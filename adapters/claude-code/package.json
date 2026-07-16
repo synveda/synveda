@@ -1,0 +1,15 @@
+{
+  "name": "@synveda/claude-code-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude Code adapter: SessionStart/PreCompact/Stop hooks + MCP recall tool (ADPT-1)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

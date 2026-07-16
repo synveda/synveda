@@ -1,0 +1,14 @@
+[package]
+name = "synveda-cli"
+description = "Admin/dev CLI (synveda init, synveda policy apply, synveda proposal review, ...)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "synveda"
+path = "src/main.rs"
+
+[dependencies]
+synveda-types = { workspace = true }

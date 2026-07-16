@@ -17,7 +17,7 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
   use a test policy pack instead.
 - Architectural choices get an ADR in docs/adr/ (copy 0000-template.md) BEFORE
   implementation.
-- Crate dependency rule (tech plan §8): types ← {policy, store, identity, audit}
+- Crate dependency rule (seed §8; tech plan §5 adds synveda-vedaflow): types ← {policy, store, identity, audit}
   ← retrieval/ingest ← gateway. Nothing imports upward. Adapters/SDKs depend only
   on the public API.
 - Licences: MIT/Apache-2.0/PostgreSQL only in the core path. cargo-deny enforces.

@@ -1,0 +1,9 @@
+[package]
+name = "synveda-types"
+description = "Domain types, identifiers, and error taxonomy — the root of the crate graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]

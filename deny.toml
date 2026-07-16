@@ -1,0 +1,22 @@
+# Licence and supply-chain policy for the core path (CLAUDE.md: MIT/Apache-2.0/PostgreSQL
+# only). Any addition to the allow list is a reviewed diff with justification.
+
+[licenses]
+version = 2
+allow = ["MIT", "Apache-2.0", "PostgreSQL"]
+# Our own crates are publish = false and carry no licence field; the allowlist
+# governs dependencies, not first-party code.
+private = { ignore = true }
+
+[advisories]
+version = 2
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Internal path deps inside the workspace are intentionally versionless.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

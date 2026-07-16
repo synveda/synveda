@@ -1,0 +1,10 @@
+[package]
+name = "synveda-audit"
+description = "Tamper-evident hash-chained audit log and export"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+synveda-types = { workspace = true }

@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+
+# Internal crates. The dependency rule (seed §8):
+#   types ← {policy, store, identity, audit, vedaflow} ← retrieval/ingest ← gateway
+# Nothing imports upward. Enforced by scripts/check-crate-deps.mjs in CI.
+[workspace.dependencies]
+synveda-types = { path = "crates/synveda-types" }
+synveda-policy = { path = "crates/synveda-policy" }
+synveda-store = { path = "crates/synveda-store" }
+synveda-identity = { path = "crates/synveda-identity" }
+synveda-audit = { path = "crates/synveda-audit" }
+synveda-vedaflow = { path = "crates/synveda-vedaflow" }
+synveda-retrieval = { path = "crates/synveda-retrieval" }
+synveda-ingest = { path = "crates/synveda-ingest" }

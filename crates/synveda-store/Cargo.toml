@@ -1,0 +1,10 @@
+[package]
+name = "synveda-store"
+description = "Storage traits and Postgres/pgvector/AGE implementations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+synveda-types = { workspace = true }

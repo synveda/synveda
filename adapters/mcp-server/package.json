@@ -1,0 +1,15 @@
+{
+  "name": "@synveda/mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Generic MCP server exposing recall (+ policy-gated write) for any MCP client (ADPT-2)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
