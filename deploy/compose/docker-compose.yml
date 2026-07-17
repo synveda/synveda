@@ -1,0 +1,92 @@
+# Synveda dev environment (FND-2) — the single-node/SMB profile of tech plan §4:
+# Postgres 17 (+pgvector +AGE +PGMQ), Rauthy (OIDC), Temporal, TEI (BGE-M3), Jaeger.
+# Dev-only credentials throughout; never reuse them outside local compose.
+#
+# Lifecycle: `make dev-up` / `make dev-down` (state survives; wipe with `down -v`).
+name: synveda
+
+services:
+  postgres:
+    build: ./postgres
+    image: synveda/dev-postgres:17
+    # Preload AGE so every session can run cypher() without a per-session LOAD.
+    command: ["postgres", "-c", "shared_preload_libraries=age"]
+    environment:
+      POSTGRES_USER: synveda
+      POSTGRES_PASSWORD: synveda-dev
+      POSTGRES_DB: synveda
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synveda -d synveda"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  rauthy:
+    # Bundled OIDC provider for dev/SMB mode (tech plan §1.2). Config lives in
+    # rauthy/config.toml — 0.29+ requires the basics in a file, not env vars.
+    image: ghcr.io/sebadob/rauthy:0.35.2
+    ports:
+      - "8100:8080"
+    volumes:
+      - ./rauthy/config.toml:/app/config.toml:ro
+      - rauthy-data:/app/data
+
+  temporal:
+    # auto-setup provisions the temporal + temporal_visibility databases in
+    # the postgres service on first boot (DB=postgres12 is Temporal's name
+    # for the postgres12+ driver).
+    image: temporalio/auto-setup:1.29.7
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: synveda
+      POSTGRES_PWD: synveda-dev
+      POSTGRES_SEEDS: postgres
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    ports:
+      - "7233:7233"
+    volumes:
+      - ./temporal/dynamicconfig.yaml:/etc/temporal/config/dynamicconfig/development-sql.yaml:ro
+
+  temporal-admin-tools:
+    # Sidecar with the `temporal` CLI; the smoke test uses it for cluster
+    # health, and it doubles as a dev shell (docker compose exec).
+    image: temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    stdin_open: true
+    tty: true
+
+  tei:
+    # text-embeddings-inference serving BGE-M3 (tech plan §1.3). First start
+    # downloads the model (~2.3 GB) into the tei-cache volume.
+    # max-batch-tokens is capped: the default (16384, with 8192-token
+    # sequences) OOM-kills warmup on a 16 GB Docker VM.
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1
+    command:
+      ["--model-id", "BAAI/bge-m3", "--max-batch-tokens", "4096", "--auto-truncate"]
+    ports:
+      - "8110:80"
+    volumes:
+      - tei-cache:/data
+
+  jaeger:
+    image: jaegertracing/jaeger:2.19.0
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+
+volumes:
+  pg-data:
+  rauthy-data:
+  tei-cache:

@@ -1,0 +1,39 @@
+# Rauthy config for the dev environment (FND-2). Rauthy 0.29+ requires a
+# config file for the basics; everything here is dev-only — never reuse these
+# secrets outside local compose.
+#
+# Admin login for manual poking: admin@localhost / synveda-dev-admin
+# (OIDC client wiring lands with AUTH-1.)
+
+[server]
+listen_address = '0.0.0.0'
+port_http = 8080
+scheme = 'http'
+# Host-side URL: compose maps host 8100 -> container 8080.
+pub_url = 'localhost:8100'
+proxy_mode = false
+
+[encryption]
+# Format: '<key id>/<base64 32-byte key>' — dev-only key.
+keys = ['fnd2dev1/LPieGaJQiyIJlTuMq4x5myh78LIEmnOoim9ipdsGspM=']
+key_active = 'fnd2dev1'
+
+[bootstrap]
+admin_email = 'admin@localhost'
+password_plain = 'synveda-dev-admin'
+
+[cluster]
+# Single-node embedded Hiqlite; the raft/api ports stay inside the container.
+node_id = 1
+nodes = ["1 localhost:8100 localhost:8200"]
+secret_raft = "9eac18e182caa3221e72df4b19eb176f"
+secret_api = "b93648de6c934d2a8975921745f902db"
+
+[database]
+hiqlite = true
+
+[webauthn]
+# Passkey relying-party identity; must match how the browser reaches rauthy.
+rp_id = 'localhost'
+rp_origin = 'http://localhost:8100'
+rp_name = 'Synveda dev'

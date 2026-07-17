@@ -85,7 +85,10 @@ const PHASES = [
 ];
 
 // Features already delivered (kept checked in STATUS.md across regenerations).
-const DONE = new Map([["FND-1", "done 2026-07-16, demo: demos/fnd-1-scaffold.sh"]]);
+const DONE = new Map([
+  ["FND-1", "done 2026-07-16, demo: demos/fnd-1-scaffold.sh"],
+  ["FND-2", "done 2026-07-17, demo: demos/fnd-2-dev-env.sh"],
+]);
 
 // ── Parse Part B ─────────────────────────────────────────────────────────────
 const lines = readFileSync(SRC, "utf8").split(/\r?\n/);

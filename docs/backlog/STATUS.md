@@ -10,7 +10,7 @@ passes (CLAUDE.md, current phase).
 ## Phase 0 — Foundation (wk 1)
 
 - [x] [FND-1: Workspace scaffold](FND-1.md) — done 2026-07-16, demo: demos/fnd-1-scaffold.sh
-- [ ] [FND-2: Dev environment](FND-2.md)
+- [x] [FND-2: Dev environment](FND-2.md) — done 2026-07-17, demo: demos/fnd-2-dev-env.sh
 - [ ] [FND-3: synveda-types + error model](FND-3.md)
 - [ ] [FND-4: Migrations & bitemporal base tables](FND-4.md)
 - [ ] [FND-5: Observability baseline](FND-5.md)

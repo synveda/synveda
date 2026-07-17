@@ -1,0 +1,8 @@
+# Temporal dynamic config for the dev environment (mirrors temporalio/docker-compose
+# development-sql.yaml). Dev-only settings; do not copy to production profiles.
+limit.maxIDLength:
+  - value: 255
+    constraints: {}
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true # Dev setup only.
+    constraints: {}

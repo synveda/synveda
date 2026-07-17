@@ -1,7 +1,19 @@
 # Mirrors .github/workflows/ci.yml exactly — `make ci` locally == CI green.
-# `make dev-up` / `make smoke` land with FND-2.
+# dev-up/dev-down/smoke manage the docker-compose dev environment (FND-2);
+# state persists in named volumes — wipe with `$(COMPOSE) down -v`.
 
-.PHONY: fmt lint test build deny check-deps ts-build ci
+COMPOSE = docker compose -f deploy/compose/docker-compose.yml
+
+.PHONY: fmt lint test build deny check-deps ts-build ci dev-up dev-down smoke
+
+dev-up:
+	$(COMPOSE) up --build --detach --wait
+
+dev-down:
+	$(COMPOSE) down
+
+smoke:
+	bash scripts/smoke.sh
 
 fmt:
 	cargo fmt --all --check
