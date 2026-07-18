@@ -1,0 +1,170 @@
+//! FND-3 acceptance criteria: serde round-trip tests for every public type.
+
+use std::fmt::Debug;
+use std::str::FromStr;
+
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use synveda_types::{Error, IdentityId, RecordId, ScopeId, Sensitivity, TenantId};
+
+fn json_roundtrip<T>(value: &T) -> T
+where
+    T: Serialize + DeserializeOwned + PartialEq + Debug,
+{
+    let json = serde_json::to_string(value).expect("serialize");
+    let back: T = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(&back, value, "round-trip changed the value (json: {json})");
+    back
+}
+
+// ── Identifiers ──────────────────────────────────────────────────────────────
+
+macro_rules! id_tests {
+    ($mod_name:ident, $ty:ident) => {
+        mod $mod_name {
+            use super::*;
+
+            #[test]
+            fn json_roundtrip_preserves_value() {
+                json_roundtrip(&$ty::new());
+            }
+
+            #[test]
+            fn serializes_transparently_as_uuid_string() {
+                let id = $ty::new();
+                let json = serde_json::to_string(&id).expect("serialize");
+                assert_eq!(json, format!("\"{}\"", id.as_uuid().as_hyphenated()));
+            }
+
+            #[test]
+            fn display_fromstr_roundtrip() {
+                let id = $ty::new();
+                let parsed = $ty::from_str(&id.to_string()).expect("parse own display output");
+                assert_eq!(parsed, id);
+            }
+
+            #[test]
+            fn new_ids_are_v7_and_unique() {
+                let a = $ty::new();
+                let b = $ty::new();
+                assert_ne!(a, b);
+                assert_eq!(a.as_uuid().get_version_num(), 7);
+            }
+
+            #[test]
+            fn rejects_garbage() {
+                assert!($ty::from_str("not-a-uuid").is_err());
+                assert!(serde_json::from_str::<$ty>("\"not-a-uuid\"").is_err());
+            }
+        }
+    };
+}
+
+id_tests!(tenant_id, TenantId);
+id_tests!(scope_id, ScopeId);
+id_tests!(identity_id, IdentityId);
+id_tests!(record_id, RecordId);
+
+// ── Sensitivity ──────────────────────────────────────────────────────────────
+
+#[test]
+fn sensitivity_all_levels_roundtrip() {
+    for level in Sensitivity::ALL {
+        json_roundtrip(&level);
+    }
+}
+
+#[test]
+fn sensitivity_wire_form_is_lowercase_and_matches_as_str() {
+    for level in Sensitivity::ALL {
+        let json = serde_json::to_string(&level).expect("serialize");
+        assert_eq!(json, format!("\"{}\"", level.as_str()));
+        assert_eq!(Sensitivity::from_str(level.as_str()).unwrap(), level);
+        assert_eq!(level.to_string(), level.as_str());
+    }
+}
+
+#[test]
+fn sensitivity_ordering_is_least_to_most_sensitive() {
+    assert!(Sensitivity::Public < Sensitivity::Internal);
+    assert!(Sensitivity::Internal < Sensitivity::Confidential);
+    assert!(Sensitivity::Confidential < Sensitivity::Restricted);
+}
+
+#[test]
+fn sensitivity_rejects_unknown_levels() {
+    assert!(serde_json::from_str::<Sensitivity>("\"secret\"").is_err());
+    assert!(
+        Sensitivity::from_str("Restricted").is_err(),
+        "wire form is lowercase only"
+    );
+}
+
+// ── Error taxonomy ───────────────────────────────────────────────────────────
+
+fn every_error_variant() -> Vec<Error> {
+    vec![
+        Error::Unauthenticated {
+            message: "token expired".into(),
+        },
+        Error::PolicyDenied {
+            action: "inject".into(),
+            resource: "record 0198".into(),
+            reason: "regulated-strict/no-cross-team-read".into(),
+        },
+        Error::NotFound {
+            entity: "scope team-billing".into(),
+        },
+        Error::Invalid {
+            message: "token budget must be positive".into(),
+        },
+        Error::Conflict {
+            message: "ref moved since proposal was opened".into(),
+        },
+        Error::RateLimited {
+            message: "inject qps".into(),
+        },
+        Error::Storage {
+            message: "connection pool exhausted".into(),
+        },
+        Error::Dependency {
+            service: "tei".into(),
+            message: "embedding timeout".into(),
+        },
+        Error::Internal {
+            message: "scope chain resolved empty".into(),
+        },
+    ]
+}
+
+#[test]
+fn error_every_variant_roundtrips() {
+    for err in every_error_variant() {
+        json_roundtrip(&err);
+    }
+}
+
+#[test]
+fn error_serde_tag_equals_stable_code() {
+    for err in every_error_variant() {
+        let value = serde_json::to_value(&err).expect("serialize");
+        assert_eq!(
+            value["kind"],
+            err.code(),
+            "kind tag and code() diverged for {err:?}"
+        );
+    }
+}
+
+#[test]
+fn error_display_is_informative() {
+    let err = Error::PolicyDenied {
+        action: "recall".into(),
+        resource: "record 0198".into(),
+        reason: "sensitivity".into(),
+    };
+    assert_eq!(
+        err.to_string(),
+        "policy denied recall on record 0198: sensitivity"
+    );
+}

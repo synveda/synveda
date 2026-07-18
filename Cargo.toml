@@ -20,3 +20,9 @@ synveda-audit = { path = "crates/synveda-audit" }
 synveda-vedaflow = { path = "crates/synveda-vedaflow" }
 synveda-retrieval = { path = "crates/synveda-retrieval" }
 synveda-ingest = { path = "crates/synveda-ingest" }
+
+# External dependencies (MIT/Apache-2.0 only in the core path — deny.toml enforces).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["serde", "v7"] }

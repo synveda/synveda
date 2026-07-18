@@ -88,6 +88,7 @@ const PHASES = [
 const DONE = new Map([
   ["FND-1", "done 2026-07-16, demo: demos/fnd-1-scaffold.sh"],
   ["FND-2", "done 2026-07-17, demo: demos/fnd-2-dev-env.sh"],
+  ["FND-3", "done 2026-07-18, AC test: crates/synveda-types/tests/serde_roundtrip.rs"],
 ]);
 
 // ── Parse Part B ─────────────────────────────────────────────────────────────
