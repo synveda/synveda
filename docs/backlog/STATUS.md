@@ -16,6 +16,10 @@ passes (CLAUDE.md, current phase).
 - [x] [FND-5: Observability baseline](FND-5.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/observability.rs, demo: demos/fnd-5-observability.sh
 - [x] [FND-6: ADRs 0001–0004](FND-6.md) — done 2026-07-18, demo: demos/fnd-6-adrs.sh (adr-0001..0004 in docs/adr/)
 
+_Phase 0 complete: exit gate `make dev-up && make smoke` passed 2026-07-18
+(all services healthy incl. AGE/PGMQ/pgvector, Rauthy, Temporal, TEI BGE-M3,
+Jaeger). Phase 1 may start._
+
 ## Phase 1 — The spine (wk 2–5)
 
 _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes and receives governed memory, fully audited._
