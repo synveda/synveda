@@ -8,8 +8,10 @@
 
 mod error;
 mod id;
+mod record;
 mod sensitivity;
 
 pub use error::{Error, Result};
 pub use id::{IdentityId, RecordId, ScopeId, TenantId};
+pub use record::{RecordClass, RecordKind};
 pub use sensitivity::Sensitivity;

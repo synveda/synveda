@@ -8,6 +8,11 @@ on:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    env:
+      # sqlx macros compile against the committed .sqlx query cache; CI has no
+      # database. Regenerate with `cargo sqlx prepare --workspace -- --all-targets`
+      # against the dev compose Postgres whenever queries or migrations change.
+      SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v4
       # Installs the toolchain pinned in rust-toolchain.toml

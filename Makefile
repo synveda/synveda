@@ -3,8 +3,11 @@
 # state persists in named volumes — wipe with `$(COMPOSE) down -v`.
 
 COMPOSE = docker compose -f deploy/compose/docker-compose.yml
+# Dev-compose credentials (FND-2); tests that need Postgres read DATABASE_URL
+# and skip when it is unset — CI runs without a database.
+DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps ts-build ci dev-up dev-down smoke
+.PHONY: fmt lint test build deny check-deps ts-build ci dev-up dev-down smoke db-test
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -14,6 +17,9 @@ dev-down:
 
 smoke:
 	bash scripts/smoke.sh
+
+db-test:
+	DATABASE_URL=$(DATABASE_URL) cargo test --workspace
 
 fmt:
 	cargo fmt --all --check

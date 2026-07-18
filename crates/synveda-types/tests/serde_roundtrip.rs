@@ -5,7 +5,9 @@ use std::str::FromStr;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use synveda_types::{Error, IdentityId, RecordId, ScopeId, Sensitivity, TenantId};
+use synveda_types::{
+    Error, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, Sensitivity, TenantId,
+};
 
 fn json_roundtrip<T>(value: &T) -> T
 where
@@ -98,6 +100,38 @@ fn sensitivity_rejects_unknown_levels() {
         Sensitivity::from_str("Restricted").is_err(),
         "wire form is lowercase only"
     );
+}
+
+// ── Record kind & class ──────────────────────────────────────────────────────
+
+#[test]
+fn record_kind_all_roundtrip_and_match_as_str() {
+    for kind in RecordKind::ALL {
+        json_roundtrip(&kind);
+        let json = serde_json::to_string(&kind).expect("serialize");
+        assert_eq!(json, format!("\"{}\"", kind.as_str()));
+        assert_eq!(RecordKind::from_str(kind.as_str()).unwrap(), kind);
+        assert_eq!(kind.to_string(), kind.as_str());
+    }
+}
+
+#[test]
+fn record_class_all_roundtrip_and_match_as_str() {
+    for class in RecordClass::ALL {
+        json_roundtrip(&class);
+        let json = serde_json::to_string(&class).expect("serialize");
+        assert_eq!(json, format!("\"{}\"", class.as_str()));
+        assert_eq!(RecordClass::from_str(class.as_str()).unwrap(), class);
+        assert_eq!(class.to_string(), class.as_str());
+    }
+}
+
+#[test]
+fn record_kind_and_class_reject_unknown_values() {
+    assert!(serde_json::from_str::<RecordKind>("\"canonical\"").is_err());
+    assert!(RecordKind::from_str("Pinned").is_err(), "lowercase only");
+    assert!(serde_json::from_str::<RecordClass>("\"note\"").is_err());
+    assert!(RecordClass::from_str("Fact").is_err(), "lowercase only");
 }
 
 // ── Error taxonomy ───────────────────────────────────────────────────────────

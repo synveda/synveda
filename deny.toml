@@ -7,6 +7,15 @@ version = 2
 # proc-macro dependency (serde_derive, thiserror-impl) pulls in transitively. It
 # covers Unicode character data tables only. Added with FND-3.
 allow = ["MIT", "Apache-2.0", "PostgreSQL", "Unicode-3.0"]
+# Narrow per-crate exceptions instead of widening the global allowlist. Both
+# are unavoidable transitive deps of sqlx (tech plan §1.3) with permissive,
+# OSI-approved licences. Added with FND-4.
+exceptions = [
+    # hashbrown's default hasher, via sqlx-core.
+    { name = "foldhash", allow = ["Zlib"] },
+    # Constant-time crypto primitive used by Postgres SCRAM auth, via sqlx-postgres.
+    { name = "subtle", allow = ["BSD-3-Clause"] },
+]
 # Our own crates are publish = false and carry no licence field; the allowlist
 # governs dependencies, not first-party code.
 private = { ignore = true }

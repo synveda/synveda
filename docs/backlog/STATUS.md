@@ -12,7 +12,7 @@ passes (CLAUDE.md, current phase).
 - [x] [FND-1: Workspace scaffold](FND-1.md) — done 2026-07-16, demo: demos/fnd-1-scaffold.sh
 - [x] [FND-2: Dev environment](FND-2.md) — done 2026-07-17, demo: demos/fnd-2-dev-env.sh
 - [x] [FND-3: synveda-types + error model](FND-3.md) — done 2026-07-18, AC test: crates/synveda-types/tests/serde_roundtrip.rs
-- [ ] [FND-4: Migrations & bitemporal base tables](FND-4.md)
+- [x] [FND-4: Migrations & bitemporal base tables](FND-4.md) — done 2026-07-18, AC test: crates/synveda-store/tests/bitemporal.rs, demo: demos/fnd-4-bitemporal.sh
 - [ ] [FND-5: Observability baseline](FND-5.md)
 - [ ] [FND-6: ADRs 0001–0004](FND-6.md)
 
