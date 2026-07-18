@@ -469,8 +469,13 @@ CNSL-4 Memory browser (M) — per-scope records with provenance, channel, validi
 Sequencing (features → phases)
 ──────────────────────────────────────────────
 Phase 0 (wk 1):    FND-1..6
-Phase 1 spine (wk 2–5):  TEN-1,2 · AUTH-1,2,3 · AUTHZ-1,2,3 · HIER-1,2,3 · MEM-1,2,3,4 ·
-                         CTX-1,2,3 · AUD-1 · ADPT-1 (minimal) · EVAL-1
+Phase 1 spine (wk 2–5):  TEN-1,2 · AUTH-1 · HIER-1 · AUTHZ-1 · AUTH-2 · AUTHZ-2,3 ·
+                         HIER-2,3 · AUTH-3 · AUD-1 · MEM-1,2,3,4 · CTX-1,2,3 ·
+                         ADPT-1 (minimal) · EVAL-1
+   (Order within the phase is topological, not epic-grouped: HIER-1 precedes
+   AUTHZ-1/AUTH-2 — Cedar entities and JIT provisioning need hierarchy nodes;
+   AUTH-3's scope-enforcement AC needs the PDP; AUD-1 precedes the data path so
+   MEM/CTX are born audited.)
    → Demo: SSO login → auto-scoped → live Claude Code session writes and receives governed
      memory, fully audited.
 Phase 2 governance (wk 6–10): FLOW-1..7 · AUTHZ-4,5 · MEM-5,6 · CTX-4,5 · GRPH-1,2,4 ·

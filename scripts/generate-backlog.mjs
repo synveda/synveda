@@ -29,12 +29,13 @@ const PHASES = [
       "SSO login → auto-scoped → live Claude Code session writes and receives governed memory, fully audited.",
     ids: [
       "TEN-1", "TEN-2",
-      "AUTH-1", "AUTH-2", "AUTH-3",
-      "AUTHZ-1", "AUTHZ-2", "AUTHZ-3",
-      "HIER-1", "HIER-2", "HIER-3",
+      "AUTH-1", "HIER-1", "AUTHZ-1", "AUTH-2",
+      "AUTHZ-2", "AUTHZ-3",
+      "HIER-2", "HIER-3", "AUTH-3",
+      "AUD-1",
       "MEM-1", "MEM-2", "MEM-3", "MEM-4",
       "CTX-1", "CTX-2", "CTX-3",
-      "AUD-1", "ADPT-1", "EVAL-1",
+      "ADPT-1", "EVAL-1",
     ],
   },
   {
@@ -107,7 +108,15 @@ const PHASE_NOTES = new Map([
   ],
   [
     1,
-    "_TEN-1 deferral (ADR-0008): tenant-resolution decisions are an audit\n" +
+    "_Order revised 2026-07-18 (was TEN → AUTH → AUTHZ → HIER → MEM → CTX →\n" +
+      "AUD): the epic-grouped sequence was not a valid topological order. HIER-1\n" +
+      "now precedes AUTHZ-1 and AUTH-2 (Cedar entities and JIT provisioning need\n" +
+      "hierarchy nodes to exist); AUTH-3 follows AUTHZ-1 (its scope-enforcement AC\n" +
+      "is a PDP decision); AUD-1 moves ahead of MEM-1 so the data path is born\n" +
+      "audited and the ADR-0008/0009 emission-point retrofit stays bounded to the\n" +
+      "identity features._\n" +
+      "\n" +
+      "_TEN-1 deferral (ADR-0008): tenant-resolution decisions are an audit\n" +
       "emission point; events are wired when AUD-1's hash-chained log lands. Until\n" +
       "then they are visible in traces and `synveda_tenant_resolutions_total` only._\n" +
       "\n" +

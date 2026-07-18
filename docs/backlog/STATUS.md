@@ -27,14 +27,15 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [TEN-1: Tenant model & resolution](TEN-1.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/tenant_resolution.rs, demo: demos/ten-1-tenant-resolution.sh
 - [x] [TEN-2: Postgres row-level security as backstop](TEN-2.md) — done 2026-07-18, AC test: crates/synveda-store/tests/rls.rs, demo: demos/ten-2-rls.sh
 - [ ] [AUTH-1: OIDC login (code+PKCE)](AUTH-1.md)
-- [ ] [AUTH-2: JIT user provisioning from claims](AUTH-2.md)
-- [ ] [AUTH-3: Service identities](AUTH-3.md)
+- [ ] [HIER-1: Hierarchy store](HIER-1.md)
 - [ ] [AUTHZ-1: Cedar PDP embedded](AUTHZ-1.md)
+- [ ] [AUTH-2: JIT user provisioning from claims](AUTH-2.md)
 - [ ] [AUTHZ-2: Policy packs](AUTHZ-2.md)
 - [ ] [AUTHZ-3: Roles & role bindings](AUTHZ-3.md)
-- [ ] [HIER-1: Hierarchy store](HIER-1.md)
 - [ ] [HIER-2: Scope chain resolver](HIER-2.md)
 - [ ] [HIER-3: Cedar entity sync](HIER-3.md)
+- [ ] [AUTH-3: Service identities](AUTH-3.md)
+- [ ] [AUD-1: Hash-chained audit log](AUD-1.md)
 - [ ] [MEM-1: observe API + PGMQ buffer](MEM-1.md)
 - [ ] [MEM-2: Redaction & secret scanning](MEM-2.md)
 - [ ] [MEM-3: Extraction pipeline](MEM-3.md)
@@ -42,9 +43,16 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [ ] [CTX-1: Hybrid retrieval](CTX-1.md)
 - [ ] [CTX-2: Composition engine](CTX-2.md)
 - [ ] [CTX-3: inject API](CTX-3.md)
-- [ ] [AUD-1: Hash-chained audit log](AUD-1.md)
 - [ ] [ADPT-1: Claude Code adapter](ADPT-1.md)
 - [ ] [EVAL-1: Eval harness skeleton](EVAL-1.md)
+
+_Order revised 2026-07-18 (was TEN → AUTH → AUTHZ → HIER → MEM → CTX →
+AUD): the epic-grouped sequence was not a valid topological order. HIER-1
+now precedes AUTHZ-1 and AUTH-2 (Cedar entities and JIT provisioning need
+hierarchy nodes to exist); AUTH-3 follows AUTHZ-1 (its scope-enforcement AC
+is a PDP decision); AUD-1 moves ahead of MEM-1 so the data path is born
+audited and the ADR-0008/0009 emission-point retrofit stays bounded to the
+identity features._
 
 _TEN-1 deferral (ADR-0008): tenant-resolution decisions are an audit
 emission point; events are wired when AUD-1's hash-chained log lands. Until
