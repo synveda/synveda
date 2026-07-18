@@ -27,6 +27,12 @@ pub const TENANT_RESOLUTIONS_TOTAL: &str = "synveda_tenant_resolutions_total";
 /// Request latency in seconds, labelled by method/route/status.
 pub const HTTP_REQUEST_DURATION_SECONDS: &str = "synveda_http_request_duration_seconds";
 
+/// Hierarchy admin operations, labelled by `op` (create/get/root/children/
+/// ancestors/descendants/update/delete) and `outcome` (`ok`, `rejected` —
+/// the caller's fault, `error` — ours or an operator's). HIER-1; an AUD-1
+/// emission point once the audit log lands.
+pub const HIERARCHY_OPERATIONS_TOTAL: &str = "synveda_hierarchy_operations_total";
+
 /// Handle to the installed tracer provider. Call [`Telemetry::shutdown`] on
 /// exit to flush batched spans; dropping without it can lose the tail of the
 /// trace.
@@ -110,6 +116,10 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         HTTP_REQUEST_DURATION_SECONDS,
         metrics::Unit::Seconds,
         "Gateway HTTP request latency"
+    );
+    metrics::describe_counter!(
+        HIERARCHY_OPERATIONS_TOTAL,
+        "Hierarchy admin operations by op and outcome (ok/rejected/error)"
     );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).

@@ -7,12 +7,14 @@
 #![warn(missing_docs)]
 
 mod error;
+mod hierarchy;
 mod id;
 mod record;
 mod sensitivity;
 mod tenant;
 
 pub use error::{Error, Result};
+pub use hierarchy::{HierarchyNode, ScopeKind};
 pub use id::{IdentityId, RecordId, ScopeId, TenantId};
 pub use record::{RecordClass, RecordKind};
 pub use sensitivity::Sensitivity;

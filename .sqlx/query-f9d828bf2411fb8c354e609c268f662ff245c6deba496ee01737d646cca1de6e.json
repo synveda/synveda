@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        delete from hierarchy_closure\n        where descendant_id in\n                (select descendant_id from hierarchy_closure where ancestor_id = $1)\n          and ancestor_id not in\n                (select descendant_id from hierarchy_closure where ancestor_id = $1)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f9d828bf2411fb8c354e609c268f662ff245c6deba496ee01737d646cca1de6e"
+}

@@ -27,7 +27,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [TEN-1: Tenant model & resolution](TEN-1.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/tenant_resolution.rs, demo: demos/ten-1-tenant-resolution.sh
 - [x] [TEN-2: Postgres row-level security as backstop](TEN-2.md) — done 2026-07-18, AC test: crates/synveda-store/tests/rls.rs, demo: demos/ten-2-rls.sh
 - [x] [AUTH-1: OIDC login (code+PKCE)](AUTH-1.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/oidc_login.rs (mock Entra), demo: demos/auth-1-oidc-login.sh (live Rauthy)
-- [ ] [HIER-1: Hierarchy store](HIER-1.md)
+- [x] [HIER-1: Hierarchy store](HIER-1.md) — done 2026-07-18, AC test: crates/synveda-store/tests/hierarchy.rs (10k nodes; ancestors/descendants medians 57µs/691µs over baseline), demo: demos/hier-1-hierarchy.sh
 - [ ] [AUTHZ-1: Cedar PDP embedded](AUTHZ-1.md)
 - [ ] [AUTH-2: JIT user provisioning from claims](AUTH-2.md)
 - [ ] [AUTHZ-2: Policy packs](AUTHZ-2.md)
@@ -63,6 +63,12 @@ _TEN-2 deferrals (ADR-0009): RLS-backstop trips (SQLSTATE 42501 →
 reach tenant-scoped tables via `synveda_store::rls::begin_tenant_tx`, and
 deployment profiles (OPS-1/OPS-2) must connect as a non-superuser
 `synveda_app` login — the dev compose superuser bypasses RLS._
+
+_HIER-1 deferrals (ADR-0011): hierarchy CRUD (create/rename/move/delete)
+is an audit emission point, wired when AUD-1 lands — until then visible in
+traces and `synveda_hierarchy_operations_total`. The `/v1/hierarchy/*`
+admin routes' PDP gate is AUTHZ-1's first obligation; until then any
+authenticated principal of a tenant can administer its own hierarchy._
 
 ## Phase 2 — Governance (wk 6–10)
 

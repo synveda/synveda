@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into hierarchy_closure (tenant_id, ancestor_id, descendant_id, distance)\n        select c.tenant_id, c.ancestor_id, $1::uuid, c.distance + 1\n          from hierarchy_closure c\n         where c.descendant_id = $2\n        union all\n        select $3::uuid, $1::uuid, $1::uuid, 0\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2c30d1f23cecf8e6eae1f8813d0bb5b0fc9a56f790655a87644cee4cc288e921"
+}

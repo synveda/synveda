@@ -17,5 +17,6 @@
 pub mod app;
 pub mod auth;
 pub mod error;
+pub mod hierarchy;
 pub mod telemetry;
 pub mod tenant;

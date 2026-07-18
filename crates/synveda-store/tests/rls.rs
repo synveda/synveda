@@ -19,10 +19,10 @@ use std::sync::OnceLock;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
-use synveda_store::{rls, tenants};
+use synveda_store::{hierarchy, rls, tenants};
 use synveda_types::{
-    Error, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, Sensitivity, TenantId,
-    TenantStatus,
+    Error, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity,
+    TenantId, TenantStatus,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -162,7 +162,12 @@ async fn visible_rows(
 /// The tables this suite adversarially covers. Extending the schema with a
 /// tenant-scoped table means extending this suite; the guard below turns
 /// forgetting into a test failure.
-const COVERED: &[&str] = &["records", "records_history"];
+const COVERED: &[&str] = &[
+    "hierarchy_closure",
+    "hierarchy_nodes",
+    "records",
+    "records_history",
+];
 
 /// Discovers every tenant-scoped table (structural definition, ADR-0009: any
 /// public base table with a `tenant_id` column) and fails unless each is
@@ -243,6 +248,173 @@ fn every_tenant_scoped_table_is_covered_and_forced() {
             "records_versions must be security_invoker, or as-of queries \
              evaluate RLS as the view owner and bypass the backstop"
         );
+    });
+}
+
+// ── Hierarchy tables (HIER-1, ADR-0011) ─────────────────────────────────────
+
+/// Rows of `tenant` visible through the hierarchy tables, in the order
+/// (hierarchy_nodes, hierarchy_closure).
+async fn visible_hierarchy_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64) {
+    let nodes = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from hierarchy_nodes where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count hierarchy_nodes");
+    let closure = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from hierarchy_closure where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count hierarchy_closure");
+    (nodes, closure)
+}
+
+/// Admits a tenant with an org root and one team: 2 nodes, 3 closure rows
+/// (two self-rows + one edge). Runs on the (RLS-exempt) test connection.
+async fn seed_hierarchy(pool: &PgPool) -> (TenantId, ScopeId) {
+    let tenant = TenantId::new();
+    let slug = format!("rlsh-{}", tenant.as_uuid().simple());
+    tenants::create(
+        pool,
+        tenant,
+        &slug,
+        "RLS hierarchy fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create tenant");
+    let mut tx = pool.begin().await.expect("begin transaction");
+    let org = hierarchy::create(
+        &mut tx,
+        ScopeId::new(),
+        tenant,
+        None,
+        ScopeKind::Org,
+        "acme",
+        "ACME",
+    )
+    .await
+    .expect("create org");
+    hierarchy::create(
+        &mut tx,
+        ScopeId::new(),
+        tenant,
+        Some(org.id),
+        ScopeKind::Team,
+        "core",
+        "Core",
+    )
+    .await
+    .expect("create team");
+    tx.commit().await.expect("commit hierarchy");
+    (tenant, org.id)
+}
+
+/// The wrong (or absent) tenant GUC sees zero hierarchy rows; the right one
+/// sees exactly its own.
+#[test]
+fn wrong_tenant_guc_sees_no_hierarchy_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _) = seed_hierarchy(&db.pool).await;
+        let (adversary, _) = seed_hierarchy(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_hierarchy_rows(&mut tx, victim).await,
+            (0, 0),
+            "hierarchy rows leaked across tenants under the wrong GUC"
+        );
+        assert_eq!(visible_hierarchy_rows(&mut tx, adversary).await, (2, 3));
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_hierarchy_rows(&mut tx, victim).await,
+            (0, 0),
+            "hierarchy rows visible without any tenant GUC"
+        );
+    });
+}
+
+/// Writing hierarchy rows for another tenant than the GUC's trips the
+/// policies' WITH CHECK — an application defect, surfaced as internal.
+#[test]
+fn cross_tenant_hierarchy_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed_hierarchy(&db.pool).await;
+        let (other, _) = seed_hierarchy(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let result = hierarchy::create(
+            &mut tx,
+            ScopeId::new(),
+            other,
+            None,
+            ScopeKind::Org,
+            "forged",
+            "Forged",
+        )
+        .await;
+        assert!(
+            matches!(result, Err(Error::Internal { .. })),
+            "cross-tenant hierarchy insert must be rejected by RLS as an \
+             internal defect, got {result:?}"
+        );
+    });
+}
+
+/// The full hierarchy lifecycle — create, move (closure surgery needs no
+/// UPDATE on the closure table), delete — works as `synveda_app` with the
+/// right GUC: the backstop isolates, it does not deny service.
+#[test]
+fn same_tenant_hierarchy_lifecycle_works_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, org) = seed_hierarchy(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let dept = hierarchy::create(
+            &mut tx,
+            ScopeId::new(),
+            tenant,
+            Some(org),
+            ScopeKind::Department,
+            "pay",
+            "Payments",
+        )
+        .await
+        .expect("create under RLS");
+        let team = hierarchy::create(
+            &mut tx,
+            ScopeId::new(),
+            tenant,
+            Some(org),
+            ScopeKind::Team,
+            "platform",
+            "Platform",
+        )
+        .await
+        .expect("create second child under RLS");
+        let moved = hierarchy::move_node(&mut tx, team.id, dept.id)
+            .await
+            .expect("move under RLS");
+        assert_eq!(moved.parent_id, Some(dept.id));
+        assert_eq!(moved.path, "acme/pay/platform");
+        assert!(
+            hierarchy::delete(&mut tx, moved.id)
+                .await
+                .expect("delete under RLS"),
+            "delete must work in-tenant"
+        );
+        tx.commit().await.expect("commit lifecycle");
     });
 }
 

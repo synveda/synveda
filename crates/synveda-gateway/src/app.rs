@@ -11,7 +11,7 @@ use axum::extract::{MatchedPath, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde::Serialize;
 use sqlx::PgPool;
@@ -21,6 +21,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::auth;
 use crate::error::ApiError;
+use crate::hierarchy;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
 
@@ -45,13 +46,34 @@ pub struct AppState {
 /// plane, wrapped in the per-request trace span and HTTP metrics middleware.
 pub fn router(state: AppState) -> Router {
     // Every /v1 route sits behind tenant resolution; ops routes do not.
-    let authenticated =
-        Router::new()
-            .route("/v1/whoami", get(whoami))
-            .route_layer(middleware::from_fn_with_state(
-                state.clone(),
-                tenant::resolve_tenant,
-            ));
+    // The hierarchy admin plane (HIER-1) is additionally an AUTHZ-1 wiring
+    // point: the PDP check slots in when Cedar lands (ADR-0011).
+    let authenticated = Router::new()
+        .route("/v1/whoami", get(whoami))
+        .route("/v1/hierarchy/nodes", post(hierarchy::create))
+        .route("/v1/hierarchy/root", get(hierarchy::root))
+        .route(
+            "/v1/hierarchy/nodes/{id}",
+            get(hierarchy::get)
+                .patch(hierarchy::update)
+                .delete(hierarchy::delete),
+        )
+        .route(
+            "/v1/hierarchy/nodes/{id}/children",
+            get(hierarchy::children),
+        )
+        .route(
+            "/v1/hierarchy/nodes/{id}/ancestors",
+            get(hierarchy::ancestors),
+        )
+        .route(
+            "/v1/hierarchy/nodes/{id}/descendants",
+            get(hierarchy::descendants),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            tenant::resolve_tenant,
+        ));
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
