@@ -111,6 +111,20 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         metrics::Unit::Seconds,
         "Gateway HTTP request latency"
     );
+    // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
+    // facade, described here where the recorder lives (ADR-0007).
+    metrics::describe_counter!(
+        synveda_identity::TOKEN_VERIFICATIONS_TOTAL,
+        "Bearer-token verifications by issuer and outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        synveda_identity::JWKS_REFRESHES_TOTAL,
+        "JWKS refreshes by issuer and outcome (ok/error)"
+    );
+    metrics::describe_counter!(
+        synveda_identity::OIDC_LOGINS_TOTAL,
+        "OIDC logins by issuer and outcome (started/completed/rejected/error)"
+    );
     // Touch the label-less histogram so it renders (count 0) before the first
     // inject exists — the FND-5 contract is visible in /metrics from boot.
     let _ = metrics::histogram!(TOKENS_PER_INJECT);

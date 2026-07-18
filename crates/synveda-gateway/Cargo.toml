@@ -27,6 +27,13 @@ tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+base64 = { workspace = true }
 http-body-util = { workspace = true }
+# The AUTH-1 AC test's mock IdP signs RS256 tokens and checks PKCE itself.
+jsonwebtoken = { workspace = true }
+# Drives the mock IdP's authorize redirect the way a browser would.
+reqwest = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tower = { workspace = true }
+url = { workspace = true }

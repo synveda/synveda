@@ -58,6 +58,7 @@ fn state(url: &str) -> AppState {
         pool: pool(url),
         metrics: metrics_handle(),
         verifier: Arc::new(Hs256Verifier::new(SECRET)),
+        login: None,
     }
 }
 

@@ -15,6 +15,7 @@
 #![warn(missing_docs)]
 
 pub mod app;
+pub mod auth;
 pub mod error;
 pub mod telemetry;
 pub mod tenant;

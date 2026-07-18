@@ -15,10 +15,11 @@ use axum::routing::get;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde::Serialize;
 use sqlx::PgPool;
-use synveda_identity::TokenVerifier;
+use synveda_identity::{LoginFlow, TokenVerifier};
 use synveda_types::{Error, Tenant};
 use tower_http::trace::TraceLayer;
 
+use crate::auth;
 use crate::error::ApiError;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
@@ -31,9 +32,13 @@ pub struct AppState {
     pub pool: PgPool,
     /// Renders the Prometheus exposition for `GET /metrics`.
     pub metrics: PrometheusHandle,
-    /// The AuthN seam (ADR-0008): HS256 dev verifier until AUTH-1, or the
-    /// fail-closed [`synveda_identity::DisabledVerifier`] when unconfigured.
+    /// The AuthN seam (ADR-0008): the OIDC/JWKS verifier (ADR-0010), the
+    /// HS256 dev verifier, or the fail-closed
+    /// [`synveda_identity::DisabledVerifier`] when neither is configured.
     pub verifier: Arc<dyn TokenVerifier>,
+    /// The code+PKCE login flow when OIDC is configured (AUTH-1); `None`
+    /// otherwise, in which case `/auth/*` answers 404.
+    pub login: Option<Arc<LoginFlow>>,
 }
 
 /// Builds the gateway router: ops-plane routes plus the authenticated `/v1`
@@ -51,6 +56,10 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/metrics", get(render_metrics))
+        // The auth plane is unauthenticated by nature: it is how a caller
+        // becomes authenticated (AUTH-1, ADR-0010).
+        .route("/auth/login", get(auth::login))
+        .route("/auth/callback", get(auth::callback))
         .merge(authenticated)
         .layer(middleware::from_fn(track_http_metrics))
         // Added last so the request span is outermost and every inner span —

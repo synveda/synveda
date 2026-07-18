@@ -3,7 +3,8 @@
 # secrets outside local compose.
 #
 # Admin login for manual poking: admin@localhost / synveda-dev-admin
-# (OIDC client wiring lands with AUTH-1.)
+# The `synveda` OIDC client is provisioned by demos/auth-1-oidc-login.sh
+# through the bootstrap API key below (AUTH-1, ADR-0010).
 
 [server]
 listen_address = '0.0.0.0'
@@ -21,6 +22,15 @@ key_active = 'fnd2dev1'
 [bootstrap]
 admin_email = 'admin@localhost'
 password_plain = 'synveda-dev-admin'
+# Dev-only API key for scripted client provisioning (AUTH-1): name
+# "synveda-dev", Clients read/create/update/delete. Bootstrap values apply
+# only when the rauthy-data volume initializes empty; recreate the volume
+# to pick up changes (demos/auth-1-oidc-login.sh does this automatically
+# when the key is not live).
+# base64 of: {"name":"synveda-dev","access":[{"group":"Clients",
+#             "access_rights":["read","create","update","delete"]}]}
+api_key = 'eyJuYW1lIjoic3ludmVkYS1kZXYiLCJhY2Nlc3MiOlt7Imdyb3VwIjoiQ2xpZW50cyIsImFjY2Vzc19yaWdodHMiOlsicmVhZCIsImNyZWF0ZSIsInVwZGF0ZSIsImRlbGV0ZSJdfV19'
+api_key_secret = '6xxmjZD7Wqe9zWN1fWzOW1jA4uxAkFQ9rYlVFpxBzVgJ0xEj2KWSLiaRTZzKV1oz'
 
 [cluster]
 # Single-node embedded Hiqlite; the raft/api ports stay inside the container.

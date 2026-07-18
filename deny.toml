@@ -18,6 +18,14 @@ exceptions = [
     { name = "matchit", allow = ["BSD-3-Clause"] },
     # Constant-time crypto primitive used by Postgres SCRAM auth, via sqlx-postgres.
     { name = "subtle", allow = ["BSD-3-Clause"] },
+    # jsonwebtoken's rust_crypto backend (AUTH-1, ADR-0010) — chosen exactly
+    # because the alternatives (ring, aws-lc) are licence-inadmissible. The
+    # dalek crates arrive via the backend umbrella feature (EdDSA support we
+    # do not yet verify with); simple_asn1 parses PEM in tests. All three are
+    # OSI-approved permissive. Added with AUTH-1.
+    { name = "curve25519-dalek", allow = ["BSD-3-Clause"] },
+    { name = "ed25519-dalek", allow = ["BSD-3-Clause"] },
+    { name = "simple_asn1", allow = ["ISC"] },
 ]
 # Our own crates are publish = false and carry no licence field; the allowlist
 # governs dependencies, not first-party code.
@@ -25,6 +33,16 @@ private = { ignore = true }
 
 [advisories]
 version = 2
+ignore = [
+    # Marvin attack: timing side channel in RSA *private-key* operations.
+    # Synveda holds no RSA private keys — the rsa crate (via jsonwebtoken,
+    # AUTH-1/ADR-0010) performs public-key signature verification only, and
+    # the advisory's workaround ("avoid settings where attackers observe
+    # timing of private-key ops") is structurally satisfied. No patched
+    # release exists yet; revisit when RustCrypto ships the constant-time
+    # rewrite.
+    "RUSTSEC-2023-0071",
+]
 
 [bans]
 multiple-versions = "warn"

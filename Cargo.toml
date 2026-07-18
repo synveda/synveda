@@ -22,13 +22,29 @@ synveda-retrieval = { path = "crates/synveda-retrieval" }
 synveda-ingest = { path = "crates/synveda-ingest" }
 
 # External dependencies (MIT/Apache-2.0 only in the core path — deny.toml enforces).
+# Object-safe async traits (TokenVerifier went async with AUTH-1, ADR-0010).
+async-trait = "0.1"
 axum = "0.8"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
-# HS256 verification for the pre-AUTH-1 dev token mode (ADR-0008); RustCrypto
-# primitives, constant-time verify. AUTH-1 adds the real OIDC/JWKS verifier.
+# CSPRNG for OIDC state/nonce/PKCE-verifier entropy (AUTH-1, ADR-0010).
+getrandom = "0.3"
+# HS256 verification for the dev token mode (ADR-0008); RustCrypto
+# primitives, constant-time verify. OIDC/JWKS is the real mode (ADR-0010).
 hmac = "0.12"
+# OIDC token verification (AUTH-1, ADR-0010). The rust_crypto backend only —
+# the aws-lc backend carries licences deny.toml does not admit, and exactly
+# one backend umbrella feature must be enabled for provider selection.
+jsonwebtoken = { version = "10", default-features = false, features = [
+    "use_pem",
+    "rust_crypto",
+] }
+# OIDC discovery/JWKS/token-endpoint client (AUTH-1, ADR-0010). No TLS
+# feature on purpose (same doctrine as sqlx below): dev IdPs are plain-http
+# localhost; the production TLS backend is chosen (and licence-reviewed)
+# when a deployment needs it.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 sha2 = "0.10"
 # The `metrics` facade is the only metrics dependency below the gateway; the
 # Prometheus recorder is installed by the gateway alone (ADR-0007).
@@ -60,6 +76,7 @@ tower-http = { version = "0.7", default-features = false, features = ["trace"] }
 tracing = "0.1"
 tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
 uuid = { version = "1", features = ["serde", "v7"] }
 
 # Test-only dependencies.

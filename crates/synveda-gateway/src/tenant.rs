@@ -11,7 +11,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use synveda_identity::{TenantContext, with_tenant};
+use synveda_identity::{Claims, TenantContext, with_tenant};
 use synveda_types::{Error, Result, TenantStatus};
 
 use crate::app::AppState;
@@ -55,7 +55,14 @@ pub async fn resolve_tenant(
 #[tracing::instrument(name = "tenant.resolve", skip_all)]
 async fn resolve(state: &AppState, headers: &HeaderMap) -> Result<TenantContext> {
     let token = bearer_token(headers)?;
-    let claims = state.verifier.verify(token)?;
+    let claims = state.verifier.verify(token).await?;
+    active_tenant(state, &claims).await
+}
+
+/// Verified claims → active tenant row → context. Shared by this middleware
+/// and the login callback (AUTH-1): TEN-1's uniform-401 doctrine applies to
+/// both entry points identically.
+pub(crate) async fn active_tenant(state: &AppState, claims: &Claims) -> Result<TenantContext> {
     let tenant = synveda_store::tenants::by_id(&state.pool, claims.tenant_id)
         .await?
         .filter(|tenant| tenant.status == TenantStatus::Active)
@@ -64,7 +71,7 @@ async fn resolve(state: &AppState, headers: &HeaderMap) -> Result<TenantContext>
         })?;
     Ok(TenantContext {
         tenant,
-        subject: claims.subject,
+        subject: claims.subject.clone(),
     })
 }
 

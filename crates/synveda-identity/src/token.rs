@@ -1,9 +1,11 @@
 //! Bearer-token verification (TEN-1, ADR-0008).
 //!
-//! The [`TokenVerifier`] trait is the AuthN seam: AUTH-1 will add the real
-//! OIDC/JWKS implementation behind it. Until then [`Hs256Verifier`] verifies
-//! HMAC-SHA256 JWTs signed with a shared dev secret, and [`DisabledVerifier`]
-//! is the fail-closed default when no secret is configured.
+//! The [`TokenVerifier`] trait is the AuthN seam. The real implementation is
+//! the OIDC/JWKS verifier (`oidc` module, AUTH-1/ADR-0010); [`Hs256Verifier`]
+//! verifies HMAC-SHA256 JWTs signed with a shared dev secret for CLI/demo
+//! bootstrap, and [`DisabledVerifier`] is the fail-closed default when
+//! neither mode is configured. `verify` is async because OIDC verification
+//! may fetch discovery documents or rotated keys mid-request.
 //!
 //! Claims contract (ADR-0008): `sub` names the subject, `tid` carries the
 //! tenant UUID, `exp` is mandatory. The algorithm is pinned — the token
@@ -33,17 +35,19 @@ pub struct Claims {
 
 /// Verifies a bearer token and returns its claims. Implementations must be
 /// fail-closed: any doubt is an [`Error::Unauthenticated`].
+#[async_trait::async_trait]
 pub trait TokenVerifier: Send + Sync {
     /// Verifies `token` (signature and expiry) and extracts [`Claims`].
-    fn verify(&self, token: &str) -> Result<Claims>;
+    async fn verify(&self, token: &str) -> Result<Claims>;
 }
 
 /// Rejects every token. Installed when no verifier is configured, so a
 /// misconfigured gateway denies rather than admits (seed §2.3).
 pub struct DisabledVerifier;
 
+#[async_trait::async_trait]
 impl TokenVerifier for DisabledVerifier {
-    fn verify(&self, _token: &str) -> Result<Claims> {
+    async fn verify(&self, _token: &str) -> Result<Claims> {
         Err(Error::Unauthenticated {
             message: "no token verifier is configured".to_owned(),
         })
@@ -105,8 +109,9 @@ impl Hs256Verifier {
     }
 }
 
+#[async_trait::async_trait]
 impl TokenVerifier for Hs256Verifier {
-    fn verify(&self, token: &str) -> Result<Claims> {
+    async fn verify(&self, token: &str) -> Result<Claims> {
         let reject = |message: &str| Error::Unauthenticated {
             message: message.to_owned(),
         };
@@ -181,24 +186,24 @@ mod tests {
         }
     }
 
-    #[test]
-    fn issue_then_verify_roundtrips() {
+    #[tokio::test]
+    async fn issue_then_verify_roundtrips() {
         let tenant = TenantId::new();
         let token = verifier().issue("alice", tenant, Duration::from_secs(60));
-        let claims = verifier().verify(&token).expect("verify own token");
+        let claims = verifier().verify(&token).await.expect("verify own token");
         assert_eq!(claims.subject, "alice");
         assert_eq!(claims.tenant_id, tenant);
     }
 
-    #[test]
-    fn wrong_secret_is_rejected() {
+    #[tokio::test]
+    async fn wrong_secret_is_rejected() {
         let token = verifier().issue("alice", TenantId::new(), Duration::from_secs(60));
         let other = Hs256Verifier::new(b"different-secret");
-        assert_unauthenticated(other.verify(&token), "signature");
+        assert_unauthenticated(other.verify(&token).await, "signature");
     }
 
-    #[test]
-    fn tampered_payload_is_rejected() {
+    #[tokio::test]
+    async fn tampered_payload_is_rejected() {
         let token = verifier().issue("alice", TenantId::new(), Duration::from_secs(60));
         let [header, _, signature]: [&str; 3] =
             token.split('.').collect::<Vec<_>>().try_into().unwrap();
@@ -211,17 +216,17 @@ mod tests {
             .unwrap(),
         );
         let forged = format!("{header}.{forged_payload}.{signature}");
-        assert_unauthenticated(verifier().verify(&forged), "signature");
+        assert_unauthenticated(verifier().verify(&forged).await, "signature");
     }
 
-    #[test]
-    fn expired_token_is_rejected() {
+    #[tokio::test]
+    async fn expired_token_is_rejected() {
         let token = verifier().issue("alice", TenantId::new(), Duration::ZERO);
-        assert_unauthenticated(verifier().verify(&token), "expired");
+        assert_unauthenticated(verifier().verify(&token).await, "expired");
     }
 
-    #[test]
-    fn non_hs256_algorithm_is_rejected_even_with_valid_hmac() {
+    #[tokio::test]
+    async fn non_hs256_algorithm_is_rejected_even_with_valid_hmac() {
         // A token whose header claims another algorithm must fail on the
         // pinned-algorithm check, even if its HMAC would verify.
         let v = verifier();
@@ -238,20 +243,23 @@ mod tests {
         mac.update(format!("{header}.{payload}").as_bytes());
         let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
         assert_unauthenticated(
-            v.verify(&format!("{header}.{payload}.{signature}")),
+            v.verify(&format!("{header}.{payload}.{signature}")).await,
             "algorithm",
         );
     }
 
-    #[test]
-    fn malformed_tokens_are_rejected() {
+    #[tokio::test]
+    async fn malformed_tokens_are_rejected() {
         for garbage in ["", "abc", "a.b", "a.b.c.d", "not base64.at.all"] {
-            assert!(verifier().verify(garbage).is_err(), "accepted {garbage:?}");
+            assert!(
+                verifier().verify(garbage).await.is_err(),
+                "accepted {garbage:?}"
+            );
         }
     }
 
-    #[test]
-    fn missing_claims_are_rejected() {
+    #[tokio::test]
+    async fn missing_claims_are_rejected() {
         let v = verifier();
         let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
         // No tid claim.
@@ -263,13 +271,13 @@ mod tests {
         mac.update(format!("{header}.{payload}").as_bytes());
         let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
         assert_unauthenticated(
-            v.verify(&format!("{header}.{payload}.{signature}")),
+            v.verify(&format!("{header}.{payload}.{signature}")).await,
             "claims",
         );
     }
 
-    #[test]
-    fn non_uuid_tid_is_rejected() {
+    #[tokio::test]
+    async fn non_uuid_tid_is_rejected() {
         let v = verifier();
         let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
         let payload = URL_SAFE_NO_PAD.encode(format!(
@@ -279,12 +287,15 @@ mod tests {
         let mut mac = v.mac();
         mac.update(format!("{header}.{payload}").as_bytes());
         let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-        assert_unauthenticated(v.verify(&format!("{header}.{payload}.{signature}")), "UUID");
+        assert_unauthenticated(
+            v.verify(&format!("{header}.{payload}.{signature}")).await,
+            "UUID",
+        );
     }
 
-    #[test]
-    fn disabled_verifier_rejects_everything() {
+    #[tokio::test]
+    async fn disabled_verifier_rejects_everything() {
         let token = verifier().issue("alice", TenantId::new(), Duration::from_secs(60));
-        assert_unauthenticated(DisabledVerifier.verify(&token), "no token verifier");
+        assert_unauthenticated(DisabledVerifier.verify(&token).await, "no token verifier");
     }
 }

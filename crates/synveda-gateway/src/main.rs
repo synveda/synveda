@@ -1,16 +1,19 @@
 //! Gateway entry point. Configuration is environment-only for now:
 //! `DATABASE_URL` (required), `SYNVEDA_LISTEN_ADDR` (default `127.0.0.1:8120`),
-//! `SYNVEDA_DEV_JWT_SECRET` (the pre-AUTH-1 dev token secret, ADR-0008 —
-//! unset means every `/v1` request is rejected), and the standard `OTEL_*`
-//! variables for the OTLP exporter (default endpoint
-//! `http://localhost:4317` — Jaeger in the dev compose).
+//! and one auth mode (ADR-0010 — setting both is a startup error):
+//! `SYNVEDA_OIDC_ISSUERS` (JSON trust-entry array; enables OIDC verification
+//! and `/auth/*`, with `SYNVEDA_PUBLIC_URL` naming this gateway in redirect
+//! URIs, default `http://127.0.0.1:8120`) or `SYNVEDA_DEV_JWT_SECRET` (the
+//! HS256 dev mode, ADR-0008). Neither set means every `/v1` request is
+//! rejected. The standard `OTEL_*` variables configure the OTLP exporter
+//! (default endpoint `http://localhost:4317` — Jaeger in the dev compose).
 
 use std::sync::Arc;
 
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{self, AppState};
 use synveda_gateway::telemetry;
-use synveda_identity::{DisabledVerifier, Hs256Verifier, TokenVerifier};
+use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, OidcVerifier, TokenVerifier};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,18 +28,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_connections(8)
         .connect_lazy(&database_url)?;
 
-    // Fail closed (ADR-0008): without a secret the /v1 plane rejects
-    // everything rather than admitting anything. AUTH-1 replaces this with
-    // OIDC/JWKS verification behind the same trait.
-    let verifier: Arc<dyn TokenVerifier> = match std::env::var("SYNVEDA_DEV_JWT_SECRET") {
-        Ok(secret) if !secret.is_empty() => Arc::new(Hs256Verifier::new(secret.as_bytes())),
-        _ => {
-            tracing::warn!(
-                "SYNVEDA_DEV_JWT_SECRET is not set; every /v1 request will be rejected 401"
-            );
-            Arc::new(DisabledVerifier)
-        }
-    };
+    // One auth mode, never two (ADR-0010); fail closed when neither is
+    // configured (ADR-0008).
+    let oidc_issuers = std::env::var("SYNVEDA_OIDC_ISSUERS")
+        .ok()
+        .filter(|v| !v.is_empty());
+    let dev_secret = std::env::var("SYNVEDA_DEV_JWT_SECRET")
+        .ok()
+        .filter(|v| !v.is_empty());
+    let (verifier, login): (Arc<dyn TokenVerifier>, Option<Arc<LoginFlow>>) =
+        match (oidc_issuers, dev_secret) {
+            (Some(_), Some(_)) => {
+                return Err(
+                    "SYNVEDA_OIDC_ISSUERS and SYNVEDA_DEV_JWT_SECRET are mutually \
+                            exclusive (ADR-0010): configure exactly one auth mode"
+                        .into(),
+                );
+            }
+            (Some(json), None) => {
+                let issuers = synveda_identity::parse_issuers(&json)?;
+                let public_url = std::env::var("SYNVEDA_PUBLIC_URL")
+                    .unwrap_or_else(|_| "http://127.0.0.1:8120".to_owned());
+                let redirect_uri = format!("{}/auth/callback", public_url.trim_end_matches('/'));
+                let oidc = Arc::new(OidcVerifier::new(issuers)?);
+                tracing::info!(
+                    redirect_uri,
+                    issuers = %oidc.issuers().collect::<Vec<_>>().join(", "),
+                    "OIDC auth mode (ADR-0010): /v1 accepts IdP-issued bearer tokens"
+                );
+                let flow = Arc::new(LoginFlow::new(Arc::clone(&oidc), redirect_uri));
+                (oidc, Some(flow))
+            }
+            (None, Some(secret)) => {
+                tracing::warn!("HS256 dev auth mode (ADR-0008): dev/demo only, never a deployment");
+                (Arc::new(Hs256Verifier::new(secret.as_bytes())), None)
+            }
+            (None, None) => {
+                tracing::warn!("no auth mode configured; every /v1 request will be rejected 401");
+                (Arc::new(DisabledVerifier), None)
+            }
+        };
 
     let addr = std::env::var("SYNVEDA_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8120".to_owned());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -48,6 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             pool,
             metrics,
             verifier,
+            login,
         }),
     )
     .with_graceful_shutdown(shutdown_signal())

@@ -1,0 +1,695 @@
+//! OIDC bearer-token verification (AUTH-1, ADR-0010).
+//!
+//! [`OidcVerifier`] verifies IdP-issued JWTs against per-issuer trust
+//! entries. Discovery and JWKS are fetched lazily and cached; keys are
+//! replaced wholesale on refresh; a token with an unknown `kid` triggers a
+//! refetch rate-limited to one per issuer per [`REFRESH_MIN_INTERVAL`] —
+//! that is the rotation-handling contract: rotation heals on the next
+//! request without letting an attacker drive fetch load.
+//!
+//! Fail-closed throughout (seed §2.3): unknown issuer, unknown key,
+//! algorithm outside the per-issuer allowlist, or any claim mismatch is the
+//! uniform [`Error::Unauthenticated`]. The *unverified* `iss` claim is read
+//! only to select a trust entry; every other claim is consulted only after
+//! signature verification under that entry's keys.
+
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use jsonwebtoken::jwk::{AlgorithmParameters, Jwk, JwkSet, KeyAlgorithm};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+use serde::Deserialize;
+use synveda_types::{Error, Result, TenantId};
+
+use crate::token::{Claims, TokenVerifier};
+
+/// Token verifications by issuer and outcome (`ok`, `rejected`, `error`).
+/// Emitted here, described by the gateway's recorder (ADR-0007 layering).
+pub const TOKEN_VERIFICATIONS_TOTAL: &str = "synveda_token_verifications_total";
+
+/// JWKS refreshes by issuer and outcome (`ok`, `error`).
+pub const JWKS_REFRESHES_TOTAL: &str = "synveda_jwks_refreshes_total";
+
+/// Minimum interval between JWKS refetches per issuer (ADR-0010 §3).
+const REFRESH_MIN_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Clock skew tolerated on `exp` and `nbf`.
+const LEEWAY: Duration = Duration::from_secs(30);
+
+/// The signature algorithms this build can verify. RS256 is what Entra,
+/// Rauthy (as provisioned by us), and every mainstream IdP sign with; the
+/// RustCrypto `rsa` backend is the only one compiled in (deny.toml).
+const SUPPORTED_ALGORITHMS: [Algorithm; 3] = [Algorithm::RS256, Algorithm::RS384, Algorithm::RS512];
+
+/// How a verified token binds to a Synveda tenant (ADR-0010 §4). Both modes
+/// end at TEN-1's unchanged active-tenant lookup in the gateway.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum TenantBinding {
+    /// A named claim carries the tenant UUID (`tid` — Entra's native shape
+    /// and the ADR-0008 internal convention).
+    Claim {
+        /// The claim name holding the tenant UUID.
+        name: String,
+    },
+    /// Every subject from this issuer belongs to one configured tenant —
+    /// the natural shape for a single-org IdP like the dev Rauthy.
+    Static {
+        /// The tenant every login from this issuer resolves to.
+        tenant_id: TenantId,
+    },
+}
+
+fn default_tenant_binding() -> TenantBinding {
+    TenantBinding::Claim {
+        name: "tid".to_owned(),
+    }
+}
+
+fn default_algorithms() -> Vec<Algorithm> {
+    vec![Algorithm::RS256]
+}
+
+/// One issuer the gateway trusts (ADR-0010 §2). Deserialized from the
+/// `SYNVEDA_OIDC_ISSUERS` JSON array; unknown fields are config typos and
+/// rejected.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IssuerConfig {
+    /// Issuer URL, compared byte-for-byte with the discovery document and
+    /// the `iss` claim.
+    pub issuer: String,
+    /// OAuth2 client id registered at the IdP; also the ID-token audience.
+    pub client_id: String,
+    /// Expected bearer-token audience. Defaults to `client_id`.
+    #[serde(default)]
+    pub audience: Option<String>,
+    /// Allowed signature algorithms. Defaults to `["RS256"]`.
+    #[serde(default = "default_algorithms")]
+    pub algorithms: Vec<Algorithm>,
+    /// How tokens from this issuer bind to a tenant. Defaults to the `tid`
+    /// claim.
+    #[serde(default = "default_tenant_binding")]
+    pub tenant: TenantBinding,
+}
+
+impl IssuerConfig {
+    fn bearer_audience(&self) -> &str {
+        self.audience.as_deref().unwrap_or(&self.client_id)
+    }
+}
+
+/// Parses the `SYNVEDA_OIDC_ISSUERS` JSON array.
+pub fn parse_issuers(json: &str) -> Result<Vec<IssuerConfig>> {
+    serde_json::from_str(json).map_err(|err| Error::Invalid {
+        message: format!("SYNVEDA_OIDC_ISSUERS is not a valid issuer list: {err}"),
+    })
+}
+
+/// The subset of the discovery document Synveda uses.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct DiscoveryDocument {
+    issuer: String,
+    pub(crate) authorization_endpoint: String,
+    pub(crate) token_endpoint: String,
+    jwks_uri: String,
+}
+
+/// A cached verification key: the decoded key plus the algorithms it may
+/// verify (the per-issuer allowlist narrowed by the JWK's own `kty`/`alg`).
+struct VerifyingKey {
+    key: DecodingKey,
+    algorithms: Vec<Algorithm>,
+}
+
+/// Immutable snapshot swapped wholesale on refresh; readers clone the `Arc`
+/// under a short read lock and verify without further synchronisation.
+pub(crate) struct IssuerState {
+    pub(crate) discovery: DiscoveryDocument,
+    keys: HashMap<String, VerifyingKey>,
+}
+
+struct IssuerEntry {
+    config: IssuerConfig,
+    state: RwLock<Option<Arc<IssuerState>>>,
+    /// Serialises refreshes and carries the rate-limit clock. `tokio::sync`
+    /// because it is held across the discovery/JWKS fetches.
+    refresh: tokio::sync::Mutex<Option<Instant>>,
+}
+
+/// Multi-issuer OIDC verifier (ADR-0010). The gateway installs it as the
+/// [`TokenVerifier`] whenever `SYNVEDA_OIDC_ISSUERS` is configured.
+pub struct OidcVerifier {
+    http: reqwest::Client,
+    issuers: HashMap<String, IssuerEntry>,
+    refresh_min_interval: Duration,
+}
+
+impl OidcVerifier {
+    /// Builds a verifier over the configured trust entries. Rejects empty
+    /// and duplicate issuer lists and algorithms this build cannot verify.
+    pub fn new(configs: Vec<IssuerConfig>) -> Result<Self> {
+        if configs.is_empty() {
+            return Err(Error::Invalid {
+                message: "at least one OIDC issuer must be configured".to_owned(),
+            });
+        }
+        let mut issuers = HashMap::new();
+        for config in configs {
+            for algorithm in &config.algorithms {
+                if !SUPPORTED_ALGORITHMS.contains(algorithm) {
+                    return Err(Error::Invalid {
+                        message: format!(
+                            "issuer {}: algorithm {algorithm:?} is not supported \
+                             (RS256/RS384/RS512 only, ADR-0010)",
+                            config.issuer
+                        ),
+                    });
+                }
+            }
+            if config.algorithms.is_empty() {
+                return Err(Error::Invalid {
+                    message: format!("issuer {}: empty algorithm list", config.issuer),
+                });
+            }
+            let issuer = config.issuer.clone();
+            let entry = IssuerEntry {
+                config,
+                state: RwLock::new(None),
+                refresh: tokio::sync::Mutex::new(None),
+            };
+            if issuers.insert(issuer.clone(), entry).is_some() {
+                return Err(Error::Invalid {
+                    message: format!("issuer {issuer} is configured twice"),
+                });
+            }
+        }
+        let http = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(10))
+            // IdP metadata, keys, and tokens must come from the configured
+            // host, not wherever it redirects.
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|err| Error::Internal {
+                message: format!("building the OIDC HTTP client: {err}"),
+            })?;
+        Ok(Self {
+            http,
+            issuers,
+            refresh_min_interval: REFRESH_MIN_INTERVAL,
+        })
+    }
+
+    /// Overrides the JWKS refresh rate-limit. For tests that rotate keys
+    /// faster than the production interval; deployments keep the default.
+    #[must_use]
+    pub fn with_refresh_min_interval(mut self, interval: Duration) -> Self {
+        self.refresh_min_interval = interval;
+        self
+    }
+
+    /// The shared HTTP client, for the login flow's token exchange.
+    pub(crate) fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
+
+    /// The configured issuer URLs.
+    pub fn issuers(&self) -> impl Iterator<Item = &str> {
+        self.issuers.keys().map(String::as_str)
+    }
+
+    /// The sole configured issuer, if exactly one.
+    pub fn sole_issuer(&self) -> Option<&str> {
+        let mut keys = self.issuers.keys();
+        match (keys.next(), keys.next()) {
+            (Some(issuer), None) => Some(issuer),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn config(&self, issuer: &str) -> Result<&IssuerConfig> {
+        self.issuers
+            .get(issuer)
+            .map(|entry| &entry.config)
+            .ok_or_else(|| Error::Invalid {
+                message: format!("issuer {issuer} is not configured"),
+            })
+    }
+
+    /// Discovery-backed endpoints for `issuer`, fetching on first use.
+    pub(crate) async fn issuer_state(&self, issuer: &str) -> Result<Arc<IssuerState>> {
+        let entry = self.entry(issuer)?;
+        match cached(entry) {
+            Some(state) => Ok(state),
+            None => self.refresh(entry).await,
+        }
+    }
+
+    /// Verifies an ID token from `issuer`: audience must be the client id
+    /// and the `nonce` claim must match the login's nonce (ADR-0010 §5).
+    pub(crate) async fn verify_id_token(
+        &self,
+        issuer: &str,
+        token: &str,
+        nonce: &str,
+    ) -> Result<Claims> {
+        let entry = self.entry(issuer)?;
+        self.verify_against(entry, token, &entry.config.client_id, Some(nonce))
+            .await
+    }
+
+    fn entry(&self, issuer: &str) -> Result<&IssuerEntry> {
+        self.issuers
+            .get(issuer)
+            .ok_or_else(|| unauthenticated("unknown token issuer"))
+    }
+
+    /// Full verification under one trust entry. `expected_nonce` is set for
+    /// ID tokens during login completion.
+    #[tracing::instrument(name = "oidc.verify", skip_all, fields(oidc.issuer = %entry.config.issuer))]
+    async fn verify_against(
+        &self,
+        entry: &IssuerEntry,
+        token: &str,
+        audience: &str,
+        expected_nonce: Option<&str>,
+    ) -> Result<Claims> {
+        let outcome = self
+            .verify_inner(entry, token, audience, expected_nonce)
+            .await;
+        let label = match &outcome {
+            Ok(_) => "ok",
+            Err(Error::Unauthenticated { .. }) => "rejected",
+            Err(_) => "error",
+        };
+        metrics::counter!(
+            TOKEN_VERIFICATIONS_TOTAL,
+            "issuer" => entry.config.issuer.clone(),
+            "outcome" => label,
+        )
+        .increment(1);
+        outcome
+    }
+
+    async fn verify_inner(
+        &self,
+        entry: &IssuerEntry,
+        token: &str,
+        audience: &str,
+        expected_nonce: Option<&str>,
+    ) -> Result<Claims> {
+        let header = decode_header(token).map_err(|_| unauthenticated("malformed token header"))?;
+        if !entry.config.algorithms.contains(&header.alg) {
+            return Err(unauthenticated("token algorithm not allowed for issuer"));
+        }
+        let kid = header
+            .kid
+            .ok_or_else(|| unauthenticated("token has no key id"))?;
+
+        // Cached snapshot, refreshing once on an unknown kid (rotation).
+        let mut state = match cached(entry) {
+            Some(state) => state,
+            None => self.refresh(entry).await?,
+        };
+        if !state.keys.contains_key(&kid) {
+            state = self.refresh(entry).await?;
+        }
+        let key = state
+            .keys
+            .get(&kid)
+            .ok_or_else(|| unauthenticated("token signed with an unknown key"))?;
+        if !key.algorithms.contains(&header.alg) {
+            return Err(unauthenticated(
+                "token algorithm does not match signing key",
+            ));
+        }
+
+        let mut validation = Validation::new(header.alg);
+        validation.leeway = LEEWAY.as_secs();
+        validation.set_audience(&[audience]);
+        validation.set_issuer(&[&entry.config.issuer]);
+        validation.set_required_spec_claims(&["exp", "iss", "aud"]);
+        let data = decode::<serde_json::Value>(token, &key.key, &validation)
+            .map_err(|err| unauthenticated(&verification_failure(&err)))?;
+        let claims = data.claims;
+
+        // jsonwebtoken validates nbf only when asked to require it; check it
+        // ourselves so an IdP that sets it (Entra does) is honoured.
+        if let Some(nbf) = claims.get("nbf").and_then(serde_json::Value::as_u64)
+            && nbf > (now() + LEEWAY).as_secs()
+        {
+            return Err(unauthenticated("token not yet valid"));
+        }
+
+        let subject = claims
+            .get("sub")
+            .and_then(serde_json::Value::as_str)
+            .filter(|sub| !sub.is_empty())
+            .ok_or_else(|| unauthenticated("token has no subject"))?
+            .to_owned();
+
+        match (
+            expected_nonce,
+            claims.get("nonce").and_then(serde_json::Value::as_str),
+        ) {
+            (None, _) => {}
+            (Some(expected), Some(actual)) if expected == actual => {}
+            (Some(_), _) => return Err(unauthenticated("login nonce mismatch")),
+        }
+
+        let tenant_id = match &entry.config.tenant {
+            TenantBinding::Static { tenant_id } => *tenant_id,
+            TenantBinding::Claim { name } => claims
+                .get(name.as_str())
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| unauthenticated("token has no tenant claim"))?
+                .parse()
+                .map_err(|_| unauthenticated("tenant claim is not a UUID"))?,
+        };
+
+        Ok(Claims { subject, tenant_id })
+    }
+
+    /// Refetches JWKS (and discovery on first use), rate-limited per issuer.
+    /// Returns the freshest available snapshot; when rate-limited, that is
+    /// the existing one.
+    #[tracing::instrument(name = "oidc.jwks.refresh", skip_all, fields(oidc.issuer = %entry.config.issuer))]
+    async fn refresh(&self, entry: &IssuerEntry) -> Result<Arc<IssuerState>> {
+        let mut last_attempt = entry.refresh.lock().await;
+
+        // Another request may have refreshed while this one waited; a
+        // snapshot newer than the rate window is as fresh as a fetch.
+        if let Some(at) = *last_attempt
+            && at.elapsed() < self.refresh_min_interval
+        {
+            return cached(entry).ok_or_else(|| Error::Dependency {
+                service: "oidc-jwks".to_owned(),
+                message: "issuer keys unavailable; refresh rate-limited".to_owned(),
+            });
+        }
+        *last_attempt = Some(Instant::now());
+
+        let result = self.fetch_state(entry).await;
+        metrics::counter!(
+            JWKS_REFRESHES_TOTAL,
+            "issuer" => entry.config.issuer.clone(),
+            "outcome" => if result.is_ok() { "ok" } else { "error" },
+        )
+        .increment(1);
+        let state = Arc::new(result?);
+        *entry.state.write().expect("issuer state lock") = Some(Arc::clone(&state));
+        Ok(state)
+    }
+
+    async fn fetch_state(&self, entry: &IssuerEntry) -> Result<IssuerState> {
+        // Endpoints are stable per issuer; refetch discovery only on first
+        // use, keys on every refresh.
+        let discovery = match cached(entry) {
+            Some(state) => state.discovery.clone(),
+            None => self.fetch_discovery(&entry.config.issuer).await?,
+        };
+        let jwks: JwkSet = self.fetch_json(&discovery.jwks_uri, "oidc-jwks").await?;
+        let mut keys = HashMap::new();
+        for jwk in &jwks.keys {
+            let Some(kid) = jwk.common.key_id.clone() else {
+                continue;
+            };
+            let Some(verifying) = verifying_key(jwk, &entry.config.algorithms) else {
+                tracing::debug!(
+                    kid,
+                    "skipping JWKS key: unusable under the issuer allowlist"
+                );
+                continue;
+            };
+            keys.insert(kid, verifying);
+        }
+        if keys.is_empty() {
+            return Err(Error::Dependency {
+                service: "oidc-jwks".to_owned(),
+                message: format!(
+                    "issuer {} published no usable verification keys",
+                    entry.config.issuer
+                ),
+            });
+        }
+        Ok(IssuerState { discovery, keys })
+    }
+
+    #[tracing::instrument(name = "oidc.discovery", skip_all, fields(oidc.issuer = %issuer))]
+    async fn fetch_discovery(&self, issuer: &str) -> Result<DiscoveryDocument> {
+        let url = format!(
+            "{}/.well-known/openid-configuration",
+            issuer.trim_end_matches('/')
+        );
+        let document: DiscoveryDocument = self.fetch_json(&url, "oidc-discovery").await?;
+        // Byte-for-byte per ADR-0010: a document that names another issuer
+        // is misconfiguration or an attack, never something to normalise.
+        if document.issuer != issuer {
+            return Err(Error::Dependency {
+                service: "oidc-discovery".to_owned(),
+                message: format!(
+                    "discovery document names issuer {:?}, configured {issuer:?}",
+                    document.issuer
+                ),
+            });
+        }
+        Ok(document)
+    }
+
+    async fn fetch_json<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+        service: &str,
+    ) -> Result<T> {
+        let dependency = |message: String| Error::Dependency {
+            service: service.to_owned(),
+            message,
+        };
+        let response = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .map_err(|err| dependency(format!("GET {url}: {err}")))?;
+        if !response.status().is_success() {
+            return Err(dependency(format!("GET {url}: HTTP {}", response.status())));
+        }
+        response
+            .json()
+            .await
+            .map_err(|err| dependency(format!("GET {url}: invalid body: {err}")))
+    }
+}
+
+#[async_trait::async_trait]
+impl TokenVerifier for OidcVerifier {
+    async fn verify(&self, token: &str) -> Result<Claims> {
+        // The unverified `iss` selects the trust entry — nothing more.
+        let issuer = unverified_issuer(token)?;
+        let entry = self.entry(&issuer)?;
+        let audience = entry.config.bearer_audience().to_owned();
+        self.verify_against(entry, token, &audience, None).await
+    }
+}
+
+fn cached(entry: &IssuerEntry) -> Option<Arc<IssuerState>> {
+    entry.state.read().expect("issuer state lock").clone()
+}
+
+/// Reads the `iss` claim without verifying anything. The result is only
+/// ever used to pick which trust entry must then fully verify the token.
+fn unverified_issuer(token: &str) -> Result<String> {
+    let mut parts = token.split('.');
+    let (Some(_), Some(payload), Some(_), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err(unauthenticated("malformed token"));
+    };
+    URL_SAFE_NO_PAD
+        .decode(payload)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|claims| {
+            claims
+                .get("iss")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .ok_or_else(|| unauthenticated("token has no issuer"))
+}
+
+/// Builds the cached key for one JWK, or `None` if the key cannot verify
+/// anything under the issuer's algorithm allowlist.
+fn verifying_key(jwk: &Jwk, allowed: &[Algorithm]) -> Option<VerifyingKey> {
+    let family: &[Algorithm] = match &jwk.algorithm {
+        AlgorithmParameters::RSA(_) => &SUPPORTED_ALGORITHMS,
+        // EC/OKP/oct keys verify algorithms this build does not compile.
+        _ => return None,
+    };
+    // Narrow by the JWK's own alg when it declares one.
+    let declared = jwk.common.key_algorithm.and_then(|ka| match ka {
+        KeyAlgorithm::RS256 => Some(Algorithm::RS256),
+        KeyAlgorithm::RS384 => Some(Algorithm::RS384),
+        KeyAlgorithm::RS512 => Some(Algorithm::RS512),
+        _ => None,
+    });
+    let algorithms: Vec<Algorithm> = allowed
+        .iter()
+        .copied()
+        .filter(|alg| family.contains(alg))
+        .filter(|alg| declared.is_none_or(|declared| declared == *alg))
+        .collect();
+    if algorithms.is_empty() {
+        return None;
+    }
+    let key = DecodingKey::from_jwk(jwk).ok()?;
+    Some(VerifyingKey { key, algorithms })
+}
+
+/// Collapses jsonwebtoken's error detail into caller-safe messages.
+fn verification_failure(err: &jsonwebtoken::errors::Error) -> String {
+    use jsonwebtoken::errors::ErrorKind;
+    match err.kind() {
+        ErrorKind::ExpiredSignature => "token expired".to_owned(),
+        ErrorKind::InvalidAudience => "token audience mismatch".to_owned(),
+        ErrorKind::InvalidIssuer => "token issuer mismatch".to_owned(),
+        ErrorKind::MissingRequiredClaim(claim) => {
+            format!("token is missing the {claim} claim")
+        }
+        _ => "token verification failed".to_owned(),
+    }
+}
+
+fn unauthenticated(message: &str) -> Error {
+    Error::Unauthenticated {
+        message: message.to_owned(),
+    }
+}
+
+fn now() -> Duration {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before 1970")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn issuer_config_defaults_apply() {
+        let configs =
+            parse_issuers(r#"[{"issuer":"http://localhost:8100/auth/v1","client_id":"synveda"}]"#)
+                .expect("parse");
+        assert_eq!(configs.len(), 1);
+        let config = &configs[0];
+        assert_eq!(config.bearer_audience(), "synveda");
+        assert_eq!(config.algorithms, vec![Algorithm::RS256]);
+        assert_eq!(
+            config.tenant,
+            TenantBinding::Claim {
+                name: "tid".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn issuer_config_parses_static_tenant_and_audience() {
+        let tenant = TenantId::new();
+        let configs = parse_issuers(&format!(
+            r#"[{{"issuer":"http://idp","client_id":"c","audience":"api://synveda",
+                 "tenant":{{"static":{{"tenant_id":"{tenant}"}}}}}}]"#,
+        ))
+        .expect("parse");
+        assert_eq!(configs[0].bearer_audience(), "api://synveda");
+        assert_eq!(
+            configs[0].tenant,
+            TenantBinding::Static { tenant_id: tenant }
+        );
+    }
+
+    #[test]
+    fn unknown_config_fields_are_rejected() {
+        let err = parse_issuers(r#"[{"issuer":"http://idp","client_id":"c","cliett_id":"typo"}]"#)
+            .expect_err("typo must not parse");
+        assert!(matches!(err, Error::Invalid { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn unsupported_algorithms_are_rejected_at_construction() {
+        let configs =
+            parse_issuers(r#"[{"issuer":"http://idp","client_id":"c","algorithms":["HS256"]}]"#)
+                .expect("HS256 parses as an algorithm name");
+        let err = OidcVerifier::new(configs)
+            .err()
+            .expect("HS256 must be refused");
+        assert!(matches!(err, Error::Invalid { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn duplicate_issuers_are_rejected() {
+        let configs = parse_issuers(
+            r#"[{"issuer":"http://idp","client_id":"a"},
+                {"issuer":"http://idp","client_id":"b"}]"#,
+        )
+        .expect("parse");
+        let err = OidcVerifier::new(configs)
+            .err()
+            .expect("duplicate issuer must be refused");
+        assert!(matches!(err, Error::Invalid { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn empty_issuer_list_is_rejected() {
+        let err = OidcVerifier::new(Vec::new())
+            .err()
+            .expect("empty config must be refused");
+        assert!(matches!(err, Error::Invalid { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn unverified_issuer_reads_iss_only_from_well_formed_tokens() {
+        let payload = URL_SAFE_NO_PAD.encode(r#"{"iss":"http://idp","sub":"alice"}"#);
+        let token = format!("h.{payload}.s");
+        assert_eq!(unverified_issuer(&token).expect("iss"), "http://idp");
+        for garbage in ["", "a.b", "a.b.c.d", "h.!!!.s"] {
+            assert!(unverified_issuer(garbage).is_err(), "accepted {garbage:?}");
+        }
+        let no_iss = format!("h.{}.s", URL_SAFE_NO_PAD.encode(r#"{"sub":"a"}"#));
+        assert!(unverified_issuer(&no_iss).is_err());
+    }
+
+    #[tokio::test]
+    async fn sole_issuer_is_only_reported_for_single_entry_configs() {
+        let one =
+            OidcVerifier::new(parse_issuers(r#"[{"issuer":"http://a","client_id":"c"}]"#).unwrap())
+                .unwrap();
+        assert_eq!(one.sole_issuer(), Some("http://a"));
+        let two = OidcVerifier::new(
+            parse_issuers(
+                r#"[{"issuer":"http://a","client_id":"c"},
+                    {"issuer":"http://b","client_id":"c"}]"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(two.sole_issuer(), None);
+    }
+
+    #[tokio::test]
+    async fn tokens_from_unknown_issuers_are_rejected_without_io() {
+        let verifier =
+            OidcVerifier::new(parse_issuers(r#"[{"issuer":"http://a","client_id":"c"}]"#).unwrap())
+                .unwrap();
+        let payload = URL_SAFE_NO_PAD.encode(r#"{"iss":"http://evil","sub":"x"}"#);
+        let err = verifier
+            .verify(&format!("h.{payload}.s"))
+            .await
+            .expect_err("unknown issuer must be rejected");
+        assert!(matches!(err, Error::Unauthenticated { .. }), "got {err:?}");
+    }
+}

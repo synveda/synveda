@@ -26,7 +26,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 
 - [x] [TEN-1: Tenant model & resolution](TEN-1.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/tenant_resolution.rs, demo: demos/ten-1-tenant-resolution.sh
 - [x] [TEN-2: Postgres row-level security as backstop](TEN-2.md) — done 2026-07-18, AC test: crates/synveda-store/tests/rls.rs, demo: demos/ten-2-rls.sh
-- [ ] [AUTH-1: OIDC login (code+PKCE)](AUTH-1.md)
+- [x] [AUTH-1: OIDC login (code+PKCE)](AUTH-1.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/oidc_login.rs (mock Entra), demo: demos/auth-1-oidc-login.sh (live Rauthy)
 - [ ] [HIER-1: Hierarchy store](HIER-1.md)
 - [ ] [AUTHZ-1: Cedar PDP embedded](AUTHZ-1.md)
 - [ ] [AUTH-2: JIT user provisioning from claims](AUTH-2.md)

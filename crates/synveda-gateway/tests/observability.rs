@@ -49,6 +49,7 @@ fn state(url: &str) -> AppState {
         metrics: metrics_handle(),
         // These tests exercise the ops plane only; fail-closed default.
         verifier: std::sync::Arc::new(synveda_identity::DisabledVerifier),
+        login: None,
     }
 }
 
