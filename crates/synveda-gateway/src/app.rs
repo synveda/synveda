@@ -16,6 +16,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde::Serialize;
 use sqlx::PgPool;
 use synveda_identity::{LoginFlow, TokenVerifier};
+use synveda_policy::Pdp;
 use synveda_types::{Error, Tenant};
 use tower_http::trace::TraceLayer;
 
@@ -40,14 +41,17 @@ pub struct AppState {
     /// The code+PKCE login flow when OIDC is configured (AUTH-1); `None`
     /// otherwise, in which case `/auth/*` answers 404.
     pub login: Option<Arc<LoginFlow>>,
+    /// The embedded PDP (AUTHZ-1, ADR-0012): handlers authorize through it
+    /// before acting; the pack refresher hot-swaps stored packs into it.
+    pub pdp: Arc<Pdp>,
 }
 
 /// Builds the gateway router: ops-plane routes plus the authenticated `/v1`
 /// plane, wrapped in the per-request trace span and HTTP metrics middleware.
 pub fn router(state: AppState) -> Router {
     // Every /v1 route sits behind tenant resolution; ops routes do not.
-    // The hierarchy admin plane (HIER-1) is additionally an AUTHZ-1 wiring
-    // point: the PDP check slots in when Cedar lands (ADR-0011).
+    // The hierarchy admin plane (HIER-1) additionally authorizes every
+    // operation through the PDP inside its handlers (AUTHZ-1, ADR-0012).
     let authenticated = Router::new()
         .route("/v1/whoami", get(whoami))
         .route("/v1/hierarchy/nodes", post(hierarchy::create))

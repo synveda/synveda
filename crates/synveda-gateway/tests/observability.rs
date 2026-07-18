@@ -47,6 +47,7 @@ fn state(url: &str) -> AppState {
             .connect_lazy(url)
             .expect("parse database url"),
         metrics: metrics_handle(),
+        pdp: std::sync::Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
         // These tests exercise the ops plane only; fail-closed default.
         verifier: std::sync::Arc::new(synveda_identity::DisabledVerifier),
         login: None,

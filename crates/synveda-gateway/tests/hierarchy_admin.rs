@@ -51,6 +51,7 @@ fn state(url: &str) -> AppState {
         metrics: metrics_handle(),
         verifier: Arc::new(Hs256Verifier::new(SECRET)),
         login: None,
+        pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
     }
 }
 

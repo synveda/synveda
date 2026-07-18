@@ -1,12 +1,13 @@
 //! The hierarchy admin API (HIER-1, ADR-0011): CRUD on `/v1/hierarchy/*`,
-//! behind tenant resolution like every `/v1` route.
+//! behind tenant resolution like every `/v1` route, and — since AUTHZ-1 —
+//! behind the PDP: every handler authorizes through
+//! [`crate::authz::require`] after its uniform-404 ownership check and
+//! before acting (ADR-0012 decision 7, discharging ADR-0011 decision 8).
 //!
-//! AUTHZ-1 wiring point: until the Cedar PDP lands, any authenticated
-//! principal of the tenant can administer its hierarchy; the PDP check
-//! slots in here, at the single chokepoint, and AUTHZ-1's AC must cover
-//! these routes (ADR-0011 decision 7). AUD-1 wiring point: every mutation
-//! here is an audit emission point; until the hash-chained log lands they
-//! are visible in traces and `synveda_hierarchy_operations_total`.
+//! AUD-1 wiring point: every mutation here is an audit emission point;
+//! until the hash-chained log lands they are visible in traces and
+//! `synveda_hierarchy_operations_total` (and every PDP decision in the
+//! policy decision log and `synveda_authz_decisions_total`).
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -14,10 +15,12 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
+use synveda_policy::{Action, Resource};
 use synveda_store::{hierarchy, rls};
 use synveda_types::{Error, HierarchyNode, Result, ScopeId, ScopeKind, TenantId};
 
 use crate::app::AppState;
+use crate::authz;
 use crate::error::ApiError;
 use crate::telemetry::HIERARCHY_OPERATIONS_TOTAL;
 
@@ -82,6 +85,36 @@ pub(crate) async fn create(
         let body = body(payload)?;
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        // Create targets the parent scope — the tenant itself for the root
+        // (ADR-0012 decision 7). Ownership check first: a foreign parent is
+        // a 404, never a policy denial oracle.
+        match body.parent_id {
+            None => {
+                authz::require(
+                    &state.pdp,
+                    &mut tx,
+                    Action::HierarchyCreate,
+                    Resource::Tenant(tenant_id),
+                    None,
+                )
+                .await?;
+            }
+            Some(parent_id) => {
+                let parent = found(
+                    hierarchy::node(&mut *tx, parent_id).await?,
+                    tenant_id,
+                    parent_id,
+                )?;
+                authz::require(
+                    &state.pdp,
+                    &mut tx,
+                    Action::HierarchyCreate,
+                    Resource::Scope(parent_id),
+                    Some(&parent),
+                )
+                .await?;
+            }
+        }
         let node = hierarchy::create(
             &mut tx,
             ScopeId::new(),
@@ -104,6 +137,14 @@ pub(crate) async fn root(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        authz::require(
+            &state.pdp,
+            &mut tx,
+            Action::HierarchyRead,
+            Resource::Tenant(tenant_id),
+            None,
+        )
+        .await?;
         let node = hierarchy::root(&mut *tx, tenant_id)
             .await?
             .ok_or_else(|| Error::NotFound {
@@ -120,7 +161,16 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ScopeId>) 
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        found(hierarchy::node(&mut *tx, id).await?, tenant_id, id).map(Json)
+        let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
+        authz::require(
+            &state.pdp,
+            &mut tx,
+            Action::HierarchyRead,
+            Resource::Scope(id),
+            Some(&node),
+        )
+        .await?;
+        Ok(Json(node))
     }
     .await;
     respond("get", result)
@@ -152,7 +202,15 @@ pub(crate) async fn descendants(
 async fn listing(state: &AppState, id: ScopeId, which: &str) -> Result<Json<Vec<HierarchyNode>>> {
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
+    let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
+    authz::require(
+        &state.pdp,
+        &mut tx,
+        Action::HierarchyRead,
+        Resource::Scope(id),
+        Some(&node),
+    )
+    .await?;
     let nodes = match which {
         "children" => hierarchy::children(&mut *tx, id).await?,
         "ancestors" => hierarchy::ancestors(&mut *tx, id).await?,
@@ -190,7 +248,15 @@ pub(crate) async fn update(
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         // Ownership check before any mutation (see `found`).
-        found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
+        let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
+        authz::require(
+            &state.pdp,
+            &mut tx,
+            Action::HierarchyUpdate,
+            Resource::Scope(id),
+            Some(&node),
+        )
+        .await?;
         if let Some(name) = &body.name {
             hierarchy::rename(&mut *tx, id, name).await?;
         }
@@ -211,7 +277,15 @@ pub(crate) async fn delete(State(state): State<AppState>, Path(id): Path<ScopeId
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         // Ownership check before any mutation (see `found`).
-        found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
+        let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
+        authz::require(
+            &state.pdp,
+            &mut tx,
+            Action::HierarchyDelete,
+            Resource::Scope(id),
+            Some(&node),
+        )
+        .await?;
         if !hierarchy::delete(&mut tx, id).await? {
             return Err(not_found(id));
         }

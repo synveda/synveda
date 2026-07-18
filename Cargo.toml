@@ -2,6 +2,17 @@
 resolver = "3"
 members = ["crates/*"]
 
+# Cedar evaluation is pure CPU on the request hot path. Keep the engine
+# optimized even in dev/test builds (test inherits dev) so the AUTHZ-1
+# µs-level decision benchmark measures reality — unoptimized Cedar is an
+# order of magnitude slower — and every dev-loop request pays µs, not ms.
+[profile.dev.package.cedar-policy]
+opt-level = 3
+[profile.dev.package.cedar-policy-core]
+opt-level = 3
+[profile.dev.package.cedar-policy-formatter]
+opt-level = 3
+
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
@@ -24,6 +35,9 @@ synveda-ingest = { path = "crates/synveda-ingest" }
 # External dependencies (MIT/Apache-2.0 only in the core path — deny.toml enforces).
 # Object-safe async traits (TokenVerifier went async with AUTH-1, ADR-0010).
 async-trait = "0.1"
+# The embedded PDP (AUTHZ-1, ADR-0002/ADR-0012): pure Rust, in-process,
+# Apache-2.0, formally verified evaluator.
+cedar-policy = "4"
 axum = "0.8"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }

@@ -1,0 +1,36 @@
+// The Synveda authorisation model (AUTHZ-1, ADR-0012).
+//
+// Every pack — embedded or stored — validates against this schema when it
+// is compiled, so an ill-typed policy fails at apply/reload time, never at
+// decision time. The entity hierarchy mirrors the tenancy hierarchy
+// (seed §4.1): scopes chain up to their tenant, and membership checks are
+// `in` expressions over that chain — never string comparison, and never
+// the materialised path (ADR-0011).
+//
+// AUTHZ-2 (policy packs), AUTHZ-3 (roles), and AUTHZ-5 (ABAC context)
+// extend this schema; HIER-3 takes over entity materialisation.
+namespace Synveda {
+    entity Tenant;
+
+    // The caller: a token subject resolved to a tenant (TEN-1). AUTH-2
+    // widens this into a provisioned identity placed in the hierarchy.
+    entity Principal in [Tenant] {
+        tenant: Tenant,
+    };
+
+    // A node of the tenancy hierarchy. Parents follow the hierarchy's
+    // parent pointers; the org root's parent is the Tenant entity.
+    entity Scope in [Tenant, Scope] {
+        tenant: Tenant,
+        kind: String,
+    };
+
+    // The hierarchy admin plane (/v1/hierarchy/*, ADR-0011 decision 8).
+    // Create targets the parent scope — the Tenant when creating the root.
+    action HierarchyCreate, HierarchyRead, HierarchyUpdate, HierarchyDelete
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Scope],
+            context: {},
+        };
+}

@@ -5,15 +5,19 @@
 //! and `/auth/*`, with `SYNVEDA_PUBLIC_URL` naming this gateway in redirect
 //! URIs, default `http://127.0.0.1:8120`) or `SYNVEDA_DEV_JWT_SECRET` (the
 //! HS256 dev mode, ADR-0008). Neither set means every `/v1` request is
-//! rejected. The standard `OTEL_*` variables configure the OTLP exporter
-//! (default endpoint `http://localhost:4317` — Jaeger in the dev compose).
+//! rejected. `SYNVEDA_POLICY_REFRESH_SECS` (default 5) paces the policy
+//! pack refresher (AUTHZ-1, ADR-0012). The standard `OTEL_*` variables
+//! configure the OTLP exporter (default endpoint `http://localhost:4317` —
+//! Jaeger in the dev compose).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{self, AppState};
-use synveda_gateway::telemetry;
+use synveda_gateway::{authz, telemetry};
 use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, OidcVerifier, TokenVerifier};
+use synveda_policy::Pdp;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -69,6 +73,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
+    // The embedded PDP (AUTHZ-1, ADR-0012): failure here means the binary's
+    // own schema or bootstrap pack is broken — refuse to boot.
+    let pdp = Arc::new(Pdp::new()?);
+    let refresh_secs = match std::env::var("SYNVEDA_POLICY_REFRESH_SECS") {
+        Ok(value) => value
+            .parse::<u64>()
+            .map_err(|_| "SYNVEDA_POLICY_REFRESH_SECS must be a positive integer")?,
+        Err(_) => 5,
+    };
+    let refresher = authz::spawn_pack_refresher(
+        pool.clone(),
+        Arc::clone(&pdp),
+        Duration::from_secs(refresh_secs.max(1)),
+    );
+
     let addr = std::env::var("SYNVEDA_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8120".to_owned());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(%addr, "synveda-gateway listening");
@@ -80,10 +99,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             metrics,
             verifier,
             login,
+            pdp,
         }),
     )
     .with_graceful_shutdown(shutdown_signal())
     .await?;
+    refresher.abort();
 
     // Flush batched spans before exit; a killed process loses the tail.
     telemetry.shutdown();

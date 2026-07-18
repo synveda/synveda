@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
-use synveda_store::{hierarchy, rls, tenants};
+use synveda_store::{hierarchy, policy_packs, rls, tenants};
 use synveda_types::{
     Error, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity,
     TenantId, TenantStatus,
@@ -165,6 +165,7 @@ async fn visible_rows(
 const COVERED: &[&str] = &[
     "hierarchy_closure",
     "hierarchy_nodes",
+    "policy_packs",
     "records",
     "records_history",
 ];
@@ -415,6 +416,114 @@ fn same_tenant_hierarchy_lifecycle_works_under_rls() {
             "delete must work in-tenant"
         );
         tx.commit().await.expect("commit lifecycle");
+    });
+}
+
+// ── Policy packs (AUTHZ-1, ADR-0012) ────────────────────────────────────────
+
+/// Admits a tenant with one stored pack. Runs on the (RLS-exempt) test
+/// connection.
+async fn seed_policy_pack(pool: &PgPool) -> TenantId {
+    let tenant = TenantId::new();
+    let slug = format!("rlsp-{}", tenant.as_uuid().simple());
+    tenants::create(
+        pool,
+        tenant,
+        &slug,
+        "RLS pack fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create tenant");
+    policy_packs::apply(
+        pool,
+        tenant,
+        "rls-fixture",
+        "permit (principal, action, resource);",
+    )
+    .await
+    .expect("apply pack");
+    tenant
+}
+
+async fn visible_pack_rows(tx: &mut Transaction<'static, Postgres>, tenant: TenantId) -> i64 {
+    sqlx::query_scalar!(
+        r#"select count(*) as "count!" from policy_packs where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count policy_packs")
+}
+
+/// The wrong (or absent) tenant GUC sees zero pack rows — a tenant can
+/// never read another tenant's policy source; the right one sees its own.
+#[test]
+fn wrong_tenant_guc_sees_no_policy_pack_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let victim = seed_policy_pack(&db.pool).await;
+        let adversary = seed_policy_pack(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_pack_rows(&mut tx, victim).await,
+            0,
+            "policy pack rows leaked across tenants under the wrong GUC"
+        );
+        assert_eq!(visible_pack_rows(&mut tx, adversary).await, 1);
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_pack_rows(&mut tx, victim).await,
+            0,
+            "policy pack rows visible without any tenant GUC"
+        );
+    });
+}
+
+/// Writing a pack for another tenant than the GUC's trips the policy's
+/// WITH CHECK — an application defect, surfaced as internal.
+#[test]
+fn cross_tenant_policy_pack_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tenant = seed_policy_pack(&db.pool).await;
+        let other = seed_policy_pack(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let result = policy_packs::apply(&mut *tx, other, "forged", "permit;").await;
+        assert!(
+            matches!(result, Err(Error::Internal { .. })),
+            "cross-tenant pack write must be rejected by RLS as an internal \
+             defect, got {result:?}"
+        );
+    });
+}
+
+/// The full pack lifecycle — apply (insert and version-bumping update),
+/// read, clear — works as `synveda_app` with the right GUC: the shape the
+/// gateway's refresher and the CLI take.
+#[test]
+fn same_tenant_policy_pack_lifecycle_works_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tenant = seed_policy_pack(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let bumped = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "forbid;")
+            .await
+            .expect("apply under RLS");
+        assert_eq!(bumped.version, 2, "the seeded pack must bump to v2");
+        let active = policy_packs::active(&mut *tx, tenant)
+            .await
+            .expect("read under RLS");
+        assert_eq!(active.as_ref(), Some(&bumped));
+        assert!(
+            policy_packs::clear(&mut *tx, tenant)
+                .await
+                .expect("clear under RLS"),
+            "clear must work in-tenant"
+        );
     });
 }
 

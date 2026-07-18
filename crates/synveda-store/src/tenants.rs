@@ -85,6 +85,21 @@ pub async fn create(
     row.try_into()
 }
 
+/// Lists all active tenants, admission order — the policy pack refresher's
+/// iteration set (AUTHZ-1, ADR-0012 decision 5). Fine at admissible tenant
+/// counts; event-based reload replaces the sweep before this needs paging.
+#[tracing::instrument(name = "store.tenants.active", skip_all, err(Display))]
+pub async fn active(executor: impl PgExecutor<'_>) -> Result<Vec<Tenant>> {
+    let rows = sqlx::query_as!(
+        TenantRow,
+        "select id, slug, name, status, created_at from tenants where status = 'active' order by id",
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// Resolves a tenant by id — the lookup behind every request's tenant
 /// resolution. Returns `None` for an unknown id; the *caller* decides what
 /// suspension means (the gateway treats non-active as unresolvable).

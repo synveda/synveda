@@ -28,7 +28,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [TEN-2: Postgres row-level security as backstop](TEN-2.md) — done 2026-07-18, AC test: crates/synveda-store/tests/rls.rs, demo: demos/ten-2-rls.sh
 - [x] [AUTH-1: OIDC login (code+PKCE)](AUTH-1.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/oidc_login.rs (mock Entra), demo: demos/auth-1-oidc-login.sh (live Rauthy)
 - [x] [HIER-1: Hierarchy store](HIER-1.md) — done 2026-07-18, AC test: crates/synveda-store/tests/hierarchy.rs (10k nodes; ancestors/descendants medians 57µs/691µs over baseline), demo: demos/hier-1-hierarchy.sh
-- [ ] [AUTHZ-1: Cedar PDP embedded](AUTHZ-1.md)
+- [x] [AUTHZ-1: Cedar PDP embedded](AUTHZ-1.md) — done 2026-07-18, AC tests: crates/synveda-policy/tests/decision_benchmark.rs (facade incl. entity materialisation, 4-level chain: median 109µs, p99 177µs), crates/synveda-policy/tests/pdp.rs (decision + pack version on every call), crates/synveda-gateway/tests/authz_hierarchy.rs (route gate + hot reload), demo: demos/authz-1-cedar-pdp.sh
 - [ ] [AUTH-2: JIT user provisioning from claims](AUTH-2.md)
 - [ ] [AUTHZ-2: Policy packs](AUTHZ-2.md)
 - [ ] [AUTHZ-3: Roles & role bindings](AUTHZ-3.md)
@@ -67,8 +67,19 @@ deployment profiles (OPS-1/OPS-2) must connect as a non-superuser
 _HIER-1 deferrals (ADR-0011): hierarchy CRUD (create/rename/move/delete)
 is an audit emission point, wired when AUD-1 lands — until then visible in
 traces and `synveda_hierarchy_operations_total`. The `/v1/hierarchy/*`
-admin routes' PDP gate is AUTHZ-1's first obligation; until then any
-authenticated principal of a tenant can administer its own hierarchy._
+admin routes' PDP gate — AUTHZ-1's first obligation — was discharged
+2026-07-18: every handler authorizes through the Cedar facade
+(ADR-0012 decision 7)._
+
+_AUTHZ-1 deferrals (ADR-0012): every PDP decision is an AUD-1 emission
+point — until the hash-chained log lands, decisions are visible in the
+decision log (pack name@version + determining policies, every call) and
+`synveda_authz_decisions_total`. The embedded `bootstrap` pack
+deliberately preserves ADR-0011's semantics (any tenant principal
+administers its own hierarchy) until AUTHZ-2/3 replace it with real
+packs and roles; stored-pack propagation lags up to
+`SYNVEDA_POLICY_REFRESH_SECS` (default 5s, poll-based) until VedaFlow
+policy commits drive event-based reload._
 
 ## Phase 2 — Governance (wk 6–10)
 

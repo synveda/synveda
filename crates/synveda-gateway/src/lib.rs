@@ -8,6 +8,10 @@
 //! (bearer-token → tenant resolution middleware guarding `/v1`, task-local
 //! context, `tenant.id` on every request trace — ADR-0008).
 //!
+//! Since AUTHZ-1 the PDP stage is real: the embedded Cedar engine
+//! (ADR-0002/ADR-0012) decides every hierarchy admin operation, and the
+//! pack refresher hot-swaps per-tenant policy packs.
+//!
 //! This is a library crate only so integration tests can build the router;
 //! nothing outside the workspace consumes it.
 
@@ -16,6 +20,7 @@
 
 pub mod app;
 pub mod auth;
+pub mod authz;
 pub mod error;
 pub mod hierarchy;
 pub mod telemetry;

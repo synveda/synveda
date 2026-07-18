@@ -33,6 +33,11 @@ pub const HTTP_REQUEST_DURATION_SECONDS: &str = "synveda_http_request_duration_s
 /// emission point once the audit log lands.
 pub const HIERARCHY_OPERATIONS_TOTAL: &str = "synveda_hierarchy_operations_total";
 
+/// Policy pack reload sweeps' per-tenant outcomes: `installed`, `removed`,
+/// `unchanged`, or `error` (a stored pack that fails to compile keeps the
+/// last-good pack in force — ADR-0012 decision 5). AUTHZ-1.
+pub const POLICY_PACK_RELOADS_TOTAL: &str = "synveda_policy_pack_reloads_total";
+
 /// Handle to the installed tracer provider. Call [`Telemetry::shutdown`] on
 /// exit to flush batched spans; dropping without it can lose the tail of the
 /// trace.
@@ -120,6 +125,17 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         HIERARCHY_OPERATIONS_TOTAL,
         "Hierarchy admin operations by op and outcome (ok/rejected/error)"
+    );
+    // AUTHZ-1 counters (ADR-0012): the decision counter is emitted in
+    // synveda-policy through the facade, the reload counter in the
+    // gateway's refresher; both described here where the recorder lives.
+    metrics::describe_counter!(
+        synveda_policy::AUTHZ_DECISIONS_TOTAL,
+        "Authorization decisions by action, decision (allow/deny), and pack"
+    );
+    metrics::describe_counter!(
+        POLICY_PACK_RELOADS_TOTAL,
+        "Policy pack reloads by outcome (installed/removed/unchanged/error)"
     );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).

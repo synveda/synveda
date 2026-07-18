@@ -13,8 +13,11 @@ path = "src/main.rs"
 [dependencies]
 # Store + identity for the dev-bootstrap commands only (db migrate, tenant
 # create, token issue — ADR-0008); everything a running gateway can serve
-# goes through its API instead.
+# goes through its API instead. Policy for the apply-time compile check
+# (AUTHZ-1, ADR-0012): a pack the reloader would reject never reaches the
+# store.
 synveda-identity = { workspace = true }
+synveda-policy = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }
 

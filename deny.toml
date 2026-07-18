@@ -26,6 +26,12 @@ exceptions = [
     { name = "curve25519-dalek", allow = ["BSD-3-Clause"] },
     { name = "ed25519-dalek", allow = ["BSD-3-Clause"] },
     { name = "simple_asn1", allow = ["ISC"] },
+    # Build-time-only dep of psm/stacker (segmented stacks for Cedar's
+    # recursive-descent parser), via cedar-policy-core (AUTHZ-1, ADR-0012).
+    # The LLVM exception only *relaxes* Apache-2.0's binary-attribution
+    # requirement; nothing from this crate ships in our binaries at all.
+    # Added with AUTHZ-1.
+    { name = "ar_archive_writer", allow = ["Apache-2.0 WITH LLVM-exception"] },
 ]
 # Our own crates are publish = false and carry no licence field; the allowlist
 # governs dependencies, not first-party code.

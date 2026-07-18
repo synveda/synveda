@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 synveda-identity = { workspace = true }
+synveda-policy = { workspace = true }
 synveda-retrieval = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }

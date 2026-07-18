@@ -34,6 +34,11 @@ enum Command {
     /// issuer; this command never applies to a production deployment.
     #[command(subcommand)]
     Token(TokenCommand),
+    /// Per-tenant policy packs (AUTHZ-1, ADR-0012). Dev/admin plumbing:
+    /// AUTHZ-2 owns the product surface, and VedaFlow eventually governs
+    /// packs as reviewed assets.
+    #[command(subcommand)]
+    Policy(PolicyCommand),
 }
 
 #[derive(Subcommand)]
@@ -55,6 +60,29 @@ enum TenantCommand {
         /// Admit in suspended state (its tokens will not resolve).
         #[arg(long)]
         suspended: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum PolicyCommand {
+    /// Compile-check a Cedar pack and apply it for a tenant (bumps the
+    /// version; the gateway hot-reloads it within its refresh interval).
+    /// Prints the stored pack row as JSON.
+    Apply {
+        /// Tenant UUID the pack applies to.
+        #[arg(long)]
+        tenant: TenantId,
+        /// Pack name (slug grammar), e.g. `regulated-strict`.
+        #[arg(long)]
+        name: String,
+        /// Path to the Cedar policy source file.
+        file: std::path::PathBuf,
+    },
+    /// Remove a tenant's stored pack — back to the embedded `bootstrap`.
+    Clear {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
     },
 }
 
@@ -114,6 +142,52 @@ async fn run(cli: Cli) -> Result<(), String> {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&tenant).map_err(|err| err.to_string())?
+            );
+            Ok(())
+        }
+        Command::Policy(PolicyCommand::Apply { tenant, name, file }) => {
+            let source = std::fs::read_to_string(&file)
+                .map_err(|err| format!("read {}: {err}", file.display()))?;
+            // Compile-check before storing: same schema, same validation
+            // the gateway's reloader applies (ADR-0012 decision 2).
+            synveda_policy::Pdp::new()
+                .and_then(|pdp| pdp.compile_check(&name, &source))
+                .map_err(|err| err.to_string())?;
+            let pool = connect().await?;
+            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            let pack = synveda_store::policy_packs::apply(&mut *tx, tenant, &name, &source)
+                .await
+                .map_err(|err| err.to_string())?;
+            tx.commit().await.map_err(|err| err.to_string())?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "tenant_id": pack.tenant_id,
+                    "name": pack.name,
+                    "version": pack.version,
+                    "updated_at": pack.updated_at,
+                })
+            );
+            Ok(())
+        }
+        Command::Policy(PolicyCommand::Clear { tenant }) => {
+            let pool = connect().await?;
+            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            let removed = synveda_store::policy_packs::clear(&mut *tx, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            tx.commit().await.map_err(|err| err.to_string())?;
+            eprintln!(
+                "{}",
+                if removed {
+                    "policy pack cleared; bootstrap in force after the next reload"
+                } else {
+                    "no stored pack; bootstrap already in force"
+                }
             );
             Ok(())
         }

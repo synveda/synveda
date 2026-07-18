@@ -29,7 +29,14 @@ const ALLOWED = {
   // The CLI is a client of the gateway API, plus direct store/identity access
   // for the dev-bootstrap commands (db migrate, tenant create, token issue)
   // that exist precisely when no usable gateway does. Reviewed in ADR-0008.
-  "synveda-cli": ["synveda-types", "synveda-store", "synveda-identity"],
+  // Policy added with AUTHZ-1 (ADR-0012): `synveda policy apply` compile-checks
+  // a pack against the same schema the gateway's reloader enforces.
+  "synveda-cli": [
+    "synveda-types",
+    "synveda-store",
+    "synveda-identity",
+    "synveda-policy",
+  ],
 };
 
 const metadata = JSON.parse(

@@ -15,6 +15,7 @@
 #![warn(missing_docs)]
 
 pub mod hierarchy;
+pub mod policy_packs;
 pub mod records;
 pub mod rls;
 pub mod tenants;
