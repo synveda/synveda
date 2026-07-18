@@ -6,15 +6,20 @@ use std::fmt;
 
 use synveda_types::{Error, HierarchyNode, Result, ScopeId, TenantId};
 
-/// Who is asking: a verified token subject resolved to a tenant (TEN-1).
-/// AUTH-2 widens this into a provisioned identity with a place in the
-/// hierarchy; the facade signature will not change.
+/// Who is asking: a verified token subject resolved to a tenant (TEN-1)
+/// with its provisioning status (AUTH-2, ADR-0013 decision 6). The caller
+/// resolves `quarantined` at the enforcement seam — identity placement for
+/// provisioned subjects, fail-closed `true` for IdP subjects that never
+/// provisioned, `false` for out-of-band (dev) subjects.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Principal {
     /// The tenant the caller resolved to.
     pub tenant_id: TenantId,
     /// The verified token's `sub` claim.
     pub subject: String,
+    /// Whether the subject is quarantined; `bootstrap@2` forbids every
+    /// action when set (ADR-0013 decision 5).
+    pub quarantined: bool,
 }
 
 /// The typed action vocabulary. Free-form action strings would let a typo

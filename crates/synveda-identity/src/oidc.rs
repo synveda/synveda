@@ -24,7 +24,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::Deserialize;
 use synveda_types::{Error, Result, TenantId};
 
-use crate::token::{Claims, TokenVerifier};
+use crate::token::{Claims, ProvisioningClaims, TokenVerifier};
 
 /// Token verifications by issuer and outcome (`ok`, `rejected`, `error`).
 /// Emitted here, described by the gateway's recorder (ADR-0007 layering).
@@ -73,6 +73,22 @@ fn default_algorithms() -> Vec<Algorithm> {
     vec![Algorithm::RS256]
 }
 
+fn default_groups_claim() -> String {
+    "groups".to_owned()
+}
+
+fn default_login_scopes() -> Vec<String> {
+    // `openid` is what makes it OIDC; profile and email feed AUTH-2's
+    // provisioning claims. IdPs that gate the groups claim behind a scope
+    // (Rauthy) add "groups" in config; IdPs that reject unknown scopes
+    // (Entra) keep the default (ADR-0013 decision 1).
+    vec![
+        "openid".to_owned(),
+        "profile".to_owned(),
+        "email".to_owned(),
+    ]
+}
+
 /// One issuer the gateway trusts (ADR-0010 §2). Deserialized from the
 /// `SYNVEDA_OIDC_ISSUERS` JSON array; unknown fields are config typos and
 /// rejected.
@@ -94,6 +110,14 @@ pub struct IssuerConfig {
     /// claim.
     #[serde(default = "default_tenant_binding")]
     pub tenant: TenantBinding,
+    /// The claim carrying group names for JIT provisioning (AUTH-2,
+    /// ADR-0013). Defaults to `groups`.
+    #[serde(default = "default_groups_claim")]
+    pub groups_claim: String,
+    /// Scopes requested at login. Defaults to `openid profile email`;
+    /// must include `openid` (no ID token without it).
+    #[serde(default = "default_login_scopes")]
+    pub login_scopes: Vec<String>,
 }
 
 impl IssuerConfig {
@@ -173,6 +197,15 @@ impl OidcVerifier {
             if config.algorithms.is_empty() {
                 return Err(Error::Invalid {
                     message: format!("issuer {}: empty algorithm list", config.issuer),
+                });
+            }
+            if !config.login_scopes.iter().any(|scope| scope == "openid") {
+                return Err(Error::Invalid {
+                    message: format!(
+                        "issuer {}: login_scopes must include \"openid\" \
+                         (no ID token without it)",
+                        config.issuer
+                    ),
                 });
             }
             let issuer = config.issuer.clone();
@@ -371,7 +404,13 @@ impl OidcVerifier {
                 .map_err(|_| unauthenticated("tenant claim is not a UUID"))?,
         };
 
-        Ok(Claims { subject, tenant_id })
+        Ok(Claims {
+            subject,
+            tenant_id,
+            // Always Some for IdP-verified tokens, even with no groups:
+            // presence marks the subject as IdP-backed (ADR-0013).
+            provisioning: Some(provisioning_claims(&claims, &entry.config.groups_claim)),
+        })
     }
 
     /// Refetches JWKS (and discovery on first use), rate-limited per issuer.
@@ -550,6 +589,37 @@ fn verifying_key(jwk: &Jwk, allowed: &[Algorithm]) -> Option<VerifyingKey> {
     Some(VerifyingKey { key, algorithms })
 }
 
+/// Harvests the provisioning claims (AUTH-2, ADR-0013) from a verified
+/// token's payload. Absent or ill-shaped claims degrade to empty/`None` —
+/// they gate placement, never verification; non-string group entries
+/// (some IdPs mix formats) are skipped.
+fn provisioning_claims(claims: &serde_json::Value, groups_claim: &str) -> ProvisioningClaims {
+    let text = |name: &str| {
+        claims
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    };
+    let groups = claims
+        .get(groups_claim)
+        .and_then(serde_json::Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|group| !group.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    ProvisioningClaims {
+        groups,
+        email: text("email"),
+        display_name: text("name"),
+    }
+}
+
 /// Collapses jsonwebtoken's error detail into caller-safe messages.
 fn verification_failure(err: &jsonwebtoken::errors::Error) -> String {
     use jsonwebtoken::errors::ErrorKind;
@@ -595,6 +665,48 @@ mod tests {
                 name: "tid".to_owned()
             }
         );
+        assert_eq!(config.groups_claim, "groups");
+        assert_eq!(config.login_scopes, ["openid", "profile", "email"]);
+    }
+
+    #[test]
+    fn login_scopes_without_openid_are_rejected_at_construction() {
+        let configs = parse_issuers(
+            r#"[{"issuer":"http://idp","client_id":"c","login_scopes":["profile","groups"]}]"#,
+        )
+        .expect("parse");
+        let err = OidcVerifier::new(configs)
+            .err()
+            .expect("scopes without openid must be refused");
+        assert!(matches!(err, Error::Invalid { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn provisioning_claims_harvest_groups_email_and_name() {
+        let claims = serde_json::json!({
+            "sub": "alice",
+            "groups": ["synveda-eng-platform", "", 42, "everyone"],
+            "email": "alice@example.test",
+            "name": "Alice Example",
+        });
+        let harvested = provisioning_claims(&claims, "groups");
+        assert_eq!(harvested.groups, ["synveda-eng-platform", "everyone"]);
+        assert_eq!(harvested.email.as_deref(), Some("alice@example.test"));
+        assert_eq!(harvested.display_name.as_deref(), Some("Alice Example"));
+    }
+
+    #[test]
+    fn provisioning_claims_degrade_to_empty_when_absent_or_ill_shaped() {
+        for claims in [
+            serde_json::json!({ "sub": "alice" }),
+            serde_json::json!({ "sub": "alice", "groups": "not-an-array", "email": 7 }),
+        ] {
+            let harvested = provisioning_claims(&claims, "groups");
+            assert_eq!(harvested, ProvisioningClaims::default(), "from {claims}");
+        }
+        // A configured claim name other than the default is honoured.
+        let entra_style = serde_json::json!({ "wids": ["role-a"], "groups": ["ignored"] });
+        assert_eq!(provisioning_claims(&entra_style, "wids").groups, ["role-a"]);
     }
 
     #[test]

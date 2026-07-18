@@ -1,0 +1,72 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select distinct n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name,\n               n.depth, n.path, n.created_at\n        from unnest($2::text[], $3::text[]) as candidate(dept_slug, team_slug)\n        join hierarchy_nodes n\n          on n.tenant_id = $1 and n.kind = 'team' and n.slug = candidate.team_slug\n        join hierarchy_closure c\n          on c.descendant_id = n.id and c.distance > 0\n        join hierarchy_nodes a\n          on a.id = c.ancestor_id\n         and a.kind = 'department' and a.slug = candidate.dept_slug\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "parent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "slug",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "depth",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f2b49fdce40a9180b7709bd3d701a23722ad213a76d4c3f9abd59427495b248e"
+}

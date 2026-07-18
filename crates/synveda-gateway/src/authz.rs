@@ -13,7 +13,7 @@ use std::time::Duration;
 use sqlx::PgPool;
 use sqlx::postgres::PgConnection;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
-use synveda_store::{hierarchy, policy_packs, rls, tenants};
+use synveda_store::{hierarchy, identities, policy_packs, rls, tenants};
 use synveda_types::{Error, HierarchyNode, Result, TenantId};
 
 use crate::telemetry::POLICY_PACK_RELOADS_TOTAL;
@@ -24,6 +24,13 @@ use crate::telemetry::POLICY_PACK_RELOADS_TOTAL;
 /// node the resource refers to — `None` for tenant-level resources. Runs
 /// after the uniform-404 ownership check, so cross-tenant probes never see
 /// a policy denial oracle (ADR-0012 decision 7).
+///
+/// Quarantine resolves here, inside the caller's transaction (AUTH-2,
+/// ADR-0013 decision 6): a provisioned identity's placement decides; an
+/// IdP subject with no identity is quarantined (fail closed — skipping
+/// `/auth/login` must not out-privilege completing it); an out-of-band
+/// (dev HS256) subject is not, preserving ADR-0012's bootstrap semantics
+/// until AUTHZ-2/3 land roles.
 pub(crate) async fn require(
     pdp: &Pdp,
     conn: &mut PgConnection,
@@ -34,9 +41,16 @@ pub(crate) async fn require(
     let context = synveda_identity::current_tenant().ok_or_else(|| Error::Internal {
         message: "authorization ran outside a tenant scope".to_owned(),
     })?;
+    let identity =
+        identities::by_subject(&mut *conn, context.tenant.id, &context.claims.subject).await?;
+    let quarantined = match &identity {
+        Some(identity) => identity.quarantined,
+        None => context.claims.provisioning.is_some(),
+    };
     let principal = Principal {
         tenant_id: context.tenant.id,
-        subject: context.subject,
+        subject: context.claims.subject,
+        quarantined,
     };
     let chain = match anchor {
         Some(node) => {

@@ -23,14 +23,33 @@ use synveda_types::{Error, Result, TenantId};
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// The verified claims a token resolves to. Only what tenant resolution
-/// needs; AUTH-2 (JIT provisioning) will widen this to groups and names.
+/// The verified claims a token resolves to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Claims {
     /// The token's `sub`: who is acting.
     pub subject: String,
     /// The token's `tid`: which tenant the request runs as.
     pub tenant_id: TenantId,
+    /// Identity attributes for JIT provisioning (AUTH-2, ADR-0013).
+    /// `Some` whenever an IdP verified the token — the OIDC verifier always
+    /// sets it, even when the token names no groups — and `None` for
+    /// out-of-band subjects (the HS256 dev mode). The PDP seam treats an
+    /// IdP subject with no provisioned identity as quarantined (ADR-0013
+    /// decision 6), so this field's presence is itself a claim.
+    pub provisioning: Option<ProvisioningClaims>,
+}
+
+/// What an IdP asserts about a subject beyond its name: the raw material
+/// of JIT provisioning (AUTH-2, ADR-0013 decision 1).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProvisioningClaims {
+    /// Group names from the per-issuer `groups_claim` (default `groups`);
+    /// empty when the token carries none.
+    pub groups: Vec<String>,
+    /// The `email` claim, if present.
+    pub email: Option<String>,
+    /// The `name` claim, if present.
+    pub display_name: Option<String>,
 }
 
 /// Verifies a bearer token and returns its claims. Implementations must be
@@ -158,6 +177,9 @@ impl TokenVerifier for Hs256Verifier {
         Ok(Claims {
             subject: claims.sub,
             tenant_id,
+            // Dev-mode subjects are out-of-band: no IdP stands behind them,
+            // so they carry no provisioning claims (ADR-0013 decision 1).
+            provisioning: None,
         })
     }
 }
@@ -193,6 +215,10 @@ mod tests {
         let claims = verifier().verify(&token).await.expect("verify own token");
         assert_eq!(claims.subject, "alice");
         assert_eq!(claims.tenant_id, tenant);
+        assert_eq!(
+            claims.provisioning, None,
+            "dev-mode subjects are out-of-band (ADR-0013)"
+        );
     }
 
     #[tokio::test]

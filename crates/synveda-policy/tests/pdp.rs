@@ -86,7 +86,101 @@ fn principal(tenant_id: TenantId) -> Principal {
     Principal {
         tenant_id,
         subject: "alice".to_owned(),
+        quarantined: false,
     }
+}
+
+/// AUTH-2 (ADR-0013 decision 5): a quarantined principal is forbidden
+/// everything under `bootstrap@2`, even inside its own tenant, and the
+/// denial names the forbidding policy.
+#[test]
+fn bootstrap_forbids_a_quarantined_principal_everything() {
+    let pdp = Pdp::new().expect("build pdp");
+    let tenant = TenantId::new();
+    let scopes = chain(tenant);
+    let team = team_of(&scopes);
+    let quarantined = Principal {
+        quarantined: true,
+        ..principal(tenant)
+    };
+
+    for action in ALL_ACTIONS {
+        let decision = pdp
+            .authorize(
+                &quarantined,
+                action,
+                Resource::Scope(team),
+                &AuthzContext { scopes: &scopes },
+            )
+            .expect("authorize");
+        assert!(
+            !decision.allowed,
+            "{action} must be denied when quarantined"
+        );
+        assert_eq!(decision.pack_name, BOOTSTRAP_PACK);
+        assert_eq!(decision.pack_version, BOOTSTRAP_VERSION);
+        assert!(
+            !decision.determining.is_empty(),
+            "the quarantine forbid must be the determining policy"
+        );
+    }
+
+    // Tenant-level resources too: quarantine has no carve-outs.
+    let decision = pdp
+        .authorize(
+            &quarantined,
+            Action::HierarchyRead,
+            Resource::Tenant(tenant),
+            &AuthzContext::default(),
+        )
+        .expect("authorize");
+    assert!(!decision.allowed, "tenant-level reads are forbidden too");
+}
+
+/// The quarantine forbid overrides permits in *stored* packs as well —
+/// but only while the pack's own rules keep the attribute in play; the
+/// forbid itself lives in each pack, so a stored pack that omits it
+/// relies on its own permits' conditions. This pins the bootstrap
+/// behaviour stored packs inherit when AUTHZ-2 templates them.
+#[test]
+fn a_stored_pack_with_the_quarantine_forbid_behaves_like_bootstrap() {
+    let pdp = Pdp::new().expect("build pdp");
+    let tenant = TenantId::new();
+    let scopes = chain(tenant);
+    let team = team_of(&scopes);
+    pdp.install_source(
+        tenant,
+        "auth2-strict",
+        1,
+        r#"
+        forbid (principal, action, resource) when { principal.quarantined };
+        permit (principal, action, resource) when { resource in principal.tenant };
+        "#,
+    )
+    .expect("install test pack");
+
+    let allowed = pdp
+        .authorize(
+            &principal(tenant),
+            Action::HierarchyRead,
+            Resource::Scope(team),
+            &AuthzContext { scopes: &scopes },
+        )
+        .expect("authorize");
+    assert!(allowed.allowed, "a placed principal keeps its rights");
+
+    let denied = pdp
+        .authorize(
+            &Principal {
+                quarantined: true,
+                ..principal(tenant)
+            },
+            Action::HierarchyRead,
+            Resource::Scope(team),
+            &AuthzContext { scopes: &scopes },
+        )
+        .expect("authorize");
+    assert!(!denied.allowed, "the forbid overrides the blanket permit");
 }
 
 #[test]

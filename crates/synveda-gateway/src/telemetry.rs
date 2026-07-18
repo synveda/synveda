@@ -38,6 +38,11 @@ pub const HIERARCHY_OPERATIONS_TOTAL: &str = "synveda_hierarchy_operations_total
 /// last-good pack in force — ADR-0012 decision 5). AUTHZ-1.
 pub const POLICY_PACK_RELOADS_TOTAL: &str = "synveda_policy_pack_reloads_total";
 
+/// JIT provisioning outcomes at login (AUTH-2, ADR-0013): `mapped`,
+/// `quarantined`, `existing` (repeat login), or `error`. An AUD-1 emission
+/// point (`identity.provisioned`) once the audit log lands.
+pub const JIT_PROVISIONS_TOTAL: &str = "synveda_jit_provisions_total";
+
 /// Handle to the installed tracer provider. Call [`Telemetry::shutdown`] on
 /// exit to flush batched spans; dropping without it can lose the tail of the
 /// trace.
@@ -136,6 +141,12 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         POLICY_PACK_RELOADS_TOTAL,
         "Policy pack reloads by outcome (installed/removed/unchanged/error)"
+    );
+    // AUTH-2 counter (ADR-0013): emitted in the gateway's provisioning
+    // module at login completion.
+    metrics::describe_counter!(
+        JIT_PROVISIONS_TOTAL,
+        "JIT identity provisioning by outcome (mapped/quarantined/existing/error)"
     );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).

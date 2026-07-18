@@ -71,7 +71,7 @@ pub(crate) async fn active_tenant(state: &AppState, claims: &Claims) -> Result<T
         })?;
     Ok(TenantContext {
         tenant,
-        subject: claims.subject.clone(),
+        claims: claims.clone(),
     })
 }
 

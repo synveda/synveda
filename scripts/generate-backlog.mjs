@@ -96,6 +96,9 @@ const DONE = new Map([
   ["TEN-1", "done 2026-07-18, AC test: crates/synveda-gateway/tests/tenant_resolution.rs, demo: demos/ten-1-tenant-resolution.sh"],
   ["TEN-2", "done 2026-07-18, AC test: crates/synveda-store/tests/rls.rs, demo: demos/ten-2-rls.sh"],
   ["AUTH-1", "done 2026-07-18, AC test: crates/synveda-gateway/tests/oidc_login.rs (mock Entra), demo: demos/auth-1-oidc-login.sh (live Rauthy)"],
+  ["HIER-1", "done 2026-07-18, AC test: crates/synveda-store/tests/hierarchy.rs (10k nodes; ancestors/descendants medians 57µs/691µs over baseline), demo: demos/hier-1-hierarchy.sh"],
+  ["AUTHZ-1", "done 2026-07-18, AC tests: crates/synveda-policy/tests/decision_benchmark.rs (facade incl. entity materialisation, 4-level chain: median 109µs, p99 177µs), crates/synveda-policy/tests/pdp.rs (decision + pack version on every call), crates/synveda-gateway/tests/authz_hierarchy.rs (route gate + hot reload), demo: demos/authz-1-cedar-pdp.sh"],
+  ["AUTH-2", "done 2026-07-18, AC test: crates/synveda-gateway/tests/jit_provisioning.rs (mock IdP: team mapping, quarantine + PDP denial, override precedence, fail-closed bearer), demo: demos/auth-2-jit-provisioning.sh (live Rauthy)"],
 ]);
 
 // Phase-level notes appended after a phase's checklist (kept across
@@ -125,7 +128,36 @@ const PHASE_NOTES = new Map([
       "`Error::Internal`) are an AUD-1 emission point; data-path features must\n" +
       "reach tenant-scoped tables via `synveda_store::rls::begin_tenant_tx`, and\n" +
       "deployment profiles (OPS-1/OPS-2) must connect as a non-superuser\n" +
-      "`synveda_app` login — the dev compose superuser bypasses RLS._",
+      "`synveda_app` login — the dev compose superuser bypasses RLS._\n" +
+      "\n" +
+      "_HIER-1 deferrals (ADR-0011): hierarchy CRUD (create/rename/move/delete)\n" +
+      "is an audit emission point, wired when AUD-1 lands — until then visible in\n" +
+      "traces and `synveda_hierarchy_operations_total`. The `/v1/hierarchy/*`\n" +
+      "admin routes' PDP gate — AUTHZ-1's first obligation — was discharged\n" +
+      "2026-07-18: every handler authorizes through the Cedar facade\n" +
+      "(ADR-0012 decision 7)._\n" +
+      "\n" +
+      "_AUTHZ-1 deferrals (ADR-0012): every PDP decision is an AUD-1 emission\n" +
+      "point — until the hash-chained log lands, decisions are visible in the\n" +
+      "decision log (pack name@version + determining policies, every call) and\n" +
+      "`synveda_authz_decisions_total`. The embedded `bootstrap` pack\n" +
+      "deliberately preserves ADR-0011's semantics (any tenant principal\n" +
+      "administers its own hierarchy) until AUTHZ-2/3 replace it with real\n" +
+      "packs and roles; stored-pack propagation lags up to\n" +
+      "`SYNVEDA_POLICY_REFRESH_SECS` (default 5s, poll-based) until VedaFlow\n" +
+      "policy commits drive event-based reload._\n" +
+      "\n" +
+      "_AUTH-2 deferrals (ADR-0013): identity provisioning\n" +
+      "(`identity.provisioned`) is an AUD-1 emission point — until then visible\n" +
+      "in the `identity.provision` span and `synveda_jit_provisions_total`.\n" +
+      "Group-mapping overrides are store-managed (like policy packs\n" +
+      "pre-AUTHZ-2) until an admin surface exists; placement is\n" +
+      "first-login-final — movers/leavers arrive with AUTH-4/5, and release\n" +
+      "from quarantine is the existing PDP-gated hierarchy move. The\n" +
+      "quarantine forbid bumped the embedded pack to `bootstrap@2`; an IdP\n" +
+      "subject that never completed a login is quarantined at the PDP seam\n" +
+      "(fail closed), while dev HS256 subjects keep ADR-0012's bootstrap\n" +
+      "semantics until AUTHZ-3 lands roles._",
   ],
 ]);
 

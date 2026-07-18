@@ -29,7 +29,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [AUTH-1: OIDC login (code+PKCE)](AUTH-1.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/oidc_login.rs (mock Entra), demo: demos/auth-1-oidc-login.sh (live Rauthy)
 - [x] [HIER-1: Hierarchy store](HIER-1.md) — done 2026-07-18, AC test: crates/synveda-store/tests/hierarchy.rs (10k nodes; ancestors/descendants medians 57µs/691µs over baseline), demo: demos/hier-1-hierarchy.sh
 - [x] [AUTHZ-1: Cedar PDP embedded](AUTHZ-1.md) — done 2026-07-18, AC tests: crates/synveda-policy/tests/decision_benchmark.rs (facade incl. entity materialisation, 4-level chain: median 109µs, p99 177µs), crates/synveda-policy/tests/pdp.rs (decision + pack version on every call), crates/synveda-gateway/tests/authz_hierarchy.rs (route gate + hot reload), demo: demos/authz-1-cedar-pdp.sh
-- [ ] [AUTH-2: JIT user provisioning from claims](AUTH-2.md)
+- [x] [AUTH-2: JIT user provisioning from claims](AUTH-2.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/jit_provisioning.rs (mock IdP: team mapping, quarantine + PDP denial, override precedence, fail-closed bearer), demo: demos/auth-2-jit-provisioning.sh (live Rauthy)
 - [ ] [AUTHZ-2: Policy packs](AUTHZ-2.md)
 - [ ] [AUTHZ-3: Roles & role bindings](AUTHZ-3.md)
 - [ ] [HIER-2: Scope chain resolver](HIER-2.md)
@@ -80,6 +80,18 @@ administers its own hierarchy) until AUTHZ-2/3 replace it with real
 packs and roles; stored-pack propagation lags up to
 `SYNVEDA_POLICY_REFRESH_SECS` (default 5s, poll-based) until VedaFlow
 policy commits drive event-based reload._
+
+_AUTH-2 deferrals (ADR-0013): identity provisioning
+(`identity.provisioned`) is an AUD-1 emission point — until then visible
+in the `identity.provision` span and `synveda_jit_provisions_total`.
+Group-mapping overrides are store-managed (like policy packs
+pre-AUTHZ-2) until an admin surface exists; placement is
+first-login-final — movers/leavers arrive with AUTH-4/5, and release
+from quarantine is the existing PDP-gated hierarchy move. The
+quarantine forbid bumped the embedded pack to `bootstrap@2`; an IdP
+subject that never completed a login is quarantined at the PDP seam
+(fail closed), while dev HS256 subjects keep ADR-0012's bootstrap
+semantics until AUTHZ-3 lands roles._
 
 ## Phase 2 — Governance (wk 6–10)
 

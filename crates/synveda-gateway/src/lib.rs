@@ -10,7 +10,9 @@
 //!
 //! Since AUTHZ-1 the PDP stage is real: the embedded Cedar engine
 //! (ADR-0002/ADR-0012) decides every hierarchy admin operation, and the
-//! pack refresher hot-swaps per-tenant policy packs.
+//! pack refresher hot-swaps per-tenant policy packs. Since AUTH-2 a first
+//! login JIT-provisions the subject into the hierarchy (ADR-0013), and
+//! every PDP decision carries the identity's quarantine status.
 //!
 //! This is a library crate only so integration tests can build the router;
 //! nothing outside the workspace consumes it.
@@ -23,5 +25,6 @@ pub mod auth;
 pub mod authz;
 pub mod error;
 pub mod hierarchy;
+mod provision;
 pub mod telemetry;
 pub mod tenant;

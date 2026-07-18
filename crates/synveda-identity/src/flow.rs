@@ -35,10 +35,6 @@ const PENDING_TTL: Duration = Duration::from_secs(600);
 /// rather than letting an unauthenticated caller grow memory.
 const PENDING_CAP: usize = 10_000;
 
-/// Scopes requested from the IdP. `openid` is what makes it OIDC; profile
-/// and email feed AUTH-2's JIT provisioning claims.
-const SCOPES: &str = "openid profile email";
-
 struct PendingLogin {
     issuer: String,
     code_verifier: String,
@@ -106,7 +102,11 @@ impl LoginFlow {
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
 
         let issuer_state = self.verifier.issuer_state(&issuer).await?;
-        let client_id = self.verifier.config(&issuer)?.client_id.clone();
+        let config = self.verifier.config(&issuer)?;
+        let client_id = config.client_id.clone();
+        // Per-issuer (ADR-0013 decision 1): IdPs that gate the groups claim
+        // behind a scope add it in config; the default stays universal.
+        let scopes = config.login_scopes.join(" ");
         let mut url =
             url::Url::parse(&issuer_state.discovery.authorization_endpoint).map_err(|err| {
                 Error::Dependency {
@@ -118,7 +118,7 @@ impl LoginFlow {
             .append_pair("response_type", "code")
             .append_pair("client_id", &client_id)
             .append_pair("redirect_uri", &self.redirect_uri)
-            .append_pair("scope", SCOPES)
+            .append_pair("scope", &scopes)
             .append_pair("state", &state)
             .append_pair("nonce", &nonce)
             .append_pair("code_challenge", &challenge)

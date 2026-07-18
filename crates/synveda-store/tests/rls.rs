@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
-use synveda_store::{hierarchy, policy_packs, rls, tenants};
+use synveda_store::{group_mappings, hierarchy, identities, policy_packs, rls, tenants};
 use synveda_types::{
     Error, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity,
     TenantId, TenantStatus,
@@ -163,8 +163,10 @@ async fn visible_rows(
 /// tenant-scoped table means extending this suite; the guard below turns
 /// forgetting into a test failure.
 const COVERED: &[&str] = &[
+    "group_mappings",
     "hierarchy_closure",
     "hierarchy_nodes",
+    "identities",
     "policy_packs",
     "records",
     "records_history",
@@ -523,6 +525,220 @@ fn same_tenant_policy_pack_lifecycle_works_under_rls() {
                 .await
                 .expect("clear under RLS"),
             "clear must work in-tenant"
+        );
+    });
+}
+
+// ── Identities & group mappings (AUTH-2, ADR-0013) ──────────────────────────
+
+/// Admits a tenant with an org root, a provisioned identity under it, and
+/// one group-mapping override. Runs on the (RLS-exempt) test connection.
+async fn seed_identity(pool: &PgPool) -> TenantId {
+    let tenant = TenantId::new();
+    let slug = format!("rlsi-{}", tenant.as_uuid().simple());
+    tenants::create(
+        pool,
+        tenant,
+        &slug,
+        "RLS identity fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create tenant");
+    let mut tx = pool.begin().await.expect("begin transaction");
+    let org = hierarchy::create(
+        &mut tx,
+        ScopeId::new(),
+        tenant,
+        None,
+        ScopeKind::Org,
+        "acme",
+        "ACME",
+    )
+    .await
+    .expect("create org");
+    let personal = hierarchy::create(
+        &mut tx,
+        ScopeId::new(),
+        tenant,
+        Some(org.id),
+        ScopeKind::User,
+        "alice",
+        "Alice",
+    )
+    .await
+    .expect("create personal scope");
+    identities::create(
+        &mut tx,
+        IdentityId::new(),
+        tenant,
+        "alice",
+        None,
+        None,
+        personal.id,
+    )
+    .await
+    .expect("create identity");
+    group_mappings::upsert(&mut *tx, tenant, "synveda-eng-core", org.id)
+        .await
+        .expect("create mapping");
+    tx.commit().await.expect("commit identity fixture");
+    tenant
+}
+
+/// Rows of `tenant` visible through the AUTH-2 tables, in the order
+/// (identities, group_mappings).
+async fn visible_identity_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64) {
+    let identities = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from identities where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count identities");
+    let mappings = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from group_mappings where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count group_mappings");
+    (identities, mappings)
+}
+
+/// The wrong (or absent) tenant GUC sees zero identity and mapping rows —
+/// who works where is itself tenant-confidential; the right one sees its
+/// own.
+#[test]
+fn wrong_tenant_guc_sees_no_identity_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let victim = seed_identity(&db.pool).await;
+        let adversary = seed_identity(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_identity_rows(&mut tx, victim).await,
+            (0, 0),
+            "identity/mapping rows leaked across tenants under the wrong GUC"
+        );
+        assert_eq!(visible_identity_rows(&mut tx, adversary).await, (1, 1));
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_identity_rows(&mut tx, victim).await,
+            (0, 0),
+            "identity/mapping rows visible without any tenant GUC"
+        );
+    });
+}
+
+/// Provisioning rows for another tenant than the GUC's trips the policies'
+/// WITH CHECK — an application defect, surfaced as internal.
+#[test]
+fn cross_tenant_identity_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tenant = seed_identity(&db.pool).await;
+        let other = seed_identity(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let foreign_root = hierarchy::root(&mut *tx, other)
+            .await
+            .expect("query foreign root");
+        assert_eq!(foreign_root, None, "the foreign root must not even read");
+        let result = identities::create(
+            &mut tx,
+            IdentityId::new(),
+            other,
+            "mallory",
+            None,
+            None,
+            ScopeId::new(),
+        )
+        .await;
+        assert!(
+            matches!(result, Err(Error::Internal { .. })),
+            "cross-tenant identity insert must be rejected by RLS as an \
+             internal defect, got {result:?}"
+        );
+    });
+}
+
+/// The provisioning shape — read subject, create identity, read mappings —
+/// works as `synveda_app` with the right GUC, including the placement-
+/// derived quarantine flag.
+#[test]
+fn same_tenant_identity_lifecycle_works_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tenant = seed_identity(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+
+        let alice = identities::by_subject(&mut *tx, tenant, "alice")
+            .await
+            .expect("read under RLS")
+            .expect("alice is provisioned");
+        assert!(
+            !alice.quarantined,
+            "alice sits under the org, not quarantine"
+        );
+
+        let root = hierarchy::root(&mut *tx, tenant)
+            .await
+            .expect("read root")
+            .expect("root exists");
+        let quarantine = hierarchy::create(
+            &mut tx,
+            ScopeId::new(),
+            tenant,
+            Some(root.id),
+            ScopeKind::Team,
+            identities::QUARANTINE_SLUG,
+            "Quarantine",
+        )
+        .await
+        .expect("create quarantine under RLS");
+        let personal = hierarchy::create(
+            &mut tx,
+            ScopeId::new(),
+            tenant,
+            Some(quarantine.id),
+            ScopeKind::User,
+            "bob",
+            "Bob",
+        )
+        .await
+        .expect("create personal scope under RLS");
+        let bob = identities::create(
+            &mut tx,
+            IdentityId::new(),
+            tenant,
+            "bob",
+            Some("bob@example.test"),
+            Some("Bob"),
+            personal.id,
+        )
+        .await
+        .expect("provision under RLS");
+        assert!(bob.quarantined, "bob's placement derives quarantined=true");
+
+        let mappings = group_mappings::for_groups(
+            &mut *tx,
+            tenant,
+            &["synveda-eng-core".to_owned(), "unmapped".to_owned()],
+        )
+        .await
+        .expect("read mappings under RLS");
+        assert_eq!(mappings.len(), 1);
+        assert!(
+            group_mappings::remove(&mut *tx, tenant, "synveda-eng-core")
+                .await
+                .expect("remove mapping under RLS"),
+            "remove must work in-tenant"
         );
     });
 }

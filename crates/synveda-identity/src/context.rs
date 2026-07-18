@@ -10,14 +10,27 @@ use std::future::Future;
 
 use synveda_types::Tenant;
 
-/// Who this request runs as: the resolved tenant plus the token's subject.
-/// AUTH-2 (JIT provisioning) will widen the subject into a full identity.
+use crate::token::Claims;
+
+/// Who this request runs as: the resolved tenant plus the verified claims.
+/// The full [`Claims`] ride along (not just the subject) so the PDP seam
+/// can tell IdP-backed subjects from out-of-band ones — an IdP subject
+/// with no provisioned identity is quarantined, a dev subject is not
+/// (AUTH-2, ADR-0013 decision 6).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TenantContext {
     /// The resolved, active tenant.
     pub tenant: Tenant,
+    /// The verified token claims (subject, tenant, provisioning).
+    pub claims: Claims,
+}
+
+impl TenantContext {
     /// The verified token's `sub` claim.
-    pub subject: String,
+    #[must_use]
+    pub fn subject(&self) -> &str {
+        &self.claims.subject
+    }
 }
 
 tokio::task_local! {
@@ -45,15 +58,20 @@ mod tests {
     use synveda_types::{TenantId, TenantStatus};
 
     fn context(subject: &str) -> TenantContext {
+        let tenant = Tenant {
+            id: TenantId::new(),
+            slug: "acme".into(),
+            name: "ACME".into(),
+            status: TenantStatus::Active,
+            created_at: "2026-07-18T12:00:00Z".parse().unwrap(),
+        };
         TenantContext {
-            tenant: Tenant {
-                id: TenantId::new(),
-                slug: "acme".into(),
-                name: "ACME".into(),
-                status: TenantStatus::Active,
-                created_at: "2026-07-18T12:00:00Z".parse().unwrap(),
+            claims: Claims {
+                subject: subject.into(),
+                tenant_id: tenant.id,
+                provisioning: None,
             },
-            subject: subject.into(),
+            tenant,
         }
     }
 

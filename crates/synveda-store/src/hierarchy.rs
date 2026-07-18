@@ -245,6 +245,76 @@ pub async fn root(
     row.map(TryInto::try_into).transpose()
 }
 
+/// Fetches a node's direct child by slug — the quarantine-scope lookup
+/// (AUTH-2, ADR-0013 decision 4) and generally cheaper than listing.
+#[tracing::instrument(
+    name = "store.hierarchy.child_by_slug",
+    skip_all,
+    fields(scope.id = %parent_id, scope.slug = slug),
+    err(Display)
+)]
+pub async fn child_by_slug(
+    executor: impl PgExecutor<'_>,
+    parent_id: ScopeId,
+    slug: &str,
+) -> Result<Option<HierarchyNode>> {
+    let row = sqlx::query_as!(
+        NodeRow,
+        r#"
+        select id, tenant_id, parent_id, kind, slug, name, depth, path, created_at
+        from hierarchy_nodes where parent_id = $1 and slug = $2
+        "#,
+        parent_id.as_uuid(),
+        slug,
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}
+
+/// Resolves convention candidates (AUTH-2, ADR-0013 decision 3): the
+/// distinct team-kind nodes whose slug is a candidate's team half and
+/// which have a department-kind ancestor with the paired department half.
+/// `departments` and `teams` are parallel arrays (one candidate per index);
+/// the caller treats "exactly one node" as a mapping and anything else as
+/// unresolved.
+#[tracing::instrument(
+    name = "store.hierarchy.teams_matching",
+    skip_all,
+    fields(tenant.id = %tenant_id),
+    err(Display)
+)]
+pub async fn teams_matching(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    departments: &[String],
+    teams: &[String],
+) -> Result<Vec<HierarchyNode>> {
+    let rows = sqlx::query_as!(
+        NodeRow,
+        r#"
+        select distinct n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name,
+               n.depth, n.path, n.created_at
+        from unnest($2::text[], $3::text[]) as candidate(dept_slug, team_slug)
+        join hierarchy_nodes n
+          on n.tenant_id = $1 and n.kind = 'team' and n.slug = candidate.team_slug
+        join hierarchy_closure c
+          on c.descendant_id = n.id and c.distance > 0
+        join hierarchy_nodes a
+          on a.id = c.ancestor_id
+         and a.kind = 'department' and a.slug = candidate.dept_slug
+        "#,
+        tenant_id.as_uuid(),
+        departments,
+        teams,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// Lists a node's direct children, ordered by slug.
 #[tracing::instrument(name = "store.hierarchy.children", skip_all, fields(scope.id = %id), err(Display))]
 pub async fn children(executor: impl PgExecutor<'_>, id: ScopeId) -> Result<Vec<HierarchyNode>> {

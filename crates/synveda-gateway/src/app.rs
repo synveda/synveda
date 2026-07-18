@@ -135,7 +135,7 @@ struct WhoamiResponse {
 async fn whoami() -> Response {
     match synveda_identity::current_tenant() {
         Some(context) => Json(WhoamiResponse {
-            subject: context.subject,
+            subject: context.claims.subject,
             tenant: context.tenant,
         })
         .into_response(),

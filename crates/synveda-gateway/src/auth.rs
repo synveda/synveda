@@ -10,10 +10,11 @@
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Json, Redirect, Response};
 use serde::{Deserialize, Serialize};
-use synveda_types::{Error, Tenant};
+use synveda_types::{Error, IdentityId, ScopeId, Tenant};
 
 use crate::app::AppState;
 use crate::error::ApiError;
+use crate::provision;
 use crate::tenant;
 
 /// Query parameters for `GET /auth/login`.
@@ -35,15 +36,27 @@ pub struct CallbackParams {
 }
 
 /// The Synveda session (ADR-0010 §1): who the login resolved to, plus the
-/// bearer credential for `/v1`.
+/// bearer credential for `/v1`. Since AUTH-2 it also says where JIT
+/// provisioning placed the subject (ADR-0013 decision 2).
 #[derive(Serialize)]
 struct SessionResponse {
     subject: String,
     tenant: Tenant,
+    identity: IdentitySummary,
     access_token: String,
     token_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     expires_in: Option<u64>,
+}
+
+/// The provisioning result a fresh session reports.
+#[derive(Serialize)]
+struct IdentitySummary {
+    id: IdentityId,
+    scope_id: ScopeId,
+    /// Display-only slug chain of the personal scope (ADR-0011).
+    scope_path: String,
+    quarantined: bool,
 }
 
 /// Starts a login: 302 to the IdP's authorization endpoint.
@@ -92,10 +105,36 @@ pub async fn callback(
         Ok(session) => session,
         Err(error) => return ApiError(error).into_response(),
     };
-    match tenant::active_tenant(&state, &session.claims).await {
-        Ok(context) => Json(SessionResponse {
-            subject: context.subject,
+    let context = match tenant::active_tenant(&state, &session.claims).await {
+        Ok(context) => context,
+        Err(error) => return ApiError(error).into_response(),
+    };
+    // A completed login always carries IdP claims (the ID token was just
+    // verified); JIT provisioning places first-time subjects (AUTH-2,
+    // ADR-0013) and is a read for everyone else.
+    let Some(provisioning) = &session.claims.provisioning else {
+        return ApiError(Error::Internal {
+            message: "login completed without provisioning claims".to_owned(),
+        })
+        .into_response();
+    };
+    match provision::provision(
+        &state,
+        &context.tenant,
+        &session.claims.subject,
+        provisioning,
+    )
+    .await
+    {
+        Ok(provisioned) => Json(SessionResponse {
+            subject: session.claims.subject,
             tenant: context.tenant,
+            identity: IdentitySummary {
+                id: provisioned.identity.id,
+                scope_id: provisioned.identity.scope_id,
+                scope_path: provisioned.scope.path,
+                quarantined: provisioned.identity.quarantined,
+            },
             access_token: session.access_token,
             token_type: session.token_type,
             expires_in: session.expires_in,

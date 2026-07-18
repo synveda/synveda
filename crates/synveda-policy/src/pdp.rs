@@ -21,8 +21,9 @@ use crate::request::{Action, AuthzContext, AuthzDecision, Principal, Resource};
 /// The embedded default pack's name (ADR-0012 decision 3).
 pub const BOOTSTRAP_PACK: &str = "bootstrap";
 
-/// The embedded default pack's version.
-pub const BOOTSTRAP_VERSION: i64 = 1;
+/// The embedded default pack's version. Bumped to 2 by AUTH-2's
+/// quarantine forbid (ADR-0013 decision 5).
+pub const BOOTSTRAP_VERSION: i64 = 2;
 
 const SCHEMA_SRC: &str = include_str!("synveda.cedarschema");
 const BOOTSTRAP_SRC: &str = include_str!("bootstrap.cedar");
@@ -264,10 +265,16 @@ impl Pdp {
         let principal_tenant = self.tenant_uid(principal.tenant_id)?;
         list.push(entity(
             self.principal_uid(principal)?,
-            HashMap::from([(
-                "tenant".to_owned(),
-                RestrictedExpression::new_entity_uid(principal_tenant.clone()),
-            )]),
+            HashMap::from([
+                (
+                    "tenant".to_owned(),
+                    RestrictedExpression::new_entity_uid(principal_tenant.clone()),
+                ),
+                (
+                    "quarantined".to_owned(),
+                    RestrictedExpression::new_bool(principal.quarantined),
+                ),
+            ]),
             HashSet::from([principal_tenant]),
         )?);
 

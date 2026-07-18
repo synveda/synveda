@@ -88,6 +88,7 @@ fn ac_decisions_are_microsecond_level() {
     let principal = Principal {
         tenant_id: tenant,
         subject: "bench".to_owned(),
+        quarantined: false,
     };
     let context = AuthzContext { scopes: &scopes };
 
