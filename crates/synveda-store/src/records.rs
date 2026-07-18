@@ -116,6 +116,15 @@ fn storage_error(err: sqlx::Error) -> Error {
                 message: db.to_string(),
             };
         }
+        // 42501 insufficient_privilege: the RLS backstop (TEN-2, ADR-0009)
+        // rejected a write whose tenant does not match the transaction's
+        // tenant GUC, or the role lacks a grant. Either way an application
+        // defect, never the caller's fault.
+        if db.code().as_deref() == Some("42501") {
+            return Error::Internal {
+                message: format!("row-level security or privilege violation: {db}"),
+            };
+        }
     }
     Error::Storage {
         message: err.to_string(),

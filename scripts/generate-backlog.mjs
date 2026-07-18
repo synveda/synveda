@@ -93,6 +93,7 @@ const DONE = new Map([
   ["FND-5", "done 2026-07-18, AC test: crates/synveda-gateway/tests/observability.rs, demo: demos/fnd-5-observability.sh"],
   ["FND-6", "done 2026-07-18, demo: demos/fnd-6-adrs.sh (adr-0001..0004 in docs/adr/)"],
   ["TEN-1", "done 2026-07-18, AC test: crates/synveda-gateway/tests/tenant_resolution.rs, demo: demos/ten-1-tenant-resolution.sh"],
+  ["TEN-2", "done 2026-07-18, AC test: crates/synveda-store/tests/rls.rs, demo: demos/ten-2-rls.sh"],
 ]);
 
 // Phase-level notes appended after a phase's checklist (kept across
@@ -108,7 +109,13 @@ const PHASE_NOTES = new Map([
     1,
     "_TEN-1 deferral (ADR-0008): tenant-resolution decisions are an audit\n" +
       "emission point; events are wired when AUD-1's hash-chained log lands. Until\n" +
-      "then they are visible in traces and `synveda_tenant_resolutions_total` only._",
+      "then they are visible in traces and `synveda_tenant_resolutions_total` only._\n" +
+      "\n" +
+      "_TEN-2 deferrals (ADR-0009): RLS-backstop trips (SQLSTATE 42501 →\n" +
+      "`Error::Internal`) are an AUD-1 emission point; data-path features must\n" +
+      "reach tenant-scoped tables via `synveda_store::rls::begin_tenant_tx`, and\n" +
+      "deployment profiles (OPS-1/OPS-2) must connect as a non-superuser\n" +
+      "`synveda_app` login — the dev compose superuser bypasses RLS._",
   ],
 ]);
 

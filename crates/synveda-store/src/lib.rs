@@ -6,11 +6,16 @@
 //! current/history table pair. Transaction time is maintained exclusively by
 //! database triggers; valid time is application data. See
 //! `migrations/0001_bitemporal_records.sql` and the [`records`] module.
+//!
+//! Tenant isolation backstop (TEN-2, ADR-0009): tenant-scoped tables carry
+//! forced RLS policies keyed to a transaction-local GUC. Reach them through
+//! [`rls::begin_tenant_tx`]; see `migrations/0003_tenant_rls.sql`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod records;
+pub mod rls;
 pub mod tenants;
 
 use sqlx::migrate::Migrator;
