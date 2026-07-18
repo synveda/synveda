@@ -47,6 +47,8 @@ fn state(url: &str) -> AppState {
             .connect_lazy(url)
             .expect("parse database url"),
         metrics: metrics_handle(),
+        // These tests exercise the ops plane only; fail-closed default.
+        verifier: std::sync::Arc::new(synveda_identity::DisabledVerifier),
     }
 }
 

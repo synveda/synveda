@@ -1,11 +1,16 @@
-//! Gateway entry point. Configuration is environment-only in Phase 0:
+//! Gateway entry point. Configuration is environment-only for now:
 //! `DATABASE_URL` (required), `SYNVEDA_LISTEN_ADDR` (default `127.0.0.1:8120`),
-//! and the standard `OTEL_*` variables for the OTLP exporter (default
-//! endpoint `http://localhost:4317` — Jaeger in the dev compose).
+//! `SYNVEDA_DEV_JWT_SECRET` (the pre-AUTH-1 dev token secret, ADR-0008 —
+//! unset means every `/v1` request is rejected), and the standard `OTEL_*`
+//! variables for the OTLP exporter (default endpoint
+//! `http://localhost:4317` — Jaeger in the dev compose).
+
+use std::sync::Arc;
 
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{self, AppState};
 use synveda_gateway::telemetry;
+use synveda_identity::{DisabledVerifier, Hs256Verifier, TokenVerifier};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -20,13 +25,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_connections(8)
         .connect_lazy(&database_url)?;
 
+    // Fail closed (ADR-0008): without a secret the /v1 plane rejects
+    // everything rather than admitting anything. AUTH-1 replaces this with
+    // OIDC/JWKS verification behind the same trait.
+    let verifier: Arc<dyn TokenVerifier> = match std::env::var("SYNVEDA_DEV_JWT_SECRET") {
+        Ok(secret) if !secret.is_empty() => Arc::new(Hs256Verifier::new(secret.as_bytes())),
+        _ => {
+            tracing::warn!(
+                "SYNVEDA_DEV_JWT_SECRET is not set; every /v1 request will be rejected 401"
+            );
+            Arc::new(DisabledVerifier)
+        }
+    };
+
     let addr = std::env::var("SYNVEDA_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8120".to_owned());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(%addr, "synveda-gateway listening");
 
-    axum::serve(listener, app::router(AppState { pool, metrics }))
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app::router(AppState {
+            pool,
+            metrics,
+            verifier,
+        }),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     // Flush batched spans before exit; a killed process loses the tail.
     telemetry.shutdown();

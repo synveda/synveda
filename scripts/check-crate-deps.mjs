@@ -26,9 +26,10 @@ const ALLOWED = {
   "synveda-retrieval": ["synveda-types", ...MIDDLE],
   "synveda-ingest": ["synveda-types", ...MIDDLE],
   "synveda-gateway": ["synveda-types", ...MIDDLE, "synveda-retrieval", "synveda-ingest"],
-  // The CLI is a client of the gateway API; expanding this set is a deliberate,
-  // reviewed decision.
-  "synveda-cli": ["synveda-types"],
+  // The CLI is a client of the gateway API, plus direct store/identity access
+  // for the dev-bootstrap commands (db migrate, tenant create, token issue)
+  // that exist precisely when no usable gateway does. Reviewed in ADR-0008.
+  "synveda-cli": ["synveda-types", "synveda-store", "synveda-identity"],
 };
 
 const metadata = JSON.parse(

@@ -19,6 +19,11 @@ pub const TOKENS_PER_INJECT: &str = "synveda_tokens_per_inject";
 /// Requests served, labelled by method/route/status.
 pub const HTTP_REQUESTS_TOTAL: &str = "synveda_http_requests_total";
 
+/// Tenant resolutions, labelled by outcome: `resolved`, `rejected`
+/// (unauthenticated — the uniform 401), or `error` (storage/internal
+/// failure). TEN-1; an AUD-1 emission point once the audit log lands.
+pub const TENANT_RESOLUTIONS_TOTAL: &str = "synveda_tenant_resolutions_total";
+
 /// Request latency in seconds, labelled by method/route/status.
 pub const HTTP_REQUEST_DURATION_SECONDS: &str = "synveda_http_request_duration_seconds";
 
@@ -97,6 +102,10 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Tokens included in each composed inject context block"
     );
     metrics::describe_counter!(HTTP_REQUESTS_TOTAL, "HTTP requests served by the gateway");
+    metrics::describe_counter!(
+        TENANT_RESOLUTIONS_TOTAL,
+        "Tenant resolutions by outcome (resolved/rejected/error)"
+    );
     metrics::describe_histogram!(
         HTTP_REQUEST_DURATION_SECONDS,
         metrics::Unit::Seconds,

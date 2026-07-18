@@ -89,6 +89,27 @@ const DONE = new Map([
   ["FND-1", "done 2026-07-16, demo: demos/fnd-1-scaffold.sh"],
   ["FND-2", "done 2026-07-17, demo: demos/fnd-2-dev-env.sh"],
   ["FND-3", "done 2026-07-18, AC test: crates/synveda-types/tests/serde_roundtrip.rs"],
+  ["FND-4", "done 2026-07-18, AC test: crates/synveda-store/tests/bitemporal.rs, demo: demos/fnd-4-bitemporal.sh"],
+  ["FND-5", "done 2026-07-18, AC test: crates/synveda-gateway/tests/observability.rs, demo: demos/fnd-5-observability.sh"],
+  ["FND-6", "done 2026-07-18, demo: demos/fnd-6-adrs.sh (adr-0001..0004 in docs/adr/)"],
+  ["TEN-1", "done 2026-07-18, AC test: crates/synveda-gateway/tests/tenant_resolution.rs, demo: demos/ten-1-tenant-resolution.sh"],
+]);
+
+// Phase-level notes appended after a phase's checklist (kept across
+// regenerations, like DONE).
+const PHASE_NOTES = new Map([
+  [
+    0,
+    "_Phase 0 complete: exit gate `make dev-up && make smoke` passed 2026-07-18\n" +
+      "(all services healthy incl. AGE/PGMQ/pgvector, Rauthy, Temporal, TEI BGE-M3,\n" +
+      "Jaeger). Phase 1 may start._",
+  ],
+  [
+    1,
+    "_TEN-1 deferral (ADR-0008): tenant-resolution decisions are an audit\n" +
+      "emission point; events are wired when AUD-1's hash-chained log lands. Until\n" +
+      "then they are visible in traces and `synveda_tenant_resolutions_total` only._",
+  ],
 ]);
 
 // ── Parse Part B ─────────────────────────────────────────────────────────────
@@ -233,6 +254,8 @@ for (const p of PHASES) {
     );
   }
   status.push("");
+  const note = PHASE_NOTES.get(p.n);
+  if (note) status.push(note, "");
 }
 if (unscheduled.length) {
   status.push("## Unscheduled — not listed in the Sequencing section", "");

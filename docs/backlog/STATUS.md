@@ -24,7 +24,7 @@ Jaeger). Phase 1 may start._
 
 _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes and receives governed memory, fully audited._
 
-- [ ] [TEN-1: Tenant model & resolution](TEN-1.md)
+- [x] [TEN-1: Tenant model & resolution](TEN-1.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/tenant_resolution.rs, demo: demos/ten-1-tenant-resolution.sh
 - [ ] [TEN-2: Postgres row-level security as backstop](TEN-2.md)
 - [ ] [AUTH-1: OIDC login (code+PKCE)](AUTH-1.md)
 - [ ] [AUTH-2: JIT user provisioning from claims](AUTH-2.md)
@@ -45,6 +45,10 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [ ] [AUD-1: Hash-chained audit log](AUD-1.md)
 - [ ] [ADPT-1: Claude Code adapter](ADPT-1.md)
 - [ ] [EVAL-1: Eval harness skeleton](EVAL-1.md)
+
+_TEN-1 deferral (ADR-0008): tenant-resolution decisions are an audit
+emission point; events are wired when AUD-1's hash-chained log lands. Until
+then they are visible in traces and `synveda_tenant_resolutions_total` only._
 
 ## Phase 2 — Governance (wk 6–10)
 

@@ -11,4 +11,14 @@ name = "synveda"
 path = "src/main.rs"
 
 [dependencies]
+# Store + identity for the dev-bootstrap commands only (db migrate, tenant
+# create, token issue — ADR-0008); everything a running gateway can serve
+# goes through its API instead.
+synveda-identity = { workspace = true }
+synveda-store = { workspace = true }
 synveda-types = { workspace = true }
+
+clap = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }

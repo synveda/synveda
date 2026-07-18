@@ -23,7 +23,13 @@ synveda-ingest = { path = "crates/synveda-ingest" }
 
 # External dependencies (MIT/Apache-2.0 only in the core path — deny.toml enforces).
 axum = "0.8"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+# HS256 verification for the pre-AUTH-1 dev token mode (ADR-0008); RustCrypto
+# primitives, constant-time verify. AUTH-1 adds the real OIDC/JWKS verifier.
+hmac = "0.12"
+sha2 = "0.10"
 # The `metrics` facade is the only metrics dependency below the gateway; the
 # Prometheus recorder is installed by the gateway alone (ADR-0007).
 metrics = "0.24"

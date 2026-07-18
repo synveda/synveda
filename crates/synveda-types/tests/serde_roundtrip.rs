@@ -6,7 +6,8 @@ use std::str::FromStr;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use synveda_types::{
-    Error, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, Sensitivity, TenantId,
+    Error, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, Sensitivity, Tenant, TenantId,
+    TenantStatus,
 };
 
 fn json_roundtrip<T>(value: &T) -> T
@@ -132,6 +133,36 @@ fn record_kind_and_class_reject_unknown_values() {
     assert!(RecordKind::from_str("Pinned").is_err(), "lowercase only");
     assert!(serde_json::from_str::<RecordClass>("\"note\"").is_err());
     assert!(RecordClass::from_str("Fact").is_err(), "lowercase only");
+}
+
+// ── Tenant ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn tenant_status_roundtrips_and_matches_as_str() {
+    for status in [TenantStatus::Active, TenantStatus::Suspended] {
+        json_roundtrip(&status);
+        let json = serde_json::to_string(&status).expect("serialize");
+        assert_eq!(json, format!("\"{}\"", status.as_str()));
+        assert_eq!(TenantStatus::from_str(status.as_str()).unwrap(), status);
+        assert_eq!(status.to_string(), status.as_str());
+    }
+}
+
+#[test]
+fn tenant_status_rejects_unknown_values() {
+    assert!(serde_json::from_str::<TenantStatus>("\"deleted\"").is_err());
+    assert!(TenantStatus::from_str("Active").is_err(), "lowercase only");
+}
+
+#[test]
+fn tenant_roundtrips() {
+    json_roundtrip(&Tenant {
+        id: TenantId::new(),
+        slug: "acme-bank".into(),
+        name: "ACME Bank".into(),
+        status: TenantStatus::Active,
+        created_at: "2026-07-18T12:00:00Z".parse().expect("timestamp"),
+    });
 }
 
 // ── Error taxonomy ───────────────────────────────────────────────────────────

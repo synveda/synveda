@@ -11,6 +11,7 @@
 #![warn(missing_docs)]
 
 pub mod records;
+pub mod tenants;
 
 use sqlx::migrate::Migrator;
 use sqlx::{PgExecutor, PgPool};
