@@ -12,8 +12,8 @@
 
 pub mod records;
 
-use sqlx::PgPool;
 use sqlx::migrate::Migrator;
+use sqlx::{PgExecutor, PgPool};
 use synveda_types::{Error, Result};
 
 /// The workspace's sqlx migrations, embedded at compile time from
@@ -22,8 +22,22 @@ pub static MIGRATOR: Migrator = sqlx::migrate!();
 
 /// Applies all pending migrations. Idempotent; safe to run concurrently
 /// (sqlx serialises runners with an advisory lock).
+#[tracing::instrument(name = "store.migrate", skip_all, err(Display))]
 pub async fn migrate(pool: &PgPool) -> Result<()> {
     MIGRATOR.run(pool).await.map_err(|err| Error::Storage {
         message: format!("migration failed: {err}"),
     })
+}
+
+/// Round-trips the database connection (`SELECT 1`). The store leg of the
+/// readiness path (FND-5, ADR-0007); reads no application data.
+#[tracing::instrument(name = "store.ping", skip_all, err(Display))]
+pub async fn ping(executor: impl PgExecutor<'_>) -> Result<()> {
+    sqlx::query_scalar!("select 1")
+        .fetch_one(executor)
+        .await
+        .map(|_| ())
+        .map_err(|err| Error::Storage {
+            message: err.to_string(),
+        })
 }

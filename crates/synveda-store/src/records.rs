@@ -124,6 +124,7 @@ fn storage_error(err: sqlx::Error) -> Error {
 
 /// Inserts a new record. Fails with [`Error::Conflict`] if `id` already has a
 /// current version.
+#[tracing::instrument(name = "store.records.insert", skip_all, fields(record.id = %id), err(Display))]
 pub async fn insert(
     executor: impl PgExecutor<'_>,
     id: RecordId,
@@ -160,6 +161,7 @@ pub async fn insert(
 
 /// Replaces the current version of `id` with `state`, archiving the previous
 /// version. Returns `None` if the record has no current version.
+#[tracing::instrument(name = "store.records.update", skip_all, fields(record.id = %id), err(Display))]
 pub async fn update(
     executor: impl PgExecutor<'_>,
     id: RecordId,
@@ -195,6 +197,7 @@ pub async fn update(
 /// Temporally deletes `id`: the current version is archived and the record
 /// ceases to exist going forward, while its history stays queryable via
 /// [`as_of`]. Returns `false` if there was no current version.
+#[tracing::instrument(name = "store.records.delete", skip_all, fields(record.id = %id), err(Display))]
 pub async fn delete(executor: impl PgExecutor<'_>, id: RecordId) -> Result<bool> {
     let result = sqlx::query!("delete from records where id = $1", id.as_uuid())
         .execute(executor)
@@ -204,6 +207,7 @@ pub async fn delete(executor: impl PgExecutor<'_>, id: RecordId) -> Result<bool>
 }
 
 /// Returns the current version of `id`, if any.
+#[tracing::instrument(name = "store.records.current", skip_all, fields(record.id = %id), err(Display))]
 pub async fn current(executor: impl PgExecutor<'_>, id: RecordId) -> Result<Option<RecordVersion>> {
     let row = sqlx::query_as!(
         RecordRow,
@@ -226,6 +230,12 @@ pub async fn current(executor: impl PgExecutor<'_>, id: RecordId) -> Result<Opti
 /// not exist (or was temporally deleted) at that instant. Transaction periods
 /// are half-open `[tx_from, tx_to)`, so a version is visible from the exact
 /// instant it was written.
+#[tracing::instrument(
+    name = "store.records.as_of",
+    skip_all,
+    fields(record.id = %id, tx_at = %tx_at),
+    err(Display)
+)]
 pub async fn as_of(
     executor: impl PgExecutor<'_>,
     id: RecordId,
@@ -254,6 +264,12 @@ pub async fn as_of(
 /// Bitemporal as-of: the version of `id` known at `tx_at`, but only if that
 /// version's valid-time window covers `valid_at` — "as known at T, did the
 /// fact hold at V". Valid periods are half-open `[valid_from, valid_to)`.
+#[tracing::instrument(
+    name = "store.records.as_of_bitemporal",
+    skip_all,
+    fields(record.id = %id, tx_at = %tx_at, valid_at = %valid_at),
+    err(Display)
+)]
 pub async fn as_of_bitemporal(
     executor: impl PgExecutor<'_>,
     id: RecordId,
@@ -283,6 +299,7 @@ pub async fn as_of_bitemporal(
 }
 
 /// Every version of `id` the database has ever known, oldest first.
+#[tracing::instrument(name = "store.records.versions", skip_all, fields(record.id = %id), err(Display))]
 pub async fn versions(executor: impl PgExecutor<'_>, id: RecordId) -> Result<Vec<RecordVersion>> {
     let rows = sqlx::query_as!(
         RecordRow,

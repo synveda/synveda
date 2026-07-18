@@ -7,4 +7,23 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+synveda-retrieval = { workspace = true }
+synveda-store = { workspace = true }
 synveda-types = { workspace = true }
+
+axum = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal", "net", "sync"] }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+http-body-util = { workspace = true }
+tower = { workspace = true }
