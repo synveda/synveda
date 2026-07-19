@@ -15,9 +15,9 @@ use std::time::Duration;
 use sqlx::PgPool;
 use sqlx::postgres::PgConnection;
 use synveda_identity::Claims;
-use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
+use synveda_policy::{Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource};
 use synveda_store::{identities, policy_assignments, policy_packs, rls, role_bindings, tenants};
-use synveda_types::{Error, HierarchyNode, IdentityKind, Result, RoleBinding, TenantId};
+use synveda_types::{Error, HierarchyNode, IdentityKind, Result, Role, RoleBinding, TenantId};
 
 use crate::app::AppState;
 use crate::telemetry::{POLICY_PACK_RELOADS_TOTAL, SERVICE_TOKEN_REJECTIONS_TOTAL};
@@ -157,31 +157,80 @@ pub(crate) async fn gather(
     })
 }
 
+/// An allowed decision plus what the audit event embeds: the verdict
+/// context and the distinct role names the PDP weighed (AUD-1, ADR-0019
+/// decision 4).
+pub(crate) struct Authorized {
+    /// The PDP's verdict context (pack@version, determining policies).
+    pub(crate) decision: AuthzDecision,
+    /// Distinct role names from the bindings relevant to this decision
+    /// (the resource's chain plus tenant-wide — ADR-0015 decision 3).
+    pub(crate) roles: Vec<String>,
+}
+
 /// Authorizes `action` on `resource` for the request's ambient principal,
 /// under the resource's effective pack. Runs after the uniform-404
 /// ownership check, so cross-tenant probes never see a policy denial
-/// oracle (ADR-0012 decision 7).
+/// oracle (ADR-0012 decision 7). Returns the decision for the caller's
+/// audit event; denials surface as [`Error::PolicyDenied`] and chain at
+/// the `respond` seam (ADR-0019 decision 5).
 pub(crate) async fn require(
     state: &AppState,
     conn: &mut PgConnection,
     action: Action,
     resource: Resource,
     anchor: Option<&HierarchyNode>,
-) -> Result<()> {
+) -> Result<Authorized> {
     let input = gather(state, conn, anchor).await?;
-    state
+    decide(state, &input, action, resource, None)
+}
+
+/// The one decision seam over a gathered [`DecisionInput`]: evaluates,
+/// collapses a deny into the taxonomy, and keeps the allow's context for
+/// the caller's audit event. `grant` is the role being granted or revoked
+/// for [`Action::RoleAssign`] (ADR-0015 decision 5).
+pub(crate) fn decide(
+    state: &AppState,
+    input: &DecisionInput,
+    action: Action,
+    resource: Resource,
+    grant: Option<Role>,
+) -> Result<Authorized> {
+    let mut context = input.context();
+    context.grant = grant;
+    let decision = state
         .pdp
-        .require(&input.principal, action, resource, &input.context())
+        .authorize(&input.principal, action, resource, &context)?;
+    decision.clone().require(action, resource)?;
+    let mut roles: Vec<String> = input
+        .role_bindings
+        .iter()
+        .map(|binding| binding.role.as_str().to_owned())
+        .collect();
+    roles.sort_unstable();
+    roles.dedup();
+    Ok(Authorized { decision, roles })
+}
+
+/// The one message shape a service-token seam rejection carries;
+/// [`is_service_token_rejection`] is its one interpreter, so the audit
+/// seam never parses ad-hoc strings (same doctrine as the store's
+/// backstop marker).
+const SERVICE_TOKEN_REJECTION_PREFIX: &str = "service tokens must carry iat and live at most";
+
+/// Whether `error` is a service-token seam rejection — the audit seam
+/// (`auth.token.rejected`, ADR-0019 decision 5) classifies with this.
+pub(crate) fn is_service_token_rejection(error: &Error) -> bool {
+    matches!(error, Error::Unauthenticated { message }
+        if message.starts_with(SERVICE_TOKEN_REJECTION_PREFIX))
 }
 
 /// The service-token lifetime cap (AUTH-3, ADR-0018 decision 5): a
 /// service identity's token must carry a known lifetime (`exp − iat`)
 /// within the configured maximum. Fail closed — an unknown lifetime (no
-/// `iat`) is refused like an excessive one, as the uniform 401.
-///
-/// AUD-1 wiring point: rejections here are audit emission points; until
-/// the hash-chained log lands they are visible in traces and
-/// `synveda_service_token_rejections_total`.
+/// `iat`) is refused like an excessive one, as the uniform 401. The
+/// rejection chains as `auth.token.rejected` at the `respond` seam
+/// (AUD-1, ADR-0019 decision 5 — the transaction here rolls back).
 fn enforce_service_token_lifetime(claims: &Claims, max: Duration) -> Result<()> {
     let reason = match claims.lifetime {
         Some(lifetime) if lifetime <= max => return Ok(()),
@@ -196,10 +245,7 @@ fn enforce_service_token_lifetime(claims: &Claims, max: Duration) -> Result<()> 
         "service token refused: {reason}"
     );
     Err(Error::Unauthenticated {
-        message: format!(
-            "service tokens must carry iat and live at most {} seconds",
-            max.as_secs()
-        ),
+        message: format!("{SERVICE_TOKEN_REJECTION_PREFIX} {} seconds", max.as_secs()),
     })
 }
 

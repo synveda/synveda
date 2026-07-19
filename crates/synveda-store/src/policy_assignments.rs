@@ -34,9 +34,7 @@ fn storage_error(err: sqlx::Error) -> Error {
         }
         // 42501 insufficient_privilege: the RLS backstop (ADR-0009).
         if db.code().as_deref() == Some("42501") {
-            return Error::Internal {
-                message: format!("row-level security or privilege violation: {db}"),
-            };
+            return crate::rls::backstop_error(db);
         }
     }
     Error::Storage {

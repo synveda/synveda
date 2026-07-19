@@ -12,6 +12,30 @@
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_types::{Error, Result, TenantId};
 
+/// The stable prefix every module's `storage_error` mapper puts on a
+/// backstop trip (SQLSTATE 42501). The taxonomy stays coarse (FND-3:
+/// detail in messages, not variants); [`is_backstop_trip`] is the one
+/// interpreter of this marker.
+const BACKSTOP_PREFIX: &str = "row-level security or privilege violation";
+
+/// The taxonomy rendering of a backstop trip: always [`Error::Internal`] —
+/// the app-level tenant scoping failed, which is our bug, never the
+/// caller's. Every store module's 42501 arm builds its error here so the
+/// marker prefix stays in one place.
+pub fn backstop_error(detail: impl std::fmt::Display) -> Error {
+    Error::Internal {
+        message: format!("{BACKSTOP_PREFIX}: {detail}"),
+    }
+}
+
+/// Whether `error` is an RLS-backstop trip — the gateway's audit seam
+/// (`store.rls.denied`, AUD-1/ADR-0019 decision 5) classifies with this
+/// instead of parsing messages itself.
+#[must_use]
+pub fn is_backstop_trip(error: &Error) -> bool {
+    matches!(error, Error::Internal { message } if message.starts_with(BACKSTOP_PREFIX))
+}
+
 /// Begins a transaction scoped to `tenant_id` for RLS purposes.
 ///
 /// The GUC is transaction-local (`set_config(..., is_local := true)`): it

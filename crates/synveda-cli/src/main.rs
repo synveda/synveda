@@ -11,7 +11,9 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
+use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::{Hs256Verifier, personal_slug};
 use synveda_types::{IdentityId, IdentityKind, Role, ScopeId, ScopeKind, TenantId, TenantStatus};
 
@@ -50,6 +52,31 @@ enum Command {
     /// the OAuth2 client there, then bind its subject to an anchor here.
     #[command(subcommand)]
     Service(ServiceCommand),
+    /// The hash-chained audit log (AUD-1, ADR-0019): verify a tenant's
+    /// chain or tail its recent events. Read-only; the operator's and
+    /// auditor's chain check ahead of AUD-2's query surface.
+    #[command(subcommand)]
+    Audit(AuditCommand),
+}
+
+#[derive(Subcommand)]
+enum AuditCommand {
+    /// Walk the tenant's whole chain, recomputing every hash, and report
+    /// the first divergence. Exits non-zero on a broken chain.
+    Verify {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+    },
+    /// Print the tenant's most recent events, newest first, as JSON.
+    Tail {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+        /// How many events.
+        #[arg(long, default_value_t = 20)]
+        limit: i64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -234,10 +261,22 @@ async fn run(cli: Cli) -> Result<(), String> {
                 TenantStatus::Active
             };
             let pool = connect().await?;
-            let tenant =
-                synveda_store::tenants::create(&pool, TenantId::new(), &slug, &name, status)
-                    .await
-                    .map_err(|err| err.to_string())?;
+            let tenant_id = TenantId::new();
+            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant_id)
+                .await
+                .map_err(|err| err.to_string())?;
+            let tenant = synveda_store::tenants::create(&mut *tx, tenant_id, &slug, &name, status)
+                .await
+                .map_err(|err| err.to_string())?;
+            record_break_glass(
+                &mut tx,
+                tenant_id,
+                AuditAction::TenantCreated,
+                format!("tenant {tenant_id}"),
+                json!({"slug": tenant.slug, "name": tenant.name, "status": tenant.status}),
+            )
+            .await?;
+            tx.commit().await.map_err(|err| err.to_string())?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&tenant).map_err(|err| err.to_string())?
@@ -259,6 +298,14 @@ async fn run(cli: Cli) -> Result<(), String> {
             let pack = synveda_store::policy_packs::apply(&mut *tx, tenant, &name, &source)
                 .await
                 .map_err(|err| err.to_string())?;
+            record_break_glass(
+                &mut tx,
+                tenant,
+                AuditAction::PolicyPackApplied,
+                format!("tenant {tenant}"),
+                json!({"pack": pack.name, "version": pack.version}),
+            )
+            .await?;
             tx.commit().await.map_err(|err| err.to_string())?;
             println!(
                 "{}",
@@ -279,6 +326,16 @@ async fn run(cli: Cli) -> Result<(), String> {
             let removed = synveda_store::policy_packs::clear(&mut tx, tenant, &name)
                 .await
                 .map_err(|err| err.to_string())?;
+            if removed {
+                record_break_glass(
+                    &mut tx,
+                    tenant,
+                    AuditAction::PolicyPackCleared,
+                    format!("tenant {tenant}"),
+                    json!({"pack": name}),
+                )
+                .await?;
+            }
             tx.commit().await.map_err(|err| err.to_string())?;
             eprintln!(
                 "{}",
@@ -304,6 +361,14 @@ async fn run(cli: Cli) -> Result<(), String> {
                 synveda_store::role_bindings::bind(&mut *tx, tenant, &subject, scope, role)
                     .await
                     .map_err(|err| err.to_string())?;
+            record_break_glass(
+                &mut tx,
+                tenant,
+                AuditAction::RoleBound,
+                scope.map_or_else(|| format!("tenant {tenant}"), |id| format!("scope {id}")),
+                json!({"binding": {"subject": subject, "role": role, "scope_id": scope}}),
+            )
+            .await?;
             tx.commit().await.map_err(|err| err.to_string())?;
             println!(
                 "{}",
@@ -325,6 +390,16 @@ async fn run(cli: Cli) -> Result<(), String> {
                 synveda_store::role_bindings::unbind(&mut *tx, tenant, &subject, scope, role)
                     .await
                     .map_err(|err| err.to_string())?;
+            if removed {
+                record_break_glass(
+                    &mut tx,
+                    tenant,
+                    AuditAction::RoleUnbound,
+                    scope.map_or_else(|| format!("tenant {tenant}"), |id| format!("scope {id}")),
+                    json!({"binding": {"subject": subject, "role": role, "scope_id": scope}}),
+                )
+                .await?;
+            }
             tx.commit().await.map_err(|err| err.to_string())?;
             eprintln!(
                 "{}",
@@ -395,6 +470,18 @@ async fn run(cli: Cli) -> Result<(), String> {
             )
             .await
             .map_err(|err| err.to_string())?;
+            record_break_glass(
+                &mut tx,
+                tenant,
+                AuditAction::ServiceIdentityRegistered,
+                format!("scope {}", anchor.id),
+                json!({
+                    "identity": {"id": identity.id, "subject": identity.subject},
+                    "leaf_scope_id": leaf.id,
+                    "anchor": {"slug": anchor.slug, "path": anchor.path},
+                }),
+            )
+            .await?;
             tx.commit().await.map_err(|err| err.to_string())?;
             eprintln!(
                 "note: a running gateway caches hierarchy out-of-process; restart it or use the API path"
@@ -415,6 +502,12 @@ async fn run(cli: Cli) -> Result<(), String> {
                 .map_err(|err| err.to_string())?
                 .filter(|identity| identity.kind == IdentityKind::Service)
                 .ok_or_else(|| format!("no service identity {id} in tenant {tenant}"))?;
+            // The anchor (the leaf's parent) names the event's resource,
+            // read before the leaf goes.
+            let anchor_id = synveda_store::hierarchy::node(&mut *tx, identity.scope_id)
+                .await
+                .map_err(|err| err.to_string())?
+                .and_then(|leaf| leaf.parent_id);
             // Row first (its FK pins the leaf), then the leaf.
             synveda_store::identities::delete_service(&mut *tx, tenant, id)
                 .await
@@ -422,6 +515,14 @@ async fn run(cli: Cli) -> Result<(), String> {
             synveda_store::hierarchy::delete(&mut tx, identity.scope_id)
                 .await
                 .map_err(|err| err.to_string())?;
+            record_break_glass(
+                &mut tx,
+                tenant,
+                AuditAction::ServiceIdentityRevoked,
+                anchor_id.map_or_else(|| format!("tenant {tenant}"), |id| format!("scope {id}")),
+                json!({"identity": {"id": identity.id, "subject": identity.subject}}),
+            )
+            .await?;
             tx.commit().await.map_err(|err| err.to_string())?;
             eprintln!("service identity revoked; its tokens are quarantined from the next request");
             Ok(())
@@ -438,6 +539,48 @@ async fn run(cli: Cli) -> Result<(), String> {
                 "{}",
                 serde_json::to_string_pretty(&identities).map_err(|err| err.to_string())?
             );
+            Ok(())
+        }
+        Command::Audit(AuditCommand::Verify { tenant }) => {
+            let pool = connect().await?;
+            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            let verification = synveda_audit::verify(&mut tx, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            println!("{verification}");
+            match verification {
+                synveda_audit::ChainVerification::Valid { .. } => Ok(()),
+                synveda_audit::ChainVerification::Broken { .. } => {
+                    Err("audit chain verification failed".to_owned())
+                }
+            }
+        }
+        Command::Audit(AuditCommand::Tail { tenant, limit }) => {
+            let pool = connect().await?;
+            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            let events = synveda_audit::tail(&mut tx, tenant, limit)
+                .await
+                .map_err(|err| err.to_string())?;
+            for event in events {
+                println!(
+                    "{}",
+                    json!({
+                        "seq": event.seq,
+                        "occurred_at": event.occurred_at,
+                        "actor": {"kind": event.actor_kind, "subject": event.actor_subject},
+                        "action": event.action,
+                        "resource": event.resource,
+                        "outcome": event.outcome,
+                        "payload": event.payload,
+                        "trace_id": event.trace_id,
+                        "hash": event.hash_hex(),
+                    })
+                );
+            }
             Ok(())
         }
         Command::Token(TokenCommand::Issue {
@@ -458,6 +601,44 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// The break-glass actor: whoever holds the database credentials, named
+/// as well as the OS names them — honest about attribution being weaker
+/// than the IdP-authenticated plane (AUD-1, ADR-0019 decision 7).
+fn break_glass() -> Actor {
+    let user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "unknown".to_owned());
+    Actor::break_glass(user)
+}
+
+/// Chains a break-glass event in the same transaction as the mutation it
+/// records: the CLI audits itself like the gateway does (ADR-0019
+/// decision 7) — a failed append fails the command.
+async fn record_break_glass(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    action: AuditAction,
+    resource: String,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    synveda_audit::append(
+        tx,
+        tenant,
+        &AuditEvent {
+            occurred_at: chrono::Utc::now(),
+            actor: break_glass(),
+            action,
+            resource,
+            outcome: Outcome::Success,
+            payload,
+            trace_id: None,
+        },
+    )
+    .await
+    .map(|_| ())
+    .map_err(|err| err.to_string())
 }
 
 async fn connect() -> Result<sqlx::PgPool, String> {

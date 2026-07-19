@@ -3,18 +3,24 @@
 //! audit). Every `/v1` route runs behind it: a request either acquires an
 //! ambient [`TenantContext`] or is rejected with a uniform 401.
 //!
-//! AUD-1 wiring point: resolution decisions (allow and reject) become audit
-//! events when the hash-chained log lands; until then they are visible in
-//! traces and the `synveda_tenant_resolutions_total` counter only.
+//! Audited since AUD-1 (ADR-0019 decision 6): a verified token naming a
+//! tenant that refuses resolution (suspended) chains
+//! `tenant.resolution.denied` on that tenant's log. Successful resolutions
+//! are not events — every subsequent chained event proves resolution — and
+//! unauthenticated failures carry no verified subject and no resolvable
+//! tenant, so they stay in traces and the counter.
 
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use serde_json::json;
+use synveda_audit::{Actor, AuditAction, Outcome};
 use synveda_identity::{Claims, TenantContext, with_tenant};
 use synveda_types::{Error, Result, TenantStatus};
 
 use crate::app::AppState;
+use crate::audit;
 use crate::error::ApiError;
 use crate::telemetry::TENANT_RESOLUTIONS_TOTAL;
 
@@ -63,12 +69,30 @@ async fn resolve(state: &AppState, headers: &HeaderMap) -> Result<TenantContext>
 /// and the login callback (AUTH-1): TEN-1's uniform-401 doctrine applies to
 /// both entry points identically.
 pub(crate) async fn active_tenant(state: &AppState, claims: &Claims) -> Result<TenantContext> {
-    let tenant = synveda_store::tenants::by_id(&state.pool, claims.tenant_id)
-        .await?
-        .filter(|tenant| tenant.status == TenantStatus::Active)
-        .ok_or_else(|| Error::Unauthenticated {
-            message: "token does not resolve to an active tenant".to_owned(),
-        })?;
+    let unresolved = || Error::Unauthenticated {
+        message: "token does not resolve to an active tenant".to_owned(),
+    };
+    let Some(tenant) = synveda_store::tenants::by_id(&state.pool, claims.tenant_id).await? else {
+        // Unknown tenant: nothing attributable, no chain to write to
+        // (ADR-0019 decision 6). The uniform 401 stays uniform.
+        return Err(unresolved());
+    };
+    if tenant.status != TenantStatus::Active {
+        // A verified subject named a real but suspended tenant — that
+        // tenant's auditors get the attempt on their chain. Best-effort:
+        // the uniform 401 is returned either way.
+        audit::record_detached(
+            state,
+            tenant.id,
+            Actor::subject(claims.subject.clone()),
+            AuditAction::TenantResolutionDenied,
+            format!("tenant {}", tenant.id),
+            Outcome::Deny,
+            json!({"status": tenant.status}),
+        )
+        .await;
+        return Err(unresolved());
+    }
     Ok(TenantContext {
         tenant,
         claims: claims.clone(),

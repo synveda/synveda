@@ -81,9 +81,7 @@ fn storage_error(err: sqlx::Error) -> Error {
         // rejected a write for a tenant other than the transaction's GUC.
         // An application defect, never the caller's fault.
         if db.code().as_deref() == Some("42501") {
-            return Error::Internal {
-                message: format!("row-level security or privilege violation: {db}"),
-            };
+            return crate::rls::backstop_error(db);
         }
     }
     Error::Storage {

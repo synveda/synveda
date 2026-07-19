@@ -31,11 +31,14 @@ const ALLOWED = {
   // that exist precisely when no usable gateway does. Reviewed in ADR-0008.
   // Policy added with AUTHZ-1 (ADR-0012): `synveda policy apply` compile-checks
   // a pack against the same schema the gateway's reloader enforces.
+  // Audit added with AUD-1 (ADR-0019): the break-glass audits itself, and
+  // `synveda audit verify` is the operator's chain check.
   "synveda-cli": [
     "synveda-types",
     "synveda-store",
     "synveda-identity",
     "synveda-policy",
+    "synveda-audit",
   ],
 };
 

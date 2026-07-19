@@ -35,7 +35,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [HIER-2: Scope chain resolver](HIER-2.md) — done 2026-07-19, AC tests: crates/synveda-store/tests/scope_chain.rs (invalidation serves the fresh chain after a move; warm resolve median 800ns, p99 ≤1.5µs over 10k samples — 300× under the 0.5ms bound), crates/synveda-gateway/tests/scope_chain_routes.rs (a move governs the very next request through the cache), demo: demos/hier-2-scope-chain.sh
 - [x] [HIER-3: Cedar entity sync](HIER-3.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/cedar_entity_sync.rs (a team moved between departments governs the very next decision: the moving steward's authority leaves with it over HTTP; the department MemoryRead follows it at the composition seam), crates/synveda-policy/tests/entity_sync.rs (a warm fragment never survives a reshaped chain, both directions), demo: demos/hier-3-cedar-entity-sync.sh
 - [x] [AUTH-3: Service identities](AUTH-3.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/service_identities.rs (client-credentials grant end to end against a mock IdP; a team-anchored agent holding tenant-wide org-admin is denied every org-scope endpoint; unregistered clients quarantined; lifetime cap; PDP-gated registration; next-request revocation), crates/synveda-policy/tests/service_scope.rs (the base-layer confinement forbid across the action vocabulary; the own-chain MemoryRead floor survives; roles cannot widen past the token scope), demo: demos/auth-3-service-identities.sh (live Rauthy)
-- [ ] [AUD-1: Hash-chained audit log](AUD-1.md)
+- [x] [AUD-1: Hash-chained audit log](AUD-1.md) — done 2026-07-19, AC test: crates/synveda-audit/tests/tamper.rs (a database-credentialed attacker suppresses triggers and rewrites history: every hashed column, row removal, relinking, and head attacks all break verification at the named seq), emission tests: crates/synveda-gateway/tests/audit_events.rs (mutation/read/denial/suspended-tenant/token-rejection each chain one event and the chain verifies), crates/synveda-store/tests/rls.rs (audit tables join the adversarial RLS suite), demo: demos/aud-1-audit-log.sh
 - [ ] [MEM-1: observe API + PGMQ buffer](MEM-1.md)
 - [ ] [MEM-2: Redaction & secret scanning](MEM-2.md)
 - [ ] [MEM-3: Extraction pipeline](MEM-3.md)
@@ -54,36 +54,46 @@ is a PDP decision); AUD-1 moves ahead of MEM-1 so the data path is born
 audited and the ADR-0008/0009 emission-point retrofit stays bounded to the
 identity features._
 
-_TEN-1 deferral (ADR-0008): tenant-resolution decisions are an audit
-emission point; events are wired when AUD-1's hash-chained log lands. Until
-then they are visible in traces and `synveda_tenant_resolutions_total` only._
+_TEN-1 deferral (ADR-0008): closed 2026-07-19 — AUD-1 chains
+`tenant.resolution.denied` when a verified token names a suspended tenant
+(ADR-0019 decision 6). Successful resolutions stay implicit (every
+subsequent chained event proves one); unauthenticated failures carry no
+attributable subject and remain in traces and
+`synveda_tenant_resolutions_total`._
 
-_TEN-2 deferrals (ADR-0009): RLS-backstop trips (SQLSTATE 42501 →
-`Error::Internal`) are an AUD-1 emission point; data-path features must
-reach tenant-scoped tables via `synveda_store::rls::begin_tenant_tx`, and
-deployment profiles (OPS-1/OPS-2) must connect as a non-superuser
-`synveda_app` login — the dev compose superuser bypasses RLS._
+_TEN-2 deferrals (ADR-0009): the audit half closed 2026-07-19 — backstop
+trips (SQLSTATE 42501, now marked via `rls::backstop_error` and classified
+by `rls::is_backstop_trip`) chain as `store.rls.denied` at the gateway's
+respond seam (AUD-1, ADR-0019 decision 5). Still standing: data-path
+features must reach tenant-scoped tables via
+`synveda_store::rls::begin_tenant_tx`, and deployment profiles
+(OPS-1/OPS-2) must connect as a non-superuser `synveda_app` login — the
+dev compose superuser bypasses RLS._
 
-_HIER-1 deferrals (ADR-0011): hierarchy CRUD (create/rename/move/delete)
-is an audit emission point, wired when AUD-1 lands — until then visible in
-traces and `synveda_hierarchy_operations_total`. The `/v1/hierarchy/*`
-admin routes' PDP gate — AUTHZ-1's first obligation — was discharged
-2026-07-18: every handler authorizes through the Cedar facade
-(ADR-0012 decision 7)._
+_HIER-1 deferrals (ADR-0011): the audit half closed 2026-07-19 — every
+hierarchy mutation chains `hierarchy.node.{created,updated,deleted}` with
+pre/post images in the mutation's own transaction (AUD-1, ADR-0019). The
+`/v1/hierarchy/*` admin routes' PDP gate — AUTHZ-1's first obligation —
+was discharged 2026-07-18: every handler authorizes through the Cedar
+facade (ADR-0012 decision 7)._
 
-_AUTHZ-1 deferrals (ADR-0012): every PDP decision is an AUD-1 emission
-point — until the hash-chained log lands, decisions are visible in the
-decision log (pack name@version + determining policies, every call) and
-`synveda_authz_decisions_total`. The `bootstrap` pack was retired
+_AUTHZ-1 deferrals (ADR-0012): the audit half closed 2026-07-19 with
+ADR-0019 decision 4's shape — one chained event per audited operation:
+mutations embed their decision context (pack@version, determining
+policies, roles), denials and allowed admin-plane reads chain standalone
+`authz.decision` events. The per-call decision log and
+`synveda_authz_decisions_total` continue unchanged and remain the
+full-fidelity record of every individual PDP call. The `bootstrap` pack was retired
 2026-07-19: AUTHZ-2 replaced it with the embedded product packs
 (`regulated-strict` is the zero-config default; roles still arrive with
 AUTHZ-3). Stored-pack propagation lags up to
 `SYNVEDA_POLICY_REFRESH_SECS` (default 5s, poll-based) until VedaFlow
 policy commits drive event-based reload._
 
-_AUTH-2 deferrals (ADR-0013): identity provisioning
-(`identity.provisioned`) is an AUD-1 emission point — until then visible
-in the `identity.provision` span and `synveda_jit_provisions_total`.
+_AUTH-2 deferrals (ADR-0013): the audit half closed 2026-07-19 —
+`identity.provisioned` chains in the provisioning transaction whenever an
+identity row is created (mapped/admin/quarantined placements; `existing`
+logins chain nothing — ADR-0019 decision 6).
 Group-mapping overrides are store-managed until an admin surface
 exists; placement is first-login-final — movers/leavers arrive with
 AUTH-4/5, and release from quarantine is the existing PDP-gated
@@ -94,9 +104,10 @@ Dev HS256 subjects kept tenant-wide admin semantics until AUTHZ-3
 landed roles (2026-07-19): an unbound subject now holds no
 administrative power._
 
-_AUTHZ-2 deferrals (ADR-0014): pack assignment/default mutations are
-AUD-1 emission points — until then visible in traces and
-`synveda_policy_operations_total`. `MemoryRead` is the composition
+_AUTHZ-2 deferrals (ADR-0014): the audit half closed 2026-07-19 — pack
+assignment/default mutations chain `policy.{default,node}.*` events, and
+the CLI's `policy apply/clear` chain `policy.pack.{applied,cleared}` as
+break-glass (AUD-1). `MemoryRead` is the composition
 seam; the AC's "inject composition changes next session" is
 demonstrated at that seam and re-demonstrated end-to-end when
 CTX-1/2/3 land on it. Governed handlers' placement and resource
@@ -112,9 +123,10 @@ privacy floor. A tenant default naming a custom pack that omits
 the break-glass (node-level assignments cannot seal themselves —
 ADR-0014 decision 4)._
 
-_AUTHZ-3 deferrals (ADR-0015): binding mutations and the JIT
-admin-group binding are AUD-1 emission points — until then visible in
-traces and `synveda_role_operations_total`. Group-driven bindings are
+_AUTHZ-3 deferrals (ADR-0015): the audit half closed 2026-07-19 —
+binding mutations chain `role.{bound,unbound}`, and the JIT admin-group
+upsert chains `role.bound` on its first establishment only (repeat logins
+are no-op upserts, ADR-0019 decision 6). Group-driven bindings are
 additive-only (`synveda-admins` upserts tenant-wide org-admin at every
 login; an admin-group subject with no team mapping is placed under the
 org root, never quarantine); revocation stays explicit until AUTH-4/5
@@ -156,10 +168,10 @@ it dominating (ADR-0017's reversal trigger). CTX-2/3's per-candidate
 `MemoryRead` sweep inherits prebuilt fragments through the same
 facade._
 
-_AUTH-3 deferrals (ADR-0018): service-identity registration/revocation
-and seam token rejections are AUD-1 emission points — until then visible
-in traces, `synveda_service_identity_operations_total`, and
-`synveda_service_token_rejections_total`. Tokens are IdP-issued
+_AUTH-3 deferrals (ADR-0018): the audit half closed 2026-07-19 —
+registration/revocation chain `service_identity.{registered,revoked}`,
+and seam token rejections chain `auth.token.rejected` at the respond
+seam (AUD-1, ADR-0019 decision 5). Tokens are IdP-issued
 (client-credentials; Rauthy mints them as `sub: null` + `azp`, covered
 by a bearer-only azp fallback in the verifier); per-issuer
 `service_audiences` must list the agents' audiences. A token's scope is
@@ -173,6 +185,24 @@ the base layer now carries the confinement forbid, whose one carve-out
 is the role-free own-chain `MemoryRead` floor — CTX-1/2/3 inherit
 agent composition through it. `synveda service` is the dev
 bootstrap and break-glass._
+
+_AUD-1 notes (ADR-0019): one BLAKE3 chain per tenant; appends run inside
+the operation's own tenant transaction (mutations are atomic with their
+events; read handlers now commit — their allowed decision is a chain row),
+deny-path events run in a short dedicated transaction at the per-plane
+`respond` seams, best-effort (`synveda_audit_append_failures_total`; the
+original error is never masked). The CLI break-glass audits itself
+(actor kind `break_glass`, OS-user attribution). `synveda audit
+verify/tail` is the operator surface until AUD-2's query API. Forward
+obligations: MEM-1's observe and CTX-1/2/3's inject/recall are emission
+points on the same seams — inject chains ONE event carrying its
+commit-hash watermarks with per-candidate `MemoryRead` decisions
+aggregated, never one row per candidate (ADR-0019 decision 4); if CTX-3's
+latency AC shows the chain-head lock or synchronous append dominating,
+the recorded upgrade is a buffered appender for read-path decision events
+only (ADR-0019 option 2). Chain anchoring beyond the database (signed
+export, offline verification) is AUD-3; the auditor-role read surface is
+AUD-2; audit-row retention/erasure semantics land with TEN-5._
 
 ## Phase 2 — Governance (wk 6–10)
 

@@ -166,6 +166,8 @@ async fn visible_rows(
 /// tenant-scoped table means extending this suite; the guard below turns
 /// forgetting into a test failure.
 const COVERED: &[&str] = &[
+    "audit_chain_heads",
+    "audit_log",
     "group_mappings",
     "hierarchy_closure",
     "hierarchy_nodes",
@@ -1176,5 +1178,134 @@ fn same_tenant_lifecycle_works_under_rls() {
             .await
             .expect("versions after delete");
         assert_eq!(versions.len(), 2);
+    });
+}
+
+// ── Audit chain tables (AUD-1, ADR-0019) ────────────────────────────────────
+
+/// Seeds one audit chain: the head row and two events, structurally-valid
+/// rows via raw SQL on the (RLS-exempt) test connection — the store crate
+/// sits beside `synveda-audit`, so this suite fabricates chain rows rather
+/// than importing append. Chain *semantics* are the audit crate's tamper
+/// suite; this suite covers isolation and grants only.
+async fn seed_audit_chain(pool: &PgPool) -> TenantId {
+    let tenant = TenantId::new();
+    let hash = [0xabu8; 32];
+    for seq in 1i64..=2 {
+        sqlx::query!(
+            r#"
+            insert into audit_log
+                (tenant_id, seq, occurred_at, actor_kind, actor_subject,
+                 action, resource, outcome, payload, prev_hash, hash)
+            values ($1, $2, now(), 'subject', 'rls-fixture',
+                    'authz.decision', 'tenant fixture', 'allow', '{}', $3, $3)
+            "#,
+            tenant.as_uuid(),
+            seq,
+            &hash[..],
+        )
+        .execute(pool)
+        .await
+        .expect("insert audit event");
+    }
+    sqlx::query!(
+        "insert into audit_chain_heads (tenant_id, seq, head_hash) values ($1, 2, $2)",
+        tenant.as_uuid(),
+        &hash[..],
+    )
+    .execute(pool)
+    .await
+    .expect("insert chain head");
+    tenant
+}
+
+/// Rows of `tenant` visible through the audit tables, in the order
+/// (audit_log, audit_chain_heads).
+async fn visible_audit_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64) {
+    let events = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from audit_log where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count audit_log");
+    let heads = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from audit_chain_heads where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count audit_chain_heads");
+    (events, heads)
+}
+
+/// The wrong (or absent) tenant GUC sees zero audit rows; the right one
+/// sees exactly its own chain.
+#[test]
+fn wrong_tenant_guc_sees_no_audit_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let victim = seed_audit_chain(&db.pool).await;
+        let adversary = seed_audit_chain(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_audit_rows(&mut tx, victim).await,
+            (0, 0),
+            "audit rows leaked across tenants under the wrong GUC"
+        );
+        assert_eq!(visible_audit_rows(&mut tx, adversary).await, (2, 1));
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_audit_rows(&mut tx, victim).await,
+            (0, 0),
+            "audit rows visible without any tenant GUC"
+        );
+    });
+}
+
+/// The app role cannot rewrite history even inside its own tenant scope:
+/// UPDATE and DELETE on `audit_log` were never granted (ADR-0019
+/// decision 3), and DELETE on the chain head neither. 42501 whether the
+/// grant or the append-only trigger answers first.
+#[test]
+fn audit_log_is_append_only_for_the_app_role() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tenant = seed_audit_chain(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let update = sqlx::raw_sql("update audit_log set resource = 'rewritten'")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            update.is_err(),
+            "the app role must not hold UPDATE on audit_log"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let delete = sqlx::raw_sql("delete from audit_log")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            delete.is_err(),
+            "the app role must not hold DELETE on audit_log"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let behead = sqlx::raw_sql("delete from audit_chain_heads")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            behead.is_err(),
+            "the app role must not hold DELETE on audit_chain_heads"
+        );
     });
 }

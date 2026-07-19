@@ -14,6 +14,10 @@
 //! login JIT-provisions the subject into the hierarchy (ADR-0013), and
 //! every PDP decision carries the identity's quarantine status.
 //!
+//! Since AUD-1 the audit stage is real too (ADR-0019): every admin
+//! mutation, allowed read, denial, provisioning, and seam rejection chains
+//! into the tenant's hash-chained audit log through the [`audit`] seams.
+//!
 //! This is a library crate only so integration tests can build the router;
 //! nothing outside the workspace consumes it.
 
@@ -21,6 +25,7 @@
 #![warn(missing_docs)]
 
 pub mod app;
+mod audit;
 pub mod auth;
 pub mod authz;
 pub mod error;

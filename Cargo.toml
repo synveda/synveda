@@ -40,6 +40,9 @@ async-trait = "0.1"
 cedar-policy = "4"
 axum = "0.8"
 base64 = "0.22"
+# The audit chain's hash (AUD-1, ADR-0019); VedaFlow's content addressing
+# uses the same primitive later (FLOW-1, tech plan §2.1). Apache-2.0.
+blake3 = "1"
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 # CSPRNG for OIDC state/nonce/PKCE-verifier entropy (AUTH-1, ADR-0010).

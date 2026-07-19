@@ -32,6 +32,10 @@ exceptions = [
     # requirement; nothing from this crate ships in our binaries at all.
     # Added with AUTHZ-1.
     { name = "ar_archive_writer", allow = ["Apache-2.0 WITH LLVM-exception"] },
+    # Fixed-size array-reference macros, via blake3 (AUD-1, ADR-0019).
+    # OSI-approved permissive; blake3 itself is Apache-2.0-licensed.
+    # Added with AUD-1.
+    { name = "arrayref", allow = ["BSD-2-Clause"] },
 ]
 # Our own crates are publish = false and carry no licence field; the allowlist
 # governs dependencies, not first-party code.

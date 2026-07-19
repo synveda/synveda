@@ -5,10 +5,9 @@
 //! (`RoleRead`/`RoleAssign`, with the granted-or-revoked role in context
 //! so the base layer's escalation guard decides — ADR-0015 decision 5).
 //!
-//! AUD-1 wiring point: binding mutations are audit emission points; until
-//! the hash-chained log lands they are visible in traces and
-//! `synveda_role_operations_total` (and every PDP decision in the
-//! decision log and `synveda_authz_decisions_total`).
+//! Audited since AUD-1 (ADR-0019): binding mutations chain their semantic
+//! events in their own transactions; reads chain their allowed decision;
+//! denials chain at the `respond` seam.
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -16,11 +15,14 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::{rls, role_bindings};
 use synveda_types::{Error, Result, Role, RoleBinding, ScopeId};
 
 use crate::app::AppState;
+use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
 use crate::hierarchy::{body, commit, found, tenant_id};
@@ -28,8 +30,13 @@ use crate::telemetry::ROLE_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the same outcome
 /// taxonomy as the hierarchy and policy routes: `ok`, `rejected` (the
-/// caller's fault), `error` (ours or an operator's).
-fn respond<T: IntoResponse>(op: &'static str, result: Result<T>) -> Response {
+/// caller's fault), `error` (ours or an operator's). Error-path audit
+/// events chain here (AUD-1, ADR-0019 decision 5).
+async fn respond<T: IntoResponse>(
+    state: &AppState,
+    op: &'static str,
+    result: Result<T>,
+) -> Response {
     let outcome = match &result {
         Ok(_) => "ok",
         Err(
@@ -45,8 +52,27 @@ fn respond<T: IntoResponse>(op: &'static str, result: Result<T>) -> Response {
     metrics::counter!(ROLE_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
     match result {
         Ok(response) => response.into_response(),
-        Err(error) => ApiError(error).into_response(),
+        Err(error) => {
+            audit::record_rejection(state, op, &error).await;
+            ApiError(error).into_response()
+        }
     }
+}
+
+/// The payload image of a binding mutation: who was bound or unbound,
+/// which role, where (`null` scope = tenant-wide), and through which
+/// decision.
+fn binding_payload(
+    action: Action,
+    authorized: &authz::Authorized,
+    subject: &str,
+    role: Role,
+    scope: Option<ScopeId>,
+) -> serde_json::Value {
+    json!({
+        "authz": audit::decision_context(action, authorized),
+        "binding": {"subject": subject, "role": role, "scope_id": scope},
+    })
 }
 
 /// A binding named by a mutation request: who and which role. `Role`
@@ -70,7 +96,7 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::RoleRead,
@@ -79,10 +105,20 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
         )
         .await?;
         let bindings = role_bindings::all(&mut *tx, tenant_id).await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::AuthzDecision,
+            Resource::Tenant(tenant_id).to_string(),
+            Outcome::Allow,
+            json!({"op": "list", "authz": audit::decision_context(Action::RoleRead, &authorized)}),
+        )
+        .await?;
+        commit(tx).await?;
         Ok(Json(BindingsResponse { bindings }))
     }
     .await;
-    respond("list", result)
+    respond(&state, "list", result).await
 }
 
 /// `PUT /v1/roles/bindings` — bind a role tenant-wide (in force
@@ -95,7 +131,7 @@ pub(crate) async fn bind_tenant_wide(
         let body = body(payload)?;
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        require_assign(
+        let authorized = require_assign(
             &state,
             &mut tx,
             Resource::Tenant(tenant_id),
@@ -105,11 +141,26 @@ pub(crate) async fn bind_tenant_wide(
         .await?;
         let binding =
             role_bindings::bind(&mut *tx, tenant_id, &body.subject, None, body.role).await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::RoleBound,
+            Resource::Tenant(tenant_id).to_string(),
+            Outcome::Success,
+            binding_payload(
+                Action::RoleAssign,
+                &authorized,
+                &body.subject,
+                body.role,
+                None,
+            ),
+        )
+        .await?;
         commit(tx).await?;
         Ok(Json(binding))
     }
     .await;
-    respond("bind", result)
+    respond(&state, "bind", result).await
 }
 
 /// `DELETE /v1/roles/bindings?subject=…&role=…` — remove a tenant-wide
@@ -125,7 +176,7 @@ pub(crate) async fn unbind_tenant_wide(
         })?;
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        require_assign(
+        let authorized = require_assign(
             &state,
             &mut tx,
             Resource::Tenant(tenant_id),
@@ -138,11 +189,26 @@ pub(crate) async fn unbind_tenant_wide(
                 entity: "tenant-wide role binding".to_owned(),
             });
         }
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::RoleUnbound,
+            Resource::Tenant(tenant_id).to_string(),
+            Outcome::Success,
+            binding_payload(
+                Action::RoleAssign,
+                &authorized,
+                &params.subject,
+                params.role,
+                None,
+            ),
+        )
+        .await?;
         commit(tx).await?;
         Ok(StatusCode::NO_CONTENT)
     }
     .await;
-    respond("unbind", result)
+    respond(&state, "unbind", result).await
 }
 
 /// `GET /v1/hierarchy/nodes/{id}/roles` — the bindings at one node.
@@ -155,7 +221,7 @@ pub(crate) async fn list_node(State(state): State<AppState>, Path(id): Path<Scop
             tenant_id,
             id,
         )?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::RoleRead,
@@ -164,10 +230,23 @@ pub(crate) async fn list_node(State(state): State<AppState>, Path(id): Path<Scop
         )
         .await?;
         let bindings = role_bindings::for_scope(&mut *tx, tenant_id, id).await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::AuthzDecision,
+            Resource::Scope(id).to_string(),
+            Outcome::Allow,
+            json!({
+                "op": "list_node",
+                "authz": audit::decision_context(Action::RoleRead, &authorized),
+            }),
+        )
+        .await?;
+        commit(tx).await?;
         Ok(Json(BindingsResponse { bindings }))
     }
     .await;
-    respond("list_node", result)
+    respond(&state, "list_node", result).await
 }
 
 /// `PUT /v1/hierarchy/nodes/{id}/roles` — bind a role at the node; its
@@ -186,14 +265,30 @@ pub(crate) async fn bind_node(
             tenant_id,
             id,
         )?;
-        require_assign(&state, &mut tx, Resource::Scope(id), Some(&node), body.role).await?;
+        let authorized =
+            require_assign(&state, &mut tx, Resource::Scope(id), Some(&node), body.role).await?;
         let binding =
             role_bindings::bind(&mut *tx, tenant_id, &body.subject, Some(id), body.role).await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::RoleBound,
+            Resource::Scope(id).to_string(),
+            Outcome::Success,
+            binding_payload(
+                Action::RoleAssign,
+                &authorized,
+                &body.subject,
+                body.role,
+                Some(id),
+            ),
+        )
+        .await?;
         commit(tx).await?;
         Ok(Json(binding))
     }
     .await;
-    respond("bind_node", result)
+    respond(&state, "bind_node", result).await
 }
 
 /// `DELETE /v1/hierarchy/nodes/{id}/roles?subject=…&role=…` — remove one
@@ -214,7 +309,7 @@ pub(crate) async fn unbind_node(
             tenant_id,
             id,
         )?;
-        require_assign(
+        let authorized = require_assign(
             &state,
             &mut tx,
             Resource::Scope(id),
@@ -229,11 +324,26 @@ pub(crate) async fn unbind_node(
                 entity: format!("role binding on scope {id}"),
             });
         }
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::RoleUnbound,
+            Resource::Scope(id).to_string(),
+            Outcome::Success,
+            binding_payload(
+                Action::RoleAssign,
+                &authorized,
+                &params.subject,
+                params.role,
+                Some(id),
+            ),
+        )
+        .await?;
         commit(tx).await?;
         Ok(StatusCode::NO_CONTENT)
     }
     .await;
-    respond("unbind_node", result)
+    respond(&state, "unbind_node", result).await
 }
 
 /// Authorizes a binding mutation: `RoleAssign` on the resource with the
@@ -244,11 +354,7 @@ async fn require_assign(
     resource: Resource,
     anchor: Option<&synveda_types::HierarchyNode>,
     grant: Role,
-) -> Result<()> {
+) -> Result<authz::Authorized> {
     let input = authz::gather(state, tx, anchor).await?;
-    let mut context = input.context();
-    context.grant = Some(grant);
-    state
-        .pdp
-        .require(&input.principal, Action::RoleAssign, resource, &context)
+    authz::decide(state, &input, Action::RoleAssign, resource, Some(grant))
 }

@@ -15,12 +15,15 @@ path = "src/main.rs"
 # create, token issue — ADR-0008); everything a running gateway can serve
 # goes through its API instead. Policy for the apply-time compile check
 # (AUTHZ-1, ADR-0012): a pack the reloader would reject never reaches the
-# store.
+# store. Audit because the break-glass audits itself (AUD-1, ADR-0019
+# decision 7) and `synveda audit verify` is the operator's chain check.
+synveda-audit = { workspace = true }
 synveda-identity = { workspace = true }
 synveda-policy = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }
 
+chrono = { workspace = true }
 clap = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }

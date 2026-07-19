@@ -8,3 +8,14 @@ publish.workspace = true
 
 [dependencies]
 synveda-types = { workspace = true }
+
+blake3 = { workspace = true }
+chrono = { workspace = true }
+metrics = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

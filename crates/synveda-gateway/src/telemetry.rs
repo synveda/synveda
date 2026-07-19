@@ -201,6 +201,21 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Service tokens refused at the enforcement seam by reason \
          (lifetime_exceeded/lifetime_unknown)"
     );
+    // AUD-1 counters (ADR-0019): appends and verifications in
+    // synveda-audit through the facade; best-effort append failures at
+    // the gateway's error-path emission seams.
+    metrics::describe_counter!(
+        synveda_audit::AUDIT_EVENTS_TOTAL,
+        "Audit events appended to tenant chains by action and outcome"
+    );
+    metrics::describe_counter!(
+        synveda_audit::AUDIT_APPEND_FAILURES_TOTAL,
+        "Audit appends that failed on a best-effort path (the event is lost, never the response)"
+    );
+    metrics::describe_counter!(
+        synveda_audit::AUDIT_VERIFICATIONS_TOTAL,
+        "Audit chain verifications by outcome (valid/broken)"
+    );
     // HIER-2 counters (ADR-0016): emitted in synveda-store's scope-chain
     // resolver; invalidations by the hierarchy-mutating handlers.
     metrics::describe_counter!(

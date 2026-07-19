@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into audit_chain_heads (tenant_id, seq, head_hash)\n         values ($1, 0, $2)\n         on conflict (tenant_id) do nothing",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b1dce713ccc2e842edfabda864b4700a21b74bf31cd1c9ca0d4a059e885fc001"
+}

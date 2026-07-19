@@ -13,9 +13,10 @@
 //! deletes the row and the leaf; re-anchoring is the existing PDP-gated
 //! hierarchy move of the leaf.
 //!
-//! AUD-1 wiring point: registration and revocation are audit emission
-//! points; until the hash-chained log lands they are visible in traces
-//! and `synveda_service_identity_operations_total`.
+//! Audited since AUD-1 (ADR-0019): registration and revocation chain
+//! their semantic events in their own transactions; reads chain their
+//! allowed decision; denials and seam token rejections chain at the
+//! `respond` seam.
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -23,6 +24,8 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::{hierarchy, identities, rls};
 use synveda_types::{
@@ -32,14 +35,20 @@ use synveda_types::{
 use synveda_identity::personal_slug;
 
 use crate::app::AppState;
+use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
 use crate::hierarchy::{body, commit, found, tenant_id};
 use crate::telemetry::SERVICE_IDENTITY_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the same outcome
-/// taxonomy as the hierarchy, policy, and role routes.
-fn respond<T: IntoResponse>(op: &'static str, result: Result<T>) -> Response {
+/// taxonomy as the hierarchy, policy, and role routes. Error-path audit
+/// events chain here (AUD-1, ADR-0019 decision 5).
+async fn respond<T: IntoResponse>(
+    state: &AppState,
+    op: &'static str,
+    result: Result<T>,
+) -> Response {
     let outcome = match &result {
         Ok(_) => "ok",
         Err(
@@ -56,7 +65,10 @@ fn respond<T: IntoResponse>(op: &'static str, result: Result<T>) -> Response {
         .increment(1);
     match result {
         Ok(response) => response.into_response(),
-        Err(error) => ApiError(error).into_response(),
+        Err(error) => {
+            audit::record_rejection(state, op, &error).await;
+            ApiError(error).into_response()
+        }
     }
 }
 
@@ -102,7 +114,7 @@ pub(crate) async fn register(
                 message: "service identities cannot be anchored at the quarantine scope".to_owned(),
             });
         }
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::ServiceIdentityManage,
@@ -133,6 +145,20 @@ pub(crate) async fn register(
             leaf.id,
         )
         .await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::ServiceIdentityRegistered,
+            Resource::Scope(anchor.id).to_string(),
+            Outcome::Success,
+            json!({
+                "authz": audit::decision_context(Action::ServiceIdentityManage, &authorized),
+                "identity": {"id": identity.id, "subject": identity.subject},
+                "leaf_scope_id": leaf.id,
+                "anchor": {"slug": anchor.slug, "path": anchor.path},
+            }),
+        )
+        .await?;
         commit(tx).await?;
         // The leaf is a committed hierarchy mutation (ADR-0016 decision 5,
         // ADR-0017 decision 5).
@@ -146,7 +172,7 @@ pub(crate) async fn register(
         Ok((StatusCode::CREATED, Json(identity)))
     }
     .await;
-    respond("register", result)
+    respond(&state, "register", result).await
 }
 
 /// `GET /v1/service-identities` — the tenant's registered agents. A
@@ -156,7 +182,7 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::ServiceIdentityRead,
@@ -165,10 +191,23 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
         )
         .await?;
         let identities = identities::services(&mut *tx, tenant_id).await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::AuthzDecision,
+            Resource::Tenant(tenant_id).to_string(),
+            Outcome::Allow,
+            json!({
+                "op": "list",
+                "authz": audit::decision_context(Action::ServiceIdentityRead, &authorized),
+            }),
+        )
+        .await?;
+        commit(tx).await?;
         Ok(Json(ServiceIdentitiesResponse { identities }))
     }
     .await;
-    respond("list", result)
+    respond(&state, "list", result).await
 }
 
 /// `GET /v1/service-identities/{id}` — one registration.
@@ -179,7 +218,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<IdentityId
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let (identity, anchor) = found_service(&mut tx, tenant_id, id).await?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::ServiceIdentityRead,
@@ -187,10 +226,23 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<IdentityId
             Some(&anchor),
         )
         .await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::AuthzDecision,
+            Resource::Scope(anchor.id).to_string(),
+            Outcome::Allow,
+            json!({
+                "op": "get",
+                "authz": audit::decision_context(Action::ServiceIdentityRead, &authorized),
+            }),
+        )
+        .await?;
+        commit(tx).await?;
         Ok(Json(identity))
     }
     .await;
-    respond("get", result)
+    respond(&state, "get", result).await
 }
 
 /// `DELETE /v1/service-identities/{id}` — revoke: delete the identity row
@@ -203,7 +255,7 @@ pub(crate) async fn remove(State(state): State<AppState>, Path(id): Path<Identit
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let (identity, anchor) = found_service(&mut tx, tenant_id, id).await?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::ServiceIdentityManage,
@@ -220,6 +272,19 @@ pub(crate) async fn remove(State(state): State<AppState>, Path(id): Path<Identit
                 message: format!("service identity {id} lost its personal leaf mid-delete"),
             });
         }
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::ServiceIdentityRevoked,
+            Resource::Scope(anchor.id).to_string(),
+            Outcome::Success,
+            json!({
+                "authz": audit::decision_context(Action::ServiceIdentityManage, &authorized),
+                "identity": {"id": identity.id, "subject": identity.subject},
+                "anchor": {"slug": anchor.slug, "path": anchor.path},
+            }),
+        )
+        .await?;
         commit(tx).await?;
         // The leaf's cached chain and fragment must go (ADR-0016, ADR-0017).
         state.invalidate_hierarchy(tenant_id);
@@ -227,7 +292,7 @@ pub(crate) async fn remove(State(state): State<AppState>, Path(id): Path<Identit
         Ok(StatusCode::NO_CONTENT)
     }
     .await;
-    respond("remove", result)
+    respond(&state, "remove", result).await
 }
 
 fn not_found(id: IdentityId) -> Error {

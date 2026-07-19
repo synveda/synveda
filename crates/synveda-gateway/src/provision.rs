@@ -16,10 +16,15 @@
 //! subsequent action through the identity's quarantine status. It is NOT
 //! a path to governed assets (seed §2.2).
 //!
-//! AUD-1 wiring point: `identity.provisioned` becomes an audit event when
-//! the hash-chained log lands; until then provisioning is visible in the
-//! `identity.provision` span and `synveda_jit_provisions_total`.
+//! Audited since AUD-1 (ADR-0019): a created identity chains
+//! `identity.provisioned` in the provisioning transaction, and the
+//! admin-group binding chains `role.bound` when it is first established —
+//! not on every login's no-op upsert (decision 6). The actor is the
+//! provisioned subject itself: this plane runs at login completion,
+//! outside the task-local tenant scope.
 
+use serde_json::json;
+use synveda_audit::{Actor, AuditAction, Outcome};
 use synveda_identity::{
     ProvisioningClaims, contains_admin_group, convention_candidates, personal_slug,
 };
@@ -30,6 +35,7 @@ use synveda_types::{
 };
 
 use crate::app::AppState;
+use crate::audit;
 use crate::telemetry::JIT_PROVISIONS_TOTAL;
 
 /// A provisioned login: the identity and the scope its personal node sits
@@ -97,10 +103,32 @@ async fn provision_once(
     // at *every* login completion — adding someone to `synveda-admins`
     // works on their next login. Additive only: leaving the group revokes
     // nothing until AUTH-4/5 bring mover/leaver sync; unbinding stays an
-    // explicit, PDP-gated action. An AUD-1 emission point.
+    // explicit, PDP-gated action. Only the binding's first establishment
+    // chains an audit event (ADR-0019 decision 6) — repeat logins are
+    // no-op upserts; a concurrent first-login race can double-record,
+    // which over-records rather than under-records.
     let admin = contains_admin_group(&claims.groups);
     if admin {
+        let established = !role_bindings::for_subject_on_scopes(&mut *tx, tenant.id, subject, &[])
+            .await?
+            .iter()
+            .any(|binding| binding.scope_id.is_none() && binding.role == Role::OrgAdmin);
         role_bindings::bind(&mut *tx, tenant.id, subject, None, Role::OrgAdmin).await?;
+        if established {
+            audit::record_as(
+                &mut tx,
+                tenant.id,
+                Actor::subject(subject),
+                AuditAction::RoleBound,
+                format!("tenant {}", tenant.id),
+                Outcome::Success,
+                json!({
+                    "origin": "jit-admin-group",
+                    "binding": {"subject": subject, "role": Role::OrgAdmin, "scope_id": null},
+                }),
+            )
+            .await?;
+        }
         tracing::info!(tenant.id = %tenant.id, "admin-group login: tenant-wide org-admin bound");
     }
 
@@ -149,6 +177,21 @@ async fn provision_once(
         claims.email.as_deref(),
         claims.display_name.as_deref(),
         scope.id,
+    )
+    .await?;
+    audit::record_as(
+        &mut tx,
+        tenant.id,
+        Actor::subject(subject),
+        AuditAction::IdentityProvisioned,
+        format!("scope {}", scope.id),
+        Outcome::Success,
+        json!({
+            "placement": label,
+            "identity": {"id": identity.id, "subject": identity.subject},
+            "parent": {"slug": parent.slug, "path": parent.path},
+            "groups": claims.groups,
+        }),
     )
     .await?;
     tx.commit().await.map_err(|err| Error::Storage {

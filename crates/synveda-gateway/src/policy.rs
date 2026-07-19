@@ -5,10 +5,9 @@
 //! (`PolicyRead`/`PolicyAssign`) — decided under the pack currently
 //! effective at the target, like every governed action.
 //!
-//! AUD-1 wiring point: assignment and default mutations are audit
-//! emission points; until the hash-chained log lands they are visible in
-//! traces and `synveda_policy_operations_total` (and every PDP decision in
-//! the decision log and `synveda_authz_decisions_total`).
+//! Audited since AUD-1 (ADR-0019): assignment and default mutations chain
+//! their semantic events in their own transactions; reads chain their
+//! allowed decision; denials chain at the `respond` seam.
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -17,7 +16,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::postgres::PgConnection;
+use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{
     Action, EMBEDDED_PACKS, EffectivePack, PackOrigin, REGULATED_STRICT, Resource,
 };
@@ -25,6 +26,7 @@ use synveda_store::{policy_assignments, policy_packs, rls};
 use synveda_types::{Error, Result, ScopeId, TenantId};
 
 use crate::app::AppState;
+use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
 use crate::hierarchy::{body, commit, found, tenant_id};
@@ -32,8 +34,13 @@ use crate::telemetry::POLICY_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the same outcome
 /// taxonomy as the hierarchy routes: `ok`, `rejected` (the caller's
-/// fault), `error` (ours or an operator's).
-fn respond<T: IntoResponse>(op: &'static str, result: Result<T>) -> Response {
+/// fault), `error` (ours or an operator's). Error-path audit events chain
+/// here (AUD-1, ADR-0019 decision 5).
+async fn respond<T: IntoResponse>(
+    state: &AppState,
+    op: &'static str,
+    result: Result<T>,
+) -> Response {
     let outcome = match &result {
         Ok(_) => "ok",
         Err(
@@ -49,8 +56,32 @@ fn respond<T: IntoResponse>(op: &'static str, result: Result<T>) -> Response {
     metrics::counter!(POLICY_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
     match result {
         Ok(response) => response.into_response(),
-        Err(error) => ApiError(error).into_response(),
+        Err(error) => {
+            audit::record_rejection(state, op, &error).await;
+            ApiError(error).into_response()
+        }
     }
+}
+
+/// The allowed-read decision event (ADR-0019 decision 4) — reads commit
+/// their transactions since AUD-1.
+async fn read_event(
+    tx: &mut PgConnection,
+    tenant_id: TenantId,
+    op: &'static str,
+    resource: Resource,
+    authorized: &authz::Authorized,
+) -> Result<()> {
+    audit::record(
+        tx,
+        tenant_id,
+        AuditAction::AuthzDecision,
+        resource.to_string(),
+        Outcome::Allow,
+        json!({"op": op, "authz": audit::decision_context(Action::PolicyRead, authorized)}),
+    )
+    .await
+    .map(|_| ())
 }
 
 /// A pack's name must denote something decisions can resolve: an embedded
@@ -95,7 +126,7 @@ pub(crate) async fn packs(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::PolicyRead,
@@ -123,10 +154,19 @@ pub(crate) async fn packs(State(state): State<AppState>) -> Response {
                     updated_at: Some(pack.updated_at),
                 }),
         );
+        read_event(
+            &mut tx,
+            tenant_id,
+            "packs",
+            Resource::Tenant(tenant_id),
+            &authorized,
+        )
+        .await?;
+        commit(tx).await?;
         Ok(Json(PacksResponse { packs }))
     }
     .await;
-    respond("packs", result)
+    respond(&state, "packs", result).await
 }
 
 #[derive(Serialize)]
@@ -143,7 +183,7 @@ pub(crate) async fn get_default(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::PolicyRead,
@@ -155,13 +195,22 @@ pub(crate) async fn get_default(State(state): State<AppState>) -> Response {
         let effective = pack_name
             .clone()
             .unwrap_or_else(|| REGULATED_STRICT.to_owned());
+        read_event(
+            &mut tx,
+            tenant_id,
+            "get_default",
+            Resource::Tenant(tenant_id),
+            &authorized,
+        )
+        .await?;
+        commit(tx).await?;
         Ok(Json(DefaultResponse {
             pack_name,
             effective,
         }))
     }
     .await;
-    respond("get_default", result)
+    respond(&state, "get_default", result).await
 }
 
 #[derive(Deserialize)]
@@ -178,7 +227,7 @@ pub(crate) async fn set_default(
         let body = body(payload)?;
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::PolicyAssign,
@@ -188,6 +237,18 @@ pub(crate) async fn set_default(
         .await?;
         known_pack(&mut tx, tenant_id, &body.name).await?;
         policy_assignments::set_default(&mut *tx, tenant_id, &body.name).await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::PolicyDefaultSet,
+            Resource::Tenant(tenant_id).to_string(),
+            Outcome::Success,
+            json!({
+                "authz": audit::decision_context(Action::PolicyAssign, &authorized),
+                "pack": body.name,
+            }),
+        )
+        .await?;
         commit(tx).await?;
         Ok(Json(DefaultResponse {
             pack_name: Some(body.name.clone()),
@@ -195,7 +256,7 @@ pub(crate) async fn set_default(
         }))
     }
     .await;
-    respond("set_default", result)
+    respond(&state, "set_default", result).await
 }
 
 /// `DELETE /v1/policy/default` — clear the tenant default; the embedded
@@ -204,7 +265,7 @@ pub(crate) async fn clear_default(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::PolicyAssign,
@@ -217,11 +278,20 @@ pub(crate) async fn clear_default(State(state): State<AppState>) -> Response {
                 entity: "tenant default pack".to_owned(),
             });
         }
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::PolicyDefaultCleared,
+            Resource::Tenant(tenant_id).to_string(),
+            Outcome::Success,
+            json!({"authz": audit::decision_context(Action::PolicyAssign, &authorized)}),
+        )
+        .await?;
         commit(tx).await?;
         Ok(StatusCode::NO_CONTENT)
     }
     .await;
-    respond("clear_default", result)
+    respond(&state, "clear_default", result).await
 }
 
 #[derive(Serialize)]
@@ -277,11 +347,12 @@ pub(crate) async fn get_node_policy(
             id,
         )?;
         let input = authz::gather(&state, &mut tx, Some(&node)).await?;
-        state.pdp.require(
-            &input.principal,
+        let authorized = authz::decide(
+            &state,
+            &input,
             Action::PolicyRead,
             Resource::Scope(id),
-            &input.context(),
+            None,
         )?;
         let effective = state
             .pdp
@@ -291,6 +362,15 @@ pub(crate) async fn get_node_policy(
             .iter()
             .find(|assignment| assignment.scope_id == id)
             .cloned();
+        read_event(
+            &mut tx,
+            tenant_id,
+            "get_node_policy",
+            Resource::Scope(id),
+            &authorized,
+        )
+        .await?;
+        commit(tx).await?;
         Ok(Json(EffectiveResponse {
             origin: origin_response(&effective),
             name: effective.name,
@@ -299,7 +379,7 @@ pub(crate) async fn get_node_policy(
         }))
     }
     .await;
-    respond("get_node_policy", result)
+    respond(&state, "get_node_policy", result).await
 }
 
 /// `PUT /v1/hierarchy/nodes/{id}/policy` — assign a pack at the node; its
@@ -318,7 +398,7 @@ pub(crate) async fn assign_node_policy(
             tenant_id,
             id,
         )?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::PolicyAssign,
@@ -328,11 +408,24 @@ pub(crate) async fn assign_node_policy(
         .await?;
         known_pack(&mut tx, tenant_id, &body.name).await?;
         let assignment = policy_assignments::assign(&mut *tx, tenant_id, id, &body.name).await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::PolicyNodeAssigned,
+            Resource::Scope(id).to_string(),
+            Outcome::Success,
+            json!({
+                "authz": audit::decision_context(Action::PolicyAssign, &authorized),
+                "pack": body.name,
+                "node": {"slug": node.slug, "path": node.path},
+            }),
+        )
+        .await?;
         commit(tx).await?;
         Ok(Json(assignment))
     }
     .await;
-    respond("assign_node_policy", result)
+    respond(&state, "assign_node_policy", result).await
 }
 
 /// `DELETE /v1/hierarchy/nodes/{id}/policy` — remove the node's
@@ -349,7 +442,7 @@ pub(crate) async fn unassign_node_policy(
             tenant_id,
             id,
         )?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::PolicyAssign,
@@ -362,9 +455,21 @@ pub(crate) async fn unassign_node_policy(
                 entity: format!("pack assignment on scope {id}"),
             });
         }
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::PolicyNodeUnassigned,
+            Resource::Scope(id).to_string(),
+            Outcome::Success,
+            json!({
+                "authz": audit::decision_context(Action::PolicyAssign, &authorized),
+                "node": {"slug": node.slug, "path": node.path},
+            }),
+        )
+        .await?;
         commit(tx).await?;
         Ok(StatusCode::NO_CONTENT)
     }
     .await;
-    respond("unassign_node_policy", result)
+    respond(&state, "unassign_node_policy", result).await
 }

@@ -4,10 +4,9 @@
 //! [`crate::authz::require`] after its uniform-404 ownership check and
 //! before acting (ADR-0012 decision 7, discharging ADR-0011 decision 8).
 //!
-//! AUD-1 wiring point: every mutation here is an audit emission point;
-//! until the hash-chained log lands they are visible in traces and
-//! `synveda_hierarchy_operations_total` (and every PDP decision in the
-//! policy decision log and `synveda_authz_decisions_total`).
+//! Audited since AUD-1 (ADR-0019): every mutation chains its semantic
+//! event in the mutation's own transaction; reads chain their allowed
+//! decision; denials chain at the `respond` seam.
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -15,11 +14,14 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
+use serde_json::json;
+use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::{hierarchy, rls};
 use synveda_types::{Error, HierarchyNode, Result, ScopeId, ScopeKind, TenantId};
 
 use crate::app::AppState;
+use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
 use crate::telemetry::HIERARCHY_OPERATIONS_TOTAL;
@@ -37,8 +39,14 @@ pub(crate) fn tenant_id() -> Result<TenantId> {
 
 /// Counts the operation and renders the result, collapsing the taxonomy
 /// into three outcomes: `ok`, `rejected` (the caller's fault), `error`
-/// (ours or an operator's).
-fn respond<T: IntoResponse>(op: &'static str, result: Result<T>) -> Response {
+/// (ours or an operator's). Error-path audit events (denials, token
+/// rejections, backstop trips) chain here, where every handler result
+/// already funnels (AUD-1, ADR-0019 decision 5).
+async fn respond<T: IntoResponse>(
+    state: &AppState,
+    op: &'static str,
+    result: Result<T>,
+) -> Response {
     let outcome = match &result {
         Ok(_) => "ok",
         Err(
@@ -54,7 +62,10 @@ fn respond<T: IntoResponse>(op: &'static str, result: Result<T>) -> Response {
     metrics::counter!(HIERARCHY_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
     match result {
         Ok(response) => response.into_response(),
-        Err(error) => ApiError(error).into_response(),
+        Err(error) => {
+            audit::record_rejection(state, op, &error).await;
+            ApiError(error).into_response()
+        }
     }
 }
 
@@ -89,7 +100,7 @@ pub(crate) async fn create(
         // Create targets the parent scope — the tenant itself for the root
         // (ADR-0012 decision 7). Ownership check first: a foreign parent is
         // a 404, never a policy denial oracle.
-        match body.parent_id {
+        let authorized = match body.parent_id {
             None => {
                 authz::require(
                     &state,
@@ -98,7 +109,7 @@ pub(crate) async fn create(
                     Resource::Tenant(tenant_id),
                     None,
                 )
-                .await?;
+                .await?
             }
             Some(parent_id) => {
                 let parent = found(
@@ -113,9 +124,9 @@ pub(crate) async fn create(
                     Resource::Scope(parent_id),
                     Some(&parent),
                 )
-                .await?;
+                .await?
             }
-        }
+        };
         let node = hierarchy::create(
             &mut tx,
             ScopeId::new(),
@@ -126,6 +137,18 @@ pub(crate) async fn create(
             &body.name,
         )
         .await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::HierarchyNodeCreated,
+            Resource::Scope(node.id).to_string(),
+            Outcome::Success,
+            json!({
+                "authz": audit::decision_context(Action::HierarchyCreate, &authorized),
+                "node": node_image(&node),
+            }),
+        )
+        .await?;
         commit(tx).await?;
         // Any committed hierarchy mutation flushes the tenant's chains
         // and entity fragments (ADR-0016 decision 5, ADR-0017 decision 5)
@@ -134,7 +157,21 @@ pub(crate) async fn create(
         Ok((StatusCode::CREATED, Json(node)))
     }
     .await;
-    respond("create", result)
+    respond(&state, "create", result).await
+}
+
+/// The payload image of a node — what an event records about the row it
+/// touched (stable fields only; no timestamps that would differ from the
+/// response body).
+fn node_image(node: &HierarchyNode) -> serde_json::Value {
+    json!({
+        "id": node.id,
+        "parent_id": node.parent_id,
+        "kind": node.kind,
+        "slug": node.slug,
+        "name": node.name,
+        "path": node.path,
+    })
 }
 
 /// `GET /v1/hierarchy/root` — the tenant's org root.
@@ -142,7 +179,7 @@ pub(crate) async fn root(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::HierarchyRead,
@@ -155,10 +192,43 @@ pub(crate) async fn root(State(state): State<AppState>) -> Response {
             .ok_or_else(|| Error::NotFound {
                 entity: "hierarchy root".to_owned(),
             })?;
+        read_event(
+            &mut tx,
+            tenant_id,
+            "root",
+            Action::HierarchyRead,
+            Resource::Tenant(tenant_id),
+            &authorized,
+        )
+        .await?;
+        commit(tx).await?;
         Ok(Json(node))
     }
     .await;
-    respond("root", result)
+    respond(&state, "root", result).await
+}
+
+/// The allowed-read decision event (ADR-0019 decision 4): reads have no
+/// semantic event, so the decision itself chains — which is why read
+/// handlers commit their transactions since AUD-1.
+async fn read_event(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    op: &'static str,
+    action: Action,
+    resource: Resource,
+    authorized: &authz::Authorized,
+) -> Result<()> {
+    audit::record(
+        tx,
+        tenant_id,
+        AuditAction::AuthzDecision,
+        resource.to_string(),
+        Outcome::Allow,
+        json!({"op": op, "authz": audit::decision_context(action, authorized)}),
+    )
+    .await
+    .map(|_| ())
 }
 
 /// `GET /v1/hierarchy/nodes/{id}`.
@@ -167,7 +237,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ScopeId>) 
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::HierarchyRead,
@@ -175,22 +245,32 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ScopeId>) 
             Some(&node),
         )
         .await?;
+        read_event(
+            &mut tx,
+            tenant_id,
+            "get",
+            Action::HierarchyRead,
+            Resource::Scope(id),
+            &authorized,
+        )
+        .await?;
+        commit(tx).await?;
         Ok(Json(node))
     }
     .await;
-    respond("get", result)
+    respond(&state, "get", result).await
 }
 
 /// `GET /v1/hierarchy/nodes/{id}/children` — direct children, slug order.
 pub(crate) async fn children(State(state): State<AppState>, Path(id): Path<ScopeId>) -> Response {
     let result = listing(&state, id, "children").await;
-    respond("children", result)
+    respond(&state, "children", result).await
 }
 
 /// `GET /v1/hierarchy/nodes/{id}/ancestors` — nearest first, root last.
 pub(crate) async fn ancestors(State(state): State<AppState>, Path(id): Path<ScopeId>) -> Response {
     let result = listing(&state, id, "ancestors").await;
-    respond("ancestors", result)
+    respond(&state, "ancestors", result).await
 }
 
 /// `GET /v1/hierarchy/nodes/{id}/descendants` — the subtree, path order.
@@ -199,16 +279,20 @@ pub(crate) async fn descendants(
     Path(id): Path<ScopeId>,
 ) -> Response {
     let result = listing(&state, id, "descendants").await;
-    respond("descendants", result)
+    respond(&state, "descendants", result).await
 }
 
 /// Shared shape of the three listing routes: 404 for an unknown anchor
 /// node (an empty list must mean "no relatives", never "no such node").
-async fn listing(state: &AppState, id: ScopeId, which: &str) -> Result<Json<Vec<HierarchyNode>>> {
+async fn listing(
+    state: &AppState,
+    id: ScopeId,
+    which: &'static str,
+) -> Result<Json<Vec<HierarchyNode>>> {
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
-    authz::require(
+    let authorized = authz::require(
         state,
         &mut tx,
         Action::HierarchyRead,
@@ -226,6 +310,16 @@ async fn listing(state: &AppState, id: ScopeId, which: &str) -> Result<Json<Vec<
             });
         }
     };
+    read_event(
+        &mut tx,
+        tenant_id,
+        which,
+        Action::HierarchyRead,
+        Resource::Scope(id),
+        &authorized,
+    )
+    .await?;
+    commit(tx).await?;
     Ok(Json(nodes))
 }
 
@@ -253,13 +347,13 @@ pub(crate) async fn update(
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         // Ownership check before any mutation (see `found`).
-        let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
-        authz::require(
+        let before = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::HierarchyUpdate,
             Resource::Scope(id),
-            Some(&node),
+            Some(&before),
         )
         .await?;
         if let Some(name) = &body.name {
@@ -269,6 +363,19 @@ pub(crate) async fn update(
             hierarchy::move_node(&mut tx, id, parent_id).await?;
         }
         let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::HierarchyNodeUpdated,
+            Resource::Scope(id).to_string(),
+            Outcome::Success,
+            json!({
+                "authz": audit::decision_context(Action::HierarchyUpdate, &authorized),
+                "before": node_image(&before),
+                "after": node_image(&node),
+            }),
+        )
+        .await?;
         commit(tx).await?;
         // A committed rename/move reshapes cached chains — and a move,
         // the Cedar entity graph (ADR-0016, ADR-0017).
@@ -276,7 +383,7 @@ pub(crate) async fn update(
         Ok(Json(node))
     }
     .await;
-    respond("update", result)
+    respond(&state, "update", result).await
 }
 
 /// `DELETE /v1/hierarchy/nodes/{id}` — leaf nodes only.
@@ -286,7 +393,7 @@ pub(crate) async fn delete(State(state): State<AppState>, Path(id): Path<ScopeId
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         // Ownership check before any mutation (see `found`).
         let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
-        authz::require(
+        let authorized = authz::require(
             &state,
             &mut tx,
             Action::HierarchyDelete,
@@ -297,6 +404,18 @@ pub(crate) async fn delete(State(state): State<AppState>, Path(id): Path<ScopeId
         if !hierarchy::delete(&mut tx, id).await? {
             return Err(not_found(id));
         }
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::HierarchyNodeDeleted,
+            Resource::Scope(id).to_string(),
+            Outcome::Success,
+            json!({
+                "authz": audit::decision_context(Action::HierarchyDelete, &authorized),
+                "node": node_image(&node),
+            }),
+        )
+        .await?;
         commit(tx).await?;
         // The deleted leaf's cached chain and fragment must go
         // (ADR-0016, ADR-0017).
@@ -304,7 +423,7 @@ pub(crate) async fn delete(State(state): State<AppState>, Path(id): Path<ScopeId
         Ok(StatusCode::NO_CONTENT)
     }
     .await;
-    respond("delete", result)
+    respond(&state, "delete", result).await
 }
 
 pub(crate) fn not_found(id: ScopeId) -> Error {
