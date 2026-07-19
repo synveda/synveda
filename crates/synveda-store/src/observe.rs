@@ -21,7 +21,9 @@ use uuid::Uuid;
 /// 0012; consumed by the extraction pipeline from MEM-2/3 on).
 pub const OBSERVE_QUEUE: &str = "observe";
 
-/// One event as submitted for admission.
+/// One event as submitted for admission — payload already redacted by
+/// the scan seam (MEM-2, ADR-0021): raw findings never reach this
+/// module in any mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewObserveEvent {
     /// Client-minted admission key; one key admits one event per tenant,
@@ -34,6 +36,14 @@ pub struct NewObserveEvent {
     pub payload: serde_json::Value,
     /// Client-asserted event time.
     pub occurred_at: DateTime<Utc>,
+    /// The scan's finding summary (rule ids, categories, counts — never
+    /// matched text), stamped on the staging row as provenance. `None`
+    /// when the payload was clean.
+    pub redactions: Option<serde_json::Value>,
+    /// Stage without a work signal and open a pending review row
+    /// (ADR-0021 decision 5). The pipeline cannot see the event until a
+    /// reviewer releases it.
+    pub quarantine: bool,
 }
 
 /// The admission outcome for one submitted event, in submission order.
@@ -47,6 +57,10 @@ pub struct AdmittedEvent {
     /// True when an earlier delivery (or an earlier event in this same
     /// batch) already admitted this key.
     pub duplicate: bool,
+    /// True when *this* submission staged signal-less behind a pending
+    /// review row. Always false for duplicates: the winning delivery's
+    /// disposition stands, whatever it was.
+    pub quarantined: bool,
 }
 
 /// Maps a sqlx error at the storage boundary into the shared taxonomy.
@@ -64,13 +78,17 @@ fn storage_error(err: sqlx::Error) -> Error {
 }
 
 /// Admits a batch of observe events for `owner_id` at `scope_id`: inserts
-/// the non-duplicate events into staging and enqueues one work signal per
-/// inserted row, all on the caller's transaction. Returns one
-/// [`AdmittedEvent`] per input event, in input order.
+/// the non-duplicate events into staging, enqueues one work signal per
+/// inserted non-quarantined row, and opens one pending review row per
+/// inserted quarantined row (MEM-2, ADR-0021 decision 5) — all on the
+/// caller's transaction. Returns one [`AdmittedEvent`] per input event,
+/// in input order.
 ///
 /// Duplicates — a key already admitted by an earlier delivery, or repeated
 /// within this batch — are reported, not errored: for an at-least-once
-/// client, redelivery is the success case (ADR-0020 decision 2).
+/// client, redelivery is the success case (ADR-0020 decision 2). The
+/// winning delivery's disposition stands: a redelivered quarantined event
+/// neither re-quarantines nor signals.
 #[tracing::instrument(
     name = "store.observe.buffer_batch",
     skip_all,
@@ -117,17 +135,28 @@ pub async fn buffer_batch(
         .iter()
         .map(|event| event.occurred_at)
         .collect();
+    // Nullable array elements can't ride a typed vec; `redactions` goes
+    // over as a jsonb array whose elements are the per-event summary or
+    // json null (mapped back to a SQL null in the insert).
+    let redactions = serde_json::Value::Array(
+        first_occurrence
+            .iter()
+            .map(|event| event.redactions.clone().unwrap_or(serde_json::Value::Null))
+            .collect(),
+    );
 
     let inserted_keys: Vec<String> = sqlx::query_scalar!(
         r#"
         insert into observe_events
             (id, tenant_id, scope_id, owner_id, session_id,
-             idempotency_key, kind, payload, occurred_at)
+             idempotency_key, kind, payload, occurred_at, redactions)
         select u.id, $1, $2, $3, $4, u.idempotency_key, u.kind, u.payload,
-               u.occurred_at
+               u.occurred_at,
+               nullif($10::jsonb -> (u.ord - 1)::int, 'null'::jsonb)
         from unnest($5::uuid[], $6::text[], $7::text[], $8::jsonb[],
                     $9::timestamptz[])
-            as u(id, idempotency_key, kind, payload, occurred_at)
+                with ordinality as u(id, idempotency_key, kind, payload,
+                                     occurred_at, ord)
         on conflict (tenant_id, idempotency_key) do nothing
         returning idempotency_key
         "#,
@@ -140,6 +169,7 @@ pub async fn buffer_batch(
         &kinds,
         &payloads,
         &occurred,
+        redactions,
     )
     .fetch_all(&mut *conn)
     .await
@@ -180,19 +210,42 @@ pub async fn buffer_batch(
         }
     }
 
-    // One work signal per row actually inserted, on the same transaction:
-    // the pipeline can never see a delivery twice, and a rollback retracts
-    // rows and signals together.
-    let signals: Vec<serde_json::Value> = keys
+    // One work signal per row actually inserted *and not quarantined*,
+    // on the same transaction: the pipeline can never see a delivery
+    // twice, a quarantined event stays invisible to it until release
+    // (ADR-0021 decision 5), and a rollback retracts rows, signals, and
+    // review markers together.
+    let quarantined_by_key: HashMap<&str, &NewObserveEvent> = first_occurrence
         .iter()
-        .filter_map(|key| match admitted.get(key.as_str()) {
-            Some((id, false)) => Some(serde_json::json!({
+        .filter(|event| event.quarantine)
+        .map(|event| (event.idempotency_key.as_str(), *event))
+        .collect();
+    let mut signals: Vec<serde_json::Value> = Vec::new();
+    let mut review_ids: Vec<Uuid> = Vec::new();
+    let mut review_findings: Vec<serde_json::Value> = Vec::new();
+    for key in &keys {
+        let Some((id, false)) = admitted.get(key.as_str()) else {
+            continue;
+        };
+        match quarantined_by_key.get(key.as_str()) {
+            Some(event) => {
+                review_ids.push(id.as_uuid());
+                // A quarantined event always has findings — that is what
+                // quarantined it — but the column is NOT NULL, so an
+                // empty list is the defensive shape, never a SQL null.
+                review_findings.push(
+                    event
+                        .redactions
+                        .clone()
+                        .unwrap_or(serde_json::Value::Array(Vec::new())),
+                );
+            }
+            None => signals.push(serde_json::json!({
                 "tenant_id": tenant_id,
                 "event_id": id,
             })),
-            _ => None,
-        })
-        .collect();
+        }
+    }
     if !signals.is_empty() {
         sqlx::query_scalar!(
             r#"select pgmq.send_batch($1, $2::jsonb[]) as "msg_id!""#,
@@ -200,6 +253,22 @@ pub async fn buffer_batch(
             &signals,
         )
         .fetch_all(&mut *conn)
+        .await
+        .map_err(storage_error)?;
+    }
+    if !review_ids.is_empty() {
+        sqlx::query!(
+            r#"
+            insert into observe_quarantine (event_id, tenant_id, scope_id, findings)
+            select u.event_id, $1, $2, u.findings
+            from unnest($3::uuid[], $4::jsonb[]) as u(event_id, findings)
+            "#,
+            tenant_id.as_uuid(),
+            scope_id.as_uuid(),
+            &review_ids,
+            &review_findings,
+        )
+        .execute(&mut *conn)
         .await
         .map_err(storage_error)?;
     }
@@ -215,10 +284,12 @@ pub async fn buffer_batch(
                 message: format!("observe admission lost track of key {key:?}"),
             })?;
             let repeat = !seen_in_batch.insert(key);
+            let duplicate = redelivery || repeat;
             Ok(AdmittedEvent {
                 id,
                 idempotency_key: event.idempotency_key.clone(),
-                duplicate: redelivery || repeat,
+                duplicate,
+                quarantined: !duplicate && event.quarantine,
             })
         })
         .collect()

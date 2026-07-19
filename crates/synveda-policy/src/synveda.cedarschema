@@ -106,6 +106,25 @@ namespace Synveda {
             context: { roles: Set<String>, grant: String },
         };
 
+    // The quarantine review plane (/v1/quarantine, MEM-2, ADR-0021
+    // decision 6): listing pending quarantined observe events
+    // (tenant-wide on the Tenant resource, a subtree on a Scope) and
+    // reviewing one (release/reject — always the event's scope, never
+    // the tenant: a quarantined event lives at a node).
+    action QuarantineRead
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Scope],
+            context: { roles: Set<String> },
+        };
+
+    action QuarantineReview
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String> },
+        };
+
     // The service-identity plane (/v1/service-identities, AUTH-3,
     // ADR-0018 decision 3): reading registrations (get on the anchor;
     // list on the tenant resource) and registering/revoking agents at an

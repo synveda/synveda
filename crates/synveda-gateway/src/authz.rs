@@ -352,7 +352,13 @@ async fn refresh_tenant(
         {
             continue;
         }
-        match pdp.install_source(tenant_id, &pack.name, pack.version, &pack.source) {
+        match pdp.install_source(
+            tenant_id,
+            &pack.name,
+            pack.version,
+            &pack.source,
+            pack.redaction,
+        ) {
             Ok(()) => outcomes.push("installed"),
             Err(error) => {
                 tracing::warn!(

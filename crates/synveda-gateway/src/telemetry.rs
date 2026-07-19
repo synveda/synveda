@@ -76,9 +76,22 @@ pub const SERVICE_TOKEN_REJECTIONS_TOTAL: &str = "synveda_service_token_rejectio
 pub const OBSERVE_BATCHES_TOTAL: &str = "synveda_observe_batches_total";
 
 /// Observe events admitted to the buffer (MEM-1, ADR-0020), labelled by
-/// `outcome`: `accepted` (staged and enqueued) or `duplicate`
-/// (idempotency key already admitted — reported, never re-enqueued).
+/// `outcome`: `accepted` (staged and enqueued), `duplicate` (idempotency
+/// key already admitted — reported, never re-enqueued), `quarantined`
+/// (staged signal-less behind a pending review, MEM-2 ADR-0021), or
+/// `denied` (refused per event; nothing persisted).
 pub const OBSERVE_EVENTS_TOTAL: &str = "synveda_observe_events_total";
+
+/// Redaction findings on the observe scan seam (MEM-2, ADR-0021),
+/// labelled by `rule` and `category` (`secret`/`pii`). Counts findings
+/// only — matched text appears nowhere, metrics included.
+pub const REDACTION_FINDINGS_TOTAL: &str = "synveda_redaction_findings_total";
+
+/// Quarantine review operations (MEM-2, ADR-0021 decision 6), labelled
+/// by `op` (`list`/`release`/`reject`) and `outcome` (`ok`, `rejected`,
+/// `error`). Release and reject chain `memory.quarantine.*` events;
+/// list chains its allowed decision (ADR-0019 decision 4).
+pub const QUARANTINE_OPERATIONS_TOTAL: &str = "synveda_quarantine_operations_total";
 
 /// Handle to the installed tracer provider. Call [`Telemetry::shutdown`] on
 /// exit to flush batched spans; dropping without it can lose the tail of the

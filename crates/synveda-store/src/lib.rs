@@ -25,6 +25,7 @@ pub mod identities;
 pub mod observe;
 pub mod policy_assignments;
 pub mod policy_packs;
+pub mod quarantine;
 pub mod records;
 pub mod rls;
 pub mod role_bindings;

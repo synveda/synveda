@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select (select count(*) from pgmq.q_observe\n                where message ->> 'tenant_id' = $1)\n             + (select count(*) from pgmq.a_observe\n                where message ->> 'tenant_id' = $1) as \"count!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1b37cbb54ad4c165aa340455cd7741d396aa8772c51fcfcf2d81a89674f53ec4"
+}

@@ -15,7 +15,10 @@ use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::{Hs256Verifier, personal_slug};
-use synveda_types::{IdentityId, IdentityKind, Role, ScopeId, ScopeKind, TenantId, TenantStatus};
+use synveda_types::{
+    IdentityId, IdentityKind, RedactionConfig, RedactionMode, Role, ScopeId, ScopeKind, TenantId,
+    TenantStatus,
+};
 
 #[derive(Parser)]
 #[command(name = "synveda", about = "Synveda admin/dev CLI", version)]
@@ -115,6 +118,15 @@ enum PolicyCommand {
         /// reserved (ADR-0014).
         #[arg(long)]
         name: String,
+        /// Redaction mode for secret findings on observe ingest
+        /// (deny/redact/quarantine — MEM-2, ADR-0021). Both redaction
+        /// flags must be given together or neither; unconfigured packs
+        /// get the strict default (secrets quarantine, PII redact).
+        #[arg(long, requires = "redaction_pii")]
+        redaction_secrets: Option<RedactionMode>,
+        /// Redaction mode for PII findings on observe ingest.
+        #[arg(long, requires = "redaction_secrets")]
+        redaction_pii: Option<RedactionMode>,
         /// Path to the Cedar policy source file.
         file: std::path::PathBuf,
     },
@@ -283,7 +295,13 @@ async fn run(cli: Cli) -> Result<(), String> {
             );
             Ok(())
         }
-        Command::Policy(PolicyCommand::Apply { tenant, name, file }) => {
+        Command::Policy(PolicyCommand::Apply {
+            tenant,
+            name,
+            redaction_secrets,
+            redaction_pii,
+            file,
+        }) => {
             let source = std::fs::read_to_string(&file)
                 .map_err(|err| format!("read {}: {err}", file.display()))?;
             // Compile-check before storing: same schema, same validation
@@ -291,19 +309,33 @@ async fn run(cli: Cli) -> Result<(), String> {
             synveda_policy::Pdp::new()
                 .and_then(|pdp| pdp.compile_check(&name, &source))
                 .map_err(|err| err.to_string())?;
+            // clap's `requires` makes these all-or-nothing.
+            let redaction = redaction_secrets
+                .zip(redaction_pii)
+                .map(|(secrets, pii)| RedactionConfig { secrets, pii });
             let pool = connect().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
-            let pack = synveda_store::policy_packs::apply(&mut *tx, tenant, &name, &source)
-                .await
-                .map_err(|err| err.to_string())?;
+            let pack = synveda_store::policy_packs::apply(
+                &mut *tx,
+                tenant,
+                &name,
+                &source,
+                redaction.as_ref(),
+            )
+            .await
+            .map_err(|err| err.to_string())?;
             record_break_glass(
                 &mut tx,
                 tenant,
                 AuditAction::PolicyPackApplied,
                 format!("tenant {tenant}"),
-                json!({"pack": pack.name, "version": pack.version}),
+                json!({
+                    "pack": pack.name,
+                    "version": pack.version,
+                    "redaction": pack.redaction,
+                }),
             )
             .await?;
             tx.commit().await.map_err(|err| err.to_string())?;

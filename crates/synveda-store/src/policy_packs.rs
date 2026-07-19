@@ -18,7 +18,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use sqlx::postgres::PgConnection;
-use synveda_types::{Error, Result, TenantId};
+use synveda_types::{Error, RedactionConfig, Result, TenantId};
 
 /// A tenant's stored policy pack.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,10 @@ pub struct PolicyPack {
     pub version: i64,
     /// Cedar policy source.
     pub source: String,
+    /// The pack's redaction configuration (MEM-2, ADR-0021 decision 3).
+    /// `None` means unconfigured: the PDP falls back to the strict
+    /// default (fail safe).
+    pub redaction: Option<RedactionConfig>,
     /// When the pack was last applied.
     pub updated_at: DateTime<Utc>,
 }
@@ -66,7 +70,8 @@ fn storage_error(err: sqlx::Error) -> Error {
 /// Applies a pack under the tenant's `name`: inserts at version 1, or
 /// replaces the existing row and bumps its version — every apply is a new
 /// version, so the reloader's unchanged-skip and the decision log both see
-/// the change.
+/// the change. `redaction: None` clears any stored config: an apply is a
+/// full statement of the pack, never a partial patch.
 #[tracing::instrument(
     name = "store.policy_packs.apply",
     skip_all,
@@ -78,21 +83,31 @@ pub async fn apply(
     tenant_id: TenantId,
     name: &str,
     source: &str,
+    redaction: Option<&RedactionConfig>,
 ) -> Result<PolicyPack> {
+    let redaction_json = redaction
+        .map(|config| {
+            serde_json::to_value(config).map_err(|err| Error::Internal {
+                message: format!("serialise redaction config: {err}"),
+            })
+        })
+        .transpose()?;
     let row = sqlx::query_as!(
         PolicyPackRow,
         r#"
-        insert into policy_packs (tenant_id, name, version, source)
-        values ($1, $2, 1, $3)
+        insert into policy_packs (tenant_id, name, version, source, redaction)
+        values ($1, $2, 1, $3, $4)
         on conflict (tenant_id, name) do update
             set source = excluded.source,
+                redaction = excluded.redaction,
                 version = policy_packs.version + 1,
                 updated_at = now()
-        returning tenant_id, name, version, source, updated_at
+        returning tenant_id, name, version, source, redaction, updated_at
         "#,
         tenant_id.as_uuid(),
         name,
         source,
+        redaction_json,
     )
     .fetch_one(executor)
     .await
@@ -112,7 +127,7 @@ pub async fn stored(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Resul
     let rows = sqlx::query_as!(
         PolicyPackRow,
         r#"
-        select tenant_id, name, version, source, updated_at
+        select tenant_id, name, version, source, redaction, updated_at
         from policy_packs where tenant_id = $1
         order by name
         "#,
@@ -139,7 +154,7 @@ pub async fn get(
     let row = sqlx::query_as!(
         PolicyPackRow,
         r#"
-        select tenant_id, name, version, source, updated_at
+        select tenant_id, name, version, source, redaction, updated_at
         from policy_packs where tenant_id = $1 and name = $2
         "#,
         tenant_id.as_uuid(),
@@ -202,16 +217,34 @@ struct PolicyPackRow {
     name: String,
     version: i64,
     source: String,
+    redaction: Option<serde_json::Value>,
     updated_at: DateTime<Utc>,
 }
 
 impl From<PolicyPackRow> for PolicyPack {
     fn from(row: PolicyPackRow) -> Self {
+        // [`apply`] validated the config on the way in; unparseable
+        // stored json can only come from out-of-band writes. Fail safe:
+        // treat it as unconfigured (the strict default downstream),
+        // loudly.
+        let redaction = row.redaction.and_then(|value| {
+            serde_json::from_value(value)
+                .inspect_err(|err| {
+                    tracing::warn!(
+                        policy.pack = %row.name,
+                        error = %err,
+                        "stored redaction config does not parse; \
+                         treating the pack as unconfigured (strict default)"
+                    );
+                })
+                .ok()
+        });
         PolicyPack {
             tenant_id: TenantId::from_uuid(row.tenant_id),
             name: row.name,
             version: row.version,
             source: row.source,
+            redaction,
             updated_at: row.updated_at,
         }
     }

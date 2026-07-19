@@ -1,5 +1,5 @@
-// open-collaboration@4 — org-wide read (seed §6, ADR-0014, ADR-0015,
-// ADR-0018, ADR-0020).
+// open-collaboration@5 — org-wide read (seed §6, ADR-0014, ADR-0015,
+// ADR-0018, ADR-0020, ADR-0021).
 //
 // Own-chain reads plus every scope of the tenant, personal (user-kind)
 // scopes excluded — the privacy floor. The seed's "non-restricted
@@ -97,4 +97,18 @@ permit (
     resource in principal.tenant
         && context.roles.containsAny(["contributor", "curator"])
         && resource.kind != "user"
+};
+
+// The quarantine review plane (MEM-2, ADR-0021 decision 6):
+// pack-uniform — see regulated-strict for the full rationale.
+permit (
+    principal,
+    action in [
+        Synveda::Action::"QuarantineRead",
+        Synveda::Action::"QuarantineReview"
+    ],
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["steward", "org-admin", "security-reviewer"])
 };

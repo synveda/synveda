@@ -20,8 +20,8 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
 use synveda_store::{
-    group_mappings, hierarchy, identities, observe, policy_assignments, policy_packs, rls,
-    role_bindings, tenants,
+    group_mappings, hierarchy, identities, observe, policy_assignments, policy_packs, quarantine,
+    rls, role_bindings, tenants,
 };
 use synveda_types::{
     Error, IdentityId, IdentityKind, ObserveKind, RecordClass, RecordId, RecordKind, Role, ScopeId,
@@ -173,6 +173,7 @@ const COVERED: &[&str] = &[
     "hierarchy_nodes",
     "identities",
     "observe_events",
+    "observe_quarantine",
     "policy_pack_assignments",
     "policy_pack_defaults",
     "policy_packs",
@@ -451,6 +452,7 @@ async fn seed_policy_pack(pool: &PgPool) -> TenantId {
         tenant,
         "rls-fixture",
         "permit (principal, action, resource);",
+        None,
     )
     .await
     .expect("apply pack");
@@ -503,7 +505,7 @@ fn cross_tenant_policy_pack_write_is_rejected() {
         let tenant = seed_policy_pack(&db.pool).await;
         let other = seed_policy_pack(&db.pool).await;
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let result = policy_packs::apply(&mut *tx, other, "forged", "permit;").await;
+        let result = policy_packs::apply(&mut *tx, other, "forged", "permit;", None).await;
         assert!(
             matches!(result, Err(Error::Internal { .. })),
             "cross-tenant pack write must be rejected by RLS as an internal \
@@ -521,11 +523,11 @@ fn same_tenant_policy_pack_lifecycle_works_under_rls() {
     db.rt.block_on(async {
         let tenant = seed_policy_pack(&db.pool).await;
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let first = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "forbid;")
+        let first = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "forbid;", None)
             .await
             .expect("apply under RLS");
         assert_eq!(first.version, 1, "a new name starts at v1");
-        let bumped = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "permit;")
+        let bumped = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "permit;", None)
             .await
             .expect("re-apply under RLS");
         assert_eq!(bumped.version, 2, "re-applying the name must bump to v2");
@@ -1190,6 +1192,22 @@ fn observe_event(key: &str) -> observe::NewObserveEvent {
         kind: ObserveKind::TranscriptDelta,
         payload: serde_json::json!({"text": "rls fixture"}),
         occurred_at: chrono::Utc::now(),
+        redactions: None,
+        quarantine: false,
+    }
+}
+
+/// An event staged behind the review queue (MEM-2, ADR-0021 decision 5).
+fn quarantined_event(key: &str) -> observe::NewObserveEvent {
+    observe::NewObserveEvent {
+        idempotency_key: key.to_owned(),
+        kind: ObserveKind::TranscriptDelta,
+        payload: serde_json::json!({"text": "[REDACTED:aws-access-key-id] fixture"}),
+        occurred_at: chrono::Utc::now(),
+        redactions: Some(serde_json::json!([
+            {"rule": "aws-access-key-id", "category": "secret", "count": 1}
+        ])),
+        quarantine: true,
     }
 }
 
@@ -1396,6 +1414,153 @@ fn same_tenant_observe_admission_works_under_rls() {
         assert_eq!(
             signals, 3,
             "one signal per admitted event, none per duplicate"
+        );
+    });
+}
+
+// ── Quarantine review queue (MEM-2, ADR-0021) ───────────────────────────────
+
+/// Admits a tenant with one quarantined observe event; returns its ids.
+async fn seed_quarantined(pool: &PgPool) -> (TenantId, synveda_types::ObserveEventId) {
+    let (tenant, scope, identity) = seed_observe(pool).await;
+    let mut tx = pool.begin().await.expect("begin");
+    let admitted = observe::buffer_batch(
+        &mut tx,
+        tenant,
+        scope,
+        identity,
+        "rls-quarantine-session",
+        &[quarantined_event("rls-q1")],
+    )
+    .await
+    .expect("buffer quarantined event");
+    tx.commit().await.expect("commit quarantine fixture");
+    (tenant, admitted[0].id)
+}
+
+/// The wrong (or absent) tenant GUC sees zero quarantine rows, and a
+/// cross-tenant review resolves nothing — the review queue is content
+/// (redacted, but content) and sits squarely under the backstop.
+#[test]
+fn wrong_tenant_guc_sees_no_quarantine_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, event_id) = seed_quarantined(&db.pool).await;
+        let (adversary, _) = seed_quarantined(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let visible = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from observe_quarantine
+               where tenant_id = $1"#,
+            victim.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count quarantine rows");
+        assert_eq!(visible, 0, "quarantine rows leaked across tenants");
+        // The store surfaces reach nothing either: get is None, review
+        // touches no row — the gateway's uniform 404.
+        assert_eq!(
+            quarantine::get(&mut tx, victim, event_id)
+                .await
+                .expect("get across tenants"),
+            None
+        );
+        let review = quarantine::review(
+            &mut tx,
+            victim,
+            event_id,
+            quarantine::ReviewDecision::Release,
+            "adversary",
+            None,
+        )
+        .await;
+        assert!(
+            matches!(review, Ok(None)),
+            "a cross-tenant review must resolve nothing, got {review:?}"
+        );
+    });
+}
+
+/// The app role's write power over the review queue is exactly the
+/// one-shot review: findings/provenance columns are not updatable, rows
+/// are not deletable, and a reviewed row cannot be re-reviewed — column
+/// grants and the transition trigger, exercised as `synveda_app`.
+#[test]
+fn quarantine_review_is_one_shot_and_column_bound_for_the_app_role() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, event_id) = seed_quarantined(&db.pool).await;
+
+        // Rewriting findings: no column grant.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let rewrite = sqlx::raw_sql("update observe_quarantine set findings = '[]'")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            rewrite.is_err(),
+            "the app role must not hold UPDATE on findings"
+        );
+        drop(tx);
+
+        // Deleting: no grant, and the trigger raises even for owners.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let delete = sqlx::raw_sql("delete from observe_quarantine")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            delete.is_err(),
+            "the app role must not hold DELETE on observe_quarantine"
+        );
+        drop(tx);
+
+        // The sanctioned path works: pending → rejected, one-shot.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let reviewed = quarantine::review(
+            &mut tx,
+            tenant,
+            event_id,
+            quarantine::ReviewDecision::Reject,
+            "rls-reviewer",
+            Some("rls suite"),
+        )
+        .await
+        .expect("review under RLS")
+        .expect("the quarantined event exists");
+        assert_eq!(reviewed.state, synveda_types::QuarantineState::Rejected);
+        tx.commit().await.expect("commit review");
+
+        // A second verdict is a conflict, not a rewrite.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let second = quarantine::review(
+            &mut tx,
+            tenant,
+            event_id,
+            quarantine::ReviewDecision::Release,
+            "rls-reviewer",
+            None,
+        )
+        .await;
+        assert!(
+            matches!(second, Err(Error::Conflict { .. })),
+            "review must be one-shot, got {second:?}"
+        );
+        drop(tx);
+
+        // Even a raw update aimed back at pending trips the transition
+        // trigger — the state machine is schema-enforced.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let unreview = sqlx::query!(
+            "update observe_quarantine set state = 'pending', \
+             reviewer_subject = null, reviewed_at = null, review_reason = null \
+             where event_id = $1",
+            event_id.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            unreview.is_err(),
+            "a reviewed row must never return to pending"
         );
     });
 }

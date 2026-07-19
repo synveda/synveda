@@ -19,7 +19,9 @@ use cedar_policy::{
     Authorizer, Context, Decision, Entities, Entity, EntityId, EntityTypeName, EntityUid,
     PolicySet, Request, Schema, ValidationMode, Validator,
 };
-use synveda_types::{Error, HierarchyNode, Result, Role, ScopeId, ScopeKind, TenantId};
+use synveda_types::{
+    Error, HierarchyNode, RedactionConfig, Result, Role, ScopeId, ScopeKind, TenantId,
+};
 
 use crate::entity_store::EntityStore;
 use crate::request::{Action, AuthzContext, AuthzDecision, Principal, Resource};
@@ -42,11 +44,12 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// added the content-role read grant (ADR-0015 decision 4). `@3`: AUTH-3
 /// added the service-identity plane to the admin permits (ADR-0018
 /// decision 3). `@4`: MEM-1 added the `MemoryWrite` own-home floor and
-/// content-role write grant (ADR-0020 decision 3).
+/// content-role write grant (ADR-0020 decision 3). `@5`: MEM-2 added the
+/// quarantine review plane (ADR-0021 decision 6).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 4),
-    (STANDARD, 4),
-    (OPEN_COLLABORATION, 4),
+    (REGULATED_STRICT, 5),
+    (STANDARD, 5),
+    (OPEN_COLLABORATION, 5),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -65,11 +68,14 @@ const REGULATED_STRICT_SRC: &str = include_str!("packs/regulated-strict.cedar");
 const STANDARD_SRC: &str = include_str!("packs/standard.cedar");
 const OPEN_COLLABORATION_SRC: &str = include_str!("packs/open-collaboration.cedar");
 
-/// A compiled, schema-validated policy pack (base layer included).
+/// A compiled, schema-validated policy pack (base layer included), with
+/// its non-Cedar configuration: the redaction modes the observe scan
+/// seam applies under this pack (MEM-2, ADR-0021 decision 3).
 struct LoadedPack {
     name: String,
     version: i64,
     policies: PolicySet,
+    redaction: RedactionConfig,
 }
 
 /// Where the effective pack came from — logged with every decision so the
@@ -97,6 +103,9 @@ pub struct EffectivePack {
     pub version: i64,
     /// How the pack came to be in force.
     pub origin: PackOrigin,
+    /// The pack's redaction configuration (MEM-2, ADR-0021 decision 3):
+    /// what the observe scan seam does with findings under this pack.
+    pub redaction: RedactionConfig,
 }
 
 impl fmt::Display for PackOrigin {
@@ -137,15 +146,28 @@ impl Pdp {
         for warning in warnings {
             tracing::warn!(warning = %warning, "embedded Cedar schema warning");
         }
+        // Embedded packs carry compiled-in redaction configs (ADR-0021
+        // decision 3): strict quarantines secrets and redacts PII (the
+        // seed §6 wording); the relaxed packs redact everything.
         let sources = [
-            (REGULATED_STRICT, REGULATED_STRICT_SRC),
-            (STANDARD, STANDARD_SRC),
-            (OPEN_COLLABORATION, OPEN_COLLABORATION_SRC),
+            (
+                REGULATED_STRICT,
+                REGULATED_STRICT_SRC,
+                RedactionConfig::STRICT,
+            ),
+            (STANDARD, STANDARD_SRC, RedactionConfig::REDACT_ALL),
+            (
+                OPEN_COLLABORATION,
+                OPEN_COLLABORATION_SRC,
+                RedactionConfig::REDACT_ALL,
+            ),
         ];
         let mut embedded = HashMap::new();
-        for ((name, version), (_, source)) in EMBEDDED_PACKS.iter().zip(sources) {
-            let pack = compile(&schema, name, *version, source).map_err(|err| Error::Internal {
-                message: format!("embedded pack invalid: {err}"),
+        for ((name, version), (_, source, redaction)) in EMBEDDED_PACKS.iter().zip(sources) {
+            let pack = compile(&schema, name, *version, source, redaction).map_err(|err| {
+                Error::Internal {
+                    message: format!("embedded pack invalid: {err}"),
+                }
             })?;
             embedded.insert(*name, Arc::new(pack));
         }
@@ -182,7 +204,7 @@ impl Pdp {
     /// without installing it — the apply-time gate (`synveda policy
     /// apply` refuses a pack the reloader would reject).
     pub fn compile_check(&self, name: &str, source: &str) -> Result<()> {
-        compile(&self.schema, name, 0, source).map(|_| ())
+        compile(&self.schema, name, 0, source, RedactionConfig::STRICT).map(|_| ())
     }
 
     /// Compiles and installs a tenant's stored pack under its name,
@@ -190,19 +212,28 @@ impl Pdp {
     /// pack stays in force (ADR-0012 decision 5: a bad apply must not
     /// widen or brick a tenant). Reserved product names are refused —
     /// the in-process face of the store's check constraint.
+    /// `redaction: None` (an unconfigured stored pack) falls back to the
+    /// strict config — fail safe (ADR-0021 decision 3).
     pub fn install_source(
         &self,
         tenant_id: TenantId,
         name: &str,
         version: i64,
         source: &str,
+        redaction: Option<RedactionConfig>,
     ) -> Result<()> {
         if is_reserved(name) {
             return Err(Error::Invalid {
                 message: format!("pack name {name:?} is reserved for the product (ADR-0014)"),
             });
         }
-        let pack = compile(&self.schema, name, version, source)?;
+        let pack = compile(
+            &self.schema,
+            name,
+            version,
+            source,
+            redaction.unwrap_or_default(),
+        )?;
         self.write_packs()
             .entry(tenant_id)
             .or_default()
@@ -354,6 +385,7 @@ impl Pdp {
             name: pack.name.clone(),
             version: pack.version,
             origin,
+            redaction: pack.redaction,
         }
     }
 
@@ -707,7 +739,13 @@ fn nearest_department(chain: &[HierarchyNode]) -> Option<ScopeId> {
 /// decision 2): a pack that compiles can never fail at decision time for
 /// structural reasons (ADR-0012 decision 2), and no pack can drop the
 /// base rules.
-fn compile(schema: &Schema, name: &str, version: i64, source: &str) -> Result<LoadedPack> {
+fn compile(
+    schema: &Schema,
+    name: &str,
+    version: i64,
+    source: &str,
+    redaction: RedactionConfig,
+) -> Result<LoadedPack> {
     let combined = format!("{BASE_SRC}\n{source}");
     let policies: PolicySet = combined.parse().map_err(|err| Error::Invalid {
         message: format!("policy pack {name}@{version} does not parse: {err}"),
@@ -729,5 +767,6 @@ fn compile(schema: &Schema, name: &str, version: i64, source: &str) -> Result<Lo
         name: name.to_owned(),
         version,
         policies,
+        redaction,
     })
 }

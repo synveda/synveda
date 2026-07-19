@@ -6,8 +6,8 @@ use std::str::FromStr;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use synveda_types::{
-    Error, IdentityId, RecordClass, RecordId, RecordKind, Role, RoleBinding, ScopeId, Sensitivity,
-    Tenant, TenantId, TenantStatus,
+    Error, IdentityId, RecordClass, RecordId, RecordKind, RedactionConfig, RedactionMode, Role,
+    RoleBinding, ScopeId, Sensitivity, Tenant, TenantId, TenantStatus,
 };
 
 fn json_roundtrip<T>(value: &T) -> T
@@ -100,6 +100,61 @@ fn sensitivity_rejects_unknown_levels() {
     assert!(
         Sensitivity::from_str("Restricted").is_err(),
         "wire form is lowercase only"
+    );
+}
+
+// ── Redaction (MEM-2, ADR-0021) ──────────────────────────────────────────────
+
+#[test]
+fn redaction_mode_all_roundtrip_and_match_as_str() {
+    for mode in RedactionMode::ALL {
+        json_roundtrip(&mode);
+        let json = serde_json::to_string(&mode).expect("serialize");
+        assert_eq!(json, format!("\"{}\"", mode.as_str()));
+        assert_eq!(RedactionMode::from_str(mode.as_str()).unwrap(), mode);
+        assert_eq!(mode.to_string(), mode.as_str());
+    }
+}
+
+#[test]
+fn redaction_mode_ordering_is_least_to_most_strict() {
+    // The disposition rule (ADR-0021 decision 4): max() over triggered
+    // categories' modes must pick deny over quarantine over redact.
+    assert!(RedactionMode::Redact < RedactionMode::Quarantine);
+    assert!(RedactionMode::Quarantine < RedactionMode::Deny);
+}
+
+#[test]
+fn redaction_mode_rejects_unknown_modes() {
+    assert!(serde_json::from_str::<RedactionMode>("\"drop\"").is_err());
+    assert!(
+        RedactionMode::from_str("Deny").is_err(),
+        "wire form is lowercase only"
+    );
+}
+
+#[test]
+fn redaction_config_roundtrips_and_defaults_strict() {
+    json_roundtrip(&RedactionConfig::STRICT);
+    json_roundtrip(&RedactionConfig::REDACT_ALL);
+    assert_eq!(
+        RedactionConfig::default(),
+        RedactionConfig::STRICT,
+        "an unconfigured pack must fail safe (ADR-0021 decision 3)"
+    );
+    assert_eq!(RedactionConfig::STRICT.secrets, RedactionMode::Quarantine);
+    assert_eq!(RedactionConfig::STRICT.pii, RedactionMode::Redact);
+}
+
+#[test]
+fn redaction_config_rejects_unknown_fields() {
+    // deny_unknown_fields: a stored config with a typo'd category must
+    // fail loudly, never silently fall back for that category.
+    assert!(
+        serde_json::from_str::<RedactionConfig>(
+            r#"{"secrets":"deny","pii":"redact","secrests":"deny"}"#
+        )
+        .is_err()
     );
 }
 

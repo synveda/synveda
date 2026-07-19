@@ -36,6 +36,7 @@ pub mod hierarchy;
 pub mod observe;
 pub mod policy;
 mod provision;
+pub mod quarantine;
 pub mod roles;
 pub mod service_identities;
 pub mod telemetry;

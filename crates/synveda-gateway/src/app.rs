@@ -27,6 +27,7 @@ use crate::error::ApiError;
 use crate::hierarchy;
 use crate::observe;
 use crate::policy;
+use crate::quarantine;
 use crate::roles;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
@@ -130,11 +131,19 @@ pub fn router(state: AppState) -> Router {
         )
         // The observe primitive (MEM-1, ADR-0020): the data plane's write
         // seam. Its body limit covers the worst-case batch; every other
-        // route keeps axum's default.
+        // route keeps axum's default. The redaction scan runs inside it
+        // (MEM-2, ADR-0021).
         .route(
             "/v1/observe",
             post(observe::create).layer(DefaultBodyLimit::max(observe::BODY_LIMIT_BYTES)),
         )
+        // The quarantine review plane (MEM-2, ADR-0021 decisions 5–7).
+        .route("/v1/quarantine", get(quarantine::list))
+        .route(
+            "/v1/quarantine/{event_id}/release",
+            post(quarantine::release),
+        )
+        .route("/v1/quarantine/{event_id}/reject", post(quarantine::reject))
         // The service-identity plane (AUTH-3, ADR-0018 decision 3).
         .route(
             "/v1/service-identities",

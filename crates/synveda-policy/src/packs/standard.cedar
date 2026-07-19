@@ -1,5 +1,5 @@
-// standard@4 — team-shares-by-default within a department (seed §6,
-// ADR-0014, ADR-0015, ADR-0018, ADR-0020).
+// standard@5 — team-shares-by-default within a department (seed §6,
+// ADR-0014, ADR-0015, ADR-0018, ADR-0020, ADR-0021).
 //
 // Own-chain reads plus the department subtree: sibling teams under the
 // principal's department share by default. Other people's personal
@@ -95,4 +95,18 @@ permit (
     resource in principal.tenant
         && context.roles.containsAny(["contributor", "curator"])
         && resource.kind != "user"
+};
+
+// The quarantine review plane (MEM-2, ADR-0021 decision 6):
+// pack-uniform — see regulated-strict for the full rationale.
+permit (
+    principal,
+    action in [
+        Synveda::Action::"QuarantineRead",
+        Synveda::Action::"QuarantineReview"
+    ],
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["steward", "org-admin", "security-reviewer"])
 };

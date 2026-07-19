@@ -57,6 +57,10 @@ jsonwebtoken = { version = "10", default-features = false, features = [
     "use_pem",
     "rust_crypto",
 ] }
+# The redaction scanner (MEM-2, ADR-0021): finite automata only — no
+# backtracking, so a hostile payload cannot pathologically slow the ack
+# path. MIT/Apache-2.0.
+regex = "1"
 # OIDC discovery/JWKS/token-endpoint client (AUTH-1, ADR-0010). No TLS
 # feature on purpose (same doctrine as sqlx below): dev IdPs are plain-http
 # localhost; the production TLS backend is chosen (and licence-reviewed)

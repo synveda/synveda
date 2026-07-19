@@ -1,5 +1,5 @@
-// regulated-strict@4 — the default product pack (seed §6, ADR-0014,
-// ADR-0015, ADR-0018, ADR-0020).
+// regulated-strict@5 — the default product pack (seed §6, ADR-0014,
+// ADR-0015, ADR-0018, ADR-0020, ADR-0021).
 //
 // Deny-first: composition reads the principal's own chain, plus whatever
 // a content-role binding explicitly grants — under this pack a viewer/
@@ -94,4 +94,25 @@ permit (
     resource in principal.tenant
         && context.roles.containsAny(["contributor", "curator"])
         && resource.kind != "user"
+};
+
+// The quarantine review plane (MEM-2, ADR-0021 decision 6): stewards,
+// org-admins, and security reviewers adjudicate quarantined observe
+// events over the bound subtree — security-reviewer's first live
+// action. Pack-uniform, like the write grant: how a security control is
+// reviewed does not loosen per pack. Auditor is excluded (quarantine
+// rows are content, redacted or not). Quarantined events live at
+// user-kind home scopes, so this permit is the deliberate, recorded
+// oversight carve-out of the personal-scope privacy floor — bounded by
+// redaction, and the owner holds no self-release right.
+permit (
+    principal,
+    action in [
+        Synveda::Action::"QuarantineRead",
+        Synveda::Action::"QuarantineReview"
+    ],
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["steward", "org-admin", "security-reviewer"])
 };

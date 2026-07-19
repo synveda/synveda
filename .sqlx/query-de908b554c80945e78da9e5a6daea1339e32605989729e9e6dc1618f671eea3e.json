@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update observe_quarantine set state = 'pending', reviewer_subject = null, reviewed_at = null, review_reason = null where event_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "de908b554c80945e78da9e5a6daea1339e32605989729e9e6dc1618f671eea3e"
+}

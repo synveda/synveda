@@ -61,6 +61,13 @@ pub enum Action {
     /// principal's own personal scope role-free (zero-config) and bound
     /// content roles beyond it.
     MemoryWrite,
+    /// List/read quarantined observe events: the tenant's pending queue
+    /// (the tenant resource) or a subtree's (a scope) — `/v1/quarantine`
+    /// (MEM-2, ADR-0021 decision 6).
+    QuarantineRead,
+    /// Release or reject one quarantined event at its scope. Never a
+    /// tenant-level action: a quarantined event lives at a node.
+    QuarantineReview,
     /// Read packs and effective assignments (`/v1/policy/*`).
     PolicyRead,
     /// Assign a pack to the resource node, or set the tenant default
@@ -95,6 +102,8 @@ impl Action {
             Action::HierarchyDelete => "hierarchy.delete",
             Action::MemoryRead => "memory.read",
             Action::MemoryWrite => "memory.write",
+            Action::QuarantineRead => "quarantine.read",
+            Action::QuarantineReview => "quarantine.review",
             Action::PolicyRead => "policy.read",
             Action::PolicyAssign => "policy.assign",
             Action::RoleRead => "role.read",
@@ -113,6 +122,8 @@ impl Action {
             Action::HierarchyDelete => "HierarchyDelete",
             Action::MemoryRead => "MemoryRead",
             Action::MemoryWrite => "MemoryWrite",
+            Action::QuarantineRead => "QuarantineRead",
+            Action::QuarantineReview => "QuarantineReview",
             Action::PolicyRead => "PolicyRead",
             Action::PolicyAssign => "PolicyAssign",
             Action::RoleRead => "RoleRead",

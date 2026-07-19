@@ -115,8 +115,16 @@ pub enum AuditAction {
     ServiceIdentityRevoked,
     /// An observe batch was admitted to the ingestion buffer — one event
     /// per batch, counts and id range in the payload, never one row per
-    /// event (MEM-1, ADR-0020 decision 5; ADR-0019 decision 4).
+    /// event (MEM-1, ADR-0020 decision 5; ADR-0019 decision 4). Since
+    /// MEM-2 the payload also carries quarantined/denied counts and the
+    /// finding rule summary — never matched text (ADR-0021).
     MemoryObserved,
+    /// A reviewer released a quarantined observe event into the pipeline
+    /// (MEM-2, ADR-0021 decision 7).
+    QuarantineReleased,
+    /// A reviewer rejected a quarantined observe event; its staging row
+    /// stays provenance-only, forever signal-less.
+    QuarantineRejected,
     /// A tenant was admitted (CLI break-glass; TEN-5 owns the product
     /// lifecycle surface).
     TenantCreated,
@@ -147,6 +155,8 @@ impl AuditAction {
             AuditAction::ServiceIdentityRegistered => "service_identity.registered",
             AuditAction::ServiceIdentityRevoked => "service_identity.revoked",
             AuditAction::MemoryObserved => "memory.observed",
+            AuditAction::QuarantineReleased => "memory.quarantine.released",
+            AuditAction::QuarantineRejected => "memory.quarantine.rejected",
             AuditAction::TenantCreated => "tenant.created",
         }
     }

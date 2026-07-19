@@ -66,14 +66,14 @@ async fn apply_versions_per_name_and_clear_removes() {
         "a fresh tenant stores no packs"
     );
 
-    let first = policy_packs::apply(&mut *tx, tenant, "authz2-test", "permit (p) v1;")
+    let first = policy_packs::apply(&mut *tx, tenant, "authz2-test", "permit (p) v1;", None)
         .await
         .expect("first apply");
     assert_eq!(first.version, 1);
     assert_eq!(first.name, "authz2-test");
 
     // A different name is a different pack with its own version counter.
-    let sibling = policy_packs::apply(&mut *tx, tenant, "authz2-strict", "permit (p) v1;")
+    let sibling = policy_packs::apply(&mut *tx, tenant, "authz2-strict", "permit (p) v1;", None)
         .await
         .expect("sibling apply");
     assert_eq!(sibling.version, 1);
@@ -81,7 +81,7 @@ async fn apply_versions_per_name_and_clear_removes() {
     // Re-applying a name is a new version, even with identical content —
     // the reloader's unchanged-skip and the decision log both see the
     // change.
-    let bumped = policy_packs::apply(&mut *tx, tenant, "authz2-test", "permit (p) v1;")
+    let bumped = policy_packs::apply(&mut *tx, tenant, "authz2-test", "permit (p) v1;", None)
         .await
         .expect("re-apply");
     assert_eq!(bumped.version, 2);
@@ -132,7 +132,7 @@ async fn clear_refuses_while_assignments_reference_the_pack() {
     hierarchy::create(&mut tx, root, tenant, None, ScopeKind::Org, "acme", "ACME")
         .await
         .expect("create org root");
-    policy_packs::apply(&mut *tx, tenant, "authz2-pinned", "permit (p);")
+    policy_packs::apply(&mut *tx, tenant, "authz2-pinned", "permit (p);", None)
         .await
         .expect("apply pack");
 
@@ -257,7 +257,7 @@ async fn constraints_map_onto_the_taxonomy() {
     let mut tx = rls::begin_tenant_tx(&pool, tenant)
         .await
         .expect("begin tenant tx");
-    let bad_name = policy_packs::apply(&mut *tx, tenant, "Not A Slug!", "permit;").await;
+    let bad_name = policy_packs::apply(&mut *tx, tenant, "Not A Slug!", "permit;", None).await;
     assert!(
         matches!(bad_name, Err(Error::Invalid { .. })),
         "malformed name must be Invalid, got {bad_name:?}"
@@ -274,7 +274,7 @@ async fn constraints_map_onto_the_taxonomy() {
         let mut tx = rls::begin_tenant_tx(&pool, tenant)
             .await
             .expect("begin tenant tx");
-        let refused = policy_packs::apply(&mut *tx, tenant, reserved, "permit;").await;
+        let refused = policy_packs::apply(&mut *tx, tenant, reserved, "permit;", None).await;
         assert!(
             matches!(refused, Err(Error::Invalid { .. })),
             "storing {reserved} must be Invalid, got {refused:?}"
@@ -286,7 +286,7 @@ async fn constraints_map_onto_the_taxonomy() {
     let mut tx = rls::begin_tenant_tx(&pool, tenant)
         .await
         .expect("begin tenant tx");
-    let empty = policy_packs::apply(&mut *tx, tenant, "authz2-empty", "").await;
+    let empty = policy_packs::apply(&mut *tx, tenant, "authz2-empty", "", None).await;
     assert!(
         matches!(empty, Err(Error::Invalid { .. })),
         "empty source must be Invalid, got {empty:?}"
@@ -298,7 +298,7 @@ async fn constraints_map_onto_the_taxonomy() {
     let mut tx = rls::begin_tenant_tx(&pool, ghost)
         .await
         .expect("begin ghost tx");
-    let orphan = policy_packs::apply(&mut *tx, ghost, "authz2-ghost", "permit;").await;
+    let orphan = policy_packs::apply(&mut *tx, ghost, "authz2-ghost", "permit;", None).await;
     assert!(
         matches!(orphan, Err(Error::NotFound { .. })),
         "unknown tenant must be NotFound, got {orphan:?}"

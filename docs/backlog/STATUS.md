@@ -37,7 +37,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [AUTH-3: Service identities](AUTH-3.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/service_identities.rs (client-credentials grant end to end against a mock IdP; a team-anchored agent holding tenant-wide org-admin is denied every org-scope endpoint; unregistered clients quarantined; lifetime cap; PDP-gated registration; next-request revocation), crates/synveda-policy/tests/service_scope.rs (the base-layer confinement forbid across the action vocabulary; the own-chain MemoryRead floor survives; roles cannot widen past the token scope), demo: demos/auth-3-service-identities.sh (live Rauthy)
 - [x] [AUD-1: Hash-chained audit log](AUD-1.md) — done 2026-07-19, AC test: crates/synveda-audit/tests/tamper.rs (a database-credentialed attacker suppresses triggers and rewrites history: every hashed column, row removal, relinking, and head attacks all break verification at the named seq), emission tests: crates/synveda-gateway/tests/audit_events.rs (mutation/read/denial/suspended-tenant/token-rejection each chain one event and the chain verifies), crates/synveda-store/tests/rls.rs (audit tables join the adversarial RLS suite), demo: demos/aud-1-audit-log.sh
 - [x] [MEM-1: observe API + PGMQ buffer](MEM-1.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/observe.rs (duplicate delivery admits nothing twice — response, staging table, queue, and audit chain all agree; 1k events/s sustained with the ack median inside the 20ms-plus-link-tax budget), crates/synveda-store/tests/rls.rs (observe buffer joins the adversarial RLS suite; PGMQ grants proven under synveda_app), crates/synveda-policy/tests/{packs,roles,service_scope}.rs (the MemoryWrite floor and grant golden-tested), demo: demos/mem-1-observe.sh
-- [ ] [MEM-2: Redaction & secret scanning](MEM-2.md)
+- [x] [MEM-2: Redaction & secret scanning](MEM-2.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/observe_redaction.rs (seeded secrets swept for across staging, quarantine, audit, and both PGMQ tables under all three modes — zero hits; the review queue E2E: security-reviewer's first live action, owner denied self-release, release sends the standard signal, one-shot 409), crates/synveda-ingest/tests/redaction.rs (every rule + validators + the scanner-output-never-contains-matched-text discipline), crates/synveda-store/tests/rls.rs (observe_quarantine joins the adversarial suite; column-bound one-shot review), crates/synveda-policy/tests/{packs,roles}.rs (quarantine plane golden-tested; redaction config rides the effective pack), demo: demos/mem-2-redaction.sh
 - [ ] [MEM-3: Extraction pipeline](MEM-3.md)
 - [ ] [MEM-4: Transactional embed-or-fail](MEM-4.md)
 - [ ] [CTX-1: Hybrid retrieval](CTX-1.md)
@@ -232,6 +232,37 @@ percentiles, which are reported only) — EVAL-6 owns percentile SLO
 enforcement on production-shaped IO, and ADR-0019 option 2's buffered
 appender remains the recorded upgrade if per-tenant chain serialisation
 ever binds real burst traffic._
+
+_MEM-2 notes (ADR-0021): scanning runs in the observe ack path, before
+the staging insert — ADR-0020's "redaction-before-persistence is not
+yet true" debt is paid; staging only ever holds redacted content, and
+the raw finding text has no representation anywhere (placeholder +
+rule id only, in tables, responses, metrics, and audit payloads
+alike). Modes are per category per pack (`RedactionConfig
+{secrets, pii}` × deny/redact/quarantine): embedded configs are
+compiled in (strict = secrets quarantine + PII redact; standard/open =
+redact both), stored packs configure via `policy_packs.redaction`
+(`synveda policy apply --redaction-secrets … --redaction-pii …`) and
+hot-reload with the pack; unconfigured stored packs get the strict
+config (fail safe). Quarantined events stage signal-less behind
+`observe_quarantine` (RLS-forced, column-level UPDATE grants, one-shot
+pending→released|rejected transition trigger); release sends the
+standard `{tenant_id, event_id}` signal so the MEM-3 consumer contract
+is unchanged; reject leaves the staging row provenance-only. The
+review plane is `QuarantineRead`/`QuarantineReview` (packs @5),
+granted pack-uniformly to steward/org-admin/security-reviewer — the
+security-reviewer marker's first live actions — with auditor excluded
+(content) and no owner self-release; this is the recorded oversight
+carve-out of the personal-scope privacy floor, bounded by redaction.
+Forward obligations: `observe_quarantine` and staging retention share
+one disposal horizon (MEM-6/TEN-5, ADR-0020/0021); MEM-3 extraction
+must treat `[REDACTED:*]` placeholders as opaque tokens; ruleset
+precision/recall measurement lands with EVAL-2's labelled fixtures
+(the recorded trigger for an ML pass behind the `Ruleset` seam); an
+event at a since-deleted scope is unreviewable via the API (uniform
+404) and awaits disposal. The scan is spawn_blocking CPU, O(payload
+bytes); the MEM-1 load AC shape stays the asserted ack bound and
+still passes with the seam in place — EVAL-6 owns percentile SLOs._
 
 ## Phase 2 — Governance (wk 6–10)
 

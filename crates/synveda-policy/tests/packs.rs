@@ -342,7 +342,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 /// (seed §6; lapses, AUTHZ-4, are the sanctioned relaxation).
 #[test]
 fn golden_regulated_strict() {
-    assert_pack_golden(REGULATED_STRICT, 4, &["org", "eng", "team-a", "alice-user"]);
+    assert_pack_golden(REGULATED_STRICT, 5, &["org", "eng", "team-a", "alice-user"]);
 }
 
 /// standard: own chain plus the department subtree — sibling team-b joins;
@@ -351,7 +351,7 @@ fn golden_regulated_strict() {
 fn golden_standard() {
     assert_pack_golden(
         STANDARD,
-        4,
+        5,
         &["org", "eng", "team-a", "team-b", "alice-user"],
     );
 }
@@ -362,7 +362,7 @@ fn golden_standard() {
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        4,
+        5,
         &[
             "org",
             "eng",
@@ -443,4 +443,79 @@ fn switching_a_teams_pack_changes_the_composition_set() {
         composition(&pdp, &fx, &alice, Some("alice-user"), &[]),
         vec!["org", "eng", "team-a", "alice-user"]
     );
+}
+
+/// MEM-2 (ADR-0021 decision 3): the redaction config rides the effective
+/// pack — embedded defaults per product pack, a stored pack's explicit
+/// config, and the fail-safe strict fallback for an unconfigured stored
+/// pack — through the same resolution every decision uses.
+#[test]
+fn redaction_config_rides_the_effective_pack() {
+    use synveda_types::{RedactionConfig, RedactionMode};
+
+    let pdp = Pdp::new().expect("build pdp");
+    let fx = fixture();
+    let team = fx.node("team-a").id;
+    let scopes = fx.chain("team-a");
+
+    for (pack, expected) in [
+        (REGULATED_STRICT, RedactionConfig::STRICT),
+        (STANDARD, RedactionConfig::REDACT_ALL),
+        (OPEN_COLLABORATION, RedactionConfig::REDACT_ALL),
+    ] {
+        let assignments = [fx.assignment("org", pack)];
+        let effective = pdp.effective(
+            fx.tenant,
+            Resource::Scope(team),
+            &AuthzContext {
+                scopes: &scopes,
+                assignments: &assignments,
+                ..Default::default()
+            },
+        );
+        assert_eq!(effective.name, pack);
+        assert_eq!(effective.redaction, expected, "{pack}");
+    }
+
+    // Nothing assigned anywhere: the embedded default is strict.
+    let unassigned = pdp.effective(
+        fx.tenant,
+        Resource::Scope(team),
+        &AuthzContext {
+            scopes: &scopes,
+            ..Default::default()
+        },
+    );
+    assert_eq!(unassigned.name, REGULATED_STRICT);
+    assert_eq!(unassigned.redaction, RedactionConfig::STRICT);
+
+    // A stored pack carries its explicit config; one stored without a
+    // config falls back to strict (fail safe).
+    const MEMBER_READ: &str = r#"permit (principal, action == Synveda::Action::"MemoryRead", resource)
+           when { principal in resource };"#;
+    let deny_secrets = RedactionConfig {
+        secrets: RedactionMode::Deny,
+        pii: RedactionMode::Redact,
+    };
+    pdp.install_source(fx.tenant, "acme-deny", 1, MEMBER_READ, Some(deny_secrets))
+        .expect("install configured pack");
+    pdp.install_source(fx.tenant, "acme-unconfigured", 1, MEMBER_READ, None)
+        .expect("install unconfigured pack");
+    for (pack, expected) in [
+        ("acme-deny", deny_secrets),
+        ("acme-unconfigured", RedactionConfig::STRICT),
+    ] {
+        let assignments = [fx.assignment("org", pack)];
+        let effective = pdp.effective(
+            fx.tenant,
+            Resource::Scope(team),
+            &AuthzContext {
+                scopes: &scopes,
+                assignments: &assignments,
+                ..Default::default()
+            },
+        );
+        assert_eq!(effective.name, pack);
+        assert_eq!(effective.redaction, expected, "{pack}");
+    }
 }

@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into observe_events\n            (id, tenant_id, scope_id, owner_id, session_id,\n             idempotency_key, kind, payload, occurred_at, redactions)\n        select u.id, $1, $2, $3, $4, u.idempotency_key, u.kind, u.payload,\n               u.occurred_at,\n               nullif($10::jsonb -> (u.ord - 1)::int, 'null'::jsonb)\n        from unnest($5::uuid[], $6::text[], $7::text[], $8::jsonb[],\n                    $9::timestamptz[])\n                with ordinality as u(id, idempotency_key, kind, payload,\n                                     occurred_at, ord)\n        on conflict (tenant_id, idempotency_key) do nothing\n        returning idempotency_key\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "idempotency_key",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "UuidArray",
+        "TextArray",
+        "TextArray",
+        "JsonbArray",
+        "TimestamptzArray",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1e218744643cb06c7609c6ac265b05020af704e2414e6b60667e09cde729aaa3"
+}

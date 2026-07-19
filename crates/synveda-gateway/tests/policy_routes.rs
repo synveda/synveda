@@ -268,7 +268,7 @@ async fn assignments_govern_per_node_from_the_next_request() {
         let mut tx = rls::begin_tenant_tx(&pool, tenant_id)
             .await
             .expect("begin tenant tx");
-        policy_packs::apply(&mut *tx, tenant_id, "authz2-frozen", FROZEN_PACK)
+        policy_packs::apply(&mut *tx, tenant_id, "authz2-frozen", FROZEN_PACK, None)
             .await
             .expect("store pack");
         tx.commit().await.expect("commit pack");

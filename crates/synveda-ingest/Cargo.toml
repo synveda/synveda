@@ -8,3 +8,8 @@ publish.workspace = true
 
 [dependencies]
 synveda-types = { workspace = true }
+
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

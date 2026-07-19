@@ -151,7 +151,7 @@ async fn store_pack(pool: &PgPool, tenant: TenantId, name: &str, source: &str) {
     let mut tx = rls::begin_tenant_tx(pool, tenant)
         .await
         .expect("begin tenant tx");
-    policy_packs::apply(&mut *tx, tenant, name, source)
+    policy_packs::apply(&mut *tx, tenant, name, source, None)
         .await
         .expect("store pack");
     tx.commit().await.expect("commit pack");

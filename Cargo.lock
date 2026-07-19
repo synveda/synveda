@@ -3191,6 +3191,7 @@ dependencies = [
  "sqlx",
  "synveda-audit",
  "synveda-identity",
+ "synveda-ingest",
  "synveda-policy",
  "synveda-retrieval",
  "synveda-store",
@@ -3228,7 +3229,11 @@ dependencies = [
 name = "synveda-ingest"
 version = "0.1.0"
 dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
  "synveda-types",
+ "tracing",
 ]
 
 [[package]]

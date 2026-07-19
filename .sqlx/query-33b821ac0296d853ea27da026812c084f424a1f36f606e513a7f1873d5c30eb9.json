@@ -1,0 +1,96 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select q.event_id, q.tenant_id, q.scope_id, e.owner_id,\n               e.session_id, e.kind, e.payload,\n               q.findings, q.state, q.created_at,\n               q.reviewer_subject, q.reviewed_at, q.review_reason\n        from observe_quarantine q\n        join observe_events e on e.id = q.event_id\n        where q.tenant_id = $1\n          and q.state = 'pending'\n          and ($2::uuid[] is null or q.scope_id = any($2))\n        order by q.created_at, q.event_id\n        limit $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "session_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
+        "name": "findings",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "reviewer_subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "reviewed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "review_reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "33b821ac0296d853ea27da026812c084f424a1f36f606e513a7f1873d5c30eb9"
+}
