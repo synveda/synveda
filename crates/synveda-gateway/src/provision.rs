@@ -20,10 +20,10 @@
 //! the hash-chained log lands; until then provisioning is visible in the
 //! `identity.provision` span and `synveda_jit_provisions_total`.
 
-use synveda_identity::{ProvisioningClaims, convention_candidates};
-use synveda_store::{group_mappings, hierarchy, identities, rls};
+use synveda_identity::{ProvisioningClaims, contains_admin_group, convention_candidates};
+use synveda_store::{group_mappings, hierarchy, identities, rls, role_bindings};
 use synveda_types::{
-    Error, HierarchyNode, Identity, IdentityId, Result, ScopeId, ScopeKind, Tenant,
+    Error, HierarchyNode, Identity, IdentityId, Result, Role, ScopeId, ScopeKind, Tenant,
 };
 
 use crate::app::AppState;
@@ -90,17 +90,38 @@ async fn provision_once(
 ) -> Result<(Provisioned, &'static str)> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
 
+    // The admin convention group (AUTHZ-3, ADR-0015 decision 6): upserted
+    // at *every* login completion — adding someone to `synveda-admins`
+    // works on their next login. Additive only: leaving the group revokes
+    // nothing until AUTH-4/5 bring mover/leaver sync; unbinding stays an
+    // explicit, PDP-gated action. An AUD-1 emission point.
+    let admin = contains_admin_group(&claims.groups);
+    if admin {
+        role_bindings::bind(&mut *tx, tenant.id, subject, None, Role::OrgAdmin).await?;
+        tracing::info!(tenant.id = %tenant.id, "admin-group login: tenant-wide org-admin bound");
+    }
+
     if let Some(identity) = identities::by_subject(&mut *tx, tenant.id, subject).await? {
         let scope = hierarchy::node(&mut *tx, identity.scope_id)
             .await?
             .ok_or_else(|| Error::Internal {
                 message: format!("identity {} lost its scope node", identity.id),
             })?;
+        if admin {
+            tx.commit().await.map_err(|err| Error::Storage {
+                message: format!("commit admin binding: {err}"),
+            })?;
+        }
         return Ok((Provisioned { identity, scope }, "existing"));
     }
 
     let (parent, label) = match resolve_mapping(&mut tx, tenant.id, &claims.groups).await? {
         Some(scope) => (scope, "mapped"),
+        // An admin-group subject with no team mapping is placed under the
+        // org root, never quarantined — quarantine's base forbid would
+        // nullify the very binding that makes the tenant governable
+        // (ADR-0015 decision 6).
+        None if admin => (ensure_root(&mut tx, tenant).await?, "admin"),
         None => (ensure_quarantine(&mut tx, tenant).await?, "quarantined"),
     };
 
@@ -199,13 +220,12 @@ async fn resolve_mapping(
     Ok(None)
 }
 
-/// The tenant's quarantine scope — the org root's child with the reserved
-/// slug — creating the root (from the tenant's own slug and name: seed
-/// §2.1 zero-config, a fresh tenant needs no admin before first login) and
-/// the quarantine node on first use.
-async fn ensure_quarantine(tx: &mut sqlx::PgConnection, tenant: &Tenant) -> Result<HierarchyNode> {
-    let root = match hierarchy::root(&mut *tx, tenant.id).await? {
-        Some(root) => root,
+/// The tenant's org root — created from the tenant's own slug and name on
+/// first use (seed §2.1 zero-config: a fresh tenant needs no admin before
+/// first login).
+async fn ensure_root(tx: &mut sqlx::PgConnection, tenant: &Tenant) -> Result<HierarchyNode> {
+    match hierarchy::root(&mut *tx, tenant.id).await? {
+        Some(root) => Ok(root),
         None => {
             hierarchy::create(
                 &mut *tx,
@@ -216,9 +236,15 @@ async fn ensure_quarantine(tx: &mut sqlx::PgConnection, tenant: &Tenant) -> Resu
                 &tenant.slug,
                 &tenant.name,
             )
-            .await?
+            .await
         }
-    };
+    }
+}
+
+/// The tenant's quarantine scope — the org root's child with the reserved
+/// slug — creating the root and the quarantine node on first use.
+async fn ensure_quarantine(tx: &mut sqlx::PgConnection, tenant: &Tenant) -> Result<HierarchyNode> {
+    let root = ensure_root(&mut *tx, tenant).await?;
     match hierarchy::child_by_slug(&mut *tx, root.id, identities::QUARANTINE_SLUG).await? {
         Some(quarantine) => Ok(quarantine),
         None => {

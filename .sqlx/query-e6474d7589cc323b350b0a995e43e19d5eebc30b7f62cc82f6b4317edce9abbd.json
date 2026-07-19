@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            select coalesce((\n                select lower(opt.option_value) in ('on', 'true', '1', 'yes')\n                from pg_options_to_table(c.reloptions) opt\n                where opt.option_name = 'security_invoker'\n            ), false) as \"security_invoker!\"\n            from pg_class c\n            join pg_namespace n on n.oid = c.relnamespace\n            where n.nspname = 'public' and c.relname = 'records_versions'\n              and c.relkind = 'v'\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "security_invoker!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e6474d7589cc323b350b0a995e43e19d5eebc30b7f62cc82f6b4317edce9abbd"
+}

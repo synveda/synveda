@@ -1,8 +1,9 @@
-//! AUTHZ-1 AC: µs-level decision benchmark (extended by AUTHZ-2).
+//! AUTHZ-1 AC: µs-level decision benchmark (extended by AUTHZ-2/3).
 //!
 //! Measures the full facade call — entity materialisation from a
 //! realistic 5-level scope chain plus a placement chain, effective-pack
-//! resolution from an assignment (ADR-0014), and the Cedar evaluation —
+//! resolution from an assignment (ADR-0014), effective-role resolution
+//! from a binding (ADR-0015), and the Cedar evaluation —
 //! since that is what every enforcement point pays per decision. Pure in-process CPU (no
 //! I/O), so absolute asserts are meaningful across dev machines and CI;
 //! the bound is set an order of magnitude above the expected cost to stay
@@ -14,7 +15,9 @@ use std::time::Instant;
 
 use chrono::Utc;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD};
-use synveda_types::{HierarchyNode, PolicyAssignment, ScopeId, ScopeKind, TenantId};
+use synveda_types::{
+    HierarchyNode, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind, TenantId,
+};
 
 const WARMUP: usize = 1_000;
 const SAMPLES: usize = 10_000;
@@ -115,11 +118,23 @@ fn ac_decisions_are_microsecond_level() {
         pack_name: STANDARD.to_owned(),
         updated_at: Utc::now(),
     }];
+    // One binding at the org: the admin-plane decisions below require a
+    // role since AUTHZ-3 (ADR-0015), and resolution against the chain is
+    // part of the measured cost.
+    let bindings = [RoleBinding {
+        tenant_id: tenant,
+        subject: "bench".to_owned(),
+        scope_id: Some(org),
+        role: Role::Steward,
+        updated_at: Utc::now(),
+    }];
     let context = AuthzContext {
         scopes: &scopes,
         principal_scopes: &principal_scopes,
         assignments: &assignments,
         default_pack: None,
+        role_bindings: &bindings,
+        grant: None,
     };
 
     let call = |action: Action| {

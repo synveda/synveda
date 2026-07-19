@@ -412,14 +412,58 @@ async fn first_login_lands_in_the_correct_team_scope_with_zero_admin_action() {
     assert_eq!(personal.parent_id, Some(platform.id));
     assert_eq!(personal.kind, ScopeKind::User);
 
-    // Her session bearer keeps its read rights (not quarantined).
+    // Her session bearer resolves and reaches the PDP — but since AUTHZ-3
+    // an unbound member holds no hierarchy-admin read (ADR-0015
+    // decision 4): a policy denial under the default pack, not an
+    // authentication failure and not quarantine.
     let token = session["access_token"].as_str().expect("access_token");
     let response = app
         .clone()
         .oneshot(get_request("/v1/hierarchy/root", Some(token)))
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK, "a placed user can read");
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "an unbound member holds no admin-plane read"
+    );
+    let denial: Value = serde_json::from_slice(
+        &response
+            .into_body()
+            .collect()
+            .await
+            .expect("read denial body")
+            .to_bytes(),
+    )
+    .expect("taxonomy body");
+    assert_eq!(denial["kind"], "policy_denied", "{denial}");
+
+    // Bound auditor through the store (the roles API has its own suite),
+    // the same bearer reads on the very next request: the role, not the
+    // placement, carries the admin plane (AUTHZ-3, ADR-0015).
+    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant_id)
+        .await
+        .expect("begin tenant tx");
+    synveda_store::role_bindings::bind(
+        &mut *tx,
+        tenant_id,
+        "alice-sub",
+        None,
+        synveda_types::Role::Auditor,
+    )
+    .await
+    .expect("bind auditor");
+    tx.commit().await.expect("commit binding");
+    let response = app
+        .clone()
+        .oneshot(get_request("/v1/hierarchy/root", Some(token)))
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "the auditor binding carries the read on the next request"
+    );
 
     // Repeat login: same identity, no second personal scope.
     idp.login_as(
@@ -610,5 +654,97 @@ async fn an_idp_bearer_that_skipped_login_is_quarantined_fail_closed() {
             .expect("read identity"),
         None,
         "the bearer path never provisions (ADR-0013 decision 2)"
+    );
+}
+
+// ── AUTHZ-3: the admin convention group (ADR-0015 decision 6) ────────────────
+
+/// Zero-config bootstrap: on a fresh tenant with no hierarchy and no
+/// admin action, the first login of a `synveda-admins` member (matched
+/// case-insensitively) is placed under the org root — never quarantine,
+/// whose base forbid would nullify the binding — gets a tenant-wide
+/// org-admin binding, and governs the tenant on the very same bearer.
+#[tokio::test]
+async fn admin_group_login_bootstraps_a_governable_tenant() {
+    let _serial = serial().await;
+    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id).await;
+    let app = router(state(&db_url, &idp.issuer));
+
+    idp.login_as(
+        "it-admin",
+        &["everyone", "Synveda-Admins"],
+        Some("admin@example.test"),
+    );
+    let session = login(&app).await;
+    assert_eq!(
+        session["identity"]["quarantined"], false,
+        "an admin-group login must never quarantine: {session}"
+    );
+
+    let root = hierarchy::root(&pool, tenant_id)
+        .await
+        .expect("read root")
+        .expect("provisioning created the org root");
+    let identity = identities::by_subject(&pool, tenant_id, "it-admin")
+        .await
+        .expect("read identity")
+        .expect("admin is provisioned");
+    let personal = hierarchy::node(&pool, identity.scope_id)
+        .await
+        .expect("read personal scope")
+        .expect("personal scope exists");
+    assert_eq!(
+        personal.parent_id,
+        Some(root.id),
+        "the admin lands under the org root"
+    );
+
+    // The binding is the tenant-wide org-admin row.
+    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant_id)
+        .await
+        .expect("begin tenant tx");
+    let bindings =
+        synveda_store::role_bindings::for_subject_on_scopes(&mut *tx, tenant_id, "it-admin", &[])
+            .await
+            .expect("read bindings");
+    drop(tx);
+    assert_eq!(bindings.len(), 1, "exactly the admin binding: {bindings:?}");
+    assert_eq!(bindings[0].scope_id, None, "tenant-wide");
+    assert_eq!(bindings[0].role, synveda_types::Role::OrgAdmin);
+
+    // The same bearer governs immediately: hierarchy admin is an
+    // org-admin action under regulated-strict@2 (ADR-0015 decision 4).
+    let token = session["access_token"].as_str().expect("access_token");
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/hierarchy/nodes")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "parent_id": root.id, "kind": "department",
+                "slug": "eng", "name": "Engineering"
+            })
+            .to_string(),
+        ))
+        .expect("build request");
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "SSO login to governing admin with zero admin action"
+    );
+
+    // The metric contract: the admin placement outcome.
+    let exposition = metrics_handle().render();
+    assert!(
+        exposition
+            .lines()
+            .any(|line| line.starts_with("synveda_jit_provisions_total")
+                && line.contains("outcome=\"admin\"")),
+        "admin provision outcome missing from exposition:\n{exposition}"
     );
 }

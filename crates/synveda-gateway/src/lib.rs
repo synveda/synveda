@@ -27,5 +27,6 @@ pub mod error;
 pub mod hierarchy;
 pub mod policy;
 mod provision;
+pub mod roles;
 pub mod telemetry;
 pub mod tenant;

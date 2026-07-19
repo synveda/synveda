@@ -11,7 +11,9 @@ use chrono::Utc;
 use synveda_policy::{
     Action, AuthzContext, Pdp, Principal, REGULATED_STRICT, Resource, is_reserved,
 };
-use synveda_types::{Error, HierarchyNode, PolicyAssignment, ScopeId, ScopeKind, TenantId};
+use synveda_types::{
+    Error, HierarchyNode, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind, TenantId,
+};
 
 const ADMIN_ACTIONS: [Action; 6] = [
     Action::HierarchyCreate,
@@ -108,19 +110,36 @@ fn principal(tenant_id: TenantId) -> Principal {
     }
 }
 
+/// A tenant-wide org-admin binding for [`principal`] — since AUTHZ-3 the
+/// product packs' admin planes require a role (ADR-0015 decision 4), so
+/// facade-mechanics tests that expect admin allows bind their principal
+/// the same way production would.
+fn admin_binding(tenant_id: TenantId) -> RoleBinding {
+    RoleBinding {
+        tenant_id,
+        subject: "alice".to_owned(),
+        scope_id: None,
+        role: Role::OrgAdmin,
+        updated_at: Utc::now(),
+    }
+}
+
 /// With nothing stored and nothing assigned, the embedded default decides:
-/// `regulated-strict@1`, strict by default (seed §2.1, ADR-0014
-/// decision 1) — and it preserves ADR-0012 decision 3's admin semantics:
-/// a tenant principal administers its own tenant.
+/// `regulated-strict@2`, strict by default (seed §2.1, ADR-0014
+/// decision 1) — and since AUTHZ-3, its admin plane admits *bound*
+/// admins: a tenant-wide org-admin administers its own tenant
+/// (ADR-0015 decision 4; ADR-0012 decision 3's semantics, role-gated).
 #[test]
-fn the_default_pack_is_regulated_strict_and_admits_tenant_admins() {
+fn the_default_pack_is_regulated_strict_and_admits_bound_admins() {
     let pdp = Pdp::new().expect("build pdp");
     let tenant = TenantId::new();
     let scopes = chain(tenant);
     let team = team_of(&scopes);
     let alice = principal(tenant);
+    let bindings = [admin_binding(tenant)];
     let context = AuthzContext {
         scopes: &scopes,
+        role_bindings: &bindings,
         ..Default::default()
     };
 
@@ -130,7 +149,7 @@ fn the_default_pack_is_regulated_strict_and_admits_tenant_admins() {
             .expect("authorize");
         assert!(decision.allowed, "{action} must be allowed on own scope");
         assert_eq!(decision.pack_name, REGULATED_STRICT);
-        assert_eq!(decision.pack_version, 1);
+        assert_eq!(decision.pack_version, 2);
         assert!(
             !decision.determining.is_empty(),
             "an allow must name its permitting policies"
@@ -138,14 +157,17 @@ fn the_default_pack_is_regulated_strict_and_admits_tenant_admins() {
     }
 
     // Tenant-level resources (creating the org root, reading the root)
-    // need no chain at all.
+    // need no chain at all: the tenant-wide binding carries them.
     for action in [Action::HierarchyCreate, Action::PolicyAssign] {
         let decision = pdp
             .authorize(
                 &alice,
                 action,
                 Resource::Tenant(tenant),
-                &AuthzContext::default(),
+                &AuthzContext {
+                    role_bindings: &bindings,
+                    ..Default::default()
+                },
             )
             .expect("authorize");
         assert!(decision.allowed, "{action} must be allowed on own tenant");
@@ -247,7 +269,7 @@ fn the_default_pack_denies_a_foreign_principal_everything() {
             assert_eq!(action, "hierarchy.read");
             assert_eq!(resource, format!("tenant {victim}"));
             assert!(
-                reason.contains(&format!("{REGULATED_STRICT}@1")),
+                reason.contains(&format!("{REGULATED_STRICT}@2")),
                 "denial must name pack@version, got: {reason}"
             );
         }
@@ -283,6 +305,7 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
     let scopes = chain(tenant);
     let (org, dept, team) = (scopes[0].id, scopes[1].id, scopes[2].id);
     let alice = principal(tenant);
+    let bindings = [admin_binding(tenant)];
     pdp.install_source(tenant, "authz2-readonly", 4, READ_ONLY_PACK)
         .expect("install test pack");
 
@@ -296,6 +319,7 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
             &AuthzContext {
                 scopes: &scopes,
                 assignments: &at_dept,
+                role_bindings: &bindings,
                 ..Default::default()
             },
         )
@@ -313,6 +337,7 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
             &AuthzContext {
                 scopes: &scopes[..1],
                 assignments: &at_dept,
+                role_bindings: &bindings,
                 ..Default::default()
             },
         )
@@ -333,6 +358,7 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
             &AuthzContext {
                 scopes: &scopes,
                 assignments: &overridden,
+                role_bindings: &bindings,
                 ..Default::default()
             },
         )
@@ -349,6 +375,7 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
             &AuthzContext {
                 scopes: &scopes,
                 default_pack: Some("authz2-readonly"),
+                role_bindings: &bindings,
                 ..Default::default()
             },
         )
@@ -370,9 +397,11 @@ fn policy_assign_is_decided_under_the_inherited_pack() {
     pdp.install_source(tenant, "authz2-frozen", 1, READ_ONLY_PACK)
         .expect("install test pack");
     let assignments = [assignment(tenant, team, "authz2-frozen")];
+    let bindings = [admin_binding(tenant)];
     let context = AuthzContext {
         scopes: &scopes,
         assignments: &assignments,
+        role_bindings: &bindings,
         ..Default::default()
     };
 
@@ -419,6 +448,7 @@ fn a_dangling_assignment_falls_back_to_regulated_strict() {
     let scopes = chain(tenant);
     let team = team_of(&scopes);
     let assignments = [assignment(tenant, team, "never-stored")];
+    let bindings = [admin_binding(tenant)];
     let decision = pdp
         .authorize(
             &principal(tenant),
@@ -427,6 +457,7 @@ fn a_dangling_assignment_falls_back_to_regulated_strict() {
             &AuthzContext {
                 scopes: &scopes,
                 assignments: &assignments,
+                role_bindings: &bindings,
                 ..Default::default()
             },
         )
@@ -465,6 +496,7 @@ fn stored_packs_install_and_remove_by_name_per_tenant() {
         team_of(&other_scopes),
         "authz2-readonly",
     )];
+    let other_bindings = [admin_binding(other_tenant)];
     let other_decision = pdp
         .authorize(
             &principal(other_tenant),
@@ -473,6 +505,7 @@ fn stored_packs_install_and_remove_by_name_per_tenant() {
             &AuthzContext {
                 scopes: &other_scopes,
                 assignments: &other_assignments,
+                role_bindings: &other_bindings,
                 ..Default::default()
             },
         )
@@ -482,9 +515,11 @@ fn stored_packs_install_and_remove_by_name_per_tenant() {
 
     // Removal: assigned scopes fall back to the default at decision time.
     let assignments = [assignment(tenant, team, "authz2-readonly")];
+    let bindings = [admin_binding(tenant)];
     let context = AuthzContext {
         scopes: &scopes,
         assignments: &assignments,
+        role_bindings: &bindings,
         ..Default::default()
     };
     assert!(pdp.remove_pack(tenant, "authz2-readonly"));

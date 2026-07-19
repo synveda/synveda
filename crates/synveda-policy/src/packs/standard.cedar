@@ -1,5 +1,5 @@
-// standard@1 — team-shares-by-default within a department (seed §6,
-// ADR-0014).
+// standard@2 — team-shares-by-default within a department (seed §6,
+// ADR-0014, ADR-0015).
 //
 // Own-chain reads plus the department subtree: sibling teams under the
 // principal's department share by default. Other people's personal
@@ -8,22 +8,39 @@
 // leaves the principal without a `department` attribute, and this pack
 // collapses to regulated-strict's read surface.
 
-// The admin planes stay tenant-wide — ADR-0012 decision 3's semantics,
-// carried by every product pack until AUTHZ-3 narrows them with roles.
+// The mutating admin planes: steward/org-admin over the bound subtree
+// (context.roles is resolved from the resource chain's bindings,
+// ADR-0015 decision 3).
 permit (
     principal,
     action in [
         Synveda::Action::"HierarchyCreate",
-        Synveda::Action::"HierarchyRead",
         Synveda::Action::"HierarchyUpdate",
         Synveda::Action::"HierarchyDelete",
-        Synveda::Action::"PolicyRead",
-        Synveda::Action::"PolicyAssign"
+        Synveda::Action::"PolicyAssign",
+        Synveda::Action::"RoleAssign"
     ],
     resource
-) when { resource in principal.tenant };
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["steward", "org-admin"])
+};
 
-// Own chain, as under regulated-strict.
+// The read-only admin surfaces: auditor joins.
+permit (
+    principal,
+    action in [
+        Synveda::Action::"HierarchyRead",
+        Synveda::Action::"PolicyRead",
+        Synveda::Action::"RoleRead"
+    ],
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["steward", "org-admin", "auditor"])
+};
+
+// The membership floor: own chain, as under regulated-strict.
 permit (
     principal,
     action == Synveda::Action::"MemoryRead",
@@ -38,5 +55,17 @@ permit (
 ) when {
     principal has department
         && resource in principal.department
+        && resource.kind != "user"
+};
+
+// Content roles read the bound subtree, personal scopes excluded
+// (ADR-0015 decision 4).
+permit (
+    principal,
+    action == Synveda::Action::"MemoryRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "contributor", "curator"])
         && resource.kind != "user"
 };

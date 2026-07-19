@@ -1,4 +1,5 @@
-// The Synveda authorisation model (AUTHZ-1 ADR-0012; AUTHZ-2 ADR-0014).
+// The Synveda authorisation model (AUTHZ-1 ADR-0012; AUTHZ-2 ADR-0014;
+// AUTHZ-3 ADR-0015).
 //
 // Every pack — embedded or stored — validates against this schema when it
 // is compiled, so an ill-typed policy fails at apply/reload time, never at
@@ -7,8 +8,12 @@
 // `in` expressions over that chain — never string comparison, and never
 // the materialised path (ADR-0011).
 //
-// AUTHZ-3 (roles) and AUTHZ-5 (ABAC context) extend this schema; HIER-3
-// takes over entity materialisation.
+// Roles reach decisions as *request context*, never entity attributes
+// (ADR-0015 decision 3): `context.roles` is the principal's effective
+// role set at the resource, resolved by the PDP from caller-supplied
+// binding rows — tenant-wide bindings always, node bindings when the
+// bound node is on the resource's chain. AUTHZ-5 adds ABAC context;
+// HIER-3 takes over entity materialisation.
 namespace Synveda {
     entity Tenant;
 
@@ -21,7 +26,7 @@ namespace Synveda {
     // placement as an attribute so packs can *require* placement (an
     // unplaced principal composes nothing — ADR-0014 decision 5), and
     // `department` is the nearest department-kind ancestor of the
-    // placement, when the hierarchy has one. AUTHZ-3 adds roles.
+    // placement, when the hierarchy has one.
     entity Principal in [Tenant, Scope] {
         tenant: Tenant,
         quarantined: Bool,
@@ -42,7 +47,7 @@ namespace Synveda {
         appliesTo {
             principal: [Principal],
             resource: [Tenant, Scope],
-            context: {},
+            context: { roles: Set<String> },
         };
 
     // The composition seam (AUTHZ-2, ADR-0014 decision 5): may this
@@ -52,7 +57,7 @@ namespace Synveda {
         appliesTo {
             principal: [Principal],
             resource: [Scope],
-            context: {},
+            context: { roles: Set<String> },
         };
 
     // The policy admin plane (/v1/policy/*, ADR-0014 decision 8): reading
@@ -62,6 +67,27 @@ namespace Synveda {
         appliesTo {
             principal: [Principal],
             resource: [Tenant, Scope],
-            context: {},
+            context: { roles: Set<String> },
+        };
+
+    // The role admin plane (/v1/roles/*, ADR-0015 decision 7): reading
+    // and mutating bindings at a node (or tenant-wide — the Tenant
+    // resource).
+    action RoleRead
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Scope],
+            context: { roles: Set<String> },
+        };
+
+    // `grant` is the role being granted *or revoked*, and is required —
+    // not optional — so a grant-less request fails schema validation and
+    // denies, instead of silently skipping the base layer's escalation
+    // forbid (Cedar drops a policy that errors; ADR-0015 decision 5).
+    action RoleAssign
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Scope],
+            context: { roles: Set<String>, grant: String },
         };
 }

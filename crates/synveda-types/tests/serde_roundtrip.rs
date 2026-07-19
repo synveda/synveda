@@ -6,8 +6,8 @@ use std::str::FromStr;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use synveda_types::{
-    Error, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, Sensitivity, Tenant, TenantId,
-    TenantStatus,
+    Error, IdentityId, RecordClass, RecordId, RecordKind, Role, RoleBinding, ScopeId, Sensitivity,
+    Tenant, TenantId, TenantStatus,
 };
 
 fn json_roundtrip<T>(value: &T) -> T
@@ -133,6 +133,42 @@ fn record_kind_and_class_reject_unknown_values() {
     assert!(RecordKind::from_str("Pinned").is_err(), "lowercase only");
     assert!(serde_json::from_str::<RecordClass>("\"note\"").is_err());
     assert!(RecordClass::from_str("Fact").is_err(), "lowercase only");
+}
+
+// ── Roles ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn role_all_roundtrip_and_match_as_str() {
+    for role in Role::ALL {
+        json_roundtrip(&role);
+        let json = serde_json::to_string(&role).expect("serialize");
+        assert_eq!(json, format!("\"{}\"", role.as_str()));
+        assert_eq!(Role::from_str(role.as_str()).unwrap(), role);
+        assert_eq!(role.to_string(), role.as_str());
+    }
+}
+
+#[test]
+fn role_rejects_unknown_values() {
+    assert!(serde_json::from_str::<Role>("\"admin\"").is_err());
+    assert!(
+        Role::from_str("OrgAdmin").is_err(),
+        "wire form is kebab-case"
+    );
+    assert!(Role::from_str("org_admin").is_err(), "kebab, not snake");
+}
+
+#[test]
+fn role_binding_roundtrips_scoped_and_tenant_wide() {
+    for scope_id in [Some(ScopeId::new()), None] {
+        json_roundtrip(&RoleBinding {
+            tenant_id: TenantId::new(),
+            subject: "idp|user-42".into(),
+            scope_id,
+            role: Role::Steward,
+            updated_at: "2026-07-19T12:00:00Z".parse().expect("timestamp"),
+        });
+    }
 }
 
 // ── Tenant ───────────────────────────────────────────────────────────────────

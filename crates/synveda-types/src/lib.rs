@@ -12,6 +12,7 @@ mod id;
 mod identity;
 mod policy;
 mod record;
+mod role;
 mod sensitivity;
 mod tenant;
 
@@ -21,5 +22,6 @@ pub use id::{IdentityId, RecordId, ScopeId, TenantId};
 pub use identity::Identity;
 pub use policy::PolicyAssignment;
 pub use record::{RecordClass, RecordKind};
+pub use role::{Role, RoleBinding};
 pub use sensitivity::Sensitivity;
 pub use tenant::{Tenant, TenantStatus};

@@ -25,8 +25,8 @@ use synveda_gateway::app::{AppState, router};
 use synveda_gateway::{authz, telemetry};
 use synveda_identity::Hs256Verifier;
 use synveda_policy::{Pdp, REGULATED_STRICT};
-use synveda_store::{policy_packs, rls};
-use synveda_types::TenantId;
+use synveda_store::{policy_packs, rls, role_bindings};
+use synveda_types::{Role, TenantId};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"authz-2-test-secret";
@@ -82,6 +82,17 @@ async fn admitted_tenant(pool: &PgPool, label: &str) -> TenantId {
     )
     .await
     .expect("admit tenant");
+    // Since AUTHZ-3 the policy admin plane requires a role (ADR-0015):
+    // seed a tenant-wide org-admin binding for the dev test subject
+    // through the store — the CLI's bootstrap path. Enforcement still
+    // runs through the PDP with this row as data.
+    let mut tx = rls::begin_tenant_tx(pool, id)
+        .await
+        .expect("begin tenant tx");
+    role_bindings::bind(&mut *tx, id, "authz2-admin", None, Role::OrgAdmin)
+        .await
+        .expect("bind admin");
+    tx.commit().await.expect("commit binding");
     id
 }
 

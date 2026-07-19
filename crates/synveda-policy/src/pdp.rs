@@ -17,7 +17,7 @@ use cedar_policy::{
     Authorizer, Context, Decision, Entities, Entity, EntityId, EntityTypeName, EntityUid,
     PolicySet, Request, Schema, ValidationMode, Validator,
 };
-use synveda_types::{Error, HierarchyNode, Result, ScopeId, ScopeKind, TenantId};
+use synveda_types::{Error, HierarchyNode, Result, Role, ScopeId, ScopeKind, TenantId};
 
 use crate::request::{Action, AuthzContext, AuthzDecision, Principal, Resource};
 use crate::{AUTHZ_DECISIONS_TOTAL, POLICY_PACK_FALLBACKS_TOTAL};
@@ -34,11 +34,13 @@ pub const STANDARD: &str = "standard";
 pub const OPEN_COLLABORATION: &str = "open-collaboration";
 
 /// The embedded product packs and their versions — hand-bumped constants,
-/// changed whenever the corresponding source changes (ADR-0014 decision 1).
+/// changed whenever the corresponding source changes (ADR-0014
+/// decision 1). `@2`: AUTHZ-3 narrowed the admin planes to roles and
+/// added the content-role read grant (ADR-0015 decision 4).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 1),
-    (STANDARD, 1),
-    (OPEN_COLLABORATION, 1),
+    (REGULATED_STRICT, 2),
+    (STANDARD, 2),
+    (OPEN_COLLABORATION, 2),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -253,8 +255,9 @@ impl Pdp {
         // custom pack cannot seal its own node against reassignment.
         let skip_self = action == Action::PolicyAssign;
         let (pack, origin) = self.resolve_pack(principal.tenant_id, resource, context, skip_self);
+        let roles = effective_roles(principal, resource, context);
         let entities = self.entities(principal, context)?;
-        let request = self.request(principal, action, resource)?;
+        let request = self.request(principal, action, resource, &roles, context.grant)?;
         let response = self
             .authorizer
             .is_authorized(&request, &pack.policies, &entities);
@@ -285,6 +288,7 @@ impl Pdp {
             authz.action = %action,
             authz.resource = %resource,
             authz.decision = verdict,
+            authz.roles = %roles.join(","),
             policy.pack = %decision.pack_name,
             policy.pack_version = decision.pack_version,
             policy.pack_origin = %origin,
@@ -530,21 +534,49 @@ impl Pdp {
         })
     }
 
+    /// Builds the schema-checked request, `context.roles` included
+    /// (ADR-0015 decision 3). `RoleAssign` additionally requires the
+    /// grant role (`context.grant`): absent, the request cannot be built
+    /// and the decision fails closed (decision 5).
     fn request(
         &self,
         principal: &Principal,
         action: Action,
         resource: Resource,
+        roles: &[&'static str],
+        grant: Option<Role>,
     ) -> Result<Request> {
+        use cedar_policy::RestrictedExpression;
+
         let resource_uid = match resource {
             Resource::Tenant(id) => self.tenant_uid(id)?,
             Resource::Scope(id) => self.scope_uid(id)?,
         };
+        let mut pairs = vec![(
+            "roles".to_owned(),
+            RestrictedExpression::new_set(
+                roles
+                    .iter()
+                    .map(|role| RestrictedExpression::new_string((*role).to_owned())),
+            ),
+        )];
+        if action == Action::RoleAssign {
+            let grant = grant.ok_or_else(|| Error::Internal {
+                message: "RoleAssign decided without the grant role in context".to_owned(),
+            })?;
+            pairs.push((
+                "grant".to_owned(),
+                RestrictedExpression::new_string(grant.as_str().to_owned()),
+            ));
+        }
+        let context = Context::from_pairs(pairs).map_err(|err| Error::Internal {
+            message: format!("build authorization context: {err}"),
+        })?;
         Request::new(
             self.principal_uid(principal)?,
             self.uid(&self.action_type, action.cedar_id())?,
             resource_uid,
-            Context::empty(),
+            context,
             Some(&self.schema),
         )
         .map_err(|err| Error::Internal {
@@ -575,6 +607,38 @@ impl Pdp {
         })?;
         Ok(EntityUid::from_type_name_and_id(type_name.clone(), eid))
     }
+}
+
+/// The principal's effective roles at the resource (AUTHZ-3, ADR-0015
+/// decision 3): from the caller-supplied binding rows, tenant-wide
+/// bindings always apply; a node binding applies iff the bound node is on
+/// the resource's chain — that one rule is "inherited downward". For a
+/// tenant resource the chain is empty, so only tenant-wide bindings
+/// apply: a root-scoped steward manages nodes, never the tenant plane.
+/// Foreign-tenant rows are dropped defensively (the store's RLS already
+/// makes them unrepresentable). Sorted for a deterministic decision log.
+fn effective_roles(
+    principal: &Principal,
+    resource: Resource,
+    context: &AuthzContext<'_>,
+) -> Vec<&'static str> {
+    let chain: HashSet<ScopeId> = match resource {
+        Resource::Scope(_) => context.scopes.iter().map(|node| node.id).collect(),
+        Resource::Tenant(_) => HashSet::new(),
+    };
+    let mut roles: Vec<&'static str> = context
+        .role_bindings
+        .iter()
+        .filter(|binding| binding.tenant_id == principal.tenant_id)
+        .filter(|binding| match binding.scope_id {
+            None => true,
+            Some(scope) => chain.contains(&scope),
+        })
+        .map(|binding| binding.role.as_str())
+        .collect();
+    roles.sort_unstable();
+    roles.dedup();
+    roles
 }
 
 /// The principal's department: the deepest department-kind node of its

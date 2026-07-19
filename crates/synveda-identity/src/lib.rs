@@ -20,7 +20,10 @@ mod token;
 
 pub use context::{TenantContext, current_tenant, with_tenant};
 pub use flow::{LoginFlow, LoginSession, OIDC_LOGINS_TOTAL};
-pub use mapping::{CONVENTION_PREFIX, ConventionCandidate, convention_candidates};
+pub use mapping::{
+    ADMIN_GROUP, CONVENTION_PREFIX, ConventionCandidate, contains_admin_group,
+    convention_candidates,
+};
 pub use oidc::{
     IssuerConfig, JWKS_REFRESHES_TOTAL, OidcVerifier, TOKEN_VERIFICATIONS_TOTAL, TenantBinding,
     parse_issuers,

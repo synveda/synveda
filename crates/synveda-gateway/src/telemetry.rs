@@ -46,9 +46,17 @@ pub const POLICY_PACK_RELOADS_TOTAL: &str = "synveda_policy_pack_reloads_total";
 pub const POLICY_OPERATIONS_TOTAL: &str = "synveda_policy_operations_total";
 
 /// JIT provisioning outcomes at login (AUTH-2, ADR-0013): `mapped`,
-/// `quarantined`, `existing` (repeat login), or `error`. An AUD-1 emission
-/// point (`identity.provisioned`) once the audit log lands.
+/// `admin` (admin-group subject with no team mapping, placed under the
+/// org root — AUTHZ-3, ADR-0015 decision 6), `quarantined`, `existing`
+/// (repeat login), or `error`. An AUD-1 emission point
+/// (`identity.provisioned`) once the audit log lands.
 pub const JIT_PROVISIONS_TOTAL: &str = "synveda_jit_provisions_total";
+
+/// Role admin operations (AUTHZ-3, ADR-0015 decision 7), labelled by `op`
+/// (list/bind/unbind/list_node/bind_node/unbind_node) and `outcome`
+/// (`ok`, `rejected`, `error`). Mutations — the JIT admin-group binding
+/// included — are an AUD-1 emission point once the audit log lands.
+pub const ROLE_OPERATIONS_TOTAL: &str = "synveda_role_operations_total";
 
 /// Handle to the installed tracer provider. Call [`Telemetry::shutdown`] on
 /// exit to flush batched spans; dropping without it can lose the tail of the
@@ -163,7 +171,12 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     // module at login completion.
     metrics::describe_counter!(
         JIT_PROVISIONS_TOTAL,
-        "JIT identity provisioning by outcome (mapped/quarantined/existing/error)"
+        "JIT identity provisioning by outcome (mapped/admin/quarantined/existing/error)"
+    );
+    // AUTHZ-3 counter (ADR-0015): operations in the gateway's roles routes.
+    metrics::describe_counter!(
+        ROLE_OPERATIONS_TOTAL,
+        "Role admin operations by op and outcome (ok/rejected/error)"
     );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).

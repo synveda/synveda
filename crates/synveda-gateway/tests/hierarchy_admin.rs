@@ -22,7 +22,7 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
-use synveda_types::TenantId;
+use synveda_types::{Role, TenantId};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"hier-1-test-secret";
@@ -91,6 +91,17 @@ async fn admitted_tenant() -> Option<(String, TenantId)> {
     )
     .await
     .expect("admit tenant");
+    // Since AUTHZ-3 the admin plane requires a role (ADR-0015): seed a
+    // tenant-wide org-admin binding for the dev test subject through the
+    // store — the CLI's bootstrap path. Enforcement still runs through
+    // the PDP with this row as data.
+    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, id)
+        .await
+        .expect("begin tenant tx");
+    synveda_store::role_bindings::bind(&mut *tx, id, "hier-admin", None, Role::OrgAdmin)
+        .await
+        .expect("bind admin");
+    tx.commit().await.expect("commit binding");
     Some((url, id))
 }
 

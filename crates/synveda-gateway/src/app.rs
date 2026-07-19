@@ -24,6 +24,7 @@ use crate::auth;
 use crate::error::ApiError;
 use crate::hierarchy;
 use crate::policy;
+use crate::roles;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
 
@@ -88,6 +89,19 @@ pub fn router(state: AppState) -> Router {
             put(policy::assign_node_policy)
                 .get(policy::get_node_policy)
                 .delete(policy::unassign_node_policy),
+        )
+        // The role admin plane (AUTHZ-3, ADR-0015 decision 7).
+        .route(
+            "/v1/roles/bindings",
+            get(roles::list)
+                .put(roles::bind_tenant_wide)
+                .delete(roles::unbind_tenant_wide),
+        )
+        .route(
+            "/v1/hierarchy/nodes/{id}/roles",
+            get(roles::list_node)
+                .put(roles::bind_node)
+                .delete(roles::unbind_node),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

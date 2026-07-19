@@ -20,7 +20,7 @@ use chrono::Utc;
 use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
 };
-use synveda_types::{HierarchyNode, PolicyAssignment, ScopeId, ScopeKind, TenantId};
+use synveda_types::{HierarchyNode, PolicyAssignment, Role, ScopeId, ScopeKind, TenantId};
 
 /// Every scope of the fixture — the candidate set a composition sweep
 /// would consider.
@@ -183,8 +183,10 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         assert_eq!(decision.pack_version, version);
     }
 
-    // The admin planes stay tenant-wide under every pack until AUTHZ-3
-    // (ADR-0012 decision 3, ADR-0014 decision 5) — placed or not.
+    // Since AUTHZ-3 the admin planes require roles (ADR-0015 decision 4):
+    // an unbound principal — placed or not — holds no administrative
+    // power under any pack. The role×action matrix lives in
+    // tests/roles.rs; here we pin the unbound baseline.
     let unplaced = Principal {
         tenant_id: fx.tenant,
         subject: "dev-token".to_owned(),
@@ -198,6 +200,8 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         Action::HierarchyDelete,
         Action::PolicyRead,
         Action::PolicyAssign,
+        Action::RoleRead,
+        Action::RoleAssign,
     ] {
         for principal in [&alice, &unplaced] {
             let scopes = fx.chain("team-b");
@@ -209,13 +213,16 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
                     &AuthzContext {
                         scopes: &scopes,
                         assignments: &assignments,
+                        // RoleAssign requires the grant in context; the
+                        // decision must still be a deny.
+                        grant: (action == Action::RoleAssign).then_some(Role::Viewer),
                         ..Default::default()
                     },
                 )
                 .expect("authorize");
             assert!(
-                decision.allowed,
-                "{pack}: {action} must stay tenant-wide for {}",
+                !decision.allowed,
+                "{pack}: {action} must be denied to the unbound {}",
                 principal.subject
             );
         }
@@ -257,7 +264,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 /// (seed §6; lapses, AUTHZ-4, are the sanctioned relaxation).
 #[test]
 fn golden_regulated_strict() {
-    assert_pack_golden(REGULATED_STRICT, 1, &["org", "eng", "team-a", "alice-user"]);
+    assert_pack_golden(REGULATED_STRICT, 2, &["org", "eng", "team-a", "alice-user"]);
 }
 
 /// standard: own chain plus the department subtree — sibling team-b joins;
@@ -266,7 +273,7 @@ fn golden_regulated_strict() {
 fn golden_standard() {
     assert_pack_golden(
         STANDARD,
-        1,
+        2,
         &["org", "eng", "team-a", "team-b", "alice-user"],
     );
 }
@@ -277,7 +284,7 @@ fn golden_standard() {
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        1,
+        2,
         &[
             "org",
             "eng",

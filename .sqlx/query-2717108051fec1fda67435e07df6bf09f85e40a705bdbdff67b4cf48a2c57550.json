@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        delete from role_bindings\n        where tenant_id = $1 and subject = $2\n          and scope_id is not distinct from $3 and role = $4\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2717108051fec1fda67435e07df6bf09f85e40a705bdbdff67b4cf48a2c57550"
+}

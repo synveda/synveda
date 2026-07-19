@@ -20,10 +20,11 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
 use synveda_store::{
-    group_mappings, hierarchy, identities, policy_assignments, policy_packs, rls, tenants,
+    group_mappings, hierarchy, identities, policy_assignments, policy_packs, rls, role_bindings,
+    tenants,
 };
 use synveda_types::{
-    Error, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity,
+    Error, IdentityId, RecordClass, RecordId, RecordKind, Role, ScopeId, ScopeKind, Sensitivity,
     TenantId, TenantStatus,
 };
 
@@ -174,6 +175,7 @@ const COVERED: &[&str] = &[
     "policy_packs",
     "records",
     "records_history",
+    "role_bindings",
 ];
 
 /// Discovers every tenant-scoped table (structural definition, ADR-0009: any
@@ -669,6 +671,120 @@ fn same_tenant_policy_assignment_lifecycle_works_under_rls() {
                 .await
                 .expect("clear default under RLS"),
             "clearing the default must work in-tenant"
+        );
+    });
+}
+
+// ── Role bindings (AUTHZ-3, ADR-0015) ───────────────────────────────────────
+
+/// Admits a tenant with an org root carrying a node binding plus a
+/// tenant-wide binding. Runs on the (RLS-exempt) test connection.
+async fn seed_role_bindings(pool: &PgPool) -> (TenantId, ScopeId) {
+    let (tenant, root) = seed_hierarchy(pool).await;
+    role_bindings::bind(pool, tenant, "rls-steward", Some(root), Role::Steward)
+        .await
+        .expect("bind steward at root");
+    role_bindings::bind(pool, tenant, "rls-admin", None, Role::OrgAdmin)
+        .await
+        .expect("bind tenant-wide org-admin");
+    (tenant, root)
+}
+
+async fn visible_binding_rows(tx: &mut Transaction<'static, Postgres>, tenant: TenantId) -> i64 {
+    sqlx::query_scalar!(
+        r#"select count(*) as "count!" from role_bindings where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count role_bindings")
+}
+
+/// The wrong (or absent) tenant GUC sees zero binding rows — who holds
+/// which role where is itself tenant-private.
+#[test]
+fn wrong_tenant_guc_sees_no_role_binding_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _) = seed_role_bindings(&db.pool).await;
+        let (adversary, _) = seed_role_bindings(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_binding_rows(&mut tx, victim).await,
+            0,
+            "binding rows leaked across tenants under the wrong GUC"
+        );
+        assert_eq!(visible_binding_rows(&mut tx, adversary).await, 2);
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_binding_rows(&mut tx, victim).await,
+            0,
+            "binding rows visible without any tenant GUC"
+        );
+    });
+}
+
+/// Writing a binding for another tenant than the GUC's trips the policy's
+/// WITH CHECK — an application defect, surfaced as internal.
+#[test]
+fn cross_tenant_role_binding_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed_role_bindings(&db.pool).await;
+        let (other, other_root) = seed_role_bindings(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let forged =
+            role_bindings::bind(&mut *tx, other, "mallory", Some(other_root), Role::OrgAdmin).await;
+        assert!(
+            matches!(forged, Err(Error::Internal { .. })),
+            "cross-tenant binding write must be rejected by RLS as an \
+             internal defect, got {forged:?}"
+        );
+    });
+}
+
+/// The full binding lifecycle — bind (node and tenant-wide), the chain
+/// query, per-node and tenant listings, unbind — works as `synveda_app`
+/// with the right GUC: the shape the gateway's roles routes take.
+#[test]
+fn same_tenant_role_binding_lifecycle_works_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, root) = seed_role_bindings(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let bound = role_bindings::bind(&mut *tx, tenant, "rls-viewer", Some(root), Role::Viewer)
+            .await
+            .expect("bind under RLS");
+        assert_eq!(bound.role, Role::Viewer);
+        let for_chain =
+            role_bindings::for_subject_on_scopes(&mut *tx, tenant, "rls-viewer", &[root])
+                .await
+                .expect("chain query under RLS");
+        assert_eq!(for_chain, vec![bound]);
+        assert_eq!(
+            role_bindings::for_scope(&mut *tx, tenant, root)
+                .await
+                .expect("node listing under RLS")
+                .len(),
+            2,
+            "the seeded steward and the fresh viewer"
+        );
+        assert_eq!(
+            role_bindings::all(&mut *tx, tenant)
+                .await
+                .expect("tenant listing under RLS")
+                .len(),
+            3,
+            "both node bindings plus the tenant-wide admin"
+        );
+        assert!(
+            role_bindings::unbind(&mut *tx, tenant, "rls-viewer", Some(root), Role::Viewer)
+                .await
+                .expect("unbind under RLS"),
+            "unbind must work in-tenant"
         );
     });
 }

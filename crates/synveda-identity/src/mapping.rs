@@ -7,6 +7,22 @@
 /// The group-name prefix the convention binds, matched case-insensitively.
 pub const CONVENTION_PREFIX: &str = "synveda-";
 
+/// The admin convention group (AUTHZ-3, ADR-0015 decision 6): a subject
+/// whose IdP groups contain this name (case-insensitively) gets a
+/// tenant-wide `org-admin` role binding upserted at every login
+/// completion — the zero-config bootstrap that makes a fresh tenant
+/// governable. It has no valid `{dept}-{team}` split, so it can never
+/// collide with placement mapping.
+pub const ADMIN_GROUP: &str = "synveda-admins";
+
+/// Whether `groups` names the admin convention group.
+#[must_use]
+pub fn contains_admin_group(groups: &[String]) -> bool {
+    groups
+        .iter()
+        .any(|group| group.eq_ignore_ascii_case(ADMIN_GROUP))
+}
+
 /// A candidate split of a convention-shaped group name.
 ///
 /// Group names may themselves contain hyphens (`synveda-eng-data-platform`),

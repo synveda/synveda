@@ -1,27 +1,44 @@
-// open-collaboration@1 — org-wide read (seed §6, ADR-0014).
+// open-collaboration@2 — org-wide read (seed §6, ADR-0014, ADR-0015).
 //
 // Own-chain reads plus every scope of the tenant, personal (user-kind)
 // scopes excluded — the privacy floor. The seed's "non-restricted
 // content" qualifier is AUTHZ-5's classification context; until it
 // lands, openness stops at other people's personal scopes.
 
-// The admin planes stay tenant-wide — ADR-0012 decision 3's semantics,
-// carried by every product pack until AUTHZ-3 narrows them with roles.
+// The mutating admin planes: steward/org-admin over the bound subtree
+// (context.roles is resolved from the resource chain's bindings,
+// ADR-0015 decision 3).
 permit (
     principal,
     action in [
         Synveda::Action::"HierarchyCreate",
-        Synveda::Action::"HierarchyRead",
         Synveda::Action::"HierarchyUpdate",
         Synveda::Action::"HierarchyDelete",
-        Synveda::Action::"PolicyRead",
-        Synveda::Action::"PolicyAssign"
+        Synveda::Action::"PolicyAssign",
+        Synveda::Action::"RoleAssign"
     ],
     resource
-) when { resource in principal.tenant };
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["steward", "org-admin"])
+};
 
-// Own chain — covers the principal's personal scope, which the org-wide
-// permit below deliberately does not.
+// The read-only admin surfaces: auditor joins.
+permit (
+    principal,
+    action in [
+        Synveda::Action::"HierarchyRead",
+        Synveda::Action::"PolicyRead",
+        Synveda::Action::"RoleRead"
+    ],
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["steward", "org-admin", "auditor"])
+};
+
+// The membership floor: own chain — covers the principal's personal
+// scope, which the org-wide permit below deliberately does not.
 permit (
     principal,
     action == Synveda::Action::"MemoryRead",
@@ -38,5 +55,19 @@ permit (
 ) when {
     principal has home
         && resource in principal.tenant
+        && resource.kind != "user"
+};
+
+// Content roles read the bound subtree, personal scopes excluded
+// (ADR-0015 decision 4) — under this pack the grant only adds reach for
+// *unplaced* role holders, but keeping the rule identical across packs
+// keeps the matrix identical too.
+permit (
+    principal,
+    action == Synveda::Action::"MemoryRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "contributor", "curator"])
         && resource.kind != "user"
 };

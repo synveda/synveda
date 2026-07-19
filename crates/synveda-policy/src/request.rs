@@ -4,7 +4,9 @@
 
 use std::fmt;
 
-use synveda_types::{Error, HierarchyNode, PolicyAssignment, Result, ScopeId, TenantId};
+use synveda_types::{
+    Error, HierarchyNode, PolicyAssignment, Result, Role, RoleBinding, ScopeId, TenantId,
+};
 
 /// Who is asking: a verified token subject resolved to a tenant (TEN-1)
 /// with its provisioning status (AUTH-2, ADR-0013 decision 6). The caller
@@ -53,6 +55,13 @@ pub enum Action {
     /// Assign a pack to the resource node, or set the tenant default
     /// (the tenant resource).
     PolicyAssign,
+    /// Read role bindings at the resource node, or the tenant's bindings
+    /// (the tenant resource) — `/v1/roles/*` (AUTHZ-3, ADR-0015).
+    RoleRead,
+    /// Bind or unbind a role at the resource node, or tenant-wide (the
+    /// tenant resource). Decisions require [`AuthzContext::grant`] — the
+    /// role being granted or revoked (ADR-0015 decision 5).
+    RoleAssign,
 }
 
 impl Action {
@@ -68,6 +77,8 @@ impl Action {
             Action::MemoryRead => "memory.read",
             Action::PolicyRead => "policy.read",
             Action::PolicyAssign => "policy.assign",
+            Action::RoleRead => "role.read",
+            Action::RoleAssign => "role.assign",
         }
     }
 
@@ -81,6 +92,8 @@ impl Action {
             Action::MemoryRead => "MemoryRead",
             Action::PolicyRead => "PolicyRead",
             Action::PolicyAssign => "PolicyAssign",
+            Action::RoleRead => "RoleRead",
+            Action::RoleAssign => "RoleAssign",
         }
     }
 }
@@ -137,6 +150,19 @@ pub struct AuthzContext<'a> {
     /// when no node on the chain carries an assignment. `None` falls
     /// back to `regulated-strict` (seed §2.1).
     pub default_pack: Option<&'a str>,
+    /// The principal's role bindings relevant to this resource: rows
+    /// bound at nodes of the resource's chain, plus its tenant-wide rows
+    /// (AUTHZ-3, ADR-0015 decision 3). The PDP resolves the effective
+    /// set — tenant-wide always; node rows when the bound node is on the
+    /// chain — and passes it to policies as `context.roles`. Empty means
+    /// no roles: strict by default.
+    pub role_bindings: &'a [RoleBinding],
+    /// For [`Action::RoleAssign`] only: the role being granted or
+    /// revoked, passed to policies as `context.grant` so the base layer
+    /// can guard org-admin escalation (ADR-0015 decision 5). A
+    /// `RoleAssign` decision without it fails closed; other actions
+    /// ignore it.
+    pub grant: Option<Role>,
 }
 
 /// The verdict, plus everything the decision log and audit event need to

@@ -15,8 +15,10 @@ use std::time::Duration;
 use sqlx::PgPool;
 use sqlx::postgres::PgConnection;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
-use synveda_store::{hierarchy, identities, policy_assignments, policy_packs, rls, tenants};
-use synveda_types::{Error, HierarchyNode, Result, TenantId};
+use synveda_store::{
+    hierarchy, identities, policy_assignments, policy_packs, rls, role_bindings, tenants,
+};
+use synveda_types::{Error, HierarchyNode, Result, RoleBinding, TenantId};
 
 use crate::telemetry::POLICY_PACK_RELOADS_TOTAL;
 
@@ -30,6 +32,7 @@ pub(crate) struct DecisionInput {
     pub(crate) principal_scopes: Vec<HierarchyNode>,
     pub(crate) assignments: Vec<synveda_types::PolicyAssignment>,
     pub(crate) default_pack: Option<String>,
+    pub(crate) role_bindings: Vec<RoleBinding>,
 }
 
 impl DecisionInput {
@@ -39,6 +42,8 @@ impl DecisionInput {
             principal_scopes: &self.principal_scopes,
             assignments: &self.assignments,
             default_pack: self.default_pack.as_deref(),
+            role_bindings: &self.role_bindings,
+            grant: None,
         }
     }
 }
@@ -97,19 +102,26 @@ pub(crate) async fn gather(
         },
         None => Vec::new(),
     };
-    let assignments = if chain.is_empty() {
+    let chain_ids: Vec<_> = chain.iter().map(|node| node.id).collect();
+    let assignments = if chain_ids.is_empty() {
         Vec::new()
     } else {
-        let ids: Vec<_> = chain.iter().map(|node| node.id).collect();
-        policy_assignments::for_scopes(&mut *conn, tenant_id, &ids).await?
+        policy_assignments::for_scopes(&mut *conn, tenant_id, &chain_ids).await?
     };
     let default_pack = policy_assignments::default_pack(&mut *conn, tenant_id).await?;
+    // The subject's bindings for the resource's chain plus its
+    // tenant-wide rows (AUTHZ-3, ADR-0015 decision 3) — read here so a
+    // new binding is in force on the very next request.
+    let role_bindings =
+        role_bindings::for_subject_on_scopes(&mut *conn, tenant_id, &principal.subject, &chain_ids)
+            .await?;
     Ok(DecisionInput {
         principal,
         chain,
         principal_scopes,
         assignments,
         default_pack,
+        role_bindings,
     })
 }
 

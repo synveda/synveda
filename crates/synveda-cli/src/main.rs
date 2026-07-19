@@ -13,7 +13,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use sqlx::postgres::PgPoolOptions;
 use synveda_identity::Hs256Verifier;
-use synveda_types::{TenantId, TenantStatus};
+use synveda_types::{Role, ScopeId, TenantId, TenantStatus};
 
 #[derive(Parser)]
 #[command(name = "synveda", about = "Synveda admin/dev CLI", version)]
@@ -39,6 +39,11 @@ enum Command {
     /// packs as reviewed assets.
     #[command(subcommand)]
     Policy(PolicyCommand),
+    /// Role bindings (AUTHZ-3, ADR-0015). Dev plumbing and the documented
+    /// break-glass: a tenant that revoked its last org-admin recovers
+    /// here, at the store level — the product surface is `/v1/roles/*`.
+    #[command(subcommand)]
+    Role(RoleCommand),
 }
 
 #[derive(Subcommand)]
@@ -90,6 +95,49 @@ enum PolicyCommand {
         /// Stored pack name to remove.
         #[arg(long)]
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum RoleCommand {
+    /// Bind a role to a subject; prints the binding as JSON. Without
+    /// --scope the binding is tenant-wide (in force everywhere, the
+    /// tenant plane included).
+    Bind {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+        /// The token subject to bind.
+        #[arg(long)]
+        subject: String,
+        /// The role (viewer/contributor/curator/steward/org-admin/
+        /// auditor/security-reviewer/compliance).
+        #[arg(long)]
+        role: Role,
+        /// Hierarchy node UUID to bind at; omit for tenant-wide.
+        #[arg(long)]
+        scope: Option<ScopeId>,
+    },
+    /// Remove one binding (exact subject + role + scope).
+    Unbind {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+        /// The bound subject.
+        #[arg(long)]
+        subject: String,
+        /// The bound role.
+        #[arg(long)]
+        role: Role,
+        /// The bound node UUID; omit for the tenant-wide binding.
+        #[arg(long)]
+        scope: Option<ScopeId>,
+    },
+    /// List every binding of the tenant as JSON.
+    List {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
     },
 }
 
@@ -195,6 +243,66 @@ async fn run(cli: Cli) -> Result<(), String> {
                 } else {
                     "no stored pack by that name"
                 }
+            );
+            Ok(())
+        }
+        Command::Role(RoleCommand::Bind {
+            tenant,
+            subject,
+            role,
+            scope,
+        }) => {
+            let pool = connect().await?;
+            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            let binding =
+                synveda_store::role_bindings::bind(&mut *tx, tenant, &subject, scope, role)
+                    .await
+                    .map_err(|err| err.to_string())?;
+            tx.commit().await.map_err(|err| err.to_string())?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&binding).map_err(|err| err.to_string())?
+            );
+            Ok(())
+        }
+        Command::Role(RoleCommand::Unbind {
+            tenant,
+            subject,
+            role,
+            scope,
+        }) => {
+            let pool = connect().await?;
+            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            let removed =
+                synveda_store::role_bindings::unbind(&mut *tx, tenant, &subject, scope, role)
+                    .await
+                    .map_err(|err| err.to_string())?;
+            tx.commit().await.map_err(|err| err.to_string())?;
+            eprintln!(
+                "{}",
+                if removed {
+                    "role binding removed; it is out of force on the next request"
+                } else {
+                    "no such binding"
+                }
+            );
+            Ok(())
+        }
+        Command::Role(RoleCommand::List { tenant }) => {
+            let pool = connect().await?;
+            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            let bindings = synveda_store::role_bindings::all(&mut *tx, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&bindings).map_err(|err| err.to_string())?
             );
             Ok(())
         }

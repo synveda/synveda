@@ -25,8 +25,8 @@ use synveda_gateway::app::{AppState, router};
 use synveda_gateway::{authz, telemetry};
 use synveda_identity::Hs256Verifier;
 use synveda_policy::{Pdp, REGULATED_STRICT};
-use synveda_store::{policy_assignments, policy_packs, rls};
-use synveda_types::TenantId;
+use synveda_store::{policy_assignments, policy_packs, rls, role_bindings};
+use synveda_types::{Role, TenantId};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"authz-1-test-secret";
@@ -155,6 +155,21 @@ async fn store_pack(pool: &PgPool, tenant: TenantId, name: &str, source: &str) {
     tx.commit().await.expect("commit pack");
 }
 
+/// Seeds the tenant's admin: a tenant-wide org-admin binding for the dev
+/// test subject, at the store level — the CLI's bootstrap/break-glass
+/// path (ADR-0015 decision 6). Since AUTHZ-3 an unbound dev subject holds
+/// no administrative power; enforcement still runs through the PDP with
+/// this row as data — never a bypass.
+async fn bind_admin(pool: &PgPool, tenant: TenantId, subject: &str) {
+    let mut tx = rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin tenant tx");
+    role_bindings::bind(&mut *tx, tenant, subject, None, Role::OrgAdmin)
+        .await
+        .expect("bind admin");
+    tx.commit().await.expect("commit binding");
+}
+
 async fn clear_pack(pool: &PgPool, tenant: TenantId, name: &str) {
     let mut tx = rls::begin_tenant_tx(pool, tenant)
         .await
@@ -198,9 +213,11 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
     let pool = state.pool.clone();
     let app = router(state);
     let token = issue(tenant_id);
+    bind_admin(&pool, tenant_id, "authz-admin").await;
 
     // Under the embedded default: create the org and a department (the
-    // same admin semantics bootstrap carried, ADR-0014 decision 1).
+    // admin semantics ADR-0014 carried, now held by the org-admin role —
+    // ADR-0015 decision 4).
     let (status, org) = api(
         &app,
         "POST",
@@ -367,6 +384,7 @@ async fn an_invalid_stored_pack_keeps_the_last_good_state() {
     let pool = state.pool.clone();
     let app = router(state);
     let token = issue(tenant_id);
+    bind_admin(&pool, tenant_id, "authz-admin").await;
 
     // The store accepts what the CLI's compile check would refuse — the
     // reloader is the enforcement boundary for out-of-band writes.

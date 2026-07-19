@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            select c.relname as \"table_name!\",\n                   c.relrowsecurity as \"rls_enabled!\",\n                   c.relforcerowsecurity as \"rls_forced!\",\n                   (select count(*) from pg_policy p where p.polrelid = c.oid)\n                       as \"policy_count!\"\n            from pg_class c\n            join pg_namespace n on n.oid = c.relnamespace\n            where n.nspname = 'public'\n              and c.relkind = 'r'\n              and exists (\n                  select from pg_attribute a\n                  where a.attrelid = c.oid\n                    and a.attname = 'tenant_id'\n                    and not a.attisdropped\n              )\n            order by c.relname\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "table_name!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 1,
+        "name": "rls_enabled!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "rls_forced!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "policy_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "dc521c1957254de037fae04e0a45fa7cffd6035775a0fe937b2c6fb3186c5ffd"
+}

@@ -31,7 +31,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [AUTHZ-1: Cedar PDP embedded](AUTHZ-1.md) — done 2026-07-18, AC tests: crates/synveda-policy/tests/decision_benchmark.rs (facade incl. entity materialisation, 4-level chain: median 109µs, p99 177µs), crates/synveda-policy/tests/pdp.rs (decision + pack version on every call), crates/synveda-gateway/tests/authz_hierarchy.rs (route gate + hot reload), demo: demos/authz-1-cedar-pdp.sh
 - [x] [AUTH-2: JIT user provisioning from claims](AUTH-2.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/jit_provisioning.rs (mock IdP: team mapping, quarantine + PDP denial, override precedence, fail-closed bearer), demo: demos/auth-2-jit-provisioning.sh (live Rauthy)
 - [x] [AUTHZ-2: Policy packs](AUTHZ-2.md) — done 2026-07-19, AC tests: crates/synveda-policy/tests/packs.rs (golden matrix per pack; composition switch at the MemoryRead seam), crates/synveda-gateway/tests/policy_routes.rs (per-node assignment governs the next request; inheritance, origin display, self-rescue), demo: demos/authz-2-policy-packs.sh
-- [ ] [AUTHZ-3: Roles & role bindings](AUTHZ-3.md)
+- [x] [AUTHZ-3: Roles & role bindings](AUTHZ-3.md) — done 2026-07-19, AC tests: crates/synveda-policy/tests/roles.rs (full role×action matrix per pack; escalation guard; subtree boundaries; privacy floor), crates/synveda-gateway/tests/roles_routes.rs (bindings govern the next request; delegation; uniform 404), crates/synveda-gateway/tests/jit_provisioning.rs (admin-group bootstrap), demo: demos/authz-3-roles.sh
 - [ ] [HIER-2: Scope chain resolver](HIER-2.md)
 - [ ] [HIER-3: Cedar entity sync](HIER-3.md)
 - [ ] [AUTH-3: Service identities](AUTH-3.md)
@@ -89,9 +89,10 @@ exists; placement is first-login-final — movers/leavers arrive with
 AUTH-4/5, and release from quarantine is the existing PDP-gated
 hierarchy move. The quarantine forbid now lives in the base layer
 compiled into every pack (ADR-0014 decision 2); an IdP subject that
-never completed a login is quarantined at the PDP seam (fail closed),
-while dev HS256 subjects keep tenant-wide admin semantics until
-AUTHZ-3 lands roles._
+never completed a login is quarantined at the PDP seam (fail closed).
+Dev HS256 subjects kept tenant-wide admin semantics until AUTHZ-3
+landed roles (2026-07-19): an unbound subject now holds no
+administrative power._
 
 _AUTHZ-2 deferrals (ADR-0014): pack assignment/default mutations are
 AUD-1 emission points — until then visible in traces and
@@ -100,7 +101,8 @@ seam; the AC's "inject composition changes next session" is
 demonstrated at that seam and re-demonstrated end-to-end when
 CTX-1/2/3 land on it. Governed handlers read the placement chain and
 chain assignments per request until HIER-2/3 cache them. Who may
-assign stays tenant-wide until AUTHZ-3 roles; `standard`'s department
+assign was tenant-wide until AUTHZ-3 narrowed it to steward/org-admin
+(2026-07-19); `standard`'s department
 sharing collapses to strict where the hierarchy skips the department
 level; `open-collaboration`'s "non-restricted content" qualifier is
 AUTHZ-5 classification — the personal-scope exclusion is the current
@@ -108,6 +110,22 @@ privacy floor. A tenant default naming a custom pack that omits
 `PolicyAssign` locks the tenant's policy plane; the store-level CLI is
 the break-glass (node-level assignments cannot seal themselves —
 ADR-0014 decision 4)._
+
+_AUTHZ-3 deferrals (ADR-0015): binding mutations and the JIT
+admin-group binding are AUD-1 emission points — until then visible in
+traces and `synveda_role_operations_total`. Group-driven bindings are
+additive-only (`synveda-admins` upserts tenant-wide org-admin at every
+login; an admin-group subject with no team mapping is placed under the
+org root, never quarantine); revocation stays explicit until AUTH-4/5
+bring mover/leaver sync, and richer group→role mapping rules defer with
+them. `synveda role bind` is the bootstrap and the break-glass — a
+tenant that revokes its last org-admin recovers there. The embedded
+packs bumped to `@2`; governed requests now also read the subject's
+bindings for the resource chain per request until HIER-2/3 cache them.
+Roles whose actions land later are marker rows in the golden matrix
+until those features extend it: curator approvals (FLOW-3),
+security-reviewer (SKIL-2), compliance (AUTHZ-5/FLOW-3), auditor's
+audit surface (AUD-2), contributor writes (MEM-1)._
 
 ## Phase 2 — Governance (wk 6–10)
 
