@@ -29,6 +29,12 @@ pub struct Principal {
     /// is a member of nothing and `MemoryRead` denies everywhere
     /// (ADR-0014 decision 5).
     pub scope_id: Option<ScopeId>,
+    /// The token's confinement scope — the anchor node whose subtree
+    /// bounds every decision for a service identity (AUTH-3, ADR-0018
+    /// decision 4). The base layer forbids everything outside it, roles
+    /// notwithstanding, except own-chain `MemoryRead`. `None` for users
+    /// and dev subjects: no confinement.
+    pub token_scope: Option<ScopeId>,
 }
 
 /// The typed action vocabulary. Free-form action strings would let a typo
@@ -62,6 +68,14 @@ pub enum Action {
     /// tenant resource). Decisions require [`AuthzContext::grant`] — the
     /// role being granted or revoked (ADR-0015 decision 5).
     RoleAssign,
+    /// Read service-identity registrations: one at its anchor node, or
+    /// the tenant's list (the tenant resource) — `/v1/service-identities`
+    /// (AUTH-3, ADR-0018 decision 3).
+    ServiceIdentityRead,
+    /// Register or revoke a service identity at the resource node (its
+    /// anchor). Never a tenant-level action: an agent is always anchored
+    /// at a node (ADR-0018 decision 3).
+    ServiceIdentityManage,
 }
 
 impl Action {
@@ -79,6 +93,8 @@ impl Action {
             Action::PolicyAssign => "policy.assign",
             Action::RoleRead => "role.read",
             Action::RoleAssign => "role.assign",
+            Action::ServiceIdentityRead => "service_identity.read",
+            Action::ServiceIdentityManage => "service_identity.manage",
         }
     }
 
@@ -94,6 +110,8 @@ impl Action {
             Action::PolicyAssign => "PolicyAssign",
             Action::RoleRead => "RoleRead",
             Action::RoleAssign => "RoleAssign",
+            Action::ServiceIdentityRead => "ServiceIdentityRead",
+            Action::ServiceIdentityManage => "ServiceIdentityManage",
         }
     }
 }

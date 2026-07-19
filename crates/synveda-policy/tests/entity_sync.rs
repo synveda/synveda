@@ -99,6 +99,7 @@ fn alice_reads(pdp: &Pdp, fx: &Fixture, target: &str, assignments: &[PolicyAssig
         subject: "alice".to_owned(),
         quarantined: false,
         scope_id: Some(fx.node("alice-user").id),
+        token_scope: None,
     };
     let scopes = fx.chain(target);
     let principal_scopes = fx.chain("alice-user");

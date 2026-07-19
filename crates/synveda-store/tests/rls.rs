@@ -24,8 +24,8 @@ use synveda_store::{
     tenants,
 };
 use synveda_types::{
-    Error, IdentityId, RecordClass, RecordId, RecordKind, Role, ScopeId, ScopeKind, Sensitivity,
-    TenantId, TenantStatus,
+    Error, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, Role, ScopeId, ScopeKind,
+    Sensitivity, TenantId, TenantStatus,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -833,6 +833,7 @@ async fn seed_identity(pool: &PgPool) -> TenantId {
         IdentityId::new(),
         tenant,
         "alice",
+        IdentityKind::User,
         None,
         None,
         personal.id,
@@ -915,6 +916,7 @@ fn cross_tenant_identity_write_is_rejected() {
             IdentityId::new(),
             other,
             "mallory",
+            IdentityKind::User,
             None,
             None,
             ScopeId::new(),
@@ -978,6 +980,7 @@ fn same_tenant_identity_lifecycle_works_under_rls() {
             IdentityId::new(),
             tenant,
             "bob",
+            IdentityKind::User,
             Some("bob@example.test"),
             Some("Bob"),
             personal.id,

@@ -34,7 +34,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [AUTHZ-3: Roles & role bindings](AUTHZ-3.md) — done 2026-07-19, AC tests: crates/synveda-policy/tests/roles.rs (full role×action matrix per pack; escalation guard; subtree boundaries; privacy floor), crates/synveda-gateway/tests/roles_routes.rs (bindings govern the next request; delegation; uniform 404), crates/synveda-gateway/tests/jit_provisioning.rs (admin-group bootstrap), demo: demos/authz-3-roles.sh
 - [x] [HIER-2: Scope chain resolver](HIER-2.md) — done 2026-07-19, AC tests: crates/synveda-store/tests/scope_chain.rs (invalidation serves the fresh chain after a move; warm resolve median 800ns, p99 ≤1.5µs over 10k samples — 300× under the 0.5ms bound), crates/synveda-gateway/tests/scope_chain_routes.rs (a move governs the very next request through the cache), demo: demos/hier-2-scope-chain.sh
 - [x] [HIER-3: Cedar entity sync](HIER-3.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/cedar_entity_sync.rs (a team moved between departments governs the very next decision: the moving steward's authority leaves with it over HTTP; the department MemoryRead follows it at the composition seam), crates/synveda-policy/tests/entity_sync.rs (a warm fragment never survives a reshaped chain, both directions), demo: demos/hier-3-cedar-entity-sync.sh
-- [ ] [AUTH-3: Service identities](AUTH-3.md)
+- [x] [AUTH-3: Service identities](AUTH-3.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/service_identities.rs (client-credentials grant end to end against a mock IdP; a team-anchored agent holding tenant-wide org-admin is denied every org-scope endpoint; unregistered clients quarantined; lifetime cap; PDP-gated registration; next-request revocation), crates/synveda-policy/tests/service_scope.rs (the base-layer confinement forbid across the action vocabulary; the own-chain MemoryRead floor survives; roles cannot widen past the token scope), demo: demos/auth-3-service-identities.sh (live Rauthy)
 - [ ] [AUD-1: Hash-chained audit log](AUD-1.md)
 - [ ] [MEM-1: observe API + PGMQ buffer](MEM-1.md)
 - [ ] [MEM-2: Redaction & secret scanning](MEM-2.md)
@@ -155,6 +155,24 @@ over the small merged set; revisit only if CTX-1's inject budget shows
 it dominating (ADR-0017's reversal trigger). CTX-2/3's per-candidate
 `MemoryRead` sweep inherits prebuilt fragments through the same
 facade._
+
+_AUTH-3 deferrals (ADR-0018): service-identity registration/revocation
+and seam token rejections are AUD-1 emission points — until then visible
+in traces, `synveda_service_identity_operations_total`, and
+`synveda_service_token_rejections_total`. Tokens are IdP-issued
+(client-credentials; Rauthy mints them as `sub: null` + `azp`, covered
+by a bearer-only azp fallback in the verifier); per-issuer
+`service_audiences` must list the agents' audiences. A token's scope is
+exactly the registered anchor subtree — per-token narrowing via OAuth
+scope claims is deferred (ADR-0018 option 8); re-anchoring an agent is
+the existing PDP-gated hierarchy move of its personal leaf; secret
+lifecycle stays IdP-side; agents can never act on the tenant plane
+(the revisit trigger is recorded in ADR-0018). The embedded packs
+bumped to `@3` (the service-identity plane joins the admin permits);
+the base layer now carries the confinement forbid, whose one carve-out
+is the role-free own-chain `MemoryRead` floor — CTX-1/2/3 inherit
+agent composition through it. `synveda service` is the dev
+bootstrap and break-glass._
 
 ## Phase 2 — Governance (wk 6–10)
 

@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use sqlx::postgres::PgPoolOptions;
-use synveda_identity::Hs256Verifier;
-use synveda_types::{Role, ScopeId, TenantId, TenantStatus};
+use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_types::{IdentityId, IdentityKind, Role, ScopeId, ScopeKind, TenantId, TenantStatus};
 
 #[derive(Parser)]
 #[command(name = "synveda", about = "Synveda admin/dev CLI", version)]
@@ -44,6 +44,12 @@ enum Command {
     /// here, at the store level — the product surface is `/v1/roles/*`.
     #[command(subcommand)]
     Role(RoleCommand),
+    /// Service identities (AUTH-3, ADR-0018). Dev plumbing and the
+    /// break-glass at the store level — the product surface is
+    /// `/v1/service-identities`. Credentials live in the IdP: register
+    /// the OAuth2 client there, then bind its subject to an anchor here.
+    #[command(subcommand)]
+    Service(ServiceCommand),
 }
 
 #[derive(Subcommand)]
@@ -134,6 +140,44 @@ enum RoleCommand {
         scope: Option<ScopeId>,
     },
     /// List every binding of the tenant as JSON.
+    List {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServiceCommand {
+    /// Register a service identity at an anchor node: creates its
+    /// personal leaf under the anchor and the identity row (kind
+    /// `service`); prints the identity as JSON. Tokens for its subject
+    /// are then confined to the anchor's subtree.
+    Register {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+        /// The `sub` the IdP puts in the agent's client-credentials
+        /// tokens (for Rauthy, the client id).
+        #[arg(long)]
+        subject: String,
+        /// The anchor node UUID.
+        #[arg(long)]
+        scope: ScopeId,
+        /// Display name; defaults to the subject.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Revoke a service identity: deletes the row and its personal leaf.
+    Remove {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+        /// The registered identity UUID (see `service list`).
+        #[arg(long)]
+        id: IdentityId,
+    },
+    /// List the tenant's service identities as JSON.
     List {
         /// Tenant UUID.
         #[arg(long)]
@@ -303,6 +347,96 @@ async fn run(cli: Cli) -> Result<(), String> {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&bindings).map_err(|err| err.to_string())?
+            );
+            Ok(())
+        }
+        Command::Service(ServiceCommand::Register {
+            tenant,
+            subject,
+            scope,
+            name,
+        }) => {
+            let pool = connect().await?;
+            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            let anchor = synveda_store::hierarchy::node(&mut *tx, scope)
+                .await
+                .map_err(|err| err.to_string())?
+                .filter(|node| node.tenant_id == tenant)
+                .ok_or_else(|| format!("no scope {scope} in tenant {tenant}"))?;
+            if anchor.slug == synveda_store::identities::QUARANTINE_SLUG && anchor.depth == 1 {
+                return Err(
+                    "service identities cannot be anchored at the quarantine scope".to_owned(),
+                );
+            }
+            let identity_id = IdentityId::new();
+            let display_name = name.as_deref().unwrap_or(&subject);
+            let leaf = synveda_store::hierarchy::create(
+                &mut tx,
+                ScopeId::new(),
+                tenant,
+                Some(anchor.id),
+                ScopeKind::User,
+                &personal_slug(None, &subject, identity_id),
+                display_name,
+            )
+            .await
+            .map_err(|err| err.to_string())?;
+            let identity = synveda_store::identities::create(
+                &mut tx,
+                identity_id,
+                tenant,
+                &subject,
+                IdentityKind::Service,
+                None,
+                name.as_deref(),
+                leaf.id,
+            )
+            .await
+            .map_err(|err| err.to_string())?;
+            tx.commit().await.map_err(|err| err.to_string())?;
+            eprintln!(
+                "note: a running gateway caches hierarchy out-of-process; restart it or use the API path"
+            );
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&identity).map_err(|err| err.to_string())?
+            );
+            Ok(())
+        }
+        Command::Service(ServiceCommand::Remove { tenant, id }) => {
+            let pool = connect().await?;
+            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            let identity = synveda_store::identities::by_id(&mut *tx, tenant, id)
+                .await
+                .map_err(|err| err.to_string())?
+                .filter(|identity| identity.kind == IdentityKind::Service)
+                .ok_or_else(|| format!("no service identity {id} in tenant {tenant}"))?;
+            // Row first (its FK pins the leaf), then the leaf.
+            synveda_store::identities::delete_service(&mut *tx, tenant, id)
+                .await
+                .map_err(|err| err.to_string())?;
+            synveda_store::hierarchy::delete(&mut tx, identity.scope_id)
+                .await
+                .map_err(|err| err.to_string())?;
+            tx.commit().await.map_err(|err| err.to_string())?;
+            eprintln!("service identity revoked; its tokens are quarantined from the next request");
+            Ok(())
+        }
+        Command::Service(ServiceCommand::List { tenant }) => {
+            let pool = connect().await?;
+            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            let identities = synveda_store::identities::services(&mut *tx, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&identities).map_err(|err| err.to_string())?
             );
             Ok(())
         }

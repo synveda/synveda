@@ -70,6 +70,7 @@ mod tests {
                 subject: subject.into(),
                 tenant_id: tenant.id,
                 provisioning: None,
+                lifetime: None,
             },
             tenant,
         }

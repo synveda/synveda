@@ -1,5 +1,7 @@
-//! The identity store (AUTH-2, ADR-0013): one row per provisioned subject,
-//! bound to its personal user-kind scope node.
+//! The identity store (AUTH-2, ADR-0013; AUTH-3, ADR-0018): one row per
+//! provisioned subject, bound to its personal user-kind scope node. Users
+//! arrive through JIT provisioning; service identities through explicit
+//! registration (ADR-0018 decision 2) — same table, same placement shape.
 //!
 //! `quarantined` is derived from placement in every read — the identity's
 //! node sits directly under the tenant's reserved `quarantine` scope (the
@@ -7,14 +9,14 @@
 //! `identities` is tenant-scoped (forced RLS, ADR-0009): reach it inside
 //! [`crate::rls::begin_tenant_tx`].
 //!
-//! AUD-1 wiring point: identity creation (`identity.provisioned`) is an
-//! audit emission point; until the hash-chained log lands it is visible in
-//! the gateway's `identity.provision` span and
-//! `synveda_jit_provisions_total`.
+//! AUD-1 wiring point: identity creation (`identity.provisioned`) and
+//! service-identity registration/removal are audit emission points; until
+//! the hash-chained log lands they are visible in the gateway's
+//! `identity.provision` / `service_identity.*` spans and their counters.
 
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, PgExecutor};
-use synveda_types::{Error, Identity, IdentityId, Result, ScopeId, TenantId};
+use synveda_types::{Error, Identity, IdentityId, IdentityKind, Result, ScopeId, TenantId};
 use uuid::Uuid;
 
 /// The reserved slug of the quarantine scope: the org root's child that
@@ -25,6 +27,7 @@ struct IdentityRow {
     id: Uuid,
     tenant_id: Uuid,
     subject: String,
+    kind: String,
     email: Option<String>,
     display_name: Option<String>,
     scope_id: Uuid,
@@ -32,18 +35,26 @@ struct IdentityRow {
     created_at: DateTime<Utc>,
 }
 
-impl From<IdentityRow> for Identity {
-    fn from(row: IdentityRow) -> Self {
-        Identity {
+impl TryFrom<IdentityRow> for Identity {
+    type Error = Error;
+
+    fn try_from(row: IdentityRow) -> Result<Self> {
+        // The check constraint pins the column to the vocabulary; a value
+        // outside it means out-of-band writes and surfaces as Internal.
+        let kind: IdentityKind = row.kind.parse().map_err(|_| Error::Internal {
+            message: format!("identity {} has unknown kind {:?}", row.id, row.kind),
+        })?;
+        Ok(Identity {
             id: IdentityId::from_uuid(row.id),
             tenant_id: TenantId::from_uuid(row.tenant_id),
             subject: row.subject,
+            kind,
             email: row.email,
             display_name: row.display_name,
             scope_id: ScopeId::from_uuid(row.scope_id),
             quarantined: row.quarantined,
             created_at: row.created_at,
-        }
+        })
     }
 }
 
@@ -94,7 +105,7 @@ pub async fn by_subject(
     let row = sqlx::query_as!(
         IdentityRow,
         r#"
-        select i.id, i.tenant_id, i.subject, i.email, i.display_name,
+        select i.id, i.tenant_id, i.subject, i.kind, i.email, i.display_name,
                i.scope_id, i.created_at,
                coalesce(p.slug = 'quarantine' and p.depth = 1, false)
                    as "quarantined!"
@@ -109,40 +120,141 @@ pub async fn by_subject(
     .fetch_optional(executor)
     .await
     .map_err(storage_error)?;
-    Ok(row.map(Into::into))
+    row.map(TryInto::try_into).transpose()
+}
+
+/// Fetches an identity by id — the service-identity routes' uniform-404
+/// lookup (AUTH-3, ADR-0018 decision 3).
+#[tracing::instrument(
+    name = "store.identities.by_id",
+    skip_all,
+    fields(tenant.id = %tenant_id, identity.id = %id),
+    err(Display)
+)]
+pub async fn by_id(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    id: IdentityId,
+) -> Result<Option<Identity>> {
+    let row = sqlx::query_as!(
+        IdentityRow,
+        r#"
+        select i.id, i.tenant_id, i.subject, i.kind, i.email, i.display_name,
+               i.scope_id, i.created_at,
+               coalesce(p.slug = 'quarantine' and p.depth = 1, false)
+                   as "quarantined!"
+        from identities i
+        join hierarchy_nodes n on n.id = i.scope_id
+        left join hierarchy_nodes p on p.id = n.parent_id
+        where i.tenant_id = $1 and i.id = $2
+        "#,
+        tenant_id.as_uuid(),
+        id.as_uuid(),
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}
+
+/// Lists the tenant's service identities, subject-ordered for a stable
+/// surface (AUTH-3, ADR-0018 decision 3).
+#[tracing::instrument(
+    name = "store.identities.services",
+    skip_all,
+    fields(tenant.id = %tenant_id),
+    err(Display)
+)]
+pub async fn services(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Result<Vec<Identity>> {
+    let rows = sqlx::query_as!(
+        IdentityRow,
+        r#"
+        select i.id, i.tenant_id, i.subject, i.kind, i.email, i.display_name,
+               i.scope_id, i.created_at,
+               coalesce(p.slug = 'quarantine' and p.depth = 1, false)
+                   as "quarantined!"
+        from identities i
+        join hierarchy_nodes n on n.id = i.scope_id
+        left join hierarchy_nodes p on p.id = n.parent_id
+        where i.tenant_id = $1 and i.kind = 'service'
+        order by i.subject
+        "#,
+        tenant_id.as_uuid(),
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// Deletes a service identity row. Deliberately keyed on
+/// `kind = 'service'`: user rows have no delete path until AUTH-4/5 own
+/// leavers (migration 0007's note). Returns whether a row was deleted.
+/// The caller deletes the personal node in the same transaction
+/// (ADR-0018 decision 2).
+///
+/// AUD-1 wiring point: service-identity removal is an audit emission
+/// point.
+#[tracing::instrument(
+    name = "store.identities.delete_service",
+    skip_all,
+    fields(tenant.id = %tenant_id, identity.id = %id),
+    err(Display)
+)]
+pub async fn delete_service(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    id: IdentityId,
+) -> Result<bool> {
+    let result = sqlx::query!(
+        r#"
+        delete from identities
+        where tenant_id = $1 and id = $2 and kind = 'service'
+        "#,
+        tenant_id.as_uuid(),
+        id.as_uuid(),
+    )
+    .execute(executor)
+    .await
+    .map_err(storage_error)?;
+    Ok(result.rows_affected() > 0)
 }
 
 /// Provisions an identity bound to `scope_id` (the already-created personal
 /// user node), returning it with its placement-derived quarantine status.
 /// Fails with [`Error::Conflict`] when the subject or the node is already
-/// bound — the JIT first-login race; the caller retries and adopts the
-/// winner's row (ADR-0013 decision 2).
+/// bound — the JIT first-login race (users), or a subject collision
+/// (service registration; ADR-0018 decision 3). The JIT caller retries and
+/// adopts the winner's row (ADR-0013 decision 2).
 ///
 /// Takes a connection (insert + derive-read); callers wrap it in the same
 /// transaction that created the node.
 #[tracing::instrument(
     name = "store.identities.create",
     skip_all,
-    fields(tenant.id = %tenant_id, identity.id = %id, scope.id = %scope_id),
+    fields(tenant.id = %tenant_id, identity.id = %id, scope.id = %scope_id, identity.kind = %kind),
     err(Display)
 )]
+#[allow(clippy::too_many_arguments)] // the row's own columns, nothing more
 pub async fn create(
     conn: &mut PgConnection,
     id: IdentityId,
     tenant_id: TenantId,
     subject: &str,
+    kind: IdentityKind,
     email: Option<&str>,
     display_name: Option<&str>,
     scope_id: ScopeId,
 ) -> Result<Identity> {
     sqlx::query!(
         r#"
-        insert into identities (id, tenant_id, subject, email, display_name, scope_id)
-        values ($1, $2, $3, $4, $5, $6)
+        insert into identities (id, tenant_id, subject, kind, email, display_name, scope_id)
+        values ($1, $2, $3, $4, $5, $6, $7)
         "#,
         id.as_uuid(),
         tenant_id.as_uuid(),
         subject,
+        kind.as_str(),
         email,
         display_name,
         scope_id.as_uuid(),

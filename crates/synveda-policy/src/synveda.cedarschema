@@ -1,5 +1,5 @@
 // The Synveda authorisation model (AUTHZ-1 ADR-0012; AUTHZ-2 ADR-0014;
-// AUTHZ-3 ADR-0015).
+// AUTHZ-3 ADR-0015; AUTH-3 ADR-0018).
 //
 // Every pack — embedded or stored — validates against this schema when it
 // is compiled, so an ill-typed policy fails at apply/reload time, never at
@@ -26,12 +26,16 @@ namespace Synveda {
     // placement as an attribute so packs can *require* placement (an
     // unplaced principal composes nothing — ADR-0014 decision 5), and
     // `department` is the nearest department-kind ancestor of the
-    // placement, when the hierarchy has one.
+    // placement, when the hierarchy has one. `token_scope` is set for
+    // service identities only (AUTH-3, ADR-0018 decision 4): the anchor
+    // node whose subtree confines the token — the base layer forbids
+    // everything outside it, roles notwithstanding.
     entity Principal in [Tenant, Scope] {
         tenant: Tenant,
         quarantined: Bool,
         home?: Scope,
         department?: Scope,
+        token_scope?: Scope,
     };
 
     // A node of the tenancy hierarchy. Parents follow the hierarchy's
@@ -89,5 +93,24 @@ namespace Synveda {
             principal: [Principal],
             resource: [Tenant, Scope],
             context: { roles: Set<String>, grant: String },
+        };
+
+    // The service-identity plane (/v1/service-identities, AUTH-3,
+    // ADR-0018 decision 3): reading registrations (get on the anchor;
+    // list on the tenant resource) and registering/revoking agents at an
+    // anchor scope. Manage deliberately never applies to the tenant:
+    // an agent is always anchored at a node.
+    action ServiceIdentityRead
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Scope],
+            context: { roles: Set<String> },
+        };
+
+    action ServiceIdentityManage
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String> },
         };
 }

@@ -245,7 +245,7 @@ async fn require_assign(
     anchor: Option<&synveda_types::HierarchyNode>,
     grant: Role,
 ) -> Result<()> {
-    let input = authz::gather(&state.scope_chains, tx, anchor).await?;
+    let input = authz::gather(state, tx, anchor).await?;
     let mut context = input.context();
     context.grant = Some(grant);
     state

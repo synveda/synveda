@@ -28,5 +28,6 @@ pub mod hierarchy;
 pub mod policy;
 mod provision;
 pub mod roles;
+pub mod service_identities;
 pub mod telemetry;
 pub mod tenant;

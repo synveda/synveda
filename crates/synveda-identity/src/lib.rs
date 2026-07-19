@@ -22,7 +22,7 @@ pub use context::{TenantContext, current_tenant, with_tenant};
 pub use flow::{LoginFlow, LoginSession, OIDC_LOGINS_TOTAL};
 pub use mapping::{
     ADMIN_GROUP, CONVENTION_PREFIX, ConventionCandidate, contains_admin_group,
-    convention_candidates,
+    convention_candidates, personal_slug,
 };
 pub use oidc::{
     IssuerConfig, JWKS_REFRESHES_TOTAL, OidcVerifier, TOKEN_VERIFICATIONS_TOTAL, TenantBinding,

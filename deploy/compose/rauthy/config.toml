@@ -22,16 +22,18 @@ key_active = 'fnd2dev1'
 [bootstrap]
 admin_email = 'admin@localhost'
 password_plain = 'synveda-dev-admin'
-# Dev-only API key for scripted provisioning: clients (AUTH-1) plus users
-# and groups (AUTH-2's JIT demo drives group-based logins). Bootstrap
-# values apply only when the rauthy-data volume initializes empty;
-# recreate the volume to pick up changes (the auth demos do this
+# Dev-only API key for scripted provisioning: clients (AUTH-1), users and
+# groups (AUTH-2's JIT demo drives group-based logins), and client secrets
+# (AUTH-3's service-identity demo rotates confidential-client secrets).
+# Bootstrap values apply only when the rauthy-data volume initializes
+# empty; recreate the volume to pick up changes (the auth demos do this
 # automatically when the key is not live or lacks the newer rights).
 # base64 of: {"name":"synveda-dev","access":[
 #   {"group":"Clients","access_rights":["read","create","update","delete"]},
 #   {"group":"Users","access_rights":["read","create","update","delete"]},
-#   {"group":"Groups","access_rights":["read","create","update","delete"]}]}
-api_key = 'eyJuYW1lIjoic3ludmVkYS1kZXYiLCJhY2Nlc3MiOlt7Imdyb3VwIjoiQ2xpZW50cyIsImFjY2Vzc19yaWdodHMiOlsicmVhZCIsImNyZWF0ZSIsInVwZGF0ZSIsImRlbGV0ZSJdfSx7Imdyb3VwIjoiVXNlcnMiLCJhY2Nlc3NfcmlnaHRzIjpbInJlYWQiLCJjcmVhdGUiLCJ1cGRhdGUiLCJkZWxldGUiXX0seyJncm91cCI6Ikdyb3VwcyIsImFjY2Vzc19yaWdodHMiOlsicmVhZCIsImNyZWF0ZSIsInVwZGF0ZSIsImRlbGV0ZSJdfV19'
+#   {"group":"Groups","access_rights":["read","create","update","delete"]},
+#   {"group":"Secrets","access_rights":["read","create","update","delete"]}]}
+api_key = 'eyJuYW1lIjoic3ludmVkYS1kZXYiLCJhY2Nlc3MiOlt7Imdyb3VwIjoiQ2xpZW50cyIsImFjY2Vzc19yaWdodHMiOlsicmVhZCIsImNyZWF0ZSIsInVwZGF0ZSIsImRlbGV0ZSJdfSx7Imdyb3VwIjoiVXNlcnMiLCJhY2Nlc3NfcmlnaHRzIjpbInJlYWQiLCJjcmVhdGUiLCJ1cGRhdGUiLCJkZWxldGUiXX0seyJncm91cCI6Ikdyb3VwcyIsImFjY2Vzc19yaWdodHMiOlsicmVhZCIsImNyZWF0ZSIsInVwZGF0ZSIsImRlbGV0ZSJdfSx7Imdyb3VwIjoiU2VjcmV0cyIsImFjY2Vzc19yaWdodHMiOlsicmVhZCIsImNyZWF0ZSIsInVwZGF0ZSIsImRlbGV0ZSJdfV19'
 api_key_secret = '6xxmjZD7Wqe9zWN1fWzOW1jA4uxAkFQ9rYlVFpxBzVgJ0xEj2KWSLiaRTZzKV1oz'
 
 [cluster]

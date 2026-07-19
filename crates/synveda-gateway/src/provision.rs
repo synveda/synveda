@@ -20,10 +20,13 @@
 //! the hash-chained log lands; until then provisioning is visible in the
 //! `identity.provision` span and `synveda_jit_provisions_total`.
 
-use synveda_identity::{ProvisioningClaims, contains_admin_group, convention_candidates};
+use synveda_identity::{
+    ProvisioningClaims, contains_admin_group, convention_candidates, personal_slug,
+};
 use synveda_store::{group_mappings, hierarchy, identities, rls, role_bindings};
 use synveda_types::{
-    Error, HierarchyNode, Identity, IdentityId, Result, Role, ScopeId, ScopeKind, Tenant,
+    Error, HierarchyNode, Identity, IdentityId, IdentityKind, Result, Role, ScopeId, ScopeKind,
+    Tenant,
 };
 
 use crate::app::AppState;
@@ -142,6 +145,7 @@ async fn provision_once(
         identity_id,
         tenant.id,
         subject,
+        IdentityKind::User,
         claims.email.as_deref(),
         claims.display_name.as_deref(),
         scope.id,
@@ -264,62 +268,6 @@ async fn ensure_quarantine(tx: &mut sqlx::PgConnection, tenant: &Tenant) -> Resu
                 "Quarantine",
             )
             .await
-        }
-    }
-}
-
-/// A slug for the personal scope node: a readable base (email local part,
-/// else the subject) sanitised into the slug grammar, plus an identity-id
-/// suffix so siblings never collide. Paths are display-only (ADR-0011).
-fn personal_slug(email: Option<&str>, subject: &str, id: IdentityId) -> String {
-    let base = email
-        .and_then(|address| address.split('@').next())
-        .filter(|local| !local.is_empty())
-        .unwrap_or(subject);
-    let mut readable: String = base
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    readable.truncate(40);
-    let readable = readable.trim_matches('-');
-    let suffix = &id.as_uuid().simple().to_string()[..8];
-    if readable.is_empty() {
-        format!("u-{suffix}")
-    } else {
-        format!("{readable}-{suffix}")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn personal_slugs_fit_the_grammar() {
-        let id = IdentityId::new();
-        let suffix = &id.as_uuid().simple().to_string()[..8];
-        let cases = [
-            (
-                Some("alice@example.test"),
-                "sub-1",
-                format!("alice-{suffix}"),
-            ),
-            (None, "Alice Q. User", format!("alice-q--user-{suffix}")),
-            (Some("@nolocal"), "--", format!("u-{suffix}")),
-            (None, "ûñïçøðé", format!("u-{suffix}")),
-        ];
-        for (email, subject, want) in cases {
-            let slug = personal_slug(email, subject, id);
-            assert_eq!(slug, want);
-            assert!(
-                slug.len() <= 63
-                    && slug.chars().next().unwrap().is_ascii_alphanumeric()
-                    && slug
-                        .chars()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
-                "slug {slug:?} breaks the grammar"
-            );
         }
     }
 }

@@ -21,3 +21,22 @@ forbid (
     resource
 ) when { context.grant == "org-admin" }
 unless { context.roles.contains("org-admin") };
+
+// Token-scope confinement (AUTH-3, ADR-0018 decision 4): a service
+// identity's token is confined to its anchor subtree — everything
+// outside it is forbidden *regardless of bound roles*, so a leaked or
+// over-privileged agent credential cannot escape, and tenant-plane
+// resources (never inside any scope subtree) are unreachable outright.
+// The one carve-out is the role-free membership floor every placed
+// principal holds: MemoryRead up the principal's own chain, so a team
+// agent still composes team → department → org on inject. Users carry
+// no token_scope; the `has` guard makes this a no-op for them.
+forbid (
+    principal,
+    action,
+    resource
+) when {
+    principal has token_scope &&
+    !(resource is Synveda::Scope && resource in principal.token_scope) &&
+    !(action == Synveda::Action::"MemoryRead" && principal in resource)
+};

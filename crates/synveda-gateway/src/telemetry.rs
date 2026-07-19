@@ -58,6 +58,18 @@ pub const JIT_PROVISIONS_TOTAL: &str = "synveda_jit_provisions_total";
 /// included — are an AUD-1 emission point once the audit log lands.
 pub const ROLE_OPERATIONS_TOTAL: &str = "synveda_role_operations_total";
 
+/// Service-identity admin operations (AUTH-3, ADR-0018 decision 3),
+/// labelled by `op` (register/list/get/remove) and `outcome` (`ok`,
+/// `rejected`, `error`). Register and remove are AUD-1 emission points
+/// once the audit log lands.
+pub const SERVICE_IDENTITY_OPERATIONS_TOTAL: &str = "synveda_service_identity_operations_total";
+
+/// Service tokens refused at the enforcement seam (AUTH-3, ADR-0018
+/// decision 5), labelled by `reason` (`lifetime_exceeded`,
+/// `lifetime_unknown` — no `iat`). An AUD-1 emission point once the audit
+/// log lands.
+pub const SERVICE_TOKEN_REJECTIONS_TOTAL: &str = "synveda_service_token_rejections_total";
+
 /// Handle to the installed tracer provider. Call [`Telemetry::shutdown`] on
 /// exit to flush batched spans; dropping without it can lose the tail of the
 /// trace.
@@ -177,6 +189,17 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         ROLE_OPERATIONS_TOTAL,
         "Role admin operations by op and outcome (ok/rejected/error)"
+    );
+    // AUTH-3 counters (ADR-0018): operations in the gateway's
+    // service-identity routes; rejections at the enforcement seam.
+    metrics::describe_counter!(
+        SERVICE_IDENTITY_OPERATIONS_TOTAL,
+        "Service-identity admin operations by op and outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        SERVICE_TOKEN_REJECTIONS_TOTAL,
+        "Service tokens refused at the enforcement seam by reason \
+         (lifetime_exceeded/lifetime_unknown)"
     );
     // HIER-2 counters (ADR-0016): emitted in synveda-store's scope-chain
     // resolver; invalidations by the hierarchy-mutating handlers.

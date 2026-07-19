@@ -14,14 +14,13 @@ use std::time::Duration;
 
 use sqlx::PgPool;
 use sqlx::postgres::PgConnection;
+use synveda_identity::Claims;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
-use synveda_store::{
-    ScopeChainCache, identities, policy_assignments, policy_packs, rls, role_bindings, tenants,
-};
-use synveda_types::{Error, HierarchyNode, Result, RoleBinding, TenantId};
+use synveda_store::{identities, policy_assignments, policy_packs, rls, role_bindings, tenants};
+use synveda_types::{Error, HierarchyNode, IdentityKind, Result, RoleBinding, TenantId};
 
 use crate::app::AppState;
-use crate::telemetry::POLICY_PACK_RELOADS_TOTAL;
+use crate::telemetry::{POLICY_PACK_RELOADS_TOTAL, SERVICE_TOKEN_REJECTIONS_TOTAL};
 
 /// Everything [`require`] assembles for one decision: the principal and
 /// the caller-supplied data the PDP resolves and materialises from.
@@ -57,11 +56,16 @@ impl DecisionInput {
 /// Quarantine resolves here (AUTH-2, ADR-0013 decision 6): a provisioned
 /// identity's placement decides; an IdP subject with no identity is
 /// quarantined (fail closed — skipping `/auth/login` must not
-/// out-privilege completing it); an out-of-band (dev HS256) subject is
-/// not, but carries no placement either, so composition rules read
-/// nothing for it (ADR-0014 decision 5). The identity's placement chain
-/// and the resource chain's pack assignments are read here too — pack
-/// switches are in force on the very next request (ADR-0014 decision 3).
+/// out-privilege completing it, and an unregistered service client is
+/// exactly this case); an out-of-band (dev HS256) subject is not, but
+/// carries no placement either, so composition rules read nothing for it
+/// (ADR-0014 decision 5). Service identities additionally resolve here
+/// (AUTH-3, ADR-0018): the token-lifetime cap is enforced fail-closed
+/// (decision 5), and `token_scope` — the anchor above the personal leaf —
+/// arms the base layer's confinement forbid (decision 4). The identity's
+/// placement chain and the resource chain's pack assignments are read
+/// here too — pack switches are in force on the very next request
+/// (ADR-0014 decision 3).
 ///
 /// Since HIER-2 (ADR-0016) both chains come from the scope-chain cache:
 /// warm requests read no hierarchy rows; assignments and bindings stay
@@ -69,24 +73,25 @@ impl DecisionInput {
 /// promises true (ADR-0016 decision 6). Must run before any hierarchy
 /// mutation staged in `conn`'s transaction (decision 4).
 pub(crate) async fn gather(
-    chains: &ScopeChainCache,
+    state: &AppState,
     conn: &mut PgConnection,
     anchor: Option<&HierarchyNode>,
 ) -> Result<DecisionInput> {
+    let chains = &state.scope_chains;
     let context = synveda_identity::current_tenant().ok_or_else(|| Error::Internal {
         message: "authorization ran outside a tenant scope".to_owned(),
     })?;
     let tenant_id = context.tenant.id;
     let identity = identities::by_subject(&mut *conn, tenant_id, &context.claims.subject).await?;
-    let quarantined = match &identity {
+    let service = identity
+        .as_ref()
+        .is_some_and(|identity| identity.kind == IdentityKind::Service);
+    if service {
+        enforce_service_token_lifetime(&context.claims, state.service_token_max_ttl)?;
+    }
+    let mut quarantined = match &identity {
         Some(identity) => identity.quarantined,
         None => context.claims.provisioning.is_some(),
-    };
-    let principal = Principal {
-        tenant_id,
-        subject: context.claims.subject,
-        quarantined,
-        scope_id: identity.as_ref().map(|identity| identity.scope_id),
     };
     let chain = match anchor {
         Some(node) => match chains.resolve(&mut *conn, tenant_id, node.id).await? {
@@ -107,6 +112,27 @@ pub(crate) async fn gather(
             .await?
             .unwrap_or_else(empty_chain),
         None => empty_chain(),
+    };
+    // The confinement scope (ADR-0018 decision 4): the personal leaf's
+    // parent — the anchor the agent was registered at — read off the
+    // already-resolved placement chain at zero extra cost. A service
+    // identity whose anchor cannot be resolved is quarantined, never
+    // unconfined (fail closed).
+    let token_scope = if service {
+        let anchor_node = principal_scopes.get(1);
+        if anchor_node.is_none() {
+            quarantined = true;
+        }
+        anchor_node.map(|node| node.id)
+    } else {
+        None
+    };
+    let principal = Principal {
+        tenant_id,
+        subject: context.claims.subject,
+        quarantined,
+        scope_id: identity.as_ref().map(|identity| identity.scope_id),
+        token_scope,
     };
     let chain_ids: Vec<_> = chain.iter().map(|node| node.id).collect();
     let assignments = if chain_ids.is_empty() {
@@ -142,10 +168,39 @@ pub(crate) async fn require(
     resource: Resource,
     anchor: Option<&HierarchyNode>,
 ) -> Result<()> {
-    let input = gather(&state.scope_chains, conn, anchor).await?;
+    let input = gather(state, conn, anchor).await?;
     state
         .pdp
         .require(&input.principal, action, resource, &input.context())
+}
+
+/// The service-token lifetime cap (AUTH-3, ADR-0018 decision 5): a
+/// service identity's token must carry a known lifetime (`exp − iat`)
+/// within the configured maximum. Fail closed — an unknown lifetime (no
+/// `iat`) is refused like an excessive one, as the uniform 401.
+///
+/// AUD-1 wiring point: rejections here are audit emission points; until
+/// the hash-chained log lands they are visible in traces and
+/// `synveda_service_token_rejections_total`.
+fn enforce_service_token_lifetime(claims: &Claims, max: Duration) -> Result<()> {
+    let reason = match claims.lifetime {
+        Some(lifetime) if lifetime <= max => return Ok(()),
+        Some(_) => "lifetime_exceeded",
+        None => "lifetime_unknown",
+    };
+    metrics::counter!(SERVICE_TOKEN_REJECTIONS_TOTAL, "reason" => reason).increment(1);
+    tracing::warn!(
+        principal.subject = %claims.subject,
+        token.lifetime_secs = claims.lifetime.map(|lifetime| lifetime.as_secs()),
+        token.max_ttl_secs = max.as_secs(),
+        "service token refused: {reason}"
+    );
+    Err(Error::Unauthenticated {
+        message: format!(
+            "service tokens must carry iat and live at most {} seconds",
+            max.as_secs()
+        ),
+    })
 }
 
 fn empty_chain() -> Arc<[HierarchyNode]> {

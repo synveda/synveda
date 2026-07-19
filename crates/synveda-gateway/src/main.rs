@@ -6,7 +6,9 @@
 //! URIs, default `http://127.0.0.1:8120`) or `SYNVEDA_DEV_JWT_SECRET` (the
 //! HS256 dev mode, ADR-0008). Neither set means every `/v1` request is
 //! rejected. `SYNVEDA_POLICY_REFRESH_SECS` (default 5) paces the policy
-//! pack refresher (AUTHZ-1, ADR-0012). The standard `OTEL_*` variables
+//! pack refresher (AUTHZ-1, ADR-0012). `SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS`
+//! (default 3600) caps service identities' token lifetime at the
+//! enforcement seam (AUTH-3, ADR-0018). The standard `OTEL_*` variables
 //! configure the OTLP exporter (default endpoint `http://localhost:4317` —
 //! Jaeger in the dev compose).
 
@@ -88,6 +90,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Duration::from_secs(refresh_secs.max(1)),
     );
 
+    // The service-token lifetime cap (AUTH-3, ADR-0018 decision 5).
+    let service_token_max_ttl_secs = match std::env::var("SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS") {
+        Ok(value) => value
+            .parse::<u64>()
+            .ok()
+            .filter(|secs| *secs > 0)
+            .ok_or("SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS must be a positive integer")?,
+        Err(_) => 3600,
+    };
+
     let addr = std::env::var("SYNVEDA_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8120".to_owned());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(%addr, "synveda-gateway listening");
@@ -101,6 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             login,
             pdp,
             scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
+            service_token_max_ttl: Duration::from_secs(service_token_max_ttl_secs),
         }),
     )
     .with_graceful_shutdown(shutdown_signal())

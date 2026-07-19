@@ -64,6 +64,7 @@ fn state(url: &str) -> AppState {
         login: None,
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
         scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
+        service_token_max_ttl: std::time::Duration::from_secs(3600),
     }
 }
 

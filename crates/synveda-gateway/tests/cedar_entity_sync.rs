@@ -59,6 +59,7 @@ fn state(url: &str) -> AppState {
         login: None,
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
         scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
+        service_token_max_ttl: std::time::Duration::from_secs(3600),
     }
 }
 
@@ -282,6 +283,7 @@ async fn a_team_move_governs_the_very_next_decision() {
         subject: "alice".to_owned(),
         quarantined: false,
         scope_id: Some(alice.id),
+        token_scope: None,
     };
     assert!(!member_reads(&state, tenant_id, &member, team_b.id).await);
     assert!(!member_reads(&state, tenant_id, &member, team_b.id).await);

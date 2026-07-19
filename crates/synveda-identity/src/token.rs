@@ -37,6 +37,11 @@ pub struct Claims {
     /// IdP subject with no provisioned identity as quarantined (ADR-0013
     /// decision 6), so this field's presence is itself a claim.
     pub provisioning: Option<ProvisioningClaims>,
+    /// The token's issued lifetime (`exp − iat`), when the token carries
+    /// `iat`; `None` when it does not. The enforcement seam caps service
+    /// identities' token lifetime with this, failing closed on `None`
+    /// (AUTH-3, ADR-0018 decision 5). User tokens ignore it.
+    pub lifetime: Option<Duration>,
 }
 
 /// What an IdP asserts about a subject beyond its name: the raw material
@@ -85,6 +90,11 @@ struct RawClaims {
     sub: String,
     tid: String,
     exp: u64,
+    /// Issued-at. Minted into every dev token so `synveda token issue`d
+    /// service subjects pass the seam's lifetime cap; optional on
+    /// verification for pre-AUTH-3 tokens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    iat: Option<u64>,
 }
 
 /// HS256 (HMAC-SHA256) JWT verification with a shared secret — the dev/test
@@ -114,10 +124,12 @@ impl Hs256Verifier {
     #[must_use]
     pub fn issue(&self, subject: &str, tenant_id: TenantId, ttl: Duration) -> String {
         let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
+        let issued_at = now();
         let claims = RawClaims {
             sub: subject.to_owned(),
             tid: tenant_id.to_string(),
-            exp: (now() + ttl).as_secs(),
+            exp: (issued_at + ttl).as_secs(),
+            iat: Some(issued_at.as_secs()),
         };
         let payload =
             URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).expect("claims serialize"));
@@ -180,6 +192,9 @@ impl TokenVerifier for Hs256Verifier {
             // Dev-mode subjects are out-of-band: no IdP stands behind them,
             // so they carry no provisioning claims (ADR-0013 decision 1).
             provisioning: None,
+            lifetime: claims
+                .iat
+                .map(|iat| Duration::from_secs(claims.exp.saturating_sub(iat))),
         })
     }
 }
@@ -219,6 +234,11 @@ mod tests {
             claims.provisioning, None,
             "dev-mode subjects are out-of-band (ADR-0013)"
         );
+        assert_eq!(
+            claims.lifetime,
+            Some(Duration::from_secs(60)),
+            "minted tokens carry iat, so their lifetime is known (ADR-0018)"
+        );
     }
 
     #[tokio::test]
@@ -238,6 +258,7 @@ mod tests {
                 sub: "mallory".into(),
                 tid: TenantId::new().to_string(),
                 exp: now().as_secs() + 600,
+                iat: None,
             })
             .unwrap(),
         );
@@ -262,6 +283,7 @@ mod tests {
                 sub: "alice".into(),
                 tid: TenantId::new().to_string(),
                 exp: now().as_secs() + 600,
+                iat: None,
             })
             .unwrap(),
         );

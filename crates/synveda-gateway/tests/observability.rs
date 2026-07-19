@@ -49,6 +49,7 @@ fn state(url: &str) -> AppState {
         metrics: metrics_handle(),
         pdp: std::sync::Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
         scope_chains: std::sync::Arc::new(synveda_store::ScopeChainCache::new()),
+        service_token_max_ttl: std::time::Duration::from_secs(3600),
         // These tests exercise the ops plane only; fail-closed default.
         verifier: std::sync::Arc::new(synveda_identity::DisabledVerifier),
         login: None,

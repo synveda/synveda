@@ -1,4 +1,5 @@
-// open-collaboration@2 — org-wide read (seed §6, ADR-0014, ADR-0015).
+// open-collaboration@3 — org-wide read (seed §6, ADR-0014, ADR-0015,
+// ADR-0018).
 //
 // Own-chain reads plus every scope of the tenant, personal (user-kind)
 // scopes excluded — the privacy floor. The seed's "non-restricted
@@ -15,7 +16,8 @@ permit (
         Synveda::Action::"HierarchyUpdate",
         Synveda::Action::"HierarchyDelete",
         Synveda::Action::"PolicyAssign",
-        Synveda::Action::"RoleAssign"
+        Synveda::Action::"RoleAssign",
+        Synveda::Action::"ServiceIdentityManage"
     ],
     resource
 ) when {
@@ -29,7 +31,8 @@ permit (
     action in [
         Synveda::Action::"HierarchyRead",
         Synveda::Action::"PolicyRead",
-        Synveda::Action::"RoleRead"
+        Synveda::Action::"RoleRead",
+        Synveda::Action::"ServiceIdentityRead"
     ],
     resource
 ) when {

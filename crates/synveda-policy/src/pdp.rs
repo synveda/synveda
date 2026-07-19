@@ -39,11 +39,13 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// The embedded product packs and their versions — hand-bumped constants,
 /// changed whenever the corresponding source changes (ADR-0014
 /// decision 1). `@2`: AUTHZ-3 narrowed the admin planes to roles and
-/// added the content-role read grant (ADR-0015 decision 4).
+/// added the content-role read grant (ADR-0015 decision 4). `@3`: AUTH-3
+/// added the service-identity plane to the admin permits (ADR-0018
+/// decision 3).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 2),
-    (STANDARD, 2),
-    (OPEN_COLLABORATION, 2),
+    (REGULATED_STRICT, 3),
+    (STANDARD, 3),
+    (OPEN_COLLABORATION, 3),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -504,6 +506,14 @@ impl Pdp {
             principal_attrs.insert(
                 "department".to_owned(),
                 RestrictedExpression::new_entity_uid(self.scope_uid(department)?),
+            );
+        }
+        if let Some(token_scope) = principal.token_scope {
+            // Service identities only (AUTH-3, ADR-0018 decision 4): the
+            // base layer confines every decision to this scope's subtree.
+            principal_attrs.insert(
+                "token_scope".to_owned(),
+                RestrictedExpression::new_entity_uid(self.scope_uid(token_scope)?),
             );
         }
         let mut list: Vec<Entity> = merged.into_values().collect();

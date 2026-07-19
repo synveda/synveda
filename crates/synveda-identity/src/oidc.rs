@@ -118,11 +118,22 @@ pub struct IssuerConfig {
     /// must include `openid` (no ID token without it).
     #[serde(default = "default_login_scopes")]
     pub login_scopes: Vec<String>,
+    /// Additional audiences accepted on *bearer* tokens (never ID tokens):
+    /// client-credentials access tokens carry the service client's own
+    /// audience, not the login client's (AUTH-3, ADR-0018 decision 1).
+    /// Typically the registered service clients' ids, or one shared API
+    /// audience (Entra's `api://...` shape). Defaults to empty.
+    #[serde(default)]
+    pub service_audiences: Vec<String>,
 }
 
 impl IssuerConfig {
-    fn bearer_audience(&self) -> &str {
-        self.audience.as_deref().unwrap_or(&self.client_id)
+    /// Every audience a bearer token may carry: the primary bearer
+    /// audience plus the service audiences (ADR-0018 decision 1).
+    fn bearer_audiences(&self) -> Vec<&str> {
+        let mut audiences = vec![self.audience.as_deref().unwrap_or(&self.client_id)];
+        audiences.extend(self.service_audiences.iter().map(String::as_str));
+        audiences
     }
 }
 
@@ -283,7 +294,8 @@ impl OidcVerifier {
     }
 
     /// Verifies an ID token from `issuer`: audience must be the client id
-    /// and the `nonce` claim must match the login's nonce (ADR-0010 §5).
+    /// alone — never a service audience (ADR-0018 decision 1) — and the
+    /// `nonce` claim must match the login's nonce (ADR-0010 §5).
     pub(crate) async fn verify_id_token(
         &self,
         issuer: &str,
@@ -291,7 +303,7 @@ impl OidcVerifier {
         nonce: &str,
     ) -> Result<Claims> {
         let entry = self.entry(issuer)?;
-        self.verify_against(entry, token, &entry.config.client_id, Some(nonce))
+        self.verify_against(entry, token, &[&entry.config.client_id], Some(nonce))
             .await
     }
 
@@ -308,11 +320,11 @@ impl OidcVerifier {
         &self,
         entry: &IssuerEntry,
         token: &str,
-        audience: &str,
+        audiences: &[&str],
         expected_nonce: Option<&str>,
     ) -> Result<Claims> {
         let outcome = self
-            .verify_inner(entry, token, audience, expected_nonce)
+            .verify_inner(entry, token, audiences, expected_nonce)
             .await;
         let label = match &outcome {
             Ok(_) => "ok",
@@ -332,7 +344,7 @@ impl OidcVerifier {
         &self,
         entry: &IssuerEntry,
         token: &str,
-        audience: &str,
+        audiences: &[&str],
         expected_nonce: Option<&str>,
     ) -> Result<Claims> {
         let header = decode_header(token).map_err(|_| unauthenticated("malformed token header"))?;
@@ -363,7 +375,7 @@ impl OidcVerifier {
 
         let mut validation = Validation::new(header.alg);
         validation.leeway = LEEWAY.as_secs();
-        validation.set_audience(&[audience]);
+        validation.set_audience(audiences);
         validation.set_issuer(&[&entry.config.issuer]);
         validation.set_required_spec_claims(&["exp", "iss", "aud"]);
         let data = decode::<serde_json::Value>(token, &key.key, &validation)
@@ -378,10 +390,21 @@ impl OidcVerifier {
             return Err(unauthenticated("token not yet valid"));
         }
 
-        let subject = claims
-            .get("sub")
-            .and_then(serde_json::Value::as_str)
-            .filter(|sub| !sub.is_empty())
+        // Bearer tokens without a subject fall back to `azp` — the
+        // authorized party, i.e. the OAuth client the token was issued
+        // to: client-credentials access tokens are minted *as* the
+        // client, and some IdPs (Rauthy) set `sub: null` there
+        // (ADR-0018 decision 1). ID tokens never fall back: OIDC
+        // requires `sub` on them, and login must not admit a token
+        // that names no end user.
+        let claimed = |name: &str| {
+            claims
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.is_empty())
+        };
+        let subject = claimed("sub")
+            .or_else(|| expected_nonce.is_none().then(|| claimed("azp")).flatten())
             .ok_or_else(|| unauthenticated("token has no subject"))?
             .to_owned();
 
@@ -404,12 +427,25 @@ impl OidcVerifier {
                 .map_err(|_| unauthenticated("tenant claim is not a UUID"))?,
         };
 
+        // `exp` is validation-required above; `iat` is optional in the
+        // spec, so a token without it has an unknown lifetime — the seam
+        // fails closed on that for service identities (ADR-0018
+        // decision 5).
+        let lifetime = match (
+            claims.get("exp").and_then(serde_json::Value::as_u64),
+            claims.get("iat").and_then(serde_json::Value::as_u64),
+        ) {
+            (Some(exp), Some(iat)) => Some(Duration::from_secs(exp.saturating_sub(iat))),
+            _ => None,
+        };
+
         Ok(Claims {
             subject,
             tenant_id,
             // Always Some for IdP-verified tokens, even with no groups:
             // presence marks the subject as IdP-backed (ADR-0013).
             provisioning: Some(provisioning_claims(&claims, &entry.config.groups_claim)),
+            lifetime,
         })
     }
 
@@ -530,8 +566,8 @@ impl TokenVerifier for OidcVerifier {
         // The unverified `iss` selects the trust entry — nothing more.
         let issuer = unverified_issuer(token)?;
         let entry = self.entry(&issuer)?;
-        let audience = entry.config.bearer_audience().to_owned();
-        self.verify_against(entry, token, &audience, None).await
+        let audiences = entry.config.bearer_audiences();
+        self.verify_against(entry, token, &audiences, None).await
     }
 }
 
@@ -657,7 +693,7 @@ mod tests {
                 .expect("parse");
         assert_eq!(configs.len(), 1);
         let config = &configs[0];
-        assert_eq!(config.bearer_audience(), "synveda");
+        assert_eq!(config.bearer_audiences(), ["synveda"]);
         assert_eq!(config.algorithms, vec![Algorithm::RS256]);
         assert_eq!(
             config.tenant,
@@ -717,10 +753,26 @@ mod tests {
                  "tenant":{{"static":{{"tenant_id":"{tenant}"}}}}}}]"#,
         ))
         .expect("parse");
-        assert_eq!(configs[0].bearer_audience(), "api://synveda");
+        assert_eq!(configs[0].bearer_audiences(), ["api://synveda"]);
         assert_eq!(
             configs[0].tenant,
             TenantBinding::Static { tenant_id: tenant }
+        );
+    }
+
+    #[test]
+    fn service_audiences_extend_bearer_audiences_only() {
+        let configs = parse_issuers(
+            r#"[{"issuer":"http://idp","client_id":"synveda",
+                 "service_audiences":["ci-agent","api://agents"]}]"#,
+        )
+        .expect("parse");
+        // Bearer tokens may carry the login client's audience or any
+        // service audience; ID-token verification passes client_id alone
+        // (ADR-0018 decision 1).
+        assert_eq!(
+            configs[0].bearer_audiences(),
+            ["synveda", "ci-agent", "api://agents"]
         );
     }
 

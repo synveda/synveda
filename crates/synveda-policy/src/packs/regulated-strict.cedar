@@ -1,5 +1,5 @@
-// regulated-strict@2 — the default product pack (seed §6, ADR-0014,
-// ADR-0015).
+// regulated-strict@3 — the default product pack (seed §6, ADR-0014,
+// ADR-0015, ADR-0018).
 //
 // Deny-first: composition reads the principal's own chain, plus whatever
 // a content-role binding explicitly grants — under this pack a viewer/
@@ -20,7 +20,8 @@ permit (
         Synveda::Action::"HierarchyUpdate",
         Synveda::Action::"HierarchyDelete",
         Synveda::Action::"PolicyAssign",
-        Synveda::Action::"RoleAssign"
+        Synveda::Action::"RoleAssign",
+        Synveda::Action::"ServiceIdentityManage"
     ],
     resource
 ) when {
@@ -35,7 +36,8 @@ permit (
     action in [
         Synveda::Action::"HierarchyRead",
         Synveda::Action::"PolicyRead",
-        Synveda::Action::"RoleRead"
+        Synveda::Action::"RoleRead",
+        Synveda::Action::"ServiceIdentityRead"
     ],
     resource
 ) when {

@@ -107,6 +107,7 @@ fn principal(tenant_id: TenantId) -> Principal {
         subject: "alice".to_owned(),
         quarantined: false,
         scope_id: None,
+        token_scope: None,
     }
 }
 
@@ -149,7 +150,7 @@ fn the_default_pack_is_regulated_strict_and_admits_bound_admins() {
             .expect("authorize");
         assert!(decision.allowed, "{action} must be allowed on own scope");
         assert_eq!(decision.pack_name, REGULATED_STRICT);
-        assert_eq!(decision.pack_version, 2);
+        assert_eq!(decision.pack_version, 3);
         assert!(
             !decision.determining.is_empty(),
             "an allow must name its permitting policies"
@@ -269,7 +270,7 @@ fn the_default_pack_denies_a_foreign_principal_everything() {
             assert_eq!(action, "hierarchy.read");
             assert_eq!(resource, format!("tenant {victim}"));
             assert!(
-                reason.contains(&format!("{REGULATED_STRICT}@2")),
+                reason.contains(&format!("{REGULATED_STRICT}@3")),
                 "denial must name pack@version, got: {reason}"
             );
         }

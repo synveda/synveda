@@ -309,6 +309,7 @@ fn oidc_state(url: &str, issuer: &str, binding: &Binding, refresh_interval: Dura
         login: Some(Arc::new(LoginFlow::new(verifier, REDIRECT_URI.to_owned()))),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
         scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
+        service_token_max_ttl: std::time::Duration::from_secs(3600),
     }
 }
 
@@ -759,6 +760,7 @@ async fn auth_plane_is_404_when_oidc_is_not_configured() {
         login: None,
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
         scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
+        service_token_max_ttl: std::time::Duration::from_secs(3600),
     };
     for uri in ["/auth/login", "/auth/callback?code=x&state=y"] {
         let (status, kind) = status_and_kind(

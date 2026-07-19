@@ -108,6 +108,7 @@ fn ac_decisions_are_microsecond_level() {
         subject: "bench".to_owned(),
         quarantined: false,
         scope_id: Some(user),
+        token_scope: None,
     };
     // One assignment at the org: resolution walks the full chain to find
     // it (ADR-0014 decision 3) — the effective-pack cost is measured, not

@@ -1,5 +1,5 @@
-// standard@2 — team-shares-by-default within a department (seed §6,
-// ADR-0014, ADR-0015).
+// standard@3 — team-shares-by-default within a department (seed §6,
+// ADR-0014, ADR-0015, ADR-0018).
 //
 // Own-chain reads plus the department subtree: sibling teams under the
 // principal's department share by default. Other people's personal
@@ -18,7 +18,8 @@ permit (
         Synveda::Action::"HierarchyUpdate",
         Synveda::Action::"HierarchyDelete",
         Synveda::Action::"PolicyAssign",
-        Synveda::Action::"RoleAssign"
+        Synveda::Action::"RoleAssign",
+        Synveda::Action::"ServiceIdentityManage"
     ],
     resource
 ) when {
@@ -32,7 +33,8 @@ permit (
     action in [
         Synveda::Action::"HierarchyRead",
         Synveda::Action::"PolicyRead",
-        Synveda::Action::"RoleRead"
+        Synveda::Action::"RoleRead",
+        Synveda::Action::"ServiceIdentityRead"
     ],
     resource
 ) when {

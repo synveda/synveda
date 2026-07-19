@@ -276,7 +276,7 @@ pub(crate) async fn get_node_policy(
             tenant_id,
             id,
         )?;
-        let input = authz::gather(&state.scope_chains, &mut tx, Some(&node)).await?;
+        let input = authz::gather(&state, &mut tx, Some(&node)).await?;
         state.pdp.require(
             &input.principal,
             Action::PolicyRead,

@@ -13,7 +13,9 @@ use std::sync::OnceLock;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::{group_mappings, hierarchy, identities, tenants};
-use synveda_types::{Error, HierarchyNode, IdentityId, ScopeId, ScopeKind, TenantId, TenantStatus};
+use synveda_types::{
+    Error, HierarchyNode, IdentityId, IdentityKind, ScopeId, ScopeKind, TenantId, TenantStatus,
+};
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -129,6 +131,7 @@ async fn provision(
         IdentityId::new(),
         tenant,
         subject,
+        IdentityKind::User,
         Some(&format!("{subject}@example.test")),
         Some(subject),
         personal.id,
@@ -230,6 +233,7 @@ fn duplicate_subject_is_a_conflict() {
             IdentityId::new(),
             tenant,
             "alice",
+            IdentityKind::User,
             None,
             None,
             second_scope.id,

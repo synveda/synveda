@@ -1,8 +1,12 @@
 //! The convention half of JIT provisioning's mapping rules (AUTH-2,
 //! ADR-0013 decision 3): parsing `synveda-{dept}-{team}` group names into
-//! candidate (department, team) slug pairs. Pure logic only — validating
+//! candidate (department, team) slug pairs, and the personal-scope slug
+//! every placement mints (users at login, service identities at
+//! registration — AUTH-3, ADR-0018). Pure logic only — validating
 //! candidates against the actual hierarchy is the store's job, and the
 //! gateway orchestrates the two (seed §8: identity never touches storage).
+
+use synveda_types::IdentityId;
 
 /// The group-name prefix the convention binds, matched case-insensitively.
 pub const CONVENTION_PREFIX: &str = "synveda-";
@@ -55,6 +59,32 @@ pub fn convention_candidates(group: &str) -> Vec<ConventionCandidate> {
             })
         })
         .collect()
+}
+
+/// A slug for a personal scope node: a readable base (email local part,
+/// else the subject) sanitised into the slug grammar, plus an identity-id
+/// suffix so siblings never collide. Paths are display-only (ADR-0011).
+/// Used by JIT provisioning (AUTH-2) and service-identity registration
+/// (AUTH-3), which place their leaves the same way.
+#[must_use]
+pub fn personal_slug(email: Option<&str>, subject: &str, id: IdentityId) -> String {
+    let base = email
+        .and_then(|address| address.split('@').next())
+        .filter(|local| !local.is_empty())
+        .unwrap_or(subject);
+    let mut readable: String = base
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    readable.truncate(40);
+    let readable = readable.trim_matches('-');
+    let suffix = &id.as_uuid().simple().to_string()[..8];
+    if readable.is_empty() {
+        format!("u-{suffix}")
+    } else {
+        format!("{readable}-{suffix}")
+    }
 }
 
 /// The tenant/hierarchy slug grammar (ADR-0008): `^[a-z0-9][a-z0-9-]{0,62}$`.
@@ -118,6 +148,34 @@ mod tests {
             "",
         ] {
             assert_eq!(convention_candidates(group), [], "group {group:?}");
+        }
+    }
+
+    #[test]
+    fn personal_slugs_fit_the_grammar() {
+        let id = IdentityId::new();
+        let suffix = &id.as_uuid().simple().to_string()[..8];
+        let cases = [
+            (
+                Some("alice@example.test"),
+                "sub-1",
+                format!("alice-{suffix}"),
+            ),
+            (None, "Alice Q. User", format!("alice-q--user-{suffix}")),
+            (Some("@nolocal"), "--", format!("u-{suffix}")),
+            (None, "ûñïçøðé", format!("u-{suffix}")),
+        ];
+        for (email, subject, want) in cases {
+            let slug = personal_slug(email, subject, id);
+            assert_eq!(slug, want);
+            assert!(
+                slug.len() <= 63
+                    && slug.chars().next().unwrap().is_ascii_alphanumeric()
+                    && slug
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                "slug {slug:?} breaks the grammar"
+            );
         }
     }
 }

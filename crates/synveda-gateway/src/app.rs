@@ -6,6 +6,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::service_identities;
+
 use axum::Router;
 use axum::extract::{MatchedPath, Request, State};
 use axum::http::StatusCode;
@@ -50,6 +52,11 @@ pub struct AppState {
     /// over the closure table; the hierarchy-mutating handlers invalidate
     /// it post-commit through [`AppState::invalidate_hierarchy`].
     pub scope_chains: Arc<synveda_store::ScopeChainCache>,
+    /// The service-token lifetime cap (AUTH-3, ADR-0018 decision 5):
+    /// the enforcement seam refuses a service identity's token whose
+    /// lifetime (`exp − iat`) is unknown or exceeds this.
+    /// `SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS`, default 3600.
+    pub service_token_max_ttl: Duration,
 }
 
 impl AppState {
@@ -119,6 +126,15 @@ pub fn router(state: AppState) -> Router {
             get(roles::list_node)
                 .put(roles::bind_node)
                 .delete(roles::unbind_node),
+        )
+        // The service-identity plane (AUTH-3, ADR-0018 decision 3).
+        .route(
+            "/v1/service-identities",
+            get(service_identities::list).post(service_identities::register),
+        )
+        .route(
+            "/v1/service-identities/{id}",
+            get(service_identities::get).delete(service_identities::remove),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
