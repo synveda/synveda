@@ -63,6 +63,7 @@ fn state(url: &str) -> AppState {
         verifier: Arc::new(Hs256Verifier::new(SECRET)),
         login: None,
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
+        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
     }
 }
 

@@ -150,6 +150,11 @@ async fn provision_once(
     tx.commit().await.map_err(|err| Error::Storage {
         message: format!("commit provisioning transaction: {err}"),
     })?;
+    // Provisioning committed hierarchy nodes (the personal scope, maybe
+    // the root/quarantine): bump the tenant's scope-chain generation
+    // (ADR-0016 decision 5). The existing-identity path above mutates no
+    // hierarchy and does not invalidate.
+    state.scope_chains.invalidate(tenant.id);
     tracing::info!(
         identity.id = %identity.id,
         scope.path = %scope.path,

@@ -46,6 +46,10 @@ pub struct AppState {
     /// The embedded PDP (AUTHZ-1, ADR-0012): handlers authorize through it
     /// before acting; the pack refresher hot-swaps stored packs into it.
     pub pdp: Arc<Pdp>,
+    /// The scope-chain resolver (HIER-2, ADR-0016): read-through cache
+    /// over the closure table; the hierarchy-mutating handlers invalidate
+    /// it post-commit.
+    pub scope_chains: Arc<synveda_store::ScopeChainCache>,
 }
 
 /// Builds the gateway router: ops-plane routes plus the authenticated `/v1`

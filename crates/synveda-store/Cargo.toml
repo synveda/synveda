@@ -10,6 +10,7 @@ publish.workspace = true
 synveda-types = { workspace = true }
 
 chrono = { workspace = true }
+metrics = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }
 tracing = { workspace = true }

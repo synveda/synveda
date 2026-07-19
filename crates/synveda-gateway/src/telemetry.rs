@@ -178,6 +178,16 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         ROLE_OPERATIONS_TOTAL,
         "Role admin operations by op and outcome (ok/rejected/error)"
     );
+    // HIER-2 counters (ADR-0016): emitted in synveda-store's scope-chain
+    // resolver; invalidations by the hierarchy-mutating handlers.
+    metrics::describe_counter!(
+        synveda_store::scope_chain::SCOPE_CHAIN_RESOLUTIONS_TOTAL,
+        "Scope chain resolutions by outcome (hit/miss)"
+    );
+    metrics::describe_counter!(
+        synveda_store::scope_chain::SCOPE_CHAIN_INVALIDATIONS_TOTAL,
+        "Tenant-wide scope-chain cache flushes after committed hierarchy mutations"
+    );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).
     metrics::describe_counter!(

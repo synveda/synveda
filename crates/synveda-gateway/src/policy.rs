@@ -96,7 +96,7 @@ pub(crate) async fn packs(State(state): State<AppState>) -> Response {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         authz::require(
-            &state.pdp,
+            &state,
             &mut tx,
             Action::PolicyRead,
             Resource::Tenant(tenant_id),
@@ -144,7 +144,7 @@ pub(crate) async fn get_default(State(state): State<AppState>) -> Response {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         authz::require(
-            &state.pdp,
+            &state,
             &mut tx,
             Action::PolicyRead,
             Resource::Tenant(tenant_id),
@@ -179,7 +179,7 @@ pub(crate) async fn set_default(
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         authz::require(
-            &state.pdp,
+            &state,
             &mut tx,
             Action::PolicyAssign,
             Resource::Tenant(tenant_id),
@@ -205,7 +205,7 @@ pub(crate) async fn clear_default(State(state): State<AppState>) -> Response {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         authz::require(
-            &state.pdp,
+            &state,
             &mut tx,
             Action::PolicyAssign,
             Resource::Tenant(tenant_id),
@@ -276,7 +276,7 @@ pub(crate) async fn get_node_policy(
             tenant_id,
             id,
         )?;
-        let input = authz::gather(&mut tx, Some(&node)).await?;
+        let input = authz::gather(&state.scope_chains, &mut tx, Some(&node)).await?;
         state.pdp.require(
             &input.principal,
             Action::PolicyRead,
@@ -319,7 +319,7 @@ pub(crate) async fn assign_node_policy(
             id,
         )?;
         authz::require(
-            &state.pdp,
+            &state,
             &mut tx,
             Action::PolicyAssign,
             Resource::Scope(id),
@@ -350,7 +350,7 @@ pub(crate) async fn unassign_node_policy(
             id,
         )?;
         authz::require(
-            &state.pdp,
+            &state,
             &mut tx,
             Action::PolicyAssign,
             Resource::Scope(id),

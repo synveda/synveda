@@ -356,6 +356,37 @@ pub async fn ancestors(executor: impl PgExecutor<'_>, id: ScopeId) -> Result<Vec
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// The scope chain (HIER-2, ADR-0016): the node itself plus its
+/// ancestors, nearest-first (self, parent, …, org root) — one closure
+/// index scan over the `distance >= 0` rows. The tenant filter is
+/// explicit in SQL so the scope-chain cache stays tenant-correct even on
+/// connections where the RLS backstop does not bite (ADR-0009); an
+/// unknown or foreign node yields an empty chain.
+#[tracing::instrument(name = "store.hierarchy.chain", skip_all, fields(tenant.id = %tenant_id, scope.id = %id), err(Display))]
+pub async fn chain(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    id: ScopeId,
+) -> Result<Vec<HierarchyNode>> {
+    let rows = sqlx::query_as!(
+        NodeRow,
+        r#"
+        select n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name,
+               n.depth, n.path, n.created_at
+        from hierarchy_closure c
+        join hierarchy_nodes n on n.id = c.ancestor_id
+        where c.descendant_id = $1 and c.tenant_id = $2
+        order by c.distance
+        "#,
+        id.as_uuid(),
+        tenant_id.as_uuid(),
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// Lists a node's whole subtree (excluding the node itself), in stable
 /// path order. One closure index scan.
 #[tracing::instrument(name = "store.hierarchy.descendants", skip_all, fields(scope.id = %id), err(Display))]

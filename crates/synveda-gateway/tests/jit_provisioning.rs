@@ -237,6 +237,7 @@ fn state(url: &str, issuer: &str) -> AppState {
         verifier: verifier.clone(),
         login: Some(Arc::new(LoginFlow::new(verifier, REDIRECT_URI.to_owned()))),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
+        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
     }
 }
 

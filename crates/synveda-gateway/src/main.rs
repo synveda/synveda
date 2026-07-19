@@ -100,6 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             verifier,
             login,
             pdp,
+            scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         }),
     )
     .with_graceful_shutdown(shutdown_signal())

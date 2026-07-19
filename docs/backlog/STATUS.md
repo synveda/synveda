@@ -32,7 +32,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [AUTH-2: JIT user provisioning from claims](AUTH-2.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/jit_provisioning.rs (mock IdP: team mapping, quarantine + PDP denial, override precedence, fail-closed bearer), demo: demos/auth-2-jit-provisioning.sh (live Rauthy)
 - [x] [AUTHZ-2: Policy packs](AUTHZ-2.md) — done 2026-07-19, AC tests: crates/synveda-policy/tests/packs.rs (golden matrix per pack; composition switch at the MemoryRead seam), crates/synveda-gateway/tests/policy_routes.rs (per-node assignment governs the next request; inheritance, origin display, self-rescue), demo: demos/authz-2-policy-packs.sh
 - [x] [AUTHZ-3: Roles & role bindings](AUTHZ-3.md) — done 2026-07-19, AC tests: crates/synveda-policy/tests/roles.rs (full role×action matrix per pack; escalation guard; subtree boundaries; privacy floor), crates/synveda-gateway/tests/roles_routes.rs (bindings govern the next request; delegation; uniform 404), crates/synveda-gateway/tests/jit_provisioning.rs (admin-group bootstrap), demo: demos/authz-3-roles.sh
-- [ ] [HIER-2: Scope chain resolver](HIER-2.md)
+- [x] [HIER-2: Scope chain resolver](HIER-2.md) — done 2026-07-19, AC tests: crates/synveda-store/tests/scope_chain.rs (invalidation serves the fresh chain after a move; warm resolve median 800ns, p99 ≤1.5µs over 10k samples — 300× under the 0.5ms bound), crates/synveda-gateway/tests/scope_chain_routes.rs (a move governs the very next request through the cache), demo: demos/hier-2-scope-chain.sh
 - [ ] [HIER-3: Cedar entity sync](HIER-3.md)
 - [ ] [AUTH-3: Service identities](AUTH-3.md)
 - [ ] [AUD-1: Hash-chained audit log](AUD-1.md)
@@ -99,8 +99,9 @@ AUD-1 emission points — until then visible in traces and
 `synveda_policy_operations_total`. `MemoryRead` is the composition
 seam; the AC's "inject composition changes next session" is
 demonstrated at that seam and re-demonstrated end-to-end when
-CTX-1/2/3 land on it. Governed handlers read the placement chain and
-chain assignments per request until HIER-2/3 cache them. Who may
+CTX-1/2/3 land on it. Governed handlers' placement and resource
+chains are cached since HIER-2 (ADR-0016); chain assignments stay
+per-request reads by design (ADR-0016 decision 6). Who may
 assign was tenant-wide until AUTHZ-3 narrowed it to steward/org-admin
 (2026-07-19); `standard`'s department
 sharing collapses to strict where the hierarchy skips the department
@@ -120,12 +121,25 @@ org root, never quarantine); revocation stays explicit until AUTH-4/5
 bring mover/leaver sync, and richer group→role mapping rules defer with
 them. `synveda role bind` is the bootstrap and the break-glass — a
 tenant that revokes its last org-admin recovers there. The embedded
-packs bumped to `@2`; governed requests now also read the subject's
-bindings for the resource chain per request until HIER-2/3 cache them.
+packs bumped to `@2`; governed requests also read the subject's
+bindings for the resource chain per request — kept per-request by
+design since HIER-2 (ADR-0016 decision 6).
 Roles whose actions land later are marker rows in the golden matrix
 until those features extend it: curator approvals (FLOW-3),
 security-reviewer (SKIL-2), compliance (AUTHZ-5/FLOW-3), auditor's
 audit surface (AUD-2), contributor writes (MEM-1)._
+
+_HIER-2 notes (ADR-0016): scope chains are cached in-process,
+invalidated post-commit by the hierarchy-mutating handlers; the gateway
+is the hierarchy's only production writer, so any future out-of-process
+writer (AUTH-4 SCIM sidecar, AUTH-5 directory sync, break-glass SQL)
+must bring an invalidation channel — LISTEN/NOTIFY is the recorded
+upgrade path, a gateway restart the manual recovery. Pack assignments,
+role bindings, and identity rows deliberately stay per-request reads
+(they carry ADR-0014/0015's next-request freshness promises); the
+"until HIER-2/3 cache them" deferrals close as chains-only. CTX-2's
+composition engine should consume `synveda_store::ScopeChainCache`
+rather than re-reading closure rows._
 
 ## Phase 2 — Governance (wk 6–10)
 

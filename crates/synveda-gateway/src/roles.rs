@@ -71,7 +71,7 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         authz::require(
-            &state.pdp,
+            &state,
             &mut tx,
             Action::RoleRead,
             Resource::Tenant(tenant_id),
@@ -156,7 +156,7 @@ pub(crate) async fn list_node(State(state): State<AppState>, Path(id): Path<Scop
             id,
         )?;
         authz::require(
-            &state.pdp,
+            &state,
             &mut tx,
             Action::RoleRead,
             Resource::Scope(id),
@@ -245,7 +245,7 @@ async fn require_assign(
     anchor: Option<&synveda_types::HierarchyNode>,
     grant: Role,
 ) -> Result<()> {
-    let input = authz::gather(tx, anchor).await?;
+    let input = authz::gather(&state.scope_chains, tx, anchor).await?;
     let mut context = input.context();
     context.grant = Some(grant);
     state

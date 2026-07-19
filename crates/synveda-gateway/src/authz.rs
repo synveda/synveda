@@ -16,10 +16,11 @@ use sqlx::PgPool;
 use sqlx::postgres::PgConnection;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
 use synveda_store::{
-    hierarchy, identities, policy_assignments, policy_packs, rls, role_bindings, tenants,
+    ScopeChainCache, identities, policy_assignments, policy_packs, rls, role_bindings, tenants,
 };
 use synveda_types::{Error, HierarchyNode, Result, RoleBinding, TenantId};
 
+use crate::app::AppState;
 use crate::telemetry::POLICY_PACK_RELOADS_TOTAL;
 
 /// Everything [`require`] assembles for one decision: the principal and
@@ -28,8 +29,8 @@ use crate::telemetry::POLICY_PACK_RELOADS_TOTAL;
 /// effective pack) build this too, through [`gather`].
 pub(crate) struct DecisionInput {
     pub(crate) principal: Principal,
-    pub(crate) chain: Vec<HierarchyNode>,
-    pub(crate) principal_scopes: Vec<HierarchyNode>,
+    pub(crate) chain: Arc<[HierarchyNode]>,
+    pub(crate) principal_scopes: Arc<[HierarchyNode]>,
     pub(crate) assignments: Vec<synveda_types::PolicyAssignment>,
     pub(crate) default_pack: Option<String>,
     pub(crate) role_bindings: Vec<RoleBinding>,
@@ -61,7 +62,14 @@ impl DecisionInput {
 /// nothing for it (ADR-0014 decision 5). The identity's placement chain
 /// and the resource chain's pack assignments are read here too — pack
 /// switches are in force on the very next request (ADR-0014 decision 3).
+///
+/// Since HIER-2 (ADR-0016) both chains come from the scope-chain cache:
+/// warm requests read no hierarchy rows; assignments and bindings stay
+/// per-request reads — that is what keeps the next-request freshness
+/// promises true (ADR-0016 decision 6). Must run before any hierarchy
+/// mutation staged in `conn`'s transaction (decision 4).
 pub(crate) async fn gather(
+    chains: &ScopeChainCache,
     conn: &mut PgConnection,
     anchor: Option<&HierarchyNode>,
 ) -> Result<DecisionInput> {
@@ -81,26 +89,24 @@ pub(crate) async fn gather(
         scope_id: identity.as_ref().map(|identity| identity.scope_id),
     };
     let chain = match anchor {
-        Some(node) => {
-            let mut chain = hierarchy::ancestors(&mut *conn, node.id).await?;
-            chain.insert(0, node.clone());
-            chain
-        }
-        None => Vec::new(),
+        Some(node) => match chains.resolve(&mut *conn, tenant_id, node.id).await? {
+            Some(chain) => chain,
+            // The anchor vanished between the handler's fetch and this
+            // statement (a concurrent committed delete): the node alone,
+            // no ancestry — the same shape the per-request reads produced.
+            None => vec![node.clone()].into(),
+        },
+        None => empty_chain(),
     };
     let principal_scopes = match &identity {
-        // The FK pins the placement node, so it exists; a missing row
+        // The FK pins the placement node, so it resolves; a missing chain
         // (mid-transaction delete) just leaves the principal unplaced —
         // composition rules then read nothing (fail closed).
-        Some(identity) => match hierarchy::node(&mut *conn, identity.scope_id).await? {
-            Some(node) => {
-                let mut placement = hierarchy::ancestors(&mut *conn, node.id).await?;
-                placement.insert(0, node);
-                placement
-            }
-            None => Vec::new(),
-        },
-        None => Vec::new(),
+        Some(identity) => chains
+            .resolve(&mut *conn, tenant_id, identity.scope_id)
+            .await?
+            .unwrap_or_else(empty_chain),
+        None => empty_chain(),
     };
     let chain_ids: Vec<_> = chain.iter().map(|node| node.id).collect();
     let assignments = if chain_ids.is_empty() {
@@ -130,14 +136,20 @@ pub(crate) async fn gather(
 /// ownership check, so cross-tenant probes never see a policy denial
 /// oracle (ADR-0012 decision 7).
 pub(crate) async fn require(
-    pdp: &Pdp,
+    state: &AppState,
     conn: &mut PgConnection,
     action: Action,
     resource: Resource,
     anchor: Option<&HierarchyNode>,
 ) -> Result<()> {
-    let input = gather(conn, anchor).await?;
-    pdp.require(&input.principal, action, resource, &input.context())
+    let input = gather(&state.scope_chains, conn, anchor).await?;
+    state
+        .pdp
+        .require(&input.principal, action, resource, &input.context())
+}
+
+fn empty_chain() -> Arc<[HierarchyNode]> {
+    Vec::new().into()
 }
 
 /// One reload sweep: for every active tenant, read its stored packs (in a

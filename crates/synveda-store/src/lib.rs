@@ -22,7 +22,10 @@ pub mod policy_packs;
 pub mod records;
 pub mod rls;
 pub mod role_bindings;
+pub mod scope_chain;
 pub mod tenants;
+
+pub use scope_chain::ScopeChainCache;
 
 use sqlx::migrate::Migrator;
 use sqlx::{PgExecutor, PgPool};

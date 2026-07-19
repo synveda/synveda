@@ -92,7 +92,7 @@ pub(crate) async fn create(
         match body.parent_id {
             None => {
                 authz::require(
-                    &state.pdp,
+                    &state,
                     &mut tx,
                     Action::HierarchyCreate,
                     Resource::Tenant(tenant_id),
@@ -107,7 +107,7 @@ pub(crate) async fn create(
                     parent_id,
                 )?;
                 authz::require(
-                    &state.pdp,
+                    &state,
                     &mut tx,
                     Action::HierarchyCreate,
                     Resource::Scope(parent_id),
@@ -127,6 +127,10 @@ pub(crate) async fn create(
         )
         .await?;
         commit(tx).await?;
+        // Any committed hierarchy mutation bumps the tenant's scope-chain
+        // generation (ADR-0016 decision 5) — uniformly, though a fresh
+        // leaf strictly invalidates nothing.
+        state.scope_chains.invalidate(tenant_id);
         Ok((StatusCode::CREATED, Json(node)))
     }
     .await;
@@ -139,7 +143,7 @@ pub(crate) async fn root(State(state): State<AppState>) -> Response {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         authz::require(
-            &state.pdp,
+            &state,
             &mut tx,
             Action::HierarchyRead,
             Resource::Tenant(tenant_id),
@@ -164,7 +168,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ScopeId>) 
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
         authz::require(
-            &state.pdp,
+            &state,
             &mut tx,
             Action::HierarchyRead,
             Resource::Scope(id),
@@ -205,7 +209,7 @@ async fn listing(state: &AppState, id: ScopeId, which: &str) -> Result<Json<Vec<
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
     authz::require(
-        &state.pdp,
+        state,
         &mut tx,
         Action::HierarchyRead,
         Resource::Scope(id),
@@ -251,7 +255,7 @@ pub(crate) async fn update(
         // Ownership check before any mutation (see `found`).
         let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
         authz::require(
-            &state.pdp,
+            &state,
             &mut tx,
             Action::HierarchyUpdate,
             Resource::Scope(id),
@@ -266,6 +270,8 @@ pub(crate) async fn update(
         }
         let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
         commit(tx).await?;
+        // A committed rename/move reshapes cached chains (ADR-0016).
+        state.scope_chains.invalidate(tenant_id);
         Ok(Json(node))
     }
     .await;
@@ -280,7 +286,7 @@ pub(crate) async fn delete(State(state): State<AppState>, Path(id): Path<ScopeId
         // Ownership check before any mutation (see `found`).
         let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
         authz::require(
-            &state.pdp,
+            &state,
             &mut tx,
             Action::HierarchyDelete,
             Resource::Scope(id),
@@ -291,6 +297,8 @@ pub(crate) async fn delete(State(state): State<AppState>, Path(id): Path<ScopeId
             return Err(not_found(id));
         }
         commit(tx).await?;
+        // The deleted leaf's cached chain must go (ADR-0016).
+        state.scope_chains.invalidate(tenant_id);
         Ok(StatusCode::NO_CONTENT)
     }
     .await;
