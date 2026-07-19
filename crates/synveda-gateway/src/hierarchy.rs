@@ -127,10 +127,10 @@ pub(crate) async fn create(
         )
         .await?;
         commit(tx).await?;
-        // Any committed hierarchy mutation bumps the tenant's scope-chain
-        // generation (ADR-0016 decision 5) — uniformly, though a fresh
-        // leaf strictly invalidates nothing.
-        state.scope_chains.invalidate(tenant_id);
+        // Any committed hierarchy mutation flushes the tenant's chains
+        // and entity fragments (ADR-0016 decision 5, ADR-0017 decision 5)
+        // — uniformly, though a fresh leaf strictly invalidates nothing.
+        state.invalidate_hierarchy(tenant_id);
         Ok((StatusCode::CREATED, Json(node)))
     }
     .await;
@@ -270,8 +270,9 @@ pub(crate) async fn update(
         }
         let node = found(hierarchy::node(&mut *tx, id).await?, tenant_id, id)?;
         commit(tx).await?;
-        // A committed rename/move reshapes cached chains (ADR-0016).
-        state.scope_chains.invalidate(tenant_id);
+        // A committed rename/move reshapes cached chains — and a move,
+        // the Cedar entity graph (ADR-0016, ADR-0017).
+        state.invalidate_hierarchy(tenant_id);
         Ok(Json(node))
     }
     .await;
@@ -297,8 +298,9 @@ pub(crate) async fn delete(State(state): State<AppState>, Path(id): Path<ScopeId
             return Err(not_found(id));
         }
         commit(tx).await?;
-        // The deleted leaf's cached chain must go (ADR-0016).
-        state.scope_chains.invalidate(tenant_id);
+        // The deleted leaf's cached chain and fragment must go
+        // (ADR-0016, ADR-0017).
+        state.invalidate_hierarchy(tenant_id);
         Ok(StatusCode::NO_CONTENT)
     }
     .await;

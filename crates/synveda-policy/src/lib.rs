@@ -15,6 +15,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod entity_store;
 mod pdp;
 mod request;
 
@@ -35,3 +36,15 @@ pub const AUTHZ_DECISIONS_TOTAL: &str = "synveda_authz_decisions_total";
 /// Nonzero means assignment data and pack sources have drifted —
 /// out-of-band writes, since the store refuses referenced deletions.
 pub const POLICY_PACK_FALLBACKS_TOTAL: &str = "synveda_policy_pack_fallbacks_total";
+
+/// Cedar entity fragment resolutions (HIER-3, ADR-0017), labelled
+/// `outcome` = `hit` (the supplied chain's shape matched the stored
+/// fragment) | `rebuild` (first sight, or the chain was reshaped by a
+/// hierarchy mutation). Emitted here; described where the recorder
+/// lives (ADR-0007).
+pub const CEDAR_ENTITY_FRAGMENTS_TOTAL: &str = "synveda_cedar_entity_fragments_total";
+
+/// Tenant-wide fragment flushes at the gateway's unified
+/// hierarchy-invalidation seam ([`Pdp::flush_entities`], ADR-0017
+/// decision 5).
+pub const CEDAR_ENTITY_FLUSHES_TOTAL: &str = "synveda_cedar_entity_flushes_total";

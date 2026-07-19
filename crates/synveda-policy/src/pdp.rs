@@ -1,13 +1,15 @@
 //! The embedded Cedar engine behind the facade (ADR-0002, ADR-0012,
 //! ADR-0014).
 //!
-//! Everything Cedar stays inside this module: packs compile (parse +
+//! Everything Cedar stays inside this crate: packs compile (parse +
 //! schema-validate, on top of the invariant base layer) at install time,
 //! the effective pack resolves nearest-ancestor-first from caller-supplied
-//! assignment rows, decisions evaluate against per-request entities
-//! materialised from caller-supplied hierarchy rows, and every call logs
-//! its decision with the policy pack version in force (the AUTHZ-1 AC; an
-//! AUD-1 emission point until the hash-chained log lands).
+//! assignment rows, decisions evaluate against entities served from the
+//! entity store's prebuilt fragments (HIER-3, ADR-0017) — rebuilt from
+//! the caller-supplied chains whenever a hierarchy mutation reshaped
+//! them — and every call logs its decision with the policy pack version
+//! in force (the AUTHZ-1 AC; an AUD-1 emission point until the
+//! hash-chained log lands).
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -19,6 +21,7 @@ use cedar_policy::{
 };
 use synveda_types::{Error, HierarchyNode, Result, Role, ScopeId, ScopeKind, TenantId};
 
+use crate::entity_store::EntityStore;
 use crate::request::{Action, AuthzContext, AuthzDecision, Principal, Resource};
 use crate::{AUTHZ_DECISIONS_TOTAL, POLICY_PACK_FALLBACKS_TOTAL};
 
@@ -116,6 +119,7 @@ pub struct Pdp {
     action_type: EntityTypeName,
     embedded: HashMap<&'static str, Arc<LoadedPack>>,
     tenant_packs: RwLock<HashMap<TenantId, HashMap<String, Arc<LoadedPack>>>>,
+    entity_store: EntityStore,
 }
 
 impl Pdp {
@@ -156,7 +160,19 @@ impl Pdp {
             action_type: type_name("Synveda::Action")?,
             embedded,
             tenant_packs: RwLock::new(HashMap::new()),
+            entity_store: EntityStore::default(),
         })
+    }
+
+    /// Drops the tenant's cached Cedar entity fragments (HIER-3,
+    /// ADR-0017 decision 5). The gateway's unified
+    /// hierarchy-invalidation seam calls this beside the scope-chain
+    /// flush after committing any hierarchy mutation. Hygiene, not
+    /// correctness: a fragment is served only for a chain whose shape it
+    /// matches, so a stale fragment can never decide — this call just
+    /// keeps deleted scopes from lingering as dead entries.
+    pub fn flush_entities(&self, tenant_id: TenantId) {
+        self.entity_store.flush(tenant_id);
     }
 
     /// Parses and schema-validates `source` (on top of the base layer)
@@ -432,47 +448,36 @@ impl Pdp {
     }
 
     /// Materialises the Cedar entity graph for one decision (ADR-0012
-    /// decision 4, ADR-0014 decision 5): tenant entities, the principal
-    /// parented to its tenant and its placement scope, and both supplied
-    /// chains — resource and principal placement, deduplicated — parented
-    /// along `parent_id` up to the org, whose parent is its tenant entity.
+    /// decision 4, ADR-0014 decision 5, ADR-0017): both supplied chains
+    /// arrive as prebuilt fragments from the entity store — served when
+    /// the chain's shape matches, rebuilt from the chain otherwise — and
+    /// the principal entity is built per request, so `quarantined`,
+    /// `home`, and `department` keep riding the per-request identity
+    /// read (ADR-0016 decision 6).
     fn entities(&self, principal: &Principal, context: &AuthzContext<'_>) -> Result<Entities> {
         use cedar_policy::RestrictedExpression;
 
         // Both chains may share nodes (a team reading its own scope);
-        // Cedar rejects duplicate entity entries, so deduplicate by id.
-        let scopes: HashMap<ScopeId, &HierarchyNode> = context
-            .scopes
-            .iter()
-            .chain(context.principal_scopes)
-            .map(|node| (node.id, node))
-            .collect();
-
-        let mut list = Vec::with_capacity(scopes.len() + 2);
-
-        // Every distinct tenant in play gets its entity; a chain from a
-        // foreign tenant therefore chains up to a *different* tenant
-        // entity and membership rules fail closed.
-        let mut tenant_ids = vec![principal.tenant_id];
-        for node in scopes.values() {
-            if !tenant_ids.contains(&node.tenant_id) {
-                tenant_ids.push(node.tenant_id);
+        // Cedar rejects duplicate entity entries, so deduplicate by uid.
+        let mut merged: HashMap<EntityUid, Entity> = HashMap::new();
+        for chain in [context.scopes, context.principal_scopes] {
+            if chain.is_empty() {
+                continue;
+            }
+            let fragment = self
+                .entity_store
+                .resolve(chain, || self.chain_entities(chain))?;
+            for entity in fragment.entities() {
+                merged.entry(entity.uid()).or_insert_with(|| entity.clone());
             }
         }
-        for tenant_id in &tenant_ids {
-            list.push(Entity::with_uid(self.tenant_uid(*tenant_id)?));
-        }
 
-        let entity = |uid: EntityUid,
-                      attrs: HashMap<String, RestrictedExpression>,
-                      parents: HashSet<EntityUid>|
-         -> Result<Entity> {
-            Entity::new(uid, attrs, parents).map_err(|err| Error::Internal {
-                message: format!("materialise entity: {err}"),
-            })
-        };
-
+        // The principal's tenant entity exists even when no chain was
+        // supplied at all (a tenant resource, an unplaced principal).
         let principal_tenant = self.tenant_uid(principal.tenant_id)?;
+        merged
+            .entry(principal_tenant.clone())
+            .or_insert_with(|| Entity::with_uid(principal_tenant.clone()));
         let mut principal_attrs = HashMap::from([
             (
                 "tenant".to_owned(),
@@ -501,19 +506,44 @@ impl Pdp {
                 RestrictedExpression::new_entity_uid(self.scope_uid(department)?),
             );
         }
-        list.push(entity(
+        let mut list: Vec<Entity> = merged.into_values().collect();
+        list.push(new_entity(
             self.principal_uid(principal)?,
             principal_attrs,
             principal_parents,
         )?);
 
-        for node in scopes.values() {
+        Entities::from_entities(list, Some(&self.schema)).map_err(|err| Error::Internal {
+            message: format!("build entity store: {err}"),
+        })
+    }
+
+    /// Builds one chain's fragment entities (ADR-0017 decision 4): a
+    /// `Scope` entity per node — parented along `parent_id`, the root to
+    /// its tenant entity — plus the chain's distinct `Tenant` entities.
+    /// Every distinct tenant in play gets its entity so a chain from a
+    /// foreign tenant chains up to a *different* tenant entity and
+    /// membership rules fail closed.
+    fn chain_entities(&self, chain: &[HierarchyNode]) -> Result<Vec<Entity>> {
+        use cedar_policy::RestrictedExpression;
+
+        let mut list = Vec::with_capacity(chain.len() + 1);
+        let mut tenant_ids: Vec<TenantId> = Vec::new();
+        for node in chain {
+            if !tenant_ids.contains(&node.tenant_id) {
+                tenant_ids.push(node.tenant_id);
+            }
+        }
+        for tenant_id in &tenant_ids {
+            list.push(Entity::with_uid(self.tenant_uid(*tenant_id)?));
+        }
+        for node in chain {
             let node_tenant = self.tenant_uid(node.tenant_id)?;
             let parent = match node.parent_id {
                 Some(parent_id) => self.scope_uid(parent_id)?,
                 None => node_tenant.clone(),
             };
-            list.push(entity(
+            list.push(new_entity(
                 self.scope_uid(node.id)?,
                 HashMap::from([
                     (
@@ -528,10 +558,7 @@ impl Pdp {
                 HashSet::from([parent]),
             )?);
         }
-
-        Entities::from_entities(list, Some(&self.schema)).map_err(|err| Error::Internal {
-            message: format!("build entity store: {err}"),
-        })
+        Ok(list)
     }
 
     /// Builds the schema-checked request, `context.roles` included
@@ -639,6 +666,18 @@ fn effective_roles(
     roles.sort_unstable();
     roles.dedup();
     roles
+}
+
+/// [`Entity::new`] mapped onto the taxonomy — shared by the fragment
+/// builder and the per-request principal entity.
+fn new_entity(
+    uid: EntityUid,
+    attrs: HashMap<String, cedar_policy::RestrictedExpression>,
+    parents: HashSet<EntityUid>,
+) -> Result<Entity> {
+    Entity::new(uid, attrs, parents).map_err(|err| Error::Internal {
+        message: format!("materialise entity: {err}"),
+    })
 }
 
 /// The principal's department: the deepest department-kind node of its

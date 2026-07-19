@@ -188,6 +188,16 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_store::scope_chain::SCOPE_CHAIN_INVALIDATIONS_TOTAL,
         "Tenant-wide scope-chain cache flushes after committed hierarchy mutations"
     );
+    // HIER-3 counters (ADR-0017): fragments in synveda-policy's entity
+    // store; flushes at the gateway's unified hierarchy-invalidation seam.
+    metrics::describe_counter!(
+        synveda_policy::CEDAR_ENTITY_FRAGMENTS_TOTAL,
+        "Cedar entity fragment resolutions by outcome (hit/rebuild)"
+    );
+    metrics::describe_counter!(
+        synveda_policy::CEDAR_ENTITY_FLUSHES_TOTAL,
+        "Tenant-wide Cedar entity fragment flushes at the hierarchy-invalidation seam"
+    );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).
     metrics::describe_counter!(

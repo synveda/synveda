@@ -33,7 +33,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [AUTHZ-2: Policy packs](AUTHZ-2.md) — done 2026-07-19, AC tests: crates/synveda-policy/tests/packs.rs (golden matrix per pack; composition switch at the MemoryRead seam), crates/synveda-gateway/tests/policy_routes.rs (per-node assignment governs the next request; inheritance, origin display, self-rescue), demo: demos/authz-2-policy-packs.sh
 - [x] [AUTHZ-3: Roles & role bindings](AUTHZ-3.md) — done 2026-07-19, AC tests: crates/synveda-policy/tests/roles.rs (full role×action matrix per pack; escalation guard; subtree boundaries; privacy floor), crates/synveda-gateway/tests/roles_routes.rs (bindings govern the next request; delegation; uniform 404), crates/synveda-gateway/tests/jit_provisioning.rs (admin-group bootstrap), demo: demos/authz-3-roles.sh
 - [x] [HIER-2: Scope chain resolver](HIER-2.md) — done 2026-07-19, AC tests: crates/synveda-store/tests/scope_chain.rs (invalidation serves the fresh chain after a move; warm resolve median 800ns, p99 ≤1.5µs over 10k samples — 300× under the 0.5ms bound), crates/synveda-gateway/tests/scope_chain_routes.rs (a move governs the very next request through the cache), demo: demos/hier-2-scope-chain.sh
-- [ ] [HIER-3: Cedar entity sync](HIER-3.md)
+- [x] [HIER-3: Cedar entity sync](HIER-3.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/cedar_entity_sync.rs (a team moved between departments governs the very next decision: the moving steward's authority leaves with it over HTTP; the department MemoryRead follows it at the composition seam), crates/synveda-policy/tests/entity_sync.rs (a warm fragment never survives a reshaped chain, both directions), demo: demos/hier-3-cedar-entity-sync.sh
 - [ ] [AUTH-3: Service identities](AUTH-3.md)
 - [ ] [AUD-1: Hash-chained audit log](AUD-1.md)
 - [ ] [MEM-1: observe API + PGMQ buffer](MEM-1.md)
@@ -140,6 +140,21 @@ role bindings, and identity rows deliberately stay per-request reads
 "until HIER-2/3 cache them" deferrals close as chains-only. CTX-2's
 composition engine should consume `synveda_store::ScopeChainCache`
 rather than re-reading closure rows._
+
+_HIER-3 notes (ADR-0017): Cedar entity fragments are cached per chain
+inside the PDP, valid exactly for the chain shape they were built from
+— freshness is inherited from the HIER-2 chain cache, so ADR-0012's
+"per-request entity building repeats work HIER-3 will cache" deferral
+closes. The gateway's mutation seams now call one helper
+(`AppState::invalidate_hierarchy`) that flushes chains and fragments
+together; future hierarchy writers (AUTH-4/5) call it — never the two
+caches individually — and the ADR-0016 LISTEN/NOTIFY upgrade path
+covers both. The principal entity stays per-request (identity freshness,
+ADR-0016 decision 6). `Entities::from_entities` still runs per decision
+over the small merged set; revisit only if CTX-1's inject budget shows
+it dominating (ADR-0017's reversal trigger). CTX-2/3's per-candidate
+`MemoryRead` sweep inherits prebuilt fragments through the same
+facade._
 
 ## Phase 2 — Governance (wk 6–10)
 

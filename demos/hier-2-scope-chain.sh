@@ -129,10 +129,23 @@ invalidations=$(metric 'synveda_scope_chain_invalidations_total')
 echo "    $invalidations"
 
 echo "==> AC: cache invalidation test + warm p99 <0.5ms (cargo test)"
-cargo test -p synveda-store --test scope_chain -- --nocapture 2>&1 |
-  grep -E '^test |warm resolve|test result' | sed 's/^/    /'
-cargo test -p synveda-gateway --test scope_chain_routes 2>&1 |
-  grep -E '^test |test result' | sed 's/^/    /'
+# Stop the gateway first: on Windows the running exe would block cargo
+# from relinking it for the integration tests (a silent lock error).
+kill "$GATEWAY_PID" 2>/dev/null || true
+wait "$GATEWAY_PID" 2>/dev/null || true
+run_ac_test() {
+  pkg=$1
+  name=$2
+  shift 2
+  if ! out=$(cargo test -p "$pkg" --test "$name" -- "$@" 2>&1); then
+    echo "$out" | tail -20
+    echo "demo FAILED: $pkg --test $name" >&2
+    exit 1
+  fi
+  echo "$out" | grep -E '^test |warm resolve|test result' | sed 's/^/    /'
+}
+run_ac_test synveda-store scope_chain --nocapture
+run_ac_test synveda-gateway scope_chain_routes
 
 echo ""
 echo "HIER-2 scope chain resolver: acceptance criteria pass."

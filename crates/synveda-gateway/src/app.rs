@@ -48,8 +48,21 @@ pub struct AppState {
     pub pdp: Arc<Pdp>,
     /// The scope-chain resolver (HIER-2, ADR-0016): read-through cache
     /// over the closure table; the hierarchy-mutating handlers invalidate
-    /// it post-commit.
+    /// it post-commit through [`AppState::invalidate_hierarchy`].
     pub scope_chains: Arc<synveda_store::ScopeChainCache>,
+}
+
+impl AppState {
+    /// The one post-commit seam for every hierarchy mutation (ADR-0016
+    /// decision 5, ADR-0017 decision 5): flushes the tenant's cached
+    /// scope chains and its Cedar entity fragments, so the very next
+    /// request re-reads committed truth. Any future hierarchy writer
+    /// (AUTH-4 SCIM, AUTH-5 directory sync) calls this — never the two
+    /// caches individually.
+    pub fn invalidate_hierarchy(&self, tenant_id: synveda_types::TenantId) {
+        self.scope_chains.invalidate(tenant_id);
+        self.pdp.flush_entities(tenant_id);
+    }
 }
 
 /// Builds the gateway router: ops-plane routes plus the authenticated `/v1`
