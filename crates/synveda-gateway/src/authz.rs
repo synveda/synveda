@@ -17,7 +17,9 @@ use sqlx::postgres::PgConnection;
 use synveda_identity::Claims;
 use synveda_policy::{Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource};
 use synveda_store::{identities, policy_assignments, policy_packs, rls, role_bindings, tenants};
-use synveda_types::{Error, HierarchyNode, IdentityKind, Result, Role, RoleBinding, TenantId};
+use synveda_types::{
+    Error, HierarchyNode, Identity, IdentityKind, Result, Role, RoleBinding, TenantId,
+};
 
 use crate::app::AppState;
 use crate::telemetry::{POLICY_PACK_RELOADS_TOTAL, SERVICE_TOKEN_REJECTIONS_TOTAL};
@@ -33,6 +35,10 @@ pub(crate) struct DecisionInput {
     pub(crate) assignments: Vec<synveda_types::PolicyAssignment>,
     pub(crate) default_pack: Option<String>,
     pub(crate) role_bindings: Vec<RoleBinding>,
+    /// The caller's identity row, already read for the principal — so
+    /// handlers whose resource *is* the placement (observe, MEM-1) never
+    /// read it twice. `None` for verified subjects with no identity.
+    pub(crate) identity: Option<Identity>,
 }
 
 impl DecisionInput {
@@ -77,6 +83,36 @@ pub(crate) async fn gather(
     conn: &mut PgConnection,
     anchor: Option<&HierarchyNode>,
 ) -> Result<DecisionInput> {
+    gather_inner(state, conn, ResourceChain::Anchor(anchor)).await
+}
+
+/// [`gather`] for the observe shape (MEM-1, ADR-0020 decision 4): the
+/// resource is the caller's own placement leaf, so the resource chain IS
+/// the placement chain — one identity read, no separate anchor fetch. The
+/// handler takes the home scope and owner from
+/// [`DecisionInput::identity`].
+pub(crate) async fn gather_at_home(
+    state: &AppState,
+    conn: &mut PgConnection,
+) -> Result<DecisionInput> {
+    gather_inner(state, conn, ResourceChain::PrincipalHome).await
+}
+
+/// How [`gather_inner`] obtains the resource's scope chain.
+enum ResourceChain<'a> {
+    /// The already-fetched, ownership-checked node the resource refers to
+    /// (`None` for tenant-level resources).
+    Anchor(Option<&'a HierarchyNode>),
+    /// The principal's own placement chain — the resource of a write that
+    /// lands at home.
+    PrincipalHome,
+}
+
+async fn gather_inner(
+    state: &AppState,
+    conn: &mut PgConnection,
+    resource_chain: ResourceChain<'_>,
+) -> Result<DecisionInput> {
     let chains = &state.scope_chains;
     let context = synveda_identity::current_tenant().ok_or_else(|| Error::Internal {
         message: "authorization ran outside a tenant scope".to_owned(),
@@ -93,16 +129,6 @@ pub(crate) async fn gather(
         Some(identity) => identity.quarantined,
         None => context.claims.provisioning.is_some(),
     };
-    let chain = match anchor {
-        Some(node) => match chains.resolve(&mut *conn, tenant_id, node.id).await? {
-            Some(chain) => chain,
-            // The anchor vanished between the handler's fetch and this
-            // statement (a concurrent committed delete): the node alone,
-            // no ancestry — the same shape the per-request reads produced.
-            None => vec![node.clone()].into(),
-        },
-        None => empty_chain(),
-    };
     let principal_scopes = match &identity {
         // The FK pins the placement node, so it resolves; a missing chain
         // (mid-transaction delete) just leaves the principal unplaced —
@@ -112,6 +138,19 @@ pub(crate) async fn gather(
             .await?
             .unwrap_or_else(empty_chain),
         None => empty_chain(),
+    };
+    let chain = match resource_chain {
+        ResourceChain::Anchor(Some(node)) => {
+            match chains.resolve(&mut *conn, tenant_id, node.id).await? {
+                Some(chain) => chain,
+                // The anchor vanished between the handler's fetch and this
+                // statement (a concurrent committed delete): the node alone,
+                // no ancestry — the same shape the per-request reads produced.
+                None => vec![node.clone()].into(),
+            }
+        }
+        ResourceChain::Anchor(None) => empty_chain(),
+        ResourceChain::PrincipalHome => Arc::clone(&principal_scopes),
     };
     // The confinement scope (ADR-0018 decision 4): the personal leaf's
     // parent — the anchor the agent was registered at — read off the
@@ -154,6 +193,7 @@ pub(crate) async fn gather(
         assignments,
         default_pack,
         role_bindings,
+        identity,
     })
 }
 

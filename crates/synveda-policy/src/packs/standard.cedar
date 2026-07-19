@@ -1,5 +1,5 @@
-// standard@3 — team-shares-by-default within a department (seed §6,
-// ADR-0014, ADR-0015, ADR-0018).
+// standard@4 — team-shares-by-default within a department (seed §6,
+// ADR-0014, ADR-0015, ADR-0018, ADR-0020).
 //
 // Own-chain reads plus the department subtree: sibling teams under the
 // principal's department share by default. Other people's personal
@@ -69,5 +69,30 @@ permit (
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["viewer", "contributor", "curator"])
+        && resource.kind != "user"
+};
+
+// The write floor, role-free: own personal scope only. Write governance
+// is pack-uniform — sharing defaults differ on the read side; writes
+// beyond home always take an explicit grant (MEM-1, ADR-0020
+// decision 3).
+permit (
+    principal,
+    action == Synveda::Action::"MemoryWrite",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+};
+
+// Content roles write the bound subtree, personal scopes excluded
+// (ADR-0015's contributor-writes marker, ADR-0020 decision 3).
+permit (
+    principal,
+    action == Synveda::Action::"MemoryWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["contributor", "curator"])
         && resource.kind != "user"
 };

@@ -10,6 +10,7 @@ mod error;
 mod hierarchy;
 mod id;
 mod identity;
+mod observe;
 mod policy;
 mod record;
 mod role;
@@ -18,8 +19,9 @@ mod tenant;
 
 pub use error::{Error, Result};
 pub use hierarchy::{HierarchyNode, ScopeKind};
-pub use id::{IdentityId, RecordId, ScopeId, TenantId};
+pub use id::{IdentityId, ObserveEventId, RecordId, ScopeId, TenantId};
 pub use identity::{Identity, IdentityKind};
+pub use observe::ObserveKind;
 pub use policy::PolicyAssignment;
 pub use record::{RecordClass, RecordKind};
 pub use role::{Role, RoleBinding};

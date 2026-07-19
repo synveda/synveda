@@ -22,6 +22,7 @@
 pub mod group_mappings;
 pub mod hierarchy;
 pub mod identities;
+pub mod observe;
 pub mod policy_assignments;
 pub mod policy_packs;
 pub mod records;

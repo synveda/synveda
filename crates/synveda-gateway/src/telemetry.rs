@@ -70,6 +70,16 @@ pub const SERVICE_IDENTITY_OPERATIONS_TOTAL: &str = "synveda_service_identity_op
 /// log lands.
 pub const SERVICE_TOKEN_REJECTIONS_TOTAL: &str = "synveda_service_token_rejections_total";
 
+/// Observe ingestion batches (MEM-1, ADR-0020), labelled by `outcome`
+/// (`ok`, `rejected`, `error`). Each `ok` batch chains one
+/// `memory.observed` audit event.
+pub const OBSERVE_BATCHES_TOTAL: &str = "synveda_observe_batches_total";
+
+/// Observe events admitted to the buffer (MEM-1, ADR-0020), labelled by
+/// `outcome`: `accepted` (staged and enqueued) or `duplicate`
+/// (idempotency key already admitted — reported, never re-enqueued).
+pub const OBSERVE_EVENTS_TOTAL: &str = "synveda_observe_events_total";
+
 /// Handle to the installed tracer provider. Call [`Telemetry::shutdown`] on
 /// exit to flush batched spans; dropping without it can lose the tail of the
 /// trace.
@@ -200,6 +210,15 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         SERVICE_TOKEN_REJECTIONS_TOTAL,
         "Service tokens refused at the enforcement seam by reason \
          (lifetime_exceeded/lifetime_unknown)"
+    );
+    // MEM-1 counters (ADR-0020): emitted in the gateway's observe route.
+    metrics::describe_counter!(
+        OBSERVE_BATCHES_TOTAL,
+        "Observe ingestion batches by outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        OBSERVE_EVENTS_TOTAL,
+        "Observe events admitted to the buffer by outcome (accepted/duplicate)"
     );
     // AUD-1 counters (ADR-0019): appends and verifications in
     // synveda-audit through the facade; best-effort append failures at

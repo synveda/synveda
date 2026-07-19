@@ -20,12 +20,12 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
 use synveda_store::{
-    group_mappings, hierarchy, identities, policy_assignments, policy_packs, rls, role_bindings,
-    tenants,
+    group_mappings, hierarchy, identities, observe, policy_assignments, policy_packs, rls,
+    role_bindings, tenants,
 };
 use synveda_types::{
-    Error, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, Role, ScopeId, ScopeKind,
-    Sensitivity, TenantId, TenantStatus,
+    Error, IdentityId, IdentityKind, ObserveKind, RecordClass, RecordId, RecordKind, Role, ScopeId,
+    ScopeKind, Sensitivity, TenantId, TenantStatus,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -172,6 +172,7 @@ const COVERED: &[&str] = &[
     "hierarchy_closure",
     "hierarchy_nodes",
     "identities",
+    "observe_events",
     "policy_pack_assignments",
     "policy_pack_defaults",
     "policy_packs",
@@ -1178,6 +1179,224 @@ fn same_tenant_lifecycle_works_under_rls() {
             .await
             .expect("versions after delete");
         assert_eq!(versions.len(), 2);
+    });
+}
+
+// ── Observe buffer (MEM-1, ADR-0020) ────────────────────────────────────────
+
+fn observe_event(key: &str) -> observe::NewObserveEvent {
+    observe::NewObserveEvent {
+        idempotency_key: key.to_owned(),
+        kind: ObserveKind::TranscriptDelta,
+        payload: serde_json::json!({"text": "rls fixture"}),
+        occurred_at: chrono::Utc::now(),
+    }
+}
+
+/// Admits a tenant with an org root, a personal scope, an identity, and
+/// two buffered observe events. Runs on the (RLS-exempt) test connection.
+async fn seed_observe(pool: &PgPool) -> (TenantId, ScopeId, IdentityId) {
+    let tenant = TenantId::new();
+    let slug = format!("rlso-{}", tenant.as_uuid().simple());
+    tenants::create(
+        pool,
+        tenant,
+        &slug,
+        "RLS observe fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create tenant");
+    let mut tx = pool.begin().await.expect("begin transaction");
+    let org = hierarchy::create(
+        &mut tx,
+        ScopeId::new(),
+        tenant,
+        None,
+        ScopeKind::Org,
+        "acme",
+        "ACME",
+    )
+    .await
+    .expect("create org");
+    let personal = hierarchy::create(
+        &mut tx,
+        ScopeId::new(),
+        tenant,
+        Some(org.id),
+        ScopeKind::User,
+        "alice",
+        "Alice",
+    )
+    .await
+    .expect("create personal scope");
+    let identity = identities::create(
+        &mut tx,
+        IdentityId::new(),
+        tenant,
+        "alice",
+        IdentityKind::User,
+        None,
+        None,
+        personal.id,
+    )
+    .await
+    .expect("create identity");
+    observe::buffer_batch(
+        &mut tx,
+        tenant,
+        personal.id,
+        identity.id,
+        "rls-session",
+        &[observe_event("rls-1"), observe_event("rls-2")],
+    )
+    .await
+    .expect("buffer events");
+    tx.commit().await.expect("commit observe fixture");
+    (tenant, personal.id, identity.id)
+}
+
+async fn visible_observe_rows(tx: &mut Transaction<'static, Postgres>, tenant: TenantId) -> i64 {
+    sqlx::query_scalar!(
+        r#"select count(*) as "count!" from observe_events where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count observe_events")
+}
+
+/// The wrong (or absent) tenant GUC sees zero staged events — raw
+/// pre-redaction session content is exactly what the backstop exists to
+/// protect (ADR-0020 decision 1); the right one sees its own.
+#[test]
+fn wrong_tenant_guc_sees_no_observe_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _, _) = seed_observe(&db.pool).await;
+        let (adversary, _, _) = seed_observe(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_observe_rows(&mut tx, victim).await,
+            0,
+            "observe rows leaked across tenants under the wrong GUC"
+        );
+        assert_eq!(visible_observe_rows(&mut tx, adversary).await, 2);
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_observe_rows(&mut tx, victim).await,
+            0,
+            "observe rows visible without any tenant GUC"
+        );
+    });
+}
+
+/// Buffering events for another tenant than the GUC's trips the policy's
+/// WITH CHECK — an application defect, surfaced as internal.
+#[test]
+fn cross_tenant_observe_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _, _) = seed_observe(&db.pool).await;
+        let (other, other_scope, other_identity) = seed_observe(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let result = observe::buffer_batch(
+            &mut tx,
+            other,
+            other_scope,
+            other_identity,
+            "forged-session",
+            &[observe_event("forged")],
+        )
+        .await;
+        assert!(
+            matches!(result, Err(Error::Internal { .. })),
+            "cross-tenant observe write must be rejected by RLS as an \
+             internal defect, got {result:?}"
+        );
+    });
+}
+
+/// The app role cannot rewrite or remove what was observed even inside its
+/// own tenant scope: UPDATE and DELETE on `observe_events` were never
+/// granted — staging rows are provenance (ADR-0020 decision 1).
+#[test]
+fn observe_events_are_append_only_for_the_app_role() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _, _) = seed_observe(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let update = sqlx::raw_sql("update observe_events set payload = '{}'")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            update.is_err(),
+            "the app role must not hold UPDATE on observe_events"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let delete = sqlx::raw_sql("delete from observe_events")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            delete.is_err(),
+            "the app role must not hold DELETE on observe_events"
+        );
+    });
+}
+
+/// The full admission shape — insert, duplicate suppression, enqueue —
+/// works as `synveda_app` with the right GUC, PGMQ grants included: the
+/// backstop isolates, it does not deny service.
+#[test]
+fn same_tenant_observe_admission_works_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, scope, identity) = seed_observe(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let admitted = observe::buffer_batch(
+            &mut tx,
+            tenant,
+            scope,
+            identity,
+            "rls-session",
+            // rls-1 was admitted by the seed; rls-3 is new.
+            &[observe_event("rls-1"), observe_event("rls-3")],
+        )
+        .await
+        .expect("buffer under RLS (pgmq grants included)");
+        assert_eq!(
+            admitted
+                .iter()
+                .map(|event| event.duplicate)
+                .collect::<Vec<_>>(),
+            vec![true, false],
+            "the redelivered key must be reported, the fresh one admitted"
+        );
+        tx.commit().await.expect("commit admission");
+
+        // Exactly one queue signal per admitted event: the seed's two plus
+        // rls-3 — the duplicate enqueued nothing (messages carry only ids,
+        // and this count is per-tenant via the message body).
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let signals = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from pgmq.q_observe
+               where message ->> 'tenant_id' = $1"#,
+            tenant.to_string(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count queue signals as synveda_app");
+        assert_eq!(
+            signals, 3,
+            "one signal per admitted event, none per duplicate"
+        );
     });
 }
 

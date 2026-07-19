@@ -36,7 +36,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [HIER-3: Cedar entity sync](HIER-3.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/cedar_entity_sync.rs (a team moved between departments governs the very next decision: the moving steward's authority leaves with it over HTTP; the department MemoryRead follows it at the composition seam), crates/synveda-policy/tests/entity_sync.rs (a warm fragment never survives a reshaped chain, both directions), demo: demos/hier-3-cedar-entity-sync.sh
 - [x] [AUTH-3: Service identities](AUTH-3.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/service_identities.rs (client-credentials grant end to end against a mock IdP; a team-anchored agent holding tenant-wide org-admin is denied every org-scope endpoint; unregistered clients quarantined; lifetime cap; PDP-gated registration; next-request revocation), crates/synveda-policy/tests/service_scope.rs (the base-layer confinement forbid across the action vocabulary; the own-chain MemoryRead floor survives; roles cannot widen past the token scope), demo: demos/auth-3-service-identities.sh (live Rauthy)
 - [x] [AUD-1: Hash-chained audit log](AUD-1.md) — done 2026-07-19, AC test: crates/synveda-audit/tests/tamper.rs (a database-credentialed attacker suppresses triggers and rewrites history: every hashed column, row removal, relinking, and head attacks all break verification at the named seq), emission tests: crates/synveda-gateway/tests/audit_events.rs (mutation/read/denial/suspended-tenant/token-rejection each chain one event and the chain verifies), crates/synveda-store/tests/rls.rs (audit tables join the adversarial RLS suite), demo: demos/aud-1-audit-log.sh
-- [ ] [MEM-1: observe API + PGMQ buffer](MEM-1.md)
+- [x] [MEM-1: observe API + PGMQ buffer](MEM-1.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/observe.rs (duplicate delivery admits nothing twice — response, staging table, queue, and audit chain all agree; 1k events/s sustained with the ack median inside the 20ms-plus-link-tax budget), crates/synveda-store/tests/rls.rs (observe buffer joins the adversarial RLS suite; PGMQ grants proven under synveda_app), crates/synveda-policy/tests/{packs,roles,service_scope}.rs (the MemoryWrite floor and grant golden-tested), demo: demos/mem-1-observe.sh
 - [ ] [MEM-2: Redaction & secret scanning](MEM-2.md)
 - [ ] [MEM-3: Extraction pipeline](MEM-3.md)
 - [ ] [MEM-4: Transactional embed-or-fail](MEM-4.md)
@@ -139,7 +139,9 @@ design since HIER-2 (ADR-0016 decision 6).
 Roles whose actions land later are marker rows in the golden matrix
 until those features extend it: curator approvals (FLOW-3),
 security-reviewer (SKIL-2), compliance (AUTHZ-5/FLOW-3), auditor's
-audit surface (AUD-2), contributor writes (MEM-1)._
+audit surface (AUD-2), contributor writes (MEM-1 — closed 2026-07-19:
+`MemoryWrite` at bound non-personal scopes for contributor/curator,
+ADR-0020 decision 3)._
 
 _HIER-2 notes (ADR-0016): scope chains are cached in-process,
 invalidated post-commit by the hierarchy-mutating handlers; the gateway
@@ -203,6 +205,33 @@ the recorded upgrade is a buffered appender for read-path decision events
 only (ADR-0019 option 2). Chain anchoring beyond the database (signed
 export, offline verification) is AUD-3; the auditor-role read surface is
 AUD-2; audit-row retention/erasure semantics land with TEN-5._
+
+_MEM-1 notes (ADR-0020): observe writes land at the caller's personal
+(home) scope only — the API takes no scope; placement decides. Content
+stages in the RLS-forced, app-append-only `observe_events` table inside
+the caller's tenant transaction; the PGMQ `observe` queue carries
+content-free `{tenant_id, event_id}` signals. Idempotency is
+buffer-level (`unique (tenant_id, idempotency_key)`, first-writer-wins,
+duplicate = 202 with the original ids): what never enters twice can
+never be extracted twice, so the AC holds structurally before MEM-2/3
+exist. `MemoryWrite` joined the vocabulary (packs bumped to `@4`): the
+role-free own-home floor plus the contributor/curator grant at bound
+non-personal scopes — pack-uniform; writes beyond home always take an
+explicit grant. The base layer is untouched (an agent's home leaf lies
+inside its anchor subtree). Forward obligations: the queue has no
+consumer until MEM-2/3 — signals accumulate and the pipeline must
+archive them; staging rows are immutable provenance whose
+retention/disposal lands with MEM-6/TEN-5, which must honour the
+idempotency horizon (ADR-0020); redaction-before-persistence (seed §6)
+is honestly not yet true — staging holds pre-redaction content under
+RLS until MEM-2 inserts itself between buffer and extraction. The load
+AC asserts the sustained rate and the ack MEDIAN against the 20ms
+budget plus the measured dev-database link tax (the HIER-1 discipline
+for IO-crossing perf ACs; Docker Desktop's fsync stalls own the upper
+percentiles, which are reported only) — EVAL-6 owns percentile SLO
+enforcement on production-shaped IO, and ADR-0019 option 2's buffered
+appender remains the recorded upgrade if per-tenant chain serialisation
+ever binds real burst traffic._
 
 ## Phase 2 — Governance (wk 6–10)
 

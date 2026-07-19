@@ -1,9 +1,11 @@
 //! AUTHZ-2 golden tests per pack (the AC): for a fixed two-department
 //! fixture, the full `MemoryRead` decision matrix of each embedded product
-//! pack, the shared admin-plane semantics, and the cross-cutting
-//! invariants (quarantine, unplaced principals, foreign tenants). Packs
-//! are applied through the same assignment-resolution path production
-//! uses — never a PDP bypass (CLAUDE.md, seed §2.2).
+//! pack, the `MemoryWrite` floor (MEM-1, ADR-0020 decision 3 — pack
+//! uniform: own home only, role-free; the content-role write grant lives
+//! in tests/roles.rs), the shared admin-plane semantics, and the
+//! cross-cutting invariants (quarantine, unplaced principals, foreign
+//! tenants). Packs are applied through the same assignment-resolution
+//! path production uses — never a PDP bypass (CLAUDE.md, seed §2.2).
 //!
 //! The fixture:
 //!
@@ -116,13 +118,14 @@ fn fixture() -> Fixture {
     Fixture { tenant, nodes }
 }
 
-/// One `MemoryRead` decision for `target`, with the principal's placement
+/// One memory-plane decision for `target`, with the principal's placement
 /// chain materialised from `placement` and packs applied via
 /// `assignments` — the exact shape the gateway feeds the facade.
-fn read(
+fn memory(
     pdp: &Pdp,
     fx: &Fixture,
     principal: &Principal,
+    action: Action,
     placement: Option<&str>,
     target: &str,
     assignments: &[PolicyAssignment],
@@ -131,7 +134,7 @@ fn read(
     let principal_scopes = placement.map(|slug| fx.chain(slug)).unwrap_or_default();
     pdp.authorize(
         principal,
-        Action::MemoryRead,
+        action,
         Resource::Scope(fx.node(target).id),
         &AuthzContext {
             scopes: &scopes,
@@ -141,6 +144,25 @@ fn read(
         },
     )
     .expect("authorize")
+}
+
+fn read(
+    pdp: &Pdp,
+    fx: &Fixture,
+    principal: &Principal,
+    placement: Option<&str>,
+    target: &str,
+    assignments: &[PolicyAssignment],
+) -> synveda_policy::AuthzDecision {
+    memory(
+        pdp,
+        fx,
+        principal,
+        Action::MemoryRead,
+        placement,
+        target,
+        assignments,
+    )
 }
 
 /// The composition sweep: which of the fixture's scopes may this
@@ -156,6 +178,33 @@ fn composition(
     ALL_SCOPES
         .into_iter()
         .filter(|target| read(pdp, fx, principal, placement, target, assignments).allowed)
+        .collect()
+}
+
+/// The write sweep: at which of the fixture's scopes may this principal
+/// land memory content? (What observe asks for home, and FLOW will ask
+/// beyond it — MEM-1, ADR-0020 decision 3.)
+fn write_targets(
+    pdp: &Pdp,
+    fx: &Fixture,
+    principal: &Principal,
+    placement: Option<&str>,
+    assignments: &[PolicyAssignment],
+) -> Vec<&'static str> {
+    ALL_SCOPES
+        .into_iter()
+        .filter(|target| {
+            memory(
+                pdp,
+                fx,
+                principal,
+                Action::MemoryWrite,
+                placement,
+                target,
+                assignments,
+            )
+            .allowed
+        })
         .collect()
 }
 
@@ -230,11 +279,27 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         }
     }
 
-    // An unplaced principal composes nothing, under every pack.
+    // The write floor is pack-uniform (MEM-1, ADR-0020 decision 3): a
+    // role-free principal writes exactly its own personal scope, under
+    // every pack — openness is a read-side property. The content-role
+    // write grant is golden-tested in tests/roles.rs.
+    assert_eq!(
+        write_targets(&pdp, &fx, &alice, Some("alice-user"), &assignments),
+        vec!["alice-user"],
+        "{pack}: the role-free write floor is home, and home only"
+    );
+
+    // An unplaced principal composes nothing, under every pack — and has
+    // no home, so it writes nothing either.
     assert_eq!(
         composition(&pdp, &fx, &unplaced, None, &assignments),
         Vec::<&str>::new(),
         "{pack}: an unplaced principal must read nothing"
+    );
+    assert_eq!(
+        write_targets(&pdp, &fx, &unplaced, None, &assignments),
+        Vec::<&str>::new(),
+        "{pack}: an unplaced principal must write nothing"
     );
 
     // A quarantined principal is forbidden everything, admin included.
@@ -246,6 +311,11 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         composition(&pdp, &fx, &quarantined, Some("alice-user"), &assignments),
         Vec::<&str>::new(),
         "{pack}: a quarantined principal must read nothing"
+    );
+    assert_eq!(
+        write_targets(&pdp, &fx, &quarantined, Some("alice-user"), &assignments),
+        Vec::<&str>::new(),
+        "{pack}: a quarantined principal must write nothing"
     );
 
     // A foreign principal is denied everything, placed or not.
@@ -261,13 +331,18 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         Vec::<&str>::new(),
         "{pack}: a foreign principal must read nothing"
     );
+    assert_eq!(
+        write_targets(&pdp, &fx, &intruder, None, &assignments),
+        Vec::<&str>::new(),
+        "{pack}: a foreign principal must write nothing"
+    );
 }
 
 /// regulated-strict: own chain only — no cross-team read exists at all
 /// (seed §6; lapses, AUTHZ-4, are the sanctioned relaxation).
 #[test]
 fn golden_regulated_strict() {
-    assert_pack_golden(REGULATED_STRICT, 3, &["org", "eng", "team-a", "alice-user"]);
+    assert_pack_golden(REGULATED_STRICT, 4, &["org", "eng", "team-a", "alice-user"]);
 }
 
 /// standard: own chain plus the department subtree — sibling team-b joins;
@@ -276,7 +351,7 @@ fn golden_regulated_strict() {
 fn golden_standard() {
     assert_pack_golden(
         STANDARD,
-        3,
+        4,
         &["org", "eng", "team-a", "team-b", "alice-user"],
     );
 }
@@ -287,7 +362,7 @@ fn golden_standard() {
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        3,
+        4,
         &[
             "org",
             "eng",

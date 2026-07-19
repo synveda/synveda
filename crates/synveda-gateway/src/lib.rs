@@ -2,11 +2,14 @@
 //! (`inject`, `recall`, `observe`) behind AuthN → tenant resolution → PDP →
 //! rate limits → audit (seed §7). The ONLY binary that speaks to the outside.
 //!
-//! The three primitives land later in Phase 1 (CTX-3, MEM-1). What exists
-//! today: the FND-5 observability baseline (OTel tracing gateway→core→store,
-//! Prometheus `/metrics`, ops probes — ADR-0007) and the TEN-1 tenant plane
-//! (bearer-token → tenant resolution middleware guarding `/v1`, task-local
-//! context, `tenant.id` on every request trace — ADR-0008).
+//! Since MEM-1 the first primitive is live: `POST /v1/observe` admits
+//! batched session events into the RLS-staged buffer with PGMQ work
+//! signals for the pipeline (ADR-0020); `inject`/`recall` land with
+//! CTX-1..3. Also here: the FND-5 observability baseline (OTel tracing
+//! gateway→core→store, Prometheus `/metrics`, ops probes — ADR-0007) and
+//! the TEN-1 tenant plane (bearer-token → tenant resolution middleware
+//! guarding `/v1`, task-local context, `tenant.id` on every request
+//! trace — ADR-0008).
 //!
 //! Since AUTHZ-1 the PDP stage is real: the embedded Cedar engine
 //! (ADR-0002/ADR-0012) decides every hierarchy admin operation, and the
@@ -30,6 +33,7 @@ pub mod auth;
 pub mod authz;
 pub mod error;
 pub mod hierarchy;
+pub mod observe;
 pub mod policy;
 mod provision;
 pub mod roles;

@@ -56,6 +56,11 @@ pub enum Action {
     /// composition — the seam inject/recall stand on (AUTHZ-2, ADR-0014
     /// decision 5).
     MemoryRead,
+    /// Land memory content at the resource scope — the write seam observe
+    /// stands on (MEM-1, ADR-0020 decision 3). The packs permit the
+    /// principal's own personal scope role-free (zero-config) and bound
+    /// content roles beyond it.
+    MemoryWrite,
     /// Read packs and effective assignments (`/v1/policy/*`).
     PolicyRead,
     /// Assign a pack to the resource node, or set the tenant default
@@ -89,6 +94,7 @@ impl Action {
             Action::HierarchyUpdate => "hierarchy.update",
             Action::HierarchyDelete => "hierarchy.delete",
             Action::MemoryRead => "memory.read",
+            Action::MemoryWrite => "memory.write",
             Action::PolicyRead => "policy.read",
             Action::PolicyAssign => "policy.assign",
             Action::RoleRead => "role.read",
@@ -106,6 +112,7 @@ impl Action {
             Action::HierarchyUpdate => "HierarchyUpdate",
             Action::HierarchyDelete => "HierarchyDelete",
             Action::MemoryRead => "MemoryRead",
+            Action::MemoryWrite => "MemoryWrite",
             Action::PolicyRead => "PolicyRead",
             Action::PolicyAssign => "PolicyAssign",
             Action::RoleRead => "RoleRead",

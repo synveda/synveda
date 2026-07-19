@@ -1,5 +1,5 @@
-// regulated-strict@3 — the default product pack (seed §6, ADR-0014,
-// ADR-0015, ADR-0018).
+// regulated-strict@4 — the default product pack (seed §6, ADR-0014,
+// ADR-0015, ADR-0018, ADR-0020).
 //
 // Deny-first: composition reads the principal's own chain, plus whatever
 // a content-role binding explicitly grants — under this pack a viewer/
@@ -65,5 +65,33 @@ permit (
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["viewer", "contributor", "curator"])
+        && resource.kind != "user"
+};
+
+// The write floor, role-free (zero-config): every placed principal may
+// land observe events at its own personal scope — and nowhere else.
+// Deliberately narrower than the read floor: reads compose up the
+// chain, writes land at home (MEM-1, ADR-0020 decision 3).
+permit (
+    principal,
+    action == Synveda::Action::"MemoryWrite",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+};
+
+// Content roles write the bound subtree, personal scopes excluded — the
+// explicit-grant mechanism for shared-scope writes (ADR-0015's
+// contributor-writes marker, discharged by ADR-0020 decision 3).
+// Viewer stays read-only by name; admin and audit roles grant no
+// content write (least privilege, as with reads).
+permit (
+    principal,
+    action == Synveda::Action::"MemoryWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["contributor", "curator"])
         && resource.kind != "user"
 };

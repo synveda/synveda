@@ -64,6 +64,17 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
+    // The write seam (MEM-1, ADR-0020 decision 3): may this principal
+    // land memory content at this scope? observe asks it for the
+    // caller's personal scope; richer write surfaces (FLOW) will ask the
+    // same question at shared scopes.
+    action MemoryWrite
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String> },
+        };
+
     // The policy admin plane (/v1/policy/*, ADR-0014 decision 8): reading
     // packs and effective assignments, and assigning packs to nodes (or
     // the tenant default — the Tenant resource).

@@ -11,7 +11,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Defines one identifier newtype. All four identifiers are deliberately
+/// Defines one identifier newtype. All identifiers are deliberately
 /// identical in behaviour; only the concept they name differs.
 macro_rules! define_id {
     ($(#[$doc:meta])* $name:ident) => {
@@ -96,4 +96,10 @@ define_id!(
     /// Identifies a memory record, the atomic unit of stored knowledge
     /// (seed §4.2).
     RecordId
+);
+
+define_id!(
+    /// Identifies a buffered observe event — one entry in the ingestion
+    /// staging table, admitted once per idempotency key (MEM-1, ADR-0020).
+    ObserveEventId
 );

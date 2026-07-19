@@ -1,5 +1,5 @@
-// open-collaboration@3 — org-wide read (seed §6, ADR-0014, ADR-0015,
-// ADR-0018).
+// open-collaboration@4 — org-wide read (seed §6, ADR-0014, ADR-0015,
+// ADR-0018, ADR-0020).
 //
 // Own-chain reads plus every scope of the tenant, personal (user-kind)
 // scopes excluded — the privacy floor. The seed's "non-restricted
@@ -72,5 +72,29 @@ permit (
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["viewer", "contributor", "curator"])
+        && resource.kind != "user"
+};
+
+// The write floor, role-free: own personal scope only. Openness is a
+// read-side property — writes beyond home take an explicit grant under
+// every pack (MEM-1, ADR-0020 decision 3).
+permit (
+    principal,
+    action == Synveda::Action::"MemoryWrite",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+};
+
+// Content roles write the bound subtree, personal scopes excluded
+// (ADR-0015's contributor-writes marker, ADR-0020 decision 3).
+permit (
+    principal,
+    action == Synveda::Action::"MemoryWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["contributor", "curator"])
         && resource.kind != "user"
 };

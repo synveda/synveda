@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from observe_events where tenant_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f0b234bd646c60dc7d8a1719c793e2fb3ff71faf1c0e5a557f043eb6e87f2567"
+}

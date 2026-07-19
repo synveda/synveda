@@ -1,13 +1,14 @@
 //! AUTHZ-3 AC: the full role×action matrix, golden-tested (ADR-0015
 //! decision 8). Nine principals (the eight product roles plus role-free)
-//! × the ten decision columns (the nine-action vocabulary, `RoleAssign`
-//! split by ordinary vs org-admin grant) × four targets (in-subtree,
-//! out-of-subtree, above the binding, the tenant plane) × all three
-//! product packs — plus the cross-cutting invariants: subtree boundaries,
-//! the privacy floor, the base-layer escalation guard under custom packs,
-//! quarantine trumping roles, foreign rows ignored, and the grant-less
-//! fail-closed path. Bindings flow through the same resolution path
-//! production uses — never a PDP bypass (CLAUDE.md, seed §2.2).
+//! × the decision columns (the action vocabulary, `RoleAssign` split by
+//! ordinary vs org-admin grant; `MemoryWrite` joined with MEM-1,
+//! ADR-0020 — the contributor-writes marker discharged) × four targets
+//! (in-subtree, out-of-subtree, above the binding, the tenant plane) ×
+//! all three product packs — plus the cross-cutting invariants: subtree
+//! boundaries, the privacy floor, the base-layer escalation guard under
+//! custom packs, quarantine trumping roles, foreign rows ignored, and the
+//! grant-less fail-closed path. Bindings flow through the same resolution
+//! path production uses — never a PDP bypass (CLAUDE.md, seed §2.2).
 //!
 //! The fixture (as in packs.rs), with the matrix binding at `eng`:
 //!
@@ -44,12 +45,13 @@ const ALL_SCOPES: [&str; 8] = [
 /// The decision columns: the action vocabulary, with `RoleAssign` split
 /// by what is being granted — the base layer decides those differently
 /// (ADR-0015 decision 5).
-const COLUMNS: [(Action, Option<Role>); 12] = [
+const COLUMNS: [(Action, Option<Role>); 13] = [
     (Action::HierarchyCreate, None),
     (Action::HierarchyRead, None),
     (Action::HierarchyUpdate, None),
     (Action::HierarchyDelete, None),
     (Action::MemoryRead, None),
+    (Action::MemoryWrite, None),
     (Action::PolicyRead, None),
     (Action::PolicyAssign, None),
     (Action::RoleRead, None),
@@ -204,9 +206,14 @@ fn decide(
 /// a deny.
 fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
     match role {
-        // Content roles: composition read only.
-        Role::Viewer | Role::Contributor | Role::Curator => {
-            vec![(Action::MemoryRead, None)]
+        // Viewer: composition read only — read-only by name (ADR-0020
+        // decision 3).
+        Role::Viewer => vec![(Action::MemoryRead, None)],
+        // Contributing content roles: read plus the shared-scope write
+        // grant (MEM-1, ADR-0020 decision 3 — ADR-0015's
+        // contributor-writes marker discharged).
+        Role::Contributor | Role::Curator => {
+            vec![(Action::MemoryRead, None), (Action::MemoryWrite, None)]
         }
         // Steward: the full admin plane, but never org-admin grants and
         // never content.
@@ -297,12 +304,15 @@ fn assert_matrix(pack: &str, version: i64) {
             // Out-of-subtree, above the binding, and the tenant plane:
             // a node binding reaches none of them (ADR-0015 decision 3).
             for target in [Some("team-c"), Some("org"), None] {
-                if matches!(action, Action::MemoryRead | Action::ServiceIdentityManage)
-                    && target.is_none()
+                if matches!(
+                    action,
+                    Action::MemoryRead | Action::MemoryWrite | Action::ServiceIdentityManage
+                ) && target.is_none()
                 {
-                    // The schema scopes MemoryRead and ServiceIdentityManage
-                    // to Scope resources; a tenant-resource request is
-                    // unrepresentable (ADR-0018 decision 3).
+                    // The schema scopes the memory plane and
+                    // ServiceIdentityManage to Scope resources; a
+                    // tenant-resource request is unrepresentable
+                    // (ADR-0018 decision 3, ADR-0020 decision 3).
                     continue;
                 }
                 let decision = decide(
@@ -330,20 +340,20 @@ fn assert_matrix(pack: &str, version: i64) {
 /// regulated-strict: the golden matrix (the AC).
 #[test]
 fn matrix_regulated_strict() {
-    assert_matrix(REGULATED_STRICT, 3);
+    assert_matrix(REGULATED_STRICT, 4);
 }
 
 /// standard: identical role matrix — packs differ on composition
 /// membership, never on who administers (ADR-0015 decision 4).
 #[test]
 fn matrix_standard() {
-    assert_matrix(STANDARD, 3);
+    assert_matrix(STANDARD, 4);
 }
 
 /// open-collaboration: identical role matrix.
 #[test]
 fn matrix_open_collaboration() {
-    assert_matrix(OPEN_COLLABORATION, 3);
+    assert_matrix(OPEN_COLLABORATION, 4);
 }
 
 /// A tenant-wide binding is in force everywhere, the tenant plane

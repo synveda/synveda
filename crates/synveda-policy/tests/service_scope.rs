@@ -302,3 +302,89 @@ fn memory_read_keeps_the_own_chain_floor_and_nothing_more() {
         None,
     ));
 }
+
+/// The write seam under confinement (MEM-1, ADR-0020 decision 3): the
+/// agent's own personal leaf sits *inside* its anchor subtree, so the
+/// role-free write floor needs no new base-layer carve-out — and a
+/// content-role binding grants writes only where the token reaches.
+#[test]
+fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
+    let pdp = Pdp::new().expect("build pdp");
+    let fx = fixture();
+    let agent = fx.agent();
+
+    // Role-free: home, and home only — observe's exact question.
+    assert!(
+        decide(
+            &pdp,
+            &fx,
+            &agent,
+            Action::MemoryWrite,
+            Some("agent-user"),
+            &[],
+            None
+        ),
+        "the agent's observe writes must land at its personal leaf"
+    );
+    for target in ["team-a", "eng", "org", "team-b", "team-c", "carol-user"] {
+        assert!(
+            !decide(
+                &pdp,
+                &fx,
+                &agent,
+                Action::MemoryWrite,
+                Some(target),
+                &[],
+                None
+            ),
+            "role-free MemoryWrite on {target} must be denied"
+        );
+    }
+
+    // A contributor binding at eng: for a user it grants the eng subtree;
+    // the agent's token scope clamps it to team-a's subtree.
+    let bindings = [fx.binding("ci-agent", Some("eng"), Role::Contributor)];
+    assert!(
+        decide(
+            &pdp,
+            &fx,
+            &agent,
+            Action::MemoryWrite,
+            Some("team-a"),
+            &bindings,
+            None,
+        ),
+        "the contributor grant works where the token reaches"
+    );
+    for target in ["team-b", "eng"] {
+        assert!(
+            !decide(
+                &pdp,
+                &fx,
+                &agent,
+                Action::MemoryWrite,
+                Some(target),
+                &bindings,
+                None,
+            ),
+            "a role must not widen MemoryWrite beyond the token scope ({target})"
+        );
+    }
+
+    // The same binding on a user (no token scope) does reach team-b.
+    let user = Principal {
+        token_scope: None,
+        subject: "carol".to_owned(),
+        ..fx.agent()
+    };
+    let bindings = [fx.binding("carol", Some("eng"), Role::Contributor)];
+    assert!(decide(
+        &pdp,
+        &fx,
+        &user,
+        Action::MemoryWrite,
+        Some("team-b"),
+        &bindings,
+        None,
+    ));
+}

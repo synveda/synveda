@@ -41,11 +41,12 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// decision 1). `@2`: AUTHZ-3 narrowed the admin planes to roles and
 /// added the content-role read grant (ADR-0015 decision 4). `@3`: AUTH-3
 /// added the service-identity plane to the admin permits (ADR-0018
-/// decision 3).
+/// decision 3). `@4`: MEM-1 added the `MemoryWrite` own-home floor and
+/// content-role write grant (ADR-0020 decision 3).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 3),
-    (STANDARD, 3),
-    (OPEN_COLLABORATION, 3),
+    (REGULATED_STRICT, 4),
+    (STANDARD, 4),
+    (OPEN_COLLABORATION, 4),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the

@@ -113,6 +113,10 @@ pub enum AuditAction {
     ServiceIdentityRegistered,
     /// A service identity was revoked (row and personal leaf deleted).
     ServiceIdentityRevoked,
+    /// An observe batch was admitted to the ingestion buffer — one event
+    /// per batch, counts and id range in the payload, never one row per
+    /// event (MEM-1, ADR-0020 decision 5; ADR-0019 decision 4).
+    MemoryObserved,
     /// A tenant was admitted (CLI break-glass; TEN-5 owns the product
     /// lifecycle surface).
     TenantCreated,
@@ -142,6 +146,7 @@ impl AuditAction {
             AuditAction::RoleUnbound => "role.unbound",
             AuditAction::ServiceIdentityRegistered => "service_identity.registered",
             AuditAction::ServiceIdentityRevoked => "service_identity.revoked",
+            AuditAction::MemoryObserved => "memory.observed",
             AuditAction::TenantCreated => "tenant.created",
         }
     }

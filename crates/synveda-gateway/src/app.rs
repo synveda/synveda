@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use crate::service_identities;
 
 use axum::Router;
-use axum::extract::{MatchedPath, Request, State};
+use axum::extract::{DefaultBodyLimit, MatchedPath, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
@@ -25,6 +25,7 @@ use tower_http::trace::TraceLayer;
 use crate::auth;
 use crate::error::ApiError;
 use crate::hierarchy;
+use crate::observe;
 use crate::policy;
 use crate::roles;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
@@ -126,6 +127,13 @@ pub fn router(state: AppState) -> Router {
             get(roles::list_node)
                 .put(roles::bind_node)
                 .delete(roles::unbind_node),
+        )
+        // The observe primitive (MEM-1, ADR-0020): the data plane's write
+        // seam. Its body limit covers the worst-case batch; every other
+        // route keeps axum's default.
+        .route(
+            "/v1/observe",
+            post(observe::create).layer(DefaultBodyLimit::max(observe::BODY_LIMIT_BYTES)),
         )
         // The service-identity plane (AUTH-3, ADR-0018 decision 3).
         .route(
