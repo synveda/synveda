@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into policy_pack_assignments (tenant_id, scope_id, pack_name)\n        values ($1, $2, $3)\n        on conflict (tenant_id, scope_id) do update\n            set pack_name = excluded.pack_name,\n                updated_at = now()\n        returning tenant_id, scope_id, pack_name, updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "pack_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a58b7f5c16918e002e592f988424ee9c004e982cb174fe70f5f5a2e9aeb330c1"
+}

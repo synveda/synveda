@@ -6,7 +6,9 @@
 //! lexicographic order, first resolution wins; a convention group whose
 //! candidate splits match zero or several teams resolves nothing. Nothing
 //! resolves → the user lands under the reserved `quarantine` scope, which
-//! `bootstrap@2` forbids everything to (ADR-0013 decisions 4–5).
+//! the PDP's base layer forbids everything to (ADR-0013 decisions 4–5;
+//! the forbid moved from `bootstrap@2` into every pack's compiled base,
+//! ADR-0014 decision 2).
 //!
 //! This is a system write path driven by verified IdP claims — the same
 //! trust class as tenant admission and the future SCIM sync (AUTH-4) — so

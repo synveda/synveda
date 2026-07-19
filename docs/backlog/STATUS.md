@@ -30,7 +30,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [HIER-1: Hierarchy store](HIER-1.md) — done 2026-07-18, AC test: crates/synveda-store/tests/hierarchy.rs (10k nodes; ancestors/descendants medians 57µs/691µs over baseline), demo: demos/hier-1-hierarchy.sh
 - [x] [AUTHZ-1: Cedar PDP embedded](AUTHZ-1.md) — done 2026-07-18, AC tests: crates/synveda-policy/tests/decision_benchmark.rs (facade incl. entity materialisation, 4-level chain: median 109µs, p99 177µs), crates/synveda-policy/tests/pdp.rs (decision + pack version on every call), crates/synveda-gateway/tests/authz_hierarchy.rs (route gate + hot reload), demo: demos/authz-1-cedar-pdp.sh
 - [x] [AUTH-2: JIT user provisioning from claims](AUTH-2.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/jit_provisioning.rs (mock IdP: team mapping, quarantine + PDP denial, override precedence, fail-closed bearer), demo: demos/auth-2-jit-provisioning.sh (live Rauthy)
-- [ ] [AUTHZ-2: Policy packs](AUTHZ-2.md)
+- [x] [AUTHZ-2: Policy packs](AUTHZ-2.md) — done 2026-07-19, AC tests: crates/synveda-policy/tests/packs.rs (golden matrix per pack; composition switch at the MemoryRead seam), crates/synveda-gateway/tests/policy_routes.rs (per-node assignment governs the next request; inheritance, origin display, self-rescue), demo: demos/authz-2-policy-packs.sh
 - [ ] [AUTHZ-3: Roles & role bindings](AUTHZ-3.md)
 - [ ] [HIER-2: Scope chain resolver](HIER-2.md)
 - [ ] [HIER-3: Cedar entity sync](HIER-3.md)
@@ -74,24 +74,40 @@ admin routes' PDP gate — AUTHZ-1's first obligation — was discharged
 _AUTHZ-1 deferrals (ADR-0012): every PDP decision is an AUD-1 emission
 point — until the hash-chained log lands, decisions are visible in the
 decision log (pack name@version + determining policies, every call) and
-`synveda_authz_decisions_total`. The embedded `bootstrap` pack
-deliberately preserves ADR-0011's semantics (any tenant principal
-administers its own hierarchy) until AUTHZ-2/3 replace it with real
-packs and roles; stored-pack propagation lags up to
+`synveda_authz_decisions_total`. The `bootstrap` pack was retired
+2026-07-19: AUTHZ-2 replaced it with the embedded product packs
+(`regulated-strict` is the zero-config default; roles still arrive with
+AUTHZ-3). Stored-pack propagation lags up to
 `SYNVEDA_POLICY_REFRESH_SECS` (default 5s, poll-based) until VedaFlow
 policy commits drive event-based reload._
 
 _AUTH-2 deferrals (ADR-0013): identity provisioning
 (`identity.provisioned`) is an AUD-1 emission point — until then visible
 in the `identity.provision` span and `synveda_jit_provisions_total`.
-Group-mapping overrides are store-managed (like policy packs
-pre-AUTHZ-2) until an admin surface exists; placement is
-first-login-final — movers/leavers arrive with AUTH-4/5, and release
-from quarantine is the existing PDP-gated hierarchy move. The
-quarantine forbid bumped the embedded pack to `bootstrap@2`; an IdP
-subject that never completed a login is quarantined at the PDP seam
-(fail closed), while dev HS256 subjects keep ADR-0012's bootstrap
-semantics until AUTHZ-3 lands roles._
+Group-mapping overrides are store-managed until an admin surface
+exists; placement is first-login-final — movers/leavers arrive with
+AUTH-4/5, and release from quarantine is the existing PDP-gated
+hierarchy move. The quarantine forbid now lives in the base layer
+compiled into every pack (ADR-0014 decision 2); an IdP subject that
+never completed a login is quarantined at the PDP seam (fail closed),
+while dev HS256 subjects keep tenant-wide admin semantics until
+AUTHZ-3 lands roles._
+
+_AUTHZ-2 deferrals (ADR-0014): pack assignment/default mutations are
+AUD-1 emission points — until then visible in traces and
+`synveda_policy_operations_total`. `MemoryRead` is the composition
+seam; the AC's "inject composition changes next session" is
+demonstrated at that seam and re-demonstrated end-to-end when
+CTX-1/2/3 land on it. Governed handlers read the placement chain and
+chain assignments per request until HIER-2/3 cache them. Who may
+assign stays tenant-wide until AUTHZ-3 roles; `standard`'s department
+sharing collapses to strict where the hierarchy skips the department
+level; `open-collaboration`'s "non-restricted content" qualifier is
+AUTHZ-5 classification — the personal-scope exclusion is the current
+privacy floor. A tenant default naming a custom pack that omits
+`PolicyAssign` locks the tenant's policy plane; the store-level CLI is
+the break-glass (node-level assignments cannot seal themselves —
+ADR-0014 decision 4)._
 
 ## Phase 2 — Governance (wk 6–10)
 

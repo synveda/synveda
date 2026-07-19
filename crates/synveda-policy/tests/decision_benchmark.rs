@@ -1,8 +1,9 @@
-//! AUTHZ-1 AC: µs-level decision benchmark.
+//! AUTHZ-1 AC: µs-level decision benchmark (extended by AUTHZ-2).
 //!
 //! Measures the full facade call — entity materialisation from a
-//! realistic 4-level scope chain plus the Cedar evaluation — since that is
-//! what every enforcement point pays per decision. Pure in-process CPU (no
+//! realistic 5-level scope chain plus a placement chain, effective-pack
+//! resolution from an assignment (ADR-0014), and the Cedar evaluation —
+//! since that is what every enforcement point pays per decision. Pure in-process CPU (no
 //! I/O), so absolute asserts are meaningful across dev machines and CI;
 //! the bound is set an order of magnitude above the expected cost to stay
 //! insensitive to scheduler noise while still failing loudly if a
@@ -12,8 +13,8 @@
 use std::time::Instant;
 
 use chrono::Utc;
-use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
-use synveda_types::{HierarchyNode, ScopeId, ScopeKind, TenantId};
+use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD};
+use synveda_types::{HierarchyNode, PolicyAssignment, ScopeId, ScopeKind, TenantId};
 
 const WARMUP: usize = 1_000;
 const SAMPLES: usize = 10_000;
@@ -85,12 +86,41 @@ fn ac_decisions_are_microsecond_level() {
             "acme/emea/payments/core",
         ),
     ];
+    // The principal is a placed identity (AUTH-2): its personal scope
+    // under the team, its chain materialised alongside the resource's —
+    // the shape every governed request pays after AUTHZ-2.
+    let user = ScopeId::new();
+    let mut principal_scopes = vec![node(
+        tenant,
+        user,
+        Some(team),
+        ScopeKind::User,
+        "bench",
+        4,
+        "acme/emea/payments/core/bench",
+    )];
+    principal_scopes.extend(scopes.iter().cloned());
     let principal = Principal {
         tenant_id: tenant,
         subject: "bench".to_owned(),
         quarantined: false,
+        scope_id: Some(user),
     };
-    let context = AuthzContext { scopes: &scopes };
+    // One assignment at the org: resolution walks the full chain to find
+    // it (ADR-0014 decision 3) — the effective-pack cost is measured, not
+    // skipped.
+    let assignments = [PolicyAssignment {
+        tenant_id: tenant,
+        scope_id: org,
+        pack_name: STANDARD.to_owned(),
+        updated_at: Utc::now(),
+    }];
+    let context = AuthzContext {
+        scopes: &scopes,
+        principal_scopes: &principal_scopes,
+        assignments: &assignments,
+        default_pack: None,
+    };
 
     let call = |action: Action| {
         let decision = pdp
@@ -107,10 +137,11 @@ fn ac_decisions_are_microsecond_level() {
     let mut samples: Vec<u128> = Vec::with_capacity(SAMPLES);
     for i in 0..SAMPLES {
         // Rotate actions so no single decision path is cached unrealistically.
-        let action = match i % 4 {
+        let action = match i % 5 {
             0 => Action::HierarchyRead,
             1 => Action::HierarchyCreate,
             2 => Action::HierarchyUpdate,
+            3 => Action::MemoryRead,
             _ => Action::HierarchyDelete,
         };
         let start = Instant::now();

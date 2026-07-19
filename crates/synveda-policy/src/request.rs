@@ -4,7 +4,7 @@
 
 use std::fmt;
 
-use synveda_types::{Error, HierarchyNode, Result, ScopeId, TenantId};
+use synveda_types::{Error, HierarchyNode, PolicyAssignment, Result, ScopeId, TenantId};
 
 /// Who is asking: a verified token subject resolved to a tenant (TEN-1)
 /// with its provisioning status (AUTH-2, ADR-0013 decision 6). The caller
@@ -17,9 +17,16 @@ pub struct Principal {
     pub tenant_id: TenantId,
     /// The verified token's `sub` claim.
     pub subject: String,
-    /// Whether the subject is quarantined; `bootstrap@2` forbids every
-    /// action when set (ADR-0013 decision 5).
+    /// Whether the subject is quarantined; the base layer forbids every
+    /// action when set (ADR-0013 decision 5, ADR-0014 decision 2).
     pub quarantined: bool,
+    /// The identity's placement — its personal scope node (AUTH-2). The
+    /// principal entity is parented to it, so pack membership rules
+    /// (`principal in resource`) walk the real hierarchy. `None` for
+    /// subjects provisioning never placed (dev HS256): such a principal
+    /// is a member of nothing and `MemoryRead` denies everywhere
+    /// (ADR-0014 decision 5).
+    pub scope_id: Option<ScopeId>,
 }
 
 /// The typed action vocabulary. Free-form action strings would let a typo
@@ -37,6 +44,15 @@ pub enum Action {
     HierarchyUpdate,
     /// Delete the resource node.
     HierarchyDelete,
+    /// Include memories attached to the resource scope in the caller's
+    /// composition — the seam inject/recall stand on (AUTHZ-2, ADR-0014
+    /// decision 5).
+    MemoryRead,
+    /// Read packs and effective assignments (`/v1/policy/*`).
+    PolicyRead,
+    /// Assign a pack to the resource node, or set the tenant default
+    /// (the tenant resource).
+    PolicyAssign,
 }
 
 impl Action {
@@ -49,6 +65,9 @@ impl Action {
             Action::HierarchyRead => "hierarchy.read",
             Action::HierarchyUpdate => "hierarchy.update",
             Action::HierarchyDelete => "hierarchy.delete",
+            Action::MemoryRead => "memory.read",
+            Action::PolicyRead => "policy.read",
+            Action::PolicyAssign => "policy.assign",
         }
     }
 
@@ -59,6 +78,9 @@ impl Action {
             Action::HierarchyRead => "HierarchyRead",
             Action::HierarchyUpdate => "HierarchyUpdate",
             Action::HierarchyDelete => "HierarchyDelete",
+            Action::MemoryRead => "MemoryRead",
+            Action::PolicyRead => "PolicyRead",
+            Action::PolicyAssign => "PolicyAssign",
         }
     }
 }
@@ -89,7 +111,8 @@ impl fmt::Display for Resource {
 }
 
 /// What the engine cannot fetch itself (seed §2.4: policy knows nothing of
-/// storage): the caller supplies the data entities are materialised from.
+/// storage): the caller supplies the data entities are materialised from
+/// and the effective pack is resolved from (ADR-0014 decision 3).
 /// AUTHZ-5 adds ABAC attributes (sensitivity, residency, channel, ...) here.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AuthzContext<'a> {
@@ -100,6 +123,20 @@ pub struct AuthzContext<'a> {
     /// [`Resource::Tenant`]. HIER-3 replaces this with a synced entity
     /// store (ADR-0012 decision 4).
     pub scopes: &'a [HierarchyNode],
+    /// The principal's placement chain — its personal scope node and that
+    /// node's ancestors, in any order — when the principal is a
+    /// provisioned identity. Empty for unplaced principals: membership
+    /// rules then fail closed (ADR-0014 decision 5).
+    pub principal_scopes: &'a [HierarchyNode],
+    /// Pack assignments for the nodes of the resource's chain (missing
+    /// rows mean "inherit"). The PDP walks the chain nearest-first; the
+    /// first assigned node decides the effective pack (ADR-0014
+    /// decision 3).
+    pub assignments: &'a [PolicyAssignment],
+    /// The tenant's default pack name, when one is stored — the fallback
+    /// when no node on the chain carries an assignment. `None` falls
+    /// back to `regulated-strict` (seed §2.1).
+    pub default_pack: Option<&'a str>,
 }
 
 /// The verdict, plus everything the decision log and audit event need to

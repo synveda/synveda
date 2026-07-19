@@ -11,7 +11,7 @@ use axum::extract::{MatchedPath, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde::Serialize;
 use sqlx::PgPool;
@@ -23,6 +23,7 @@ use tower_http::trace::TraceLayer;
 use crate::auth;
 use crate::error::ApiError;
 use crate::hierarchy;
+use crate::policy;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
 
@@ -73,6 +74,20 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/v1/hierarchy/nodes/{id}/descendants",
             get(hierarchy::descendants),
+        )
+        // The policy admin plane (AUTHZ-2, ADR-0014 decision 8).
+        .route("/v1/policy/packs", get(policy::packs))
+        .route(
+            "/v1/policy/default",
+            get(policy::get_default)
+                .put(policy::set_default)
+                .delete(policy::clear_default),
+        )
+        .route(
+            "/v1/hierarchy/nodes/{id}/policy",
+            put(policy::assign_node_policy)
+                .get(policy::get_node_policy)
+                .delete(policy::unassign_node_policy),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

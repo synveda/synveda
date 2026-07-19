@@ -1,25 +1,29 @@
-//! AUTHZ-1 golden tests for the facade: bootstrap allow/deny, default-deny,
-//! pack install/hot-swap/remove, compile rejection, and the decision
-//! metadata (pack name + version + determining policies) every call
-//! carries. Restrictive behaviour is exercised through *test policy packs*
-//! installed via the same path the reloader uses — never a PDP bypass
-//! (CLAUDE.md, seed §2.2).
+//! Facade mechanics (AUTHZ-1 ADR-0012; AUTHZ-2 ADR-0014): the embedded
+//! default, per-node effective-pack resolution (nearest assignment →
+//! tenant default → `regulated-strict`), stored pack install/remove,
+//! reserved names, compile rejection with last-good semantics, and the
+//! decision metadata (pack name + version + determining policies) every
+//! call carries. Restrictive behaviour is exercised through *test policy
+//! packs* installed via the same path the reloader uses — never a PDP
+//! bypass (CLAUDE.md, seed §2.2).
 
 use chrono::Utc;
 use synveda_policy::{
-    Action, AuthzContext, BOOTSTRAP_PACK, BOOTSTRAP_VERSION, Pdp, Principal, Resource,
+    Action, AuthzContext, Pdp, Principal, REGULATED_STRICT, Resource, is_reserved,
 };
-use synveda_types::{Error, HierarchyNode, ScopeId, ScopeKind, TenantId};
+use synveda_types::{Error, HierarchyNode, PolicyAssignment, ScopeId, ScopeKind, TenantId};
 
-const ALL_ACTIONS: [Action; 4] = [
+const ADMIN_ACTIONS: [Action; 6] = [
     Action::HierarchyCreate,
     Action::HierarchyRead,
     Action::HierarchyUpdate,
     Action::HierarchyDelete,
+    Action::PolicyRead,
+    Action::PolicyAssign,
 ];
 
-/// A pack that only permits reads — the shape AUTHZ-2's `regulated-strict`
-/// takes for non-curators.
+/// A pack that only permits hierarchy reads; everything else falls to
+/// Cedar's default-deny.
 const READ_ONLY_PACK: &str = r#"
 permit (
     principal,
@@ -82,127 +86,51 @@ fn team_of(chain: &[HierarchyNode]) -> ScopeId {
     chain.last().expect("chain is non-empty").id
 }
 
+fn org_of(chain: &[HierarchyNode]) -> ScopeId {
+    chain.first().expect("chain is non-empty").id
+}
+
+fn assignment(tenant_id: TenantId, scope_id: ScopeId, pack_name: &str) -> PolicyAssignment {
+    PolicyAssignment {
+        tenant_id,
+        scope_id,
+        pack_name: pack_name.to_owned(),
+        updated_at: Utc::now(),
+    }
+}
+
 fn principal(tenant_id: TenantId) -> Principal {
     Principal {
         tenant_id,
         subject: "alice".to_owned(),
         quarantined: false,
+        scope_id: None,
     }
 }
 
-/// AUTH-2 (ADR-0013 decision 5): a quarantined principal is forbidden
-/// everything under `bootstrap@2`, even inside its own tenant, and the
-/// denial names the forbidding policy.
+/// With nothing stored and nothing assigned, the embedded default decides:
+/// `regulated-strict@1`, strict by default (seed §2.1, ADR-0014
+/// decision 1) — and it preserves ADR-0012 decision 3's admin semantics:
+/// a tenant principal administers its own tenant.
 #[test]
-fn bootstrap_forbids_a_quarantined_principal_everything() {
-    let pdp = Pdp::new().expect("build pdp");
-    let tenant = TenantId::new();
-    let scopes = chain(tenant);
-    let team = team_of(&scopes);
-    let quarantined = Principal {
-        quarantined: true,
-        ..principal(tenant)
-    };
-
-    for action in ALL_ACTIONS {
-        let decision = pdp
-            .authorize(
-                &quarantined,
-                action,
-                Resource::Scope(team),
-                &AuthzContext { scopes: &scopes },
-            )
-            .expect("authorize");
-        assert!(
-            !decision.allowed,
-            "{action} must be denied when quarantined"
-        );
-        assert_eq!(decision.pack_name, BOOTSTRAP_PACK);
-        assert_eq!(decision.pack_version, BOOTSTRAP_VERSION);
-        assert!(
-            !decision.determining.is_empty(),
-            "the quarantine forbid must be the determining policy"
-        );
-    }
-
-    // Tenant-level resources too: quarantine has no carve-outs.
-    let decision = pdp
-        .authorize(
-            &quarantined,
-            Action::HierarchyRead,
-            Resource::Tenant(tenant),
-            &AuthzContext::default(),
-        )
-        .expect("authorize");
-    assert!(!decision.allowed, "tenant-level reads are forbidden too");
-}
-
-/// The quarantine forbid overrides permits in *stored* packs as well —
-/// but only while the pack's own rules keep the attribute in play; the
-/// forbid itself lives in each pack, so a stored pack that omits it
-/// relies on its own permits' conditions. This pins the bootstrap
-/// behaviour stored packs inherit when AUTHZ-2 templates them.
-#[test]
-fn a_stored_pack_with_the_quarantine_forbid_behaves_like_bootstrap() {
-    let pdp = Pdp::new().expect("build pdp");
-    let tenant = TenantId::new();
-    let scopes = chain(tenant);
-    let team = team_of(&scopes);
-    pdp.install_source(
-        tenant,
-        "auth2-strict",
-        1,
-        r#"
-        forbid (principal, action, resource) when { principal.quarantined };
-        permit (principal, action, resource) when { resource in principal.tenant };
-        "#,
-    )
-    .expect("install test pack");
-
-    let allowed = pdp
-        .authorize(
-            &principal(tenant),
-            Action::HierarchyRead,
-            Resource::Scope(team),
-            &AuthzContext { scopes: &scopes },
-        )
-        .expect("authorize");
-    assert!(allowed.allowed, "a placed principal keeps its rights");
-
-    let denied = pdp
-        .authorize(
-            &Principal {
-                quarantined: true,
-                ..principal(tenant)
-            },
-            Action::HierarchyRead,
-            Resource::Scope(team),
-            &AuthzContext { scopes: &scopes },
-        )
-        .expect("authorize");
-    assert!(!denied.allowed, "the forbid overrides the blanket permit");
-}
-
-#[test]
-fn bootstrap_allows_a_tenant_principal_to_administer_its_own_hierarchy() {
+fn the_default_pack_is_regulated_strict_and_admits_tenant_admins() {
     let pdp = Pdp::new().expect("build pdp");
     let tenant = TenantId::new();
     let scopes = chain(tenant);
     let team = team_of(&scopes);
     let alice = principal(tenant);
+    let context = AuthzContext {
+        scopes: &scopes,
+        ..Default::default()
+    };
 
-    for action in ALL_ACTIONS {
+    for action in ADMIN_ACTIONS {
         let decision = pdp
-            .authorize(
-                &alice,
-                action,
-                Resource::Scope(team),
-                &AuthzContext { scopes: &scopes },
-            )
+            .authorize(&alice, action, Resource::Scope(team), &context)
             .expect("authorize");
         assert!(decision.allowed, "{action} must be allowed on own scope");
-        assert_eq!(decision.pack_name, BOOTSTRAP_PACK);
-        assert_eq!(decision.pack_version, BOOTSTRAP_VERSION);
+        assert_eq!(decision.pack_name, REGULATED_STRICT);
+        assert_eq!(decision.pack_version, 1);
         assert!(
             !decision.determining.is_empty(),
             "an allow must name its permitting policies"
@@ -211,7 +139,7 @@ fn bootstrap_allows_a_tenant_principal_to_administer_its_own_hierarchy() {
 
     // Tenant-level resources (creating the org root, reading the root)
     // need no chain at all.
-    for action in [Action::HierarchyCreate, Action::HierarchyRead] {
+    for action in [Action::HierarchyCreate, Action::PolicyAssign] {
         let decision = pdp
             .authorize(
                 &alice,
@@ -224,22 +152,79 @@ fn bootstrap_allows_a_tenant_principal_to_administer_its_own_hierarchy() {
     }
 }
 
+/// The base layer travels with every pack (ADR-0014 decision 2): a stored
+/// pack that never mentions quarantine still forbids a quarantined
+/// principal everything, because the forbid is compiled in ahead of it.
 #[test]
-fn bootstrap_denies_a_foreign_principal_everything() {
+fn the_base_quarantine_forbid_is_compiled_into_stored_packs() {
+    let pdp = Pdp::new().expect("build pdp");
+    let tenant = TenantId::new();
+    let scopes = chain(tenant);
+    let team = team_of(&scopes);
+    pdp.install_source(
+        tenant,
+        "authz2-blanket",
+        1,
+        "permit (principal, action, resource) when { resource in principal.tenant };",
+    )
+    .expect("install test pack");
+    let assignments = [assignment(tenant, org_of(&scopes), "authz2-blanket")];
+    let context = AuthzContext {
+        scopes: &scopes,
+        assignments: &assignments,
+        ..Default::default()
+    };
+
+    let allowed = pdp
+        .authorize(
+            &principal(tenant),
+            Action::HierarchyRead,
+            Resource::Scope(team),
+            &context,
+        )
+        .expect("authorize");
+    assert!(
+        allowed.allowed,
+        "a clean principal keeps the blanket permit"
+    );
+    assert_eq!(allowed.pack_name, "authz2-blanket");
+
+    let denied = pdp
+        .authorize(
+            &Principal {
+                quarantined: true,
+                ..principal(tenant)
+            },
+            Action::HierarchyRead,
+            Resource::Scope(team),
+            &context,
+        )
+        .expect("authorize");
+    assert!(
+        !denied.allowed,
+        "the compiled-in base forbid overrides the pack's blanket permit"
+    );
+    assert!(
+        !denied.determining.is_empty(),
+        "the quarantine forbid must be the determining policy"
+    );
+}
+
+#[test]
+fn the_default_pack_denies_a_foreign_principal_everything() {
     let pdp = Pdp::new().expect("build pdp");
     let victim = TenantId::new();
     let scopes = chain(victim);
     let team = team_of(&scopes);
     let intruder = principal(TenantId::new());
+    let context = AuthzContext {
+        scopes: &scopes,
+        ..Default::default()
+    };
 
-    for action in ALL_ACTIONS {
+    for action in ADMIN_ACTIONS {
         let decision = pdp
-            .authorize(
-                &intruder,
-                action,
-                Resource::Scope(team),
-                &AuthzContext { scopes: &scopes },
-            )
+            .authorize(&intruder, action, Resource::Scope(team), &context)
             .expect("authorize");
         assert!(!decision.allowed, "{action} must be denied cross-tenant");
     }
@@ -262,7 +247,7 @@ fn bootstrap_denies_a_foreign_principal_everything() {
             assert_eq!(action, "hierarchy.read");
             assert_eq!(resource, format!("tenant {victim}"));
             assert!(
-                reason.contains(&format!("{BOOTSTRAP_PACK}@{BOOTSTRAP_VERSION}")),
+                reason.contains(&format!("{REGULATED_STRICT}@1")),
                 "denial must name pack@version, got: {reason}"
             );
         }
@@ -287,49 +272,199 @@ fn a_scope_without_its_chain_fails_closed() {
     assert!(!decision.allowed, "an unmaterialised scope must deny");
 }
 
+/// Per-node application (ADR-0014 decisions 3–4): the nearest assignment
+/// on the resource's chain decides; deeper assignments override shallower
+/// ones; unassigned chains fall to the tenant default, then the embedded
+/// default.
 #[test]
-fn installed_packs_swap_decisions_and_report_their_version() {
+fn effective_pack_resolution_walks_nearest_assignment_first() {
     let pdp = Pdp::new().expect("build pdp");
     let tenant = TenantId::new();
-    let other_tenant = TenantId::new();
+    let scopes = chain(tenant);
+    let (org, dept, team) = (scopes[0].id, scopes[1].id, scopes[2].id);
+    let alice = principal(tenant);
+    pdp.install_source(tenant, "authz2-readonly", 4, READ_ONLY_PACK)
+        .expect("install test pack");
+
+    // Assigned at the department: the team inherits it.
+    let at_dept = [assignment(tenant, dept, "authz2-readonly")];
+    let denied = pdp
+        .authorize(
+            &alice,
+            Action::HierarchyDelete,
+            Resource::Scope(team),
+            &AuthzContext {
+                scopes: &scopes,
+                assignments: &at_dept,
+                ..Default::default()
+            },
+        )
+        .expect("authorize");
+    assert!(!denied.allowed, "the inherited read-only pack must deny");
+    assert_eq!(denied.pack_name, "authz2-readonly");
+    assert_eq!(denied.pack_version, 4);
+
+    // The org above the assignment is out of its reach: default applies.
+    let org_decision = pdp
+        .authorize(
+            &alice,
+            Action::HierarchyDelete,
+            Resource::Scope(org),
+            &AuthzContext {
+                scopes: &scopes[..1],
+                assignments: &at_dept,
+                ..Default::default()
+            },
+        )
+        .expect("authorize");
+    assert!(org_decision.allowed);
+    assert_eq!(org_decision.pack_name, REGULATED_STRICT);
+
+    // A deeper assignment overrides the inherited one: nearest wins.
+    let overridden = [
+        assignment(tenant, dept, "authz2-readonly"),
+        assignment(tenant, team, REGULATED_STRICT),
+    ];
+    let nearest = pdp
+        .authorize(
+            &alice,
+            Action::HierarchyDelete,
+            Resource::Scope(team),
+            &AuthzContext {
+                scopes: &scopes,
+                assignments: &overridden,
+                ..Default::default()
+            },
+        )
+        .expect("authorize");
+    assert!(nearest.allowed, "the node's own assignment must win");
+    assert_eq!(nearest.pack_name, REGULATED_STRICT);
+
+    // No assignment on the chain: the tenant default decides.
+    let by_default = pdp
+        .authorize(
+            &alice,
+            Action::HierarchyDelete,
+            Resource::Scope(team),
+            &AuthzContext {
+                scopes: &scopes,
+                default_pack: Some("authz2-readonly"),
+                ..Default::default()
+            },
+        )
+        .expect("authorize");
+    assert!(!by_default.allowed);
+    assert_eq!(by_default.pack_name, "authz2-readonly");
+}
+
+/// `PolicyAssign` is decided under the pack the node *inherits* — the
+/// resolution skips the node's own assignment (ADR-0014 decision 4): a
+/// restrictive pack cannot seal its own node against reassignment.
+#[test]
+fn policy_assign_is_decided_under_the_inherited_pack() {
+    let pdp = Pdp::new().expect("build pdp");
+    let tenant = TenantId::new();
     let scopes = chain(tenant);
     let team = team_of(&scopes);
     let alice = principal(tenant);
-    let context = AuthzContext { scopes: &scopes };
-
-    pdp.install_source(tenant, "authz1-readonly", 7, READ_ONLY_PACK)
+    pdp.install_source(tenant, "authz2-frozen", 1, READ_ONLY_PACK)
         .expect("install test pack");
-    assert_eq!(
-        pdp.installed_version(tenant),
-        Some(("authz1-readonly".to_owned(), 7))
-    );
+    let assignments = [assignment(tenant, team, "authz2-frozen")];
+    let context = AuthzContext {
+        scopes: &scopes,
+        assignments: &assignments,
+        ..Default::default()
+    };
 
-    let read = pdp
-        .authorize(
-            &alice,
-            Action::HierarchyRead,
-            Resource::Scope(team),
-            &context,
-        )
-        .expect("authorize read");
-    assert!(read.allowed, "the test pack permits reads");
-    assert_eq!(read.pack_name, "authz1-readonly");
-    assert_eq!(read.pack_version, 7);
-
-    let write = pdp
+    // The frozen pack governs the node's ordinary actions...
+    let frozen = pdp
         .authorize(
             &alice,
             Action::HierarchyDelete,
             Resource::Scope(team),
             &context,
         )
-        .expect("authorize delete");
-    assert!(!write.allowed, "the test pack does not permit mutations");
-    assert_eq!(write.pack_name, "authz1-readonly");
-    assert_eq!(write.pack_version, 7);
+        .expect("authorize");
+    assert!(!frozen.allowed);
+    assert_eq!(frozen.pack_name, "authz2-frozen");
 
-    // Other tenants keep running bootstrap, unaffected.
+    // ...but changing the node's governance is decided by the pack it
+    // inherits (here the embedded default), which permits it.
+    let rescue = pdp
+        .authorize(
+            &alice,
+            Action::PolicyAssign,
+            Resource::Scope(team),
+            &context,
+        )
+        .expect("authorize");
+    assert!(
+        rescue.allowed,
+        "reassignment must not be sealed by the node's own pack"
+    );
+    assert_eq!(rescue.pack_name, REGULATED_STRICT);
+
+    // The display resolution keeps answering "what governs this node":
+    // the node's own assignment.
+    let shown = pdp.effective(tenant, Resource::Scope(team), &context);
+    assert_eq!(shown.name, "authz2-frozen");
+}
+
+/// An assigned name with no compiled pack falls back to the embedded
+/// default — strict, never dark (ADR-0014 decision 7).
+#[test]
+fn a_dangling_assignment_falls_back_to_regulated_strict() {
+    let pdp = Pdp::new().expect("build pdp");
+    let tenant = TenantId::new();
+    let scopes = chain(tenant);
+    let team = team_of(&scopes);
+    let assignments = [assignment(tenant, team, "never-stored")];
+    let decision = pdp
+        .authorize(
+            &principal(tenant),
+            Action::HierarchyRead,
+            Resource::Scope(team),
+            &AuthzContext {
+                scopes: &scopes,
+                assignments: &assignments,
+                ..Default::default()
+            },
+        )
+        .expect("authorize");
+    assert!(decision.allowed, "the fallback pack still admits the admin");
+    assert_eq!(decision.pack_name, REGULATED_STRICT);
+}
+
+/// Stored packs are tenant-isolated and hot-swappable by name; removal
+/// leaves other tenants and other packs untouched.
+#[test]
+fn stored_packs_install_and_remove_by_name_per_tenant() {
+    let pdp = Pdp::new().expect("build pdp");
+    let tenant = TenantId::new();
+    let other_tenant = TenantId::new();
+    let scopes = chain(tenant);
+    let team = team_of(&scopes);
+    let alice = principal(tenant);
+
+    pdp.install_source(tenant, "authz2-readonly", 7, READ_ONLY_PACK)
+        .expect("install test pack");
+    assert_eq!(
+        pdp.installed_versions(tenant),
+        vec![("authz2-readonly".to_owned(), 7)]
+    );
+    assert!(
+        pdp.installed_versions(other_tenant).is_empty(),
+        "other tenants must not see the pack"
+    );
+
+    // The other tenant's identically-named assignment resolves to nothing
+    // stored and falls back — never to the first tenant's pack.
     let other_scopes = chain(other_tenant);
+    let other_assignments = [assignment(
+        other_tenant,
+        team_of(&other_scopes),
+        "authz2-readonly",
+    )];
     let other_decision = pdp
         .authorize(
             &principal(other_tenant),
@@ -337,16 +472,27 @@ fn installed_packs_swap_decisions_and_report_their_version() {
             Resource::Scope(team_of(&other_scopes)),
             &AuthzContext {
                 scopes: &other_scopes,
+                assignments: &other_assignments,
+                ..Default::default()
             },
         )
         .expect("authorize other tenant");
     assert!(other_decision.allowed);
-    assert_eq!(other_decision.pack_name, BOOTSTRAP_PACK);
+    assert_eq!(other_decision.pack_name, REGULATED_STRICT);
 
-    // Removal falls back to bootstrap — hot reload in both directions.
-    assert!(pdp.remove_pack(tenant));
-    assert!(!pdp.remove_pack(tenant), "second removal is a no-op");
-    assert_eq!(pdp.installed_version(tenant), None);
+    // Removal: assigned scopes fall back to the default at decision time.
+    let assignments = [assignment(tenant, team, "authz2-readonly")];
+    let context = AuthzContext {
+        scopes: &scopes,
+        assignments: &assignments,
+        ..Default::default()
+    };
+    assert!(pdp.remove_pack(tenant, "authz2-readonly"));
+    assert!(
+        !pdp.remove_pack(tenant, "authz2-readonly"),
+        "second removal is a no-op"
+    );
+    assert!(pdp.installed_versions(tenant).is_empty());
     let restored = pdp
         .authorize(
             &alice,
@@ -356,7 +502,29 @@ fn installed_packs_swap_decisions_and_report_their_version() {
         )
         .expect("authorize after removal");
     assert!(restored.allowed);
-    assert_eq!(restored.pack_name, BOOTSTRAP_PACK);
+    assert_eq!(restored.pack_name, REGULATED_STRICT);
+}
+
+/// Product names are reserved (ADR-0014 decision 6): `regulated-strict`
+/// must mean the same thing in every tenant, forever.
+#[test]
+fn reserved_pack_names_cannot_be_stored() {
+    let pdp = Pdp::new().expect("build pdp");
+    let tenant = TenantId::new();
+    for name in [
+        "regulated-strict",
+        "standard",
+        "open-collaboration",
+        "bootstrap",
+    ] {
+        assert!(is_reserved(name), "{name} must be reserved");
+        let refused = pdp.install_source(tenant, name, 1, READ_ONLY_PACK);
+        assert!(
+            matches!(refused, Err(Error::Invalid { .. })),
+            "storing {name} must be refused, got {refused:?}"
+        );
+    }
+    assert!(!is_reserved("acme-strict"));
 }
 
 #[test]
@@ -365,10 +533,9 @@ fn an_explicit_forbid_reports_its_determining_policy() {
     let tenant = TenantId::new();
     let scopes = chain(tenant);
     let team = team_of(&scopes);
-    let context = AuthzContext { scopes: &scopes };
     pdp.install_source(
         tenant,
-        "authz1-no-delete",
+        "authz2-no-delete",
         1,
         r#"
         permit (principal, action, resource) when { resource in principal.tenant };
@@ -376,13 +543,18 @@ fn an_explicit_forbid_reports_its_determining_policy() {
         "#,
     )
     .expect("install test pack");
+    let assignments = [assignment(tenant, team, "authz2-no-delete")];
 
     let decision = pdp
         .authorize(
             &principal(tenant),
             Action::HierarchyDelete,
             Resource::Scope(team),
-            &context,
+            &AuthzContext {
+                scopes: &scopes,
+                assignments: &assignments,
+                ..Default::default()
+            },
         )
         .expect("authorize");
     assert!(!decision.allowed);
@@ -399,13 +571,12 @@ fn invalid_packs_are_rejected_and_leave_the_previous_pack_in_force() {
     let scopes = chain(tenant);
     let team = team_of(&scopes);
     let alice = principal(tenant);
-    let context = AuthzContext { scopes: &scopes };
 
-    pdp.install_source(tenant, "authz1-readonly", 1, READ_ONLY_PACK)
+    pdp.install_source(tenant, "authz2-readonly", 1, READ_ONLY_PACK)
         .expect("install good pack");
 
     // Syntax error: does not parse.
-    let syntax = pdp.install_source(tenant, "authz1-broken", 2, "permit (principal");
+    let syntax = pdp.install_source(tenant, "authz2-readonly", 2, "permit (principal");
     assert!(
         matches!(syntax, Err(Error::Invalid { .. })),
         "a syntax error must be Invalid, got {syntax:?}"
@@ -414,7 +585,7 @@ fn invalid_packs_are_rejected_and_leave_the_previous_pack_in_force() {
     // Well-formed but outside the schema: fails validation.
     let unknown_action = pdp.install_source(
         tenant,
-        "authz1-unknown",
+        "authz2-readonly",
         3,
         r#"permit (principal, action == Synveda::Action::"LaunchMissiles", resource);"#,
     );
@@ -425,22 +596,27 @@ fn invalid_packs_are_rejected_and_leave_the_previous_pack_in_force() {
 
     // The last-good pack still decides (ADR-0012 decision 5).
     assert_eq!(
-        pdp.installed_version(tenant),
-        Some(("authz1-readonly".to_owned(), 1))
+        pdp.installed_versions(tenant),
+        vec![("authz2-readonly".to_owned(), 1)]
     );
+    let assignments = [assignment(tenant, team, "authz2-readonly")];
     let decision = pdp
         .authorize(
             &alice,
             Action::HierarchyDelete,
             Resource::Scope(team),
-            &context,
+            &AuthzContext {
+                scopes: &scopes,
+                assignments: &assignments,
+                ..Default::default()
+            },
         )
         .expect("authorize");
     assert!(
         !decision.allowed,
         "the read-only pack must still be in force"
     );
-    assert_eq!(decision.pack_name, "authz1-readonly");
+    assert_eq!(decision.pack_name, "authz2-readonly");
 
     // compile_check applies the same gate without installing.
     assert!(pdp.compile_check("ok", READ_ONLY_PACK).is_ok());

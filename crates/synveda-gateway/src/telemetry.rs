@@ -33,10 +33,17 @@ pub const HTTP_REQUEST_DURATION_SECONDS: &str = "synveda_http_request_duration_s
 /// emission point once the audit log lands.
 pub const HIERARCHY_OPERATIONS_TOTAL: &str = "synveda_hierarchy_operations_total";
 
-/// Policy pack reload sweeps' per-tenant outcomes: `installed`, `removed`,
+/// Policy pack reload sweeps' per-pack outcomes: `installed`, `removed`,
 /// `unchanged`, or `error` (a stored pack that fails to compile keeps the
-/// last-good pack in force — ADR-0012 decision 5). AUTHZ-1.
+/// last-good compile in force — ADR-0012 decision 5). AUTHZ-1/AUTHZ-2.
 pub const POLICY_PACK_RELOADS_TOTAL: &str = "synveda_policy_pack_reloads_total";
+
+/// Policy admin operations (AUTHZ-2, ADR-0014 decision 8), labelled by
+/// `op` (packs/get_default/set_default/clear_default/get_node_policy/
+/// assign_node_policy/unassign_node_policy) and `outcome` (`ok`,
+/// `rejected`, `error`). Mutations are an AUD-1 emission point once the
+/// audit log lands.
+pub const POLICY_OPERATIONS_TOTAL: &str = "synveda_policy_operations_total";
 
 /// JIT provisioning outcomes at login (AUTH-2, ADR-0013): `mapped`,
 /// `quarantined`, `existing` (repeat login), or `error`. An AUD-1 emission
@@ -141,6 +148,16 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         POLICY_PACK_RELOADS_TOTAL,
         "Policy pack reloads by outcome (installed/removed/unchanged/error)"
+    );
+    // AUTHZ-2 counters (ADR-0014): operations in the gateway's policy
+    // routes; fallbacks in synveda-policy's effective-pack resolution.
+    metrics::describe_counter!(
+        POLICY_OPERATIONS_TOTAL,
+        "Policy admin operations by op and outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        synveda_policy::POLICY_PACK_FALLBACKS_TOTAL,
+        "Assigned pack names that resolved to no compiled pack (fell back to regulated-strict)"
     );
     // AUTH-2 counter (ADR-0013): emitted in the gateway's provisioning
     // module at login completion.

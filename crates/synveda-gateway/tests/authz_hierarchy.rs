@@ -1,8 +1,10 @@
-//! AUTHZ-1: the PDP gates `/v1/hierarchy/*` (ADR-0012 decision 7,
-//! discharging ADR-0011 decision 8), and stored per-tenant packs hot-swap
-//! decisions through the reload path. Restrictive behaviour comes from a
-//! *test policy pack* applied through the same store + reload path the
-//! product uses — never a PDP bypass (CLAUDE.md, seed §2.2).
+//! AUTHZ-1/AUTHZ-2: the PDP gates `/v1/hierarchy/*` (ADR-0012 decision 7)
+//! under the resource's *effective* pack (ADR-0014): stored custom packs
+//! hot-swap through the reload path, and what governs a request is the
+//! tenant default (or an assignment) — request-time data, in force on the
+//! next request. Restrictive behaviour comes from a *test policy pack*
+//! applied through the same store + reload + assignment paths the product
+//! uses — never a PDP bypass (CLAUDE.md, seed §2.2).
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database); run them locally with
@@ -22,15 +24,15 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::{authz, telemetry};
 use synveda_identity::Hs256Verifier;
-use synveda_policy::Pdp;
-use synveda_store::{policy_packs, rls};
+use synveda_policy::{Pdp, REGULATED_STRICT};
+use synveda_store::{policy_assignments, policy_packs, rls};
 use synveda_types::TenantId;
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"authz-1-test-secret";
 
-/// Only permits reads: mutations fall to Cedar's default-deny. The shape
-/// AUTHZ-2's `regulated-strict` takes for non-curators.
+/// Only permits hierarchy reads: mutations — and the policy admin plane —
+/// fall to Cedar's default-deny.
 const READ_ONLY_PACK: &str = r#"
 permit (
     principal,
@@ -98,7 +100,7 @@ async fn admitted_tenant() -> Option<(String, TenantId)> {
         &pool,
         id,
         &slug,
-        "AUTHZ-1 gateway test",
+        "AUTHZ gateway test",
         synveda_types::TenantStatus::Active,
     )
     .await
@@ -153,24 +155,38 @@ async fn store_pack(pool: &PgPool, tenant: TenantId, name: &str, source: &str) {
     tx.commit().await.expect("commit pack");
 }
 
-async fn clear_pack(pool: &PgPool, tenant: TenantId) {
+async fn clear_pack(pool: &PgPool, tenant: TenantId, name: &str) {
     let mut tx = rls::begin_tenant_tx(pool, tenant)
         .await
         .expect("begin tenant tx");
-    policy_packs::clear(&mut *tx, tenant)
+    policy_packs::clear(&mut tx, tenant, name)
         .await
         .expect("clear pack");
     tx.commit().await.expect("commit clear");
+}
+
+/// The store-level break-glass (ADR-0014): a tenant default naming a pack
+/// that permits no policy admin locks the `/v1/policy` plane; the CLI's
+/// tenant-tx store path clears it.
+async fn break_glass_clear_default(pool: &PgPool, tenant: TenantId) {
+    let mut tx = rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin tenant tx");
+    policy_assignments::clear_default(&mut *tx, tenant)
+        .await
+        .expect("clear default");
+    tx.commit().await.expect("commit clear default");
 }
 
 fn node_id(body: &Value) -> String {
     body["id"].as_str().expect("node id").to_owned()
 }
 
-/// The headline flow: bootstrap allows the tenant's own admin; a stored
-/// read-only pack hot-reloads in and denies mutations (naming pack@version
-/// in the denial) while reads keep working; clearing the pack hot-reloads
-/// back to bootstrap.
+/// The headline flow: the embedded default (`regulated-strict`) admits the
+/// tenant's own admin; a stored read-only pack hot-reloads in and — once
+/// made the tenant default through the product route — denies mutations
+/// (naming pack@version in the denial) on the next request, while reads
+/// keep working; clearing the default restores the embedded default.
 #[tokio::test]
 async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
     let _serial = serial().await;
@@ -183,8 +199,8 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
     let app = router(state);
     let token = issue(tenant_id);
 
-    // Under bootstrap: create the org and a department (the PDP allows —
-    // the same decisions the pre-AUTHZ-1 seam waved through, now decided).
+    // Under the embedded default: create the org and a department (the
+    // same admin semantics bootstrap carried, ADR-0014 decision 1).
     let (status, org) = api(
         &app,
         "POST",
@@ -207,7 +223,7 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{dept}");
 
-    // Store the read-only pack and reload — the product path.
+    // Store the read-only pack and reload — the source distribution path.
     store_pack(&pool, tenant_id, "authz1-readonly", READ_ONLY_PACK).await;
     assert_eq!(
         authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
@@ -218,6 +234,36 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
         "unchanged",
         "an unchanged version must be skipped"
     );
+
+    // A compiled-but-unassigned pack governs nothing: mutations still work.
+    let (status, probe) = api(
+        &app,
+        "POST",
+        "/v1/hierarchy/nodes",
+        &token,
+        Some(json!({
+            "parent_id": node_id(&org), "kind": "team",
+            "slug": "probe", "name": "Probe"
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "an unassigned pack must not govern: {probe}"
+    );
+
+    // Make it the tenant default through the product route: in force on
+    // the very next request, no reload involved (ADR-0014 decision 3).
+    let (status, set) = api(
+        &app,
+        "PUT",
+        "/v1/policy/default",
+        &token,
+        Some(json!({"name": "authz1-readonly"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
 
     // Mutations are denied 403 with the pack version in the denial reason.
     for (method, path, body) in [
@@ -262,7 +308,11 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
 
     // Decisions are visible in the metric contract, allow and deny alike.
     let exposition = metrics_handle().render();
-    for (decision, pack) in [("allow", "bootstrap"), ("deny", "authz1-readonly")] {
+    for (decision, pack) in [
+        ("allow", REGULATED_STRICT),
+        ("deny", "authz1-readonly"),
+        ("allow", "authz1-readonly"),
+    ] {
         assert!(
             exposition
                 .lines()
@@ -273,13 +323,14 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
         );
     }
 
-    // Clearing the stored pack hot-reloads back to bootstrap: mutations
-    // work again.
-    clear_pack(&pool, tenant_id).await;
-    assert_eq!(
-        authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
-        "removed"
-    );
+    // The read-only pack permits no PolicyAssign, so the product route to
+    // undo the default is itself denied — the lockout ADR-0014 documents.
+    let (status, locked) = api(&app, "DELETE", "/v1/policy/default", &token, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{locked}");
+
+    // Break-glass at the store level, then mutations work again on the
+    // next request — back on the embedded default.
+    break_glass_clear_default(&pool, tenant_id).await;
     let (status, team) = api(
         &app,
         "POST",
@@ -292,13 +343,21 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{team}");
+
+    // With no references left, the stored pack clears and the reloader
+    // drops the compiled copy.
+    clear_pack(&pool, tenant_id, "authz1-readonly").await;
+    assert_eq!(
+        authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
+        "removed"
+    );
 }
 
 /// A stored pack that does not compile must not change enforcement: the
-/// reload records an error and the last-good pack stays in force
+/// reload records an error and enforcement stays on the last-good state
 /// (ADR-0012 decision 5).
 #[tokio::test]
-async fn an_invalid_stored_pack_keeps_the_last_good_pack() {
+async fn an_invalid_stored_pack_keeps_the_last_good_state() {
     let _serial = serial().await;
     let Some((url, tenant_id)) = admitted_tenant().await else {
         return;
@@ -317,7 +376,8 @@ async fn an_invalid_stored_pack_keeps_the_last_good_pack() {
         "error"
     );
 
-    // Bootstrap (the last-good pack) still decides: admin works.
+    // The embedded default (the last-good state) still decides: admin
+    // works.
     let (status, org) = api(
         &app,
         "POST",
@@ -336,5 +396,5 @@ async fn an_invalid_stored_pack_keeps_the_last_good_pack() {
                 && line.contains("outcome=\"error\"")),
         "reload error missing from exposition:\n{exposition}"
     );
-    clear_pack(&pool, tenant_id).await;
+    clear_pack(&pool, tenant_id, "authz1-broken").await;
 }

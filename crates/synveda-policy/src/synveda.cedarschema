@@ -1,4 +1,4 @@
-// The Synveda authorisation model (AUTHZ-1, ADR-0012).
+// The Synveda authorisation model (AUTHZ-1 ADR-0012; AUTHZ-2 ADR-0014).
 //
 // Every pack — embedded or stored — validates against this schema when it
 // is compiled, so an ill-typed policy fails at apply/reload time, never at
@@ -7,19 +7,26 @@
 // `in` expressions over that chain — never string comparison, and never
 // the materialised path (ADR-0011).
 //
-// AUTHZ-2 (policy packs), AUTHZ-3 (roles), and AUTHZ-5 (ABAC context)
-// extend this schema; HIER-3 takes over entity materialisation.
+// AUTHZ-3 (roles) and AUTHZ-5 (ABAC context) extend this schema; HIER-3
+// takes over entity materialisation.
 namespace Synveda {
     entity Tenant;
 
     // The caller: a token subject resolved to a tenant (TEN-1), carrying
     // its provisioning status (AUTH-2, ADR-0013): quarantined is true for
     // identities placed in the quarantine scope and for IdP subjects that
-    // never provisioned (fail closed). AUTHZ-3 adds roles; HIER-3 will
-    // place principals in the scope hierarchy itself.
-    entity Principal in [Tenant] {
+    // never provisioned (fail closed). A provisioned principal is
+    // parented to its placement scope (its personal user node), so pack
+    // membership rules are entity-hierarchy checks; `home` mirrors that
+    // placement as an attribute so packs can *require* placement (an
+    // unplaced principal composes nothing — ADR-0014 decision 5), and
+    // `department` is the nearest department-kind ancestor of the
+    // placement, when the hierarchy has one. AUTHZ-3 adds roles.
+    entity Principal in [Tenant, Scope] {
         tenant: Tenant,
         quarantined: Bool,
+        home?: Scope,
+        department?: Scope,
     };
 
     // A node of the tenancy hierarchy. Parents follow the hierarchy's
@@ -32,6 +39,26 @@ namespace Synveda {
     // The hierarchy admin plane (/v1/hierarchy/*, ADR-0011 decision 8).
     // Create targets the parent scope — the Tenant when creating the root.
     action HierarchyCreate, HierarchyRead, HierarchyUpdate, HierarchyDelete
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Scope],
+            context: {},
+        };
+
+    // The composition seam (AUTHZ-2, ADR-0014 decision 5): may this
+    // principal's inject/recall composition include memories attached to
+    // this scope? CTX-1/2/3 ask exactly this question per candidate scope.
+    action MemoryRead
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: {},
+        };
+
+    // The policy admin plane (/v1/policy/*, ADR-0014 decision 8): reading
+    // packs and effective assignments, and assigning packs to nodes (or
+    // the tenant default — the Tenant resource).
+    action PolicyRead, PolicyAssign
         appliesTo {
             principal: [Principal],
             resource: [Tenant, Scope],

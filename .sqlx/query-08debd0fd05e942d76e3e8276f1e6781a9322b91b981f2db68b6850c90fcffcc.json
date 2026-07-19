@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select tenant_id, name, version, source, updated_at\n        from policy_packs where tenant_id = $1\n        ",
+  "query": "\n        select tenant_id, scope_id, pack_name, updated_at\n        from policy_pack_assignments\n        where tenant_id = $1 and scope_id = any($2)\n        ",
   "describe": {
     "columns": [
       {
@@ -10,37 +10,32 @@
       },
       {
         "ordinal": 1,
-        "name": "name",
-        "type_info": "Text"
+        "name": "scope_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 2,
-        "name": "version",
-        "type_info": "Int8"
-      },
-      {
-        "ordinal": 3,
-        "name": "source",
+        "name": "pack_name",
         "type_info": "Text"
       },
       {
-        "ordinal": 4,
+        "ordinal": 3,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "UuidArray"
       ]
     },
     "nullable": [
       false,
       false,
       false,
-      false,
       false
     ]
   },
-  "hash": "844c710d448fdf806c83748c7ee79ae3f08276e170a93cb35a1c9a611b062238"
+  "hash": "08debd0fd05e942d76e3e8276f1e6781a9322b91b981f2db68b6850c90fcffcc"
 }

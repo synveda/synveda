@@ -72,17 +72,24 @@ enum PolicyCommand {
         /// Tenant UUID the pack applies to.
         #[arg(long)]
         tenant: TenantId,
-        /// Pack name (slug grammar), e.g. `regulated-strict`.
+        /// Pack name (slug grammar), e.g. `acme-strict`. Product names
+        /// (`regulated-strict`, `standard`, `open-collaboration`) are
+        /// reserved (ADR-0014).
         #[arg(long)]
         name: String,
         /// Path to the Cedar policy source file.
         file: std::path::PathBuf,
     },
-    /// Remove a tenant's stored pack — back to the embedded `bootstrap`.
+    /// Remove one of a tenant's stored packs. Refused while assignments
+    /// or the tenant default still reference it; scopes it governed fall
+    /// back to their inherited pack (ADR-0014).
     Clear {
         /// Tenant UUID.
         #[arg(long)]
         tenant: TenantId,
+        /// Stored pack name to remove.
+        #[arg(long)]
+        name: String,
     },
 }
 
@@ -172,21 +179,21 @@ async fn run(cli: Cli) -> Result<(), String> {
             );
             Ok(())
         }
-        Command::Policy(PolicyCommand::Clear { tenant }) => {
+        Command::Policy(PolicyCommand::Clear { tenant, name }) => {
             let pool = connect().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
-            let removed = synveda_store::policy_packs::clear(&mut *tx, tenant)
+            let removed = synveda_store::policy_packs::clear(&mut tx, tenant, &name)
                 .await
                 .map_err(|err| err.to_string())?;
             tx.commit().await.map_err(|err| err.to_string())?;
             eprintln!(
                 "{}",
                 if removed {
-                    "policy pack cleared; bootstrap in force after the next reload"
+                    "policy pack cleared; it unloads on the next reload sweep"
                 } else {
-                    "no stored pack; bootstrap already in force"
+                    "no stored pack by that name"
                 }
             );
             Ok(())

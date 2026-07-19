@@ -25,8 +25,9 @@ use crate::error::ApiError;
 use crate::telemetry::HIERARCHY_OPERATIONS_TOTAL;
 
 /// The resolved tenant from the task-local, or the invariant error: these
-/// handlers only run behind the tenant-resolution middleware.
-fn tenant_id() -> Result<TenantId> {
+/// handlers only run behind the tenant-resolution middleware. Shared with
+/// the policy routes (`crate::policy`).
+pub(crate) fn tenant_id() -> Result<TenantId> {
     synveda_identity::current_tenant()
         .map(|context| context.tenant.id)
         .ok_or_else(|| Error::Internal {
@@ -59,7 +60,7 @@ fn respond<T: IntoResponse>(op: &'static str, result: Result<T>) -> Response {
 
 /// Maps a malformed JSON body onto the taxonomy instead of axum's default
 /// plain-text rejection.
-fn body<T>(payload: std::result::Result<Json<T>, JsonRejection>) -> Result<T> {
+pub(crate) fn body<T>(payload: std::result::Result<Json<T>, JsonRejection>) -> Result<T> {
     payload
         .map(|Json(inner)| inner)
         .map_err(|rejection| Error::Invalid {
@@ -296,7 +297,7 @@ pub(crate) async fn delete(State(state): State<AppState>, Path(id): Path<ScopeId
     respond("delete", result)
 }
 
-fn not_found(id: ScopeId) -> Error {
+pub(crate) fn not_found(id: ScopeId) -> Error {
     Error::NotFound {
         entity: format!("scope {id}"),
     }
@@ -307,12 +308,16 @@ fn not_found(id: ScopeId) -> Error {
 /// tenant check keeps the API correct even on connections that bypass RLS
 /// (the dev-compose superuser — ADR-0009's accepted trade-off), and it is
 /// why every mutation starts by fetching the node.
-fn found(node: Option<HierarchyNode>, tenant_id: TenantId, id: ScopeId) -> Result<HierarchyNode> {
+pub(crate) fn found(
+    node: Option<HierarchyNode>,
+    tenant_id: TenantId,
+    id: ScopeId,
+) -> Result<HierarchyNode> {
     node.filter(|node| node.tenant_id == tenant_id)
         .ok_or_else(|| not_found(id))
 }
 
-async fn commit(tx: sqlx::Transaction<'static, sqlx::Postgres>) -> Result<()> {
+pub(crate) async fn commit(tx: sqlx::Transaction<'static, sqlx::Postgres>) -> Result<()> {
     tx.commit().await.map_err(|err| Error::Storage {
         message: format!("commit hierarchy transaction: {err}"),
     })

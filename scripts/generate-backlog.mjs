@@ -99,6 +99,7 @@ const DONE = new Map([
   ["HIER-1", "done 2026-07-18, AC test: crates/synveda-store/tests/hierarchy.rs (10k nodes; ancestors/descendants medians 57µs/691µs over baseline), demo: demos/hier-1-hierarchy.sh"],
   ["AUTHZ-1", "done 2026-07-18, AC tests: crates/synveda-policy/tests/decision_benchmark.rs (facade incl. entity materialisation, 4-level chain: median 109µs, p99 177µs), crates/synveda-policy/tests/pdp.rs (decision + pack version on every call), crates/synveda-gateway/tests/authz_hierarchy.rs (route gate + hot reload), demo: demos/authz-1-cedar-pdp.sh"],
   ["AUTH-2", "done 2026-07-18, AC test: crates/synveda-gateway/tests/jit_provisioning.rs (mock IdP: team mapping, quarantine + PDP denial, override precedence, fail-closed bearer), demo: demos/auth-2-jit-provisioning.sh (live Rauthy)"],
+  ["AUTHZ-2", "done 2026-07-19, AC tests: crates/synveda-policy/tests/packs.rs (golden matrix per pack; composition switch at the MemoryRead seam), crates/synveda-gateway/tests/policy_routes.rs (per-node assignment governs the next request; inheritance, origin display, self-rescue), demo: demos/authz-2-policy-packs.sh"],
 ]);
 
 // Phase-level notes appended after a phase's checklist (kept across
@@ -140,24 +141,40 @@ const PHASE_NOTES = new Map([
       "_AUTHZ-1 deferrals (ADR-0012): every PDP decision is an AUD-1 emission\n" +
       "point — until the hash-chained log lands, decisions are visible in the\n" +
       "decision log (pack name@version + determining policies, every call) and\n" +
-      "`synveda_authz_decisions_total`. The embedded `bootstrap` pack\n" +
-      "deliberately preserves ADR-0011's semantics (any tenant principal\n" +
-      "administers its own hierarchy) until AUTHZ-2/3 replace it with real\n" +
-      "packs and roles; stored-pack propagation lags up to\n" +
+      "`synveda_authz_decisions_total`. The `bootstrap` pack was retired\n" +
+      "2026-07-19: AUTHZ-2 replaced it with the embedded product packs\n" +
+      "(`regulated-strict` is the zero-config default; roles still arrive with\n" +
+      "AUTHZ-3). Stored-pack propagation lags up to\n" +
       "`SYNVEDA_POLICY_REFRESH_SECS` (default 5s, poll-based) until VedaFlow\n" +
       "policy commits drive event-based reload._\n" +
       "\n" +
       "_AUTH-2 deferrals (ADR-0013): identity provisioning\n" +
       "(`identity.provisioned`) is an AUD-1 emission point — until then visible\n" +
       "in the `identity.provision` span and `synveda_jit_provisions_total`.\n" +
-      "Group-mapping overrides are store-managed (like policy packs\n" +
-      "pre-AUTHZ-2) until an admin surface exists; placement is\n" +
-      "first-login-final — movers/leavers arrive with AUTH-4/5, and release\n" +
-      "from quarantine is the existing PDP-gated hierarchy move. The\n" +
-      "quarantine forbid bumped the embedded pack to `bootstrap@2`; an IdP\n" +
-      "subject that never completed a login is quarantined at the PDP seam\n" +
-      "(fail closed), while dev HS256 subjects keep ADR-0012's bootstrap\n" +
-      "semantics until AUTHZ-3 lands roles._",
+      "Group-mapping overrides are store-managed until an admin surface\n" +
+      "exists; placement is first-login-final — movers/leavers arrive with\n" +
+      "AUTH-4/5, and release from quarantine is the existing PDP-gated\n" +
+      "hierarchy move. The quarantine forbid now lives in the base layer\n" +
+      "compiled into every pack (ADR-0014 decision 2); an IdP subject that\n" +
+      "never completed a login is quarantined at the PDP seam (fail closed),\n" +
+      "while dev HS256 subjects keep tenant-wide admin semantics until\n" +
+      "AUTHZ-3 lands roles._\n" +
+      "\n" +
+      "_AUTHZ-2 deferrals (ADR-0014): pack assignment/default mutations are\n" +
+      "AUD-1 emission points — until then visible in traces and\n" +
+      "`synveda_policy_operations_total`. `MemoryRead` is the composition\n" +
+      "seam; the AC's \"inject composition changes next session\" is\n" +
+      "demonstrated at that seam and re-demonstrated end-to-end when\n" +
+      "CTX-1/2/3 land on it. Governed handlers read the placement chain and\n" +
+      "chain assignments per request until HIER-2/3 cache them. Who may\n" +
+      "assign stays tenant-wide until AUTHZ-3 roles; `standard`'s department\n" +
+      "sharing collapses to strict where the hierarchy skips the department\n" +
+      "level; `open-collaboration`'s \"non-restricted content\" qualifier is\n" +
+      "AUTHZ-5 classification — the personal-scope exclusion is the current\n" +
+      "privacy floor. A tenant default naming a custom pack that omits\n" +
+      "`PolicyAssign` locks the tenant's policy plane; the store-level CLI is\n" +
+      "the break-glass (node-level assignments cannot seal themselves —\n" +
+      "ADR-0014 decision 4)._",
   ],
 ]);
 

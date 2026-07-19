@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        insert into policy_packs (tenant_id, name, version, source)\n        values ($1, $2, 1, $3)\n        on conflict (tenant_id) do update\n            set name = excluded.name,\n                source = excluded.source,\n                version = policy_packs.version + 1,\n                updated_at = now()\n        returning tenant_id, name, version, source, updated_at\n        ",
+  "query": "\n        select tenant_id, name, version, source, updated_at\n        from policy_packs where tenant_id = $1 and name = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -32,7 +32,6 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
         "Text"
       ]
     },
@@ -44,5 +43,5 @@
       false
     ]
   },
-  "hash": "53708f171e2cf449972b673c23af564dcc97af4a0a7cea46e65503caf359b624"
+  "hash": "117c37995576fcb660ac9930e0c42425f6b623ac6d2ce3ed139965b300b31d6f"
 }

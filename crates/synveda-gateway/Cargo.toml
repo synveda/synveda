@@ -14,6 +14,7 @@ synveda-store = { workspace = true }
 synveda-types = { workspace = true }
 
 axum = { workspace = true }
+chrono = { workspace = true }
 metrics = { workspace = true }
 serde = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }

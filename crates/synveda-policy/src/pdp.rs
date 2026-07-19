@@ -1,38 +1,105 @@
-//! The embedded Cedar engine behind the facade (ADR-0002, ADR-0012).
+//! The embedded Cedar engine behind the facade (ADR-0002, ADR-0012,
+//! ADR-0014).
 //!
 //! Everything Cedar stays inside this module: packs compile (parse +
-//! schema-validate) at install time, decisions evaluate against per-request
-//! entities materialised from caller-supplied hierarchy rows, and every
-//! call logs its decision with the policy pack version in force (the
-//! AUTHZ-1 AC; an AUD-1 emission point until the hash-chained log lands).
+//! schema-validate, on top of the invariant base layer) at install time,
+//! the effective pack resolves nearest-ancestor-first from caller-supplied
+//! assignment rows, decisions evaluate against per-request entities
+//! materialised from caller-supplied hierarchy rows, and every call logs
+//! its decision with the policy pack version in force (the AUTHZ-1 AC; an
+//! AUD-1 emission point until the hash-chained log lands).
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use cedar_policy::{
     Authorizer, Context, Decision, Entities, Entity, EntityId, EntityTypeName, EntityUid,
     PolicySet, Request, Schema, ValidationMode, Validator,
 };
-use synveda_types::{Error, Result, ScopeId, TenantId};
+use synveda_types::{Error, HierarchyNode, Result, ScopeId, ScopeKind, TenantId};
 
-use crate::AUTHZ_DECISIONS_TOTAL;
 use crate::request::{Action, AuthzContext, AuthzDecision, Principal, Resource};
+use crate::{AUTHZ_DECISIONS_TOTAL, POLICY_PACK_FALLBACKS_TOTAL};
 
-/// The embedded default pack's name (ADR-0012 decision 3).
-pub const BOOTSTRAP_PACK: &str = "bootstrap";
+/// The default product pack (ADR-0014 decision 1): deny-first, own-chain
+/// composition only. In force wherever nothing else is assigned
+/// (seed §2.1: strict by default).
+pub const REGULATED_STRICT: &str = "regulated-strict";
 
-/// The embedded default pack's version. Bumped to 2 by AUTH-2's
-/// quarantine forbid (ADR-0013 decision 5).
-pub const BOOTSTRAP_VERSION: i64 = 2;
+/// Team-shares-by-default within a department (seed §6).
+pub const STANDARD: &str = "standard";
+
+/// Org-wide read, personal scopes excluded (seed §6).
+pub const OPEN_COLLABORATION: &str = "open-collaboration";
+
+/// The embedded product packs and their versions — hand-bumped constants,
+/// changed whenever the corresponding source changes (ADR-0014 decision 1).
+pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
+    (REGULATED_STRICT, 1),
+    (STANDARD, 1),
+    (OPEN_COLLABORATION, 1),
+];
+
+/// Whether `name` is reserved for the product (ADR-0014 decision 6): the
+/// embedded packs, plus the retired `bootstrap`. Stored packs may not use
+/// these names — `regulated-strict` must mean the same thing in every
+/// tenant. Mirrored by the `policy_packs` check constraint; this is the
+/// in-process guard for the same rule.
+#[must_use]
+pub fn is_reserved(name: &str) -> bool {
+    name == "bootstrap" || EMBEDDED_PACKS.iter().any(|(pack, _)| *pack == name)
+}
 
 const SCHEMA_SRC: &str = include_str!("synveda.cedarschema");
-const BOOTSTRAP_SRC: &str = include_str!("bootstrap.cedar");
+const BASE_SRC: &str = include_str!("base.cedar");
+const REGULATED_STRICT_SRC: &str = include_str!("packs/regulated-strict.cedar");
+const STANDARD_SRC: &str = include_str!("packs/standard.cedar");
+const OPEN_COLLABORATION_SRC: &str = include_str!("packs/open-collaboration.cedar");
 
-/// A compiled, schema-validated policy pack.
+/// A compiled, schema-validated policy pack (base layer included).
 struct LoadedPack {
     name: String,
     version: i64,
     policies: PolicySet,
+}
+
+/// Where the effective pack came from — logged with every decision so the
+/// trail explains not just which pack decided but why it was in force,
+/// and surfaced by the policy routes (`GET .../policy`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackOrigin {
+    /// Assigned at this node of the resource's chain.
+    Assigned(ScopeId),
+    /// The tenant's stored default.
+    TenantDefault,
+    /// Nothing assigned anywhere: the embedded default (seed §2.1).
+    Default,
+    /// An assigned name had no compiled pack; fell back to the embedded
+    /// default (ADR-0014 decision 7).
+    Fallback,
+}
+
+/// The pack in force for a resource, as [`Pdp::effective`] resolves it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectivePack {
+    /// The pack's name.
+    pub name: String,
+    /// The pack's version.
+    pub version: i64,
+    /// How the pack came to be in force.
+    pub origin: PackOrigin,
+}
+
+impl fmt::Display for PackOrigin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PackOrigin::Assigned(scope) => write!(f, "assigned:{scope}"),
+            PackOrigin::TenantDefault => f.write_str("tenant-default"),
+            PackOrigin::Default => f.write_str("default"),
+            PackOrigin::Fallback => f.write_str("fallback"),
+        }
+    }
 }
 
 /// The Policy Decision Point: the one `authorize` chokepoint every governed
@@ -45,13 +112,13 @@ pub struct Pdp {
     principal_type: EntityTypeName,
     scope_type: EntityTypeName,
     action_type: EntityTypeName,
-    default_pack: Arc<LoadedPack>,
-    tenant_packs: RwLock<HashMap<TenantId, Arc<LoadedPack>>>,
+    embedded: HashMap<&'static str, Arc<LoadedPack>>,
+    tenant_packs: RwLock<HashMap<TenantId, HashMap<String, Arc<LoadedPack>>>>,
 }
 
 impl Pdp {
     /// Builds the PDP: parses the embedded schema and compiles the
-    /// embedded `bootstrap` pack. Failure means the binary itself is
+    /// embedded product packs. Failure means the binary itself is
     /// broken — callers treat it as fatal at startup.
     pub fn new() -> Result<Self> {
         let (schema, warnings) =
@@ -61,10 +128,18 @@ impl Pdp {
         for warning in warnings {
             tracing::warn!(warning = %warning, "embedded Cedar schema warning");
         }
-        let default_pack = compile(&schema, BOOTSTRAP_PACK, BOOTSTRAP_VERSION, BOOTSTRAP_SRC)
-            .map_err(|err| Error::Internal {
-                message: format!("embedded bootstrap pack invalid: {err}"),
+        let sources = [
+            (REGULATED_STRICT, REGULATED_STRICT_SRC),
+            (STANDARD, STANDARD_SRC),
+            (OPEN_COLLABORATION, OPEN_COLLABORATION_SRC),
+        ];
+        let mut embedded = HashMap::new();
+        for ((name, version), (_, source)) in EMBEDDED_PACKS.iter().zip(sources) {
+            let pack = compile(&schema, name, *version, source).map_err(|err| Error::Internal {
+                message: format!("embedded pack invalid: {err}"),
             })?;
+            embedded.insert(*name, Arc::new(pack));
+        }
         let type_name = |name: &str| -> Result<EntityTypeName> {
             name.parse().map_err(|err| Error::Internal {
                 message: format!("entity type {name:?}: {err}"),
@@ -77,21 +152,23 @@ impl Pdp {
             principal_type: type_name("Synveda::Principal")?,
             scope_type: type_name("Synveda::Scope")?,
             action_type: type_name("Synveda::Action")?,
-            default_pack: Arc::new(default_pack),
+            embedded,
             tenant_packs: RwLock::new(HashMap::new()),
         })
     }
 
-    /// Parses and schema-validates `source` without installing it — the
-    /// apply-time gate (`synveda policy apply` refuses a pack the reloader
-    /// would reject).
+    /// Parses and schema-validates `source` (on top of the base layer)
+    /// without installing it — the apply-time gate (`synveda policy
+    /// apply` refuses a pack the reloader would reject).
     pub fn compile_check(&self, name: &str, source: &str) -> Result<()> {
         compile(&self.schema, name, 0, source).map(|_| ())
     }
 
-    /// Compiles and installs a tenant's pack, replacing any previous one
-    /// atomically. On error the previous pack stays in force (ADR-0012
-    /// decision 5: a bad apply must not widen or brick a tenant).
+    /// Compiles and installs a tenant's stored pack under its name,
+    /// replacing any previous version atomically. On error the previous
+    /// pack stays in force (ADR-0012 decision 5: a bad apply must not
+    /// widen or brick a tenant). Reserved product names are refused —
+    /// the in-process face of the store's check constraint.
     pub fn install_source(
         &self,
         tenant_id: TenantId,
@@ -99,8 +176,16 @@ impl Pdp {
         version: i64,
         source: &str,
     ) -> Result<()> {
+        if is_reserved(name) {
+            return Err(Error::Invalid {
+                message: format!("pack name {name:?} is reserved for the product (ADR-0014)"),
+            });
+        }
         let pack = compile(&self.schema, name, version, source)?;
-        self.write_packs().insert(tenant_id, Arc::new(pack));
+        self.write_packs()
+            .entry(tenant_id)
+            .or_default()
+            .insert(name.to_owned(), Arc::new(pack));
         tracing::info!(
             tenant.id = %tenant_id,
             policy.pack = name,
@@ -110,30 +195,45 @@ impl Pdp {
         Ok(())
     }
 
-    /// Drops a tenant's stored pack; the tenant falls back to `bootstrap`.
-    /// Returns whether a pack was actually removed.
-    pub fn remove_pack(&self, tenant_id: TenantId) -> bool {
-        let removed = self.write_packs().remove(&tenant_id).is_some();
+    /// Drops one of the tenant's stored packs. Scopes assigned to it fall
+    /// back to the embedded default at decision time (ADR-0014
+    /// decision 7). Returns whether a pack was actually removed.
+    pub fn remove_pack(&self, tenant_id: TenantId, name: &str) -> bool {
+        let mut packs = self.write_packs();
+        let Some(tenant) = packs.get_mut(&tenant_id) else {
+            return false;
+        };
+        let removed = tenant.remove(name).is_some();
+        if tenant.is_empty() {
+            packs.remove(&tenant_id);
+        }
         if removed {
-            tracing::info!(tenant.id = %tenant_id, "policy pack removed; bootstrap in force");
+            tracing::info!(tenant.id = %tenant_id, policy.pack = name, "policy pack removed");
         }
         removed
     }
 
-    /// The `(name, version)` of the tenant's installed pack, if any — the
-    /// reloader's unchanged-skip check.
+    /// The `(name, version)` of every stored pack installed for the
+    /// tenant — the refresher's reconciliation input.
     #[must_use]
-    pub fn installed_version(&self, tenant_id: TenantId) -> Option<(String, i64)> {
+    pub fn installed_versions(&self, tenant_id: TenantId) -> Vec<(String, i64)> {
         self.read_packs()
             .get(&tenant_id)
-            .map(|pack| (pack.name.clone(), pack.version))
+            .map(|packs| {
+                packs
+                    .values()
+                    .map(|pack| (pack.name.clone(), pack.version))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// The facade (seed §6): evaluates `principal` doing `action` on
-    /// `resource` under the tenant's pack (or `bootstrap`), against
-    /// entities materialised from `context`. Every call — allow and deny —
-    /// logs the decision with the pack version in force and increments
-    /// [`AUTHZ_DECISIONS_TOTAL`].
+    /// `resource` under the resource's effective pack (nearest assigned
+    /// ancestor → tenant default → `regulated-strict`, ADR-0014
+    /// decision 3), against entities materialised from `context`. Every
+    /// call — allow and deny — logs the decision with the pack version in
+    /// force and increments [`AUTHZ_DECISIONS_TOTAL`].
     #[tracing::instrument(
         name = "policy.authorize",
         skip_all,
@@ -146,7 +246,13 @@ impl Pdp {
         resource: Resource,
         context: &AuthzContext<'_>,
     ) -> Result<AuthzDecision> {
-        let pack = self.pack_for(principal.tenant_id);
+        // Assignment mutations are decided under the pack the node
+        // *inherits*, skipping its own assignment (ADR-0014 decision 4):
+        // changing a node's governance is authorized by the surrounding
+        // governance, never by the pack being replaced — so a restrictive
+        // custom pack cannot seal its own node against reassignment.
+        let skip_self = action == Action::PolicyAssign;
+        let (pack, origin) = self.resolve_pack(principal.tenant_id, resource, context, skip_self);
         let entities = self.entities(principal, context)?;
         let request = self.request(principal, action, resource)?;
         let response = self
@@ -181,6 +287,7 @@ impl Pdp {
             authz.decision = verdict,
             policy.pack = %decision.pack_name,
             policy.pack_version = decision.pack_version,
+            policy.pack_origin = %origin,
             policy.determining = %decision.determining.join(","),
             "authorization decision"
         );
@@ -208,43 +315,142 @@ impl Pdp {
             .require(action, resource)
     }
 
-    /// The tenant's installed pack, or the embedded default.
-    fn pack_for(&self, tenant_id: TenantId) -> Arc<LoadedPack> {
-        self.read_packs()
+    /// The pack in force for `resource` under `context` — the resolution
+    /// [`Self::authorize`] applies to every action but `PolicyAssign`,
+    /// exposed for the policy routes to display (never for callers to
+    /// enforce with).
+    #[must_use]
+    pub fn effective(
+        &self,
+        tenant_id: TenantId,
+        resource: Resource,
+        context: &AuthzContext<'_>,
+    ) -> EffectivePack {
+        let (pack, origin) = self.resolve_pack(tenant_id, resource, context, false);
+        EffectivePack {
+            name: pack.name.clone(),
+            version: pack.version,
+            origin,
+        }
+    }
+
+    /// Resolves the effective pack for `resource` (ADR-0014 decision 3):
+    /// walk the resource's chain from the node upward, nearest assignment
+    /// first; then the tenant default; then the embedded default. An
+    /// assigned name with no compiled pack falls back to the embedded
+    /// default — strict, never dark (decision 7). With `skip_self` the
+    /// walk ignores the resource node's own assignment — the
+    /// `PolicyAssign` rule (decision 4).
+    fn resolve_pack(
+        &self,
+        tenant_id: TenantId,
+        resource: Resource,
+        context: &AuthzContext<'_>,
+        skip_self: bool,
+    ) -> (Arc<LoadedPack>, PackOrigin) {
+        let assigned: HashMap<ScopeId, &str> = context
+            .assignments
+            .iter()
+            .map(|assignment| (assignment.scope_id, assignment.pack_name.as_str()))
+            .collect();
+        let nodes: HashMap<ScopeId, &HierarchyNode> =
+            context.scopes.iter().map(|node| (node.id, node)).collect();
+        let named = |name: &str, origin: PackOrigin| -> (Arc<LoadedPack>, PackOrigin) {
+            match self.lookup(tenant_id, name) {
+                Some(pack) => (pack, origin),
+                None => {
+                    tracing::warn!(
+                        tenant.id = %tenant_id,
+                        policy.pack = name,
+                        "assigned pack has no compiled source; falling back to {REGULATED_STRICT}"
+                    );
+                    metrics::counter!(POLICY_PACK_FALLBACKS_TOTAL).increment(1);
+                    (self.default_pack(), PackOrigin::Fallback)
+                }
+            }
+        };
+        if let Resource::Scope(id) = resource {
+            let mut current = id;
+            let mut skip = skip_self;
+            // Bounded by the chain length: a malformed chain cannot loop.
+            for _ in 0..=nodes.len() {
+                if !skip && let Some(name) = assigned.get(&current) {
+                    return named(name, PackOrigin::Assigned(current));
+                }
+                skip = false;
+                match nodes.get(&current).and_then(|node| node.parent_id) {
+                    Some(parent) => current = parent,
+                    None => break,
+                }
+            }
+        }
+        match context.default_pack {
+            Some(name) => named(name, PackOrigin::TenantDefault),
+            None => (self.default_pack(), PackOrigin::Default),
+        }
+    }
+
+    /// A pack by name: the tenant's stored packs first, then the embedded
+    /// product packs. Reserved names can never be stored, so shadowing is
+    /// impossible (ADR-0014 decision 6).
+    fn lookup(&self, tenant_id: TenantId, name: &str) -> Option<Arc<LoadedPack>> {
+        if let Some(pack) = self
+            .read_packs()
             .get(&tenant_id)
-            .cloned()
-            .unwrap_or_else(|| Arc::clone(&self.default_pack))
+            .and_then(|packs| packs.get(name))
+        {
+            return Some(Arc::clone(pack));
+        }
+        self.embedded.get(name).map(Arc::clone)
+    }
+
+    fn default_pack(&self) -> Arc<LoadedPack> {
+        Arc::clone(&self.embedded[REGULATED_STRICT])
     }
 
     // Lock poisoning would mean a panic mid-`HashMap` operation; the map
     // is still structurally sound, so both sides recover the guard rather
     // than propagating an unactionable error.
-    fn read_packs(&self) -> std::sync::RwLockReadGuard<'_, HashMap<TenantId, Arc<LoadedPack>>> {
+    fn read_packs(
+        &self,
+    ) -> std::sync::RwLockReadGuard<'_, HashMap<TenantId, HashMap<String, Arc<LoadedPack>>>> {
         self.tenant_packs
             .read()
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn write_packs(&self) -> std::sync::RwLockWriteGuard<'_, HashMap<TenantId, Arc<LoadedPack>>> {
+    fn write_packs(
+        &self,
+    ) -> std::sync::RwLockWriteGuard<'_, HashMap<TenantId, HashMap<String, Arc<LoadedPack>>>> {
         self.tenant_packs
             .write()
             .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Materialises the Cedar entity graph for one decision (ADR-0012
-    /// decision 4): tenant entities, the principal parented to its tenant,
-    /// and the supplied scope chain parented along `parent_id` up to the
-    /// org, whose parent is its tenant entity.
+    /// decision 4, ADR-0014 decision 5): tenant entities, the principal
+    /// parented to its tenant and its placement scope, and both supplied
+    /// chains — resource and principal placement, deduplicated — parented
+    /// along `parent_id` up to the org, whose parent is its tenant entity.
     fn entities(&self, principal: &Principal, context: &AuthzContext<'_>) -> Result<Entities> {
         use cedar_policy::RestrictedExpression;
 
-        let mut list = Vec::with_capacity(context.scopes.len() + 2);
+        // Both chains may share nodes (a team reading its own scope);
+        // Cedar rejects duplicate entity entries, so deduplicate by id.
+        let scopes: HashMap<ScopeId, &HierarchyNode> = context
+            .scopes
+            .iter()
+            .chain(context.principal_scopes)
+            .map(|node| (node.id, node))
+            .collect();
+
+        let mut list = Vec::with_capacity(scopes.len() + 2);
 
         // Every distinct tenant in play gets its entity; a chain from a
         // foreign tenant therefore chains up to a *different* tenant
         // entity and membership rules fail closed.
         let mut tenant_ids = vec![principal.tenant_id];
-        for node in context.scopes {
+        for node in scopes.values() {
             if !tenant_ids.contains(&node.tenant_id) {
                 tenant_ids.push(node.tenant_id);
             }
@@ -263,22 +469,41 @@ impl Pdp {
         };
 
         let principal_tenant = self.tenant_uid(principal.tenant_id)?;
+        let mut principal_attrs = HashMap::from([
+            (
+                "tenant".to_owned(),
+                RestrictedExpression::new_entity_uid(principal_tenant.clone()),
+            ),
+            (
+                "quarantined".to_owned(),
+                RestrictedExpression::new_bool(principal.quarantined),
+            ),
+        ]);
+        let mut principal_parents = HashSet::from([principal_tenant]);
+        if let Some(home) = principal.scope_id {
+            // The placement makes the principal a member of its own chain
+            // (`principal in resource`), and the `home` attribute lets
+            // packs require placement outright (ADR-0014 decision 5).
+            let home_uid = self.scope_uid(home)?;
+            principal_attrs.insert(
+                "home".to_owned(),
+                RestrictedExpression::new_entity_uid(home_uid.clone()),
+            );
+            principal_parents.insert(home_uid);
+        }
+        if let Some(department) = nearest_department(context.principal_scopes) {
+            principal_attrs.insert(
+                "department".to_owned(),
+                RestrictedExpression::new_entity_uid(self.scope_uid(department)?),
+            );
+        }
         list.push(entity(
             self.principal_uid(principal)?,
-            HashMap::from([
-                (
-                    "tenant".to_owned(),
-                    RestrictedExpression::new_entity_uid(principal_tenant.clone()),
-                ),
-                (
-                    "quarantined".to_owned(),
-                    RestrictedExpression::new_bool(principal.quarantined),
-                ),
-            ]),
-            HashSet::from([principal_tenant]),
+            principal_attrs,
+            principal_parents,
         )?);
 
-        for node in context.scopes {
+        for node in scopes.values() {
             let node_tenant = self.tenant_uid(node.tenant_id)?;
             let parent = match node.parent_id {
                 Some(parent_id) => self.scope_uid(parent_id)?,
@@ -352,10 +577,25 @@ impl Pdp {
     }
 }
 
-/// Parse + schema-validate: a pack that compiles can never fail at
-/// decision time for structural reasons (ADR-0012 decision 2).
+/// The principal's department: the deepest department-kind node of its
+/// placement chain. A chain is a path with strictly increasing ranks
+/// (ADR-0011), so more than one can only mean malformed caller data —
+/// deepest is then the conservative pick (the narrower subtree).
+fn nearest_department(chain: &[HierarchyNode]) -> Option<ScopeId> {
+    chain
+        .iter()
+        .filter(|node| node.kind == ScopeKind::Department)
+        .max_by_key(|node| node.depth)
+        .map(|node| node.id)
+}
+
+/// Parse + schema-validate on top of the invariant base layer (ADR-0014
+/// decision 2): a pack that compiles can never fail at decision time for
+/// structural reasons (ADR-0012 decision 2), and no pack can drop the
+/// base rules.
 fn compile(schema: &Schema, name: &str, version: i64, source: &str) -> Result<LoadedPack> {
-    let policies: PolicySet = source.parse().map_err(|err| Error::Invalid {
+    let combined = format!("{BASE_SRC}\n{source}");
+    let policies: PolicySet = combined.parse().map_err(|err| Error::Invalid {
         message: format!("policy pack {name}@{version} does not parse: {err}"),
     })?;
     let validation = Validator::new(schema.clone()).validate(&policies, ValidationMode::default());

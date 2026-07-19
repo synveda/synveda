@@ -25,6 +25,7 @@ pub mod auth;
 pub mod authz;
 pub mod error;
 pub mod hierarchy;
+pub mod policy;
 mod provision;
 pub mod telemetry;
 pub mod tenant;

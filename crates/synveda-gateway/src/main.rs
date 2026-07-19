@@ -74,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
     // The embedded PDP (AUTHZ-1, ADR-0012): failure here means the binary's
-    // own schema or bootstrap pack is broken — refuse to boot.
+    // own schema or an embedded product pack is broken — refuse to boot.
     let pdp = Arc::new(Pdp::new()?);
     let refresh_secs = match std::env::var("SYNVEDA_POLICY_REFRESH_SECS") {
         Ok(value) => value

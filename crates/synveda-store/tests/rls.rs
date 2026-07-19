@@ -19,7 +19,9 @@ use std::sync::OnceLock;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
-use synveda_store::{group_mappings, hierarchy, identities, policy_packs, rls, tenants};
+use synveda_store::{
+    group_mappings, hierarchy, identities, policy_assignments, policy_packs, rls, tenants,
+};
 use synveda_types::{
     Error, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity,
     TenantId, TenantStatus,
@@ -167,6 +169,8 @@ const COVERED: &[&str] = &[
     "hierarchy_closure",
     "hierarchy_nodes",
     "identities",
+    "policy_pack_assignments",
+    "policy_pack_defaults",
     "policy_packs",
     "records",
     "records_history",
@@ -503,28 +507,168 @@ fn cross_tenant_policy_pack_write_is_rejected() {
     });
 }
 
-/// The full pack lifecycle — apply (insert and version-bumping update),
-/// read, clear — works as `synveda_app` with the right GUC: the shape the
-/// gateway's refresher and the CLI take.
+/// The full pack lifecycle — apply (insert, then version-bumping update
+/// of the same name), read, clear — works as `synveda_app` with the right
+/// GUC: the shape the gateway's refresher and the CLI take.
 #[test]
 fn same_tenant_policy_pack_lifecycle_works_under_rls() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = seed_policy_pack(&db.pool).await;
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let bumped = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "forbid;")
+        let first = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "forbid;")
             .await
             .expect("apply under RLS");
-        assert_eq!(bumped.version, 2, "the seeded pack must bump to v2");
-        let active = policy_packs::active(&mut *tx, tenant)
+        assert_eq!(first.version, 1, "a new name starts at v1");
+        let bumped = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "permit;")
+            .await
+            .expect("re-apply under RLS");
+        assert_eq!(bumped.version, 2, "re-applying the name must bump to v2");
+        let stored = policy_packs::get(&mut *tx, tenant, "rls-lifecycle")
             .await
             .expect("read under RLS");
-        assert_eq!(active.as_ref(), Some(&bumped));
+        assert_eq!(stored.as_ref(), Some(&bumped));
+        assert_eq!(
+            policy_packs::stored(&mut *tx, tenant)
+                .await
+                .expect("list under RLS")
+                .len(),
+            2,
+            "the seeded pack and the lifecycle pack are both stored"
+        );
         assert!(
-            policy_packs::clear(&mut *tx, tenant)
+            policy_packs::clear(&mut tx, tenant, "rls-lifecycle")
                 .await
                 .expect("clear under RLS"),
             "clear must work in-tenant"
+        );
+    });
+}
+
+// ── Policy assignments & defaults (AUTHZ-2, ADR-0014) ───────────────────────
+
+/// Admits a tenant with an org root carrying a pack assignment and a
+/// tenant default. Runs on the (RLS-exempt) test connection.
+async fn seed_policy_assignment(pool: &PgPool) -> (TenantId, ScopeId) {
+    let (tenant, root) = seed_hierarchy(pool).await;
+    policy_assignments::assign(pool, tenant, root, "open-collaboration")
+        .await
+        .expect("assign pack");
+    policy_assignments::set_default(pool, tenant, "standard")
+        .await
+        .expect("set default");
+    (tenant, root)
+}
+
+async fn visible_assignment_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64) {
+    let assignments = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from policy_pack_assignments where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count policy_pack_assignments");
+    let defaults = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from policy_pack_defaults where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count policy_pack_defaults");
+    (assignments, defaults)
+}
+
+/// The wrong (or absent) tenant GUC sees zero assignment/default rows —
+/// which pack governs which node is itself tenant-private.
+#[test]
+fn wrong_tenant_guc_sees_no_policy_assignment_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _) = seed_policy_assignment(&db.pool).await;
+        let (adversary, _) = seed_policy_assignment(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_assignment_rows(&mut tx, victim).await,
+            (0, 0),
+            "assignment rows leaked across tenants under the wrong GUC"
+        );
+        assert_eq!(visible_assignment_rows(&mut tx, adversary).await, (1, 1));
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_assignment_rows(&mut tx, victim).await,
+            (0, 0),
+            "assignment rows visible without any tenant GUC"
+        );
+    });
+}
+
+/// Writing an assignment or default for another tenant than the GUC's
+/// trips the policy's WITH CHECK — an application defect, surfaced as
+/// internal.
+#[test]
+fn cross_tenant_policy_assignment_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed_policy_assignment(&db.pool).await;
+        let (other, other_root) = seed_policy_assignment(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let forged = policy_assignments::assign(&mut *tx, other, other_root, "standard").await;
+        assert!(
+            matches!(forged, Err(Error::Internal { .. })),
+            "cross-tenant assignment write must be rejected by RLS as an \
+             internal defect, got {forged:?}"
+        );
+        drop(tx);
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let forged_default = policy_assignments::set_default(&mut *tx, other, "standard").await;
+        assert!(
+            matches!(forged_default, Err(Error::Internal { .. })),
+            "cross-tenant default write must be rejected by RLS as an \
+             internal defect, got {forged_default:?}"
+        );
+    });
+}
+
+/// The full assignment lifecycle — assign (insert and replacing update),
+/// chain lookup, unassign, default set/get/clear — works as `synveda_app`
+/// with the right GUC: the shape the gateway's policy routes take.
+#[test]
+fn same_tenant_policy_assignment_lifecycle_works_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, root) = seed_policy_assignment(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let replaced = policy_assignments::assign(&mut *tx, tenant, root, "standard")
+            .await
+            .expect("re-assign under RLS");
+        assert_eq!(replaced.pack_name, "standard");
+        let for_chain = policy_assignments::for_scopes(&mut *tx, tenant, &[root])
+            .await
+            .expect("chain lookup under RLS");
+        assert_eq!(for_chain, vec![replaced]);
+        assert_eq!(
+            policy_assignments::default_pack(&mut *tx, tenant)
+                .await
+                .expect("read default under RLS"),
+            Some("standard".to_owned())
+        );
+        assert!(
+            policy_assignments::unassign(&mut *tx, tenant, root)
+                .await
+                .expect("unassign under RLS"),
+            "unassign must work in-tenant"
+        );
+        assert!(
+            policy_assignments::clear_default(&mut *tx, tenant)
+                .await
+                .expect("clear default under RLS"),
+            "clearing the default must work in-tenant"
         );
     });
 }
