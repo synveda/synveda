@@ -260,6 +260,15 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_ingest::worker::EXTRACTION_RESCAN_FINDINGS_TOTAL,
         "Redaction findings in extractor output (redacted before persistence, ADR-0022)"
     );
+    // MEM-4 metrics (ADR-0023): emitted in the worker's embed stage.
+    metrics::describe_counter!(
+        synveda_ingest::worker::EMBEDDER_REQUESTS_TOTAL,
+        "Embedder calls by method and outcome (ok/error)"
+    );
+    metrics::describe_histogram!(
+        synveda_ingest::worker::EMBEDDER_REQUEST_SECONDS,
+        "Embedder call duration in seconds by method"
+    );
     // AUD-1 counters (ADR-0019): appends and verifications in
     // synveda-audit through the facade; best-effort append failures at
     // the gateway's error-path emission seams.

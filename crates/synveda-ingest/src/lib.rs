@@ -5,12 +5,15 @@
 //! Redaction (MEM-2, ADR-0021) is live: [`scan`] runs in the observe ack
 //! path, before persistence (seed §6). Extraction (MEM-3, ADR-0022) is
 //! live: [`extraction`] is the Extractor seam and [`worker`] is the
-//! observe queue's consumer, spawned by the gateway. Dedup (MEM-5) and
-//! embedding (MEM-4) land next on the same seams.
+//! observe queue's consumer, spawned by the gateway. Embedding (MEM-4,
+//! ADR-0023) is live: [`embedding`] is the Embedder seam, and the worker
+//! commits every record atomically with its vector — embed-or-fail.
+//! Dedup (MEM-5) lands next on the same seams.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod embedding;
 pub mod extraction;
 mod redaction;
 pub mod worker;

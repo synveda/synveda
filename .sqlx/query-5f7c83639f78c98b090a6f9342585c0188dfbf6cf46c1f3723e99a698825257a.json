@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select model, dim, embedded_at from record_embeddings where record_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "dim",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "embedded_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5f7c83639f78c98b090a6f9342585c0188dfbf6cf46c1f3723e99a698825257a"
+}

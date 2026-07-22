@@ -91,6 +91,35 @@ fn state(content: &str) -> RecordState {
     }
 }
 
+/// A fixed embedding for every write: this suite exercises tenant
+/// isolation, not vectors, but embed-or-fail (MEM-4, ADR-0023) makes an
+/// embedding-less write unrepresentable.
+fn embed() -> records::RecordEmbedding {
+    records::RecordEmbedding {
+        model: "test@1".to_owned(),
+        vector: vec![0.25, -0.5, 0.75],
+    }
+}
+
+/// [`records::insert`] with the fixed test embedding.
+async fn insert(
+    executor: impl sqlx::PgExecutor<'_>,
+    id: RecordId,
+    tenant: TenantId,
+    state: &RecordState,
+) -> synveda_types::Result<records::RecordVersion> {
+    records::insert(executor, id, tenant, state, &embed()).await
+}
+
+/// [`records::update`] with the fixed test embedding.
+async fn update(
+    executor: impl sqlx::PgExecutor<'_>,
+    id: RecordId,
+    state: &RecordState,
+) -> synveda_types::Result<Option<records::RecordVersion>> {
+    records::update(executor, id, state, &embed()).await
+}
+
 /// Admits a fresh tenant and seeds one record with one archived version, so
 /// `records`, `records_history`, and `records_versions` all hold rows for
 /// it. Runs on the (RLS-exempt) test connection — the fixture is the world
@@ -102,11 +131,11 @@ async fn seed_tenant(pool: &PgPool) -> (TenantId, RecordId) {
         .await
         .expect("create tenant");
     let record = RecordId::new();
-    records::insert(pool, record, tenant, &state("v1"))
+    insert(pool, record, tenant, &state("v1"))
         .await
         .expect("insert record");
     tick().await;
-    records::update(pool, record, &state("v2"))
+    update(pool, record, &state("v2"))
         .await
         .expect("update record")
         .expect("record is current");
@@ -177,6 +206,7 @@ const COVERED: &[&str] = &[
     "policy_pack_assignments",
     "policy_pack_defaults",
     "policy_packs",
+    "record_embeddings",
     "records",
     "records_history",
     "role_bindings",
@@ -1089,7 +1119,7 @@ fn cross_tenant_insert_is_rejected() {
         let (tenant, _) = seed_tenant(&db.pool).await;
         let (other, _) = seed_tenant(&db.pool).await;
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let result = records::insert(&mut *tx, RecordId::new(), other, &state("forged")).await;
+        let result = insert(&mut *tx, RecordId::new(), other, &state("forged")).await;
         assert!(
             matches!(result, Err(Error::Internal { .. })),
             "cross-tenant insert must be rejected by RLS as an internal \
@@ -1111,7 +1141,7 @@ fn cross_tenant_update_delete_and_reads_see_nothing() {
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
         let current = records::current(&mut *tx, foreign_record).await.unwrap();
         assert_eq!(current, None, "cross-tenant read leaked a record");
-        let updated = records::update(&mut *tx, foreign_record, &state("hijack"))
+        let updated = update(&mut *tx, foreign_record, &state("hijack"))
             .await
             .unwrap();
         assert_eq!(updated, None, "cross-tenant update found a row");
@@ -1147,14 +1177,14 @@ fn same_tenant_lifecycle_works_under_rls() {
         let record = RecordId::new();
 
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        records::insert(&mut *tx, record, tenant, &state("v1"))
+        insert(&mut *tx, record, tenant, &state("v1"))
             .await
             .expect("insert under RLS");
         tx.commit().await.expect("commit insert");
         tick().await;
 
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        records::update(&mut *tx, record, &state("v2"))
+        update(&mut *tx, record, &state("v2"))
             .await
             .expect("update under RLS (archive trigger runs as synveda_app)")
             .expect("record is current");
@@ -1181,6 +1211,101 @@ fn same_tenant_lifecycle_works_under_rls() {
             .await
             .expect("versions after delete");
         assert_eq!(versions.len(), 2);
+    });
+}
+
+// ── Record embeddings (MEM-4, ADR-0023) ─────────────────────────────────────
+
+/// Embeddings are content-derived vectors and sit squarely under the
+/// backstop: the wrong tenant GUC sees zero rows, a forged-tenant write
+/// trips WITH CHECK, and the app role holds no DELETE — an embedding
+/// leaves only through its record's FK cascade (which fires under the
+/// app role because FK actions bypass RLS by Postgres semantics).
+#[test]
+fn record_embeddings_are_tenant_isolated_and_undeletable_by_the_app_role() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_record) = seed_tenant(&db.pool).await;
+        let (adversary, _) = seed_tenant(&db.pool).await;
+
+        // Cross-tenant reads see nothing — the raw table and the store
+        // surface agree.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let visible = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from record_embeddings
+               where tenant_id = $1"#,
+            victim.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count embeddings");
+        assert_eq!(visible, 0, "embedding rows leaked across tenants");
+        assert_eq!(
+            records::embedding_meta(&mut *tx, victim_record)
+                .await
+                .expect("embedding meta across tenants"),
+            None,
+            "cross-tenant embedding metadata leaked"
+        );
+        drop(tx);
+
+        // A forged-tenant write trips the policy's WITH CHECK.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            r#"insert into record_embeddings
+                   (record_id, tenant_id, model, dim, embedding)
+               values ($1, $2, 'test@1', 3, '[1,0,0]'::vector)"#,
+            RecordId::new().as_uuid(),
+            victim.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant embedding write must be rejected"
+        );
+        drop(tx);
+
+        // No DELETE grant, even in-tenant: deleting an embedding while
+        // its record lives would strand the record embedding-less.
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let delete = sqlx::raw_sql("delete from record_embeddings")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            delete.is_err(),
+            "the app role must not hold DELETE on record_embeddings"
+        );
+        drop(tx);
+
+        // In-tenant the surface works, and the record's temporal delete
+        // cascades the embedding away under the app role.
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let meta = records::embedding_meta(&mut *tx, victim_record)
+            .await
+            .expect("read own embedding meta")
+            .expect("the seeded record is embedded");
+        assert_eq!(meta.model, "test@1");
+        assert_eq!(meta.dim, 3);
+        assert!(
+            records::delete(&mut *tx, victim_record)
+                .await
+                .expect("delete record"),
+            "delete must work in-tenant"
+        );
+        let orphaned = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from record_embeddings
+               where record_id = $1"#,
+            victim_record.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count after cascade");
+        assert_eq!(
+            orphaned, 0,
+            "the record's cascade must remove its embedding"
+        );
+        tx.commit().await.expect("commit");
     });
 }
 

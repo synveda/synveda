@@ -91,6 +91,35 @@ fn midpoint(a: DateTime<Utc>, b: DateTime<Utc>) -> DateTime<Utc> {
     a + (b - a) / 2
 }
 
+/// A fixed embedding for every write: this suite exercises
+/// bitemporality, not vectors, but embed-or-fail (MEM-4, ADR-0023)
+/// makes an embedding-less write unrepresentable.
+fn embed() -> records::RecordEmbedding {
+    records::RecordEmbedding {
+        model: "test@1".to_owned(),
+        vector: vec![0.25, -0.5, 0.75],
+    }
+}
+
+/// [`records::insert`] with the fixed test embedding.
+async fn insert(
+    executor: impl sqlx::PgExecutor<'_>,
+    id: RecordId,
+    tenant: TenantId,
+    state: &RecordState,
+) -> synveda_types::Result<records::RecordVersion> {
+    records::insert(executor, id, tenant, state, &embed()).await
+}
+
+/// [`records::update`] with the fixed test embedding.
+async fn update(
+    executor: impl sqlx::PgExecutor<'_>,
+    id: RecordId,
+    state: &RecordState,
+) -> synveda_types::Result<Option<records::RecordVersion>> {
+    records::update(executor, id, state, &embed()).await
+}
+
 // ── The headline acceptance test ─────────────────────────────────────────────
 
 /// Insert → update → update → delete → re-insert, then prove the as-of query
@@ -104,23 +133,23 @@ fn as_of_returns_historical_row_states() {
         let (id, tenant) = (RecordId::new(), TenantId::new());
         let (scope, owner) = (ScopeId::new(), IdentityId::new());
 
-        records::insert(pool, id, tenant, &state("postgres 16", scope, owner))
+        insert(pool, id, tenant, &state("postgres 16", scope, owner))
             .await
             .expect("insert v1");
         tick().await;
-        records::update(pool, id, &state("postgres 17", scope, owner))
+        update(pool, id, &state("postgres 17", scope, owner))
             .await
             .expect("update to v2")
             .expect("v1 was current");
         tick().await;
-        records::update(pool, id, &state("postgres 18", scope, owner))
+        update(pool, id, &state("postgres 18", scope, owner))
             .await
             .expect("update to v3")
             .expect("v2 was current");
         tick().await;
         assert!(records::delete(pool, id).await.expect("delete"));
         tick().await;
-        records::insert(
+        insert(
             pool,
             id,
             tenant,
@@ -194,10 +223,10 @@ fn same_transaction_update_folds_into_one_version() {
         let (scope, owner) = (ScopeId::new(), IdentityId::new());
 
         let mut tx = db.pool.begin().await.expect("begin");
-        records::insert(&mut *tx, id, tenant, &state("draft", scope, owner))
+        insert(&mut *tx, id, tenant, &state("draft", scope, owner))
             .await
             .expect("insert");
-        records::update(&mut *tx, id, &state("final", scope, owner))
+        update(&mut *tx, id, &state("final", scope, owner))
             .await
             .expect("update")
             .expect("current");
@@ -225,7 +254,11 @@ fn transaction_time_cannot_be_forged() {
         let (scope, owner) = (ScopeId::new(), IdentityId::new());
         let forged = base(); // 2026-01-01, well before any real now()
 
-        // Forged insert: tx_from/tx_to supplied explicitly.
+        // Forged insert: tx_from/tx_to supplied explicitly. The
+        // embedding rides the same transaction — migration 0015's
+        // deferred constraint refuses an embedding-less commit even
+        // from raw SQL (its own test lives in the MEM-4 suite).
+        let mut tx = pool.begin().await.expect("begin");
         sqlx::query!(
             r#"
             insert into records
@@ -240,9 +273,21 @@ fn transaction_time_cannot_be_forged() {
             owner.as_uuid(),
             forged,
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .expect("insert succeeds — but the trigger stamps real time");
+        sqlx::query!(
+            r#"
+            insert into record_embeddings (record_id, tenant_id, model, dim, embedding)
+            values ($1, $2, 'test@1', 3, '[0.25,-0.5,0.75]'::vector)
+            "#,
+            id.as_uuid(),
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("embed the forged record");
+        tx.commit().await.expect("commit forged insert");
 
         let v1 = records::current(pool, id).await.unwrap().expect("current");
         assert!(v1.tx_from > forged, "trigger overwrote the forged tx_from");
@@ -283,11 +328,11 @@ fn history_is_append_only() {
         let (id, tenant) = (RecordId::new(), TenantId::new());
         let (scope, owner) = (ScopeId::new(), IdentityId::new());
 
-        records::insert(pool, id, tenant, &state("v1", scope, owner))
+        insert(pool, id, tenant, &state("v1", scope, owner))
             .await
             .unwrap();
         tick().await;
-        records::update(pool, id, &state("v2", scope, owner))
+        update(pool, id, &state("v2", scope, owner))
             .await
             .unwrap()
             .unwrap();
@@ -322,10 +367,10 @@ fn insert_of_existing_id_is_a_conflict() {
     db.rt.block_on(async {
         let (id, tenant) = (RecordId::new(), TenantId::new());
         let (scope, owner) = (ScopeId::new(), IdentityId::new());
-        records::insert(&db.pool, id, tenant, &state("v1", scope, owner))
+        insert(&db.pool, id, tenant, &state("v1", scope, owner))
             .await
             .unwrap();
-        let err = records::insert(&db.pool, id, tenant, &state("again", scope, owner))
+        let err = insert(&db.pool, id, tenant, &state("again", scope, owner))
             .await
             .expect_err("duplicate id");
         assert!(matches!(err, Error::Conflict { .. }), "got: {err:?}");
@@ -350,7 +395,7 @@ fn bitemporal_query_combines_transaction_and_valid_time() {
             valid_to: Some(june),
             ..state("office is in building A", scope, owner)
         };
-        records::insert(pool, id, tenant, &v1_state).await.unwrap();
+        insert(pool, id, tenant, &v1_state).await.unwrap();
         tick().await;
         // v2 (a correction): from June it is building B, open-ended.
         let v2_state = RecordState {
@@ -358,7 +403,7 @@ fn bitemporal_query_combines_transaction_and_valid_time() {
             valid_to: None,
             ..state("office is in building B", scope, owner)
         };
-        records::update(pool, id, &v2_state).await.unwrap().unwrap();
+        update(pool, id, &v2_state).await.unwrap().unwrap();
 
         // Re-fetch: v1 as archived (its transaction period is now closed).
         let versions = records::versions(pool, id).await.unwrap();
@@ -454,7 +499,7 @@ async fn check_history_case(pool: &PgPool, initial: StateSpec, ops: Vec<OpSpec>)
 
     let mut expected: Vec<Expected> = Vec::new();
     let mut alive = true;
-    records::insert(pool, id, tenant, &spec_to_state(&initial, 0, scope, owner))
+    insert(pool, id, tenant, &spec_to_state(&initial, 0, scope, owner))
         .await
         .expect("initial insert");
     expected.push(Expected {
@@ -467,7 +512,7 @@ async fn check_history_case(pool: &PgPool, initial: StateSpec, ops: Vec<OpSpec>)
         let seq = i + 1;
         match op {
             OpSpec::Update(spec) => {
-                let updated = records::update(pool, id, &spec_to_state(&spec, seq, scope, owner))
+                let updated = update(pool, id, &spec_to_state(&spec, seq, scope, owner))
                     .await
                     .expect("update");
                 if alive {
@@ -493,8 +538,7 @@ async fn check_history_case(pool: &PgPool, initial: StateSpec, ops: Vec<OpSpec>)
             }
             OpSpec::Reinsert(spec) => {
                 let result =
-                    records::insert(pool, id, tenant, &spec_to_state(&spec, seq, scope, owner))
-                        .await;
+                    insert(pool, id, tenant, &spec_to_state(&spec, seq, scope, owner)).await;
                 if alive {
                     assert!(
                         matches!(result, Err(Error::Conflict { .. })),

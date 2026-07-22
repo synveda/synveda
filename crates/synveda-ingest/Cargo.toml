@@ -12,6 +12,9 @@ synveda-policy = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }
 
+# The deterministic embedder's hash (MEM-4, ADR-0023) — the same
+# primitive the audit chain already uses (AUD-1).
+blake3 = { workspace = true }
 chrono = { workspace = true }
 metrics = { workspace = true }
 regex = { workspace = true }

@@ -16,7 +16,12 @@
 //! honours `SYNVEDA_ANTHROPIC_BASE_URL` (default
 //! `https://api.anthropic.com`); `vllm` requires `SYNVEDA_VLLM_BASE_URL`
 //! and `SYNVEDA_EXTRACTOR_MODEL`; `SYNVEDA_EXTRACTOR_MODEL` otherwise
-//! defaults per implementation. Worker pacing:
+//! defaults per implementation. The embedder (MEM-4, ADR-0023) is
+//! selected by `SYNVEDA_EMBEDDER` (`deterministic` [default] | `tei` —
+//! deliberately no `off`: embed-or-fail is unconditional); `tei`
+//! requires `SYNVEDA_TEI_URL` (the dev compose serves
+//! `http://localhost:8110`) and honours `SYNVEDA_EMBEDDER_MODEL`
+//! (default `BAAI/bge-m3`). Worker pacing:
 //! `SYNVEDA_EXTRACTION_POLL_MS` (default 1000),
 //! `SYNVEDA_EXTRACTION_BATCH` (default 16),
 //! `SYNVEDA_EXTRACTION_VT_SECS` (default 60),
@@ -32,6 +37,7 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{self, AppState};
 use synveda_gateway::{authz, telemetry};
 use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, OidcVerifier, TokenVerifier};
+use synveda_ingest::embedding::Embedder as _;
 use synveda_ingest::extraction::Extractor as _;
 use synveda_policy::Pdp;
 
@@ -120,10 +126,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // reach the worker's authorization reads.
     let scope_chains = Arc::new(synveda_store::ScopeChainCache::new());
     let extractor = extractor_from_env()?;
+    let embedder = embedder_from_env()?;
     let extraction_worker = extractor.map(|extractor| {
         tracing::info!(
             extractor = extractor.method(),
-            "extraction worker starting (MEM-3, ADR-0022)"
+            embedder = embedder.method(),
+            embedding_model = embedder.model(),
+            "extraction worker starting (MEM-3/MEM-4, ADR-0022/0023)"
         );
         synveda_ingest::worker::spawn(
             synveda_ingest::worker::WorkerDeps {
@@ -131,6 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 pdp: Arc::clone(&pdp),
                 chains: Arc::clone(&scope_chains),
                 extractor,
+                embedder,
             },
             extraction_config_from_env(),
         )
@@ -221,6 +231,35 @@ fn extractor_from_env() -> Result<Option<synveda_ingest::extraction::AnyExtracto
         }
         other => Err(format!(
             "SYNVEDA_EXTRACTOR must be off|deterministic|claude|vllm, got {other:?}"
+        )),
+    }
+}
+
+/// Builds the configured embedder from `SYNVEDA_EMBEDDER` and its
+/// companions (module header). There is no `off`: wherever the worker
+/// runs, records commit embed-or-fail (ADR-0023 decision 6).
+/// Misconfiguration is a startup error, the extractor discipline.
+fn embedder_from_env() -> Result<synveda_ingest::embedding::AnyEmbedder, String> {
+    use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder, TeiEmbedder};
+    let selected = std::env::var("SYNVEDA_EMBEDDER")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "deterministic".to_owned());
+    match selected.as_str() {
+        "deterministic" => Ok(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
+        "tei" => {
+            let base_url = std::env::var("SYNVEDA_TEI_URL")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .ok_or("SYNVEDA_EMBEDDER=tei requires SYNVEDA_TEI_URL")?;
+            let model = std::env::var("SYNVEDA_EMBEDDER_MODEL")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| TeiEmbedder::DEFAULT_MODEL.to_owned());
+            Ok(AnyEmbedder::Tei(TeiEmbedder::new(model, base_url)))
+        }
+        other => Err(format!(
+            "SYNVEDA_EMBEDDER must be deterministic|tei, got {other:?}"
         )),
     }
 }

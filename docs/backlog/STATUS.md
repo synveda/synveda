@@ -39,7 +39,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [MEM-1: observe API + PGMQ buffer](MEM-1.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/observe.rs (duplicate delivery admits nothing twice — response, staging table, queue, and audit chain all agree; 1k events/s sustained with the ack median inside the 20ms-plus-link-tax budget), crates/synveda-store/tests/rls.rs (observe buffer joins the adversarial RLS suite; PGMQ grants proven under synveda_app), crates/synveda-policy/tests/{packs,roles,service_scope}.rs (the MemoryWrite floor and grant golden-tested), demo: demos/mem-1-observe.sh
 - [x] [MEM-2: Redaction & secret scanning](MEM-2.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/observe_redaction.rs (seeded secrets swept for across staging, quarantine, audit, and both PGMQ tables under all three modes — zero hits; the review queue E2E: security-reviewer's first live action, owner denied self-release, release sends the standard signal, one-shot 409), crates/synveda-ingest/tests/redaction.rs (every rule + validators + the scanner-output-never-contains-matched-text discipline), crates/synveda-store/tests/rls.rs (observe_quarantine joins the adversarial suite; column-bound one-shot review), crates/synveda-policy/tests/{packs,roles}.rs (quarantine plane golden-tested; redaction config rides the effective pack), demo: demos/mem-2-redaction.sh
 - [x] [MEM-3: Extraction pipeline](MEM-3.md) — done 2026-07-22, AC tests: crates/synveda-ingest/tests/extraction_precision.rs (labelled fixture set, per-class precision; deterministic macro 0.958 ≥ the provisional 0.8 target; the `#[ignore]`d live-LLM hook runs the same harness against Claude or vLLM), crates/synveda-gateway/tests/extraction.rs (observe → worker → records with the provenance quadruple on every record; archive-lock exactly-once under redelivery; a released quarantined event extracts identically; a since-quarantined owner is denied at commit; retries exhaust into an audited dead-letter; an extractor echoing a live-format secret persists only the placeholder), crates/synveda-ingest/tests/extractor_http.rs (Claude/vLLM request contracts against local mocks), crates/synveda-store/tests/observe_queue.rs (visibility timeout, redelivery, archive-as-lock), demo: demos/mem-3-extraction.sh
-- [ ] [MEM-4: Transactional embed-or-fail](MEM-4.md)
+- [x] [MEM-4: Transactional embed-or-fail](MEM-4.md) — done 2026-07-22, AC tests: crates/synveda-gateway/tests/embedding.rs (the chaos test: a mock TEI killed mid-batch — the embedded event commits atomically with its vector, the rest redeliver and commit on recovery, zero lost and zero embedding-less at every phase; the schema backstop refuses a raw-SQL embedding-less commit; the deterministic zero-config path), crates/synveda-ingest/tests/embedder_http.rs (TEI request contract and failure taxonomy against local mocks — error status, count mismatch, empty vector, dead endpoint all `Dependency`), crates/synveda-store/tests/rls.rs (record_embeddings joins the adversarial suite: tenant-isolated, forged-tenant write rejected, app role holds no DELETE, record delete cascades), crates/synveda-store/tests/bitemporal.rs (every write now carries its embedding through the one-statement API), demo: demos/mem-4-embedding.sh (real TEI/BGE-M3 stopped and restarted mid-pipeline)
 - [ ] [CTX-1: Hybrid retrieval](CTX-1.md)
 - [ ] [CTX-2: Composition engine](CTX-2.md)
 - [ ] [CTX-3: inject API](CTX-3.md)
@@ -292,6 +292,32 @@ derived-channel commit; the <60s pipeline-lag SLO is evidenced by
 `synveda_extraction_lag_seconds` (EVAL-6 owns SLO enforcement); and
 LISTEN/NOTIFY replaces polling if idle load or measured lag ever matters
 (ADR-0022's recorded upgrade)._
+
+_MEM-4 notes (ADR-0023): embedding is a per-event stage between extract and
+commit — outside any transaction (the MEM-3 rule: no transaction spans a
+network call) — and the vectors land atomically with their records under
+the archive-lock: `records::insert/update` now REQUIRE a `RecordEmbedding`
+and write both tables in one data-modifying-CTE statement, and migration
+0015's deferred constraint trigger makes an embedding-less record
+impossible to commit even from raw SQL (the Mem0 failure mode is
+structurally absent, not monitored for). Storage is the `record_embeddings`
+sidecar (typmod-less `vector`, per-row model + dim, FK cascade, forced RLS,
+no app-role DELETE) — never a column on the bitemporal pair; ANN indexing
+belongs to CTX-1, which will find `vector` installed and populated. The
+extractor-output re-scan moved ahead of the embed call so vectors are
+computed over exactly the persisted redacted text — a secret absent from
+content is also absent from vector space. The `Embedder` seam
+(`SYNVEDA_EMBEDDER`: `deterministic` [default] | `tei`, no `off`) mirrors
+the Extractor seam; TEI failures are `Dependency` → the existing
+redelivery/dead-letter flow; the model identity is config-declared
+(`SYNVEDA_EMBEDDER_MODEL`), not probed — gateway boot never couples to TEI.
+Forward obligations: records from the MEM-3 window remain embedding-less
+until the re-embed workflow (tech plan §1.3 model-change machinery) owns
+the backfill; MEM-5's supersession work inherits the update-path
+re-embed-on-rewrite obligation the upsert already satisfies mechanically;
+per-tenant model pinning revisits the single config-declared model;
+coalesced TEI batch calls (per-event failure attribution preserved) are the
+recorded upgrade if embed round-trips ever dominate the <60s lag SLO._
 
 ## Phase 2 — Governance (wk 6–10)
 

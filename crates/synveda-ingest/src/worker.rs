@@ -1,14 +1,18 @@
 //! The extraction worker (MEM-3, ADR-0022): the observe queue's first
 //! consumer. A polling transport (`spawn`/`run_once`) drives
 //! Temporal-shaped stages — load the staged event, extract outside any
-//! transaction, commit under the archive-lock — so the enterprise
-//! profile can later host the same stages under a workflow engine
-//! (decision 1).
+//! transaction, embed outside any transaction (MEM-4, ADR-0023), commit
+//! under the archive-lock — so the enterprise profile can later host the
+//! same stages under a workflow engine (decision 1).
 //!
 //! Exactly-once is the archive-lock (decision 2): `pgmq.archive` runs
 //! inside the tenant write transaction before the record inserts, so a
 //! commit means "records exist AND the signal is consumed" atomically,
-//! and a redelivery race loses by archiving zero rows.
+//! and a redelivery race loses by archiving zero rows. Embed-or-fail
+//! rides the same seam: each record inserts with its vector in one
+//! statement, so "records exist" now means "embedded records exist" —
+//! an embedding failure leaves the signal for redelivery, never a
+//! vector-less record (ADR-0023 decisions 1 and 2).
 //!
 //! Context is explicit throughout — tenant from the signal, actor named
 //! per event — never task-local (ADR-0008's worker rule).
@@ -23,13 +27,14 @@ use sqlx::PgPool;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
 use synveda_store::observe::{ObserveMessage, QueuedSignal, StagedEvent};
-use synveda_store::records::{self, RecordState};
+use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::{ScopeChainCache, identities, observe, policy_assignments, rls, role_bindings};
 use synveda_types::{
-    Error, HierarchyNode, IdentityId, IdentityKind, RecordId, RecordKind, Result, ScopeId,
-    Sensitivity, TenantId,
+    Error, HierarchyNode, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, Result,
+    ScopeId, Sensitivity, TenantId,
 };
 
+use crate::embedding::{AnyEmbedder, Embedder};
 use crate::extraction::{AnyExtractor, ExtractionInput, ExtractionOutcome, Extractor};
 
 /// Counter: staged events the worker resolved, labelled
@@ -55,6 +60,13 @@ pub const EXTRACTOR_REQUEST_SECONDS: &str = "synveda_extractor_request_seconds";
 /// decision 7's re-scan) — nonzero means an extractor echoed or
 /// fabricated secret-shaped content that never reached storage.
 pub const EXTRACTION_RESCAN_FINDINGS_TOTAL: &str = "synveda_extraction_rescan_findings_total";
+
+/// Counter: embedder calls, labelled `method` and `outcome = ok | error`
+/// (MEM-4, ADR-0023 decision 7).
+pub const EMBEDDER_REQUESTS_TOTAL: &str = "synveda_embedder_requests_total";
+
+/// Histogram: embedder call duration in seconds, labelled `method`.
+pub const EMBEDDER_REQUEST_SECONDS: &str = "synveda_embedder_request_seconds";
 
 /// The audit actor component name for this pipeline.
 const ACTOR_COMPONENT: &str = "extraction";
@@ -100,6 +112,9 @@ pub struct WorkerDeps {
     pub chains: Arc<ScopeChainCache>,
     /// The configured extractor.
     pub extractor: AnyExtractor,
+    /// The configured embedder: every record commits with its vector,
+    /// embed-or-fail (MEM-4, ADR-0023).
+    pub embedder: AnyEmbedder,
 }
 
 /// Spawns the worker loop: poll, drain while work exists, sleep. Abort
@@ -189,12 +204,35 @@ enum Loaded {
     Missing(i64),
 }
 
-/// One extracted event waiting for the write transaction.
+/// One extracted event waiting for the embed stage.
 struct Extracted {
     msg_id: i64,
+    read_ct: i32,
     input: ExtractionInput,
     received_at: DateTime<Utc>,
     outcome: ExtractionOutcome,
+}
+
+/// One candidate past the embed stage: the final rescanned content and
+/// the vector computed over exactly that text (ADR-0023 decision 5).
+struct EmbeddedCandidate {
+    class: RecordClass,
+    content: String,
+    confidence: f64,
+    sensitivity: Option<Sensitivity>,
+    entities: Vec<String>,
+    vector: Vec<f32>,
+}
+
+/// One event past the embed stage, waiting for the write transaction.
+struct Embedded {
+    msg_id: i64,
+    input: ExtractionInput,
+    received_at: DateTime<Utc>,
+    method: String,
+    model_version: String,
+    candidates: Vec<EmbeddedCandidate>,
+    rescan_findings: usize,
 }
 
 /// Processes one tenant's signals: load (read tx) → extract (no tx) →
@@ -270,6 +308,7 @@ async fn process_group(
                         .increment(1);
                         extracted.push(Extracted {
                             msg_id: signal.msg_id,
+                            read_ct: signal.read_ct,
                             input,
                             received_at,
                             outcome,
@@ -295,11 +334,117 @@ async fn process_group(
             }
         }
     }
-    if extracted.is_empty() && dead_letters.is_empty() && missing.is_empty() {
+    // Embed stage (MEM-4, ADR-0023 decisions 1 and 5): outside any
+    // transaction, one call per event, over the final rescanned text.
+    // A failure leaves the signal un-archived — the same redelivery
+    // flow as an extractor failure — and costs no other event its
+    // commit: this is the AC's partial-batch-failure semantics.
+    let mut embedded: Vec<Embedded> = Vec::with_capacity(extracted.len());
+    for item in extracted {
+        let event_id = item.input.event_id;
+        let read_ct = item.read_ct;
+        match embed_event(deps, item).await {
+            Ok(item) => embedded.push(item),
+            Err(error) => {
+                metrics::counter!(EXTRACTION_EVENTS_TOTAL, "outcome" => "error").increment(1);
+                tracing::warn!(
+                    tenant.id = %tenant_id,
+                    event.id = %event_id,
+                    read.count = read_ct,
+                    error = %error,
+                    "embedding failed; signal redelivers"
+                );
+            }
+        }
+    }
+
+    if embedded.is_empty() && dead_letters.is_empty() && missing.is_empty() {
         return Ok(());
     }
 
-    commit_group(deps, tenant_id, extracted, dead_letters, missing).await
+    commit_group(deps, tenant_id, embedded, dead_letters, missing).await
+}
+
+/// Rescans and embeds one extracted event (ADR-0023 decision 5: scan →
+/// embed → commit, so the vector is computed over exactly the persisted
+/// text — a secret redacted from content never reaches vector space).
+#[tracing::instrument(
+    name = "ingest.worker.embed",
+    skip_all,
+    fields(event.id = %item.input.event_id),
+    err(Display)
+)]
+async fn embed_event(deps: &WorkerDeps, item: Extracted) -> Result<Embedded> {
+    let Extracted {
+        msg_id,
+        read_ct: _,
+        input,
+        received_at,
+        outcome,
+    } = item;
+    let mut rescan_findings = 0usize;
+    let mut candidates: Vec<EmbeddedCandidate> = Vec::with_capacity(outcome.candidates.len());
+    for candidate in outcome.candidates {
+        // Decision 7 of ADR-0022: extractor output re-enters the
+        // scanner, so an echoed or fabricated live-format secret never
+        // persists — and now (ADR-0023) is never embedded either.
+        let (content, findings) = rescan(candidate.content);
+        rescan_findings += findings;
+        candidates.push(EmbeddedCandidate {
+            class: candidate.class,
+            content,
+            confidence: candidate.confidence,
+            sensitivity: candidate.sensitivity,
+            entities: candidate.entities,
+            vector: Vec::new(),
+        });
+    }
+    if rescan_findings > 0 {
+        metrics::counter!(EXTRACTION_RESCAN_FINDINGS_TOTAL).increment(rescan_findings as u64);
+    }
+    if !candidates.is_empty() {
+        let contents: Vec<String> = candidates
+            .iter()
+            .map(|candidate| candidate.content.clone())
+            .collect();
+        let started = std::time::Instant::now();
+        let result = deps.embedder.embed(&contents).await;
+        let method = deps.embedder.method();
+        metrics::histogram!(EMBEDDER_REQUEST_SECONDS, "method" => method)
+            .record(started.elapsed().as_secs_f64());
+        let outcome_label = if result.is_ok() { "ok" } else { "error" };
+        metrics::counter!(
+            EMBEDDER_REQUESTS_TOTAL,
+            "method" => method, "outcome" => outcome_label
+        )
+        .increment(1);
+        let vectors = result?;
+        // The seam's contract (one vector per input, in order) is
+        // checked by the implementations; a zip would silently
+        // misattribute on breach, so re-check before pairing.
+        if vectors.len() != candidates.len() {
+            return Err(Error::Dependency {
+                service: method.to_owned(),
+                message: format!(
+                    "expected {} vectors, got {}",
+                    candidates.len(),
+                    vectors.len()
+                ),
+            });
+        }
+        for (candidate, vector) in candidates.iter_mut().zip(vectors) {
+            candidate.vector = vector;
+        }
+    }
+    Ok(Embedded {
+        msg_id,
+        input,
+        received_at,
+        method: outcome.method,
+        model_version: outcome.model_version,
+        candidates,
+        rescan_findings,
+    })
 }
 
 /// One owner's authorization verdict for this commit group.
@@ -315,13 +460,14 @@ enum OwnerAuth {
     Denied { reason: String },
 }
 
-/// The write transaction (ADR-0022 decisions 2, 4, 5): archive-lock each
-/// signal, re-authorize each owner at current facts, insert records, and
+/// The write transaction (ADR-0022 decisions 2, 4, 5; ADR-0023
+/// decision 2): archive-lock each signal, re-authorize each owner at
+/// current facts, insert each record atomically with its embedding, and
 /// chain the group's audit events — all atomically.
 async fn commit_group(
     deps: &WorkerDeps,
     tenant_id: TenantId,
-    extracted: Vec<Extracted>,
+    embedded: Vec<Embedded>,
     dead_letters: Vec<QueuedSignal>,
     missing: Vec<i64>,
 ) -> Result<()> {
@@ -347,7 +493,7 @@ async fn commit_group(
 
     // Authorize each distinct owner once, at current facts (decision 4).
     let mut auth_by_owner: HashMap<IdentityId, OwnerAuth> = HashMap::new();
-    for item in &extracted {
+    for item in &embedded {
         if let std::collections::hash_map::Entry::Vacant(entry) =
             auth_by_owner.entry(item.input.owner_id)
         {
@@ -364,7 +510,7 @@ async fn commit_group(
     let mut methods: Vec<(String, String)> = Vec::new();
     let mut rescan_findings = 0usize;
     let mut lags: Vec<f64> = Vec::new();
-    for item in extracted {
+    for item in embedded {
         // The archive-lock: zero rows means a racing consumer already
         // committed this signal's work — skip without inserting.
         if !observe::archive_signal(&mut tx, item.msg_id).await? {
@@ -383,11 +529,7 @@ async fn commit_group(
             continue;
         };
         let mut classes: Vec<&'static str> = Vec::new();
-        for candidate in item.outcome.candidates {
-            // Decision 7: extractor output re-enters the scanner, so an
-            // echoed or fabricated live-format secret never persists.
-            let (content, findings) = rescan(candidate.content);
-            rescan_findings += findings;
+        for candidate in item.candidates {
             let sensitivity = candidate
                 .sensitivity
                 .unwrap_or(Sensitivity::Internal)
@@ -397,13 +539,13 @@ async fn commit_group(
                 owner_id: item.input.owner_id,
                 kind: RecordKind::Derived,
                 class: candidate.class,
-                content,
+                content: candidate.content,
                 sensitivity,
                 provenance: json!({
                     "event_id": item.input.event_id,
                     "session_id": item.input.session_id,
-                    "method": item.outcome.method,
-                    "model_version": item.outcome.model_version,
+                    "method": item.method,
+                    "model_version": item.model_version,
                     "confidence": candidate.confidence,
                     "entities": candidate.entities,
                     "redactions": item.input.redactions,
@@ -412,7 +554,13 @@ async fn commit_group(
                 valid_from: item.input.occurred_at,
                 valid_to: None,
             };
-            records::insert(&mut *tx, RecordId::new(), tenant_id, &state).await?;
+            // Record and vector in one statement (ADR-0023 decision 2):
+            // this commit cannot produce an embedding-less record.
+            let embedding = RecordEmbedding {
+                model: deps.embedder.model().to_owned(),
+                vector: candidate.vector,
+            };
+            records::insert(&mut *tx, RecordId::new(), tenant_id, &state, &embedding).await?;
             metrics::counter!(EXTRACTION_RECORDS_TOTAL, "class" => candidate.class.as_str())
                 .increment(1);
             classes.push(candidate.class.as_str());
@@ -420,7 +568,8 @@ async fn commit_group(
         let outcome_label = if classes.is_empty() { "empty" } else { "ok" };
         metrics::counter!(EXTRACTION_EVENTS_TOTAL, "outcome" => outcome_label).increment(1);
         lags.push((now - item.received_at).num_milliseconds() as f64 / 1000.0);
-        methods.push((item.outcome.method, item.outcome.model_version));
+        methods.push((item.method, item.model_version));
+        rescan_findings += item.rescan_findings;
         committed.push(json!({
             "event_id": item.input.event_id,
             "owner": item.input.owner_id,
@@ -429,10 +578,6 @@ async fn commit_group(
             "records": classes.len(),
             "classes": classes,
         }));
-    }
-
-    if rescan_findings > 0 {
-        metrics::counter!(EXTRACTION_RESCAN_FINDINGS_TOTAL).increment(rescan_findings as u64);
     }
 
     // Denials chain standalone decision events (ADR-0019 decision 4).
@@ -472,6 +617,8 @@ async fn commit_group(
                 "events": committed,
                 "method": method,
                 "model_version": model_version,
+                "embedder": deps.embedder.method(),
+                "embedding_model": deps.embedder.model(),
                 "rescan_findings": rescan_findings,
             }),
         )

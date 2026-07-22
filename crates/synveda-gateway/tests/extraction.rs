@@ -31,6 +31,7 @@ use synveda_audit::ChainVerification;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::{OidcVerifier, parse_issuers, personal_slug};
+use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_ingest::extraction::{AnyExtractor, ClaudeExtractor, DeterministicExtractor};
 use synveda_ingest::worker::{self, WorkerConfig, WorkerDeps};
 use synveda_store::{hierarchy, identities, quarantine, rls, tenants};
@@ -155,13 +156,16 @@ fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
 }
 
 /// The worker wired exactly as the gateway wires it: the same pool, PDP,
-/// and scope-chain cache instance (ADR-0022 decision 1).
+/// and scope-chain cache instance (ADR-0022 decision 1). This suite is
+/// about extraction; the embedder is the network-free deterministic one
+/// (the MEM-4 suite owns embedding behaviour).
 fn worker_deps(state: &AppState, extractor: AnyExtractor) -> WorkerDeps {
     WorkerDeps {
         pool: state.pool.clone(),
         pdp: Arc::clone(&state.pdp),
         chains: Arc::clone(&state.scope_chains),
         extractor,
+        embedder: AnyEmbedder::Deterministic(DeterministicEmbedder::new()),
     }
 }
 
