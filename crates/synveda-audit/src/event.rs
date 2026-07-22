@@ -42,15 +42,31 @@ impl Actor {
             subject: os_user.into(),
         }
     }
+
+    /// A background pipeline acting as itself (MEM-3, ADR-0022
+    /// decision 5). The subject names the component — `"extraction"`, a
+    /// MEM-6 sweep, a directory sync — never a user: the identity the
+    /// pipeline acted *for* belongs in the event payload.
+    #[must_use]
+    pub fn system(component: impl Into<String>) -> Self {
+        Self {
+            kind: ActorKind::System,
+            subject: component.into(),
+        }
+    }
 }
 
-/// The two attribution strengths an event can carry (ADR-0019 decision 7).
+/// The attribution strengths an event can carry (ADR-0019 decision 7;
+/// ADR-0022 decision 5 adds `System`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorKind {
     /// An authenticated bearer subject (user or service identity).
     Subject,
     /// Unauthenticated store-level access via the CLI break-glass.
     BreakGlass,
+    /// A background pipeline (extraction, sweeps, sync jobs) acting as
+    /// itself, named by component.
+    System,
 }
 
 impl ActorKind {
@@ -60,6 +76,7 @@ impl ActorKind {
         match self {
             ActorKind::Subject => "subject",
             ActorKind::BreakGlass => "break_glass",
+            ActorKind::System => "system",
         }
     }
 }
@@ -125,6 +142,11 @@ pub enum AuditAction {
     /// A reviewer rejected a quarantined observe event; its staging row
     /// stays provenance-only, forever signal-less.
     QuarantineRejected,
+    /// The extraction pipeline processed a tenant commit-group of staged
+    /// events — one event per group, ids/counts/classes in the payload,
+    /// never one row per record (MEM-3, ADR-0022 decision 5). `failure`
+    /// marks a dead-lettered signal (retries exhausted).
+    MemoryExtracted,
     /// A tenant was admitted (CLI break-glass; TEN-5 owns the product
     /// lifecycle surface).
     TenantCreated,
@@ -157,6 +179,7 @@ impl AuditAction {
             AuditAction::MemoryObserved => "memory.observed",
             AuditAction::QuarantineReleased => "memory.quarantine.released",
             AuditAction::QuarantineRejected => "memory.quarantine.rejected",
+            AuditAction::MemoryExtracted => "memory.extracted",
             AuditAction::TenantCreated => "tenant.created",
         }
     }

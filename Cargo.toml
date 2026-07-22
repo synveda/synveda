@@ -61,11 +61,15 @@ jsonwebtoken = { version = "10", default-features = false, features = [
 # backtracking, so a hostile payload cannot pathologically slow the ack
 # path. MIT/Apache-2.0.
 regex = "1"
-# OIDC discovery/JWKS/token-endpoint client (AUTH-1, ADR-0010). No TLS
-# feature on purpose (same doctrine as sqlx below): dev IdPs are plain-http
-# localhost; the production TLS backend is chosen (and licence-reviewed)
-# when a deployment needs it.
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# OIDC discovery/JWKS/token-endpoint client (AUTH-1, ADR-0010) and the
+# extraction LLM clients (MEM-3, ADR-0022). native-tls is the reviewed TLS
+# backend for the Claude API: schannel on Windows, OpenSSL 3 (Apache-2.0)
+# on Linux — the rustls stack pulls ring/aws-lc, whose licences deny.toml
+# does not admit (same reasoning as jsonwebtoken above).
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "native-tls",
+] }
 sha2 = "0.10"
 # The `metrics` facade is the only metrics dependency below the gateway; the
 # Prometheus recorder is installed by the gateway alone (ADR-0007).

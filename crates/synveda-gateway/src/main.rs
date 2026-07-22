@@ -8,9 +8,22 @@
 //! rejected. `SYNVEDA_POLICY_REFRESH_SECS` (default 5) paces the policy
 //! pack refresher (AUTHZ-1, ADR-0012). `SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS`
 //! (default 3600) caps service identities' token lifetime at the
-//! enforcement seam (AUTH-3, ADR-0018). The standard `OTEL_*` variables
-//! configure the OTLP exporter (default endpoint `http://localhost:4317` —
-//! Jaeger in the dev compose).
+//! enforcement seam (AUTH-3, ADR-0018).
+//!
+//! The extraction worker (MEM-3, ADR-0022) is selected by
+//! `SYNVEDA_EXTRACTOR` (`deterministic` [default] | `claude` | `vllm` |
+//! `off`). `claude` requires `ANTHROPIC_API_KEY` (never logged) and
+//! honours `SYNVEDA_ANTHROPIC_BASE_URL` (default
+//! `https://api.anthropic.com`); `vllm` requires `SYNVEDA_VLLM_BASE_URL`
+//! and `SYNVEDA_EXTRACTOR_MODEL`; `SYNVEDA_EXTRACTOR_MODEL` otherwise
+//! defaults per implementation. Worker pacing:
+//! `SYNVEDA_EXTRACTION_POLL_MS` (default 1000),
+//! `SYNVEDA_EXTRACTION_BATCH` (default 16),
+//! `SYNVEDA_EXTRACTION_VT_SECS` (default 60),
+//! `SYNVEDA_EXTRACTION_MAX_READS` (default 5).
+//!
+//! The standard `OTEL_*` variables configure the OTLP exporter (default
+//! endpoint `http://localhost:4317` — Jaeger in the dev compose).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,6 +32,7 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{self, AppState};
 use synveda_gateway::{authz, telemetry};
 use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, OidcVerifier, TokenVerifier};
+use synveda_ingest::extraction::Extractor as _;
 use synveda_policy::Pdp;
 
 #[tokio::main]
@@ -100,6 +114,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(_) => 3600,
     };
 
+    // The extraction worker (MEM-3, ADR-0022 decision 1): the observe
+    // queue's consumer, embedded so SMB mode stays one process. It shares
+    // the gateway's scope-chain cache — hierarchy-move invalidations must
+    // reach the worker's authorization reads.
+    let scope_chains = Arc::new(synveda_store::ScopeChainCache::new());
+    let extractor = extractor_from_env()?;
+    let extraction_worker = extractor.map(|extractor| {
+        tracing::info!(
+            extractor = extractor.method(),
+            "extraction worker starting (MEM-3, ADR-0022)"
+        );
+        synveda_ingest::worker::spawn(
+            synveda_ingest::worker::WorkerDeps {
+                pool: pool.clone(),
+                pdp: Arc::clone(&pdp),
+                chains: Arc::clone(&scope_chains),
+                extractor,
+            },
+            extraction_config_from_env(),
+        )
+    });
+    if extraction_worker.is_none() {
+        tracing::warn!("SYNVEDA_EXTRACTOR=off: observe signals will accumulate unconsumed");
+    }
+
     let addr = std::env::var("SYNVEDA_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8120".to_owned());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(%addr, "synveda-gateway listening");
@@ -112,13 +151,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             verifier,
             login,
             pdp,
-            scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
+            scope_chains,
             service_token_max_ttl: Duration::from_secs(service_token_max_ttl_secs),
         }),
     )
     .with_graceful_shutdown(shutdown_signal())
     .await?;
     refresher.abort();
+    if let Some(worker) = extraction_worker {
+        worker.abort();
+    }
 
     // Flush batched spans before exit; a killed process loses the tail.
     telemetry.shutdown();
@@ -130,5 +172,82 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn shutdown_signal() {
     if let Err(err) = tokio::signal::ctrl_c().await {
         tracing::error!(error = %err, "failed to install the Ctrl-C handler");
+    }
+}
+
+/// Builds the configured extractor from `SYNVEDA_EXTRACTOR` and its
+/// companions (module header). `None` means `off`. Misconfiguration is a
+/// startup error: a silently-idle pipeline would break the <60s lag SLO
+/// without a symptom.
+fn extractor_from_env() -> Result<Option<synveda_ingest::extraction::AnyExtractor>, String> {
+    use synveda_ingest::extraction::{
+        AnyExtractor, ClaudeExtractor, DeterministicExtractor, VllmExtractor,
+    };
+    let selected = std::env::var("SYNVEDA_EXTRACTOR")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "deterministic".to_owned());
+    let model = std::env::var("SYNVEDA_EXTRACTOR_MODEL")
+        .ok()
+        .filter(|value| !value.is_empty());
+    match selected.as_str() {
+        "off" => Ok(None),
+        "deterministic" => Ok(Some(AnyExtractor::Deterministic(
+            DeterministicExtractor::new(),
+        ))),
+        "claude" => {
+            let api_key = std::env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .ok_or("SYNVEDA_EXTRACTOR=claude requires ANTHROPIC_API_KEY")?;
+            let base_url = std::env::var("SYNVEDA_ANTHROPIC_BASE_URL")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| ClaudeExtractor::DEFAULT_BASE_URL.to_owned());
+            let model = model.unwrap_or_else(|| ClaudeExtractor::DEFAULT_MODEL.to_owned());
+            Ok(Some(AnyExtractor::Claude(ClaudeExtractor::new(
+                api_key, model, base_url,
+            ))))
+        }
+        "vllm" => {
+            let base_url = std::env::var("SYNVEDA_VLLM_BASE_URL")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .ok_or("SYNVEDA_EXTRACTOR=vllm requires SYNVEDA_VLLM_BASE_URL")?;
+            let model = model.ok_or("SYNVEDA_EXTRACTOR=vllm requires SYNVEDA_EXTRACTOR_MODEL")?;
+            Ok(Some(AnyExtractor::Vllm(VllmExtractor::new(
+                model, base_url,
+            ))))
+        }
+        other => Err(format!(
+            "SYNVEDA_EXTRACTOR must be off|deterministic|claude|vllm, got {other:?}"
+        )),
+    }
+}
+
+/// Worker pacing from `SYNVEDA_EXTRACTION_*`, with the defaults the
+/// module header documents. Unparseable values fall back to defaults:
+/// pacing is tuning, never a fail-closed control.
+fn extraction_config_from_env() -> synveda_ingest::worker::WorkerConfig {
+    let defaults = synveda_ingest::worker::WorkerConfig::default();
+    let parse = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|value| *value > 0)
+    };
+    synveda_ingest::worker::WorkerConfig {
+        poll_interval: parse("SYNVEDA_EXTRACTION_POLL_MS")
+            .map(|ms| Duration::from_millis(ms as u64))
+            .unwrap_or(defaults.poll_interval),
+        batch: parse("SYNVEDA_EXTRACTION_BATCH")
+            .and_then(|value| i32::try_from(value).ok())
+            .unwrap_or(defaults.batch),
+        vt_secs: parse("SYNVEDA_EXTRACTION_VT_SECS")
+            .and_then(|value| i32::try_from(value).ok())
+            .unwrap_or(defaults.vt_secs),
+        max_reads: parse("SYNVEDA_EXTRACTION_MAX_READS")
+            .and_then(|value| i32::try_from(value).ok())
+            .unwrap_or(defaults.max_reads),
     }
 }

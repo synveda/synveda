@@ -38,7 +38,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [AUD-1: Hash-chained audit log](AUD-1.md) — done 2026-07-19, AC test: crates/synveda-audit/tests/tamper.rs (a database-credentialed attacker suppresses triggers and rewrites history: every hashed column, row removal, relinking, and head attacks all break verification at the named seq), emission tests: crates/synveda-gateway/tests/audit_events.rs (mutation/read/denial/suspended-tenant/token-rejection each chain one event and the chain verifies), crates/synveda-store/tests/rls.rs (audit tables join the adversarial RLS suite), demo: demos/aud-1-audit-log.sh
 - [x] [MEM-1: observe API + PGMQ buffer](MEM-1.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/observe.rs (duplicate delivery admits nothing twice — response, staging table, queue, and audit chain all agree; 1k events/s sustained with the ack median inside the 20ms-plus-link-tax budget), crates/synveda-store/tests/rls.rs (observe buffer joins the adversarial RLS suite; PGMQ grants proven under synveda_app), crates/synveda-policy/tests/{packs,roles,service_scope}.rs (the MemoryWrite floor and grant golden-tested), demo: demos/mem-1-observe.sh
 - [x] [MEM-2: Redaction & secret scanning](MEM-2.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/observe_redaction.rs (seeded secrets swept for across staging, quarantine, audit, and both PGMQ tables under all three modes — zero hits; the review queue E2E: security-reviewer's first live action, owner denied self-release, release sends the standard signal, one-shot 409), crates/synveda-ingest/tests/redaction.rs (every rule + validators + the scanner-output-never-contains-matched-text discipline), crates/synveda-store/tests/rls.rs (observe_quarantine joins the adversarial suite; column-bound one-shot review), crates/synveda-policy/tests/{packs,roles}.rs (quarantine plane golden-tested; redaction config rides the effective pack), demo: demos/mem-2-redaction.sh
-- [ ] [MEM-3: Extraction pipeline](MEM-3.md)
+- [x] [MEM-3: Extraction pipeline](MEM-3.md) — done 2026-07-22, AC tests: crates/synveda-ingest/tests/extraction_precision.rs (labelled fixture set, per-class precision; deterministic macro 0.958 ≥ the provisional 0.8 target; the `#[ignore]`d live-LLM hook runs the same harness against Claude or vLLM), crates/synveda-gateway/tests/extraction.rs (observe → worker → records with the provenance quadruple on every record; archive-lock exactly-once under redelivery; a released quarantined event extracts identically; a since-quarantined owner is denied at commit; retries exhaust into an audited dead-letter; an extractor echoing a live-format secret persists only the placeholder), crates/synveda-ingest/tests/extractor_http.rs (Claude/vLLM request contracts against local mocks), crates/synveda-store/tests/observe_queue.rs (visibility timeout, redelivery, archive-as-lock), demo: demos/mem-3-extraction.sh
 - [ ] [MEM-4: Transactional embed-or-fail](MEM-4.md)
 - [ ] [CTX-1: Hybrid retrieval](CTX-1.md)
 - [ ] [CTX-2: Composition engine](CTX-2.md)
@@ -263,6 +263,35 @@ event at a since-deleted scope is unreviewable via the API (uniform
 404) and awaits disposal. The scan is spawn_blocking CPU, O(payload
 bytes); the MEM-1 load AC shape stays the asserted ack bound and
 still passes with the seam in place — EVAL-6 owns percentile SLOs._
+
+_MEM-3 notes (ADR-0022): extraction runs as a PGMQ-polling worker embedded
+in the gateway (`SYNVEDA_EXTRACTOR`: `deterministic` by default, `claude` /
+`vllm` / `off`), its stages Temporal-shaped — serializable activity I/O,
+orchestration split from the polling transport — so the enterprise profile
+(OPS-2) can host the same stages under the Temporal SDK later; the SDK
+itself is deferred (git-distributed, ring/aws-lc licence graph — deny.toml
+refuses both). Exactly-once is the archive-lock: `pgmq.archive` runs inside
+the tenant write transaction before the record inserts, so redelivery and
+racing consumers cannot duplicate records; a deliberately re-sent signal is
+intentional reprocessing, with MEM-5's dedup as the semantic net, and
+`pgmq.a_observe` is the dead-letter/completion record (no new table). The
+pipeline's write re-decides `MemoryWrite` at the owner's *current* home
+under current facts (a mover's memories follow the mover; a
+since-quarantined owner is denied); denials archive and chain standalone
+decision events under the new `system` actor kind (migration 0014 — MEM-6
+sweeps and AUTH-4/5 sync inherit it). Extractor output re-enters the MEM-2
+scanner before persisting — an LLM echoing a live-format secret writes the
+placeholder — and sensitivity is floored at `internal` until AUTHZ-5
+brings classification. Confidence is model-elicited and uncalibrated; the
+provisional macro-precision target (≥0.8 on the labelled fixtures) and the
+`--ignored` live-LLM measurement stand in until EVAL-2 owns the real
+target, dashboard, and calibration. Forward obligations: MEM-4 wraps the
+one commit seam with embed-or-fail; MEM-5 inserts dedup between extract
+and commit; FLOW-1/2 replace the direct records insert with the
+derived-channel commit; the <60s pipeline-lag SLO is evidenced by
+`synveda_extraction_lag_seconds` (EVAL-6 owns SLO enforcement); and
+LISTEN/NOTIFY replaces polling if idle load or measured lag ever matters
+(ADR-0022's recorded upgrade)._
 
 ## Phase 2 — Governance (wk 6–10)
 

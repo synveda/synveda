@@ -233,6 +233,33 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         OBSERVE_EVENTS_TOTAL,
         "Observe events admitted to the buffer by outcome (accepted/duplicate)"
     );
+    // MEM-3 metrics (ADR-0022): emitted in synveda-ingest's extraction
+    // worker through the facade, described here where the recorder lives.
+    metrics::describe_counter!(
+        synveda_ingest::worker::EXTRACTION_EVENTS_TOTAL,
+        "Staged events resolved by the extraction worker by outcome \
+         (ok/empty/denied/dead_letter/error/skipped)"
+    );
+    metrics::describe_counter!(
+        synveda_ingest::worker::EXTRACTION_RECORDS_TOTAL,
+        "Derived records committed by the extraction pipeline by class"
+    );
+    metrics::describe_histogram!(
+        synveda_ingest::worker::EXTRACTION_LAG_SECONDS,
+        "Seconds from observe admission to extraction commit (seed §10: <60s SLO)"
+    );
+    metrics::describe_counter!(
+        synveda_ingest::worker::EXTRACTOR_REQUESTS_TOTAL,
+        "Extractor calls by method and outcome (ok/error)"
+    );
+    metrics::describe_histogram!(
+        synveda_ingest::worker::EXTRACTOR_REQUEST_SECONDS,
+        "Extractor call duration in seconds by method"
+    );
+    metrics::describe_counter!(
+        synveda_ingest::worker::EXTRACTION_RESCAN_FINDINGS_TOTAL,
+        "Redaction findings in extractor output (redacted before persistence, ADR-0022)"
+    );
     // AUD-1 counters (ADR-0019): appends and verifications in
     // synveda-audit through the facade; best-effort append failures at
     // the gateway's error-path emission seams.
