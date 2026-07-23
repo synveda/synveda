@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select pgmq.purge_queue('observe') as \"purged!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "purged!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cd0ee4e07f2ca348c5b463c2c7237151a1c877394ccebbc74ec29ce6c5cf70ae"
+}

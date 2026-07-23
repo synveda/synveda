@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                with new_records as (\n                    insert into records\n                        (id, tenant_id, scope_id, owner_id, kind, class, content,\n                         sensitivity, provenance, valid_from, valid_to, tx_from)\n                    select u.id, $1, u.scope_id, $2, 'derived', 'fact', u.content,\n                           'internal', '{}'::jsonb, now(), null, now()\n                    from unnest($3::uuid[], $4::uuid[], $5::text[])\n                        as u(id, scope_id, content)\n                    returning id, tenant_id\n                )\n                insert into record_embeddings (record_id, tenant_id, model, dim, embedding)\n                select nr.id, nr.tenant_id, $6, 16,\n                    (\n                        select ('[' || string_agg(\n                            ((((hashtextextended(nr.id::text, s) % 1000) + 1001))::float8\n                                / 2000.0)::text,\n                            ',' order by s) || ']')\n                        from generate_series(1, 16) s\n                    )::vector\n                from new_records nr\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "UuidArray",
+        "UuidArray",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "271847f16af172d818e2ed43d01520779d40b08c6f538d4e7c38629c6bf3201b"
+}

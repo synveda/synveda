@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select pgmq.send('observe', '{\"not\": \"a signal\"}'::jsonb) as \"msg_id!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "msg_id!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "79485f80dd6a708ee166e306aa52667f61539b7ce4c84a27fa1f7daa400ff49a"
+}

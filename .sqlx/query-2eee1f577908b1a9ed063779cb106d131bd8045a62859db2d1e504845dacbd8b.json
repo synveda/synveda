@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select outcome, payload from audit_log\n           where tenant_id = $1 and action = 'memory.extracted' order by seq",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "payload",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "2eee1f577908b1a9ed063779cb106d131bd8045a62859db2d1e504845dacbd8b"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from pgmq.q_observe where message ->> 'tenant_id' = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a12d1f828ecb4e6e28142ecdf05412f912de78f78049ec828c5fddd7dbdf4bc3"
+}
