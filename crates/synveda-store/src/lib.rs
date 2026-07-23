@@ -30,6 +30,7 @@ pub mod records;
 pub mod rls;
 pub mod role_bindings;
 pub mod scope_chain;
+pub mod search;
 pub mod tenants;
 
 pub use scope_chain::ScopeChainCache;

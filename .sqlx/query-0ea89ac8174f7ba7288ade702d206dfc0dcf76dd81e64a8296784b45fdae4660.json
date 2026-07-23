@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                select e.record_id as \"record_id!\",\n                       (e.embedding::vector(1024) <=> $2::real[]::vector(1024))::float8\n                           as \"distance!\"\n                from record_embeddings e\n                join records r on r.id = e.record_id\n                where e.tenant_id = $1\n                  and e.dim = 1024\n                  and e.model = $3\n                  and r.tenant_id = $1\n                  and r.scope_id = any($4)\n                  and r.sensitivity = any($5)\n                order by e.embedding::vector(1024) <=> $2::real[]::vector(1024)\n                limit $6\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "record_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "distance!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float4Array",
+        "Text",
+        "UuidArray",
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "0ea89ac8174f7ba7288ade702d206dfc0dcf76dd81e64a8296784b45fdae4660"
+}

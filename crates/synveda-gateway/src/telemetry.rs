@@ -304,6 +304,25 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_policy::CEDAR_ENTITY_FLUSHES_TOTAL,
         "Tenant-wide Cedar entity fragment flushes at the hierarchy-invalidation seam"
     );
+    // CTX-1 metrics (ADR-0024): the search legs in synveda-retrieval's
+    // hybrid engine; sweeps and document ops in its sidecar indexer.
+    metrics::describe_counter!(
+        synveda_retrieval::RETRIEVAL_SEARCHES_TOTAL,
+        "Hybrid searches by mode (hybrid/sparse_only/dense_only/empty_filter)"
+    );
+    metrics::describe_histogram!(
+        synveda_retrieval::RETRIEVAL_LEG_SECONDS,
+        metrics::Unit::Seconds,
+        "Retrieval leg latency by leg (dense/sparse/hydrate)"
+    );
+    metrics::describe_counter!(
+        synveda_retrieval::SEARCH_INDEX_SWEEPS_TOTAL,
+        "Search index sweeps per tenant by outcome (updated/empty/error)"
+    );
+    metrics::describe_counter!(
+        synveda_retrieval::SEARCH_INDEX_DOCS_TOTAL,
+        "Search index document operations by op (upsert/delete)"
+    );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).
     metrics::describe_counter!(

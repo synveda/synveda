@@ -40,7 +40,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [MEM-2: Redaction & secret scanning](MEM-2.md) — done 2026-07-19, AC tests: crates/synveda-gateway/tests/observe_redaction.rs (seeded secrets swept for across staging, quarantine, audit, and both PGMQ tables under all three modes — zero hits; the review queue E2E: security-reviewer's first live action, owner denied self-release, release sends the standard signal, one-shot 409), crates/synveda-ingest/tests/redaction.rs (every rule + validators + the scanner-output-never-contains-matched-text discipline), crates/synveda-store/tests/rls.rs (observe_quarantine joins the adversarial suite; column-bound one-shot review), crates/synveda-policy/tests/{packs,roles}.rs (quarantine plane golden-tested; redaction config rides the effective pack), demo: demos/mem-2-redaction.sh
 - [x] [MEM-3: Extraction pipeline](MEM-3.md) — done 2026-07-22, AC tests: crates/synveda-ingest/tests/extraction_precision.rs (labelled fixture set, per-class precision; deterministic macro 0.958 ≥ the provisional 0.8 target; the `#[ignore]`d live-LLM hook runs the same harness against Claude or vLLM), crates/synveda-gateway/tests/extraction.rs (observe → worker → records with the provenance quadruple on every record; archive-lock exactly-once under redelivery; a released quarantined event extracts identically; a since-quarantined owner is denied at commit; retries exhaust into an audited dead-letter; an extractor echoing a live-format secret persists only the placeholder), crates/synveda-ingest/tests/extractor_http.rs (Claude/vLLM request contracts against local mocks), crates/synveda-store/tests/observe_queue.rs (visibility timeout, redelivery, archive-as-lock), demo: demos/mem-3-extraction.sh
 - [x] [MEM-4: Transactional embed-or-fail](MEM-4.md) — done 2026-07-22, AC tests: crates/synveda-gateway/tests/embedding.rs (the chaos test: a mock TEI killed mid-batch — the embedded event commits atomically with its vector, the rest redeliver and commit on recovery, zero lost and zero embedding-less at every phase; the schema backstop refuses a raw-SQL embedding-less commit; the deterministic zero-config path), crates/synveda-ingest/tests/embedder_http.rs (TEI request contract and failure taxonomy against local mocks — error status, count mismatch, empty vector, dead endpoint all `Dependency`), crates/synveda-store/tests/rls.rs (record_embeddings joins the adversarial suite: tenant-isolated, forged-tenant write rejected, app role holds no DELETE, record delete cascades), crates/synveda-store/tests/bitemporal.rs (every write now carries its embedding through the one-statement API), demo: demos/mem-4-embedding.sh (real TEI/BGE-M3 stopped and restarted mid-pipeline)
-- [ ] [CTX-1: Hybrid retrieval](CTX-1.md)
+- [x] [CTX-1: Hybrid retrieval](CTX-1.md) — done 2026-07-23, AC tests: crates/synveda-retrieval/tests/quality.rs (the fixture set, each leg blind to half the corpus by construction: sparse-only 0.500, dense-only 0.500, hybrid 1.000 recall@6), crates/synveda-gateway/tests/retrieval_live.rs (`--ignored`: the same fixtures through live TEI/BGE-M3 — sparse-only 0.500, hybrid 0.792 recall@6, MRR 1.0), crates/synveda-retrieval/tests/latency.rs (`--ignored`: 1M records/tenant, median asserted under the 80ms budget, tails reported — the HIER-1/MEM-1 discipline), crates/synveda-retrieval/tests/hybrid.rs (fusion order end to end; adversarial no-leak on both legs at once; one-sided staleness; degradation modes; watermark/overlap/rebuild), crates/synveda-retrieval/tests/permitted_scopes.rs (the PDP-derived predicate: own chain, quarantine, unplaced, the service-identity floor), demo: demos/ctx-1-hybrid-retrieval.sh (observe → pipeline → real-TEI vectors → sidecar convergence → live quality harness)
 - [ ] [CTX-2: Composition engine](CTX-2.md)
 - [ ] [CTX-3: inject API](CTX-3.md)
 - [ ] [ADPT-1: Claude Code adapter](ADPT-1.md)
@@ -318,6 +318,43 @@ re-embed-on-rewrite obligation the upsert already satisfies mechanically;
 per-tenant model pinning revisits the single config-declared model;
 coalesced TEI batch calls (per-event failure attribution preserved) are the
 recorded upgrade if embed round-trips ever dominate the <60s lag SLO._
+
+_CTX-1 notes (ADR-0024): the retrieval engine's only entry takes a
+mandatory `SearchFilter` — an empty scope set returns nothing without
+touching an index; there is no unfiltered code path — and the scope set
+is produced by `permitted_chain_scopes`: one PDP `MemoryRead` decision
+per scope of the caller's placement chain (the Cedar schema's recorded
+per-candidate-scope contract), suffix chains as resource chains, reusing
+the full-chain assignment/binding rows the gateway already gathers.
+The candidate universe is the chain (seed §4.4's composition contract);
+scopes packs permit beyond it — bound subtrees, `standard`'s department
+subtree — are CTX-5's recall surface, with the broader-universe
+enumeration (and its batch-PDP perf problem) recorded there. Sensitivity
+is a structural ceiling clamped below `restricted` until AUTHZ-5 makes
+it a policy attribute. The lexical leg is a per-tenant Tantivy sidecar
+(BM25 stats tenant-local; disposal = directory delete, a TEN-5
+obligation; the directory must share the database's encryption-at-rest
+story — recorded for TEN-4) converged by a watermark poller tailing the
+bitemporal pair with a 10s overlap window; a stale sidecar is one-sided
+by construction — fused candidates re-verify scope and sensitivity
+against current Postgres truth at hydration, so lag can miss but never
+resurface or leak. The dense leg is pgvector HNSW with iterative scans
+(partial expression indexes per shipped dimension: 16 deterministic,
+1024 BGE-M3; a custom-dim model adds its index and compile-checked query
+variant as a reviewed diff). Query embedding is the caller's input — the
+retrieval crate has no HTTP dependency, so "NO LLM calls on the read
+path" is structural; no vector degrades to BM25-only (CTX-3's
+embedder-down mode), no sidecar index degrades to dense-only. Stopwords
+are stripped at the tokenizer (RRF is rank-based; an "and"-grade match
+must not hand out ranks). Forward obligations: CTX-2 composes over
+`permitted_chain_scopes` + `ScopeChainCache` (ADR-0016); CTX-3 owns the
+inject seam, its audit event (one chained event, aggregated decisions,
+record-id watermarks — ADR-0019 decision 4), and the query-embedding
+call through the MEM-4 `Embedder` seam; the latency AC asserts the
+MEDIAN with tails reported — EVAL-6 owns percentile SLOs; EVAL-4 owns
+real quality targets over the fixture harness; LISTEN/NOTIFY replaces
+the indexer's polling if measured lag matters (ADR-0022's recorded
+upgrade, restated)._
 
 ## Phase 2 — Governance (wk 6–10)
 

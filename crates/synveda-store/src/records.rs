@@ -87,22 +87,23 @@ pub struct RecordVersion {
     pub tx_to: Option<DateTime<Utc>>,
 }
 
-/// Raw row shared by every query in this module; converted with `TryFrom`
-/// so vocabulary columns decode through the `synveda-types` enums.
-struct RecordRow {
-    id: Uuid,
-    tenant_id: Uuid,
-    scope_id: Uuid,
-    owner_id: Uuid,
-    kind: String,
-    class: String,
-    content: String,
-    sensitivity: String,
-    provenance: serde_json::Value,
-    valid_from: DateTime<Utc>,
-    valid_to: Option<DateTime<Utc>>,
-    tx_from: DateTime<Utc>,
-    tx_to: Option<DateTime<Utc>>,
+/// Raw row shared by every record query in this crate (the read path's
+/// [`crate::search`] included); converted with `TryFrom` so vocabulary
+/// columns decode through the `synveda-types` enums.
+pub(crate) struct RecordRow {
+    pub(crate) id: Uuid,
+    pub(crate) tenant_id: Uuid,
+    pub(crate) scope_id: Uuid,
+    pub(crate) owner_id: Uuid,
+    pub(crate) kind: String,
+    pub(crate) class: String,
+    pub(crate) content: String,
+    pub(crate) sensitivity: String,
+    pub(crate) provenance: serde_json::Value,
+    pub(crate) valid_from: DateTime<Utc>,
+    pub(crate) valid_to: Option<DateTime<Utc>>,
+    pub(crate) tx_from: DateTime<Utc>,
+    pub(crate) tx_to: Option<DateTime<Utc>>,
 }
 
 impl TryFrom<RecordRow> for RecordVersion {
@@ -136,8 +137,9 @@ impl TryFrom<RecordRow> for RecordVersion {
 
 /// Maps a sqlx error at the storage boundary into the shared taxonomy
 /// (types crate rule: native errors are converted at the boundary, detail
-/// goes in the message).
-fn storage_error(err: sqlx::Error) -> Error {
+/// goes in the message). Shared with [`crate::search`] — same tables,
+/// same taxonomy.
+pub(crate) fn storage_error(err: sqlx::Error) -> Error {
     if let sqlx::Error::Database(db) = &err {
         // 23505 unique_violation (duplicate id), 40001 serialization_failure
         // (trigger-detected transaction-time clock anomaly): both are

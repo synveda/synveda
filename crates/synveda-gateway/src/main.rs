@@ -27,6 +27,14 @@
 //! `SYNVEDA_EXTRACTION_VT_SECS` (default 60),
 //! `SYNVEDA_EXTRACTION_MAX_READS` (default 5).
 //!
+//! The search index sidecar (CTX-1, ADR-0024) lives under
+//! `SYNVEDA_SEARCH_INDEX_DIR` (default `./data/search-index`; one
+//! subdirectory per tenant — deleting a tenant's directory is the
+//! rebuild procedure, and the directory must share the database's
+//! encryption-at-rest story). Its indexer task polls every
+//! `SYNVEDA_SEARCH_POLL_MS` (default 1000), which bounds BM25
+//! visibility lag; the dense leg reads Postgres directly and never lags.
+//!
 //! The standard `OTEL_*` variables configure the OTLP exporter (default
 //! endpoint `http://localhost:4317` — Jaeger in the dev compose).
 
@@ -149,6 +157,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("SYNVEDA_EXTRACTOR=off: observe signals will accumulate unconsumed");
     }
 
+    // The search index sidecar and its indexer (CTX-1, ADR-0024): a
+    // boot failure here means the index root is unusable — refuse to
+    // boot rather than serve a read path whose lexical leg can never
+    // converge.
+    let index_root = std::env::var("SYNVEDA_SEARCH_INDEX_DIR")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "./data/search-index".to_owned());
+    let search_index = Arc::new(synveda_retrieval::SearchIndex::open(&index_root)?);
+    let indexer_config = synveda_retrieval::IndexerConfig {
+        poll_interval: std::env::var("SYNVEDA_SEARCH_POLL_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|ms| *ms > 0)
+            .map(Duration::from_millis)
+            .unwrap_or(synveda_retrieval::IndexerConfig::default().poll_interval),
+        ..synveda_retrieval::IndexerConfig::default()
+    };
+    tracing::info!(
+        index_root,
+        poll_ms = indexer_config.poll_interval.as_millis() as u64,
+        "search indexer starting (CTX-1, ADR-0024)"
+    );
+    let search_indexer =
+        synveda_retrieval::indexer::spawn(pool.clone(), Arc::clone(&search_index), indexer_config);
+
     let addr = std::env::var("SYNVEDA_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8120".to_owned());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(%addr, "synveda-gateway listening");
@@ -168,6 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .with_graceful_shutdown(shutdown_signal())
     .await?;
     refresher.abort();
+    search_indexer.abort();
     if let Some(worker) = extraction_worker {
         worker.abort();
     }

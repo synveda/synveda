@@ -1,0 +1,30 @@
+{
+  "_comment": "CTX-1 quality fixture (ADR-0024 decision 8). 24 docs, 4 topics x 6, topic pairs deployment<->database and security<->onboarding. Per topic: docs 1-3 share the topic's query terms but their vectors lean toward the partner topic (lexically reachable, semantically confusable — the dense leg's blind spot); docs 4-6 are paraphrases with clean topic vectors (semantically reachable only — the sparse leg's blind spot). Each leg alone plateaus near 0.5 recall; fusion must recover both halves. topic_mix drives the synthetic vector geometry in CI; the live-TEI harness embeds `content` instead.",
+  "topics": ["deployment", "database", "security", "onboarding"],
+  "docs": [
+    { "key": "dep-1", "topic_mix": [0.45, 0.55, 0.0, 0.0], "content": "Canary deployment rollout steps: shift five percent of traffic, watch error budget, then promote the release." },
+    { "key": "dep-2", "topic_mix": [0.45, 0.55, 0.0, 0.0], "content": "Rollback procedure for a failed deployment: repoint the release ref and drain the bad pods." },
+    { "key": "dep-3", "topic_mix": [0.45, 0.55, 0.0, 0.0], "content": "Deployment freeze windows are announced in the release calendar before every quarter close." },
+    { "key": "dep-4", "topic_mix": [1.0, 0.0, 0.0, 0.0], "content": "Shipping a build safely means gradual exposure, health watching, and a fast path back to the previous version." },
+    { "key": "dep-5", "topic_mix": [1.0, 0.0, 0.0, 0.0], "content": "When a bad artifact reaches production, repoint to the last good image and let the fleet converge." },
+    { "key": "dep-6", "topic_mix": [1.0, 0.0, 0.0, 0.0], "content": "Progressive traffic shifting with automated abort keeps customer impact small when shipping changes." },
+    { "key": "db-1", "topic_mix": [0.55, 0.45, 0.0, 0.0], "content": "Autovacuum tuning for large tables: raise the cost limit and lower scale factor on hot relations." },
+    { "key": "db-2", "topic_mix": [0.55, 0.45, 0.0, 0.0], "content": "Index bloat on the orders table is checked weekly; reindex concurrently when it passes thirty percent." },
+    { "key": "db-3", "topic_mix": [0.55, 0.45, 0.0, 0.0], "content": "Connection pool sizing for the analytics database follows cores times two plus spindles." },
+    { "key": "db-4", "topic_mix": [0.0, 1.0, 0.0, 0.0], "content": "Slow reads usually trace back to relation growth outpacing the planner statistics refresh cadence." },
+    { "key": "db-5", "topic_mix": [0.0, 1.0, 0.0, 0.0], "content": "Nightly storage jobs reclaim dead rows so reads stay predictable under churn." },
+    { "key": "db-6", "topic_mix": [0.0, 1.0, 0.0, 0.0], "content": "Keeping too many client sessions open exhausts server slots; size the shared entry points deliberately." },
+    { "key": "sec-1", "topic_mix": [0.0, 0.0, 0.45, 0.55], "content": "Secret rotation runbook: rotate the vault credentials quarterly and audit every access grant." },
+    { "key": "sec-2", "topic_mix": [0.0, 0.0, 0.45, 0.55], "content": "Incident response for a leaked secret: revoke, rotate, then trace the exposure window in the audit log." },
+    { "key": "sec-3", "topic_mix": [0.0, 0.0, 0.45, 0.55], "content": "Access reviews for the security perimeter run monthly against the compliance register." },
+    { "key": "sec-4", "topic_mix": [0.0, 0.0, 1.0, 0.0], "content": "Anything that reaches a paste site must be invalidated immediately and its blast radius mapped." },
+    { "key": "sec-5", "topic_mix": [0.0, 0.0, 1.0, 0.0], "content": "Quarterly key ceremonies replace signing material before certificates approach expiry." },
+    { "key": "sec-6", "topic_mix": [0.0, 0.0, 1.0, 0.0], "content": "Least privilege pruning removes unused grants so dormant accounts cannot become entry points." },
+    { "key": "onb-1", "topic_mix": [0.0, 0.0, 0.55, 0.45], "content": "New engineer onboarding checklist: laptop setup, repository permissions, and the first-week buddy plan." },
+    { "key": "onb-2", "topic_mix": [0.0, 0.0, 0.55, 0.45], "content": "Onboarding buddies review the starter project with the new engineer at the end of week two." },
+    { "key": "onb-3", "topic_mix": [0.0, 0.0, 0.55, 0.45], "content": "The onboarding portal tracks equipment, badges, and account provisioning for every new hire." },
+    { "key": "onb-4", "topic_mix": [0.0, 0.0, 0.0, 1.0], "content": "A newcomer's first fortnight covers tooling, codebase tours, and a small starter change shipped with a mentor." },
+    { "key": "onb-5", "topic_mix": [0.0, 0.0, 0.0, 1.0], "content": "Getting a fresh teammate productive means pairing early and keeping the setup guide current." },
+    { "key": "onb-6", "topic_mix": [0.0, 0.0, 0.0, 1.0], "content": "Mentors introduce fresh colleagues to the review culture during their first shipped change." }
+  ]
+}

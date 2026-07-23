@@ -1,0 +1,9 @@
+{
+  "_comment": "Relevance = the query's topic (its six docs). One deep-recall query per topic whose terms reach exactly the topic's lexical half (docs 1-3) and none of the paraphrase half or other topics; the paraphrase half is reachable through vector geometry alone. Query vectors are pure topic axes, so the partner topic's lexical docs (which lean toward this axis) crowd the dense leg's top ranks.",
+  "queries": [
+    { "key": "q-deploy", "topic_mix": [1.0, 0.0, 0.0, 0.0], "text": "canary deployment rollout rollback release freeze", "relevant": ["dep-1", "dep-2", "dep-3", "dep-4", "dep-5", "dep-6"] },
+    { "key": "q-database", "topic_mix": [0.0, 1.0, 0.0, 0.0], "text": "autovacuum index bloat connection pool sizing large tables", "relevant": ["db-1", "db-2", "db-3", "db-4", "db-5", "db-6"] },
+    { "key": "q-security", "topic_mix": [0.0, 0.0, 1.0, 0.0], "text": "secret rotation leaked audit access reviews compliance", "relevant": ["sec-1", "sec-2", "sec-3", "sec-4", "sec-5", "sec-6"] },
+    { "key": "q-onboarding", "topic_mix": [0.0, 0.0, 0.0, 1.0], "text": "onboarding checklist buddy portal new hire engineer", "relevant": ["onb-1", "onb-2", "onb-3", "onb-4", "onb-5", "onb-6"] }
+  ]
+}

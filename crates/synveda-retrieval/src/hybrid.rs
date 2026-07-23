@@ -1,0 +1,337 @@
+//! Hybrid retrieval (CTX-1, ADR-0024): the dense pgvector leg and the
+//! sparse Tantivy leg, fused by reciprocal rank, verified and hydrated
+//! from current Postgres truth.
+//!
+//! The filter is mandatory and fails empty (decision 2): an empty
+//! allowed-scope set returns no results without touching either index —
+//! there is no unfiltered code path to call. `restricted` records are
+//! never retrievable regardless of the requested ceiling until AUTHZ-5
+//! makes sensitivity a policy attribute. Both legs are
+//! optional-but-at-least-one: no query vector → BM25 only (the
+//! embedder-down degradation CTX-3 leans on); no tenant index yet →
+//! dense only.
+//!
+//! No LLM — no network beyond Postgres — runs here, structurally: the
+//! query vector is the caller's input (the gateway owns the MEM-4
+//! `Embedder` seam) and this crate carries no HTTP client (decision 7).
+
+use std::collections::HashMap;
+use std::time::Instant;
+
+use sqlx::PgConnection;
+use synveda_store::records::RecordVersion;
+use synveda_store::search::{self, DenseHit};
+use synveda_types::{Error, RecordId, Result, ScopeId, Sensitivity, TenantId};
+
+use crate::index::{SearchIndex, SparseHit};
+use crate::{RETRIEVAL_LEG_SECONDS, RETRIEVAL_SEARCHES_TOTAL};
+
+/// The reciprocal-rank-fusion constant (the literature's default;
+/// ADR-0024 decision 6).
+pub const RRF_K: f64 = 60.0;
+
+/// The authz-derived pushdown predicate: the PDP-allowed scopes (from
+/// [`crate::authz::permitted_chain_scopes`] in the product paths) and
+/// the sensitivity ceiling.
+#[derive(Debug, Clone)]
+pub struct SearchFilter {
+    /// Scopes whose records the caller may read. Empty = no results.
+    pub scopes: Vec<ScopeId>,
+    /// The inclusive ceiling. Clamped to `confidential` — `restricted`
+    /// is structurally out of retrieval until AUTHZ-5 (ADR-0024
+    /// decision 2).
+    pub max_sensitivity: Sensitivity,
+}
+
+/// A pre-computed query embedding (the caller's, never this crate's —
+/// ADR-0024 decision 7).
+#[derive(Debug, Clone)]
+pub struct QueryVector {
+    /// The model that produced it; only vectors written by the same
+    /// model are comparable, so the dense leg filters on it.
+    pub model: String,
+    /// The query's vector.
+    pub vector: Vec<f32>,
+}
+
+/// One hybrid search.
+#[derive(Debug, Clone)]
+pub struct SearchRequest {
+    /// The lexical query (BM25 leg).
+    pub query: String,
+    /// The dense leg's query embedding; `None` degrades to BM25-only.
+    pub vector: Option<QueryVector>,
+    /// The mandatory pushdown predicate.
+    pub filter: SearchFilter,
+    /// Results returned after fusion and verification.
+    pub limit: usize,
+    /// Candidates fetched per leg before fusion.
+    pub per_leg: usize,
+}
+
+impl SearchRequest {
+    /// A request with the default depths (10 results, 50 per leg).
+    #[must_use]
+    pub fn new(query: impl Into<String>, filter: SearchFilter) -> Self {
+        Self {
+            query: query.into(),
+            vector: None,
+            filter,
+            limit: 10,
+            per_leg: 50,
+        }
+    }
+}
+
+/// One fused, verified, hydrated result.
+#[derive(Debug, Clone)]
+pub struct RetrievedRecord {
+    /// The record's current version, read from Postgres after fusion —
+    /// never from the sidecar (ADR-0024 decision 6).
+    pub record: RecordVersion,
+    /// The fused reciprocal-rank score (higher is better).
+    pub score: f64,
+    /// 1-based rank in the dense leg, if it surfaced there.
+    pub dense_rank: Option<usize>,
+    /// 1-based rank in the sparse leg, if it surfaced there.
+    pub sparse_rank: Option<usize>,
+}
+
+/// Runs the hybrid search inside the caller's tenant transaction
+/// (`rls::begin_tenant_tx` — the RLS discipline, and the dense leg's
+/// transaction-local HNSW tuning needs it).
+#[tracing::instrument(
+    name = "retrieval.hybrid_search",
+    skip_all,
+    fields(
+        tenant.id = %tenant_id,
+        scopes.count = request.filter.scopes.len(),
+        limit = request.limit,
+        mode = tracing::field::Empty,
+        results = tracing::field::Empty,
+    ),
+    err(Display)
+)]
+pub async fn hybrid_search(
+    conn: &mut PgConnection,
+    index: &SearchIndex,
+    tenant_id: TenantId,
+    request: &SearchRequest,
+) -> Result<Vec<RetrievedRecord>> {
+    let span = tracing::Span::current();
+    if request.filter.scopes.is_empty() {
+        span.record("mode", "empty_filter");
+        span.record("results", 0);
+        metrics::counter!(RETRIEVAL_SEARCHES_TOTAL, "mode" => "empty_filter").increment(1);
+        return Ok(vec![]);
+    }
+    let scopes = &request.filter.scopes;
+    let sensitivities = allowed_sensitivities(request.filter.max_sensitivity);
+    let per_leg = request.per_leg.max(request.limit).max(1);
+
+    let started = Instant::now();
+    let sparse = index.search_sparse(tenant_id, &request.query, scopes, &sensitivities, per_leg)?;
+    metrics::histogram!(RETRIEVAL_LEG_SECONDS, "leg" => "sparse")
+        .record(started.elapsed().as_secs_f64());
+
+    let dense = match &request.vector {
+        Some(query_vector) => {
+            if query_vector.vector.is_empty() {
+                return Err(Error::Invalid {
+                    message: "query vector must not be empty".to_owned(),
+                });
+            }
+            let started = Instant::now();
+            let hits = search::dense_candidates(
+                conn,
+                tenant_id,
+                &query_vector.model,
+                &query_vector.vector,
+                scopes,
+                &sensitivities,
+                per_leg as i64,
+            )
+            .await?;
+            metrics::histogram!(RETRIEVAL_LEG_SECONDS, "leg" => "dense")
+                .record(started.elapsed().as_secs_f64());
+            hits
+        }
+        None => vec![],
+    };
+
+    let mode = match (request.vector.is_some(), sparse.is_empty()) {
+        (true, _) => "hybrid",
+        (false, _) => "sparse_only",
+    };
+    // A tenant with no sidecar index yet has an empty sparse leg even
+    // in hybrid mode; keep the label honest for dashboards.
+    let mode = if request.vector.is_some() && sparse.is_empty() && !dense.is_empty() {
+        "dense_only"
+    } else {
+        mode
+    };
+    span.record("mode", mode);
+    metrics::counter!(RETRIEVAL_SEARCHES_TOTAL, "mode" => mode).increment(1);
+
+    let fused = fuse(&dense, &sparse);
+    if fused.is_empty() {
+        span.record("results", 0);
+        return Ok(vec![]);
+    }
+    // Hydrate with headroom: the verify re-check may drop candidates the
+    // sidecar remembered but current truth no longer permits.
+    let candidates: Vec<RecordId> = fused
+        .iter()
+        .take(request.limit.saturating_mul(2).max(request.limit))
+        .map(|entry| entry.record_id)
+        .collect();
+    let started = Instant::now();
+    let hydrated =
+        search::hydrate_verified(conn, tenant_id, &candidates, scopes, &sensitivities).await?;
+    metrics::histogram!(RETRIEVAL_LEG_SECONDS, "leg" => "hydrate")
+        .record(started.elapsed().as_secs_f64());
+    let mut by_id: HashMap<RecordId, RecordVersion> = hydrated
+        .into_iter()
+        .map(|version| (version.id, version))
+        .collect();
+    let results: Vec<RetrievedRecord> = fused
+        .into_iter()
+        .filter_map(|entry| {
+            by_id
+                .remove(&entry.record_id)
+                .map(|record| RetrievedRecord {
+                    record,
+                    score: entry.score,
+                    dense_rank: entry.dense_rank,
+                    sparse_rank: entry.sparse_rank,
+                })
+        })
+        .take(request.limit)
+        .collect();
+    span.record("results", results.len());
+    Ok(results)
+}
+
+/// One fused candidate, ordered best-first.
+#[derive(Debug)]
+struct FusedCandidate {
+    record_id: RecordId,
+    score: f64,
+    dense_rank: Option<usize>,
+    sparse_rank: Option<usize>,
+}
+
+/// Reciprocal-rank fusion: `score(d) = Σ legs 1/(RRF_K + rank(d))`,
+/// 1-based ranks. Ties break on record id for deterministic output.
+fn fuse(dense: &[DenseHit], sparse: &[SparseHit]) -> Vec<FusedCandidate> {
+    let mut merged: HashMap<RecordId, FusedCandidate> = HashMap::new();
+    for (position, hit) in dense.iter().enumerate() {
+        let rank = position + 1;
+        let entry = merged
+            .entry(hit.record_id)
+            .or_insert_with(|| FusedCandidate {
+                record_id: hit.record_id,
+                score: 0.0,
+                dense_rank: None,
+                sparse_rank: None,
+            });
+        entry.score += 1.0 / (RRF_K + rank as f64);
+        entry.dense_rank = Some(rank);
+    }
+    for (position, hit) in sparse.iter().enumerate() {
+        let rank = position + 1;
+        let entry = merged
+            .entry(hit.record_id)
+            .or_insert_with(|| FusedCandidate {
+                record_id: hit.record_id,
+                score: 0.0,
+                dense_rank: None,
+                sparse_rank: None,
+            });
+        entry.score += 1.0 / (RRF_K + rank as f64);
+        entry.sparse_rank = Some(rank);
+    }
+    let mut fused: Vec<FusedCandidate> = merged.into_values().collect();
+    fused.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.record_id.cmp(&b.record_id))
+    });
+    fused
+}
+
+/// The sensitivity levels at or below the (clamped) ceiling (ADR-0024
+/// decision 2).
+fn allowed_sensitivities(max: Sensitivity) -> Vec<Sensitivity> {
+    let ceiling = max.min(Sensitivity::Confidential);
+    Sensitivity::ALL
+        .into_iter()
+        .filter(|level| *level <= ceiling)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id(byte: u8) -> RecordId {
+        RecordId::from_uuid(uuid::Uuid::from_bytes([byte; 16]))
+    }
+
+    #[test]
+    fn restricted_is_never_an_allowed_sensitivity() {
+        for ceiling in Sensitivity::ALL {
+            assert!(
+                !allowed_sensitivities(ceiling).contains(&Sensitivity::Restricted),
+                "requested ceiling {ceiling:?} must clamp below restricted"
+            );
+        }
+        assert_eq!(
+            allowed_sensitivities(Sensitivity::Public),
+            vec![Sensitivity::Public]
+        );
+        assert_eq!(
+            allowed_sensitivities(Sensitivity::Confidential),
+            vec![
+                Sensitivity::Public,
+                Sensitivity::Internal,
+                Sensitivity::Confidential
+            ]
+        );
+    }
+
+    /// The RRF promise: a candidate on both legs outranks one that tops
+    /// a single leg (1/61 + 1/62 > 1/61), and ranks are recorded 1-based.
+    #[test]
+    fn fusion_rewards_agreement_and_is_deterministic() {
+        let dense = vec![
+            DenseHit {
+                record_id: id(1),
+                distance: 0.1,
+            },
+            DenseHit {
+                record_id: id(2),
+                distance: 0.2,
+            },
+        ];
+        let sparse = vec![
+            SparseHit {
+                record_id: id(3),
+                score: 9.0,
+            },
+            SparseHit {
+                record_id: id(2),
+                score: 5.0,
+            },
+        ];
+        let fused = fuse(&dense, &sparse);
+        assert_eq!(fused[0].record_id, id(2), "on both legs → first");
+        assert_eq!(fused[0].dense_rank, Some(2));
+        assert_eq!(fused[0].sparse_rank, Some(2));
+        // ids 1 and 3 both scored 1/61: the tie breaks on record id.
+        assert_eq!(fused[1].record_id, id(1));
+        assert_eq!(fused[2].record_id, id(3));
+        let expected = 1.0 / (RRF_K + 2.0) + 1.0 / (RRF_K + 2.0);
+        assert!((fused[0].score - expected).abs() < 1e-12);
+    }
+}
