@@ -42,7 +42,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [MEM-4: Transactional embed-or-fail](MEM-4.md) — done 2026-07-22, AC tests: crates/synveda-gateway/tests/embedding.rs (the chaos test: a mock TEI killed mid-batch — the embedded event commits atomically with its vector, the rest redeliver and commit on recovery, zero lost and zero embedding-less at every phase; the schema backstop refuses a raw-SQL embedding-less commit; the deterministic zero-config path), crates/synveda-ingest/tests/embedder_http.rs (TEI request contract and failure taxonomy against local mocks — error status, count mismatch, empty vector, dead endpoint all `Dependency`), crates/synveda-store/tests/rls.rs (record_embeddings joins the adversarial suite: tenant-isolated, forged-tenant write rejected, app role holds no DELETE, record delete cascades), crates/synveda-store/tests/bitemporal.rs (every write now carries its embedding through the one-statement API), demo: demos/mem-4-embedding.sh (real TEI/BGE-M3 stopped and restarted mid-pipeline)
 - [x] [CTX-1: Hybrid retrieval](CTX-1.md) — done 2026-07-23, AC tests: crates/synveda-retrieval/tests/quality.rs (the fixture set, each leg blind to half the corpus by construction: sparse-only 0.500, dense-only 0.500, hybrid 1.000 recall@6), crates/synveda-gateway/tests/retrieval_live.rs (`--ignored`: the same fixtures through live TEI/BGE-M3 — sparse-only 0.500, hybrid 0.792 recall@6, MRR 1.0), crates/synveda-retrieval/tests/latency.rs (`--ignored`: 1M records/tenant, median asserted under the 80ms budget, tails reported — the HIER-1/MEM-1 discipline), crates/synveda-retrieval/tests/hybrid.rs (fusion order end to end; adversarial no-leak on both legs at once; one-sided staleness; degradation modes; watermark/overlap/rebuild), crates/synveda-retrieval/tests/permitted_scopes.rs (the PDP-derived predicate: own chain, quarantine, unplaced, the service-identity floor), demo: demos/ctx-1-hybrid-retrieval.sh (observe → pipeline → real-TEI vectors → sidecar convergence → live quality harness)
 - [x] [CTX-2: Composition engine](CTX-2.md) — done 2026-07-23, AC tests: crates/synveda-retrieval/tests/compose.rs (deterministic: byte-identical re-composition at the same instant, unrelated writes notwithstanding; the watermark: BLAKE3 version hashes + record ids on every block, block hash recomputable from the entry hashes; tokens_per_inject recorded on every compose including the zero-entry one; plus gradient/pinned-first assembly, first-fit budget, channel rules, the seed §4.4 conflict matrix, valid-time as-of, the sensitivity clamp, relevance ranking), crates/synveda-retrieval/tests/composition_plan.rs (the PDP sweep: per-scope channel rules and the home-scope budget from effective packs; bank-mode subtree inheritance; quarantine/unplaced plan nothing), crates/synveda-store/tests/policy_packs.rs (the composition config rides the stored pack; re-apply clears; garbage json reads unconfigured), demo: demos/ctx-2-composition.sh (observe → pipeline → seeded scope material → the compose example over the real product path — identity → HIER-2 chain → PDP plan → compose — then the bank-mode pack flip governs the very next compose)
-- [ ] [CTX-3: inject API](CTX-3.md)
+- [x] [CTX-3: inject API](CTX-3.md) — done 2026-07-23, AC tests: crates/synveda-gateway/tests/inject.rs (the degradation matrix: embedder down → sparse-only still ranked + the warning header; broken sidecar → unranked compose + the header; contract rejections stay honest errors — plus the full product path with the watermark and exactly one `context.injected` event, aggregated decisions, task as hash only; taskless recency; quarantined/unplaced → the empty block, still audited; budget narrowing never widening; the bank-mode pack governing the very next inject), crates/synveda-gateway/tests/inject_latency.rs (`--ignored`: 1,000 concurrent sessions arriving at 50/s — p50 18.6ms, p95 22ms, p99 24ms against the 150ms budget, median asserted, tails + stage split reported; the closed-loop saturation probe prints the per-tenant chain-lock ceiling every run), demo: demos/ctx-3-inject.sh (real TEI end to end; TEI stopped mid-demo degrades the same inject to sparse-only with the header and recovers on restart; audit tail + verify)
 - [ ] [ADPT-1: Claude Code adapter](ADPT-1.md)
 - [ ] [EVAL-1: Eval harness skeleton](EVAL-1.md)
 
@@ -389,6 +389,42 @@ the hybrid→relevance wiring; CTX-5 extends the explicit instant to
 transaction-time as-of; PRMT-2's context packs arrive as pinned
 material; FLOW-1/2 landing replaces both stand-ins (recorded reversal
 triggers in ADR-0025)._
+
+_CTX-3 notes (ADR-0026): `POST /v1/inject` is the CTX-2 product path
+with the hybrid engine wired between plan and compose — two tenant
+transactions bracket the MEM-4 embed call (no transaction spans a
+network call), and the caller's `budget_tokens` narrows the pack budget,
+never widens it. Policy outcomes are results: a quarantined, unplaced,
+or fully-denied caller receives the empty block (200, watermarked,
+audited with every denial in the decisions) — the surface is not a
+placement oracle. Dependency failures degrade instead of failing:
+embed error/deadline (`SYNVEDA_INJECT_EMBED_TIMEOUT_MS`, default 100ms)
+→ sparse-only, still ranked; retrieval error → unranked compose; both
+marked in `X-Synveda-Degraded` and the body — only a store failure is a
+5xx. Each inject chains ONE `context.injected` event in the compose
+transaction (ADR-0019 decision 4): block hash, per-entry version-hash
+watermarks, the instant, aggregated per-scope decisions (the plan now
+returns them), degradations, and the task as a BLAKE3 hash — never
+task text. Latency evidence (dev hardware, the house discipline):
+p50 18.6ms / p99 24ms at the 50/s herd, stage split plan 4.5ms /
+embed 10µs / search 3.3ms / compose 2.1ms / audit 5.8ms. STANDING
+TRIGGERS with measured evidence: (1) the per-tenant chain-head lock
+serializes append commits — the saturation probe measures a ~160/s
+per-tenant inject ceiling (p50 ~190ms saturated, audit stage ~70ms) —
+ADR-0019 option 2 (buffered read-path appender) is the recorded
+upgrade if real deployments approach that per-tenant session-start
+rate, and the probe prints the number every latency run; (2) the CTX-1
+sidecar indexer sweeps EVERY active tenant per cycle — on the
+long-lived dev database (2,868 leftover test tenants) a full cycle
+takes minutes, so a just-admitted tenant's sparse leg lags that long
+(the demo runs on a scratch database because of it) — ADR-0022/0024's
+LISTEN/NOTIFY (or a dirty-tenant filter) now has dev-scale evidence
+and becomes load-bearing at production tenant counts. Forward
+obligations: ADPT-1 consumes the route (session-start + pre-compact,
+narrowing the budget to the harness's remaining room); CTX-5 owns the
+as-of parameter (transaction time + refs) and the recall surface;
+EVAL-4 owns quality over the inject path; EVAL-6 owns percentile SLO
+enforcement on production-shaped IO._
 
 ## Phase 2 — Governance (wk 6–10)
 

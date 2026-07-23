@@ -53,6 +53,18 @@ fn state(url: &str) -> AppState {
         // These tests exercise the ops plane only; fail-closed default.
         verifier: std::sync::Arc::new(synveda_identity::DisabledVerifier),
         login: None,
+        search_index: Arc::new(
+            synveda_retrieval::SearchIndex::open(
+                std::env::temp_dir()
+                    .join("synveda-gateway-tests")
+                    .join(synveda_types::TenantId::new().to_string()),
+            )
+            .expect("open search index"),
+        ),
+        embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
+            synveda_ingest::embedding::DeterministicEmbedder::new(),
+        )),
+        inject_embed_timeout: std::time::Duration::from_millis(100),
     }
 }
 

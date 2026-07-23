@@ -35,6 +35,11 @@
 //! `SYNVEDA_SEARCH_POLL_MS` (default 1000), which bounds BM25
 //! visibility lag; the dense leg reads Postgres directly and never lags.
 //!
+//! The inject route (CTX-3, ADR-0026) embeds the caller's task through
+//! the same configured embedder under `SYNVEDA_INJECT_EMBED_TIMEOUT_MS`
+//! (default 100): expiry or failure degrades that inject to the sparse
+//! leg (marked in `X-Synveda-Degraded`), never fails it.
+//!
 //! The standard `OTEL_*` variables configure the OTLP exporter (default
 //! endpoint `http://localhost:4317` — Jaeger in the dev compose).
 
@@ -134,7 +139,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // reach the worker's authorization reads.
     let scope_chains = Arc::new(synveda_store::ScopeChainCache::new());
     let extractor = extractor_from_env()?;
-    let embedder = embedder_from_env()?;
+    // Shared with the inject route (CTX-3, ADR-0026 decision 3): the
+    // query-embedding call and the pipeline's record vectors carry one
+    // config-declared model identity.
+    let embedder = Arc::new(embedder_from_env()?);
     let extraction_worker = extractor.map(|extractor| {
         tracing::info!(
             extractor = extractor.method(),
@@ -148,7 +156,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 pdp: Arc::clone(&pdp),
                 chains: Arc::clone(&scope_chains),
                 extractor,
-                embedder,
+                embedder: embedder.as_ref().clone(),
             },
             extraction_config_from_env(),
         )
@@ -183,6 +191,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let search_indexer =
         synveda_retrieval::indexer::spawn(pool.clone(), Arc::clone(&search_index), indexer_config);
 
+    // The inject route's embed deadline (CTX-3, ADR-0026 decision 3).
+    let inject_embed_timeout_ms = std::env::var("SYNVEDA_INJECT_EMBED_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|ms| *ms > 0)
+        .unwrap_or(100);
+
     let addr = std::env::var("SYNVEDA_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8120".to_owned());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(%addr, "synveda-gateway listening");
@@ -197,6 +212,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             pdp,
             scope_chains,
             service_token_max_ttl: Duration::from_secs(service_token_max_ttl_secs),
+            search_index,
+            embedder,
+            inject_embed_timeout: Duration::from_millis(inject_embed_timeout_ms),
         }),
     )
     .with_graceful_shutdown(shutdown_signal())

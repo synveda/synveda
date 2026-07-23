@@ -150,6 +150,12 @@ pub enum AuditAction {
     /// A tenant was admitted (CLI break-glass; TEN-5 owns the product
     /// lifecycle surface).
     TenantCreated,
+    /// An inject composed a context block — one event per inject with
+    /// the block's watermark and the per-scope `MemoryRead` decisions
+    /// aggregated, never one row per candidate (CTX-3, ADR-0026
+    /// decision 5; ADR-0019 decision 4). Payloads carry no user
+    /// content: the task rides as a BLAKE3 hash only.
+    ContextInjected,
 }
 
 impl AuditAction {
@@ -181,6 +187,7 @@ impl AuditAction {
             AuditAction::QuarantineRejected => "memory.quarantine.rejected",
             AuditAction::MemoryExtracted => "memory.extracted",
             AuditAction::TenantCreated => "tenant.created",
+            AuditAction::ContextInjected => "context.injected",
         }
     }
 }

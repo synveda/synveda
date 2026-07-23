@@ -24,7 +24,9 @@ pub mod hybrid;
 pub mod index;
 pub mod indexer;
 
-pub use authz::{CompositionPlan, MemoryReadInputs, composition_plan, permitted_chain_scopes};
+pub use authz::{
+    CompositionPlan, MemoryReadInputs, ScopeDecision, composition_plan, permitted_chain_scopes,
+};
 pub use compose::{
     ComposeRequest, ComposeScope, ComposedBlock, ComposedEntry, compose, conflict_precedence,
     estimated_tokens,

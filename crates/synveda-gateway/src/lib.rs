@@ -33,6 +33,7 @@ pub mod auth;
 pub mod authz;
 pub mod error;
 pub mod hierarchy;
+mod inject;
 pub mod observe;
 pub mod policy;
 mod provision;

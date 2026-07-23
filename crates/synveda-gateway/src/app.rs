@@ -25,6 +25,7 @@ use tower_http::trace::TraceLayer;
 use crate::auth;
 use crate::error::ApiError;
 use crate::hierarchy;
+use crate::inject;
 use crate::observe;
 use crate::policy;
 use crate::quarantine;
@@ -59,6 +60,17 @@ pub struct AppState {
     /// lifetime (`exp − iat`) is unknown or exceeds this.
     /// `SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS`, default 3600.
     pub service_token_max_ttl: Duration,
+    /// The search-index sidecar (CTX-1, ADR-0024): the inject route's
+    /// lexical leg (CTX-3, ADR-0026); the indexer task converges it.
+    pub search_index: Arc<synveda_retrieval::SearchIndex>,
+    /// The MEM-4 embedder seam (ADR-0023): the inject route's
+    /// query-embedding call and the pipeline worker's record vectors
+    /// share one config-declared model identity (ADR-0026 decision 3).
+    pub embedder: Arc<synveda_ingest::embedding::AnyEmbedder>,
+    /// The inject route's embed deadline (ADR-0026 decision 3):
+    /// `SYNVEDA_INJECT_EMBED_TIMEOUT_MS`, default 100. Expiry drops the
+    /// dense leg (sparse-only, marked degraded), never the request.
+    pub inject_embed_timeout: Duration,
 }
 
 impl AppState {
@@ -137,6 +149,10 @@ pub fn router(state: AppState) -> Router {
             "/v1/observe",
             post(observe::create).layer(DefaultBodyLimit::max(observe::BODY_LIMIT_BYTES)),
         )
+        // The inject primitive (CTX-3, ADR-0026): the read path's
+        // session-start seam — plan, retrieve, compose, one chained
+        // audit event.
+        .route("/v1/inject", post(inject::create))
         // The quarantine review plane (MEM-2, ADR-0021 decisions 5–7).
         .route("/v1/quarantine", get(quarantine::list))
         .route(

@@ -3624,6 +3624,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64",
+ "blake3",
  "chrono",
  "http-body-util",
  "jsonwebtoken",

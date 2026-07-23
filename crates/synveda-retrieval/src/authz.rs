@@ -90,6 +90,25 @@ pub struct CompositionPlan {
     /// "per-scope configurable" resolves at the caller's placement
     /// (ADR-0025 decision 3).
     pub budget_tokens: u32,
+    /// Every chain scope's `MemoryRead` outcome, chain order (allowed
+    /// and denied alike): what the walk decided, kept so the inject
+    /// audit event aggregates decisions without re-deriving them
+    /// (ADR-0026 decision 5; ADR-0019 decision 4). The per-call
+    /// decision log remains the full-fidelity record.
+    pub decisions: Vec<ScopeDecision>,
+}
+
+/// One chain scope's `MemoryRead` verdict as the plan walk decided it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeDecision {
+    /// The chain scope decided.
+    pub scope_id: ScopeId,
+    /// Allow or deny.
+    pub allowed: bool,
+    /// The pack that decided.
+    pub pack_name: String,
+    /// The pack's version at decision time.
+    pub pack_version: i64,
 }
 
 /// The [`permitted_chain_scopes`] sweep extended with composition
@@ -128,6 +147,7 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
         None => CompositionConfig::DEFAULT.budget_tokens,
     };
     let mut scopes = Vec::with_capacity(inputs.chain.len());
+    let mut decisions = Vec::with_capacity(inputs.chain.len());
     for (position, node) in inputs.chain.iter().enumerate() {
         let context = context_at(position);
         let decision = pdp.authorize(
@@ -136,6 +156,12 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             Resource::Scope(node.id),
             &context,
         )?;
+        decisions.push(ScopeDecision {
+            scope_id: node.id,
+            allowed: decision.allowed,
+            pack_name: decision.pack_name,
+            pack_version: decision.pack_version,
+        });
         if !decision.allowed {
             continue;
         }
@@ -155,5 +181,6 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
     Ok(CompositionPlan {
         scopes,
         budget_tokens,
+        decisions,
     })
 }

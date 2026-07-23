@@ -94,6 +94,19 @@ pub const REDACTION_FINDINGS_TOTAL: &str = "synveda_redaction_findings_total";
 /// list chains its allowed decision (ADR-0019 decision 4).
 pub const QUARANTINE_OPERATIONS_TOTAL: &str = "synveda_quarantine_operations_total";
 
+/// Inject requests (CTX-3, ADR-0026 decision 8), labelled by `outcome`,
+/// funnel-collapsed worst-first: `error`, `rejected`, `degraded` (a
+/// block was served under a degradation), `empty` (nothing composed),
+/// `ok`. Each served inject chains one `context.injected` audit event.
+pub const CONTEXT_INJECTS_TOTAL: &str = "synveda_context_injects_total";
+
+/// Per-stage inject latency in seconds, labelled by `stage`
+/// (`plan`/`embed`/`search`/`compose`/`audit` — audit includes the
+/// commit). This is the measurement behind ADR-0019 option 2's trigger:
+/// whether the chain append binds the read path is read here, not
+/// guessed (ADR-0026 decision 9).
+pub const INJECT_STAGE_SECONDS: &str = "synveda_inject_stage_duration_seconds";
+
 /// Handle to the installed tracer provider. Call [`Telemetry::shutdown`] on
 /// exit to flush batched spans; dropping without it can lose the tail of the
 /// trace.
@@ -158,6 +171,16 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
             Matcher::Full(HTTP_REQUEST_DURATION_SECONDS.to_owned()),
             // The inject SLO is p99 < 150ms (seed §10); buckets bracket it.
             &[0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.25, 0.5, 1.0, 2.5],
+        )
+        .map_err(|err| internal(format!("metric buckets: {err}")))?
+        .set_buckets_for_metric(
+            Matcher::Full(INJECT_STAGE_SECONDS.to_owned()),
+            // Stages subdivide the 150ms SLO (ADR-0026 decision 9);
+            // finer low end than the HTTP histogram so the split is
+            // readable when every stage is fast.
+            &[
+                0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.25, 0.5,
+            ],
         )
         .map_err(|err| internal(format!("metric buckets: {err}")))?
         .install_recorder()
@@ -323,6 +346,16 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         synveda_retrieval::SEARCH_INDEX_DOCS_TOTAL,
         "Search index document operations by op (upsert/delete)"
+    );
+    // CTX-3 metrics (ADR-0026): emitted in the gateway's inject route.
+    metrics::describe_counter!(
+        CONTEXT_INJECTS_TOTAL,
+        "Inject requests by outcome (ok/degraded/empty/rejected/error)"
+    );
+    metrics::describe_histogram!(
+        INJECT_STAGE_SECONDS,
+        metrics::Unit::Seconds,
+        "Inject stage latency by stage (plan/embed/search/compose/audit)"
     );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).

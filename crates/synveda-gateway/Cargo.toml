@@ -16,6 +16,8 @@ synveda-store = { workspace = true }
 synveda-types = { workspace = true }
 
 axum = { workspace = true }
+# The inject audit event's task hash (CTX-3, ADR-0026 decision 5).
+blake3 = { workspace = true }
 chrono = { workspace = true }
 metrics = { workspace = true }
 serde = { workspace = true }
