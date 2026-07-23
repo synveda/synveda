@@ -483,6 +483,7 @@ async fn seed_policy_pack(pool: &PgPool) -> TenantId {
         "rls-fixture",
         "permit (principal, action, resource);",
         None,
+        None,
     )
     .await
     .expect("apply pack");
@@ -535,7 +536,7 @@ fn cross_tenant_policy_pack_write_is_rejected() {
         let tenant = seed_policy_pack(&db.pool).await;
         let other = seed_policy_pack(&db.pool).await;
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let result = policy_packs::apply(&mut *tx, other, "forged", "permit;", None).await;
+        let result = policy_packs::apply(&mut *tx, other, "forged", "permit;", None, None).await;
         assert!(
             matches!(result, Err(Error::Internal { .. })),
             "cross-tenant pack write must be rejected by RLS as an internal \
@@ -553,11 +554,11 @@ fn same_tenant_policy_pack_lifecycle_works_under_rls() {
     db.rt.block_on(async {
         let tenant = seed_policy_pack(&db.pool).await;
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let first = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "forbid;", None)
+        let first = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "forbid;", None, None)
             .await
             .expect("apply under RLS");
         assert_eq!(first.version, 1, "a new name starts at v1");
-        let bumped = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "permit;", None)
+        let bumped = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "permit;", None, None)
             .await
             .expect("re-apply under RLS");
         assert_eq!(bumped.version, 2, "re-applying the name must bump to v2");

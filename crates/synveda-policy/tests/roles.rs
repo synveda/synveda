@@ -501,6 +501,7 @@ fn the_escalation_guard_survives_custom_packs() {
         1,
         "permit (principal, action, resource) when { resource in principal.tenant };",
         None,
+        None,
     )
     .expect("install blanket pack");
     let assignments = [fx.assignment("org", "authz3-blanket")];

@@ -497,9 +497,16 @@ fn redaction_config_rides_the_effective_pack() {
         secrets: RedactionMode::Deny,
         pii: RedactionMode::Redact,
     };
-    pdp.install_source(fx.tenant, "acme-deny", 1, MEMBER_READ, Some(deny_secrets))
-        .expect("install configured pack");
-    pdp.install_source(fx.tenant, "acme-unconfigured", 1, MEMBER_READ, None)
+    pdp.install_source(
+        fx.tenant,
+        "acme-deny",
+        1,
+        MEMBER_READ,
+        Some(deny_secrets),
+        None,
+    )
+    .expect("install configured pack");
+    pdp.install_source(fx.tenant, "acme-unconfigured", 1, MEMBER_READ, None, None)
         .expect("install unconfigured pack");
     for (pack, expected) in [
         ("acme-deny", deny_secrets),

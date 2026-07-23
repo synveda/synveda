@@ -11,10 +11,11 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-/// Tokens included in each composed inject block. Registered here so the
-/// contract exists from day one; the composition engine (CTX-2) records into
-/// it through the `metrics` facade. A tracked SLO metric (research digest A1).
-pub const TOKENS_PER_INJECT: &str = "synveda_tokens_per_inject";
+/// Tokens included in each composed inject block. The name was registered
+/// here from day one (FND-5); the constant now lives in the emitting crate
+/// (CTX-2, ADR-0025 decision 8) and is re-exported for the recorder wiring.
+/// A tracked SLO metric (research digest A1).
+pub use synveda_retrieval::TOKENS_PER_INJECT;
 
 /// Requests served, labelled by method/route/status.
 pub const HTTP_REQUESTS_TOTAL: &str = "synveda_http_requests_total";

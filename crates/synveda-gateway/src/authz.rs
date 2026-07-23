@@ -358,6 +358,7 @@ async fn refresh_tenant(
             pack.version,
             &pack.source,
             pack.redaction,
+            pack.composition,
         ) {
             Ok(()) => outcomes.push("installed"),
             Err(error) => {

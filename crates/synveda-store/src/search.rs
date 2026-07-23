@@ -1,6 +1,7 @@
-//! The read path's record queries (CTX-1, ADR-0024): the dense ANN leg,
-//! the fused candidates' verify-and-hydrate, and the change scan the
-//! search indexer tails.
+//! The read path's record queries (CTX-1, ADR-0024; CTX-2, ADR-0025):
+//! the dense ANN leg, the fused candidates' verify-and-hydrate, the
+//! change scan the search indexer tails, and the composition engine's
+//! candidate read.
 //!
 //! Every query here filters on `tenant_id` explicitly — tenant
 //! correctness never rides on the RLS backstop alone, which the
@@ -276,6 +277,68 @@ pub async fn dense_candidates(
 struct DenseHitRow {
     record_id: Uuid,
     distance: f64,
+}
+
+/// The composition engine's candidate read (CTX-2, ADR-0025
+/// decision 5): every current record in the allowed scopes and
+/// sensitivities whose valid-time window covers `at`, capped per
+/// `(scope, kind)` so a flood of derived records cannot crowd pinned
+/// material out of the fetch (nor one scope's records another's). The
+/// cap selects deterministically — newest `valid_from`, then newest
+/// `tx_from`, then id — and the caller owns final ordering (SQL does
+/// not know chain positions). `at` is the caller's explicit instant:
+/// no clock is read here (the determinism AC).
+#[tracing::instrument(
+    name = "store.search.compose_candidates",
+    skip_all,
+    fields(tenant.id = %tenant_id, scopes.count = scopes.len(), at = %at),
+    err(Display)
+)]
+pub async fn compose_candidates(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    scopes: &[ScopeId],
+    sensitivities: &[Sensitivity],
+    at: DateTime<Utc>,
+    per_scope_kind_limit: i64,
+) -> Result<Vec<RecordVersion>> {
+    let scopes: Vec<Uuid> = scopes.iter().map(ScopeId::as_uuid).collect();
+    let sensitivities: Vec<String> = sensitivities
+        .iter()
+        .map(|level| level.as_str().to_owned())
+        .collect();
+    let rows = sqlx::query_as!(
+        RecordRow,
+        r#"
+        select id as "id!", tenant_id as "tenant_id!", scope_id as "scope_id!",
+               owner_id as "owner_id!", kind as "kind!", class as "class!",
+               content as "content!", sensitivity as "sensitivity!",
+               provenance as "provenance!", valid_from as "valid_from!",
+               valid_to, tx_from as "tx_from!", tx_to
+        from (
+            select id, tenant_id, scope_id, owner_id, kind, class, content,
+                   sensitivity, provenance, valid_from, valid_to, tx_from, tx_to,
+                   row_number() over (
+                       partition by scope_id, kind
+                       order by valid_from desc, tx_from desc, id
+                   ) as position
+            from records
+            where tenant_id = $1 and scope_id = any($2)
+              and sensitivity = any($3)
+              and valid_from <= $4 and (valid_to is null or valid_to > $4)
+        ) ranked
+        where position <= $5
+        "#,
+        tenant_id.as_uuid(),
+        &scopes,
+        &sensitivities,
+        at,
+        per_scope_kind_limit,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
 }
 
 /// Verify-and-hydrate for the fused candidate set: re-reads `ids`

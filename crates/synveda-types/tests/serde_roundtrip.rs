@@ -6,8 +6,9 @@ use std::str::FromStr;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use synveda_types::{
-    Error, IdentityId, RecordClass, RecordId, RecordKind, RedactionConfig, RedactionMode, Role,
-    RoleBinding, ScopeId, Sensitivity, Tenant, TenantId, TenantStatus,
+    CompositionConfig, Error, IdentityId, InjectChannels, RecordClass, RecordId, RecordKind,
+    RedactionConfig, RedactionMode, Role, RoleBinding, ScopeId, Sensitivity, Tenant, TenantId,
+    TenantStatus,
 };
 
 fn json_roundtrip<T>(value: &T) -> T
@@ -153,6 +154,52 @@ fn redaction_config_rejects_unknown_fields() {
     assert!(
         serde_json::from_str::<RedactionConfig>(
             r#"{"secrets":"deny","pii":"redact","secrests":"deny"}"#
+        )
+        .is_err()
+    );
+}
+
+// ── Composition config ───────────────────────────────────────────────────────
+
+#[test]
+fn inject_channels_roundtrip_kebab_case() {
+    for channels in InjectChannels::ALL {
+        json_roundtrip(&channels);
+        let json = serde_json::to_string(&channels).expect("serialize");
+        assert_eq!(json, format!("\"{}\"", channels.as_str()));
+        assert_eq!(
+            InjectChannels::from_str(channels.as_str()).unwrap(),
+            channels
+        );
+    }
+    assert!(serde_json::from_str::<InjectChannels>("\"derived-only\"").is_err());
+    assert!(InjectChannels::PublishedAndDerived.includes_derived());
+    assert!(!InjectChannels::PublishedOnly.includes_derived());
+}
+
+#[test]
+fn composition_config_roundtrips_and_defaults_to_the_product_config() {
+    json_roundtrip(&CompositionConfig::DEFAULT);
+    assert_eq!(
+        CompositionConfig::default(),
+        CompositionConfig::DEFAULT,
+        "an unconfigured pack composes under the product config \
+         (ADR-0025 decision 3 — the config only ever narrows)"
+    );
+    assert_eq!(CompositionConfig::DEFAULT.budget_tokens, 1_500, "seed §4.4");
+    assert_eq!(
+        CompositionConfig::DEFAULT.channels,
+        InjectChannels::PublishedAndDerived
+    );
+}
+
+#[test]
+fn composition_config_rejects_unknown_fields() {
+    // deny_unknown_fields: a stored config with a typo'd key must fail
+    // loudly, never silently compose under a default it didn't choose.
+    assert!(
+        serde_json::from_str::<CompositionConfig>(
+            r#"{"budget_tokens":900,"channels":"published-only","chanels":"published-only"}"#
         )
         .is_err()
     );

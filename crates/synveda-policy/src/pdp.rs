@@ -20,7 +20,8 @@ use cedar_policy::{
     PolicySet, Request, Schema, ValidationMode, Validator,
 };
 use synveda_types::{
-    Error, HierarchyNode, RedactionConfig, Result, Role, ScopeId, ScopeKind, TenantId,
+    CompositionConfig, Error, HierarchyNode, RedactionConfig, Result, Role, ScopeId, ScopeKind,
+    TenantId,
 };
 
 use crate::entity_store::EntityStore;
@@ -70,12 +71,15 @@ const OPEN_COLLABORATION_SRC: &str = include_str!("packs/open-collaboration.ceda
 
 /// A compiled, schema-validated policy pack (base layer included), with
 /// its non-Cedar configuration: the redaction modes the observe scan
-/// seam applies under this pack (MEM-2, ADR-0021 decision 3).
+/// seam applies under this pack (MEM-2, ADR-0021 decision 3), and the
+/// composition budget/channel rule the read path composes under (CTX-2,
+/// ADR-0025 decisions 2–3).
 struct LoadedPack {
     name: String,
     version: i64,
     policies: PolicySet,
     redaction: RedactionConfig,
+    composition: CompositionConfig,
 }
 
 /// Where the effective pack came from — logged with every decision so the
@@ -106,6 +110,9 @@ pub struct EffectivePack {
     /// The pack's redaction configuration (MEM-2, ADR-0021 decision 3):
     /// what the observe scan seam does with findings under this pack.
     pub redaction: RedactionConfig,
+    /// The pack's composition configuration (CTX-2, ADR-0025): the
+    /// inject budget and channel rule at scopes this pack governs.
+    pub composition: CompositionConfig,
 }
 
 impl fmt::Display for PackOrigin {
@@ -148,7 +155,11 @@ impl Pdp {
         }
         // Embedded packs carry compiled-in redaction configs (ADR-0021
         // decision 3): strict quarantines secrets and redacts PII (the
-        // seed §6 wording); the relaxed packs redact everything.
+        // seed §6 wording); the relaxed packs redact everything. All
+        // three compose under the product composition config (ADR-0025
+        // decision 2: derived is readable-per-policy by design; the
+        // published-only restriction is an explicit choice, never a
+        // default).
         let sources = [
             (
                 REGULATED_STRICT,
@@ -164,10 +175,16 @@ impl Pdp {
         ];
         let mut embedded = HashMap::new();
         for ((name, version), (_, source, redaction)) in EMBEDDED_PACKS.iter().zip(sources) {
-            let pack = compile(&schema, name, *version, source, redaction).map_err(|err| {
-                Error::Internal {
-                    message: format!("embedded pack invalid: {err}"),
-                }
+            let pack = compile(
+                &schema,
+                name,
+                *version,
+                source,
+                redaction,
+                CompositionConfig::DEFAULT,
+            )
+            .map_err(|err| Error::Internal {
+                message: format!("embedded pack invalid: {err}"),
             })?;
             embedded.insert(*name, Arc::new(pack));
         }
@@ -204,7 +221,15 @@ impl Pdp {
     /// without installing it — the apply-time gate (`synveda policy
     /// apply` refuses a pack the reloader would reject).
     pub fn compile_check(&self, name: &str, source: &str) -> Result<()> {
-        compile(&self.schema, name, 0, source, RedactionConfig::STRICT).map(|_| ())
+        compile(
+            &self.schema,
+            name,
+            0,
+            source,
+            RedactionConfig::STRICT,
+            CompositionConfig::DEFAULT,
+        )
+        .map(|_| ())
     }
 
     /// Compiles and installs a tenant's stored pack under its name,
@@ -213,7 +238,9 @@ impl Pdp {
     /// widen or brick a tenant). Reserved product names are refused —
     /// the in-process face of the store's check constraint.
     /// `redaction: None` (an unconfigured stored pack) falls back to the
-    /// strict config — fail safe (ADR-0021 decision 3).
+    /// strict config — fail safe (ADR-0021 decision 3); `composition:
+    /// None` to the product config, which only ever narrows (ADR-0025
+    /// decision 2).
     pub fn install_source(
         &self,
         tenant_id: TenantId,
@@ -221,6 +248,7 @@ impl Pdp {
         version: i64,
         source: &str,
         redaction: Option<RedactionConfig>,
+        composition: Option<CompositionConfig>,
     ) -> Result<()> {
         if is_reserved(name) {
             return Err(Error::Invalid {
@@ -233,6 +261,7 @@ impl Pdp {
             version,
             source,
             redaction.unwrap_or_default(),
+            composition.unwrap_or_default(),
         )?;
         self.write_packs()
             .entry(tenant_id)
@@ -386,6 +415,7 @@ impl Pdp {
             version: pack.version,
             origin,
             redaction: pack.redaction,
+            composition: pack.composition,
         }
     }
 
@@ -745,6 +775,7 @@ fn compile(
     version: i64,
     source: &str,
     redaction: RedactionConfig,
+    composition: CompositionConfig,
 ) -> Result<LoadedPack> {
     let combined = format!("{BASE_SRC}\n{source}");
     let policies: PolicySet = combined.parse().map_err(|err| Error::Invalid {
@@ -768,5 +799,6 @@ fn compile(
         version,
         policies,
         redaction,
+        composition,
     })
 }

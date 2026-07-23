@@ -41,7 +41,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [MEM-3: Extraction pipeline](MEM-3.md) — done 2026-07-22, AC tests: crates/synveda-ingest/tests/extraction_precision.rs (labelled fixture set, per-class precision; deterministic macro 0.958 ≥ the provisional 0.8 target; the `#[ignore]`d live-LLM hook runs the same harness against Claude or vLLM), crates/synveda-gateway/tests/extraction.rs (observe → worker → records with the provenance quadruple on every record; archive-lock exactly-once under redelivery; a released quarantined event extracts identically; a since-quarantined owner is denied at commit; retries exhaust into an audited dead-letter; an extractor echoing a live-format secret persists only the placeholder), crates/synveda-ingest/tests/extractor_http.rs (Claude/vLLM request contracts against local mocks), crates/synveda-store/tests/observe_queue.rs (visibility timeout, redelivery, archive-as-lock), demo: demos/mem-3-extraction.sh
 - [x] [MEM-4: Transactional embed-or-fail](MEM-4.md) — done 2026-07-22, AC tests: crates/synveda-gateway/tests/embedding.rs (the chaos test: a mock TEI killed mid-batch — the embedded event commits atomically with its vector, the rest redeliver and commit on recovery, zero lost and zero embedding-less at every phase; the schema backstop refuses a raw-SQL embedding-less commit; the deterministic zero-config path), crates/synveda-ingest/tests/embedder_http.rs (TEI request contract and failure taxonomy against local mocks — error status, count mismatch, empty vector, dead endpoint all `Dependency`), crates/synveda-store/tests/rls.rs (record_embeddings joins the adversarial suite: tenant-isolated, forged-tenant write rejected, app role holds no DELETE, record delete cascades), crates/synveda-store/tests/bitemporal.rs (every write now carries its embedding through the one-statement API), demo: demos/mem-4-embedding.sh (real TEI/BGE-M3 stopped and restarted mid-pipeline)
 - [x] [CTX-1: Hybrid retrieval](CTX-1.md) — done 2026-07-23, AC tests: crates/synveda-retrieval/tests/quality.rs (the fixture set, each leg blind to half the corpus by construction: sparse-only 0.500, dense-only 0.500, hybrid 1.000 recall@6), crates/synveda-gateway/tests/retrieval_live.rs (`--ignored`: the same fixtures through live TEI/BGE-M3 — sparse-only 0.500, hybrid 0.792 recall@6, MRR 1.0), crates/synveda-retrieval/tests/latency.rs (`--ignored`: 1M records/tenant, median asserted under the 80ms budget, tails reported — the HIER-1/MEM-1 discipline), crates/synveda-retrieval/tests/hybrid.rs (fusion order end to end; adversarial no-leak on both legs at once; one-sided staleness; degradation modes; watermark/overlap/rebuild), crates/synveda-retrieval/tests/permitted_scopes.rs (the PDP-derived predicate: own chain, quarantine, unplaced, the service-identity floor), demo: demos/ctx-1-hybrid-retrieval.sh (observe → pipeline → real-TEI vectors → sidecar convergence → live quality harness)
-- [ ] [CTX-2: Composition engine](CTX-2.md)
+- [x] [CTX-2: Composition engine](CTX-2.md) — done 2026-07-23, AC tests: crates/synveda-retrieval/tests/compose.rs (deterministic: byte-identical re-composition at the same instant, unrelated writes notwithstanding; the watermark: BLAKE3 version hashes + record ids on every block, block hash recomputable from the entry hashes; tokens_per_inject recorded on every compose including the zero-entry one; plus gradient/pinned-first assembly, first-fit budget, channel rules, the seed §4.4 conflict matrix, valid-time as-of, the sensitivity clamp, relevance ranking), crates/synveda-retrieval/tests/composition_plan.rs (the PDP sweep: per-scope channel rules and the home-scope budget from effective packs; bank-mode subtree inheritance; quarantine/unplaced plan nothing), crates/synveda-store/tests/policy_packs.rs (the composition config rides the stored pack; re-apply clears; garbage json reads unconfigured), demo: demos/ctx-2-composition.sh (observe → pipeline → seeded scope material → the compose example over the real product path — identity → HIER-2 chain → PDP plan → compose — then the bank-mode pack flip governs the very next compose)
 - [ ] [CTX-3: inject API](CTX-3.md)
 - [ ] [ADPT-1: Claude Code adapter](ADPT-1.md)
 - [ ] [EVAL-1: Eval harness skeleton](EVAL-1.md)
@@ -355,6 +355,40 @@ MEDIAN with tails reported — EVAL-6 owns percentile SLOs; EVAL-4 owns
 real quality targets over the fixture harness; LISTEN/NOTIFY replaces
 the indexer's polling if measured lag matters (ADR-0022's recorded
 upgrade, restated)._
+
+_CTX-2 notes (ADR-0025): composition consumes the CTX-1 predicate —
+`composition_plan` is one PDP walk producing the allowed chain scopes
+with per-scope channel rules and the home-scope budget, and `compose`
+is deterministic by construction (the valid-time instant is an explicit
+input, every ordering is total, no clock reads or map-order effects).
+`RecordKind` is the pre-FLOW-2 channel stand-in — pinned composes as
+the published channel, derived is always marked unreviewed — and the
+pack-carried `CompositionConfig` (budget default 1500;
+`published-and-derived` | `published-only`) rides
+`policy_packs.composition` (migration 0017) with CLI flags
+(`synveda policy apply --composition-budget --composition-channels`)
+and hot reload: bank mode exists and is testable two phases early, and
+FLOW-2's AC will flip this same switch. The config never grants —
+`MemoryRead` is decided per scope before composition — so an
+unconfigured pack defaulting to the product config is not a widening.
+Watermarks are BLAKE3 version hashes over (id, tx_from, content) —
+recomputable content addresses FLOW-1's commit hashes supersede in
+place; the block hash and record ids ride the rendered text inside the
+budget. Conflict rules implement seed §4.4's resolution order (pinned
+beats derived, nearer scope, newer valid time) over an exact
+trimmed-content predicate; MEM-5 replaces the predicate (near-dup,
+supersession) and reuses the exported comparator. Token accounting is
+the `ceil(chars/4)` estimator seam — budgets bound estimated tokens;
+EVAL-4 owns bias measurement and per-harness tokenizers are an adapter
+concern. `synveda_tokens_per_inject` (the name FND-5 reserved, now
+declared in the emitting crate) records on every compose, empty
+included. Forward obligations: CTX-3 owns the inject seam — its single
+chained audit event carries this watermark with aggregated decisions
+(ADR-0019 decision 4) — plus the query-embedding call (MEM-4 seam) and
+the hybrid→relevance wiring; CTX-5 extends the explicit instant to
+transaction-time as-of; PRMT-2's context packs arrive as pinned
+material; FLOW-1/2 landing replaces both stand-ins (recorded reversal
+triggers in ADR-0025)._
 
 ## Phase 2 — Governance (wk 6–10)
 

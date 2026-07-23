@@ -16,8 +16,8 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::{Hs256Verifier, personal_slug};
 use synveda_types::{
-    IdentityId, IdentityKind, RedactionConfig, RedactionMode, Role, ScopeId, ScopeKind, TenantId,
-    TenantStatus,
+    CompositionConfig, IdentityId, IdentityKind, InjectChannels, RedactionConfig, RedactionMode,
+    Role, ScopeId, ScopeKind, TenantId, TenantStatus,
 };
 
 #[derive(Parser)]
@@ -127,6 +127,16 @@ enum PolicyCommand {
         /// Redaction mode for PII findings on observe ingest.
         #[arg(long, requires = "redaction_secrets")]
         redaction_pii: Option<RedactionMode>,
+        /// Estimated-token inject budget at scopes this pack governs
+        /// (CTX-2, ADR-0025). Both composition flags must be given
+        /// together or neither; unconfigured packs get the product
+        /// default (1500, published-and-derived).
+        #[arg(long, requires = "composition_channels")]
+        composition_budget: Option<u32>,
+        /// Inject channel rule (published-and-derived/published-only —
+        /// published-only is the bank-mode switch).
+        #[arg(long, requires = "composition_budget")]
+        composition_channels: Option<InjectChannels>,
         /// Path to the Cedar policy source file.
         file: std::path::PathBuf,
     },
@@ -300,6 +310,8 @@ async fn run(cli: Cli) -> Result<(), String> {
             name,
             redaction_secrets,
             redaction_pii,
+            composition_budget,
+            composition_channels,
             file,
         }) => {
             let source = std::fs::read_to_string(&file)
@@ -309,10 +321,17 @@ async fn run(cli: Cli) -> Result<(), String> {
             synveda_policy::Pdp::new()
                 .and_then(|pdp| pdp.compile_check(&name, &source))
                 .map_err(|err| err.to_string())?;
-            // clap's `requires` makes these all-or-nothing.
+            // clap's `requires` makes each config's flags all-or-nothing.
             let redaction = redaction_secrets
                 .zip(redaction_pii)
                 .map(|(secrets, pii)| RedactionConfig { secrets, pii });
+            let composition =
+                composition_budget
+                    .zip(composition_channels)
+                    .map(|(budget_tokens, channels)| CompositionConfig {
+                        budget_tokens,
+                        channels,
+                    });
             let pool = connect().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
@@ -323,6 +342,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 &name,
                 &source,
                 redaction.as_ref(),
+                composition.as_ref(),
             )
             .await
             .map_err(|err| err.to_string())?;
@@ -335,6 +355,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     "pack": pack.name,
                     "version": pack.version,
                     "redaction": pack.redaction,
+                    "composition": pack.composition,
                 }),
             )
             .await?;

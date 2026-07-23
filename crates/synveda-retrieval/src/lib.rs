@@ -1,8 +1,9 @@
 //! The read path: hybrid retrieval (pgvector ANN + Tantivy BM25, RRF
-//! fusion — CTX-1, ADR-0024) and, with CTX-2, the composition engine
-//! (scope gradient, pinned-first, token budget, channel rules). No LLM
-//! calls on this path (tech plan §3): the crate's only network peer is
-//! Postgres, and the query embedding is the caller's input.
+//! fusion — CTX-1, ADR-0024) and the composition engine (scope
+//! gradient, pinned-first, token budget, channel rules — CTX-2,
+//! ADR-0025). No LLM calls on this path (tech plan §3): the crate's
+//! only network peer is Postgres, and the query embedding is the
+//! caller's input.
 //!
 //! Retrieval is policy-shaped before it touches an index: the engine's
 //! only entry takes an allowed-scope set, produced in the product paths
@@ -18,11 +19,16 @@
 #![warn(missing_docs)]
 
 pub mod authz;
+pub mod compose;
 pub mod hybrid;
 pub mod index;
 pub mod indexer;
 
-pub use authz::{MemoryReadInputs, permitted_chain_scopes};
+pub use authz::{CompositionPlan, MemoryReadInputs, composition_plan, permitted_chain_scopes};
+pub use compose::{
+    ComposeRequest, ComposeScope, ComposedBlock, ComposedEntry, compose, conflict_precedence,
+    estimated_tokens,
+};
 pub use hybrid::{QueryVector, RetrievedRecord, SearchFilter, SearchRequest, hybrid_search};
 pub use index::{SEARCH_SCHEMA_VERSION, SearchIndex, SparseHit};
 pub use indexer::{IndexerConfig, SweepSummary, TenantSweep};
@@ -42,6 +48,13 @@ pub const SEARCH_INDEX_DOCS_TOTAL: &str = "synveda_search_index_docs_total";
 /// Counter: hybrid searches, labelled `mode` = `hybrid` |
 /// `sparse_only` | `dense_only` | `empty_filter`.
 pub const RETRIEVAL_SEARCHES_TOTAL: &str = "synveda_retrieval_searches_total";
+
+/// Histogram: estimated tokens per composed inject block (CTX-2,
+/// ADR-0025 decision 8). The name FND-5 pre-registered with
+/// budget-shaped buckets; emitted here by [`compose::compose`] on every
+/// call — an inject that composed nothing records 0 — and described by
+/// the gateway where the recorder lives (ADR-0007).
+pub const TOKENS_PER_INJECT: &str = "synveda_tokens_per_inject";
 
 /// Histogram: per-leg latency, labelled `leg` = `dense` | `sparse` |
 /// `hydrate`.

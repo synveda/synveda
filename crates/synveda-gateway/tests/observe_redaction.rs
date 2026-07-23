@@ -516,6 +516,7 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         "acme-deny",
         MEMBER_PACK,
         Some(&deny_config),
+        None,
     )
     .await
     .expect("store deny pack");

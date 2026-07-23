@@ -11,6 +11,7 @@ synveda-policy = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }
 
+blake3 = { workspace = true }
 chrono = { workspace = true }
 metrics = { workspace = true }
 serde = { workspace = true }
@@ -22,4 +23,5 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+metrics-exporter-prometheus = { workspace = true }
 tokio = { workspace = true }

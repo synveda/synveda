@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod composition;
 mod error;
 mod hierarchy;
 mod id;
@@ -18,6 +19,7 @@ mod role;
 mod sensitivity;
 mod tenant;
 
+pub use composition::{CompositionConfig, InjectChannels};
 pub use error::{Error, Result};
 pub use hierarchy::{HierarchyNode, ScopeKind};
 pub use id::{IdentityId, ObserveEventId, RecordId, ScopeId, TenantId};

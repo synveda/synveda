@@ -261,8 +261,9 @@ fn fuse(dense: &[DenseHit], sparse: &[SparseHit]) -> Vec<FusedCandidate> {
 }
 
 /// The sensitivity levels at or below the (clamped) ceiling (ADR-0024
-/// decision 2).
-fn allowed_sensitivities(max: Sensitivity) -> Vec<Sensitivity> {
+/// decision 2). Shared with the composition engine — one clamp for the
+/// whole read path (ADR-0025 compliance).
+pub(crate) fn allowed_sensitivities(max: Sensitivity) -> Vec<Sensitivity> {
     let ceiling = max.min(Sensitivity::Confidential);
     Sensitivity::ALL
         .into_iter()
