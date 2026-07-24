@@ -52,3 +52,5 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
+      # The adapter suites (ADPT-1); packages without a test script are skipped.
+      - run: pnpm -r test

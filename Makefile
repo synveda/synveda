@@ -7,7 +7,7 @@ COMPOSE = docker compose -f deploy/compose/docker-compose.yml
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps ts-build ci dev-up dev-down smoke db-test
+.PHONY: fmt lint test build deny check-deps ts-build ts-test ci dev-up dev-down smoke db-test
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -43,4 +43,8 @@ ts-build:
 	pnpm install --frozen-lockfile
 	pnpm -r build
 
-ci: fmt lint test build deny check-deps ts-build
+# The adapter suites (ADPT-1); packages without a test script are skipped.
+ts-test:
+	pnpm -r test
+
+ci: fmt lint test build deny check-deps ts-build ts-test

@@ -1,0 +1,128 @@
+#!/usr/bin/env node
+/**
+ * The hook entry point (ADR-0027 decisions 1, 2 and 3).
+ *
+ * One artifact for all four events, dispatched by the payload's own
+ * `hook_event_name` and cross-checked against the mode named in
+ * `hooks/hooks.json`.
+ *
+ * It exits 0 unconditionally. A memory system that can break the user's
+ * session is worse than one that occasionally has no memory, so there is
+ * no path here that returns a non-zero status, and none that emits a
+ * blocking decision — exit 2 on `PreCompact` would block compaction
+ * itself.
+ *
+ * Nothing but the hook result is ever written to stdout: for
+ * `SessionStart`, stdout is context the model reads.
+ */
+
+import { loadConfig } from "./config.mjs";
+import { flush } from "./flush.mjs";
+import { log } from "./log.mjs";
+import { sessionStart } from "./session-start.mjs";
+import { prune } from "./spool.mjs";
+import type { HookInput, HookOutput } from "./types.mjs";
+
+/**
+ * A hard ceiling on the whole hook, above the per-call deadline: if
+ * anything hangs that the request deadline does not cover, the process
+ * still leaves.
+ */
+const WATCHDOG_MS = 10_000;
+
+type Mode = "inject" | "flush" | "none";
+
+process.on("uncaughtException", (error: unknown) => {
+  log("hook.uncaught", { error: String(error) });
+  process.exit(0);
+});
+process.on("unhandledRejection", (reason: unknown) => {
+  log("hook.unhandled_rejection", { reason: String(reason) });
+  process.exit(0);
+});
+
+const watchdog = setTimeout(() => {
+  log("hook.watchdog", { ms: WATCHDOG_MS });
+  process.exit(0);
+}, WATCHDOG_MS);
+watchdog.unref();
+
+await main();
+
+async function main(): Promise<void> {
+  const input = await readInput();
+  const mode = resolveMode(process.argv[2], input.hook_event_name);
+  if (mode === "none") {
+    log("hook.unrecognised", { argv: process.argv[2], hook: input.hook_event_name });
+    return;
+  }
+
+  const config = loadConfig(input.cwd);
+  if (config.disabled) {
+    log("hook.disabled", { hook: input.hook_event_name });
+    return;
+  }
+
+  try {
+    emit(mode === "inject" ? await sessionStart(input, config) : await flush(input, config));
+  } catch (error) {
+    log("hook.failed", { hook: input.hook_event_name, error: String(error) });
+  }
+
+  // Session state is worthless once the session is gone; the last hook
+  // of a session is the cheapest place to notice.
+  if (input.hook_event_name === "SessionEnd") prune();
+}
+
+/**
+ * The payload is ground truth — it says which event actually fired. The
+ * argument from `hooks.json` is the fallback and the cross-check.
+ */
+function resolveMode(argument: string | undefined, event: string | undefined): Mode {
+  switch (event) {
+    case "SessionStart":
+      return "inject";
+    case "Stop":
+    case "PreCompact":
+    case "SessionEnd":
+      return "flush";
+    case undefined:
+      break;
+    default:
+      // Registered for an event this adapter does not handle.
+      return "none";
+  }
+  if (argument === "session-start") return "inject";
+  if (argument === "observe" || argument === "flush") return "flush";
+  return "none";
+}
+
+async function readInput(): Promise<HookInput> {
+  // No stdin to speak of (a human running the binary by hand): there is
+  // nothing to do, and blocking on a terminal would hang the watchdog out.
+  if (process.stdin.isTTY === true) return {};
+  let raw = "";
+  try {
+    process.stdin.setEncoding("utf8");
+    for await (const piece of process.stdin) raw += String(piece);
+  } catch (error) {
+    log("hook.stdin_failed", { error: String(error) });
+    return {};
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as HookInput;
+    }
+  } catch {
+    // The harness sent something this version does not understand
+    // (decision 9): do nothing, quietly, and let the session proceed.
+  }
+  log("hook.stdin_unparsed", { bytes: raw.length });
+  return {};
+}
+
+function emit(output: HookOutput): void {
+  if (Object.keys(output).length === 0) return;
+  process.stdout.write(JSON.stringify(output));
+}
