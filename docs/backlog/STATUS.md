@@ -584,13 +584,75 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [ ] [CTX-5: recall API + MCP tool](CTX-5.md)
 - [ ] [GRPH-1: Multi-graph AGE schema](GRPH-1.md)
 - [ ] [GRPH-2: Graph-linking stage](GRPH-2.md)
-- [ ] [GRPH-4: AGE performance spike / Kuzu fallback assessment](GRPH-4.md)
+- [x] [GRPH-4: AGE performance spike / graph fallback assessment](GRPH-4.md) — done 2026-07-25, report: docs/spikes/grph-4-age-traversal.md, criteria + verdict: ADR-0029, harness: crates/synveda-store/tests/graph_spike.rs (`--ignored`), demo: demos/grph-4-graph-spike.sh
 - [ ] [AUD-2: Audit query & auditor role surface](AUD-2.md)
 - [ ] [EVAL-2: Extraction quality suite](EVAL-2.md)
 - [ ] [EVAL-4: Retrieval & injection quality](EVAL-4.md)
 - [ ] [EVAL-5: Security evals](EVAL-5.md)
 - [ ] [PRMT-1: Prompt templates as assets](PRMT-1.md)
 - [ ] [PRMT-2: Context packs](PRMT-2.md)
+
+_GRPH-4 (2026-07-25, ADR-0029): the phase gate ran first, because it is
+the only Phase 2 item that can invalidate an Accepted ADR and the schema
+is the expensive thing to move. Its criteria were written and committed
+before the harness existed — a spike that fixes its thresholds after
+seeing the numbers can only ratify the decision it was commissioned to
+test, and ADR-0004 was already Accepted.
+
+**AGE passed the latency gate and failed three of the other four
+criteria.** Traversal speed — the thing ADR-0001 and ADR-0004 both flagged
+as unproven — is not AGE's problem: 2-hop expansion from a 10-seed set
+costs 12.91ms median at 10M edges against a 50ms threshold, with a 1M→10M
+slope of 1.58×. What failed was catalog cost (48 relations per tenant's
+three graphs → 48,000 at 1,000 tenants, against a 25,000 ceiling), the SQL
+discipline (`cypher()` takes its graph name as a *name constant*, so a
+per-tenant graph name can only reach the statement as runtime-built text —
+which CLAUDE.md forbids and ADR-0001's "enumerate every SQL statement in
+the binary" rules out), and the edge write at 10.42ms against a 10ms
+bound.
+
+Both failures that matter share one cause and one fix. **ADR-0004 is
+amended: named graphs stay, per-tenant instantiation goes** — one shared
+entity/episode/provenance set with `tenant_id` as a property and forced
+RLS keyed to the TEN-2 GUC, which G6 verified is honoured by Cypher
+traversals across two tenants and returns nothing at all when the GUC is
+unset. TEN-5 tenant deletion and MEM-6 per-graph decay become predicated
+rather than structural; that is the recorded cost. The write failure is
+mitigated rather than traded: direct inserts into AGE's label tables run
+at 0.01ms against Cypher `CREATE`'s 7.90ms, inside the same transaction,
+so ADR-0001's commit-together property is kept.
+
+Three obligations are binding on GRPH-1/2: edges are written as
+label-table inserts, never Cypher `CREATE`; the disciplined query forms
+are the only ones the code can emit, defended by a test that fails on a
+sequential scan over a label table; and the amended tenant-property schema
+carries an index on the tenant property. The discipline is load-bearing
+because **three of the four ways a competent person would write these
+queries are 20×–2000× slower than the one that works**: `IN` lists scan
+the whole edge table (211.77ms at 10M, slope 7.09×), `*1..2`
+variable-length paths cost 408ms at 1M and 3.7s at 10M where the explicit
+two-hop pattern costs 0.43ms, and `WHERE id(x) = …` does not use the
+primary key (689ms). Nothing in the query text tells you which one you
+wrote.
+
+The fallback ladder was **not** activated and was rewritten anyway: the
+embedded engine ADR-0001 and ADR-0004 originally named is no longer
+maintained, and no licence-compatible property-graph replacement exists
+(the mature engines are GPL or BSL). The ladder is now inside Postgres —
+indexed adjacency, then a materialised k-hop closure table on the HIER-1
+pattern — with a second engine a last rung needing its own ADR and a
+cargo-deny exception. Its one live trigger is a requirement for depth
+beyond 2 hops or genuinely variable-length paths, which AGE cannot serve
+either.
+
+Recorded and deliberately not resolved here: the relational adjacency
+baseline cleared **every** criterion, including both AGE failed, and was
+3–8× faster on the traversals themselves (1-hop 1.24ms vs 9.35ms, 2-hop
+4.84ms vs 12.91ms at 10M) with 2.5× less storage and 6.7× faster bulk
+load. The pre-registered rule reserved ADR-0004's option-4 revival for a
+G1/G2 failure, which did not occur, so this gate does not overturn it on
+that basis — but GRPH-1's design ADR is where the schema call belongs, and
+the burden of proof has moved onto AGE._
 
 ## Phase 3 — Enterprise (wk 11–16)
 

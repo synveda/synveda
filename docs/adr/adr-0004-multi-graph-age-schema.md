@@ -1,9 +1,28 @@
 # ADR-0004: Multiple named AGE graphs per tenant with bitemporal edges
 
-- **Status**: Accepted
+- **Status**: Accepted; amended in part by ADR-0029 (2026-07-25)
 - **Date**: 2026-07-18
 - **Feature(s)**: FND-6, GRPH-1..4
 - **Deciders**: sujitn
+
+> **Amendment (ADR-0029, GRPH-4 gate).** The named-graph partitioning
+> below stands; its **per-tenant instantiation does not**. The spike
+> measured 48 catalog relations per tenant's three graphs (48,000 at 1,000
+> tenants), and AGE's `cypher()` requires its graph name as a *name
+> constant* — so a per-tenant graph name can only reach the statement as
+> runtime-built text, which CLAUDE.md forbids and ADR-0001's compliance
+> note rules out. Amended shape: **one shared set** of entity / episode /
+> provenance graphs with `tenant_id` carried as a property and forced RLS
+> keyed to the TEN-2 GUC, which the spike verified is honoured by Cypher
+> traversals and fails closed. Consequently the "clean per-tenant
+> isolation boundary in AGE" and "cross-tenant edges structurally
+> impossible" claims below are now *enforced* rather than *structural*,
+> and TEN-5 tenant deletion and MEM-6 per-graph decay become predicated
+> rather than a graph drop. Traversal performance passed the gate
+> (2-hop 12.91ms median at 10M edges) — but only for disciplined query
+> forms, and the relational alternative rejected as option 4 below
+> outperformed AGE on every measured axis. See ADR-0029 and
+> docs/spikes/grph-4-age-traversal.md.
 
 ## Context
 
@@ -67,10 +86,22 @@ additive and degradable: retrieval and injection work with the graph off.
   tenant delete); cross-graph queries route through record IDs rather than
   a single traversal.
 - Reversal trigger: the GRPH-4 spike benchmarks traversals at 1M/10M
-  edges; failing its go/no-go criteria activates the Kuzu
-  embedded-fallback assessment recorded there. If cross-graph joins
+  edges; failing its go/no-go criteria activates the embedded-graph
+  fallback assessment recorded there. If cross-graph joins
   dominate real recall workloads, revisit the partition boundaries (merge
   entity+episode) before adding engines.
+  **Fired 2026-07-25 (ADR-0029):** the latency criteria passed, so the
+  fallback ladder was *not* activated — its rungs and trigger conditions
+  are re-recorded in the spike report, and the ladder was rewritten there:
+  the embedded engine this ADR originally named is no longer maintained,
+  and no licence-compatible property-graph replacement exists, so the
+  fallback is indexed adjacency in Postgres and then a materialised k-hop
+  closure table. The catalog and SQL-discipline criteria failed, and
+  the per-tenant instantiation is amended above. Remaining live trigger:
+  traversal depth beyond 2 hops or genuinely variable-length paths
+  becoming a product requirement, which AGE cannot serve (`*1..2` measured
+  at 408ms/1M and 3.7s/10M) and which is the one scenario where a
+  dedicated graph engine earns its place.
 
 ## Compliance notes
 

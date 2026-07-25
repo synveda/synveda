@@ -1,7 +1,7 @@
 # ADR-0029: The GRPH-4 gate — pre-registered criteria for Apache AGE, and the fallback ladder
 
-- **Status**: Proposed
-- **Date**: 2026-07-25
+- **Status**: Accepted
+- **Date**: 2026-07-25 (criteria recorded before the run; verdict appended after)
 - **Feature(s)**: GRPH-4 (gate for GRPH-1..3, MEM-5, CTX-5)
 - **Deciders**: sujitn
 
@@ -182,4 +182,77 @@ compliance note rather than left in a benchmark log.
 
 ## Verdict
 
-_Filled in after the run — see below._
+Measured 2026-07-25 on Postgres 17.10 + AGE 1.7.0 (Apple Silicon,
+OrbStack, virtualised IO). Full report and method:
+[docs/spikes/grph-4-age-traversal.md](../spikes/grph-4-age-traversal.md).
+
+| Criterion | Threshold | Measured | |
+|---|---|---|---|
+| G1 traversal | median ≤ 50ms @ 1M / 10M | 2-hop 8.18 / 12.91ms | **pass**¹ |
+| G2 slope | ≤ 3× | 1.58× (2-hop), 2.45× (1-hop) | **pass**¹ |
+| G3 edge write | median ≤ 10ms | 10.42ms via Cypher @10M | **fail**² |
+| G4 tenant cost | < 25,000 relations @ 1,000 tenants | 48,000 | **fail** |
+| G5 SQL discipline | no string-built SQL | graph name must be a literal | **fail** |
+| G6 txn + RLS | both | rollback ✓, forced RLS honoured ✓ | **pass** |
+
+¹ Conditional: only for single-seed `UNION ALL` branches and explicit hop
+patterns. The natural forms fail — `IN` lists scan the whole edge table
+(211.77ms at 10M, slope 7.09×) and `*1..2` variable-length paths cost
+408ms at 1M and 3.7s at 10M, against 0.43ms for the same traversal written
+as an explicit two-hop pattern.
+
+² Passes at 0.01ms by writing edges as direct inserts into AGE's label
+tables instead of through Cypher `CREATE` — 790× faster, still inside the
+record's transaction, so ADR-0001's commit-together property is kept
+rather than traded away as this ADR's G3 rule anticipated. (Matching
+endpoints by `id()` instead is 689ms — it does not use the primary key.)
+
+**Conditional go.** G1 and G2 — the criteria this gate existed to settle,
+and the ones whose failure would have activated the fallback ladder — pass
+with headroom. AGE is retained and ADR-0004's multi-graph partitioning
+stands. The fallback ladder is **not** activated; its rungs and trigger
+conditions are recorded in the report. One correction to both older ADRs
+falls out of writing it: the embedded engine they named as the fallback is
+no longer actively maintained, and there is no drop-in licence-compatible
+property-graph replacement — the mature engines are GPL or BSL and fail
+the core-path rule. The ladder is therefore inside Postgres (indexed
+adjacency, then a materialised k-hop closure table on the HIER-1 pattern),
+with a second engine reduced to a last rung that needs its own ADR and an
+explicit cargo-deny exception.
+
+Applying the pre-registered consequences of the three failures, all of
+which are binding on GRPH-1/GRPH-2:
+
+1. **G4 + G5 amend ADR-0004's central decision.** Both failures are
+   caused by the same clause — one named graph set *per tenant* — and both
+   are removed by the same change: one shared set of named graphs with
+   `tenant_id` carried as a property. That takes relations from
+   48-per-tenant to 48 total and makes the graph name a compile-time
+   constant, so statements are static and sqlx-checkable. G6 is what makes
+   this safe: forced RLS on label tables is honoured by Cypher, verified
+   with the TEN-2 GUC predicate across two tenants and failing closed with
+   no GUC set. ADR-0004 is amended, not superseded — the entity/episode/
+   provenance partitioning survives; only its per-tenant instantiation
+   does not. TEN-5 tenant deletion and MEM-6 per-graph decay become
+   predicated rather than structural, which is recorded as the cost.
+2. **G3's mitigation is binding on GRPH-2**: edges are written as direct
+   label-table inserts with the label sequences kept in step, never
+   through Cypher `CREATE`.
+3. **G1's conditionality is binding on GRPH-1**: the disciplined query
+   forms must be the only ones the code can emit, enforced by a test that
+   fails on a sequential scan over a label table in the plan. A gate that
+   passes only for queries written one particular way is not a property of
+   the engine; it is a property of the code, and it has to be defended by
+   a test or it will not survive contact with the second contributor.
+
+**Recorded against ADR-0004's option 4, and not resolved here.** The
+relational adjacency baseline cleared every criterion — including both
+that AGE failed — and was 3–8× faster on the traversals themselves
+(1-hop 1.24ms vs 9.35ms, 2-hop 4.84ms vs 12.91ms at 10M), with 2.5× less
+storage and 6.7× faster bulk load. AGE's distinguishing feature,
+variable-length traversal, is the slowest thing measured. This gate's
+pre-registered rule reserved the relational revival for a G1/G2 failure,
+which did not occur, so this ADR does not overturn ADR-0004 on that basis
+— but the evidence is recorded here and in the report, GRPH-1's design ADR
+is where the schema call belongs (per G4's own consequence), and the
+burden of proof has moved onto AGE.

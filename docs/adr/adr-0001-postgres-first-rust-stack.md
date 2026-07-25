@@ -63,8 +63,20 @@ trait, not a dependency taken today.
   path.
 - Reversal trigger: filtered ANN p99 > 200ms at ~5M vectors/tenant →
   promote the Qdrant adapter (OPS-4) to per-deployment default. AGE
-  traversal benchmarks fail the GRPH-4 gate → Kuzu embedded fallback, per
-  ADR-0004. PGMQ throughput ceiling → Temporal absorbs the ingestion buffer.
+  traversal benchmarks fail the GRPH-4 gate → the graph fallback ladder,
+  per ADR-0004. PGMQ throughput ceiling → Temporal absorbs the ingestion
+  buffer.
+  **GRPH-4 settled 2026-07-25 (ADR-0029):** AGE traversal passed
+  (2-hop 12.91ms median at 10M edges, slope 1.58×), so the fallback ladder
+  stays unactivated and "AGE Cypher performance is unproven at 10M+ edges"
+  above is now measured rather than assumed. The ladder itself was
+  rewritten: the embedded engine originally named is no longer maintained
+  and no licence-compatible property-graph replacement exists, so the
+  fallback is indexed adjacency in Postgres, then a materialised k-hop
+  closure table, with a second engine a last rung needing its own ADR. The single-engine claim held
+  on both counts that matter here: Cypher writes roll back with the
+  enclosing transaction, and forced RLS on AGE's label tables is honoured
+  by Cypher traversals.
 
 ## Compliance notes
 

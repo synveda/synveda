@@ -101,9 +101,13 @@ Apache-2.0, single binary, with scalar/product quantisation for memory-constrain
 **Apache AGE**: active Apache top-level project; the pgvector+AGE single-engine pattern
 (vectors + openCypher graph in one Postgres, no sync pipelines, "no multi-database tax") is
 now an explicitly promoted architecture (e.g. Microsoft Azure PostgreSQL guidance, 2026).
-Kuzu is the notable embedded-graph alternative appearing in memory stacks.
-→ **AGE choice holds. Keep graph features additive/degradable. Kuzu noted as embedded
-   fallback if AGE Cypher perf disappoints (spike in Phase 2).**
+The embedded-graph alternatives that appeared in memory stacks have thinned out: the
+notable one is no longer maintained, and the mature property-graph engines are GPL or BSL,
+failing the core-path licence rule.
+→ **AGE choice holds. Keep graph features additive/degradable. The fallback if AGE Cypher
+   perf disappoints is inside Postgres — indexed adjacency, then a materialised k-hop
+   closure table — not a second engine (spike in Phase 2; settled by GRPH-4/ADR-0029:
+   AGE passed on latency, and the fallback ladder was rewritten there).**
 
 **AuthZ**: MCP only got "its missing enterprise authorization layer" in mid-2026 —
 authorization for agent access is immature everywhere, which again is our gap to own. Cedar
@@ -299,8 +303,13 @@ GRPH-2 Graph-linking stage (M)
 GRPH-3 Graph-augmented recall (M)
   1–2 hop expansion in recall ranking; degradable (retrieval works with graph off).
   AC: multi-hop question set improves vs vector-only baseline; feature-flagged.
-GRPH-4 AGE performance spike / Kuzu fallback assessment (S) [de-risk, Phase 2 gate]
-  AC: report with traversal benchmarks at 1M/10M edges; go/no-go criteria recorded as ADR.
+GRPH-4 AGE performance spike / graph fallback assessment (S) [de-risk, Phase 2 gate]
+  Benchmark AGE Cypher traversal at the scales ADR-0001 and ADR-0004 both flag as unproven,
+  and decide whether the multi-graph AGE schema survives. Assess the fallback the two ADRs
+  name as their reversal trigger, and record the conditions that would activate it.
+  AC: report with traversal benchmarks at 1M/10M edges; go/no-go criteria recorded as ADR
+  — recorded *before* the benchmark runs, since a spike that fixes its thresholds after
+  seeing the numbers can only ratify the decision it was commissioned to test.
 
 ──────────────────────────────────────────────
 EPIC FLOW — VedaFlow (git-style governance)
@@ -396,11 +405,14 @@ EPIC EVAL — Evaluation (functional requirement)
 EVAL-1 Eval harness skeleton (M)
   Rust runner + fixtures; executes scenario suites against a live stack; CI-integrated with
   regression gates on the five axes: accuracy, latency, tokens, recall, abstention.
-  AC: `make eval` runs the scenario suite against a live stack and reports all five axes as
-  machine-readable JSON plus a human summary; a committed baseline gates the run; a real
-  product change that degrades quality (a bank-mode pack flip withholding derived memory)
-  fails the gate naming the axis, the baseline, the measurement, and the delta; nightly
-  workflow; demo script.
+  AC: `make eval` runs the scenario suite against a live stack and reports all five axes
+  (accuracy, latency, tokens, recall, abstention) as machine-readable JSON plus a human
+  summary; a committed baseline gates the run; a real product change that degrades quality
+  (a bank-mode pack flip withholding derived memory) fails the gate naming the axis, the
+  baseline, the measurement, and the delta; nightly workflow; demo script.
+  Written 2026-07-25 (EVAL-1, ADR-0028): the feature text specified a runner and gates but
+  no criteria. The gate is the load-bearing part — a harness that reports without failing is
+  a dashboard, and the five axes only mean something if a real regression trips them.
 EVAL-2 Extraction quality suite (M)
   Labelled transcript fixtures → precision/recall per memory class; hallucinated-memory rate
   (HaluMem-style). AC: dashboard; gate on regression >2pts.
