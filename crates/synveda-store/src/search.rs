@@ -341,6 +341,67 @@ pub async fn compose_candidates(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// The composition engine's published-channel read (FLOW-2, ADR-0031
+/// decision 9): the current version of each id a scope's published tree
+/// names, through the same scope, sensitivity, and valid-time predicate
+/// the derived sweep applies.
+///
+/// Fetched by id rather than swept, and uncapped, because a published set
+/// is bounded by `MAX_CHANNEL_MEMBERS` and must not compete with derived
+/// records for the per-`(scope, kind)` cap — a promoted extraction is
+/// still `kind = derived`, so the capped sweep could crowd a scope's own
+/// published material out of its own fetch.
+///
+/// An id the predicate rejects — deleted, re-scoped, re-classified above
+/// the ceiling, or outside its valid window — simply does not come back.
+/// A published set can therefore only go stale by *missing* material,
+/// never by resurfacing it: current Postgres truth decides, as it does
+/// for the sidecar index (ADR-0024 decision 6).
+#[tracing::instrument(
+    name = "store.search.compose_members",
+    skip_all,
+    fields(tenant.id = %tenant_id, ids.count = ids.len(), at = %at),
+    err(Display)
+)]
+pub async fn compose_members(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    ids: &[RecordId],
+    scopes: &[ScopeId],
+    sensitivities: &[Sensitivity],
+    at: DateTime<Utc>,
+) -> Result<Vec<RecordVersion>> {
+    if ids.is_empty() || scopes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<Uuid> = ids.iter().map(RecordId::as_uuid).collect();
+    let scopes: Vec<Uuid> = scopes.iter().map(ScopeId::as_uuid).collect();
+    let sensitivities: Vec<String> = sensitivities
+        .iter()
+        .map(|level| level.as_str().to_owned())
+        .collect();
+    let rows = sqlx::query_as!(
+        RecordRow,
+        r#"
+        select id, tenant_id, scope_id, owner_id, kind, class, content,
+               sensitivity, provenance, valid_from, valid_to, tx_from, tx_to
+        from records
+        where tenant_id = $1 and id = any($2)
+          and scope_id = any($3) and sensitivity = any($4)
+          and valid_from <= $5 and (valid_to is null or valid_to > $5)
+        "#,
+        tenant_id.as_uuid(),
+        &ids,
+        &scopes,
+        &sensitivities,
+        at,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// Verify-and-hydrate for the fused candidate set: re-reads `ids`
 /// against current truth with the scope and sensitivity predicate
 /// re-applied in SQL, so a lagging sidecar index can only miss — never

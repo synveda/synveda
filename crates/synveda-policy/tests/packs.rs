@@ -342,7 +342,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 /// (seed §6; lapses, AUTHZ-4, are the sanctioned relaxation).
 #[test]
 fn golden_regulated_strict() {
-    assert_pack_golden(REGULATED_STRICT, 5, &["org", "eng", "team-a", "alice-user"]);
+    assert_pack_golden(REGULATED_STRICT, 6, &["org", "eng", "team-a", "alice-user"]);
 }
 
 /// standard: own chain plus the department subtree — sibling team-b joins;
@@ -351,7 +351,7 @@ fn golden_regulated_strict() {
 fn golden_standard() {
     assert_pack_golden(
         STANDARD,
-        5,
+        6,
         &["org", "eng", "team-a", "team-b", "alice-user"],
     );
 }
@@ -362,7 +362,7 @@ fn golden_standard() {
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        5,
+        6,
         &[
             "org",
             "eng",

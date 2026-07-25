@@ -76,7 +76,11 @@ impl PolicySnapshot {
 /// Serialises a JSON value canonically: keys sorted bytewise at every depth,
 /// non-integer numbers rejected. String escaping is delegated to
 /// `serde_json`, whose output for a bare string is deterministic.
-fn canonical_json(value: &Value, out: &mut String) -> Result<()> {
+///
+/// Shared with [`crate::channels`], which addresses a memory by the same
+/// rule (ADR-0031 decision 6) so an auditor holding an API response can
+/// recompute the address the tree entry names.
+pub(crate) fn canonical_json(value: &Value, out: &mut String) -> Result<()> {
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(true) => out.push_str("true"),

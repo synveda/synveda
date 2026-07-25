@@ -3662,6 +3662,7 @@ dependencies = [
  "synveda-retrieval",
  "synveda-store",
  "synveda-types",
+ "synveda-vedaflow",
  "tokio",
  "tower",
  "tower-http 0.7.0",
@@ -3708,6 +3709,7 @@ dependencies = [
  "synveda-policy",
  "synveda-store",
  "synveda-types",
+ "synveda-vedaflow",
  "tokio",
  "tracing",
 ]
@@ -3737,6 +3739,7 @@ dependencies = [
  "synveda-policy",
  "synveda-store",
  "synveda-types",
+ "synveda-vedaflow",
  "tantivy",
  "tokio",
  "tracing",

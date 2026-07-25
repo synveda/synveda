@@ -251,8 +251,10 @@ pub(crate) fn policy_snapshot_writer() -> Writer {
 }
 
 /// RFC 3339 UTC with exactly six fractional digits — the one timestamp
-/// rendering the hash and the stored column agree on.
-fn canonical_timestamp(at: DateTime<Utc>) -> String {
+/// rendering the hash and the stored column agree on. Also the rendering
+/// inside a memory object's canonical JSON (ADR-0031 decision 6): one
+/// timestamp rule for everything this crate addresses.
+pub(crate) fn canonical_timestamp(at: DateTime<Utc>) -> String {
     at.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string()
 }
 

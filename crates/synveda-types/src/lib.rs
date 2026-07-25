@@ -7,6 +7,7 @@
 #![warn(missing_docs)]
 
 mod asset;
+mod channel;
 mod composition;
 mod error;
 mod hierarchy;
@@ -21,6 +22,7 @@ mod sensitivity;
 mod tenant;
 
 pub use asset::AssetKind;
+pub use channel::Channel;
 pub use composition::{CompositionConfig, InjectChannels};
 pub use error::{Error, Result};
 pub use hierarchy::{HierarchyNode, ScopeKind};

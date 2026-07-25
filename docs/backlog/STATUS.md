@@ -570,7 +570,7 @@ do._
 _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode switch._
 
 - [x] [FLOW-1: Object store](FLOW-1.md) — done 2026-07-25, ADR-0030, AC tests: crates/synveda-vedaflow/tests/object_store.rs (both properties over a live Postgres — dedup across objects, trees, and commits, with the row count pinned to the number of *distinct* (kind, content) pairs, and the same bytes in two tenants proven to be two rows at one address; immutability under 8 genuinely concurrent writers on their own connections, asserting every landed commit is reachable from the head, the chain is root + every commit, and no commit row exists that the head cannot reach — the headline run reports the compare-and-swaps actually lost, and fails if none were, since a race nobody lost tested nothing; plus the append-only grants and triggers, a trigger-suppressing attacker caught by `verify`, fast-forward vs. force, and the foreign keys refusing a dangling tree, parent, or entry), crates/synveda-store/tests/rls.rs (the six VedaFlow tables join the adversarial suite and its completeness guard), crates/synveda-vedaflow (27 unit tests: the length-prefixed encodings, per-kind domain separation, parent order, the policy-snapshot canonical form, and the signer seam), demo: demos/flow-1-object-store.sh
-- [ ] [FLOW-2: Channels](FLOW-2.md)
+- [x] [FLOW-2: Channels](FLOW-2.md) — done 2026-07-25, ADR-0031, AC test: crates/synveda-gateway/tests/channels.rs (the bank-mode switch over real refs, end to end on product surfaces: extracted memories land on `{scope}/memory/derived`, a curator publishes one through `POST /v1/channels/{scope}/publish` under the PDP, inject renders it unmarked while the rest still says unreviewed, a `published-only` pack becomes the tenant default, and the very next inject — same token, same session, no restart — composes the published record alone and cites the commit the curator made; plus the PDP gate, the read requirement that keeps a curator out of a teammate's personal scope, whole-request refusal of another scope's record, the `vedaflow.channel.published` event carrying ids and addresses but never content, and `GET /v1/channels`), crates/synveda-retrieval/tests/compose.rs (12 tests on real channels — including authored-but-unpublished material failing bank mode, and an edit demoting a published record to unreviewed), crates/synveda-gateway/tests/extraction.rs (the derived-channel commit lands in the pipeline's own write transaction), crates/synveda-policy/tests/{roles,packs,pdp}.rs (the channel plane joins the role×action matrix at pack `@6`), demo: demos/flow-2-channels.sh
 - [ ] [FLOW-3: Proposals & approval matrix](FLOW-3.md)
 - [ ] [FLOW-4: Auto-promotion rules](FLOW-4.md)
 - [ ] [FLOW-5: Cross-scope promotion](FLOW-5.md)
@@ -708,6 +708,61 @@ generation number as the recorded upgrade if FLOW-4/5's automated
 promotions make ref moves hot. `vedaflow_refs` carries no foreign key to
 `hierarchy_nodes`: an `on delete cascade` would be a ref-deletion path
 around the withheld DELETE grant, and disposal is TEN-5's._
+
+_FLOW-2 (2026-07-25, ADR-0031): channels — `vedaflow_refs` rows named
+`{asset-kind}/{channel}`, materialising on first write, no migration and
+no bootstrap. Three transitional stand-ins are discharged here: ADR-0025
+decisions 2 and 7 (the `RecordKind` channel stand-in and the version-hash
+watermark) and ADR-0022's "FLOW-1/2 replace the direct records insert
+with the derived-channel commit".
+
+**Published and staged are sets; derived is a log.** A publish commit's
+tree is the channel's entire membership, so "what is published here" is
+one indexed read for the whole scope chain. A derived commit's tree holds
+only what that commit added, because a full-membership tree per commit
+costs one row per record in the corpus on *every* extraction batch. The
+asymmetry is safe because derived membership is never enumerated: a
+record is derived material unless it is published.
+
+**Publication binds bytes, not ids.** A tree entry names the object
+address of exactly the version that was reviewed, and composition
+recomputes that address from the record it is about to serve. Edit a
+published record and it composes as unreviewed again — the alternative,
+membership by id, would let anyone with `memory.write` rewrite text under
+a published id and have it serve as reviewed content. It costs one hash
+comparison and no extra query.
+
+`RecordKind` goes back to meaning what seed §4.2 says: authored versus
+pipeline-derived. **Authorship is not review** — a pinned record nobody
+published does not survive bank mode, which is a deliberate behaviour
+change and the reason several CTX-2/CTX-3 tests move in this diff.
+Channel is tier 0 of conflict resolution (above seed §4.4's list, which
+predates channels), published material composes regardless of the task
+where pinned material used to, and bank mode *removes* the derived query
+rather than filtering its results.
+
+The publish route takes **two** decisions, and the second one decided
+what FLOW-3 is for. `ChannelPublish` says who may publish here;
+`MemoryRead` says whether they may read what they are about to declare
+reviewed. Since the pipeline lands every record at its owner's personal
+scope (ADR-0020 decision 3) and the privacy floor (ADR-0015 decision 4)
+denies a team curator any read there, **a curator cannot reach into a
+teammate's personal scope to publish it** — so the user→team climb tech
+plan §2.3 describes has to be a proposal the owner opens, not a
+reach-in. FLOW-2 ships no way around that. A user holding a curator
+binding can publish their own memories to their own channel, because the
+membership floor grants them that read.
+
+Deferrals and forward obligations: retraction has no surface until
+FLOW-7's rewind; `staged` has no writer until FLOW-3, so its ref is
+genuinely absent rather than manufactured empty; published sets are
+capped at 10,000 members per scope with subtree sharding as the recorded
+upgrade; MEM-5 and MEM-6 inherit the obligation to re-commit when they
+rewrite or close a record, since `valid_to` is inside the address;
+FLOW-8's export covers `published` cleanly and would need the snapshot
+question reopened for `derived`; records written before this feature have
+no derived commit and are simply unpublished material, with no backfill
+attempted. Signing stays `Unsigned` — key management is still TEN-4's._
 
 ## Phase 3 — Enterprise (wk 11–16)
 

@@ -331,6 +331,46 @@ pub async fn current(executor: impl PgExecutor<'_>, id: RecordId) -> Result<Opti
     row.map(TryInto::try_into).transpose()
 }
 
+/// The current version of each id that is a record of `tenant_id` living at
+/// `scope_id` — the publish path's read (FLOW-2, ADR-0031 decision 12).
+///
+/// Scoped rather than by id alone, because publishing is same-scope by
+/// definition: a record at a child scope climbing to its parent's channel
+/// needs that scope's approvers, which is FLOW-5. An id that is missing,
+/// deleted, or living elsewhere simply does not come back, and the caller
+/// reports the difference rather than publishing a partial set.
+#[tracing::instrument(
+    name = "store.records.current_at_scope",
+    skip_all,
+    fields(tenant.id = %tenant_id, scope.id = %scope_id, ids.count = ids.len()),
+    err(Display)
+)]
+pub async fn current_at_scope(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+    ids: &[RecordId],
+) -> Result<Vec<RecordVersion>> {
+    let ids: Vec<Uuid> = ids.iter().map(RecordId::as_uuid).collect();
+    let rows = sqlx::query_as!(
+        RecordRow,
+        r#"
+        select id, tenant_id, scope_id, owner_id, kind, class, content,
+               sensitivity, provenance, valid_from, valid_to, tx_from, tx_to
+        from records
+        where tenant_id = $1 and scope_id = $2 and id = any($3)
+        order by id
+        "#,
+        tenant_id.as_uuid(),
+        scope_id.as_uuid(),
+        &ids,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// Transaction-time as-of: the version of `id` the database held as truth at
 /// `tx_at` — "what did we know at time T". Returns `None` if the record did
 /// not exist (or was temporally deleted) at that instant. Transaction periods

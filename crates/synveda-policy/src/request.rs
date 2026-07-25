@@ -88,6 +88,15 @@ pub enum Action {
     /// anchor). Never a tenant-level action: an agent is always anchored
     /// at a node (ADR-0018 decision 3).
     ServiceIdentityManage,
+    /// Read the VedaFlow channels standing at the resource scope —
+    /// `GET /v1/channels/{scope}` (FLOW-2, ADR-0031 decision 12).
+    ChannelRead,
+    /// Publish records onto the resource scope's published channel: the
+    /// act that moves content across the trust boundary, so `inject`
+    /// composes it as reviewed material. Never a tenant-level action —
+    /// a channel belongs to a node — and never cross-scope: climbing to
+    /// a higher scope's channel needs that scope's approvers (FLOW-5).
+    ChannelPublish,
 }
 
 impl Action {
@@ -110,6 +119,8 @@ impl Action {
             Action::RoleAssign => "role.assign",
             Action::ServiceIdentityRead => "service_identity.read",
             Action::ServiceIdentityManage => "service_identity.manage",
+            Action::ChannelRead => "channel.read",
+            Action::ChannelPublish => "channel.publish",
         }
     }
 
@@ -130,6 +141,8 @@ impl Action {
             Action::RoleAssign => "RoleAssign",
             Action::ServiceIdentityRead => "ServiceIdentityRead",
             Action::ServiceIdentityManage => "ServiceIdentityManage",
+            Action::ChannelRead => "ChannelRead",
+            Action::ChannelPublish => "ChannelPublish",
         }
     }
 }

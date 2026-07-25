@@ -1,4 +1,4 @@
-// open-collaboration@5 — org-wide read (seed §6, ADR-0014, ADR-0015,
+// open-collaboration@6 — org-wide read (seed §6, ADR-0014, ADR-0015,
 // ADR-0018, ADR-0020, ADR-0021).
 //
 // Own-chain reads plus every scope of the tenant, personal (user-kind)
@@ -111,4 +111,37 @@ permit (
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["steward", "org-admin", "security-reviewer"])
+};
+
+// The VedaFlow channel plane (FLOW-2, ADR-0031 decision 12): pack-uniform,
+// like the quarantine plane and for the same reason — how content crosses
+// the trust boundary does not loosen per pack. Reading a scope's channels
+// joins the read-only admin surfaces, plus curator, who has to see a
+// channel before publishing to it.
+permit (
+    principal,
+    action == Synveda::Action::"ChannelRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["steward", "org-admin", "auditor", "curator"])
+};
+
+// Publishing is the curator's act by name (seed §5: curator "can
+// pin/approve"), with steward and org-admin above it. Personal scopes are
+// deliberately NOT excluded here, unlike the content-role grants: the
+// route additionally requires MemoryRead on every record it admits
+// (ADR-0031 decision 12), and the privacy floor already denies that at
+// someone else's personal scope. So a user who holds a curator binding may
+// publish their own memories to their own channel, and no curator can
+// publish material they cannot read — which is the property a scope-kind
+// clause here would only approximate. FLOW-3 puts required approvals in
+// front of this action; it does not replace it.
+permit (
+    principal,
+    action == Synveda::Action::"ChannelPublish",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["curator", "steward", "org-admin"])
 };

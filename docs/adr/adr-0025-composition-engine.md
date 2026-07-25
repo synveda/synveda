@@ -1,9 +1,23 @@
 # ADR-0025: Composition engine — chain gradient, pack-carried composition config, pre-VedaFlow watermarks
 
-- **Status**: Accepted
+- **Status**: Accepted; decisions 2 and 7 superseded by ADR-0031 (2026-07-25)
 - **Date**: 2026-07-23
 - **Feature(s)**: CTX-2
 - **Deciders**: sujitn
+
+> **Note (ADR-0031, FLOW-2).** This ADR's decisions 2 and 7 were recorded
+> as explicitly transitional, with "FLOW-1/2 land" as their reversal
+> trigger. They have landed. **Decision 2** — `RecordKind` standing in for
+> the channel — is gone: a record composes as published when its scope's
+> `memory/published` tree names it at the content it now holds, and
+> `RecordKind` means only what seed §4.2 says (authored vs derived). A
+> pinned record nobody published no longer survives bank mode. **Decision
+> 7**'s `blake3(record_id ‖ tx_from ‖ content)` watermark is replaced by
+> the VedaFlow object address, and the block additionally carries the
+> commit each scope's published channel pointed at. Decision 6's
+> comparator gained a tier above seed §4.4's list: published beats
+> unpublished. Everything else here — the plan walk, the budget, the
+> estimator, the assembly order, the metric — stands unchanged.
 
 ## Context
 

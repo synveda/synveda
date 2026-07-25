@@ -46,11 +46,12 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// added the service-identity plane to the admin permits (ADR-0018
 /// decision 3). `@4`: MEM-1 added the `MemoryWrite` own-home floor and
 /// content-role write grant (ADR-0020 decision 3). `@5`: MEM-2 added the
-/// quarantine review plane (ADR-0021 decision 6).
+/// quarantine review plane (ADR-0021 decision 6). `@6`: FLOW-2 added the
+/// channel plane (ADR-0031 decision 12).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 5),
-    (STANDARD, 5),
-    (OPEN_COLLABORATION, 5),
+    (REGULATED_STRICT, 6),
+    (STANDARD, 6),
+    (OPEN_COLLABORATION, 6),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the

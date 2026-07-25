@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select r.name, r.commit_hash, r.updated_at, r.updated_by,\n                  (select count(*) from vedaflow_tree_entries e\n                   where e.tenant_id = r.tenant_id and e.tree_hash = c.tree_hash)\n                      as \"entries!\"\n           from vedaflow_refs r\n           join vedaflow_commits c\n               on c.tenant_id = r.tenant_id and c.hash = r.commit_hash\n           where r.tenant_id = $1 and r.scope_id = $2\n           order by r.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "commit_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "entries!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "dc51962376e4dd36e2fd988696a6ba66362a86bb2b8467824dc4b73b40d130a1"
+}

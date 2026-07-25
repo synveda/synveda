@@ -31,6 +31,7 @@ pub mod app;
 mod audit;
 pub mod auth;
 pub mod authz;
+pub mod channels;
 pub mod error;
 pub mod hierarchy;
 mod inject;

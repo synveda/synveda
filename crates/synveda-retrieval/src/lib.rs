@@ -28,8 +28,8 @@ pub use authz::{
     CompositionPlan, MemoryReadInputs, ScopeDecision, composition_plan, permitted_chain_scopes,
 };
 pub use compose::{
-    ComposeRequest, ComposeScope, ComposedBlock, ComposedEntry, compose, conflict_precedence,
-    estimated_tokens,
+    COMPOSED_ENTRIES_TOTAL, Candidate, ChannelWatermark, ComposeRequest, ComposeScope,
+    ComposedBlock, ComposedEntry, compose, conflict_precedence, estimated_tokens,
 };
 pub use hybrid::{QueryVector, RetrievedRecord, SearchFilter, SearchRequest, hybrid_search};
 pub use index::{SEARCH_SCHEMA_VERSION, SearchIndex, SparseHit};

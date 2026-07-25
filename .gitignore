@@ -1,4 +1,8 @@
 /target/
+# The gateway's Tantivy sidecar (CTX-1): SYNVEDA_SEARCH_INDEX_DIR defaults
+# here, so running the binary or a demo from the repo root materialises a
+# per-tenant index. Derived data, rebuilt by the indexer's sweep.
+/data/
 node_modules/
 dist/
 *.tsbuildinfo

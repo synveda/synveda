@@ -8,11 +8,13 @@ use serde::{Deserialize, Serialize};
 use crate::Error;
 
 /// Which channels compose into an inject block under a pack (CTX-2,
-/// ADR-0025 decision 2). Pre-FLOW-2, [`crate::RecordKind`] is the
-/// channel stand-in: `pinned` is the published channel (authored,
-/// canonical), `derived` the derived channel (unreviewed pipeline
-/// output). FLOW-2's channel refs replace the stand-in; this switch —
-/// the "bank mode" — keeps its meaning unchanged.
+/// ADR-0025 decision 2). Since FLOW-2 the channels are real: a record
+/// composes as published when its scope's `memory/published` tree names
+/// it at exactly the content it holds, and as derived otherwise
+/// ([`crate::Channel`], ADR-0031 decisions 4 and 5). This switch — the
+/// "bank mode" — kept its meaning across that change; what changed is
+/// that `published` now requires a publication rather than standing in
+/// for one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum InjectChannels {

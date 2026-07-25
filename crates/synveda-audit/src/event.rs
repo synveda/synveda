@@ -156,6 +156,16 @@ pub enum AuditAction {
     /// decision 5; ADR-0019 decision 4). Payloads carry no user
     /// content: the task rides as a BLAKE3 hash only.
     ContextInjected,
+    /// Records were published onto a scope's VedaFlow published channel —
+    /// the act that moves content across the trust boundary so `inject`
+    /// composes it as reviewed (FLOW-2, ADR-0031 decision 14). The first
+    /// VedaFlow action; ADR-0030 decision 14 deferred it to whichever
+    /// feature produced a governed one. Payload carries the asset kind,
+    /// the record ids, the commit the channel moved from and to, and the
+    /// pack that governed — never record content. The pipeline's
+    /// derived-channel commits ride `memory.extracted` instead: one event
+    /// per group, not a second event asserting the same fact.
+    ChannelPublished,
 }
 
 impl AuditAction {
@@ -188,6 +198,7 @@ impl AuditAction {
             AuditAction::MemoryExtracted => "memory.extracted",
             AuditAction::TenantCreated => "tenant.created",
             AuditAction::ContextInjected => "context.injected",
+            AuditAction::ChannelPublished => "vedaflow.channel.published",
         }
     }
 }

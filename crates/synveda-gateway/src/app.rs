@@ -23,6 +23,7 @@ use synveda_types::{Error, Tenant};
 use tower_http::trace::TraceLayer;
 
 use crate::auth;
+use crate::channels;
 use crate::error::ApiError;
 use crate::hierarchy;
 use crate::inject;
@@ -160,6 +161,11 @@ pub fn router(state: AppState) -> Router {
             post(quarantine::release),
         )
         .route("/v1/quarantine/{event_id}/reject", post(quarantine::reject))
+        // The VedaFlow channel plane (FLOW-2, ADR-0031 decision 12):
+        // reading a scope's standing channels, and publishing records
+        // across the trust boundary onto its published one.
+        .route("/v1/channels/{scope_id}", get(channels::list))
+        .route("/v1/channels/{scope_id}/publish", post(channels::publish))
         // The service-identity plane (AUTH-3, ADR-0018 decision 3).
         .route(
             "/v1/service-identities",

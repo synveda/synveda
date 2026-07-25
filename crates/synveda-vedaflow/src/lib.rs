@@ -4,13 +4,15 @@
 //!
 //! # What this crate is
 //!
-//! The substrate, and only the substrate. FLOW-1 ships the object store:
-//! content addressing, immutable history, and compare-and-swap ref updates.
-//! The meanings come later — FLOW-2 turns ref names into the
-//! `derived`/`staged`/`published` channels the inject path reads, FLOW-3
-//! hangs proposals and the approval matrix off two refs, FLOW-7 rolls a ref
-//! back. Nothing here decides who may write what; that is the PDP's job, at
-//! the seam the caller crossed to get here.
+//! The substrate and the channel vocabulary built on it. FLOW-1 shipped the
+//! object store: content addressing, immutable history, and
+//! compare-and-swap ref updates. FLOW-2 ([`channels`], ADR-0031) gives ref
+//! names meaning — `{asset-kind}/{channel}` per scope, published and staged
+//! carrying their whole membership and derived carrying a log of what each
+//! commit added. The rest comes later: FLOW-3 hangs proposals and the
+//! approval matrix off two refs, FLOW-7 rolls a ref back. Nothing here
+//! decides who may write what; that is the PDP's job, at the seam the
+//! caller crossed to get here.
 //!
 //! # How it is used
 //!
@@ -65,6 +67,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod channels;
 pub mod commits;
 pub mod hash;
 pub mod objects;
@@ -74,6 +77,11 @@ pub mod signer;
 pub mod trees;
 pub mod verify;
 
+pub use channels::{
+    ChannelCommit, ChannelMember, ChannelRef, ChannelSnapshot, ChannelStatus, ChannelWrite,
+    MAX_CHANNEL_MEMBERS, MemoryAsset, MemoryChannel, append, publish, put_memory, read_members,
+    read_memory_members,
+};
 pub use commits::{NewCommit, StoredCommit, commit, is_ancestor, read_commit};
 pub use hash::{CommitHash, ObjectHash, PolicySnapshotHash, TreeHash};
 pub use objects::{MAX_OBJECT_BYTES, StoredObject, put_object, read_object};

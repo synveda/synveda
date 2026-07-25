@@ -36,8 +36,8 @@ use synveda_ingest::extraction::{AnyExtractor, ClaudeExtractor, DeterministicExt
 use synveda_ingest::worker::{self, WorkerConfig, WorkerDeps};
 use synveda_store::{hierarchy, identities, quarantine, rls, tenants};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, ObserveEventId, ScopeId, ScopeKind,
-    TenantId, TenantStatus,
+    HierarchyNode, Identity, IdentityId, IdentityKind, ObserveEventId, RecordId, ScopeId,
+    ScopeKind, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -330,6 +330,7 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
 }
 
 struct StoredRecord {
+    id: RecordId,
     class: String,
     content: String,
     sensitivity: String,
@@ -342,7 +343,7 @@ struct StoredRecord {
 /// on purpose; the RLS suite owns isolation).
 async fn stored_records(pool: &PgPool, tenant: TenantId) -> Vec<StoredRecord> {
     sqlx::query!(
-        r#"select class, content, sensitivity, kind, provenance, valid_from
+        r#"select id, class, content, sensitivity, kind, provenance, valid_from
            from records where tenant_id = $1 order by class"#,
         tenant.as_uuid(),
     )
@@ -351,6 +352,7 @@ async fn stored_records(pool: &PgPool, tenant: TenantId) -> Vec<StoredRecord> {
     .expect("read records")
     .into_iter()
     .map(|row| StoredRecord {
+        id: RecordId::from_uuid(row.id),
         class: row.class,
         content: row.content,
         sensitivity: row.sensitivity,
@@ -517,6 +519,47 @@ async fn observed_events_become_derived_records_with_provenance() {
     assert_eq!(payload["events"].as_array().expect("events array").len(), 3);
     assert_eq!(payload["method"], "deterministic");
     assert_chain_verifies(&pool, tenant).await;
+
+    // FLOW-2 (ADR-0031 decision 13), discharging ADR-0022's recorded
+    // forward obligation: the records and their derived-channel commit
+    // land in one transaction. The channel rides the group's existing
+    // event rather than chaining a second one (decision 14).
+    let channels = payload["channels"].as_array().expect("channels array");
+    assert_eq!(channels.len(), 1, "one commit per owner's home scope");
+    assert_eq!(channels[0]["ref"], "memory/derived");
+    assert_eq!(channels[0]["scope_id"], json!(alice.scope_id));
+    assert_eq!(channels[0]["records"], json!(3), "this batch's records");
+    assert!(
+        channels[0]["parent"].is_null(),
+        "the channel's first commit"
+    );
+    let commit = channels[0]["commit"].as_str().expect("commit hash");
+    assert_eq!(commit.len(), 64);
+
+    // And the ref really points there, with an object per record whose
+    // address the composition engine recomputes from the record itself.
+    let mut tx = rls::begin_tenant_tx(&pool, tenant)
+        .await
+        .expect("tenant tx");
+    let derived = synveda_vedaflow::read_memory_members(
+        &mut tx,
+        tenant,
+        &[alice.scope_id],
+        synveda_types::Channel::Derived,
+    )
+    .await
+    .expect("read the derived channel");
+    let head = derived.first().expect("the derived channel exists");
+    assert_eq!(head.commit.to_hex(), commit);
+    assert_eq!(head.members.len(), 3);
+    for record in &records {
+        assert!(
+            head.members.contains_key(&record.id),
+            "record {} is on the derived channel",
+            record.id
+        );
+    }
+    drop(tx);
 
     assert!(
         state

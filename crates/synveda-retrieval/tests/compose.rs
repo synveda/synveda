@@ -1,12 +1,19 @@
 //! CTX-2 AC tests (ADR-0025): deterministic given same inputs; every
-//! block watermarked with version hashes + record ids;
-//! `tokens_per_inject` emitted — plus the gradient, pinned-first,
-//! conflict, channel, budget, valid-time, sensitivity, and relevance
-//! rules the feature names.
+//! block watermarked with content addresses + record ids;
+//! `tokens_per_inject` emitted — plus the gradient, conflict, channel,
+//! budget, valid-time, sensitivity, and relevance rules the feature
+//! names.
+//!
+//! Since FLOW-2 (ADR-0031) the channel rules are real, and the suite
+//! says so: material composes as *published* only where a scope's
+//! `memory/published` tree names it at the content it now holds, so the
+//! fixtures publish deliberately. `RecordKind::Pinned` here means what
+//! seed §4.2 says — authored — and an unpublished authored record is
+//! still unreviewed.
 //!
 //! These tests need a live Postgres (the bitemporal-suite harness:
-//! `DATABASE_URL` or quiet skip). Tenant isolation is by freshly minted
-//! ids.
+//! `DATABASE_URL` or quiet skip). Tenants are admitted per test — the
+//! VedaFlow tables carry a tenant foreign key.
 
 use std::sync::OnceLock;
 
@@ -18,7 +25,11 @@ use synveda_retrieval::{ComposeRequest, ComposeScope, ComposedBlock, compose};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::rls;
 use synveda_types::{
-    IdentityId, RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity, TenantId,
+    Channel, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity,
+    TenantId,
+};
+use synveda_vedaflow::{
+    self as vedaflow, ChannelRef, ChannelWrite, MemoryAsset, PolicySnapshot, Signer,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -164,6 +175,73 @@ async fn insert(pool: &PgPool, tenant: TenantId, spec: Insert<'_>) -> RecordId {
     id
 }
 
+/// Admits a tenant. Records need none, but the VedaFlow tables carry a
+/// tenant foreign key, so a test that publishes needs one.
+fn admit(db: &Db) -> TenantId {
+    let tenant = TenantId::new();
+    db.rt.block_on(async {
+        sqlx::query("insert into tenants (id, slug, name, status) values ($1, $2, $3, 'active')")
+            .bind(tenant.as_uuid())
+            .bind(format!("ctx2-{}", tenant.as_uuid().simple()))
+            .bind("CTX-2 / FLOW-2 acceptance test")
+            .execute(&db.pool)
+            .await
+            .expect("admit tenant");
+    });
+    tenant
+}
+
+/// Publishes records onto a scope's `memory/published` channel — the
+/// fixture form of what `POST /v1/channels/{scope}/publish` does under
+/// the PDP (the governed route is proven in the gateway suite; seeding
+/// here is the same standing `records::insert` has).
+fn publish(db: &Db, tenant: TenantId, scope: ScopeId, ids: &[RecordId]) {
+    db.rt.block_on(async {
+        let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("tenant tx");
+        let mut members = Vec::with_capacity(ids.len());
+        for id in ids {
+            let version = records::current(&mut *tx, *id)
+                .await
+                .expect("read record")
+                .expect("record exists");
+            let asset = MemoryAsset {
+                id: version.id,
+                scope_id: version.state.scope_id,
+                owner_id: version.state.owner_id,
+                kind: version.state.kind,
+                class: version.state.class,
+                content: version.state.content.clone(),
+                sensitivity: version.state.sensitivity,
+                valid_from: version.state.valid_from,
+                valid_to: version.state.valid_to,
+            };
+            let object = vedaflow::put_memory(&mut tx, tenant, &asset)
+                .await
+                .expect("put memory object");
+            members.push((asset.entry_name(), object.hash));
+        }
+        vedaflow::publish(
+            &mut tx,
+            tenant,
+            &ChannelWrite {
+                scope,
+                channel: ChannelRef::memory(Channel::Published),
+                members: &members,
+                author: IdentityId::new(),
+                message: "ctx-2 fixture publication",
+                committed_at: Utc::now(),
+                policy_snapshot: &PolicySnapshot::new("regulated-strict", 6),
+            },
+            &Signer::Unsigned,
+        )
+        .await
+        .expect("publish");
+        tx.commit().await.expect("commit publication");
+    });
+}
+
 /// Runs one compose inside a fresh tenant transaction (the RLS
 /// discipline production follows).
 fn run(db: &Db, tenant: TenantId, request: &ComposeRequest) -> ComposedBlock {
@@ -182,15 +260,15 @@ fn ids(block: &ComposedBlock) -> Vec<RecordId> {
     block.entries.iter().map(|entry| entry.record_id).collect()
 }
 
-// ── The gradient and pinned-first (seed §4.4) ────────────────────────────────
+// ── The gradient and published-first (seed §4.4) ─────────────────────────────
 
-/// Assembly order is user > team > department > org, pinned before
-/// derived within each level, and derived — never pinned — is marked
-/// unreviewed in the rendered text.
+/// Assembly order is user > team > department > org, published before
+/// unpublished within each level, and everything not published is
+/// marked unreviewed in the rendered text.
 #[test]
-fn gradient_assembles_nearest_first_pinned_first() {
+fn gradient_assembles_nearest_first_published_first() {
     let Some(db) = db() else { return };
-    let tenant = TenantId::new();
+    let tenant = admit(db);
     let chain = Chain::new();
     let now = Utc::now();
     // Inserted deliberately out of gradient order.
@@ -214,13 +292,15 @@ fn gradient_assembles_nearest_first_pinned_first() {
         tenant,
         Insert::pinned(chain.team, "team-a owns the payments service", now),
     ));
+    publish(db, tenant, chain.team, &[team_pin]);
+    publish(db, tenant, chain.org, &[org_pin]);
 
     let block = run(db, tenant, &ComposeRequest::new(chain.scopes(), 1_500, now));
 
     assert_eq!(
         ids(&block),
         vec![user_derived, team_pin, team_derived, org_pin],
-        "gradient order, pinned first within the level"
+        "gradient order, published first within the level"
     );
     assert!(
         block.text.contains("alice prefers tabs [unreviewed]"),
@@ -231,7 +311,7 @@ fn gradient_assembles_nearest_first_pinned_first() {
         block
             .text
             .contains("- [fact] team-a owns the payments service\n"),
-        "pinned carries no unreviewed mark: {}",
+        "published carries no unreviewed mark: {}",
         block.text
     );
     let user_at = block.text.find("alice prefers tabs").expect("user entry");
@@ -248,7 +328,7 @@ fn gradient_assembles_nearest_first_pinned_first() {
 #[test]
 fn deterministic_given_same_inputs() {
     let Some(db) = db() else { return };
-    let tenant = TenantId::new();
+    let tenant = admit(db);
     let chain = Chain::new();
     let now = Utc::now();
     for content in ["fact one", "fact two", "fact three"] {
@@ -283,13 +363,15 @@ fn deterministic_given_same_inputs() {
 
 // ── The watermark AC ─────────────────────────────────────────────────────────
 
-/// Every block is watermarked: per-entry BLAKE3 version hashes, a block
-/// hash recomputable from them, and the rendered watermark line carries
-/// the block hash and every composed record id.
+/// Every block is watermarked: per-entry VedaFlow object addresses, a
+/// block hash recomputable from them, the rendered watermark line
+/// carrying the block hash and every composed record id, and — since
+/// FLOW-2 — the published channel commit each scope was read at
+/// (ADR-0031 decision 11).
 #[test]
 fn watermark_carries_hashes_and_record_ids() {
     let Some(db) = db() else { return };
-    let tenant = TenantId::new();
+    let tenant = admit(db);
     let chain = Chain::new();
     let now = Utc::now();
     db.rt.block_on(insert(
@@ -297,19 +379,20 @@ fn watermark_carries_hashes_and_record_ids() {
         tenant,
         Insert::derived(chain.user, "watermarked fact", now),
     ));
-    db.rt.block_on(insert(
+    let convention = db.rt.block_on(insert(
         &db.pool,
         tenant,
         Insert::pinned(chain.org, "watermarked convention", now),
     ));
+    publish(db, tenant, chain.org, &[convention]);
 
     let block = run(db, tenant, &ComposeRequest::new(chain.scopes(), 1_500, now));
 
     assert_eq!(block.entries.len(), 2);
     for entry in &block.entries {
-        assert_eq!(entry.version_hash.len(), 64, "BLAKE3 hex");
+        assert_eq!(entry.object_hash.len(), 64, "BLAKE3 hex");
         assert!(
-            entry.version_hash.chars().all(|c| c.is_ascii_hexdigit()),
+            entry.object_hash.chars().all(|c| c.is_ascii_hexdigit()),
             "hex-encoded"
         );
         assert!(
@@ -318,11 +401,13 @@ fn watermark_carries_hashes_and_record_ids() {
             entry.record_id
         );
     }
-    // The block hash is BLAKE3 over the ordered entry hashes —
-    // recomputable by any consumer holding the watermark.
+    // The block hash is BLAKE3 over the ordered entry addresses and the
+    // channel each composed from — recomputable by any consumer holding
+    // the watermark, and different for two blocks that read differently.
     let mut hasher = blake3::Hasher::new();
     for entry in &block.entries {
-        hasher.update(entry.version_hash.as_bytes());
+        hasher.update(entry.object_hash.as_bytes());
+        hasher.update(entry.channel.as_str().as_bytes());
     }
     let recomputed = hasher.finalize().to_hex().to_string();
     assert_eq!(block.block_hash, recomputed, "block hash recomputes");
@@ -332,6 +417,21 @@ fn watermark_carries_hashes_and_record_ids() {
             .contains(&format!("synveda:watermark v1 blake3={}", block.block_hash)),
         "watermark line carries the block hash: {}",
         block.text
+    );
+
+    // The channel watermark: the org's published ref, cited on the block
+    // and (in the product path) in the inject audit event — never in the
+    // rendered text, which the budget pays for.
+    let cited = block
+        .channels
+        .iter()
+        .find(|channel| channel.scope_id == chain.org)
+        .expect("the org's published channel is cited");
+    assert_eq!(cited.channel, "memory/published");
+    assert_eq!(cited.commit.len(), 64, "a commit hash, hex");
+    assert!(
+        !block.text.contains(&cited.commit),
+        "channel commits stay out of the budgeted text"
     );
 }
 
@@ -343,7 +443,7 @@ fn watermark_carries_hashes_and_record_ids() {
 #[test]
 fn budget_is_enforced_nearest_first() {
     let Some(db) = db() else { return };
-    let tenant = TenantId::new();
+    let tenant = admit(db);
     let chain = Chain::new();
     let now = Utc::now();
     let short = db.rt.block_on(insert(
@@ -374,11 +474,12 @@ fn budget_is_enforced_nearest_first() {
 // ── Channel rules ────────────────────────────────────────────────────────────
 
 /// A published-only scope (its effective pack's bank-mode switch)
-/// composes pinned material only; other scopes keep both channels.
+/// composes that scope's *published* material only; other scopes keep
+/// both channels.
 #[test]
 fn published_only_scope_excludes_derived() {
     let Some(db) = db() else { return };
-    let tenant = TenantId::new();
+    let tenant = admit(db);
     let chain = Chain::new();
     let now = Utc::now();
     let user_derived = db.rt.block_on(insert(
@@ -391,11 +492,12 @@ fn published_only_scope_excludes_derived() {
         tenant,
         Insert::derived(chain.team, "team derived fact", now),
     ));
-    let team_pin = db.rt.block_on(insert(
+    let team_published = db.rt.block_on(insert(
         &db.pool,
         tenant,
-        Insert::pinned(chain.team, "team pinned procedure", now),
+        Insert::pinned(chain.team, "team published procedure", now),
     ));
+    publish(db, tenant, chain.team, &[team_published]);
 
     let mut scopes = chain.scopes();
     scopes[1].include_derived = false;
@@ -403,27 +505,147 @@ fn published_only_scope_excludes_derived() {
 
     assert_eq!(
         ids(&block),
-        vec![user_derived, team_pin],
-        "team derived is out; team pinned and user derived compose"
+        vec![user_derived, team_published],
+        "team derived is out; the team's published record and user derived compose"
+    );
+}
+
+/// The behaviour change FLOW-2 exists for (ADR-0031 decision 7):
+/// authorship is not review. An authored (`pinned`) record nobody
+/// published is unreviewed material — marked as such, and gone under
+/// bank mode.
+#[test]
+fn authored_material_nobody_published_does_not_survive_bank_mode() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+    let authored = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::pinned(chain.team, "authored but never reviewed", now),
+    ));
+
+    let both = run(db, tenant, &ComposeRequest::new(chain.scopes(), 1_500, now));
+    assert_eq!(
+        ids(&both),
+        vec![authored],
+        "it composes while derived is on"
+    );
+    assert!(
+        both.text
+            .contains("authored but never reviewed [unreviewed]"),
+        "and says it is unreviewed: {}",
+        both.text
+    );
+
+    let mut bank = chain.scopes();
+    for scope in &mut bank {
+        scope.include_derived = false;
+    }
+    let block = run(db, tenant, &ComposeRequest::new(bank, 1_500, now));
+    assert!(
+        ids(&block).is_empty(),
+        "bank mode composes nothing nobody published"
+    );
+
+    // Publish it, and the very same block composes it as reviewed.
+    publish(db, tenant, chain.team, &[authored]);
+    let mut bank = chain.scopes();
+    for scope in &mut bank {
+        scope.include_derived = false;
+    }
+    let after = run(db, tenant, &ComposeRequest::new(bank, 1_500, now));
+    assert_eq!(ids(&after), vec![authored]);
+    assert!(!after.text.contains("[unreviewed]"));
+    // Same record, same content, different block: publishing changed
+    // what the block says, so it changed the block's identity too.
+    assert_ne!(
+        both.block_hash, after.block_hash,
+        "the channel is part of the block hash"
+    );
+}
+
+/// Publication binds bytes, not ids (ADR-0031 decision 5): a record
+/// edited after publication no longer matches the address its scope
+/// admitted, so it composes as unreviewed again rather than laundering
+/// the edit through a published id.
+#[test]
+fn editing_published_content_demotes_it_to_unreviewed() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+    let record = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::pinned(chain.team, "deploy on fridays", now),
+    ));
+    publish(db, tenant, chain.team, &[record]);
+
+    let before = run(db, tenant, &ComposeRequest::new(chain.scopes(), 1_500, now));
+    assert!(
+        !before.text.contains("[unreviewed]"),
+        "published as written"
+    );
+
+    // The same id, different bytes — the whole point of the check.
+    db.rt.block_on(async {
+        let current = records::current(&db.pool, record)
+            .await
+            .expect("read record")
+            .expect("record exists");
+        records::update(
+            &db.pool,
+            record,
+            &RecordState {
+                content: "deploy whenever you like".to_owned(),
+                ..current.state
+            },
+            &RecordEmbedding {
+                model: "test@1".to_owned(),
+                vector: vec![0.5; 16],
+            },
+        )
+        .await
+        .expect("rewrite record");
+    });
+
+    let after = run(db, tenant, &ComposeRequest::new(chain.scopes(), 1_500, now));
+    assert!(
+        after.text.contains("deploy whenever you like [unreviewed]"),
+        "the edited version is unreviewed again: {}",
+        after.text
+    );
+    let mut bank = chain.scopes();
+    for scope in &mut bank {
+        scope.include_derived = false;
+    }
+    let banked = run(db, tenant, &ComposeRequest::new(bank, 1_500, now));
+    assert!(
+        ids(&banked).is_empty(),
+        "and bank mode drops it: the reviewed bytes no longer exist"
     );
 }
 
 // ── Conflict rules (seed §4.4) ───────────────────────────────────────────────
 
-/// The three conflict rules, each proven against the tempting wrong
-/// winner: pinned beats derived even from a broader scope and an older
-/// valid time; specificity beats recency among equals; newer valid time
-/// wins within a scope. Losers vanish from block and watermark alike.
+/// The conflict rules, each proven against the tempting wrong winner:
+/// published beats unpublished even from a broader scope and an older
+/// valid time (ADR-0031 decision 8's tier 0); specificity beats recency
+/// among equals; newer valid time wins within a scope. Losers vanish
+/// from block and watermark alike.
 #[test]
-fn conflicts_resolve_by_kind_then_scope_then_valid_time() {
+fn conflicts_resolve_by_channel_then_scope_then_valid_time() {
     let Some(db) = db() else { return };
-    let tenant = TenantId::new();
+    let tenant = admit(db);
     let chain = Chain::new();
     let now = Utc::now();
     let earlier = now - Duration::hours(2);
 
-    // Pinned at org (older) vs derived at user (newer, whitespace-
-    // padded — the trimmed-content predicate still groups them).
+    // Published at org (older) vs unpublished at user (newer,
+    // whitespace-padded — the trimmed-content predicate still groups
+    // them).
     let org_pin = db.rt.block_on(insert(
         &db.pool,
         tenant,
@@ -434,6 +656,7 @@ fn conflicts_resolve_by_kind_then_scope_then_valid_time() {
         tenant,
         Insert::derived(chain.user, "  the deploy window is friday  ", now),
     ));
+    publish(db, tenant, chain.org, &[org_pin]);
 
     // Derived at user (older) vs derived at org (newer).
     let user_near = db.rt.block_on(insert(
@@ -462,7 +685,10 @@ fn conflicts_resolve_by_kind_then_scope_then_valid_time() {
     let block = run(db, tenant, &ComposeRequest::new(chain.scopes(), 1_500, now));
 
     let composed = ids(&block);
-    assert!(composed.contains(&org_pin), "pinned beats derived");
+    assert!(
+        composed.contains(&org_pin),
+        "published beats nearer unpublished"
+    );
     assert!(!composed.contains(&user_dup));
     assert!(composed.contains(&user_near), "specific beats broad");
     assert!(!composed.contains(&org_dup));
@@ -485,7 +711,7 @@ fn conflicts_resolve_by_kind_then_scope_then_valid_time() {
 #[test]
 fn valid_time_window_is_applied_at_the_explicit_instant() {
     let Some(db) = db() else { return };
-    let tenant = TenantId::new();
+    let tenant = admit(db);
     let chain = Chain::new();
     let now = Utc::now();
     let handover = now - Duration::hours(1);
@@ -521,7 +747,7 @@ fn valid_time_window_is_applied_at_the_explicit_instant() {
 #[test]
 fn sensitivity_ceiling_clamps_below_restricted() {
     let Some(db) = db() else { return };
-    let tenant = TenantId::new();
+    let tenant = admit(db);
     let chain = Chain::new();
     let now = Utc::now();
     let mut by_level = Vec::new();
@@ -566,11 +792,12 @@ fn sensitivity_ceiling_clamps_below_restricted() {
 
 /// Under a relevance ranking (the hybrid engine's output), unranked
 /// derived records do not compose and ranked ones follow rank order —
-/// while pinned material composes regardless of the task.
+/// while published material composes regardless of the task (ADR-0031
+/// decision 9: the rule was always about the trusted channel).
 #[test]
-fn relevance_ranks_derived_and_never_gates_pinned() {
+fn relevance_ranks_derived_and_never_gates_published() {
     let Some(db) = db() else { return };
-    let tenant = TenantId::new();
+    let tenant = admit(db);
     let chain = Chain::new();
     let now = Utc::now();
     let a = db.rt.block_on(insert(
@@ -591,8 +818,9 @@ fn relevance_ranks_derived_and_never_gates_pinned() {
     let pin = db.rt.block_on(insert(
         &db.pool,
         tenant,
-        Insert::pinned(chain.team, "pinned delta — never gated", now),
+        Insert::pinned(chain.team, "published delta — never gated", now),
     ));
+    publish(db, tenant, chain.team, &[pin]);
 
     let mut request = ComposeRequest::new(chain.scopes(), 1_500, now);
     request.relevance = Some(vec![b, a]);
@@ -601,7 +829,7 @@ fn relevance_ranks_derived_and_never_gates_pinned() {
     assert_eq!(
         ids(&block),
         vec![pin, b, a],
-        "pinned first, then derived in rank order, unranked excluded"
+        "published first, then derived in rank order, unranked excluded"
     );
 }
 
@@ -613,7 +841,7 @@ fn relevance_ranks_derived_and_never_gates_pinned() {
 #[test]
 fn tokens_per_inject_is_emitted_including_zero() {
     let Some(db) = db() else { return };
-    let tenant = TenantId::new();
+    let tenant = admit(db);
     let now = Utc::now();
 
     let empty = run(db, tenant, &ComposeRequest::new(Vec::new(), 1_500, now));

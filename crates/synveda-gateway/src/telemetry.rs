@@ -94,6 +94,12 @@ pub const REDACTION_FINDINGS_TOTAL: &str = "synveda_redaction_findings_total";
 /// list chains its allowed decision (ADR-0019 decision 4).
 pub const QUARANTINE_OPERATIONS_TOTAL: &str = "synveda_quarantine_operations_total";
 
+/// Channel API operations (FLOW-2, ADR-0031 decision 12), labelled by
+/// `op` (`list`/`publish`) and `outcome` (`ok`, `rejected`, `error`).
+/// Publish chains a `vedaflow.channel.published` event; list chains its
+/// allowed decision (ADR-0019 decision 4).
+pub const CHANNEL_OPERATIONS_TOTAL: &str = "synveda_channel_operations_total";
+
 /// Inject requests (CTX-3, ADR-0026 decision 8), labelled by `outcome`,
 /// funnel-collapsed worst-first: `error`, `rejected`, `degraded` (a
 /// block was served under a degradation), `empty` (nothing composed),
@@ -370,6 +376,41 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         synveda_identity::OIDC_LOGINS_TOTAL,
         "OIDC logins by issuer and outcome (started/completed/rejected/error)"
+    );
+    // FLOW-1's counters (ADR-0030 decision 14 deferred describing them to
+    // whichever feature made the binary call that crate — FLOW-2 did),
+    // plus FLOW-2's own.
+    metrics::describe_counter!(
+        synveda_vedaflow::objects::OBJECTS_WRITTEN_TOTAL,
+        "VedaFlow object writes by asset kind and result (stored/deduplicated)"
+    );
+    metrics::describe_counter!(
+        synveda_vedaflow::trees::TREES_WRITTEN_TOTAL,
+        "VedaFlow tree writes by result (stored/deduplicated)"
+    );
+    metrics::describe_counter!(
+        synveda_vedaflow::commits::COMMITS_WRITTEN_TOTAL,
+        "VedaFlow commit writes by signer and result (stored/deduplicated)"
+    );
+    metrics::describe_counter!(
+        synveda_vedaflow::refs::REF_UPDATES_TOTAL,
+        "VedaFlow ref updates by outcome (updated/raced/not_fast_forward)"
+    );
+    metrics::describe_counter!(
+        synveda_vedaflow::verify::VERIFICATIONS_TOTAL,
+        "VedaFlow store verifications by outcome"
+    );
+    metrics::describe_counter!(
+        synveda_vedaflow::channels::CHANNEL_COMMITS_TOTAL,
+        "VedaFlow channel commits by asset, channel, and outcome (committed/contended)"
+    );
+    metrics::describe_counter!(
+        CHANNEL_OPERATIONS_TOTAL,
+        "Channel API operations by op (list/publish) and outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        synveda_retrieval::COMPOSED_ENTRIES_TOTAL,
+        "Composed context entries by the channel they composed from (published/derived)"
     );
     // Touch the label-less histogram so it renders (count 0) before the first
     // inject exists — the FND-5 contract is visible in /metrics from boot.

@@ -1,35 +1,49 @@
-//! The composition engine (CTX-2, ADR-0025): deterministic
-//! chain-gradient assembly — user > team > department > org,
-//! pinned-first within each level — under an estimated-token budget,
-//! with seed §4.4's conflict rules and per-scope channel rules, every
-//! block watermarked with BLAKE3 version hashes and record ids.
+//! The composition engine (CTX-2, ADR-0025; channels, FLOW-2,
+//! ADR-0031): deterministic chain-gradient assembly — user > team >
+//! department > org — under an estimated-token budget, with seed §4.4's
+//! conflict rules and per-scope channel rules, every block watermarked
+//! with VedaFlow content addresses and record ids.
 //!
 //! Determinism is the AC: no clock is read here (the valid-time instant
 //! is the caller's input), every ordering is total, and no map
 //! iteration order reaches the output. Given the same plan, instant,
 //! and database state, [`compose`] returns a byte-identical block.
 //!
-//! Channel rules pre-FLOW-2 (ADR-0025 decision 2): [`RecordKind`] is
-//! the stand-in — `pinned` composes as the published channel, `derived`
-//! as the derived channel, included only where the scope's effective
-//! pack allows and always marked unreviewed in the rendered text.
-//! Watermarks pre-FLOW-1 (decision 7): each entry's hash is the BLAKE3
-//! content address of exactly the version that composed; FLOW-1's
-//! commit hashes take the field over, same shape.
+//! # Channels
+//!
+//! A record composes as **published** when its scope's
+//! `memory/published` tree names it *at exactly the content it now
+//! holds*, and as **derived** otherwise — so editing published content
+//! demotes it to unreviewed rather than laundering the edit through a
+//! published id (ADR-0031 decision 5). Derived material composes only
+//! where the scope's effective pack allows it, and is always marked
+//! unreviewed in the rendered text. Under `published-only` — bank mode —
+//! the derived sweep is not issued at all for that scope.
+//!
+//! [`RecordKind`] no longer decides any of this. It means what seed §4.2
+//! says: authored/canonical versus pipeline-derived. Authorship is not
+//! review, and a pinned record nobody published does not survive bank
+//! mode.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use sqlx::PgConnection;
-use synveda_store::records::RecordVersion;
+use synveda_store::records::{RecordState, RecordVersion};
 use synveda_store::search;
 use synveda_types::{
-    RecordClass, RecordId, RecordKind, Result, ScopeId, ScopeKind, Sensitivity, TenantId,
+    Channel, RecordClass, RecordId, RecordKind, Result, ScopeId, ScopeKind, Sensitivity, TenantId,
 };
+use synveda_vedaflow::{ChannelRef, MemoryAsset, read_memory_members};
 
 use crate::TOKENS_PER_INJECT;
 use crate::hybrid::allowed_sensitivities;
+
+/// Counts composed entries, labelled by the channel they composed from —
+/// the production evidence that bank mode does what its AC says
+/// (ADR-0031 decision 15).
+pub const COMPOSED_ENTRIES_TOTAL: &str = "synveda_composed_entries_total";
 
 /// One scope of a composition plan: a PDP-allowed chain scope plus the
 /// channel rule its effective pack sets (ADR-0025 decisions 1–2).
@@ -91,23 +105,44 @@ impl ComposeRequest {
     }
 }
 
-/// One composed entry: the watermark's unit (ADR-0025 decision 7).
+/// One composed entry: the watermark's unit (ADR-0025 decision 7, as
+/// ADR-0031 decision 11 upgraded it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposedEntry {
     /// The record that composed.
     pub record_id: RecordId,
     /// The scope it composed from.
     pub scope_id: ScopeId,
-    /// Pinned (published stand-in) or derived.
+    /// Which channel it composed from — the trust label.
+    pub channel: Channel,
+    /// Authored/canonical or pipeline-derived (seed §4.2). Authorship,
+    /// not trust: [`ComposedEntry::channel`] carries that now.
     pub kind: RecordKind,
     /// What the record asserts.
     pub class: RecordClass,
-    /// BLAKE3 over `(record_id, tx_from, content)` — the content
-    /// address of exactly the version that composed, hex-encoded.
-    /// FLOW-1's commit hashes supersede this field in place.
-    pub version_hash: String,
+    /// The VedaFlow object address of exactly the version that composed,
+    /// hex-encoded — recomputable by an auditor from this response alone,
+    /// and equal to the address the scope's published tree names whenever
+    /// the entry composed as published (ADR-0031 decisions 5 and 6).
+    pub object_hash: String,
     /// Estimated tokens of the entry's rendered line.
     pub tokens: u32,
+}
+
+/// One channel the block read: where a scope's ref pointed at
+/// composition time (ADR-0031 decision 11).
+///
+/// Carried on the block and recorded in the inject audit event rather
+/// than rendered into the text: tech plan §2.5's "inject responses cite
+/// commit hashes", paid for out of the response instead of the budget.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelWatermark {
+    /// The scope whose channel this is.
+    pub scope_id: ScopeId,
+    /// The ref name, e.g. `memory/published`.
+    pub channel: String,
+    /// The commit it pointed at, hex-encoded.
+    pub commit: String,
 }
 
 /// One composed, watermarked context block.
@@ -118,6 +153,11 @@ pub struct ComposedBlock {
     pub text: String,
     /// The watermark: every composed record, in block order.
     pub entries: Vec<ComposedEntry>,
+    /// The channel refs this block composed against, in scope order —
+    /// present even when a channel contributed no entry, because "the
+    /// published channel was here and held nothing you could read" is
+    /// the auditable fact.
+    pub channels: Vec<ChannelWatermark>,
     /// BLAKE3 over the ordered entry hashes, hex-encoded — the block's
     /// identity, also on the rendered watermark line.
     pub block_hash: String,
@@ -142,25 +182,72 @@ pub fn estimated_tokens(text: &str) -> u32 {
     u32::try_from(chars.div_ceil(4)).unwrap_or(u32::MAX)
 }
 
-/// The seed §4.4 conflict resolution order (ADR-0025 decision 6):
-/// `Less` means the first candidate wins. Pinned beats derived, then
-/// the more specific scope (smaller chain position), then newer
-/// valid-from, then newer tx-from, then the smaller record id — a
-/// total order, so the winner never depends on evaluation order.
+/// One candidate as composition sees it: a record version, the chain
+/// position of the scope it came from, and the channel it is on there.
+#[derive(Debug, Clone, Copy)]
+pub struct Candidate<'a> {
+    /// The record version.
+    pub version: &'a RecordVersion,
+    /// Its scope's position in the gradient, nearest = 0.
+    pub position: usize,
+    /// Published or derived at that scope.
+    pub channel: Channel,
+}
+
+/// The conflict resolution order (ADR-0025 decision 6, with ADR-0031
+/// decision 8's tier 0): `Less` means the first candidate wins.
+///
+/// Published beats unpublished, then seed §4.4 unchanged — pinned beats
+/// derived, then the more specific scope, then newer valid-from, then
+/// newer tx-from, then the smaller record id. A total order, so the
+/// winner never depends on evaluation order.
+///
+/// Channel goes first because seed §4.4's list predates channels. When
+/// identical content is published at one scope and unpublished at
+/// another, the nearer-scope rule would otherwise render the unreviewed
+/// copy, drop the reviewed one, and watermark the block with the address
+/// of the version nobody approved.
+///
 /// Exported for MEM-5, which replaces the exact-match *predicate* with
 /// semantic groups and reuses this resolution.
 #[must_use]
-pub fn conflict_precedence(a: (&RecordVersion, usize), b: (&RecordVersion, usize)) -> Ordering {
+pub fn conflict_precedence(a: Candidate<'_>, b: Candidate<'_>) -> Ordering {
+    let channel_rank = |channel: Channel| match channel {
+        Channel::Published => 0_u8,
+        _ => 1,
+    };
     let kind_rank = |version: &RecordVersion| match version.state.kind {
         RecordKind::Pinned => 0_u8,
         RecordKind::Derived => 1,
     };
-    kind_rank(a.0)
-        .cmp(&kind_rank(b.0))
-        .then_with(|| a.1.cmp(&b.1))
-        .then_with(|| b.0.state.valid_from.cmp(&a.0.state.valid_from))
-        .then_with(|| b.0.tx_from.cmp(&a.0.tx_from))
-        .then_with(|| a.0.id.cmp(&b.0.id))
+    channel_rank(a.channel)
+        .cmp(&channel_rank(b.channel))
+        .then_with(|| kind_rank(a.version).cmp(&kind_rank(b.version)))
+        .then_with(|| a.position.cmp(&b.position))
+        .then_with(|| b.version.state.valid_from.cmp(&a.version.state.valid_from))
+        .then_with(|| b.version.tx_from.cmp(&a.version.tx_from))
+        .then_with(|| a.version.id.cmp(&b.version.id))
+}
+
+/// The VedaFlow view of a stored record version (ADR-0031 decision 6).
+///
+/// Duplicated from the ingestion pipeline's identical mapping for the
+/// reason given there: `synveda-store` and `synveda-vedaflow` are
+/// siblings, so neither can host a conversion between their types. The
+/// AC test pins the two addresses together, which is what makes the
+/// duplication safe rather than merely small.
+fn memory_asset(id: RecordId, state: &RecordState) -> MemoryAsset {
+    MemoryAsset {
+        id,
+        scope_id: state.scope_id,
+        owner_id: state.owner_id,
+        kind: state.kind,
+        class: state.class,
+        content: state.content.clone(),
+        sensitivity: state.sensitivity,
+        valid_from: state.valid_from,
+        valid_to: state.valid_to,
+    }
 }
 
 /// Composes the block: fetches candidates for the plan's scopes inside
@@ -197,26 +284,57 @@ pub async fn compose(
 
     let scope_ids: Vec<ScopeId> = request.scopes.iter().map(|scope| scope.scope_id).collect();
     let sensitivities = allowed_sensitivities(request.max_sensitivity);
-    let candidates = search::compose_candidates(
+
+    // The published channel of every planned scope: one indexed read for
+    // the whole chain (ADR-0031 decision 3).
+    let published = read_memory_members(conn, tenant_id, &scope_ids, Channel::Published).await?;
+    let admitted: HashMap<ScopeId, &HashMap<RecordId, _>> = published
+        .iter()
+        .map(|channel| (channel.scope_id, &channel.members))
+        .collect();
+    let published_ids: Vec<RecordId> = published
+        .iter()
+        .flat_map(|channel| channel.members.keys().copied())
+        .collect();
+
+    // Published members are fetched by id and uncapped; derived is the
+    // capped per-(scope, kind) sweep, and only over scopes whose pack
+    // admits it — bank mode removes the read rather than filtering its
+    // results (ADR-0031 decisions 9 and 10).
+    let derived_scopes: Vec<ScopeId> = request
+        .scopes
+        .iter()
+        .filter(|scope| scope.include_derived)
+        .map(|scope| scope.scope_id)
+        .collect();
+    let members = search::compose_members(
         conn,
         tenant_id,
+        &published_ids,
         &scope_ids,
         &sensitivities,
         request.at,
-        request.per_scope_kind_candidates.max(1),
     )
     .await?;
+    let swept = if derived_scopes.is_empty() {
+        Vec::new()
+    } else {
+        search::compose_candidates(
+            conn,
+            tenant_id,
+            &derived_scopes,
+            &sensitivities,
+            request.at,
+            request.per_scope_kind_candidates.max(1),
+        )
+        .await?
+    };
 
     let chain_position: HashMap<ScopeId, usize> = request
         .scopes
         .iter()
         .enumerate()
         .map(|(position, scope)| (scope.scope_id, position))
-        .collect();
-    let include_derived: HashMap<ScopeId, bool> = request
-        .scopes
-        .iter()
-        .map(|scope| (scope.scope_id, scope.include_derived))
         .collect();
     let relevance_rank: Option<HashMap<RecordId, usize>> = request.relevance.as_ref().map(|ids| {
         ids.iter()
@@ -225,81 +343,109 @@ pub async fn compose(
             .collect()
     });
 
-    // Channel and relevance rules (ADR-0025 decisions 2 and 5): derived
-    // composes only where the scope's pack allows, and — under a
-    // relevance ranking — only if retrieval ranked it. Pinned material
-    // never depends on the task.
-    let mut survivors: Vec<&RecordVersion> = candidates
-        .iter()
-        .filter(|version| match version.state.kind {
-            RecordKind::Pinned => true,
-            RecordKind::Derived => {
-                include_derived
-                    .get(&version.state.scope_id)
-                    .copied()
-                    .unwrap_or(false)
-                    && relevance_rank
-                        .as_ref()
-                        .is_none_or(|ranks| ranks.contains_key(&version.id))
+    // Which channel each candidate is on (ADR-0031 decision 5):
+    // published when its scope's tree names it at exactly the address its
+    // current content produces, derived otherwise. A record whose content
+    // moved since publication fails the comparison and is unreviewed
+    // again — publication binds bytes, not ids.
+    let channel_of = |version: &RecordVersion| {
+        let admitted_at = admitted
+            .get(&version.state.scope_id)
+            .and_then(|members| members.get(&version.id));
+        match admitted_at {
+            Some(address) if *address == memory_asset(version.id, &version.state).address() => {
+                Channel::Published
             }
-        })
-        .collect();
+            _ => Channel::Derived,
+        }
+    };
 
-    // Conflict resolution (decision 6): one winner per trimmed-content
-    // group by the seed §4.4 precedence; losers are dropped entirely.
-    let position_of =
-        |version: &RecordVersion| chain_position.get(&version.state.scope_id).copied();
-    let mut winner_by_content: HashMap<&str, &RecordVersion> = HashMap::new();
-    for version in &survivors {
-        let key = version.state.content.trim();
-        // Candidates whose scope fell out of the plan cannot happen (the
-        // query filtered on plan scopes); position lookup is total here.
-        let Some(position) = position_of(version) else {
+    // The two fetches can name the same record — a promoted extraction is
+    // still `kind = derived`, so the sweep returns it too. Published wins,
+    // and the id keys the union so nothing composes twice.
+    let mut by_id: HashMap<RecordId, Candidate<'_>> = HashMap::new();
+    for version in members.iter().chain(swept.iter()) {
+        let Some(position) = chain_position.get(&version.state.scope_id).copied() else {
+            // The queries filtered on plan scopes; unreachable in
+            // practice, and dropping is the safe reading of "not planned".
             continue;
         };
-        winner_by_content
-            .entry(key)
+        let channel = channel_of(version);
+        // Relevance gates derived material only: published content is the
+        // trust anchor and composes regardless of the task (ADR-0031
+        // decision 9, ADR-0025 decision 5's rule moved to the channel it
+        // was always about).
+        if channel == Channel::Derived {
+            let ranked = relevance_rank
+                .as_ref()
+                .is_none_or(|ranks| ranks.contains_key(&version.id));
+            if !ranked || !admits_derived(request, position) {
+                continue;
+            }
+        }
+        let candidate = Candidate {
+            version,
+            position,
+            channel,
+        };
+        by_id
+            .entry(version.id)
             .and_modify(|incumbent| {
-                let incumbent_position = position_of(incumbent).unwrap_or(usize::MAX);
-                if conflict_precedence((version, position), (incumbent, incumbent_position))
-                    == Ordering::Less
-                {
-                    *incumbent = version;
+                if conflict_precedence(candidate, *incumbent) == Ordering::Less {
+                    *incumbent = candidate;
                 }
             })
-            .or_insert(version);
+            .or_insert(candidate);
+    }
+    let mut survivors: Vec<Candidate<'_>> = by_id.into_values().collect();
+
+    // Conflict resolution (ADR-0025 decision 6, ADR-0031 decision 8): one
+    // winner per trimmed-content group; losers are dropped entirely.
+    let mut winner_by_content: HashMap<&str, Candidate<'_>> = HashMap::new();
+    for candidate in &survivors {
+        winner_by_content
+            .entry(candidate.version.state.content.trim())
+            .and_modify(|incumbent| {
+                if conflict_precedence(*candidate, *incumbent) == Ordering::Less {
+                    *incumbent = *candidate;
+                }
+            })
+            .or_insert(*candidate);
     }
     let before = survivors.len();
-    survivors.retain(|version| {
+    survivors.retain(|candidate| {
         winner_by_content
-            .get(version.state.content.trim())
-            .is_some_and(|winner| winner.id == version.id)
+            .get(candidate.version.state.content.trim())
+            .is_some_and(|winner| winner.version.id == candidate.version.id)
     });
     let dropped_conflicts = before - survivors.len();
 
-    // Assembly order (decision 5): the gradient — nearest scope first,
-    // pinned before derived within a scope, derived by relevance rank
-    // when ranked else newest valid-from, record id as the total-order
-    // tiebreak.
+    // Assembly order: the gradient — nearest scope first, published
+    // before derived within a scope, then pinned before derived-kind,
+    // then derived by relevance rank when ranked else newest valid-from,
+    // record id as the total-order tiebreak.
     survivors.sort_by(|a, b| {
-        let scope = position_of(a)
-            .unwrap_or(usize::MAX)
-            .cmp(&position_of(b).unwrap_or(usize::MAX));
-        let kind = |version: &RecordVersion| match version.state.kind {
+        let channel = |candidate: &Candidate<'_>| match candidate.channel {
+            Channel::Published => 0_u8,
+            _ => 1,
+        };
+        let kind = |candidate: &Candidate<'_>| match candidate.version.state.kind {
             RecordKind::Pinned => 0_u8,
             RecordKind::Derived => 1,
         };
-        let rank = |version: &RecordVersion| {
+        let rank = |candidate: &Candidate<'_>| {
             relevance_rank
                 .as_ref()
-                .and_then(|ranks| ranks.get(&version.id).copied())
+                .and_then(|ranks| ranks.get(&candidate.version.id).copied())
                 .unwrap_or(usize::MAX)
         };
-        scope
+        a.position
+            .cmp(&b.position)
+            .then_with(|| channel(a).cmp(&channel(b)))
             .then_with(|| kind(a).cmp(&kind(b)))
             .then_with(|| rank(a).cmp(&rank(b)))
-            .then_with(|| b.state.valid_from.cmp(&a.state.valid_from))
-            .then_with(|| a.id.cmp(&b.id))
+            .then_with(|| b.version.state.valid_from.cmp(&a.version.state.valid_from))
+            .then_with(|| a.version.id.cmp(&b.version.id))
     });
 
     // First-fit assembly under the budget (decision 4): every piece the
@@ -333,8 +479,9 @@ pub async fn compose(
     let mut entries: Vec<ComposedEntry> = Vec::new();
     let mut skipped_over_budget = 0_usize;
 
-    for version in survivors {
-        let line = entry_line(version);
+    for candidate in survivors {
+        let version = candidate.version;
+        let line = entry_line(candidate);
         let line_tokens = estimated_tokens(&line);
         let header_tokens = if open_sections.contains(&version.state.scope_id) {
             0
@@ -364,18 +511,39 @@ pub async fn compose(
         used += cost;
         watermark_chars = new_watermark_chars;
         watermark_tokens = new_watermark_tokens;
+        metrics::counter!(COMPOSED_ENTRIES_TOTAL, "channel" => candidate.channel.as_str())
+            .increment(1);
         entries.push(ComposedEntry {
             record_id: version.id,
             scope_id: version.state.scope_id,
+            channel: candidate.channel,
             kind: version.state.kind,
             class: version.state.class,
-            version_hash: version_hash(version),
+            object_hash: memory_asset(version.id, &version.state).address().to_hex(),
             tokens: line_tokens,
         });
     }
 
+    // The channels this block read, in scope order — kept whether or not
+    // they contributed an entry.
+    let channels: Vec<ChannelWatermark> = request
+        .scopes
+        .iter()
+        .filter_map(|scope| {
+            published
+                .iter()
+                .find(|channel| channel.scope_id == scope.scope_id)
+                .map(|channel| ChannelWatermark {
+                    scope_id: channel.scope_id,
+                    channel: ChannelRef::memory(Channel::Published).name(),
+                    commit: channel.commit.to_hex(),
+                })
+        })
+        .collect();
+
     if entries.is_empty() {
         let block = ComposedBlock {
+            channels,
             dropped_conflicts,
             skipped_over_budget,
             ..empty_block(request.budget_tokens)
@@ -400,6 +568,7 @@ pub async fn compose(
     Ok(ComposedBlock {
         text,
         entries,
+        channels,
         block_hash,
         tokens,
         budget_tokens: request.budget_tokens,
@@ -408,11 +577,20 @@ pub async fn compose(
     })
 }
 
+/// Whether derived material composes at the plan's `position`.
+fn admits_derived(request: &ComposeRequest, position: usize) -> bool {
+    request
+        .scopes
+        .get(position)
+        .is_some_and(|scope| scope.include_derived)
+}
+
 /// The block over nothing: empty text, the hash of zero entries.
 fn empty_block(budget_tokens: u32) -> ComposedBlock {
     ComposedBlock {
         text: String::new(),
         entries: Vec::new(),
+        channels: Vec::new(),
         block_hash: blake3::Hasher::new().finalize().to_hex().to_string(),
         tokens: 0,
         budget_tokens,
@@ -421,17 +599,14 @@ fn empty_block(budget_tokens: u32) -> ComposedBlock {
     }
 }
 
-/// One entry's rendered line. Derived is always marked unreviewed
-/// (seed tech plan §2.2: "clearly watermarked as unreviewed").
-fn entry_line(version: &RecordVersion) -> String {
-    match version.state.kind {
-        RecordKind::Pinned => {
-            format!("- [{}] {}\n", version.state.class, version.state.content)
-        }
-        RecordKind::Derived => format!(
-            "- [{}] {} [unreviewed]\n",
-            version.state.class, version.state.content
-        ),
+/// One entry's rendered line. Anything not published is marked
+/// unreviewed (tech plan §2.2: "clearly watermarked as unreviewed") —
+/// which since FLOW-2 includes authored material nobody has published.
+fn entry_line(candidate: Candidate<'_>) -> String {
+    let state = &candidate.version.state;
+    match candidate.channel {
+        Channel::Published => format!("- [{}] {}\n", state.class, state.content),
+        _ => format!("- [{}] {} [unreviewed]\n", state.class, state.content),
     }
 }
 
@@ -444,23 +619,16 @@ fn watermark_line(block_hash: &str, record_ids: &[String]) -> String {
     )
 }
 
-/// The entry's content address (ADR-0025 decision 7): BLAKE3 over the
-/// record id, the version's transaction-time start (which uniquely
-/// names the version, ADR-0006), and the content — recomputable from
-/// the bitemporal store forever.
-fn version_hash(version: &RecordVersion) -> String {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(version.id.as_uuid().as_bytes());
-    hasher.update(&version.tx_from.timestamp_micros().to_be_bytes());
-    hasher.update(version.state.content.as_bytes());
-    hasher.finalize().to_hex().to_string()
-}
-
-/// The block's identity: BLAKE3 over the ordered entry hashes.
+/// The block's identity: BLAKE3 over the ordered entry addresses.
 fn block_hash(entries: &[ComposedEntry]) -> String {
     let mut hasher = blake3::Hasher::new();
     for entry in entries {
-        hasher.update(entry.version_hash.as_bytes());
+        hasher.update(entry.object_hash.as_bytes());
+        // The channel is in the block's identity because it is in the
+        // block's *text*: publishing a record removes its unreviewed
+        // marker, and two blocks that read differently must not share
+        // one hash.
+        hasher.update(entry.channel.as_str().as_bytes());
     }
     hasher.finalize().to_hex().to_string()
 }
@@ -510,29 +678,47 @@ mod tests {
         assert_eq!(estimated_tokens("ééé"), 1);
     }
 
-    /// The seed §4.4 order: pinned beats derived even from a broader
-    /// scope; among equals, nearer scope; then newer valid-from; then
-    /// the id tiebreak — total, so winners never depend on order.
+    fn candidate(version: &RecordVersion, position: usize, channel: Channel) -> Candidate<'_> {
+        Candidate {
+            version,
+            position,
+            channel,
+        }
+    }
+
+    /// Seed §4.4's order, below ADR-0031 decision 8's channel tier:
+    /// pinned beats derived even from a broader scope; among equals,
+    /// nearer scope; then newer valid-from; then the id tiebreak —
+    /// total, so winners never depend on order.
     #[test]
     fn conflict_precedence_is_the_seed_order() {
         let pinned_broad = version(RecordKind::Pinned, "x", at(0), 1);
         let derived_near = version(RecordKind::Derived, "x", at(100), 2);
         assert_eq!(
-            conflict_precedence((&pinned_broad, 3), (&derived_near, 0)),
+            conflict_precedence(
+                candidate(&pinned_broad, 3, Channel::Derived),
+                candidate(&derived_near, 0, Channel::Derived)
+            ),
             Ordering::Less,
             "pinned beats derived across levels"
         );
 
         let derived_broad = version(RecordKind::Derived, "x", at(100), 3);
         assert_eq!(
-            conflict_precedence((&derived_near, 0), (&derived_broad, 2)),
+            conflict_precedence(
+                candidate(&derived_near, 0, Channel::Derived),
+                candidate(&derived_broad, 2, Channel::Derived)
+            ),
             Ordering::Less,
             "more specific scope beats less specific"
         );
 
         let older = version(RecordKind::Derived, "x", at(0), 4);
         assert_eq!(
-            conflict_precedence((&derived_near, 1), (&older, 1)),
+            conflict_precedence(
+                candidate(&derived_near, 1, Channel::Derived),
+                candidate(&older, 1, Channel::Derived)
+            ),
             Ordering::Less,
             "newer valid-time beats older"
         );
@@ -540,21 +726,67 @@ mod tests {
         let twin_a = version(RecordKind::Derived, "x", at(100), 5);
         let twin_b = version(RecordKind::Derived, "x", at(100), 6);
         assert_eq!(
-            conflict_precedence((&twin_a, 1), (&twin_b, 1)),
+            conflict_precedence(
+                candidate(&twin_a, 1, Channel::Derived),
+                candidate(&twin_b, 1, Channel::Derived)
+            ),
             Ordering::Less,
             "the id tiebreak makes the order total"
         );
     }
 
+    /// ADR-0031 decision 8: the reviewed copy wins even when the
+    /// unreviewed one is nearer *and* pinned. Otherwise the block would
+    /// render the copy nobody approved and watermark it with that
+    /// version's address.
     #[test]
-    fn version_hash_binds_id_version_and_content() {
+    fn published_outranks_every_seed_tier() {
+        let published_far = version(RecordKind::Derived, "x", at(0), 1);
+        let pinned_near = version(RecordKind::Pinned, "x", at(100), 2);
+        assert_eq!(
+            conflict_precedence(
+                candidate(&published_far, 4, Channel::Published),
+                candidate(&pinned_near, 0, Channel::Derived)
+            ),
+            Ordering::Less,
+            "published beats nearer, newer, pinned material"
+        );
+    }
+
+    /// The rendered marker follows the channel, not the authorship: a
+    /// pinned record nobody published still says so.
+    #[test]
+    fn only_published_material_renders_without_the_unreviewed_marker() {
+        let pinned = version(RecordKind::Pinned, "canonical", at(0), 1);
+        assert!(
+            entry_line(candidate(&pinned, 0, Channel::Derived)).contains("[unreviewed]"),
+            "authorship is not review"
+        );
+        assert!(!entry_line(candidate(&pinned, 0, Channel::Published)).contains("[unreviewed]"));
+        let derived = version(RecordKind::Derived, "extracted", at(0), 2);
+        assert!(!entry_line(candidate(&derived, 0, Channel::Published)).contains("[unreviewed]"));
+    }
+
+    /// The watermark is the VedaFlow object address (ADR-0031
+    /// decision 11): content-bound, and *not* version-bound — the same
+    /// content at the same scope has one address however many times the
+    /// bitemporal pair rewrites around it.
+    #[test]
+    fn the_entry_address_is_the_vedaflow_object_address() {
         let a = version(RecordKind::Derived, "same", at(50), 1);
-        let mut b = a.clone();
-        assert_eq!(version_hash(&a), version_hash(&b), "recomputable");
-        b.state.content = "different".to_owned();
-        assert_ne!(version_hash(&a), version_hash(&b), "content-bound");
-        let mut c = a.clone();
-        c.tx_from = at(51);
-        assert_ne!(version_hash(&a), version_hash(&c), "version-bound");
+        let address = |v: &RecordVersion| memory_asset(v.id, &v.state).address();
+        assert_eq!(address(&a), address(&a.clone()), "recomputable");
+
+        let mut edited = a.clone();
+        edited.state.content = "different".to_owned();
+        assert_ne!(address(&a), address(&edited), "content-bound");
+
+        let mut rewritten = a.clone();
+        rewritten.tx_from = at(51);
+        assert_eq!(
+            address(&a),
+            address(&rewritten),
+            "transaction time is not content"
+        );
     }
 }

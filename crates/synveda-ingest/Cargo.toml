@@ -11,6 +11,9 @@ synveda-audit = { workspace = true }
 synveda-policy = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }
+# The derived-channel commit that lands with every extracted record
+# (FLOW-2, ADR-0031 decision 13; ADR-0022's recorded forward obligation).
+synveda-vedaflow = { workspace = true }
 
 # The deterministic embedder's hash (MEM-4, ADR-0023) — the same
 # primitive the audit chain already uses (AUD-1).

@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select r.scope_id, r.commit_hash,\n                  e.name as \"name?\", e.object_hash as \"object_hash?\"\n           from vedaflow_refs r\n           join vedaflow_commits c\n               on c.tenant_id = r.tenant_id and c.hash = r.commit_hash\n           left join vedaflow_tree_entries e\n               on e.tenant_id = c.tenant_id and e.tree_hash = c.tree_hash\n           where r.tenant_id = $1 and r.scope_id = any($2) and r.name = $3\n           order by r.scope_id, e.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "commit_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "object_hash?",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "463d1b89d51bc7544594f53ef3997479dc122994173618c9dc12b71a3f4c509b"
+}

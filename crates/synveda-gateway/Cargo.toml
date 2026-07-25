@@ -14,6 +14,10 @@ synveda-policy = { workspace = true }
 synveda-retrieval = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }
+# The channel surface (FLOW-2, ADR-0031 decision 15): the dependency
+# ADR-0030 decision 14 held back until something in the binary called
+# this crate, which is also where its counters get described.
+synveda-vedaflow = { workspace = true }
 
 axum = { workspace = true }
 # The inject audit event's task hash (CTX-3, ADR-0026 decision 5).

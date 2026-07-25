@@ -143,4 +143,17 @@ namespace Synveda {
             resource: [Scope],
             context: { roles: Set<String> },
         };
+
+    // The VedaFlow channel plane (/v1/channels/*, FLOW-2, ADR-0031
+    // decision 12): reading a scope's channels, and publishing records
+    // onto its published channel — the act that moves content across the
+    // trust boundary. Never a tenant-level action: a channel belongs to a
+    // node. FLOW-3 puts required approvals in front of ChannelPublish; it
+    // does not replace it.
+    action ChannelRead, ChannelPublish
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String> },
+        };
 }

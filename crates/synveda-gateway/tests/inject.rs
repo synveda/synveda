@@ -39,8 +39,11 @@ use synveda_retrieval::indexer::{self, IndexerConfig};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::{hierarchy, identities, policy_assignments, rls, tenants};
 use synveda_types::{
-    CompositionConfig, HierarchyNode, Identity, IdentityId, IdentityKind, InjectChannels,
+    Channel, CompositionConfig, HierarchyNode, Identity, IdentityId, IdentityKind, InjectChannels,
     RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+};
+use synveda_vedaflow::{
+    self as vedaflow, ChannelRef, ChannelWrite, MemoryAsset, PolicySnapshot, Signer,
 };
 use tower::ServiceExt;
 
@@ -355,12 +358,61 @@ async fn seed_corpus(pool: &PgPool, tenant: TenantId, platform: &HierarchyNode) 
         NOTE_CONTENT,
     )
     .await;
+    // Since FLOW-2 (ADR-0031) authorship is not review: the canonical
+    // team record is trusted material only once someone publishes it.
+    // The governed route is exercised in tests/channels.rs; this is the
+    // fixture form, with the same standing `seed_record` has.
+    publish_fixture(pool, tenant, platform.id, &[pinned_team]).await;
     Corpus {
         pinned_team,
         kube_team,
         postgres_team,
         note_user,
     }
+}
+
+/// Publishes records onto a scope's `memory/published` channel.
+async fn publish_fixture(pool: &PgPool, tenant: TenantId, scope: ScopeId, ids: &[RecordId]) {
+    let mut tx = rls::begin_tenant_tx(pool, tenant).await.expect("tenant tx");
+    let mut members = Vec::with_capacity(ids.len());
+    for id in ids {
+        let version = records::current(&mut *tx, *id)
+            .await
+            .expect("read record")
+            .expect("record exists");
+        let asset = MemoryAsset {
+            id: version.id,
+            scope_id: version.state.scope_id,
+            owner_id: version.state.owner_id,
+            kind: version.state.kind,
+            class: version.state.class,
+            content: version.state.content.clone(),
+            sensitivity: version.state.sensitivity,
+            valid_from: version.state.valid_from,
+            valid_to: version.state.valid_to,
+        };
+        let object = vedaflow::put_memory(&mut tx, tenant, &asset)
+            .await
+            .expect("put memory object");
+        members.push((asset.entry_name(), object.hash));
+    }
+    vedaflow::publish(
+        &mut tx,
+        tenant,
+        &ChannelWrite {
+            scope,
+            channel: ChannelRef::memory(Channel::Published),
+            members: &members,
+            author: IdentityId::new(),
+            message: "ctx-3 fixture publication",
+            committed_at: chrono::Utc::now(),
+            policy_snapshot: &PolicySnapshot::new("regulated-strict", 6),
+        },
+        &Signer::Unsigned,
+    )
+    .await
+    .expect("publish");
+    tx.commit().await.expect("commit publication");
 }
 
 fn record_ids(body: &Value) -> Vec<String> {
@@ -477,12 +529,30 @@ async fn inject_composes_ranked_watermarked_block_and_chains_one_event() {
     let entries = event.payload["entries"].as_array().expect("entries");
     assert_eq!(entries.len(), ids.len());
     for entry in entries {
+        // The VedaFlow object address of the version that composed, and
+        // the channel it composed from (FLOW-2, ADR-0031 decision 11).
         assert!(
-            entry["version_hash"]
+            entry["object_hash"]
                 .as_str()
-                .is_some_and(|h| !h.is_empty())
+                .is_some_and(|hash| hash.len() == 64)
+        );
+        assert!(
+            ["published", "derived"].contains(&entry["channel"].as_str().expect("channel label"))
         );
     }
+    // And the published channel each scope was read at — tech plan
+    // §2.5's "inject responses cite commit hashes", in the audit event
+    // rather than the token budget.
+    let channels = event.payload["channels"].as_array().expect("channels");
+    assert!(
+        channels
+            .iter()
+            .any(|channel| channel["ref"] == json!("memory/published")
+                && channel["commit"]
+                    .as_str()
+                    .is_some_and(|commit| commit.len() == 64)),
+        "the published channel commit is cited: {channels:?}"
+    );
     let decisions = event.payload["decisions"].as_array().expect("decisions");
     assert_eq!(decisions.len(), 4, "one decision per chain scope");
     for decision in decisions {
@@ -589,7 +659,7 @@ async fn embedder_down_degrades_to_sparse_only_with_warning_header() {
     );
     assert!(
         ids.contains(&corpus.pinned_team.to_string()),
-        "pinned material never depends on retrieval"
+        "published material never depends on retrieval"
     );
 
     // The audit event records the degradation.
@@ -732,8 +802,10 @@ async fn request_budget_narrows_never_widens() {
 
 /// The bank-mode switch at the inject seam: a `published-only` pack set
 /// as the tenant default governs the very next inject — derived
-/// vanishes, pinned survives (ADR-0026 decision 8; the ADR-0014
-/// composition promise, end-to-end).
+/// vanishes, the scope's published channel survives (ADR-0026
+/// decision 8; the ADR-0014 composition promise, end-to-end). The
+/// FLOW-2 acceptance criterion over the governed publish route lives in
+/// tests/channels.rs.
 #[tokio::test]
 async fn bank_mode_pack_governs_the_very_next_inject() {
     let Some((pool, tenant)) = admitted_tenant().await else {
@@ -779,7 +851,7 @@ async fn bank_mode_pack_governs_the_very_next_inject() {
     let ids = record_ids(&after);
     assert!(
         ids.contains(&corpus.pinned_team.to_string()),
-        "pinned (the published stand-in) survives bank mode"
+        "the team's published record survives bank mode"
     );
     for derived in [&corpus.kube_team, &corpus.postgres_team, &corpus.note_user] {
         assert!(

@@ -30,9 +30,11 @@ use synveda_store::observe::{ObserveMessage, QueuedSignal, StagedEvent};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::{ScopeChainCache, identities, observe, policy_assignments, rls, role_bindings};
 use synveda_types::{
-    Error, HierarchyNode, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, Result,
-    ScopeId, Sensitivity, TenantId,
+    Channel, Error, HierarchyNode, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind,
+    Result, ScopeId, Sensitivity, TenantId,
 };
+use synveda_vedaflow::hash::ObjectHash;
+use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
 
 use crate::embedding::{AnyEmbedder, Embedder};
 use crate::extraction::{AnyExtractor, ExtractionInput, ExtractionOutcome, Extractor};
@@ -452,12 +454,29 @@ enum OwnerAuth {
     /// The write may land at the owner's current home.
     Allowed {
         home: ScopeId,
-        pack: String,
+        pack_name: String,
+        pack_version: i64,
         roles: Vec<String>,
     },
     /// Fail closed: the reason names policies or invariants, never
     /// content.
     Denied { reason: String },
+}
+
+/// What one owner's records contribute to their home scope's derived
+/// channel (FLOW-2, ADR-0031 decision 13).
+///
+/// Keyed by owner because home scope and owner are the same grouping: a
+/// record lands at its owner's personal node, so one scope in a group has
+/// exactly one owner — which is also why the owner is the commit's
+/// author. Blame and lineage (tech plan §2.5) run through this field.
+struct DerivedBatch {
+    scope: ScopeId,
+    pack_name: String,
+    pack_version: i64,
+    /// `(record id, content address)` per record inserted this group.
+    members: Vec<(String, ObjectHash)>,
+    events: usize,
 }
 
 /// The write transaction (ADR-0022 decisions 2, 4, 5; ADR-0023
@@ -510,6 +529,7 @@ async fn commit_group(
     let mut methods: Vec<(String, String)> = Vec::new();
     let mut rescan_findings = 0usize;
     let mut lags: Vec<f64> = Vec::new();
+    let mut batches: HashMap<IdentityId, DerivedBatch> = HashMap::new();
     for item in embedded {
         // The archive-lock: zero rows means a racing consumer already
         // committed this signal's work — skip without inserting.
@@ -520,7 +540,13 @@ async fn commit_group(
         let auth = auth_by_owner
             .get(&item.input.owner_id)
             .unwrap_or(&missing_auth);
-        let OwnerAuth::Allowed { home, pack, roles } = auth else {
+        let OwnerAuth::Allowed {
+            home,
+            pack_name,
+            pack_version,
+            roles,
+        } = auth
+        else {
             denied
                 .entry(item.input.owner_id)
                 .or_default()
@@ -528,6 +554,16 @@ async fn commit_group(
             metrics::counter!(EXTRACTION_EVENTS_TOTAL, "outcome" => "denied").increment(1);
             continue;
         };
+        let batch = batches
+            .entry(item.input.owner_id)
+            .or_insert_with(|| DerivedBatch {
+                scope: *home,
+                pack_name: pack_name.clone(),
+                pack_version: *pack_version,
+                members: Vec::new(),
+                events: 0,
+            });
+        batch.events += 1;
         let mut classes: Vec<&'static str> = Vec::new();
         for candidate in item.candidates {
             let sensitivity = candidate
@@ -560,7 +596,16 @@ async fn commit_group(
                 model: deps.embedder.model().to_owned(),
                 vector: candidate.vector,
             };
-            records::insert(&mut *tx, RecordId::new(), tenant_id, &state, &embedding).await?;
+            let record_id = RecordId::new();
+            records::insert(&mut *tx, record_id, tenant_id, &state, &embedding).await?;
+            // The derived-channel object, in the same transaction as the
+            // record it addresses (FLOW-2, ADR-0031 decision 13; the
+            // forward obligation ADR-0022 recorded). Content-addressed,
+            // so re-extracting identical content at the same scope stores
+            // nothing new.
+            let asset = memory_asset(record_id, &state);
+            let object = vedaflow::put_memory(&mut tx, tenant_id, &asset).await?;
+            batch.members.push((asset.entry_name(), object.hash));
             metrics::counter!(EXTRACTION_RECORDS_TOTAL, "class" => candidate.class.as_str())
                 .increment(1);
             classes.push(candidate.class.as_str());
@@ -573,10 +618,54 @@ async fn commit_group(
         committed.push(json!({
             "event_id": item.input.event_id,
             "owner": item.input.owner_id,
-            "pack": pack,
+            "pack": format!("{pack_name}@{pack_version}"),
             "roles": roles,
             "records": classes.len(),
             "classes": classes,
+        }));
+    }
+
+    // The derived-channel commits: one per owner (equivalently, per home
+    // scope — a record lands at its owner's personal node), inside this
+    // same transaction and before the audit append, so the lock order
+    // ADR-0019 decision 1 fixes is preserved with the chain head last.
+    // Scopes are visited in id order so two workers touching the same two
+    // scopes cannot deadlock by approaching them from opposite ends.
+    let mut ordered: Vec<(&IdentityId, &DerivedBatch)> = batches
+        .iter()
+        .filter(|(_, batch)| !batch.members.is_empty())
+        .collect();
+    ordered.sort_unstable_by_key(|(owner, batch)| (batch.scope, **owner));
+    let mut channels: Vec<serde_json::Value> = Vec::with_capacity(ordered.len());
+    for (owner, batch) in ordered {
+        let snapshot = PolicySnapshot::new(batch.pack_name.clone(), batch.pack_version);
+        let message = format!(
+            "extraction: {} record(s) from {} event(s)",
+            batch.members.len(),
+            batch.events
+        );
+        let committed = vedaflow::append(
+            &mut tx,
+            tenant_id,
+            &vedaflow::ChannelWrite {
+                scope: batch.scope,
+                channel: vedaflow::ChannelRef::memory(Channel::Derived),
+                members: &batch.members,
+                author: *owner,
+                message: &message,
+                committed_at: now,
+                policy_snapshot: &snapshot,
+            },
+            &Signer::Unsigned,
+        )
+        .await?;
+        channels.push(json!({
+            "scope_id": batch.scope,
+            "ref": vedaflow::ChannelRef::memory(Channel::Derived).name(),
+            "commit": committed.commit.to_hex(),
+            "parent": committed.parent.map(|parent| parent.to_hex()),
+            "records": committed.entries,
+            "attempts": committed.attempts,
         }));
     }
 
@@ -620,6 +709,12 @@ async fn commit_group(
                 "embedder": deps.embedder.method(),
                 "embedding_model": deps.embedder.model(),
                 "rescan_findings": rescan_findings,
+                // Where this group's records landed on the derived
+                // channel (FLOW-2, ADR-0031 decision 14). Aggregated into
+                // the group's one event rather than chained separately:
+                // a second event asserting the same fact is noise an
+                // auditor has to reconcile (ADR-0019 decision 4).
+                "channels": channels,
             }),
         )
         .await?;
@@ -720,7 +815,8 @@ async fn authorize_owner(
         roles.dedup();
         Ok(OwnerAuth::Allowed {
             home: identity.scope_id,
-            pack: format!("{}@{}", decision.pack_name, decision.pack_version),
+            pack_name: decision.pack_name,
+            pack_version: decision.pack_version,
             roles,
         })
     } else {
@@ -765,6 +861,29 @@ async fn append_event(
     )
     .await?;
     Ok(())
+}
+
+/// The VedaFlow view of a record about to be inserted (ADR-0031
+/// decision 6): the governed fields, and none of the provenance.
+///
+/// Spelled out here rather than shared with `synveda-retrieval`, which
+/// needs the same mapping: `synveda-store` and `synveda-vedaflow` are
+/// siblings, so neither can host a conversion between their types, and
+/// a field copy duplicated across a layering boundary is the trade
+/// ADR-0030 already took for the RLS backstop marker. The address it
+/// produces is pinned to retrieval's by the AC test.
+fn memory_asset(id: RecordId, state: &RecordState) -> MemoryAsset {
+    MemoryAsset {
+        id,
+        scope_id: state.scope_id,
+        owner_id: state.owner_id,
+        kind: state.kind,
+        class: state.class,
+        content: state.content.clone(),
+        sensitivity: state.sensitivity,
+        valid_from: state.valid_from,
+        valid_to: state.valid_to,
+    }
 }
 
 /// Runs extracted content back through the admission scanner (ADR-0022

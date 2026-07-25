@@ -333,12 +333,24 @@ async fn handle(
             "task_hash": payload.task.as_deref().map(task_hash),
             "as_of": as_of,
             "block_hash": block.block_hash,
-            // The full per-entry watermark (ADR-0025 decision 7): the
-            // content address of exactly the version that composed,
-            // recomputable from the bitemporal store forever.
+            // The full per-entry watermark (ADR-0025 decision 7, as
+            // ADR-0031 decision 11 upgraded it): the VedaFlow object
+            // address of exactly the version that composed, plus the
+            // channel it composed from — the trust label an auditor
+            // reads before the content.
             "entries": block.entries.iter().map(|entry| json!({
                 "record_id": entry.record_id,
-                "version_hash": entry.version_hash,
+                "object_hash": entry.object_hash,
+                "channel": entry.channel,
+            })).collect::<Vec<_>>(),
+            // Where each scope's published channel pointed when the
+            // block was composed: tech plan §2.5's "inject responses
+            // cite commit hashes", paid for out of the audit event
+            // rather than the token budget.
+            "channels": block.channels.iter().map(|channel| json!({
+                "scope_id": channel.scope_id,
+                "ref": channel.channel,
+                "commit": channel.commit,
             })).collect::<Vec<_>>(),
             "tokens": block.tokens,
             "budget_tokens": block.budget_tokens,
