@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod asset;
 mod composition;
 mod error;
 mod hierarchy;
@@ -19,6 +20,7 @@ mod role;
 mod sensitivity;
 mod tenant;
 
+pub use asset::AssetKind;
 pub use composition::{CompositionConfig, InjectChannels};
 pub use error::{Error, Result};
 pub use hierarchy::{HierarchyNode, ScopeKind};

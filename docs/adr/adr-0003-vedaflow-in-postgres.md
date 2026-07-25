@@ -1,9 +1,18 @@
 # ADR-0003: VedaFlow implements git semantics natively in Postgres, not on git repos
 
-- **Status**: Accepted
+- **Status**: Accepted; object model specified by ADR-0030 (2026-07-25)
 - **Date**: 2026-07-18
 - **Feature(s)**: FND-6, FLOW-1..8
 - **Deciders**: sujitn
+
+> **Note (ADR-0030, FLOW-1).** This ADR settled the *substrate* — native
+> Postgres tables, not bare git repos, not a forge. The object model it
+> sketches below is a sketch: ADR-0030 specifies the content-addressing
+> rule, splits `trees.entries[]` and `commits.parents[]` into foreign-keyed
+> child tables so a dangling reference is unrepresentable, prefixes the
+> tables `vedaflow_*`, and makes ref updates compare-and-swap with
+> fast-forward by default. `proposals` remains unbuilt; it lands with
+> FLOW-3.
 
 ## Context
 

@@ -8,3 +8,22 @@ publish.workspace = true
 
 [dependencies]
 synveda-types = { workspace = true }
+
+blake3 = { workspace = true }
+chrono = { workspace = true }
+# Commit signatures (FLOW-1, ADR-0030 decision 9). Already a reviewed
+# licence exception in deny.toml — it arrives transitively through
+# jsonwebtoken's rust_crypto backend (AUTH-1) — and is taken directly here.
+# No `rand_core` feature: signing keys arrive as configuration, never
+# generated in-process.
+ed25519-dalek = { workspace = true }
+metrics = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }

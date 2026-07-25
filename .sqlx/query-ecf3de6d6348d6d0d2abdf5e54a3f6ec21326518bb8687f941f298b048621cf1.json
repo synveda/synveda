@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select kind, content from vedaflow_objects where tenant_id = $1 and hash = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "content",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ecf3de6d6348d6d0d2abdf5e54a3f6ec21326518bb8687f941f298b048621cf1"
+}

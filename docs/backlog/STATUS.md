@@ -569,7 +569,7 @@ do._
 
 _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode switch._
 
-- [ ] [FLOW-1: Object store](FLOW-1.md)
+- [x] [FLOW-1: Object store](FLOW-1.md) — done 2026-07-25, ADR-0030, AC tests: crates/synveda-vedaflow/tests/object_store.rs (both properties over a live Postgres — dedup across objects, trees, and commits, with the row count pinned to the number of *distinct* (kind, content) pairs, and the same bytes in two tenants proven to be two rows at one address; immutability under 8 genuinely concurrent writers on their own connections, asserting every landed commit is reachable from the head, the chain is root + every commit, and no commit row exists that the head cannot reach — the headline run reports the compare-and-swaps actually lost, and fails if none were, since a race nobody lost tested nothing; plus the append-only grants and triggers, a trigger-suppressing attacker caught by `verify`, fast-forward vs. force, and the foreign keys refusing a dangling tree, parent, or entry), crates/synveda-store/tests/rls.rs (the six VedaFlow tables join the adversarial suite and its completeness guard), crates/synveda-vedaflow (27 unit tests: the length-prefixed encodings, per-kind domain separation, parent order, the policy-snapshot canonical form, and the signer seam), demo: demos/flow-1-object-store.sh
 - [ ] [FLOW-2: Channels](FLOW-2.md)
 - [ ] [FLOW-3: Proposals & approval matrix](FLOW-3.md)
 - [ ] [FLOW-4: Auto-promotion rules](FLOW-4.md)
@@ -653,6 +653,61 @@ load. The pre-registered rule reserved ADR-0004's option-4 revival for a
 G1/G2 failure, which did not occur, so this gate does not overturn it on
 that basis — but GRPH-1's design ADR is where the schema call belongs, and
 the burden of proof has moved onto AGE._
+
+_FLOW-1 (2026-07-25, ADR-0030): the object store — the substrate ADR-0003
+committed to, and only the substrate. Six `vedaflow_*` tables in migration
+0018, all queries in `synveda-vedaflow`, every operation inside the
+caller's `begin_tenant_tx` transaction. That is the AUD-1 split (ADR-0019)
+and it is what makes ADR-0003's central claim true in code: a commit, the
+records it describes, and the audit event attesting to it either all land
+or none do.
+
+Both acceptance properties are enforced rather than tested for, which is
+the point of the schema work. **Dedup is the primary key**: the address
+`(tenant_id, hash)` *is* the key, so a second write of identical content
+conflicts with the first and reports `deduplicated` — the property test
+pins the row count to the number of distinct (kind, content) pairs,
+however many times each was written. **Immutability is grants plus
+triggers**: the five history tables give `synveda_app` SELECT and INSERT
+only and raise on every UPDATE/DELETE/TRUNCATE, owner included; refs are
+the one mutable table and hold no DELETE. What a trigger cannot stop — a
+principal who disables triggers, the AUD-1 attacker — `verify` catches by
+recomputing every address from the row it is stored under, and the demo
+runs that attack and prints both hashes.
+
+Three readings the ADR settles because they are behaviour, not taste.
+(1) **The tenant is not in the hash.** It is in the primary key instead.
+Putting it in the address would make dedup true only in the trivial sense
+and would break the two things a content address is for: an auditor
+recomputing it from bytes, and FLOW-8 exporting it. (2) **The asset kind
+is** — identical bytes as a prompt and as a skill are two different
+objects, because FLOW-3 resolves approvals from asset type and a skill is
+executable where a prompt is not. `AssetKind` joined `synveda-types` for
+it. (3) **Racing a ref is a result, not an error.** `update_ref` states
+the commit it expects to replace and reports `Raced` when it finds
+another; the caller re-reads and re-parents. Under 8 concurrent writers
+the headline test loses 100-odd compare-and-swaps and drops nothing: a
+lost race rolls back its own objects, tree, and commit, so there is no
+unreachable garbage either. Fast-forward is the default and
+`force_update_ref` is a separate function by name, so FLOW-7's rollback
+can never be a typo.
+
+Deferrals, all recorded in ADR-0030: **no audit action, no route, no CLI
+verb** — the object store has no product surface until FLOW-2, and
+inventing `vedaflow.ref.updated`'s actor, resource, and decision context
+ahead of the surface that produces them would be guessing; the counters
+this crate emits (`synveda_vedaflow_{objects,trees,commits}_written_total`,
+`_ref_updates_total`, `_verifications_total`) are described in the
+gateway's recorder when FLOW-2 wires the gateway to this crate. Packing
+and GC stay open, as ADR-0003 anticipated. Signing-key management is
+configuration-shaped (`Signer::Unsigned` is the default and writes NULL,
+because a commit nobody signed should say so); TEN-4's per-tenant keys are
+its natural home. The ancestry walk behind the fast-forward check is
+O(history) worst case — depth 1 in the overwhelmingly common case — with a
+generation number as the recorded upgrade if FLOW-4/5's automated
+promotions make ref moves hot. `vedaflow_refs` carries no foreign key to
+`hierarchy_nodes`: an `on delete cascade` would be a ref-deletion path
+around the withheld DELETE grant, and disposal is TEN-5's._
 
 ## Phase 3 — Enterprise (wk 11–16)
 

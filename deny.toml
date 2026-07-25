@@ -24,6 +24,11 @@ exceptions = [
     # do not yet verify with); simple_asn1 parses PEM in tests. All three are
     # OSI-approved permissive. Added with AUTH-1.
     { name = "curve25519-dalek", allow = ["BSD-3-Clause"] },
+    # ed25519-dalek stopped being incidental with FLOW-1 (ADR-0030
+    # decision 9): synveda-vedaflow signs commit hashes with it directly.
+    # Same licence, now a deliberate dependency rather than a transitive
+    # one — and the `rand_core` feature stays off, so no key generation
+    # happens in-process.
     { name = "ed25519-dalek", allow = ["BSD-3-Clause"] },
     { name = "simple_asn1", allow = ["ISC"] },
     # Build-time-only dep of psm/stacker (segmented stacks for Cedar's

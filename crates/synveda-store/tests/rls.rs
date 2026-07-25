@@ -210,6 +210,12 @@ const COVERED: &[&str] = &[
     "records",
     "records_history",
     "role_bindings",
+    "vedaflow_commit_parents",
+    "vedaflow_commits",
+    "vedaflow_objects",
+    "vedaflow_refs",
+    "vedaflow_tree_entries",
+    "vedaflow_trees",
 ];
 
 /// Discovers every tenant-scoped table (structural definition, ADR-0009: any
@@ -1817,5 +1823,410 @@ fn audit_log_is_append_only_for_the_app_role() {
             behead.is_err(),
             "the app role must not hold DELETE on audit_chain_heads"
         );
+    });
+}
+
+// ── VedaFlow object store (FLOW-1, ADR-0030) ────────────────────────────────
+
+/// Seeds one tenant's worth of VedaFlow history: an object, a tree holding
+/// an entry that points at it, two commits linked parent-to-child, and a ref.
+///
+/// Raw SQL with arbitrary 32-byte addresses on purpose. `synveda-store` sits
+/// beside `synveda-vedaflow` and cannot import it (seed §8), and this suite
+/// is about the backstop rather than about content addressing — FLOW-1's own
+/// property tests own that half, and RLS does not care whether a hash is
+/// honest.
+async fn seed_vedaflow(pool: &PgPool) -> (TenantId, ScopeId) {
+    let tenant = TenantId::new();
+    let slug = format!("rls-vf-{}", tenant.as_uuid().simple());
+    tenants::create(
+        pool,
+        tenant,
+        &slug,
+        "VedaFlow RLS fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create tenant");
+    let scope = ScopeId::new();
+    let author = IdentityId::new();
+
+    sqlx::query!(
+        "insert into vedaflow_objects (tenant_id, hash, kind, content, size_bytes)
+         values ($1, $2, 'memory', $3, 3)",
+        tenant.as_uuid(),
+        &[1u8; 32][..],
+        &b"abc"[..],
+    )
+    .execute(pool)
+    .await
+    .expect("seed object");
+    sqlx::query!(
+        "insert into vedaflow_trees (tenant_id, hash) values ($1, $2)",
+        tenant.as_uuid(),
+        &[2u8; 32][..],
+    )
+    .execute(pool)
+    .await
+    .expect("seed tree");
+    sqlx::query!(
+        "insert into vedaflow_tree_entries (tenant_id, tree_hash, name, object_hash)
+         values ($1, $2, 'note.md', $3)",
+        tenant.as_uuid(),
+        &[2u8; 32][..],
+        &[1u8; 32][..],
+    )
+    .execute(pool)
+    .await
+    .expect("seed tree entry");
+    for hash in [[3u8; 32], [4u8; 32]] {
+        sqlx::query!(
+            "insert into vedaflow_commits
+                 (tenant_id, hash, tree_hash, author_id, message, committed_at,
+                  policy_snapshot_hash)
+             values ($1, $2, $3, $4, 'seed', now(), $5)",
+            tenant.as_uuid(),
+            &hash[..],
+            &[2u8; 32][..],
+            author.as_uuid(),
+            &[5u8; 32][..],
+        )
+        .execute(pool)
+        .await
+        .expect("seed commit");
+    }
+    sqlx::query!(
+        "insert into vedaflow_commit_parents (tenant_id, commit_hash, ordinal, parent_hash)
+         values ($1, $2, 0, $3)",
+        tenant.as_uuid(),
+        &[4u8; 32][..],
+        &[3u8; 32][..],
+    )
+    .execute(pool)
+    .await
+    .expect("seed commit parent");
+    sqlx::query!(
+        "insert into vedaflow_refs (tenant_id, scope_id, name, commit_hash, updated_by)
+         values ($1, $2, 'published', $3, $4)",
+        tenant.as_uuid(),
+        scope.as_uuid(),
+        &[4u8; 32][..],
+        author.as_uuid(),
+    )
+    .execute(pool)
+    .await
+    .expect("seed ref");
+    (tenant, scope)
+}
+
+/// Rows of `tenant` visible through the six VedaFlow tables, in the order
+/// (objects, trees, entries, commits, parents, refs).
+async fn visible_vedaflow_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64, i64, i64, i64, i64) {
+    let row = sqlx::query!(
+        r#"select
+             (select count(*) from vedaflow_objects where tenant_id = $1) as "objects!",
+             (select count(*) from vedaflow_trees where tenant_id = $1) as "trees!",
+             (select count(*) from vedaflow_tree_entries where tenant_id = $1) as "entries!",
+             (select count(*) from vedaflow_commits where tenant_id = $1) as "commits!",
+             (select count(*) from vedaflow_commit_parents where tenant_id = $1) as "parents!",
+             (select count(*) from vedaflow_refs where tenant_id = $1) as "refs!""#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count vedaflow rows");
+    (
+        row.objects,
+        row.trees,
+        row.entries,
+        row.commits,
+        row.parents,
+        row.refs,
+    )
+}
+
+#[test]
+fn wrong_tenant_guc_sees_no_vedaflow_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _) = seed_vedaflow(&db.pool).await;
+        let (adversary, _) = seed_vedaflow(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        assert_eq!(
+            visible_vedaflow_rows(&mut tx, victim).await,
+            (1, 1, 1, 2, 1, 1),
+            "a tenant must see its own governed history"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_vedaflow_rows(&mut tx, victim).await,
+            (0, 0, 0, 0, 0, 0),
+            "another tenant's knowledge history leaked"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_vedaflow_rows(&mut tx, victim).await,
+            (0, 0, 0, 0, 0, 0),
+            "an unset GUC must see nothing at all"
+        );
+    });
+}
+
+/// Forging another tenant's id on the way in trips each policy's WITH CHECK,
+/// on every one of the six tables.
+#[test]
+fn cross_tenant_vedaflow_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_scope) = seed_vedaflow(&db.pool).await;
+        let (adversary, _) = seed_vedaflow(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            "insert into vedaflow_objects (tenant_id, hash, kind, content, size_bytes)
+             values ($1, $2, 'memory', $3, 3)",
+            victim.as_uuid(),
+            &[9u8; 32][..],
+            &b"xyz"[..],
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant object write must be rejected"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            "insert into vedaflow_trees (tenant_id, hash) values ($1, $2)",
+            victim.as_uuid(),
+            &[9u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant tree write must be rejected"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            "insert into vedaflow_tree_entries (tenant_id, tree_hash, name, object_hash)
+             values ($1, $2, 'stolen.md', $3)",
+            victim.as_uuid(),
+            &[2u8; 32][..],
+            &[1u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant tree entry write must be rejected"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            "insert into vedaflow_commits
+                 (tenant_id, hash, tree_hash, author_id, message, committed_at,
+                  policy_snapshot_hash)
+             values ($1, $2, $3, $4, 'forged', now(), $5)",
+            victim.as_uuid(),
+            &[9u8; 32][..],
+            &[2u8; 32][..],
+            IdentityId::new().as_uuid(),
+            &[5u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant commit write must be rejected"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            "insert into vedaflow_commit_parents
+                 (tenant_id, commit_hash, ordinal, parent_hash)
+             values ($1, $2, 1, $3)",
+            victim.as_uuid(),
+            &[4u8; 32][..],
+            &[3u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant commit parent write must be rejected"
+        );
+        drop(tx);
+
+        // And the one mutable table, both ways in: a forged insert, and a
+        // cross-tenant move of a ref the adversary cannot even see.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            "insert into vedaflow_refs (tenant_id, scope_id, name, commit_hash, updated_by)
+             values ($1, $2, 'hijacked', $3, $4)",
+            victim.as_uuid(),
+            victim_scope.as_uuid(),
+            &[4u8; 32][..],
+            IdentityId::new().as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant ref write must be rejected"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let moved = sqlx::query!(
+            "update vedaflow_refs set commit_hash = $3
+             where tenant_id = $1 and scope_id = $2",
+            victim.as_uuid(),
+            victim_scope.as_uuid(),
+            &[3u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("cross-tenant ref move");
+        assert_eq!(
+            moved.rows_affected(),
+            0,
+            "another tenant's published ref must be unreachable, not merely unwritten"
+        );
+    });
+}
+
+/// The five history tables hold no UPDATE or DELETE grant for the app role,
+/// and `vedaflow_refs` holds no DELETE — a ref moves, it never disappears
+/// (ADR-0030 decision 6). 42501 whether the withheld grant or the
+/// append-only trigger answers first.
+#[test]
+fn vedaflow_history_is_append_only_for_the_app_role() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed_vedaflow(&db.pool).await;
+
+        for statement in [
+            "update vedaflow_objects set content = 'tampered'",
+            "delete from vedaflow_objects",
+            "update vedaflow_trees set created_at = now()",
+            "delete from vedaflow_trees",
+            "update vedaflow_tree_entries set name = 'renamed'",
+            "delete from vedaflow_tree_entries",
+            "update vedaflow_commits set message = 'rewritten'",
+            "delete from vedaflow_commits",
+            "update vedaflow_commit_parents set ordinal = 9",
+            "delete from vedaflow_commit_parents",
+            "delete from vedaflow_refs",
+        ] {
+            let mut tx = app_tx(&db.pool, Some(tenant)).await;
+            let outcome = sqlx::raw_sql(statement).execute(&mut *tx).await;
+            assert!(
+                outcome.is_err(),
+                "the app role must not be able to run: {statement}"
+            );
+        }
+    });
+}
+
+/// In-tenant, the app role can do everything the object store needs: write
+/// content, link it, commit it, and move a ref forward.
+#[test]
+fn same_tenant_vedaflow_lifecycle_works_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, scope) = seed_vedaflow(&db.pool).await;
+        let author = IdentityId::new();
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        sqlx::query!(
+            "insert into vedaflow_objects (tenant_id, hash, kind, content, size_bytes)
+             values ($1, $2, 'prompt', $3, 4)",
+            tenant.as_uuid(),
+            &[10u8; 32][..],
+            &b"tips"[..],
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("write own object");
+        sqlx::query!(
+            "insert into vedaflow_trees (tenant_id, hash) values ($1, $2)",
+            tenant.as_uuid(),
+            &[11u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("write own tree");
+        sqlx::query!(
+            "insert into vedaflow_tree_entries (tenant_id, tree_hash, name, object_hash)
+             values ($1, $2, 'style.md', $3)",
+            tenant.as_uuid(),
+            &[11u8; 32][..],
+            &[10u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("write own tree entry");
+        sqlx::query!(
+            "insert into vedaflow_commits
+                 (tenant_id, hash, tree_hash, author_id, message, committed_at,
+                  policy_snapshot_hash)
+             values ($1, $2, $3, $4, 'own commit', now(), $5)",
+            tenant.as_uuid(),
+            &[12u8; 32][..],
+            &[11u8; 32][..],
+            author.as_uuid(),
+            &[5u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("write own commit");
+        sqlx::query!(
+            "insert into vedaflow_commit_parents
+                 (tenant_id, commit_hash, ordinal, parent_hash)
+             values ($1, $2, 0, $3)",
+            tenant.as_uuid(),
+            &[12u8; 32][..],
+            &[4u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("write own commit parent");
+
+        // The ref moves — the one UPDATE the app role holds on this schema.
+        let moved = sqlx::query!(
+            "update vedaflow_refs set commit_hash = $4, updated_at = now(), updated_by = $5
+             where tenant_id = $1 and scope_id = $2 and name = 'published' and commit_hash = $3",
+            tenant.as_uuid(),
+            scope.as_uuid(),
+            &[4u8; 32][..],
+            &[12u8; 32][..],
+            author.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("move own ref");
+        assert_eq!(moved.rows_affected(), 1, "a ref must move in-tenant");
+
+        assert_eq!(
+            visible_vedaflow_rows(&mut tx, tenant).await,
+            (2, 2, 2, 3, 2, 1),
+            "everything written in-tenant is visible in-tenant"
+        );
+        tx.commit().await.expect("commit");
     });
 }

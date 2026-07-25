@@ -3774,7 +3774,18 @@ dependencies = [
 name = "synveda-vedaflow"
 version = "0.1.0"
 dependencies = [
+ "blake3",
+ "chrono",
+ "ed25519-dalek",
+ "metrics",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sqlx",
  "synveda-types",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

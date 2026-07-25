@@ -1,0 +1,110 @@
+//! The managed asset vocabulary (seed §4.3, tech plan §2.3).
+
+use std::fmt;
+use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
+
+use crate::Error;
+
+/// What kind of governed asset a VedaFlow object holds.
+///
+/// The four managed asset classes of seed §4.3 plus policy, which tech plan
+/// §2.3 makes an asset in its own right: "policy packs and lapses are
+/// themselves assets flowing through VedaFlow".
+///
+/// This is part of a VedaFlow object's content address (FLOW-1, ADR-0030
+/// decision 4), not a label beside it: identical bytes registered as a prompt
+/// and as a skill are two different objects, because FLOW-3 resolves required
+/// approvals from asset type × sensitivity × scope × pack, and a skill is
+/// executable where a prompt is not. Content governed differently is not the
+/// same content.
+///
+/// There is no `Default` — what an asset *is* is always an explicit decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AssetKind {
+    /// A memory record's content — derived by the pipeline or authored
+    /// (seed §4.2).
+    Memory,
+    /// A versioned prompt template (PRMT-1).
+    Prompt,
+    /// A skill definition and its bundled files (SKIL-1). Executable, and
+    /// reviewed like code.
+    Skill,
+    /// A curated bundle pinned to a scope: docs, conventions, glossaries
+    /// (PRMT-2).
+    ContextPack,
+    /// A policy pack or lapse, flowing through the same propose/review/approve
+    /// path as everything else it governs.
+    Policy,
+}
+
+impl AssetKind {
+    /// All asset kinds. Kept in the same order as the `vedaflow_objects.kind`
+    /// CHECK constraint (migration 0018).
+    pub const ALL: [AssetKind; 5] = [
+        AssetKind::Memory,
+        AssetKind::Prompt,
+        AssetKind::Skill,
+        AssetKind::ContextPack,
+        AssetKind::Policy,
+    ];
+
+    /// Stable wire name, identical to the serde form and to the stored
+    /// column. It is hashed into every object's content address, so renaming
+    /// one would re-address every object of that kind.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            AssetKind::Memory => "memory",
+            AssetKind::Prompt => "prompt",
+            AssetKind::Skill => "skill",
+            AssetKind::ContextPack => "context-pack",
+            AssetKind::Policy => "policy",
+        }
+    }
+}
+
+impl fmt::Display for AssetKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for AssetKind {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        AssetKind::ALL
+            .into_iter()
+            .find(|kind| kind.as_str() == s)
+            .ok_or_else(|| Error::Invalid {
+                message: format!("unknown asset kind: {s:?}"),
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wire_names_round_trip_through_display_and_parse() {
+        for kind in AssetKind::ALL {
+            assert_eq!(kind.to_string().parse::<AssetKind>().unwrap(), kind);
+            assert_eq!(
+                serde_json::to_string(&kind).unwrap(),
+                format!("\"{}\"", kind.as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_names_are_invalid_not_defaulted() {
+        assert!(matches!(
+            "memories".parse::<AssetKind>(),
+            Err(Error::Invalid { .. })
+        ));
+    }
+}
