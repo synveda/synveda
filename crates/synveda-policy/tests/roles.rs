@@ -45,7 +45,7 @@ const ALL_SCOPES: [&str; 8] = [
 /// The decision columns: the action vocabulary, with `RoleAssign` split
 /// by what is being granted — the base layer decides those differently
 /// (ADR-0015 decision 5).
-const COLUMNS: [(Action, Option<Role>); 20] = [
+const COLUMNS: [(Action, Option<Role>); 22] = [
     (Action::HierarchyCreate, None),
     (Action::HierarchyRead, None),
     (Action::HierarchyUpdate, None),
@@ -63,6 +63,8 @@ const COLUMNS: [(Action, Option<Role>); 20] = [
     (Action::ServiceIdentityManage, None),
     (Action::ChannelRead, None),
     (Action::ChannelPublish, None),
+    (Action::ChannelRollback, None),
+    (Action::ChannelPin, None),
     (Action::ProposalRead, None),
     (Action::ProposalOpen, None),
     (Action::ProposalReview, None),
@@ -235,6 +237,8 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::MemoryWrite, None),
             (Action::ChannelRead, None),
             (Action::ChannelPublish, None),
+            (Action::ChannelRollback, None),
+            (Action::ChannelPin, None),
             (Action::ProposalRead, None),
             (Action::ProposalOpen, None),
             (Action::ProposalReview, None),
@@ -257,6 +261,8 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::ServiceIdentityManage, None),
             (Action::ChannelRead, None),
             (Action::ChannelPublish, None),
+            (Action::ChannelRollback, None),
+            (Action::ChannelPin, None),
             (Action::ProposalRead, None),
             (Action::ProposalOpen, None),
             (Action::ProposalReview, None),
@@ -278,6 +284,8 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::ServiceIdentityManage, None),
             (Action::ChannelRead, None),
             (Action::ChannelPublish, None),
+            (Action::ChannelRollback, None),
+            (Action::ChannelPin, None),
             (Action::ProposalRead, None),
             (Action::ProposalOpen, None),
             (Action::ProposalReview, None),
@@ -370,6 +378,8 @@ fn assert_matrix(pack: &str, version: i64) {
                         | Action::ServiceIdentityManage
                         | Action::ChannelRead
                         | Action::ChannelPublish
+                        | Action::ChannelRollback
+                        | Action::ChannelPin
                         | Action::ProposalOpen
                         | Action::ProposalReview
                 ) && target.is_none()
@@ -411,20 +421,20 @@ fn assert_matrix(pack: &str, version: i64) {
 /// regulated-strict: the golden matrix (the AC).
 #[test]
 fn matrix_regulated_strict() {
-    assert_matrix(REGULATED_STRICT, 7);
+    assert_matrix(REGULATED_STRICT, 8);
 }
 
 /// standard: identical role matrix — packs differ on composition
 /// membership, never on who administers (ADR-0015 decision 4).
 #[test]
 fn matrix_standard() {
-    assert_matrix(STANDARD, 7);
+    assert_matrix(STANDARD, 8);
 }
 
 /// open-collaboration: identical role matrix.
 #[test]
 fn matrix_open_collaboration() {
-    assert_matrix(OPEN_COLLABORATION, 7);
+    assert_matrix(OPEN_COLLABORATION, 8);
 }
 
 /// A tenant-wide binding is in force everywhere, the tenant plane

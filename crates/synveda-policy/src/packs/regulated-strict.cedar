@@ -150,6 +150,28 @@ permit (
         && context.roles.containsAny(["curator", "steward", "org-admin"])
 };
 
+// A rewind and a pin (FLOW-7, ADR-0036 decision 3): pack-uniform, and the
+// same three roles as publishing, because a rewind can only reinstate a
+// state this same set already approved. What the separate actions buy is
+// the ability for a *stored* pack to say "publish widely, rewind narrowly"
+// — the embedded packs choose not to, and could not express the choice at
+// all if the two shared one action.
+//
+// Rolling back also requires the asset kind's read action at the same scope
+// (ADR-0036 decision 3), which is what keeps a curator out of a teammate's
+// personal published channel here, exactly as it does for publishing.
+permit (
+    principal,
+    action in [
+        Synveda::Action::"ChannelRollback",
+        Synveda::Action::"ChannelPin"
+    ],
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["curator", "steward", "org-admin"])
+};
+
 // The VedaFlow proposal plane (FLOW-3, ADR-0032 decision 16): pack-uniform,
 // like the channel and quarantine planes and for the same reason — how
 // content crosses the trust boundary does not loosen per pack. What varies

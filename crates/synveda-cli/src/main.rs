@@ -17,6 +17,7 @@
 #![cfg_attr(not(test), forbid(unsafe_code))]
 
 mod api;
+mod channel;
 mod credentials;
 mod diff;
 mod login;
@@ -111,6 +112,114 @@ enum Command {
     /// identity. Run `synveda login` first.
     #[command(subcommand)]
     Proposal(ProposalCommand),
+    /// VedaFlow channels (FLOW-7, ADR-0036): what a scope publishes, the
+    /// states it has published, rewinding to one of them, and holding
+    /// what it serves at a commit.
+    ///
+    /// Gateway calls under the bearer `synveda login` stored, like
+    /// `proposal` and for the same reason: a rewind reaches every agent
+    /// under the scope on their next session, and an act that large is
+    /// one the PDP must decide and the gateway must chain under your own
+    /// identity — never a row a laptop wrote.
+    #[command(subcommand)]
+    Channel(ChannelCommand),
+}
+
+#[derive(Subcommand)]
+enum ChannelCommand {
+    /// What stands at a scope: each channel, where it points, and the
+    /// pin holding its readers if there is one.
+    Status {
+        /// The scope UUID.
+        scope: ScopeId,
+        /// Print the gateway's answer verbatim.
+        #[arg(long)]
+        json: bool,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// The states a channel has held, newest first — the menu a rewind is
+    /// chosen from. Everything listed but the head is a legal `--to`, and
+    /// nothing outside the listing is (ADR-0036 decisions 1 and 11).
+    History {
+        /// The scope UUID.
+        scope: ScopeId,
+        /// Which channel, as its ref name. Defaults to
+        /// `memory/published`.
+        #[arg(long)]
+        channel: Option<String>,
+        /// How many states, 1..=200.
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Rewind a channel to a state it has already held. Every session
+    /// that starts afterwards composes that state; nothing else has to
+    /// happen, and nothing can be installed that was not approved when it
+    /// was published.
+    Rollback {
+        /// The scope UUID.
+        scope: ScopeId,
+        /// The commit being abandoned — the head as `history` showed it.
+        /// Required: a rewind is a decision about which state to leave,
+        /// and that decision is stale if someone else moved the ref.
+        #[arg(long)]
+        from: String,
+        /// The state to install: one of the commits `history` lists.
+        #[arg(long)]
+        to: String,
+        /// Why. An auditor reads this, and so does whoever asks next week
+        /// why a record stopped being published.
+        #[arg(long)]
+        message: String,
+        #[arg(long)]
+        channel: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Hold what a channel serves at a commit. Publications keep landing
+    /// and the channel keeps advancing; what stops moving is what readers
+    /// compose (ADR-0036 decision 6).
+    Pin {
+        /// The scope UUID.
+        scope: ScopeId,
+        /// The commit to hold readers at — one of the commits `history`
+        /// lists, the head included.
+        #[arg(long)]
+        commit: String,
+        /// Why this scope is holding its readers. The pin's only record:
+        /// the ref carries who and when and nothing else.
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        channel: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Release the hold. Readers catch up to the channel's head on their
+    /// next session.
+    Unpin {
+        /// The scope UUID.
+        scope: ScopeId,
+        /// Why the hold is being released.
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        channel: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -918,6 +1027,55 @@ async fn run(cli: Cli) -> Result<(), String> {
             ProposalCommand::Publish { id, profile } => {
                 proposal::publish(&profile_name(profile), id).await
             }
+        },
+        Command::Channel(command) => match command {
+            ChannelCommand::Status {
+                scope,
+                json,
+                profile,
+            } => channel::status(&profile_name(profile), scope, json).await,
+            ChannelCommand::History {
+                scope,
+                channel,
+                limit,
+                json,
+                profile,
+            } => channel::history(&profile_name(profile), scope, channel, limit, json).await,
+            ChannelCommand::Rollback {
+                scope,
+                from,
+                to,
+                message,
+                channel,
+                json,
+                profile,
+            } => {
+                channel::rollback(
+                    &profile_name(profile),
+                    scope,
+                    from,
+                    to,
+                    message,
+                    channel,
+                    json,
+                )
+                .await
+            }
+            ChannelCommand::Pin {
+                scope,
+                commit,
+                reason,
+                channel,
+                json,
+                profile,
+            } => channel::pin(&profile_name(profile), scope, commit, reason, channel, json).await,
+            ChannelCommand::Unpin {
+                scope,
+                reason,
+                channel,
+                json,
+                profile,
+            } => channel::unpin(&profile_name(profile), scope, reason, channel, json).await,
         },
         Command::Token(TokenCommand::Issue {
             tenant,

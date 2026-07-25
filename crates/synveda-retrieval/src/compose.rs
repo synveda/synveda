@@ -135,7 +135,7 @@ pub struct ComposedEntry {
     pub tokens: u32,
 }
 
-/// One channel the block read: where a scope's ref pointed at
+/// One channel the block read: the commit a scope's channel served at
 /// composition time (ADR-0031 decision 11).
 ///
 /// Carried on the block and recorded in the inject audit event rather
@@ -147,8 +147,17 @@ pub struct ChannelWatermark {
     pub scope_id: ScopeId,
     /// The ref name, e.g. `memory/published`.
     pub channel: String,
-    /// The commit it pointed at, hex-encoded.
+    /// The commit it served, hex-encoded.
     pub commit: String,
+    /// Whether a pin chose that commit rather than the ref (FLOW-7,
+    /// ADR-0036 decision 10).
+    ///
+    /// A watermark that cites a frozen commit without saying it is frozen
+    /// invites "the agent had the latest reviewed material", which is
+    /// exactly what a pinned scope has decided against. The same
+    /// discipline as CTX-3's degradation header: a response that
+    /// deliberately differs from the expected one has to say so.
+    pub pinned: bool,
 }
 
 /// One composed, watermarked context block.
@@ -577,6 +586,7 @@ pub async fn compose(
                     scope_id: channel.scope_id,
                     channel: ChannelRef::memory(Channel::Published).name(),
                     commit: channel.commit.to_hex(),
+                    pinned: channel.pinned,
                 })
         })
         .collect();

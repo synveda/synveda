@@ -338,6 +338,10 @@ FLOW-6 CLI review flow (M)
 FLOW-7 Rollback & pinning (S)
   Ref rollback; agents heal next session; assets pinnable to a commit per scope.
   AC: bad-prompt rollback demo <60s to fleet-wide effect.
+  AC: a rewind can only install a state the channel has held — a proposal commit and an
+  orphaned publication are both refused by name (ADR-0036 decisions 1–2).
+  AC: a pinned scope serves its pinned commit while publications keep landing; the block's
+  watermark says so; releasing the pin catches every reader up on the next session.
 FLOW-8 Git bridge — export (M)
   gitoxide mirror of published channels to a bare repo / GitHub for visibility & PR-culture
   review. AC: published history round-trips to a real git repo with signatures preserved.

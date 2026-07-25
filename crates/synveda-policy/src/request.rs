@@ -102,6 +102,26 @@ pub enum Action {
     /// acting principal's authority is enough on its own (ADR-0032
     /// decision 8).
     ChannelPublish,
+    /// Rewind the resource scope's published channel to a state it has
+    /// already held (FLOW-7, ADR-0036 decision 3).
+    ///
+    /// Its own action rather than [`Action::ChannelPublish`] so that a pack
+    /// can grant publication broadly and rewinds narrowly — the two are the
+    /// same grant forever if they share one. It deliberately resolves *no*
+    /// approval matrix: a rewind can only install a state that cleared the
+    /// matrix when it was installed (ADR-0036 decisions 1 and 2), and an
+    /// incident response that needs a quorum is not a rollback. Like
+    /// publishing, the route additionally requires the asset kind's read
+    /// action at the same scope.
+    ChannelRollback,
+    /// Hold what the resource scope's channel *serves* at a commit, or
+    /// release that hold (FLOW-7, ADR-0036 decisions 6 and 8).
+    ///
+    /// One action for setting, moving, and releasing a pin: they are the
+    /// same decision by the same principal about the same channel, and
+    /// releasing is never the more dangerous half — it can only return
+    /// readers to material that was approved more recently.
+    ChannelPin,
     /// Read proposals targeting the resource scope — `GET /v1/proposals`
     /// and `GET /v1/proposals/{id}` (FLOW-3, ADR-0032 decision 16).
     ProposalRead,
@@ -139,6 +159,8 @@ impl Action {
             Action::ServiceIdentityManage => "service_identity.manage",
             Action::ChannelRead => "channel.read",
             Action::ChannelPublish => "channel.publish",
+            Action::ChannelRollback => "channel.rollback",
+            Action::ChannelPin => "channel.pin",
             Action::ProposalRead => "proposal.read",
             Action::ProposalOpen => "proposal.open",
             Action::ProposalReview => "proposal.review",
@@ -164,6 +186,8 @@ impl Action {
             Action::ServiceIdentityManage => "ServiceIdentityManage",
             Action::ChannelRead => "ChannelRead",
             Action::ChannelPublish => "ChannelPublish",
+            Action::ChannelRollback => "ChannelRollback",
+            Action::ChannelPin => "ChannelPin",
             Action::ProposalRead => "ProposalRead",
             Action::ProposalOpen => "ProposalOpen",
             Action::ProposalReview => "ProposalReview",

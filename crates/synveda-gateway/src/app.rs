@@ -170,6 +170,14 @@ pub fn router(state: AppState) -> Router {
         // satisfied by the acting principal alone (ADR-0032 decision 8).
         .route("/v1/channels/{scope_id}", get(channels::list))
         .route("/v1/channels/{scope_id}/publish", post(channels::publish))
+        // Rollback and pinning (FLOW-7, ADR-0036). `history` is the
+        // listing a rewind is chosen from and renders exactly the set the
+        // rewind accepts; `pin` holds what the channel serves without
+        // moving where it points, and is released by deleting it.
+        .route("/v1/channels/{scope_id}/history", get(channels::history))
+        .route("/v1/channels/{scope_id}/rollback", post(channels::rollback))
+        .route("/v1/channels/{scope_id}/pin", post(channels::pin))
+        .route("/v1/channels/{scope_id}/unpin", post(channels::unpin))
         // The VedaFlow proposal plane (FLOW-3, ADR-0032): the review in
         // front of a publication. Opening asks, approving counts, and
         // publishing runs the effect under `ChannelPublish` — approvals

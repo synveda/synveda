@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from vedaflow_refs\n         where tenant_id = $1 and scope_id = $2 and name = $3\n         returning commit_hash, updated_at, updated_by",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "commit_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 1,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b208afb66bbf30f51b3f19fc5566aa5831b60bbad19bb029d9ed511ca76b34ca"
+}

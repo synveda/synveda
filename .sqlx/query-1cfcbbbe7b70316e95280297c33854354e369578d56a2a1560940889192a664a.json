@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select r.name, r.commit_hash, r.updated_at, r.updated_by,\n                  p.commit_hash as \"pinned_commit?\",\n                  p.updated_at as \"pinned_at?\",\n                  p.updated_by as \"pinned_by?\",\n                  (select count(*) from vedaflow_tree_entries e\n                   where e.tenant_id = r.tenant_id and e.tree_hash = c.tree_hash)\n                      as \"entries!\"\n           from vedaflow_refs r\n           join vedaflow_commits c\n               on c.tenant_id = r.tenant_id and c.hash = r.commit_hash\n           left join vedaflow_refs p\n               on p.tenant_id = r.tenant_id and p.scope_id = r.scope_id\n                  and p.name = $3 || r.name\n           where r.tenant_id = $1 and r.scope_id = $2\n           order by r.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "commit_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "pinned_commit?",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 5,
+        "name": "pinned_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "pinned_by?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "entries!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "1cfcbbbe7b70316e95280297c33854354e369578d56a2a1560940889192a664a"
+}

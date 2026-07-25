@@ -173,6 +173,26 @@ pub enum AuditAction {
     /// direct publish, so it is the same action with a fuller payload,
     /// not a second one asserting the same fact.
     ChannelPublished,
+    /// A scope's published channel was rewound to a state it had already
+    /// held (FLOW-7, ADR-0036 decision 9) — the one governed act that
+    /// removes content from the trust boundary, and the one that reaches
+    /// every agent in the subtree on their next session with no further
+    /// human act. Payload carries the commit abandoned and the commit
+    /// installed, the record ids that stopped being published material and
+    /// those whose published version went back to an earlier one, the
+    /// operator's mandatory message, and the `channel.rollback` decision.
+    /// Never record content, like every other channel event.
+    ChannelRolledBack,
+    /// A scope's channel was held at a commit, or a standing hold was moved
+    /// to a different one (ADR-0036 decision 6). Publications keep landing
+    /// while a pin stands; what changes is only what readers compose.
+    /// Payload carries the commit held, the one it replaced when the pin
+    /// moved, and the mandatory reason — the pin's only record, because the
+    /// ref itself carries who and when and nothing else.
+    ChannelPinned,
+    /// A standing pin was released and the channel serves its head again.
+    /// The one ref deletion the schema permits (migration 0021).
+    ChannelUnpinned,
     /// A proposal was opened against a scope's published channel
     /// (FLOW-3, ADR-0032 decision 18). Payload carries the target, asset
     /// kind, member ids and addresses, the proposal commit, the maximum
@@ -222,6 +242,9 @@ impl AuditAction {
             AuditAction::TenantCreated => "tenant.created",
             AuditAction::ContextInjected => "context.injected",
             AuditAction::ChannelPublished => "vedaflow.channel.published",
+            AuditAction::ChannelRolledBack => "vedaflow.channel.rolled_back",
+            AuditAction::ChannelPinned => "vedaflow.channel.pinned",
+            AuditAction::ChannelUnpinned => "vedaflow.channel.unpinned",
             AuditAction::ProposalOpened => "vedaflow.proposal.opened",
             AuditAction::ProposalApproved => "vedaflow.proposal.approved",
             AuditAction::ProposalRejected => "vedaflow.proposal.rejected",

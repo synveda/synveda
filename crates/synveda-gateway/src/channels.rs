@@ -15,6 +15,14 @@
 //! channel's tree, so a later edit demotes the record to unreviewed
 //! rather than riding a published id (ADR-0031 decision 5).
 //!
+//! Since FLOW-7 (ADR-0036) the same plane holds the two acts that move a
+//! channel the other way: `ChannelRollback` rewinds it to a state it has
+//! already held, and `ChannelPin` holds what it *serves* at a commit
+//! without moving where it points. Neither resolves the approval matrix —
+//! a rewind can install nothing the matrix has not already cleared — and
+//! both take the asset kind's read action alongside their own, on the same
+//! rule publishing follows: nobody governs material they cannot read.
+//!
 //! Since FLOW-3 (ADR-0032 decision 8) this route resolves the **same**
 //! approval matrix a proposal does, with the acting principal counting as
 //! the only approver. A curator publishing internal memory under
@@ -26,7 +34,7 @@
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -101,6 +109,30 @@ struct ChannelView {
     entries: usize,
     updated_at: DateTime<Utc>,
     updated_by: IdentityId,
+    /// The standing pin, when there is one: readers compose this commit
+    /// rather than the one above until it is released (FLOW-7, ADR-0036
+    /// decision 6).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pin: Option<PinView>,
+}
+
+/// A pin as the API renders it.
+#[derive(Serialize)]
+struct PinView {
+    /// The commit readers are held at.
+    commit: String,
+    pinned_at: DateTime<Utc>,
+    pinned_by: IdentityId,
+}
+
+impl PinView {
+    fn of(pin: &vedaflow::ChannelPin) -> Self {
+        PinView {
+            commit: pin.commit.to_hex(),
+            pinned_at: pin.pinned_at,
+            pinned_by: pin.pinned_by,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -161,6 +193,7 @@ pub(crate) async fn list(State(state): State<AppState>, Path(scope_id): Path<Sco
                     entries: status.entries,
                     updated_at: status.updated_at,
                     updated_by: status.updated_by,
+                    pin: status.pin.as_ref().map(PinView::of),
                 })
                 .collect(),
         }))
@@ -210,6 +243,13 @@ struct PublishResponse {
     /// which is the honest answer: this pack asks for no review at this
     /// cell.
     required: crate::approvals::RequirementView,
+    /// The standing pin, when this scope has one. A publication onto a
+    /// pinned channel lands and the ref advances — what does not change is
+    /// what readers compose, and a curator who published and saw no effect
+    /// has to be told why rather than left to discover it (ADR-0036
+    /// decision 6).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pinned: Option<PinView>,
 }
 
 #[derive(Serialize)]
@@ -412,6 +452,7 @@ async fn publish_inner(
         }),
     )
     .await?;
+    let pinned = vedaflow::read_pin(&mut tx, tenant_id, scope_id, channel).await?;
     commit(tx).await?;
 
     Ok(Json(PublishResponse {
@@ -423,7 +464,584 @@ async fn publish_inner(
         added: committed.added,
         published,
         required: crate::approvals::RequirementView::of(&requirement),
+        pinned: pinned.as_ref().map(PinView::of),
     }))
+}
+
+// ── Rollback & pinning (FLOW-7, ADR-0036) ────────────────────────────────
+//
+// Three surfaces and one rule between them: the history is the set a
+// rewind may name, a rewind installs a state the channel has already held,
+// and a pin holds what the channel *serves* without moving where it
+// points. None of the three resolves the approval matrix, because a rewind
+// cannot install content the matrix has not already cleared (ADR-0036
+// decisions 1–3) and a pin can only hold membership at an earlier such
+// state.
+
+/// The most states `GET /history` returns in one call.
+const MAX_HISTORY: u32 = 200;
+
+/// Its default, when the caller does not ask.
+const DEFAULT_HISTORY: u32 = 20;
+
+/// Which channel a FLOW-7 call is about. Both halves default, so the
+/// common case — a scope's published memories — names neither.
+///
+/// The routes are asset-kind generic on purpose: PRMT-1's prompts and
+/// SKIL-1's skill bundles land on channels of the same shape, and a
+/// rewind of one is this same act. What they do not have yet is a read
+/// action, so they are refused by name rather than governed by memory's
+/// (ADR-0036 decision 3).
+///
+/// Spelled out on each request type rather than flattened into them: a
+/// flattened struct deserialises differently from a query string than
+/// from a body, and two fields are cheaper than that surprise.
+fn channel_of(asset: Option<AssetKind>, channel: Option<Channel>) -> ChannelRef {
+    ChannelRef::new(
+        asset.unwrap_or(AssetKind::Memory),
+        channel.unwrap_or(Channel::Published),
+    )
+}
+
+/// The read action that governs an asset kind's content.
+///
+/// A rewind and a pin both take it in addition to their own action, on
+/// ADR-0031 decision 12's rule: nobody governs material they cannot read.
+/// That is what keeps a curator out of a teammate's personal published
+/// channel, through the privacy floor, with no clause about personal
+/// scopes anywhere here.
+fn read_action(asset: AssetKind) -> Result<Action> {
+    match asset {
+        AssetKind::Memory => Ok(Action::MemoryRead),
+        other => Err(Error::Invalid {
+            message: format!(
+                "{} channels have no read action yet, so this route cannot decide who \
+                 may govern them; it arrives with that asset kind's feature (PRMT-1, \
+                 SKIL-1)",
+                other.as_str()
+            ),
+        }),
+    }
+}
+
+/// One state a channel has held, as the API renders it.
+#[derive(Serialize)]
+struct HistoryEntryView {
+    commit: String,
+    /// The state it replaced — its first parent, absent on the channel's
+    /// first commit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent: Option<String>,
+    /// Parents beyond the first: the proposal this publication was the
+    /// effect of, when it had one. Present so a reviewer can trace the
+    /// decision — and deliberately *not* a rewind target, because a
+    /// proposal's tree is a member set that may never have been approved
+    /// (ADR-0036 decision 1).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    merge_parents: Vec<String>,
+    author: IdentityId,
+    message: String,
+    committed_at: DateTime<Utc>,
+    /// The membership this state served.
+    members: usize,
+    /// True for the commit the channel points at now — where it already
+    /// is, and so the one entry a rewind cannot name.
+    head: bool,
+    /// True for the commit a pin holds readers at.
+    served: bool,
+}
+
+#[derive(Serialize)]
+struct HistoryResponse {
+    scope_id: ScopeId,
+    channel: String,
+    /// The commit the ref points at.
+    head: String,
+    /// The standing pin, when there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pin: Option<PinView>,
+    /// Newest first. Every entry but `head` is a legal rewind target, and
+    /// nothing outside this listing is (ADR-0036 decision 11).
+    history: Vec<HistoryEntryView>,
+}
+
+/// `GET /v1/channels/{scope_id}/history` — the states this channel has
+/// held, newest first.
+#[tracing::instrument(name = "channels.history", skip_all)]
+pub(crate) async fn history(
+    State(state): State<AppState>,
+    Path(scope_id): Path<ScopeId>,
+    Query(query): Query<HistoryQuery>,
+) -> Response {
+    let result = history_inner(&state, scope_id, query).await;
+    respond(&state, "history", result).await
+}
+
+#[derive(Deserialize)]
+pub(crate) struct HistoryQuery {
+    asset: Option<AssetKind>,
+    channel: Option<Channel>,
+    limit: Option<u32>,
+}
+
+async fn history_inner(
+    state: &AppState,
+    scope_id: ScopeId,
+    query: HistoryQuery,
+) -> Result<Json<HistoryResponse>> {
+    let channel = channel_of(query.asset, query.channel);
+    let limit = query.limit.unwrap_or(DEFAULT_HISTORY).clamp(1, MAX_HISTORY);
+    let tenant_id = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let node = found(
+        hierarchy::node(&mut *tx, scope_id).await?,
+        tenant_id,
+        scope_id,
+    )?;
+    // Reading a channel's history is reading the channel: same action, and
+    // the entries carry no record content — ids, addresses, and the
+    // curators' own commit messages.
+    let authorized = authz::require(
+        &state.clone(),
+        &mut tx,
+        Action::ChannelRead,
+        Resource::Scope(scope_id),
+        Some(&node),
+    )
+    .await?;
+
+    let head = vedaflow::read_ref(&mut tx, tenant_id, scope_id, &channel.name())
+        .await?
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("{channel} channel at scope {scope_id}"),
+        })?;
+    let pin = vedaflow::read_pin(&mut tx, tenant_id, scope_id, channel).await?;
+    let served = pin.as_ref().map_or(head.commit_hash, |pin| pin.commit);
+    let entries = vedaflow::history(&mut tx, tenant_id, scope_id, channel, limit).await?;
+
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::AuthzDecision,
+        Resource::Scope(scope_id).to_string(),
+        Outcome::Allow,
+        json!({
+            "op": "history",
+            "authz": audit::decision_context(Action::ChannelRead, &authorized),
+            "channel": channel.name(),
+            "entries": entries.len(),
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+
+    Ok(Json(HistoryResponse {
+        scope_id,
+        channel: channel.name(),
+        head: head.commit_hash.to_hex(),
+        pin: pin.as_ref().map(PinView::of),
+        history: entries
+            .into_iter()
+            .map(|entry| HistoryEntryView {
+                head: entry.commit == head.commit_hash,
+                served: entry.commit == served,
+                commit: entry.commit.to_hex(),
+                parent: entry.parent.map(|parent| parent.to_hex()),
+                merge_parents: entry
+                    .merge_parents
+                    .iter()
+                    .map(|parent| parent.to_hex())
+                    .collect(),
+                author: entry.author,
+                message: entry.message,
+                committed_at: entry.committed_at,
+                members: entry.members,
+            })
+            .collect(),
+    }))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct RollbackBody {
+    asset: Option<AssetKind>,
+    channel: Option<Channel>,
+    /// The commit being abandoned — what the caller read before deciding.
+    /// Required rather than inferred: a rewind is a decision about *which*
+    /// state to leave, and that decision is stale if someone else moved
+    /// the ref meanwhile (ADR-0030 decision 10's rule, applied to the one
+    /// call that can move a ref backwards).
+    from_commit: String,
+    /// The state to install: one of the entries `GET /history` lists.
+    to_commit: String,
+    /// Why. An auditor reads this, and so does whoever asks next week why
+    /// a record stopped being published.
+    message: String,
+}
+
+#[derive(Serialize)]
+struct RollbackResponse {
+    scope_id: ScopeId,
+    channel: String,
+    /// The commit abandoned.
+    from: String,
+    /// The commit installed — what the next inject at this scope cites.
+    to: String,
+    /// The membership after the rewind.
+    members: usize,
+    /// The record ids that stopped being published material. These compose
+    /// as unreviewed derived output again where the pack admits it, and
+    /// not at all under bank mode.
+    removed: Vec<String>,
+    /// Records whose published version went back to an earlier one, with
+    /// the address now bound.
+    restored: Vec<PublishedRecord>,
+}
+
+/// `POST /v1/channels/{scope_id}/rollback` — rewind the channel to a state
+/// it has already held.
+#[tracing::instrument(name = "channels.rollback", skip_all)]
+pub(crate) async fn rollback(
+    State(state): State<AppState>,
+    Path(scope_id): Path<ScopeId>,
+    payload: std::result::Result<Json<RollbackBody>, JsonRejection>,
+) -> Response {
+    let result = rollback_inner(&state, scope_id, payload).await;
+    respond(&state, "rollback", result).await
+}
+
+async fn rollback_inner(
+    state: &AppState,
+    scope_id: ScopeId,
+    payload: std::result::Result<Json<RollbackBody>, JsonRejection>,
+) -> Result<Json<RollbackResponse>> {
+    let body = body(payload)?;
+    validate_message(&body.message)?;
+    let channel = channel_of(body.asset, body.channel);
+    let from: vedaflow::CommitHash = body.from_commit.parse()?;
+    let to: vedaflow::CommitHash = body.to_commit.parse()?;
+
+    let tenant_id = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let node = found(
+        hierarchy::node(&mut *tx, scope_id).await?,
+        tenant_id,
+        scope_id,
+    )?;
+    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let authorized = authz::decide(
+        state,
+        &input,
+        Action::ChannelRollback,
+        Resource::Scope(scope_id),
+        None,
+    )?;
+    // The second decision, as for publishing: nobody governs material they
+    // cannot read (ADR-0031 decision 12, ADR-0036 decision 3).
+    authz::decide(
+        state,
+        &input,
+        read_action(channel.asset)?,
+        Resource::Scope(scope_id),
+        None,
+    )?;
+    let author = acting_identity(&input, "rewinding")?;
+
+    let rolled_back = vedaflow::rollback(
+        &mut tx,
+        tenant_id,
+        &vedaflow::ChannelRewind {
+            scope: scope_id,
+            channel,
+            from,
+            to,
+            by: author,
+        },
+    )
+    .await?;
+
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::ChannelRolledBack,
+        Resource::Scope(scope_id).to_string(),
+        Outcome::Success,
+        json!({
+            "authz": audit::decision_context(Action::ChannelRollback, &authorized),
+            "channel": channel.name(),
+            "asset": channel.asset.as_str(),
+            "message": body.message,
+            "from": rolled_back.from.to_hex(),
+            "to": rolled_back.to.to_hex(),
+            "members": rolled_back.entries,
+            // Ids and addresses, never content — the same rule the
+            // publication event follows.
+            "removed": rolled_back.removed,
+            "restored": rolled_back.restored.iter().map(|member| json!({
+                "name": member.name,
+                "object_hash": member.object.to_hex(),
+            })).collect::<Vec<_>>(),
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+
+    Ok(Json(RollbackResponse {
+        scope_id,
+        channel: channel.name(),
+        from: rolled_back.from.to_hex(),
+        to: rolled_back.to.to_hex(),
+        members: rolled_back.entries,
+        removed: rolled_back.removed,
+        restored: rolled_back
+            .restored
+            .into_iter()
+            .filter_map(|member| {
+                // A memory channel names entries by record id; anything
+                // else is another asset kind's path and is rendered by
+                // name alone rather than misparsed into one.
+                member.name.parse().ok().map(|id| PublishedRecord {
+                    record_id: RecordId::from_uuid(id),
+                    object_hash: member.object.to_hex(),
+                })
+            })
+            .collect(),
+    }))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct PinBody {
+    asset: Option<AssetKind>,
+    channel: Option<Channel>,
+    /// The commit to hold readers at: one of the entries `GET /history`
+    /// lists, the head included.
+    commit: String,
+    /// Why this scope is holding its readers. The pin's only record — the
+    /// ref carries who and when and nothing else (ADR-0036 decision 9).
+    reason: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct UnpinBody {
+    asset: Option<AssetKind>,
+    channel: Option<Channel>,
+    /// Why the hold is being released.
+    reason: String,
+}
+
+#[derive(Serialize)]
+struct PinResponse {
+    scope_id: ScopeId,
+    channel: String,
+    /// The commit readers now compose.
+    commit: String,
+    /// What the pin held before, when this call moved a standing one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous: Option<String>,
+    /// Where the channel's ref points. Publications keep landing here
+    /// while the pin stands (ADR-0036 decision 6).
+    head: String,
+}
+
+#[derive(Serialize)]
+struct UnpinResponse {
+    scope_id: ScopeId,
+    channel: String,
+    /// The commit that was held, when there was a pin. Absent means there
+    /// was none, which is the answer rather than an error: the channel
+    /// serves its head either way.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    released: Option<String>,
+    /// What readers compose from the next session on.
+    head: String,
+}
+
+/// `POST /v1/channels/{scope_id}/pin` — hold what this channel serves at a
+/// commit.
+#[tracing::instrument(name = "channels.pin", skip_all)]
+pub(crate) async fn pin(
+    State(state): State<AppState>,
+    Path(scope_id): Path<ScopeId>,
+    payload: std::result::Result<Json<PinBody>, JsonRejection>,
+) -> Response {
+    let result = pin_inner(&state, scope_id, payload).await;
+    respond(&state, "pin", result).await
+}
+
+async fn pin_inner(
+    state: &AppState,
+    scope_id: ScopeId,
+    payload: std::result::Result<Json<PinBody>, JsonRejection>,
+) -> Result<Json<PinResponse>> {
+    let body = body(payload)?;
+    validate_message(&body.reason)?;
+    let channel = channel_of(body.asset, body.channel);
+    let commit_hash: vedaflow::CommitHash = body.commit.parse()?;
+
+    let tenant_id = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let node = found(
+        hierarchy::node(&mut *tx, scope_id).await?,
+        tenant_id,
+        scope_id,
+    )?;
+    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let authorized = authz::decide(
+        state,
+        &input,
+        Action::ChannelPin,
+        Resource::Scope(scope_id),
+        None,
+    )?;
+    authz::decide(
+        state,
+        &input,
+        read_action(channel.asset)?,
+        Resource::Scope(scope_id),
+        None,
+    )?;
+    let author = acting_identity(&input, "pinning")?;
+
+    let previous =
+        vedaflow::pin(&mut tx, tenant_id, scope_id, channel, commit_hash, author).await?;
+    let head = vedaflow::read_ref(&mut tx, tenant_id, scope_id, &channel.name())
+        .await?
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("{channel} channel at scope {scope_id}"),
+        })?;
+
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::ChannelPinned,
+        Resource::Scope(scope_id).to_string(),
+        Outcome::Success,
+        json!({
+            "authz": audit::decision_context(Action::ChannelPin, &authorized),
+            "channel": channel.name(),
+            "asset": channel.asset.as_str(),
+            "reason": body.reason,
+            "commit": commit_hash.to_hex(),
+            "previous": previous.as_ref().map(|pin| pin.commit.to_hex()),
+            "head": head.commit_hash.to_hex(),
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+
+    Ok(Json(PinResponse {
+        scope_id,
+        channel: channel.name(),
+        commit: commit_hash.to_hex(),
+        previous: previous.map(|pin| pin.commit.to_hex()),
+        head: head.commit_hash.to_hex(),
+    }))
+}
+
+/// `POST /v1/channels/{scope_id}/unpin` — release the hold.
+#[tracing::instrument(name = "channels.unpin", skip_all)]
+pub(crate) async fn unpin(
+    State(state): State<AppState>,
+    Path(scope_id): Path<ScopeId>,
+    payload: std::result::Result<Json<UnpinBody>, JsonRejection>,
+) -> Response {
+    let result = unpin_inner(&state, scope_id, payload).await;
+    respond(&state, "unpin", result).await
+}
+
+async fn unpin_inner(
+    state: &AppState,
+    scope_id: ScopeId,
+    payload: std::result::Result<Json<UnpinBody>, JsonRejection>,
+) -> Result<Json<UnpinResponse>> {
+    let body = body(payload)?;
+    validate_message(&body.reason)?;
+    let channel = channel_of(body.asset, body.channel);
+
+    let tenant_id = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let node = found(
+        hierarchy::node(&mut *tx, scope_id).await?,
+        tenant_id,
+        scope_id,
+    )?;
+    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let authorized = authz::decide(
+        state,
+        &input,
+        Action::ChannelPin,
+        Resource::Scope(scope_id),
+        None,
+    )?;
+    authz::decide(
+        state,
+        &input,
+        read_action(channel.asset)?,
+        Resource::Scope(scope_id),
+        None,
+    )?;
+
+    let released = vedaflow::unpin(&mut tx, tenant_id, scope_id, channel).await?;
+    let head = vedaflow::read_ref(&mut tx, tenant_id, scope_id, &channel.name())
+        .await?
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("{channel} channel at scope {scope_id}"),
+        })?;
+
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::ChannelUnpinned,
+        Resource::Scope(scope_id).to_string(),
+        Outcome::Success,
+        json!({
+            "authz": audit::decision_context(Action::ChannelPin, &authorized),
+            "channel": channel.name(),
+            "asset": channel.asset.as_str(),
+            "reason": body.reason,
+            // Absent means there was no pin. The act still audits: an
+            // operator asserting "nothing holds this channel" is a fact an
+            // auditor should be able to see someone established.
+            "released": released.as_ref().map(|pin| pin.commit.to_hex()),
+            "head": head.commit_hash.to_hex(),
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+
+    Ok(Json(UnpinResponse {
+        scope_id,
+        channel: channel.name(),
+        released: released.map(|pin| pin.commit.to_hex()),
+        head: head.commit_hash.to_hex(),
+    }))
+}
+
+/// The acting principal's identity row, or an [`Error::Invalid`] naming
+/// the act.
+///
+/// A verified subject with no identity row cannot reach here — the packs
+/// require a role binding, and bindings are resolved per subject — but the
+/// check is explicit rather than an unwrap, as it is on the publish path.
+fn acting_identity(input: &authz::DecisionInput, act: &str) -> Result<IdentityId> {
+    input
+        .identity
+        .as_ref()
+        .map(|identity| identity.id)
+        .ok_or_else(|| Error::Invalid {
+            message: format!("{act} requires a provisioned identity"),
+        })
+}
+
+/// The message/reason bound every FLOW-7 act shares: present and within
+/// the commit-message cap, so a governed act always says why.
+fn validate_message(message: &str) -> Result<()> {
+    let chars = message.chars().count();
+    if chars == 0 || chars > MAX_MESSAGE_CHARS {
+        return Err(Error::Invalid {
+            message: format!("message must be 1..={MAX_MESSAGE_CHARS} characters"),
+        });
+    }
+    Ok(())
 }
 
 fn validate(body: &PublishBody) -> Result<()> {

@@ -269,6 +269,92 @@ pub async fn is_ancestor(
     .map_err(|err| storage_error("walk commit ancestry", &err))
 }
 
+/// Whether `ancestor` lies on `descendant`'s **first-parent line** — the
+/// rewind test (FLOW-7, ADR-0036 decision 1).
+///
+/// Not the same question as [`is_ancestor`], and the difference is the whole
+/// of why a rollback is safe. A channel commit's first parent is the state it
+/// replaced ([`crate::channels`] puts the head first in every parent list), so
+/// walking ordinal 0 from a head enumerates exactly the states that ref has
+/// held. Every *other* reachable commit is something else: since FLOW-3 a
+/// publication through a proposal is a merge commit whose second parent is the
+/// proposal commit, whose tree is a proposed member set that may never have
+/// been approved.
+///
+/// `union all` rather than `union`: the first-parent line is a path — each
+/// commit has at most one ordinal-0 parent — so there are no diamonds to
+/// deduplicate, and `depth` bounds the walk regardless.
+///
+/// A commit is on its own first-parent line, matching [`is_ancestor`]'s
+/// convention; callers that mean a *strict* ancestor compare first.
+///
+/// # The one place ordinal 0 is not enough
+///
+/// A channel's **first** publication has no head to be its first parent, so
+/// when that publication came through review the proposal commit lands at
+/// ordinal 0 — a shape ADR-0032 decision 10 chose deliberately and FLOW-3's
+/// acceptance test pins ("head first (there is none — this is the channel's
+/// first commit), then the proposal"). Walking ordinal 0 alone would then
+/// offer a proposal commit as a rewind target on exactly the channels that
+/// have published least.
+///
+/// So the walk stops at any commit a proposal names. That is a fact this
+/// schema already stores, it needs no marker column, and it says the rule
+/// out loud: a proposal commit is not a state a ref has held, whichever
+/// ordinal it happens to sit at.
+#[tracing::instrument(
+    name = "vedaflow.is_first_parent_ancestor",
+    skip_all,
+    fields(tenant.id = %tenant),
+    err(Display)
+)]
+pub async fn is_first_parent_ancestor(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    ancestor: CommitHash,
+    descendant: CommitHash,
+) -> Result<bool> {
+    if ancestor == descendant {
+        return Ok(true);
+    }
+    sqlx::query_scalar!(
+        r#"
+        with recursive line (hash, depth) as (
+            select $3::bytea, 0
+            union all
+            select parent.parent_hash, line.depth + 1
+            from vedaflow_commit_parents parent
+            join line on line.hash = parent.commit_hash
+            where parent.tenant_id = $1 and parent.ordinal = 0
+              and line.depth < $4
+              and not exists (
+                  select from vedaflow_proposals proposal
+                  where proposal.tenant_id = parent.tenant_id
+                    and proposal.commit_hash = parent.parent_hash
+              )
+        )
+        select exists (select from line where hash = $2) as "found!"
+        "#,
+        tenant.as_uuid(),
+        ancestor.as_slice(),
+        descendant.as_slice(),
+        MAX_FIRST_PARENT_WALK,
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(|err| storage_error("walk first-parent ancestry", &err))
+}
+
+/// How far back the first-parent walk goes.
+///
+/// A bound rather than a full walk: this runs inside a request, and a channel
+/// with a hundred thousand publications behind it must not be able to turn a
+/// rollback into a table scan. A rewind past this depth is refused as
+/// unreachable rather than served slowly — the honest answer, since the
+/// history route stops there too and an operator cannot roll back to a commit
+/// the product will not show them (ADR-0036 decision 11).
+pub const MAX_FIRST_PARENT_WALK: i32 = 10_000;
+
 /// The first hash that appears twice, if any. A commit listing the same
 /// parent twice is meaningless and the table's unique constraint rejects it;
 /// catching it here makes it the caller's error rather than a storage one.

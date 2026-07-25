@@ -94,10 +94,12 @@ pub const REDACTION_FINDINGS_TOTAL: &str = "synveda_redaction_findings_total";
 /// list chains its allowed decision (ADR-0019 decision 4).
 pub const QUARANTINE_OPERATIONS_TOTAL: &str = "synveda_quarantine_operations_total";
 
-/// Channel API operations (FLOW-2, ADR-0031 decision 12), labelled by
-/// `op` (`list`/`publish`) and `outcome` (`ok`, `rejected`, `error`).
-/// Publish chains a `vedaflow.channel.published` event; list chains its
-/// allowed decision (ADR-0019 decision 4).
+/// Channel API operations (FLOW-2, ADR-0031 decision 12; FLOW-7,
+/// ADR-0036), labelled by `op` (`list`/`publish`/`history`/`rollback`/
+/// `pin`/`unpin`) and `outcome` (`ok`, `rejected`, `error`). Publish,
+/// rollback, pin, and unpin each chain their own `vedaflow.channel.*`
+/// event; the two reads chain their allowed decision (ADR-0019
+/// decision 4).
 pub const CHANNEL_OPERATIONS_TOTAL: &str = "synveda_channel_operations_total";
 
 /// Proposal API operations (FLOW-3, ADR-0032), labelled by `op`
@@ -434,7 +436,8 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     );
     metrics::describe_counter!(
         CHANNEL_OPERATIONS_TOTAL,
-        "Channel API operations by op (list/publish) and outcome (ok/rejected/error)"
+        "Channel API operations by op (list/publish/history/rollback/pin/unpin) and \
+         outcome (ok/rejected/error)"
     );
     metrics::describe_counter!(
         PROPOSAL_OPERATIONS_TOTAL,

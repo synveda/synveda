@@ -14,9 +14,11 @@
 //! request that moves content onto a published channel: a commit holding
 //! exactly what is reviewed, an append-only log of who approved it under
 //! which roles, and a per-scope CODEOWNERS file that adds required
-//! approvers. FLOW-7 rolls a ref back. Nothing here decides who may write
-//! what, and nothing here counts as authority; that is the PDP's job, at
-//! the seam the caller crossed to get here.
+//! approvers. FLOW-7 ([`channels::rollback`], [`channels::pin`], ADR-0036)
+//! rewinds a channel to a state it has already held, and holds what a
+//! channel serves without moving where it points. Nothing here decides who
+//! may write what, and nothing here counts as authority; that is the PDP's
+//! job, at the seam the caller crossed to get here.
 //!
 //! # How it is used
 //!
@@ -84,11 +86,15 @@ pub mod trees;
 pub mod verify;
 
 pub use channels::{
-    ChannelCommit, ChannelMember, ChannelRef, ChannelSnapshot, ChannelStatus, ChannelWrite,
-    MAX_CHANNEL_MEMBERS, MemoryAsset, MemoryChannel, append, publish, put_memory, read_members,
-    read_memory_members,
+    ChannelCommit, ChannelHistoryEntry, ChannelMember, ChannelPin, ChannelRef, ChannelRewind,
+    ChannelRolledBack, ChannelSnapshot, ChannelStatus, ChannelWrite, MAX_CHANNEL_MEMBERS,
+    MemoryAsset, MemoryChannel, PIN_PREFIX, append, history, pin, publish, put_memory,
+    read_members, read_memory_members, read_pin, rollback, unpin,
 };
-pub use commits::{NewCommit, StoredCommit, commit, is_ancestor, read_commit};
+pub use commits::{
+    MAX_FIRST_PARENT_WALK, NewCommit, StoredCommit, commit, is_ancestor, is_first_parent_ancestor,
+    read_commit,
+};
 pub use curators::{
     Approver, CURATORS_REF, CuratorCommit, CuratorFile, CuratorRule, CuratorWrite,
     MAX_CURATOR_FILE_BYTES, StoredCuratorFile, nearest_curators, read_curators, write_curators,

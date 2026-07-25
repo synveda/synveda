@@ -157,6 +157,25 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
+    // The other two ways a channel moves (FLOW-7, ADR-0036 decision 3).
+    //
+    // ChannelRollback rewinds a scope's published channel to a state it has
+    // already held; ChannelPin holds what that channel *serves* at a commit,
+    // and releases the hold. Separate from ChannelPublish so a pack can say
+    // "publish widely, rewind narrowly" — one action would make that
+    // sentence unsayable forever.
+    //
+    // Neither resolves an approval matrix, and that is safe for one reason
+    // only: a rewind can install nothing that was not already approved when
+    // it was installed. Both are scope actions, never tenant-level, like the
+    // rest of the channel plane.
+    action ChannelRollback, ChannelPin
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String> },
+        };
+
     // The VedaFlow proposal plane (/v1/proposals/*, FLOW-3, ADR-0032
     // decision 16): reading proposals, opening one against a scope, and
     // casting a review verdict on one.

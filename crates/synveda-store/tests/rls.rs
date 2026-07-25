@@ -2126,8 +2126,7 @@ fn cross_tenant_vedaflow_write_is_rejected() {
     });
 }
 
-/// The five history tables hold no UPDATE or DELETE grant for the app role,
-/// and `vedaflow_refs` holds no DELETE — a ref moves, it never disappears
+/// The five history tables hold no UPDATE or DELETE grant for the app role
 /// (ADR-0030 decision 6). 42501 whether the withheld grant or the
 /// append-only trigger answers first.
 #[test]
@@ -2147,7 +2146,6 @@ fn vedaflow_history_is_append_only_for_the_app_role() {
             "delete from vedaflow_commits",
             "update vedaflow_commit_parents set ordinal = 9",
             "delete from vedaflow_commit_parents",
-            "delete from vedaflow_refs",
         ] {
             let mut tx = app_tx(&db.pool, Some(tenant)).await;
             let outcome = sqlx::raw_sql(statement).execute(&mut *tx).await;
@@ -2156,6 +2154,110 @@ fn vedaflow_history_is_append_only_for_the_app_role() {
                 "the app role must not be able to run: {statement}"
             );
         }
+    });
+}
+
+/// FLOW-7's one deletion (migration 0021, ADR-0036 decision 8): a pin can
+/// be released, and a channel pointer still never disappears.
+///
+/// Both halves of the narrowing are asserted, because they answer to
+/// different attackers. The **restrictive policy** is what the product
+/// runs under: the app role's delete of a channel ref is a legal statement
+/// that matches nothing, even with the right tenant GUC set and even
+/// without a `where` clause. The **trigger** is what someone bypassing RLS
+/// meets: the superuser pool — no GUC, no policies — gets an exception
+/// naming the rule instead of a quiet success. That is migration 0018's
+/// own split, extended to the first ref that is a decision rather than a
+/// pointer into history.
+#[test]
+fn only_pins_can_be_deleted_and_only_in_their_own_tenant() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, scope) = seed_vedaflow(&db.pool).await;
+        let (other_tenant, other_scope) = seed_vedaflow(&db.pool).await;
+        let pinner = IdentityId::new();
+
+        // A pin at each tenant, on the seeded channel's own commit.
+        for (tenant, scope) in [(tenant, scope), (other_tenant, other_scope)] {
+            sqlx::query!(
+                "insert into vedaflow_refs (tenant_id, scope_id, name, commit_hash, updated_by)
+                 values ($1, $2, 'pin/memory/published', $3, $4)",
+                tenant.as_uuid(),
+                scope.as_uuid(),
+                &[4u8; 32][..],
+                pinner.as_uuid(),
+            )
+            .execute(&db.pool)
+            .await
+            .expect("seed pin");
+        }
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+
+        // A channel pointer: legal statement, zero rows. Deliberately
+        // unqualified — if the policy were permissive this would take
+        // every channel in the tenant with it.
+        let channels = sqlx::query!("delete from vedaflow_refs where name not like 'pin/%'")
+            .execute(&mut *tx)
+            .await
+            .expect("deleting a channel ref is a legal statement")
+            .rows_affected();
+        assert_eq!(
+            channels, 0,
+            "a channel pointer must be unreachable to DELETE, not merely unwritten"
+        );
+
+        // Another tenant's pin: the ordinary isolation, still in force on
+        // the one path that can now remove a row.
+        let forged = sqlx::query!(
+            "delete from vedaflow_refs where tenant_id = $1 and name = 'pin/memory/published'",
+            other_tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("cross-tenant unpin runs")
+        .rows_affected();
+        assert_eq!(forged, 0, "another tenant's pin must be unreachable");
+
+        // Its own pin: released.
+        let released = sqlx::query!(
+            "delete from vedaflow_refs where scope_id = $1 and name = 'pin/memory/published'",
+            scope.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("unpin own channel")
+        .rows_affected();
+        assert_eq!(released, 1, "a pin must be releasable in its own tenant");
+        tx.commit().await.expect("commit");
+
+        // The other tenant's pin is untouched, and its channel is too.
+        let survivors = sqlx::query_scalar!(
+            "select count(*) as \"count!\" from vedaflow_refs where tenant_id = $1",
+            other_tenant.as_uuid(),
+        )
+        .fetch_one(&db.pool)
+        .await
+        .expect("count surviving refs");
+        assert_eq!(
+            survivors, 2,
+            "the other tenant keeps its channel and its pin"
+        );
+
+        // And the trigger, for whoever is not running under RLS: the
+        // superuser pool deleting a channel pointer must raise rather than
+        // silently succeed.
+        let raised = sqlx::query!(
+            "delete from vedaflow_refs where tenant_id = $1 and name = 'published'",
+            tenant.as_uuid(),
+        )
+        .execute(&db.pool)
+        .await
+        .expect_err("the delete guard must raise for a channel pointer");
+        assert!(
+            raised.to_string().contains("channel pointer"),
+            "unexpected error: {raised}"
+        );
     });
 }
 

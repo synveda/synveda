@@ -49,10 +49,11 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// quarantine review plane (ADR-0021 decision 6). `@6`: FLOW-2 added the
 /// channel plane (ADR-0031 decision 12). `@7`: FLOW-3 added the proposal
 /// plane and each pack's approval matrix (ADR-0032 decisions 3 and 16).
+/// `@8`: FLOW-7 added the rewind and pin actions (ADR-0036 decision 3).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 7),
-    (STANDARD, 7),
-    (OPEN_COLLABORATION, 7),
+    (REGULATED_STRICT, 8),
+    (STANDARD, 8),
+    (OPEN_COLLABORATION, 8),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the

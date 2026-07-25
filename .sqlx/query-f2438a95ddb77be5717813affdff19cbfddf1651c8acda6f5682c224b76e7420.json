@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from vedaflow_refs where tenant_id = $1 and name = 'pin/memory/published'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f2438a95ddb77be5717813affdff19cbfddf1651c8acda6f5682c224b76e7420"
+}

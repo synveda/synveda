@@ -1068,3 +1068,72 @@ fn a_commit_records_its_author_its_pack_and_its_signature() {
         tx.rollback().await.expect("rollback");
     });
 }
+
+// ── FLOW-7: the first-parent line (ADR-0036 decision 1) ──────────────────────
+
+/// The distinction a rewind rests on, at the substrate: **reachable is not
+/// the same as "was a state".**
+///
+/// A merge commit's second parent is reachable from the head — FLOW-1's
+/// `is_ancestor` says so, and that is correct for the fast-forward test it
+/// was written for. Walking ordinal 0 answers the other question, which is
+/// the one a rollback has to ask: which commits has this ref actually
+/// pointed at?
+#[test]
+fn a_side_parent_is_reachable_and_is_not_on_the_first_parent_line() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tenant = create_tenant(&db.pool).await;
+        let author = IdentityId::new();
+        let mut tx = tenant_tx(&db.pool, tenant).await;
+        let conn = &mut *tx;
+
+        // A mainline of two, and a side commit merged into a third — the
+        // shape every reviewed publication has had since FLOW-3.
+        let first = seed_commit(conn, tenant, author, "first")
+            .await
+            .expect("first");
+        let second = make_commit(conn, tenant, author, "second", vec![first])
+            .await
+            .expect("second");
+        let side = seed_commit(conn, tenant, author, "side")
+            .await
+            .expect("side");
+        let merge = make_commit(conn, tenant, author, "merge", vec![second, side])
+            .await
+            .expect("merge");
+
+        for ancestor in [first, second, merge] {
+            assert!(
+                synveda_vedaflow::is_first_parent_ancestor(conn, tenant, ancestor, merge)
+                    .await
+                    .expect("walk"),
+                "{ancestor} is a state the mainline passed through"
+            );
+        }
+
+        assert!(
+            synveda_vedaflow::is_ancestor(conn, tenant, side, merge)
+                .await
+                .expect("walk"),
+            "the side commit is reachable — this is what makes the other check load-bearing"
+        );
+        assert!(
+            !synveda_vedaflow::is_first_parent_ancestor(conn, tenant, side, merge)
+                .await
+                .expect("walk"),
+            "…and it was never a state the mainline held"
+        );
+
+        // Descendants are not on their ancestors' line either, which is
+        // what makes "a rewind never advances" a property of the walk
+        // rather than a comparison the caller has to remember.
+        assert!(
+            !synveda_vedaflow::is_first_parent_ancestor(conn, tenant, merge, first)
+                .await
+                .expect("walk"),
+            "the line runs one way"
+        );
+        tx.rollback().await.expect("rollback");
+    });
+}

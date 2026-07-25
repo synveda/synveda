@@ -44,7 +44,7 @@ use synveda_retrieval::{
     compose, composition_plan, hybrid_search,
 };
 use synveda_store::rls;
-use synveda_types::{Error, RecordId, Result};
+use synveda_types::{Error, RecordId, Result, ScopeId};
 
 use crate::app::AppState;
 use crate::audit;
@@ -94,6 +94,15 @@ struct InjectResponse {
     /// The valid-time instant the block was composed at: same instant +
     /// same database state re-composes byte-identically (the CTX-2 AC).
     as_of: DateTime<Utc>,
+    /// The commit each planned scope's published channel served, in scope
+    /// order — tech plan §2.5's "inject responses cite commit hashes",
+    /// paid for out of the response rather than the token budget.
+    ///
+    /// Present since FLOW-7, because a pinned scope serves an older
+    /// commit deliberately and a caller that cannot see which commit it
+    /// got cannot tell (ADR-0036 decision 10). It was already in the
+    /// audit event; a fact only an auditor can reach is not a citation.
+    channels: Vec<ChannelView>,
     /// Degradations applied, worst-first (`embedder`, `retrieval`).
     /// Empty on the full path; also the `X-Synveda-Degraded` header.
     degraded: Vec<&'static str>,
@@ -351,6 +360,11 @@ async fn handle(
                 "scope_id": channel.scope_id,
                 "ref": channel.channel,
                 "commit": channel.commit,
+                // Whether a pin chose that commit (FLOW-7, ADR-0036
+                // decision 10): "what did the agent know" has a different
+                // answer at a scope that froze what it serves, and the
+                // trail must not have to be reconstructed to learn it.
+                "pinned": channel.pinned,
             })).collect::<Vec<_>>(),
             "tokens": block.tokens,
             "budget_tokens": block.budget_tokens,
@@ -393,6 +407,16 @@ fn render(
 ) -> InjectResponse {
     InjectResponse {
         record_ids: block.entries.iter().map(|entry| entry.record_id).collect(),
+        channels: block
+            .channels
+            .iter()
+            .map(|channel| ChannelView {
+                scope_id: channel.scope_id,
+                r#ref: channel.channel.clone(),
+                commit: channel.commit.clone(),
+                pinned: channel.pinned,
+            })
+            .collect(),
         text: block.text,
         block_hash: block.block_hash,
         tokens: block.tokens,
@@ -400,4 +424,17 @@ fn render(
         as_of,
         degraded,
     }
+}
+
+/// One channel citation on a block.
+#[derive(Serialize)]
+struct ChannelView {
+    scope_id: ScopeId,
+    /// The ref name, e.g. `memory/published`.
+    r#ref: String,
+    /// The commit this scope served.
+    commit: String,
+    /// True when a pin chose that commit — the scope is deliberately not
+    /// serving its latest reviewed material (ADR-0036 decision 10).
+    pinned: bool,
 }

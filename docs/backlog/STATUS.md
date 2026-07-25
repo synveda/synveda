@@ -585,7 +585,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [FLOW-4: Auto-promotion rules](FLOW-4.md) — done 2026-07-25, ADR-0033, AC tests: crates/synveda-gateway/tests/promotion.rs (the **soak**, over real product surfaces with a real signal — nothing writes a usage counter, every recall is an actual `POST /v1/inject` whose `context.injected` event the engine folds out of the audit chain: two recalls open nothing, the third crosses the rule's threshold and a proposal appears with nobody deciding to, targeting the scope the material already sits on, proposed under the *owner's* identity rather than a system principal; and the **evidence**, which is checked rather than displayed — `evidence_is_checkable_against_the_chain` re-derives the recall and distinct-member counts from the hash-chained events in the `[from_seq, to_seq]` range the evidence names, without consulting the projection that produced it; plus a ten-round soak that never proposes the same bytes twice, a rejection binding those bytes and an edit freeing them, the projection discarded and refolded from seq 1 to the identical counts, a quarantined owner proposing nothing, an unconfigured pack promoting nothing while still sweeping usage, and — pinning the fact ADR-0033 decision 8 rests on — twenty injects by a teammate adding neither a member nor a recall to someone else's personal record), crates/synveda-store/tests/rls.rs (the two new tables join the adversarial suite and its completeness guard: a forged usage row, a rewound watermark that would refold a victim's chain and double their evidence, and the DELETE grant that makes the rebuild an operation rather than an aspiration), crates/synveda-types (16 unit tests on the rule vocabulary: every threshold load-bearing, the sensitivity ceiling, and refusal at install of a rule that asks nothing or could never fire), demo: demos/flow-4-auto-promotion.sh (on a scratch database, the gateway's own background loop — not a test harness — crossing the threshold, then the evidence re-derived from the chain in SQL, idempotence under a continuing soak, a curator refused because publishing needs MemoryRead on material nobody else can read, and the owner publishing her own through the ordinary FLOW-3 path into a merge commit whose second parent is the proposal a rule opened)
 - [x] [FLOW-5: Cross-scope promotion](FLOW-5.md) — done 2026-07-25, ADR-0034, AC test: crates/synveda-gateway/tests/cross_scope.rs (the **two-level climb with distinct approver sets**, asserted from the reader's side because that is what makes it a promotion rather than a row: a platform-team runbook reaches Engineering and then ACME, and between the hops a payments-team member — who could not read platform before and still cannot — starts receiving it in her own \`POST /v1/inject\`, sectioned under the department and unmarked, while a member of *another department* still gets nothing until the second hop lands; each level refuses the level below by name, because bindings inherit downward and never up, and each publication takes what the pack asks at that scope kind — one curator at a team, a curator **and** a steward at a department or the org, with the steward unable to run the effect since steward reads no content in any pack; the **denial audited with reason** is the org's rejection between the hops, carrying its mandatory reason and both scopes, with the chain verifying over all of it; plus the direction rule refusing sideways and downward by name, the disclosure rule — a team curator cannot climb a teammate's personal memory and the owner can climb her own, then the curator reviews content she cannot read at its source — and the two senses in which a scope holds material, including the second hop proposed by a department that holds the record only by publishing it, and an edit that takes it out of both at once), crates/synveda-retrieval/tests/compose.rs (\`an_ancestors_published_channel_admits_a_record_living_below_it\`: the read-path half in isolation — the same record composes nothing when only a sibling team published it and composes as reviewed at the *department's* gradient position and section once the department does, surviving bank mode, with the record never moving), crates/synveda-gateway/tests/proposals.rs + crates/synveda-retrieval/tests/compose.rs (FLOW-2/3/4's suites unchanged and green: when source and target are the same scope both composition substitutions are identities), demo: demos/flow-5-cross-scope.sh (the runbook climbing \`acme/eng/platform → acme/eng → acme\` over the HTTP surfaces, with the two readers' injects before and after each hop, and the trail printed as a table whose from/to columns are the climb)
 - [x] [FLOW-6: CLI review flow](FLOW-6.md) — done 2026-07-25, ADR-0035, AC demo: demos/flow-6-cli-review.sh (**the whole review from a terminal**, and shaped so the claim cannot be fudged: from the moment a proposal exists, every governed act is `synveda proposal ...` and `DATABASE_URL` is *unset* for all of it — cora lists her queue, reads one in full with its requirement and its effect, approves, and runs that effect; the runbook is then edited and re-proposed and the review renders it as an `update` with the published version beside it and one line marked out of three; `synveda proposal review` walks the queue oldest-first and takes three verdicts in one command — skip, reject with the empty reason refused and re-asked, approve — while the same command over `/dev/null` casts nothing at all; then the refusals a reviewer meets in the product's own words: a contributor denied `ProposalReview`, a team curator's tenant-wide listing denied with `--scope` named, a `restricted` record that one curator cannot carry, compliance reading content it holds no `MemoryRead` for and then unable to publish what it just decided; and the trail, where all twelve acts carry `actor_kind=subject` under the reviewer's own subject with **not one break-glass row**, chain verifying), AC tests: crates/synveda-gateway/tests/review_surface.rs (what the CLI cannot invent: `add`/`update`/`none` read off the *target's* tree rather than the record's row, the old side being the object the tree names now and the new side the object the **proposal** names — asserted specifically for a record edited under its own review, where the two differ; a `compliance` reviewer proven to compose nothing from `POST /v1/inject` at that scope and shown both sides of the change anyway, which is ADR-0035 decision 8 as a test rather than a paragraph; both scope paths on a climb through the listing and the detail; and a climb's baseline being the scope it would land on — the department `add`s what the team has already published, and only a second climb of the same bytes is the no-op), crates/synveda-cli (33 unit tests: the LCS line diff — hunk headers, context merging, identical texts producing nothing — the field-wise renderer refusing to show a sensitivity change as no change, the prompt whose EOF casts nothing and whose rejection is re-asked until it says why, the tenant-wide denial that names `--scope`, and refusals rendered from the shared taxonomy), crates/synveda-vedaflow (the batched object read the detail route uses so its statement count does not grow with the member set)
-- [ ] [FLOW-7: Rollback & pinning](FLOW-7.md)
+- [x] [FLOW-7: Rollback & pinning](FLOW-7.md) — done 2026-07-25, ADR-0036, AC demo: demos/flow-7-rollback.sh (**a bad instruction live in a fleet to not one agent receiving it in 0.2s of the 60s budget**, and the clock is on the incident rather than the estate: the line is authored at a team and climbs to Engineering through review — a curator *and* a steward, because that is how bad content actually becomes trusted — two engineers in different teams and a headless agent all receive it unmarked, and then one operator runs `synveda channel history` and `synveda channel rollback` and the same three agents' next sessions are different, with no second approval, no restart, and nothing to wait out; the two readers deliberately do **not** get the same answer, which is the honest half — the payments engineer loses the line entirely because the record lives off her chain, the platform engineer gets it back as `[unreviewed]`, because what a rewind removes is trust rather than content; then the trail (one `vedaflow.channel.rolled_back` carrying both commits, the record that left, the reason, and no record text, chain verifying), the refusals in the product's own words — a proposal commit *reachable from the head* and refused by name, a rewind forward refused with the way back named, a reader denied `channel.rollback`, and the steward who approved the publication denied `memory.read` — and the pin: the team holds its readers, publishes anyway, the block cites the frozen commit with `pinned=true`, a rewind under it is refused because readers would not heal, releasing catches the reader up, and a rewind at the *source* leaves the department's publication standing), AC tests: crates/synveda-gateway/tests/rollback.rs (8 tests over the product surfaces: the AC end to end with both readers asserted separately; **a proposal commit is reachable and still refused** — including the case that nearly slipped through, a channel's *first* publication, where the proposal sits at ordinal 0 and FLOW-3's own AC pins it there; a rewind that never advances and never guesses what it is leaving (`from == to`, a stale `from` as `Conflict`, and the forward move refused); log channels and asset kinds with no read action refused by name; the two decisions a rewind takes, with the privacy floor keeping a curator out of a teammate's personal channel through `MemoryRead` and no clause about personal scopes anywhere; the pin holding what readers compose while the channel keeps moving, with the watermark, the listing, the refusal, and both audit events; a pin refused at a state the channel never held; and **a climbed record surviving its source's rewind**, which discharges ADR-0034 reversal trigger (c) with the answer recorded rather than assumed), crates/synveda-store/tests/rls.rs (`only_pins_can_be_deleted_and_only_in_their_own_tenant`: the restrictive policy makes an unqualified channel-ref delete a legal statement matching nothing, a cross-tenant unpin matches nothing, a pin releases, and the trigger raises for anyone bypassing RLS), crates/synveda-vedaflow/tests/object_store.rs (`a_side_parent_is_reachable_and_is_not_on_the_first_parent_line`: the substrate distinction the whole feature rests on, asserted against `is_ancestor` in the same test), crates/synveda-vedaflow + crates/synveda-cli (unit tests: pin names that can never parse as channels and always match migration 0021's `pin/%`, set-channel-only operations, and the CLI's channel-name splitting)
 - [ ] [AUTHZ-4: Lapses (controlled relaxation)](AUTHZ-4.md)
 - [ ] [AUTHZ-5: ABAC conditions](AUTHZ-5.md)
 - [ ] [MEM-5: Always-on dedup & conflict detection](MEM-5.md)
@@ -797,6 +797,106 @@ from an earlier session held the port, the new gateway died on bind, and
 symptom was a 401 on the first API call, twenty lines from the cause. This
 demo now checks the child process is alive before and after the poll and
 fails with the port named. The other demos still have it._
+
+_FLOW-7 (2026-07-25, ADR-0036): rollback & pinning. Almost all of the
+mechanism has existed since FLOW-1 — `force_update_ref` is a separate
+function by name so "no rollback is ever a typo", and composition reads the
+published channel per request with no cache, so "agents heal next session"
+was a property to demonstrate rather than a feature to build. What did not
+exist was the answer to the only question that matters: **what is a rewind
+allowed to install?**
+
+**A rewind may only install a state the channel has actually held.** The
+target must be a strict *first-parent* ancestor of the head, which is not
+the same as reachable, and the difference is the whole feature. Since FLOW-3
+a publication through review is a merge commit whose second parent is the
+proposal commit, so FLOW-1's `is_ancestor` — the fast-forward test, run
+backwards — accepts commits whose trees are *proposed* member sets that may
+never have been approved. `write_channel` has put the head first in every
+parent list since FLOW-2, so walking ordinal 0 enumerates exactly the states
+the ref has been in, and every one of them cleared the approval matrix when
+it was installed. **That is why a rewind resolves no approvals of its own**
+— it takes `ChannelRollback` plus the asset kind's read action and nothing
+more — and it is not a convenience: `regulated-strict` asks for a curator
+and a steward at a department, and a product whose answer to "a bad
+instruction is reaching every agent right now" is "convene two people" has
+not shipped rollback. The two decisions are load-bearing on each other, and
+the ADR says so rather than leaving it to be inferred.
+
+Two things the work turned up, both recorded because they are behaviour.
+(1) **The rule needed one more clause than ordinal 0.** A channel's *first*
+publication has no head to be its first parent, so a reviewed one puts the
+proposal commit at ordinal 0 — a shape ADR-0032 decision 10 chose and
+FLOW-3's own AC pins ("head first (there is none — this is the channel's
+first commit), then the proposal"). Walking ordinal 0 alone would have
+offered a proposal commit as a rewind target on exactly the channels that
+have published least. The walk now stops at any commit a proposal names,
+which is a fact the schema already stores and needs no marker column; the
+acceptance suite covers both ordinals. (2) **A rewind rewinds; it never
+advances.** Not an oversight: `write_channel` mints its commit before
+attempting the compare-and-swap and retries three times, so a contended
+channel leaves orphan commits parented on a head they never replaced, and
+admitting first-parent *descendants* would make it possible to install a
+member set no publication ever installed. Recovery from a mistaken rewind
+is therefore publishing, which resolves the matrix again — the right price
+for re-admitting content across the trust boundary.
+
+**A pin freezes what a channel *serves* without moving where it points.**
+Publications keep landing, the head keeps advancing, readers stay — and the
+publish response names the standing pin, because a curator who publishes
+and sees no effect has to be told why. It is a ref
+(`pin/{asset}/{channel}`, the namespace ADR-0031 decision 1 reserved for
+it), so there is no new table; the read path left-joins it and coalesces in
+the query it was already running, so `inject` gains no round trip.
+`ChannelWatermark` carries `pinned` and the inject response now returns its
+channel citations, because tech plan §2.5's "inject responses cite commit
+hashes" was true only of the audit event, and a citation only an auditor
+can reach is not one. Reader-side pinning — a scope holding an *ancestor's*
+channel for its own members, which is what PRMT-1's "consumer pins"
+phrasing suggests — was refused for two reasons in the ADR: no action in
+the vocabulary expresses "govern what someone else's channel serves me",
+and it would make a scope's channel resolve differently per caller, so
+"what did this scope publish on date D" would stop having one answer.
+
+**Exactly one thing decides what readers see**, so a rewind of a pinned
+channel is refused with `Conflict` naming the pin. The asymmetry with
+publish is deliberate: a publication's contract ("this channel now holds
+these records") stays true under a pin, and a rewind's contract is the
+FLOW-7 sentence itself — every consuming agent heals on next session start
+— which under a pin is false.
+
+Migration 0021 is the only schema change and it grants exactly one thing:
+DELETE on `vedaflow_refs`, narrowed by a *restrictive* policy to names
+beginning `pin/` and by a trigger that raises for anyone bypassing RLS. A
+pin is the first ref that is a standing decision rather than a pointer into
+history, and a decision that cannot be reversed is not one this product
+should write; a channel pointer stays undeletable, and a truncate trigger
+closes the statement that would take every pointer at once.
+
+**ADR-0034 reversal trigger (c) is discharged: a climbed record survives
+its source's rollback.** The department admitted it under the department's
+approvers, and a cascade would hand a team curator a veto over a decision
+the org's own stewards made — precisely what ADR-0034 decision 5 refused
+when it declined to enforce a ladder, pointed downhill. What changes for
+the reader is which scope's section the line appears under, which is true
+rather than cosmetic. The cost is that a rewind at one scope is a partial
+remedy by design, and an operator who wants a record gone everywhere
+rewinds at each scope that admitted it.
+
+One thing the demo makes explicit rather than hiding: **a rewind moves the
+trust boundary; it does not delete.** Under the default pack a rewound
+record composes again as `[unreviewed]` for readers whose chain it lives
+on, and disappears entirely only for readers it was reaching *through* the
+rewound channel. Both are asserted, in the test and in the demo, because a
+demo that showed only the second reader would be claiming a feature this is
+not. Deferrals, all in ADR-0036: commits abandoned by a rewind stay in the
+store unreachable from any ref (`verify` still recomputes them — it walks
+rows, not reachability — and FLOW-8 will have to decide whether they belong
+in a git mirror); a pin's reason lives in the audit chain rather than on
+the ref, so "why is this pinned" needs AUD-2's query surface; reinstating a
+rewound state without re-review would need a reflog, which is a table and
+its own ADR; and prompts and skills are refused by name rather than
+governed by memory's read action until PRMT-1 and SKIL-1 bring theirs._
 
 _GRPH-4 (2026-07-25, ADR-0029): the phase gate ran first, because it is
 the only Phase 2 item that can invalidate an Accepted ADR and the schema
