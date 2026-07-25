@@ -342,9 +342,9 @@ pub async fn compose_candidates(
 }
 
 /// The composition engine's published-channel read (FLOW-2, ADR-0031
-/// decision 9): the current version of each id a scope's published tree
-/// names, through the same scope, sensitivity, and valid-time predicate
-/// the derived sweep applies.
+/// decision 9): the current version of each id a planned scope's
+/// published tree names, through the same sensitivity and valid-time
+/// predicate the derived sweep applies.
 ///
 /// Fetched by id rather than swept, and uncapped, because a published set
 /// is bounded by `MAX_CHANNEL_MEMBERS` and must not compete with derived
@@ -352,11 +352,24 @@ pub async fn compose_candidates(
 /// still `kind = derived`, so the capped sweep could crowd a scope's own
 /// published material out of its own fetch.
 ///
-/// An id the predicate rejects — deleted, re-scoped, re-classified above
-/// the ceiling, or outside its valid window — simply does not come back.
-/// A published set can therefore only go stale by *missing* material,
-/// never by resurfacing it: current Postgres truth decides, as it does
-/// for the sidecar index (ADR-0024 decision 6).
+/// **Deliberately not filtered by scope** (FLOW-5, ADR-0034 decision 6).
+/// The caller builds `ids` from the published trees of the scopes the PDP
+/// already permitted, and a scope's published tree may name a record that
+/// lives *below* it — that is what a cross-scope promotion produces. So
+/// the predicate is tree membership, which is the stronger statement: "a
+/// reviewed set at a scope you may read names this record" beats "this
+/// record lives at a scope you may read". Residence still decides for
+/// derived material, which has crossed no boundary
+/// ([`compose_candidates`] keeps its scope predicate exactly).
+///
+/// An id the predicate rejects — deleted, re-classified above the
+/// ceiling, or outside its valid window — simply does not come back. A
+/// published set can therefore only go stale by *missing* material, never
+/// by resurfacing it: current Postgres truth decides, as it does for the
+/// sidecar index (ADR-0024 decision 6). The caller re-checks each
+/// survivor's content address against the tree that named it, so an
+/// edited record is unreviewed again rather than served under a
+/// publication it no longer matches (ADR-0031 decision 5).
 #[tracing::instrument(
     name = "store.search.compose_members",
     skip_all,
@@ -367,15 +380,13 @@ pub async fn compose_members(
     conn: &mut PgConnection,
     tenant_id: TenantId,
     ids: &[RecordId],
-    scopes: &[ScopeId],
     sensitivities: &[Sensitivity],
     at: DateTime<Utc>,
 ) -> Result<Vec<RecordVersion>> {
-    if ids.is_empty() || scopes.is_empty() {
+    if ids.is_empty() {
         return Ok(Vec::new());
     }
     let ids: Vec<Uuid> = ids.iter().map(RecordId::as_uuid).collect();
-    let scopes: Vec<Uuid> = scopes.iter().map(ScopeId::as_uuid).collect();
     let sensitivities: Vec<String> = sensitivities
         .iter()
         .map(|level| level.as_str().to_owned())
@@ -387,12 +398,11 @@ pub async fn compose_members(
                sensitivity, provenance, valid_from, valid_to, tx_from, tx_to
         from records
         where tenant_id = $1 and id = any($2)
-          and scope_id = any($3) and sensitivity = any($4)
-          and valid_from <= $5 and (valid_to is null or valid_to > $5)
+          and sensitivity = any($3)
+          and valid_from <= $4 and (valid_to is null or valid_to > $4)
         "#,
         tenant_id.as_uuid(),
         &ids,
-        &scopes,
         &sensitivities,
         at,
     )

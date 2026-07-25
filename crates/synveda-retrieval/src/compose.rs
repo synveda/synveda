@@ -111,7 +111,13 @@ impl ComposeRequest {
 pub struct ComposedEntry {
     /// The record that composed.
     pub record_id: RecordId,
-    /// The scope it composed from.
+    /// The scope it composed **from** — the scope whose channel admitted
+    /// it and whose `MemoryRead` decision let this caller see it. Since
+    /// FLOW-5 that is not always the scope the record lives at: a
+    /// department's published channel may name a record that lives at a
+    /// team under it (ADR-0034 decision 6). The record's own scope is one
+    /// read away, on the record; this field answers "why was this in that
+    /// block", which is the question an auditor asks.
     pub scope_id: ScopeId,
     /// Which channel it composed from — the trust label.
     pub channel: Channel,
@@ -182,13 +188,23 @@ pub fn estimated_tokens(text: &str) -> u32 {
     u32::try_from(chars.div_ceil(4)).unwrap_or(u32::MAX)
 }
 
-/// One candidate as composition sees it: a record version, the chain
-/// position of the scope it came from, and the channel it is on there.
+/// One candidate as composition sees it: a record version, the scope it
+/// composed from and that scope's position in the gradient, and the
+/// channel it is on there.
+///
+/// [`Candidate::scope_id`] is the scope the record **composed from**, not
+/// necessarily the scope it lives at: since FLOW-5 a scope's published
+/// tree may name a record that lives below it, and the entry then belongs
+/// to the publishing scope's section of the block, at that scope's
+/// position (ADR-0034 decision 6). For derived material the two are
+/// always the same scope.
 #[derive(Debug, Clone, Copy)]
 pub struct Candidate<'a> {
     /// The record version.
     pub version: &'a RecordVersion,
-    /// Its scope's position in the gradient, nearest = 0.
+    /// The scope it composed from.
+    pub scope_id: ScopeId,
+    /// That scope's position in the gradient, nearest = 0.
     pub position: usize,
     /// Published or derived at that scope.
     pub channel: Channel,
@@ -285,13 +301,27 @@ pub async fn compose(
     let scope_ids: Vec<ScopeId> = request.scopes.iter().map(|scope| scope.scope_id).collect();
     let sensitivities = allowed_sensitivities(request.max_sensitivity);
 
-    // The published channel of every planned scope: one indexed read for
-    // the whole chain (ADR-0031 decision 3).
-    let published = read_memory_members(conn, tenant_id, &scope_ids, Channel::Published).await?;
-    let admitted: HashMap<ScopeId, &HashMap<RecordId, _>> = published
+    let chain_position: HashMap<ScopeId, usize> = request
+        .scopes
         .iter()
-        .map(|channel| (channel.scope_id, &channel.members))
+        .enumerate()
+        .map(|(position, scope)| (scope.scope_id, position))
         .collect();
+
+    // The published channel of every planned scope: one indexed read for
+    // the whole chain (ADR-0031 decision 3). Kept in gradient order, so
+    // "the nearest scope that published this" is the first match
+    // (ADR-0034 decision 6).
+    let published = read_memory_members(conn, tenant_id, &scope_ids, Channel::Published).await?;
+    let mut admitted: Vec<(usize, ScopeId, &HashMap<RecordId, _>)> = published
+        .iter()
+        .filter_map(|channel| {
+            chain_position
+                .get(&channel.scope_id)
+                .map(|position| (*position, channel.scope_id, &channel.members))
+        })
+        .collect();
+    admitted.sort_unstable_by_key(|(position, _, _)| *position);
     let published_ids: Vec<RecordId> = published
         .iter()
         .flat_map(|channel| channel.members.keys().copied())
@@ -307,15 +337,13 @@ pub async fn compose(
         .filter(|scope| scope.include_derived)
         .map(|scope| scope.scope_id)
         .collect();
-    let members = search::compose_members(
-        conn,
-        tenant_id,
-        &published_ids,
-        &scope_ids,
-        &sensitivities,
-        request.at,
-    )
-    .await?;
+    // Published members are fetched by id alone: tree membership at a
+    // planned scope is the predicate, because that tree may name a record
+    // living below it (ADR-0034 decision 6). Residence still decides for
+    // the derived sweep.
+    let members =
+        search::compose_members(conn, tenant_id, &published_ids, &sensitivities, request.at)
+            .await?;
     let swept = if derived_scopes.is_empty() {
         Vec::new()
     } else {
@@ -330,12 +358,6 @@ pub async fn compose(
         .await?
     };
 
-    let chain_position: HashMap<ScopeId, usize> = request
-        .scopes
-        .iter()
-        .enumerate()
-        .map(|(position, scope)| (scope.scope_id, position))
-        .collect();
     let relevance_rank: Option<HashMap<RecordId, usize>> = request.relevance.as_ref().map(|ids| {
         ids.iter()
             .enumerate()
@@ -343,21 +365,24 @@ pub async fn compose(
             .collect()
     });
 
-    // Which channel each candidate is on (ADR-0031 decision 5):
-    // published when its scope's tree names it at exactly the address its
-    // current content produces, derived otherwise. A record whose content
-    // moved since publication fails the comparison and is unreviewed
-    // again — publication binds bytes, not ids.
-    let channel_of = |version: &RecordVersion| {
-        let admitted_at = admitted
-            .get(&version.state.scope_id)
-            .and_then(|members| members.get(&version.id));
-        match admitted_at {
-            Some(address) if *address == memory_asset(version.id, &version.state).address() => {
-                Channel::Published
-            }
-            _ => Channel::Derived,
+    // Where each candidate composes as *published* (ADR-0031 decision 5,
+    // as ADR-0034 decision 6 widened it): the nearest planned scope whose
+    // tree names it at exactly the address its current content produces.
+    // A record whose content moved since publication fails the comparison
+    // and is unreviewed again — publication binds bytes, not ids — and
+    // one no tree names is not hashed at all.
+    let published_at = |version: &RecordVersion| {
+        if !admitted
+            .iter()
+            .any(|(_, _, members)| members.contains_key(&version.id))
+        {
+            return None;
         }
+        let address = memory_asset(version.id, &version.state).address();
+        admitted
+            .iter()
+            .find(|(_, _, members)| members.get(&version.id) == Some(&address))
+            .map(|(position, scope_id, _)| (*position, *scope_id))
     };
 
     // The two fetches can name the same record — a promoted extraction is
@@ -365,12 +390,21 @@ pub async fn compose(
     // and the id keys the union so nothing composes twice.
     let mut by_id: HashMap<RecordId, Candidate<'_>> = HashMap::new();
     for version in members.iter().chain(swept.iter()) {
-        let Some(position) = chain_position.get(&version.state.scope_id).copied() else {
-            // The queries filtered on plan scopes; unreachable in
-            // practice, and dropping is the safe reading of "not planned".
-            continue;
+        let (position, scope_id, channel) = match published_at(version) {
+            Some((position, scope_id)) => (position, scope_id, Channel::Published),
+            // Not published anywhere the caller can read it, so it is
+            // derived material — and derived material composes only from
+            // the scope it lives at, which must itself be planned. A
+            // published fetch that came back for a record living outside
+            // the plan lands here and is dropped, which is the safe
+            // reading of "the tree no longer names this content".
+            None => {
+                let Some(position) = chain_position.get(&version.state.scope_id).copied() else {
+                    continue;
+                };
+                (position, version.state.scope_id, Channel::Derived)
+            }
         };
-        let channel = channel_of(version);
         // Relevance gates derived material only: published content is the
         // trust anchor and composes regardless of the task (ADR-0031
         // decision 9, ADR-0025 decision 5's rule moved to the channel it
@@ -385,6 +419,7 @@ pub async fn compose(
         }
         let candidate = Candidate {
             version,
+            scope_id,
             position,
             channel,
         };
@@ -483,11 +518,16 @@ pub async fn compose(
         let version = candidate.version;
         let line = entry_line(candidate);
         let line_tokens = estimated_tokens(&line);
-        let header_tokens = if open_sections.contains(&version.state.scope_id) {
+        // Sectioned by the scope it composed *from*, which for climbed
+        // material is the scope that published it rather than the scope
+        // it lives at (ADR-0034 decision 6) — the reader is shown the
+        // section they can actually see, and a source scope's path never
+        // reaches a block through a record that climbed out of it.
+        let header_tokens = if open_sections.contains(&candidate.scope_id) {
             0
         } else {
             header_of
-                .get(&version.state.scope_id)
+                .get(&candidate.scope_id)
                 .map_or(0, |header| estimated_tokens(header))
         };
         // Each entry grows the watermark's record list by ",<uuid>" (the
@@ -502,8 +542,8 @@ pub async fn compose(
             skipped_over_budget += 1;
             continue;
         }
-        if open_sections.insert(version.state.scope_id)
-            && let Some(header) = header_of.get(&version.state.scope_id)
+        if open_sections.insert(candidate.scope_id)
+            && let Some(header) = header_of.get(&candidate.scope_id)
         {
             pieces.push(header.clone());
         }
@@ -515,7 +555,7 @@ pub async fn compose(
             .increment(1);
         entries.push(ComposedEntry {
             record_id: version.id,
-            scope_id: version.state.scope_id,
+            scope_id: candidate.scope_id,
             channel: candidate.channel,
             kind: version.state.kind,
             class: version.state.class,
@@ -681,6 +721,7 @@ mod tests {
     fn candidate(version: &RecordVersion, position: usize, channel: Channel) -> Candidate<'_> {
         Candidate {
             version,
+            scope_id: version.state.scope_id,
             position,
             channel,
         }

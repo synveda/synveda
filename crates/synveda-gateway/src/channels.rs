@@ -171,9 +171,12 @@ pub(crate) async fn list(State(state): State<AppState>, Path(scope_id): Path<Sco
 
 #[derive(Deserialize)]
 pub(crate) struct PublishBody {
-    /// The records to admit. Must be current records of this scope —
-    /// climbing from a child scope is FLOW-5's, under that scope's
-    /// approvers.
+    /// The records to admit. Must be current records of **this** scope:
+    /// the direct route stays same-scope (ADR-0034 decision 13). A climb
+    /// from a child scope goes through `POST /v1/proposals` with a
+    /// `source_scope_id`, because it needs a recorded proposer, a
+    /// disclosure decision, and a review that other people can read —
+    /// none of which a single call has.
     record_ids: Vec<RecordId>,
     /// Why — an auditor and a reviewer both read this. Required: a
     /// publication with nothing to say is one nobody can review after
@@ -292,7 +295,8 @@ async fn publish_inner(
         // never produce quietly.
         return Err(Error::Invalid {
             message: format!(
-                "not current records of this scope: {} (cross-scope promotion is FLOW-5)",
+                "not current records of this scope: {} — promote from a child scope \
+                 with POST /v1/proposals and a source_scope_id (FLOW-5)",
                 missing.join(", ")
             ),
         });

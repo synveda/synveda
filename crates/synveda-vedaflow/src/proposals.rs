@@ -71,8 +71,11 @@ pub const MAX_OPEN_PROPOSALS: i64 = 500;
 pub struct NewProposal<'a> {
     /// The scope whose channel would move — where requirements resolve.
     pub target_scope: ScopeId,
-    /// Where the material lives now. FLOW-3 requires it to equal the
-    /// target; FLOW-5's climb is what relaxes that.
+    /// The scope the material comes from — equal to the target for a
+    /// same-scope proposal, a strict descendant of it for FLOW-5's climb
+    /// (ADR-0034 decision 2). Which scopes are in that relation, and
+    /// whether the source actually holds the material, are the caller's
+    /// to decide: this module authorises nothing and reads no hierarchy.
     pub source_scope: ScopeId,
     /// Which asset type.
     pub asset: AssetKind,

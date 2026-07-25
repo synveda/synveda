@@ -18,7 +18,7 @@ use synveda_identity::Claims;
 use synveda_policy::{Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource};
 use synveda_store::{identities, policy_assignments, policy_packs, rls, role_bindings, tenants};
 use synveda_types::{
-    Error, HierarchyNode, Identity, IdentityKind, Result, Role, RoleBinding, TenantId,
+    Error, HierarchyNode, Identity, IdentityKind, Result, Role, RoleBinding, ScopeId, TenantId,
 };
 
 use crate::app::AppState;
@@ -43,14 +43,36 @@ pub(crate) struct DecisionInput {
 
 impl DecisionInput {
     pub(crate) fn context(&self) -> AuthzContext<'_> {
+        self.context_from(0)
+    }
+
+    /// The decision context for a resource whose own chain is the
+    /// gathered chain from `position` onwards — an *ancestor* of the node
+    /// this input was gathered at.
+    ///
+    /// A cross-scope promotion decides at two scopes (FLOW-5, ADR-0034
+    /// decision 12): `MemoryRead` at the source and `ProposalOpen` at an
+    /// ancestor of it. Gathering at the deeper node reads assignments and
+    /// role bindings for a chain that already contains the ancestor's, so
+    /// the second decision needs a slice rather than a second gather —
+    /// the same trick `permitted_chain_scopes` uses to decide a whole
+    /// chain from one set of rows. A position past the end yields the
+    /// empty chain, which fails closed.
+    pub(crate) fn context_from(&self, position: usize) -> AuthzContext<'_> {
         AuthzContext {
-            scopes: &self.chain,
+            scopes: self.chain.get(position..).unwrap_or(&[]),
             principal_scopes: &self.principal_scopes,
             assignments: &self.assignments,
             default_pack: self.default_pack.as_deref(),
             role_bindings: &self.role_bindings,
             grant: None,
         }
+    }
+
+    /// The position of `scope_id` on the gathered chain, if it is on it.
+    /// `Some(0)` is the node itself; a strict ancestor is `Some(n > 0)`.
+    pub(crate) fn position_of(&self, scope_id: ScopeId) -> Option<usize> {
+        self.chain.iter().position(|node| node.id == scope_id)
     }
 }
 
@@ -236,15 +258,37 @@ pub(crate) fn decide(
     resource: Resource,
     grant: Option<Role>,
 ) -> Result<Authorized> {
-    let mut context = input.context();
+    decide_from(state, input, 0, action, resource, grant)
+}
+
+/// [`decide`] for a resource whose chain starts at `position` of the
+/// gathered chain (see [`DecisionInput::context_from`]). The audit
+/// event's role list is narrowed to that chain too — a binding at a scope
+/// *below* the resource did not bear on this decision and must not be
+/// reported as though it had.
+pub(crate) fn decide_from(
+    state: &AppState,
+    input: &DecisionInput,
+    position: usize,
+    action: Action,
+    resource: Resource,
+    grant: Option<Role>,
+) -> Result<Authorized> {
+    let mut context = input.context_from(position);
     context.grant = grant;
     let decision = state
         .pdp
         .authorize(&input.principal, action, resource, &context)?;
     decision.clone().require(action, resource)?;
+    let on_chain: HashSet<_> = context.scopes.iter().map(|node| node.id).collect();
     let mut roles: Vec<String> = input
         .role_bindings
         .iter()
+        .filter(|binding| {
+            binding
+                .scope_id
+                .is_none_or(|scope| on_chain.contains(&scope))
+        })
         .map(|binding| binding.role.as_str().to_owned())
         .collect();
     roles.sort_unstable();

@@ -577,7 +577,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [FLOW-2: Channels](FLOW-2.md) — done 2026-07-25, ADR-0031, AC test: crates/synveda-gateway/tests/channels.rs (the bank-mode switch over real refs, end to end on product surfaces: extracted memories land on `{scope}/memory/derived`, a curator publishes one through `POST /v1/channels/{scope}/publish` under the PDP, inject renders it unmarked while the rest still says unreviewed, a `published-only` pack becomes the tenant default, and the very next inject — same token, same session, no restart — composes the published record alone and cites the commit the curator made; plus the PDP gate, the read requirement that keeps a curator out of a teammate's personal scope, whole-request refusal of another scope's record, the `vedaflow.channel.published` event carrying ids and addresses but never content, and `GET /v1/channels`), crates/synveda-retrieval/tests/compose.rs (12 tests on real channels — including authored-but-unpublished material failing bank mode, and an edit demoting a published record to unreviewed), crates/synveda-gateway/tests/extraction.rs (the derived-channel commit lands in the pipeline's own write transaction), crates/synveda-policy/tests/{roles,packs,pdp}.rs (the channel plane joins the role×action matrix at pack `@6`), demo: demos/flow-2-channels.sh
 - [x] [FLOW-3: Proposals & approval matrix](FLOW-3.md) — done 2026-07-25, ADR-0032, AC tests: crates/synveda-policy/tests/approvals.rs (the **full matrix golden**: 3 packs × 5 asset kinds × 4 sensitivities × 5 scope kinds = 300 cells rendered canonically against tests/golden/approval-matrix.txt, so a wrong requirement and a wrong *absence* of one both fail and the diff names the cell; plus the packs proven to actually differ where tech plan §2.4 says they do, the floor holding under a pack written specifically to author it away, and an unsatisfiable matrix refused at install rather than discovered at review), crates/synveda-gateway/tests/proposals.rs (the **team→published promotion with 1 curator** over the product surfaces — a contributor opens, the response states what the pack requires and that it is unmet, the contributor cannot run the effect, the curator reads the content and approves, and the publication is a merge commit whose second parent is the proposal; and **restricted → compliance + dual approval**, refused on the direct route by name, refused again for a principal holding *both* roles because two distinct approvers means two people, then carried by curator + compliance — with the deciding compliance vote unable to publish, which is the case that decided against auto-publishing; plus approvals binding bytes, a curator file adding a named approver without granting them anything, rejection/withdrawal, and the uniform 404), crates/synveda-store/tests/rls.rs (the two new tables join the adversarial suite and its completeness guard: a forged approval on another tenant's proposal, the append-only review log, and the one permitted open → closed transition), crates/synveda-types (18 unit tests on the counting rule) and crates/synveda-vedaflow (curator-file parsing, the one-wildcard glob, and approvals that never carry to another commit), demo: demos/flow-3-proposals.sh
 - [x] [FLOW-4: Auto-promotion rules](FLOW-4.md) — done 2026-07-25, ADR-0033, AC tests: crates/synveda-gateway/tests/promotion.rs (the **soak**, over real product surfaces with a real signal — nothing writes a usage counter, every recall is an actual `POST /v1/inject` whose `context.injected` event the engine folds out of the audit chain: two recalls open nothing, the third crosses the rule's threshold and a proposal appears with nobody deciding to, targeting the scope the material already sits on, proposed under the *owner's* identity rather than a system principal; and the **evidence**, which is checked rather than displayed — `evidence_is_checkable_against_the_chain` re-derives the recall and distinct-member counts from the hash-chained events in the `[from_seq, to_seq]` range the evidence names, without consulting the projection that produced it; plus a ten-round soak that never proposes the same bytes twice, a rejection binding those bytes and an edit freeing them, the projection discarded and refolded from seq 1 to the identical counts, a quarantined owner proposing nothing, an unconfigured pack promoting nothing while still sweeping usage, and — pinning the fact ADR-0033 decision 8 rests on — twenty injects by a teammate adding neither a member nor a recall to someone else's personal record), crates/synveda-store/tests/rls.rs (the two new tables join the adversarial suite and its completeness guard: a forged usage row, a rewound watermark that would refold a victim's chain and double their evidence, and the DELETE grant that makes the rebuild an operation rather than an aspiration), crates/synveda-types (16 unit tests on the rule vocabulary: every threshold load-bearing, the sensitivity ceiling, and refusal at install of a rule that asks nothing or could never fire), demo: demos/flow-4-auto-promotion.sh (on a scratch database, the gateway's own background loop — not a test harness — crossing the threshold, then the evidence re-derived from the chain in SQL, idempotence under a continuing soak, a curator refused because publishing needs MemoryRead on material nobody else can read, and the owner publishing her own through the ordinary FLOW-3 path into a merge commit whose second parent is the proposal a rule opened)
-- [ ] [FLOW-5: Cross-scope promotion](FLOW-5.md)
+- [x] [FLOW-5: Cross-scope promotion](FLOW-5.md) — done 2026-07-25, ADR-0034, AC test: crates/synveda-gateway/tests/cross_scope.rs (the **two-level climb with distinct approver sets**, asserted from the reader's side because that is what makes it a promotion rather than a row: a platform-team runbook reaches Engineering and then ACME, and between the hops a payments-team member — who could not read platform before and still cannot — starts receiving it in her own \`POST /v1/inject\`, sectioned under the department and unmarked, while a member of *another department* still gets nothing until the second hop lands; each level refuses the level below by name, because bindings inherit downward and never up, and each publication takes what the pack asks at that scope kind — one curator at a team, a curator **and** a steward at a department or the org, with the steward unable to run the effect since steward reads no content in any pack; the **denial audited with reason** is the org's rejection between the hops, carrying its mandatory reason and both scopes, with the chain verifying over all of it; plus the direction rule refusing sideways and downward by name, the disclosure rule — a team curator cannot climb a teammate's personal memory and the owner can climb her own, then the curator reviews content she cannot read at its source — and the two senses in which a scope holds material, including the second hop proposed by a department that holds the record only by publishing it, and an edit that takes it out of both at once), crates/synveda-retrieval/tests/compose.rs (\`an_ancestors_published_channel_admits_a_record_living_below_it\`: the read-path half in isolation — the same record composes nothing when only a sibling team published it and composes as reviewed at the *department's* gradient position and section once the department does, surviving bank mode, with the record never moving), crates/synveda-gateway/tests/proposals.rs + crates/synveda-retrieval/tests/compose.rs (FLOW-2/3/4's suites unchanged and green: when source and target are the same scope both composition substitutions are identities), demo: demos/flow-5-cross-scope.sh (the runbook climbing \`acme/eng/platform → acme/eng → acme\` over the HTTP surfaces, with the two readers' injects before and after each hop, and the trail printed as a table whose from/to columns are the climb)
 - [ ] [FLOW-6: CLI review flow](FLOW-6.md)
 - [ ] [FLOW-7: Rollback & pinning](FLOW-7.md)
 - [ ] [AUTHZ-4: Lapses (controlled relaxation)](AUTHZ-4.md)
@@ -628,6 +628,74 @@ watermark check before either). The second matters on the shared dev
 database, where a pass visits thousands of leftover test tenants — which
 is also why the demo runs on a scratch database, the discipline EVAL-1
 recorded for the same reason._
+
+_FLOW-5 (2026-07-25, ADR-0034): cross-scope promotion — the climb is an
+**ordinary proposal whose target is a strict ancestor of its source**.
+Same table, same matrix resolved at the target and only there, same
+lifecycle, same audit actions; two things are added and nothing else.
+Opening a climb takes a second Cedar decision, `MemoryRead` at the
+**source**, and a climb's members must be material the source scope holds
+— records living there, or records its published channel names at their
+current address. That second sense is what lets a department propose
+onward what a team climbed into it, and it is why the ladder the tech
+plan draws (team → department → org) falls out without being enforced:
+hop two's source held the material because hop one published it there.
+The feature added **no migration, no Cedar action, no audit action, and
+no table** — `source_scope_id` has been stored and immutable since
+migration 0019, which is the strongest available evidence that ADR-0032
+decision 17 put the boundary where it said it did.
+
+**The disclosure question ADR-0032 deferred has one answer: the
+proposer's read at the source, taken once, recorded under their name.**
+A reviewer at the target sees content they may not be able to read at its
+source, and that is the disclosure the proposer made rather than a leak.
+The obvious alternative — make every reviewer hold `MemoryRead` at the
+source — was refused for two independent reasons, either decisive:
+`compliance` holds no content read in any pack, so the invariant floor's
+own role could never review a `restricted` climb; and nobody but the
+owner reads a personal scope, so a user's own memory could never climb to
+their team. The privacy floor then does the rest with no clause about
+personal scopes anywhere in the promotion code: Bob cannot climb Alice's
+note because no pack permits him `MemoryRead` there, and Alice can
+because the self permit does.
+
+**The read path is where the feature becomes real, and it is the one
+place FLOW-5 changed behaviour rather than adding a surface.** A scope's
+published channel may now name a record that lives *below* it, so
+composition fetches published members by id (tree membership is the
+predicate, not residence) and gives an entry the gradient position and
+section of the **nearest planned scope whose tree names it at its current
+address**. Derived material keeps its scope predicate exactly. When
+source and target are the same scope both substitutions are identities,
+which is why FLOW-2's and CTX-2's suites pass unchanged — and it is worth
+naming what moved: the published tree now does authorisation work the
+record row used to do, so a bug in tree membership is a disclosure bug
+where before it was a trust-label bug. The address check keeps that
+narrow, and the PDP still decides `MemoryRead` once per planned scope
+before any of it runs.
+
+Two things the acceptance work turned up. The approver *sets* are the
+pack's, not a test fixture's: `regulated-strict` asks for one curator at
+a team but a curator **and** a steward, two distinct people, at a
+department or the org — so a two-level climb needs four principals, and
+the steward cannot run the effect because steward reads no content in any
+pack. And publish-time refusals are now uniformly `Conflict` rather than
+`Invalid`: a member deleted, edited, or given up by its source between
+approval and publication is the world moving under a well-formed request,
+not a bad request, and each names the record.
+
+Still standing: **rules do not climb.** ADR-0033 reversal trigger (e) is
+half discharged — the same-scope constraint left the proposal surface, so
+it is now a property of the rule engine — and the other half waits on a
+rule target expression, for the reason decision 1 gives: a rule acts
+under the material owner's authority, and an owner who configured no
+target has decided nothing about disclosing upward. The direct publish
+route stays same-scope (a restriction, never a relaxation). Everything
+that climbs accumulates at the org root, where `MAX_CHANNEL_MEMBERS`
+(10,000) is the standing bound and ADR-0031's subtree sharding is the
+recorded upgrade. And a rewind at a source (FLOW-7) will not un-publish
+at the target — a climbed record survives its source's rollback, which is
+FLOW-7's decision to make, not this ADR's._
 
 _GRPH-4 (2026-07-25, ADR-0029): the phase gate ran first, because it is
 the only Phase 2 item that can invalidate an Accepted ADR and the schema

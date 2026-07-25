@@ -1229,8 +1229,10 @@ async fn the_pdp_gates_every_verb_and_foreign_proposals_are_not_found() {
     let (_, opened) = open_proposal(&app, &dana, team.id, &[record], "promote the runbook").await;
     let id = opened["id"].as_str().expect("proposal id").to_owned();
 
-    // A curator cannot open a proposal naming a record of another scope:
-    // cross-scope promotion is FLOW-5's, under that scope's approvers.
+    // A curator cannot open a proposal naming a record of a scope that is
+    // not the source: payments neither holds the platform record nor
+    // publishes it, and FLOW-5's climb would not help — payments is a
+    // sibling, not an ancestor (ADR-0034 decisions 2 and 3).
     let (status, cross) =
         open_proposal(&app, &cora, payments.id, &[record], "climb sideways").await;
     assert_eq!(
@@ -1239,8 +1241,9 @@ async fn the_pdp_gates_every_verb_and_foreign_proposals_are_not_found() {
         "cross-scope promotion slipped through: {cross}"
     );
     assert!(
-        detail(&cross).contains("FLOW-5"),
-        "the refusal must name where the climb belongs: {cross}"
+        detail(&cross).contains("neither holds nor publishes")
+            && detail(&cross).contains("source_scope_id"),
+        "the refusal must name the rule and the field that expresses a climb: {cross}"
     );
 
     // Another tenant sees a uniform 404, not a policy denial oracle.

@@ -629,6 +629,92 @@ fn editing_published_content_demotes_it_to_unreviewed() {
     );
 }
 
+// ── Climbed material (FLOW-5, ADR-0034 decision 6) ───────────────────────────
+
+/// A scope's published channel may name a record that lives *below* it,
+/// and composition reads it that way: the entry takes the publishing
+/// scope's position in the gradient and the publishing scope's section,
+/// not the residence its row records.
+///
+/// This is the read-path half of a cross-scope promotion, and it is
+/// asserted from the side that makes it matter — the reader's. The record
+/// lives at a team this caller is not in and can never read; what admits
+/// it is the department's publication, and nothing else. Before that
+/// publication the same record composes nothing at all, which is the
+/// control: residence alone never admits anything.
+#[test]
+fn an_ancestors_published_channel_admits_a_record_living_below_it() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    // A team this caller has no chain relationship with — a sibling under
+    // the same department, which is exactly where a climb starts.
+    let sibling = ScopeId::new();
+    let now = Utc::now();
+    let runbook = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(sibling, "rotate the signing key every 90 days", now),
+    ));
+
+    // Published at the sibling team only: not on this caller's chain, so
+    // the department's channel says nothing about it and neither does the
+    // block.
+    publish(db, tenant, sibling, &[runbook]);
+    let before = run(db, tenant, &ComposeRequest::new(chain.scopes(), 1_500, now));
+    assert!(
+        ids(&before).is_empty(),
+        "another team's material must not compose: {}",
+        before.text
+    );
+
+    // The climb lands: the department publishes it, and the record has not
+    // moved an inch.
+    publish(db, tenant, chain.dept, &[runbook]);
+    let after = run(db, tenant, &ComposeRequest::new(chain.scopes(), 1_500, now));
+    assert_eq!(
+        ids(&after),
+        vec![runbook],
+        "the department's publication admits it: {}",
+        after.text
+    );
+    assert!(
+        !after.text.contains("[unreviewed]"),
+        "and it composes as reviewed, not derived: {}",
+        after.text
+    );
+
+    // The watermark and the rendering both name the scope it composed
+    // *from*. A reader is never shown a section for a scope they cannot
+    // see, and an auditor asking "why was this in that block" is pointed
+    // at the decision that admitted it.
+    let entry = &after.entries[0];
+    assert_eq!(
+        entry.scope_id, chain.dept,
+        "the entry belongs to the publishing scope"
+    );
+    assert_eq!(entry.channel, Channel::Published);
+    assert!(
+        after.text.contains("## acme/eng (department)"),
+        "sectioned under the department: {}",
+        after.text
+    );
+
+    // Bank mode is the sharpest form of the same statement: with derived
+    // material switched off entirely, the climbed record is all there is.
+    let mut bank = chain.scopes();
+    for scope in &mut bank {
+        scope.include_derived = false;
+    }
+    let banked = run(db, tenant, &ComposeRequest::new(bank, 1_500, now));
+    assert_eq!(
+        ids(&banked),
+        vec![runbook],
+        "a climbed record survives published-only composition: {}",
+        banked.text
+    );
+}
+
 // ── Conflict rules (seed §4.4) ───────────────────────────────────────────────
 
 /// The conflict rules, each proven against the tempting wrong winner:

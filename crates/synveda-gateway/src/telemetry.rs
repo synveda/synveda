@@ -115,6 +115,15 @@ pub const PROPOSAL_OPERATIONS_TOTAL: &str = "synveda_proposal_operations_total";
 /// counts the publications that were pushed onto the review path.
 pub const PUBLISH_REVIEW_REQUIRED_TOTAL: &str = "synveda_publish_review_required_total";
 
+/// Proposals opened against an **ancestor** of the material's scope
+/// (FLOW-5, ADR-0034), labelled by `levels` (how far up the chain the
+/// target sits — `1` is the parent) and by the source and target scope
+/// kinds. Same-scope proposals are not counted here: this measures the
+/// org gradient being climbed, which is the thing the feature exists to
+/// make observable, and a counter that also ticked for FLOW-3's case
+/// would answer a different question.
+pub const PROPOSAL_CLIMBS_TOTAL: &str = "synveda_proposal_climbs_total";
+
 /// Curator-file edits (FLOW-3, ADR-0032 decision 15), labelled by `op`
 /// (`get`/`put`) and `outcome`.
 pub const CURATOR_OPERATIONS_TOTAL: &str = "synveda_curator_operations_total";
@@ -434,6 +443,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         PUBLISH_REVIEW_REQUIRED_TOTAL,
         "Publications refused for want of approvals, by surface (channel/proposal)"
+    );
+    metrics::describe_counter!(
+        PROPOSAL_CLIMBS_TOTAL,
+        "Proposals opened against an ancestor of the material's scope, \
+         by levels climbed and source/target scope kind"
     );
     metrics::describe_counter!(
         CURATOR_OPERATIONS_TOTAL,

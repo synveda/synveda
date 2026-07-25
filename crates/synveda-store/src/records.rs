@@ -332,13 +332,18 @@ pub async fn current(executor: impl PgExecutor<'_>, id: RecordId) -> Result<Opti
 }
 
 /// The current version of each id that is a record of `tenant_id` living at
-/// `scope_id` — the publish path's read (FLOW-2, ADR-0031 decision 12).
+/// `scope_id` — the direct publish path's read (FLOW-2, ADR-0031
+/// decision 12).
 ///
-/// Scoped rather than by id alone, because publishing is same-scope by
-/// definition: a record at a child scope climbing to its parent's channel
-/// needs that scope's approvers, which is FLOW-5. An id that is missing,
-/// deleted, or living elsewhere simply does not come back, and the caller
-/// reports the difference rather than publishing a partial set.
+/// Scoped rather than by id alone, because the **direct** publish route is
+/// same-scope and stays that way (ADR-0034 decision 13): a record at a
+/// child scope climbing to its parent's channel needs a recorded proposer,
+/// a disclosure decision, and a review, which is what a proposal is and
+/// what a single call is not. The proposal route reads through
+/// [`current_many`] instead and decides what the source scope holds for
+/// itself. An id that is missing, deleted, or living elsewhere simply does
+/// not come back, and the caller reports the difference rather than
+/// publishing a partial set.
 #[tracing::instrument(
     name = "store.records.current_at_scope",
     skip_all,
@@ -377,8 +382,11 @@ pub async fn current_at_scope(
 /// learns about records before it learns where they are: the FLOW-4
 /// sweep folds record ids out of the audit chain and only then asks
 /// which scope each belongs to, so it can group by scope and resolve one
-/// effective pack per group (ADR-0033 decision 14). Records that have
-/// since been deleted simply do not come back.
+/// effective pack per group (ADR-0033 decision 14); and FLOW-5's climb,
+/// whose members may live anywhere below the scope proposing them, so
+/// residence is one of two answers rather than the predicate (ADR-0034
+/// decision 3). Records that have since been deleted simply do not come
+/// back.
 #[tracing::instrument(
     name = "store.records.current_many",
     skip_all,

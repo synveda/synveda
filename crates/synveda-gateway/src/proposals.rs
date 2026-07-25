@@ -18,6 +18,20 @@
 //! cannot see stored approvals, and a counting rule must never be
 //! authority.
 //!
+//! # Climbing (FLOW-5, ADR-0034)
+//!
+//! A proposal's target may be a strict **ancestor** of its source, which
+//! is how tribal knowledge reaches the department and then the org. It is
+//! not a second kind of proposal: same table, same matrix resolved at the
+//! target and only there, same lifecycle, same audit actions. Two things
+//! are added and nothing else. Opening a climb takes a second Cedar
+//! decision — `MemoryRead` at the *source*, the proposer's warrant for
+//! showing the material to the target's reviewers — and a climb's members
+//! must be material the source scope holds, meaning records that live
+//! there or records its published channel names at their current address.
+//! The second sense is what lets a department propose onward what a team
+//! climbed into it, with nothing stored to make the hop possible.
+//!
 //! # Publishing is a separate act
 //!
 //! The deciding approval does not publish. `POST /v1/proposals/{id}/publish`
@@ -53,7 +67,9 @@ use crate::audit;
 use crate::authz::{self, DecisionInput};
 use crate::error::ApiError;
 use crate::hierarchy::{body, commit, found, tenant_id};
-use crate::telemetry::{PROPOSAL_OPERATIONS_TOTAL, PUBLISH_REVIEW_REQUIRED_TOTAL};
+use crate::telemetry::{
+    PROPOSAL_CLIMBS_TOTAL, PROPOSAL_OPERATIONS_TOTAL, PUBLISH_REVIEW_REQUIRED_TOTAL,
+};
 
 /// The listing page cap; `limit` above it is a 400, not a silent trim.
 const MAX_LIMIT: i64 = 500;
@@ -270,11 +286,15 @@ pub(crate) async fn list(
 ///
 /// The members' content is the disclosure a proposal makes: a reviewer
 /// who cannot read the source scope reviews what the proposal shows them.
-/// In FLOW-3 source and target are the same scope, so this discloses
-/// nothing `MemoryRead` would not; FLOW-5's climb is what makes the
-/// question interesting, and `ProposalRead` is shaped like `MemoryRead`
-/// now so the boundary is already in the right place (ADR-0032
-/// decision 17).
+/// Since FLOW-5 that is a real difference — a climb's members live below
+/// the target — and `ProposalRead` at the target is deliberately the only
+/// gate (ADR-0034 decision 1). Requiring the reviewer to hold
+/// `MemoryRead` at the *source* instead would break the product twice
+/// over: `compliance` holds no content read in any pack, so the invariant
+/// floor's own role could never review a `restricted` climb, and nobody
+/// but the owner reads a personal scope, so a user's own memory could
+/// never climb to their team. The read that guards a climb is the
+/// proposer's, taken once at open time and recorded under their name.
 #[tracing::instrument(name = "proposals.get", skip_all)]
 pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId>) -> Response {
     let result = async {
@@ -338,11 +358,19 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
 #[derive(Deserialize)]
 pub(crate) struct OpenBody {
     /// The scope whose published channel would move. Requirements resolve
-    /// here.
+    /// here, and only here — "each level's approvers" is true because
+    /// each level's proposal resolves at that level (ADR-0034
+    /// decision 4).
     scope_id: ScopeId,
-    /// The records to propose. Must be current records of that scope —
-    /// climbing from a child scope is FLOW-5's, under that scope's
-    /// approvers.
+    /// Where the material is now. Absent means the target — the
+    /// same-scope case, a climb of zero levels. Present, it must be the
+    /// target or a **descendant** of it: a climb goes up the chain that
+    /// composition walks down (ADR-0034 decision 2).
+    #[serde(default)]
+    source_scope_id: Option<ScopeId>,
+    /// The records to propose. Must be material the source scope holds —
+    /// records living there, or records its published channel names at
+    /// their current address (ADR-0034 decision 3).
     record_ids: Vec<RecordId>,
     /// What this proposes, in one line. A reviewer reads it in a list.
     title: String,
@@ -372,16 +400,52 @@ async fn open_inner(
     let body = body(payload)?;
     validate_open(&body)?;
     let tenant_id = tenant_id()?;
+    let source_scope_id = body.source_scope_id.unwrap_or(body.scope_id);
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
         hierarchy::node(&mut *tx, body.scope_id).await?,
         tenant_id,
         body.scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
-    let authorized = authz::decide(
+    let source = found(
+        hierarchy::node(&mut *tx, source_scope_id).await?,
+        tenant_id,
+        source_scope_id,
+    )?;
+    // Gathered at the *source* — the deeper node, whose chain contains
+    // the target's as a suffix — so two scopes are decided from one set of
+    // pack assignments and role bindings (ADR-0034 decision 12).
+    let input = authz::gather(state, &mut tx, Some(&source)).await?;
+    // The climb's direction, checked before anything is decided about it:
+    // the target has to be on the source's own chain. A peer scope is not,
+    // has no authority over the source, and admitting one would turn the
+    // approval matrix into a cross-team transfer with the target's curator
+    // as the only party (ADR-0034 decision 2).
+    let Some(target_position) = input.position_of(body.scope_id) else {
+        return Err(Error::Invalid {
+            message: format!(
+                "scope {} is not an ancestor of {source_scope_id}; a promotion climbs \
+                 the hierarchy, it does not cross it",
+                body.scope_id
+            ),
+        });
+    };
+    // The disclosure decision (ADR-0034 decision 1): may this principal
+    // read what it is about to show the target's reviewers. It is the
+    // whole warrant for the climb, and it is asked once, here — the
+    // privacy floor then makes "nobody climbs another principal's personal
+    // material" true with no clause about personal scopes anywhere.
+    let disclosed = authz::decide(
         state,
         &input,
+        Action::MemoryRead,
+        Resource::Scope(source_scope_id),
+        None,
+    )?;
+    let authorized = authz::decide_from(
+        state,
+        &input,
+        target_position,
         Action::ProposalOpen,
         Resource::Scope(body.scope_id),
         None,
@@ -402,7 +466,7 @@ async fn open_inner(
         });
     }
 
-    let versions = current_versions(&mut tx, tenant_id, body.scope_id, &body.record_ids).await?;
+    let versions = held_versions(&mut tx, tenant_id, source_scope_id, &body.record_ids).await?;
     // Objects first: each member's address, computed from the version
     // being proposed. This is what binds the review to bytes — approvals
     // name this commit, and publishing recomputes these addresses from the
@@ -423,10 +487,11 @@ async fn open_inner(
         tenant_id,
         &vedaflow::NewProposal {
             target_scope: body.scope_id,
-            // FLOW-3 is same-scope; FLOW-5's climb is what makes these
-            // differ, and it needs the higher scope's approvers
-            // (ADR-0032 decision 17).
-            source_scope: body.scope_id,
+            // Equal for a same-scope proposal, a strict descendant for a
+            // climb. Both were stored from FLOW-3 onward and migration
+            // 0019's transition trigger already makes both immutable, so
+            // the climb needed no schema (ADR-0034 decision 8).
+            source_scope: source_scope_id,
             asset: AssetKind::Memory,
             channel: Channel::Published,
             members: &members,
@@ -442,6 +507,23 @@ async fn open_inner(
         &Signer::Unsigned,
     )
     .await?;
+
+    if target_position > 0 {
+        metrics::counter!(
+            PROPOSAL_CLIMBS_TOTAL,
+            "levels" => target_position.to_string(),
+            "from" => source.kind.as_str(),
+            "to" => node.kind.as_str(),
+        )
+        .increment(1);
+        tracing::info!(
+            proposal.id = %proposal.id,
+            scope.source = %source_scope_id,
+            scope.target = %body.scope_id,
+            climb.levels = target_position,
+            "proposal climbs {target_position} level(s) to {}", node.path
+        );
+    }
 
     let entries: Vec<String> = members.iter().map(|(name, _)| name.clone()).collect();
     let requirement = approvals::resolve(
@@ -472,6 +554,16 @@ async fn open_inner(
             "title": body.title,
             "sensitivity": sensitivity.as_str(),
             "commit": proposal.commit.to_hex(),
+            // Where it came from, and — when that is not the target — the
+            // second governed decision the climb took: the proposer's read
+            // at the source, which is the disclosure this proposal makes
+            // (ADR-0034 decisions 1 and 9).
+            "source_scope_id": source_scope_id,
+            "target_scope_id": body.scope_id,
+            "climb": (source_scope_id != body.scope_id).then(|| json!({
+                "levels": target_position,
+                "source_read": audit::decision_context(Action::MemoryRead, &disclosed),
+            })),
             // Ids and addresses, never content.
             "records": members.iter().map(|(name, hash)| json!({
                 "record_id": name,
@@ -615,6 +707,8 @@ async fn approve_inner(
             "authz": audit::decision_context(Action::ProposalReview, &authorized),
             "proposal_id": id,
             "commit": proposal.commit.to_hex(),
+            "source_scope_id": proposal.source_scope_id,
+            "target_scope_id": proposal.target_scope_id,
             "roles": candidate.roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
             "comment": comment,
             "approvals": approvals::audit_context(&requirement, &after),
@@ -716,6 +810,12 @@ async fn reject_inner(
             "authz": audit::decision_context(Action::ProposalReview, &authorized),
             "proposal_id": id,
             "commit": proposal.commit.to_hex(),
+            // The level a denial happened at, and what it refused to take:
+            // the AC's "denial at any level audited with reason" is this
+            // event, with the reason ADR-0032 decision 12 already made
+            // mandatory (ADR-0034 decision 9).
+            "source_scope_id": proposal.source_scope_id,
+            "target_scope_id": proposal.target_scope_id,
             "roles": roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
             "reason": reason,
         }),
@@ -786,6 +886,8 @@ pub(crate) async fn withdraw(
                 "authz": audit::decision_context(Action::ProposalOpen, &authorized),
                 "proposal_id": id,
                 "commit": proposal.commit.to_hex(),
+                "source_scope_id": proposal.source_scope_id,
+                "target_scope_id": proposal.target_scope_id,
             }),
         )
         .await?;
@@ -870,24 +972,51 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
     // record as it stands *now* and require it to equal what the approved
     // commit named — otherwise the content moved after the review, and
     // publishing it would launder unreviewed text through a completed
-    // approval (ADR-0032 decision 6).
+    // approval (ADR-0032 decision 6). Then re-ask whether the source still
+    // holds the material, which is the same check one scope over
+    // (ADR-0034 decision 7).
     let proposed = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
     let ids = member_ids(&proposed)?;
-    let versions = current_versions(&mut tx, tenant_id, proposal.target_scope_id, &ids).await?;
-    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> = Vec::with_capacity(versions.len());
-    for version in &versions {
+    let versions = records::current_many(&mut *tx, tenant_id, &ids).await?;
+    let published = published_at(&mut tx, tenant_id, proposal.source_scope_id).await?;
+    // Every refusal here is a `Conflict`, never an `Invalid`: the request
+    // is well formed and was well formed when it was approved — what moved
+    // is the world, between the review and its effect.
+    let moved = |what: &str, record: RecordId| Error::Conflict {
+        message: format!(
+            "record {record} {what} after this proposal was approved; withdraw it and \
+             open a new one so the change is reviewed"
+        ),
+    };
+    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> = Vec::with_capacity(ids.len());
+    for member in &proposed {
+        let record: RecordId = member.name.parse().map_err(|err| Error::Internal {
+            message: format!(
+                "proposal member {:?} is not a record id: {err}",
+                member.name
+            ),
+        })?;
+        let Some(version) = versions.iter().find(|version| version.id == record) else {
+            return Err(moved("no longer exists", record));
+        };
         let asset = memory_asset(version.id, &version.state);
         let address = asset.address();
-        let approved = proposed
-            .iter()
-            .find(|member| member.name == asset.entry_name())
-            .map(|member| member.object);
-        if approved != Some(address) {
+        if address != member.object {
+            return Err(moved("changed", record));
+        }
+        // And the source must still hold it. A record rewound off the
+        // source's channel (FLOW-7) or moved out of the scope between
+        // approval and publication is refused rather than carried up on a
+        // review of material the source no longer stands behind
+        // (ADR-0034 decision 7).
+        if version.state.scope_id != proposal.source_scope_id
+            && published.get(&record) != Some(&address)
+        {
             return Err(Error::Conflict {
                 message: format!(
-                    "record {} changed after this proposal was approved; withdraw it and \
-                     open a new one so the change is reviewed",
-                    version.id
+                    "scope {} no longer holds record {record}; the climb was approved \
+                     against material its source has since given up",
+                    proposal.source_scope_id
                 ),
             });
         }
@@ -950,6 +1079,12 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
             "proposal_id": id,
             "proposal_commit": proposal.commit.to_hex(),
             "sensitivity": proposal.sensitivity.as_str(),
+            // What climbed, and from where. The scope pair on the
+            // publication event is what lets an auditor read a climb off
+            // the chain without joining the proposal row (ADR-0034
+            // decision 9).
+            "source_scope_id": proposal.source_scope_id,
+            "target_scope_id": proposal.target_scope_id,
             "records": members.iter().map(|(name, hash)| json!({
                 "record_id": name,
                 "object_hash": hash.to_hex(),
@@ -1149,8 +1284,11 @@ async fn member_views(
 ) -> Result<Vec<MemberView>> {
     let proposed = vedaflow::proposals::members(tx, tenant_id, proposal.commit).await?;
     let ids = member_ids(&proposed)?;
-    let versions =
-        records::current_at_scope(&mut *tx, tenant_id, proposal.target_scope_id, &ids).await?;
+    // Read wherever the records live, not at the target: a climb's members
+    // live below it, and rendering them as "changed, no content" would
+    // make every climb unreviewable (ADR-0034 decision 3). The address
+    // comparison below is what says whether they still match the review.
+    let versions = records::current_many(&mut *tx, tenant_id, &ids).await?;
     Ok(proposed
         .into_iter()
         .zip(ids)
@@ -1205,13 +1343,27 @@ fn member_ids(members: &[vedaflow::ChannelMember]) -> Result<Vec<RecordId>> {
         .collect()
 }
 
-/// The current versions of `ids` at `scope`, refusing the whole request
-/// if any is missing.
+/// The current versions of `ids` that `scope` **holds**, refusing the
+/// whole request if any is not held there.
+///
+/// A scope holds material in one of two senses, and FLOW-5 needs both
+/// (ADR-0034 decision 3):
+///
+/// - the record **lives** there (`records.scope_id`), which is every
+///   same-scope proposal and the first hop of any climb; or
+/// - the scope **published** it — its `memory/published` tree names the
+///   record at exactly the address its current content produces — which
+///   is how a second hop starts from where the first one landed, with
+///   nothing new stored to make it possible.
+///
+/// The address is what makes the second sense safe: an edited record
+/// falls out of it by arithmetic, so a climb can never carry content the
+/// source scope did not stand behind (ADR-0031 decision 5).
 ///
 /// Named rather than silently dropped: proposing (or publishing) a subset
 /// of what a curator asked for is the one outcome a review surface must
 /// never produce quietly.
-async fn current_versions(
+async fn held_versions(
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     scope_id: ScopeId,
@@ -1220,9 +1372,20 @@ async fn current_versions(
     let mut requested = ids.to_vec();
     requested.sort_unstable();
     requested.dedup();
-    let versions = records::current_at_scope(&mut *tx, tenant_id, scope_id, &requested).await?;
-    if versions.len() != requested.len() {
-        let found: Vec<RecordId> = versions.iter().map(|version| version.id).collect();
+    // Scope-blind: where each record lives is one of the two answers, not
+    // the predicate.
+    let versions = records::current_many(&mut *tx, tenant_id, &requested).await?;
+    let published = published_at(tx, tenant_id, scope_id).await?;
+    let held: Vec<synveda_store::records::RecordVersion> = versions
+        .into_iter()
+        .filter(|version| {
+            version.state.scope_id == scope_id
+                || published.get(&version.id)
+                    == Some(&memory_asset(version.id, &version.state).address())
+        })
+        .collect();
+    if held.len() != requested.len() {
+        let found: Vec<RecordId> = held.iter().map(|version| version.id).collect();
         let missing: Vec<String> = requested
             .iter()
             .filter(|id| !found.contains(id))
@@ -1230,12 +1393,30 @@ async fn current_versions(
             .collect();
         return Err(Error::Invalid {
             message: format!(
-                "not current records of this scope: {} (cross-scope promotion is FLOW-5)",
+                "scope {scope_id} neither holds nor publishes: {} — name the scope \
+                 that does with source_scope_id, which must be {scope_id} or a scope \
+                 beneath it (FLOW-5 climbs the hierarchy, it does not cross it)",
                 missing.join(", ")
             ),
         });
     }
-    Ok(versions)
+    Ok(held)
+}
+
+/// What `scope`'s published channel names, record id → admitted address.
+async fn published_at(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+) -> Result<std::collections::HashMap<RecordId, vedaflow::hash::ObjectHash>> {
+    Ok(
+        vedaflow::read_memory_members(tx, tenant_id, &[scope_id], Channel::Published)
+            .await?
+            .into_iter()
+            .next()
+            .map(|channel| channel.members)
+            .unwrap_or_default(),
+    )
 }
 
 fn max_sensitivity(versions: &[synveda_store::records::RecordVersion]) -> Sensitivity {

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, scope_id, owner_id, kind, class, content,\n               sensitivity, provenance, valid_from, valid_to, tx_from, tx_to\n        from records\n        where tenant_id = $1 and id = any($2)\n          and scope_id = any($3) and sensitivity = any($4)\n          and valid_from <= $5 and (valid_to is null or valid_to > $5)\n        ",
+  "query": "\n        select id, tenant_id, scope_id, owner_id, kind, class, content,\n               sensitivity, provenance, valid_from, valid_to, tx_from, tx_to\n        from records\n        where tenant_id = $1 and id = any($2)\n          and sensitivity = any($3)\n          and valid_from <= $4 and (valid_to is null or valid_to > $4)\n        ",
   "describe": {
     "columns": [
       {
@@ -73,7 +73,6 @@
       "Left": [
         "Uuid",
         "UuidArray",
-        "UuidArray",
         "TextArray",
         "Timestamptz"
       ]
@@ -94,5 +93,5 @@
       true
     ]
   },
-  "hash": "84ee3277ee1619e3d1e014b8868969f4ed640e59272ad8fcec13fc1b546e3ac4"
+  "hash": "6131a970f0b6d7f558b7ca1eb2e219befbcba85ace79893158bbe473c87c8241"
 }
