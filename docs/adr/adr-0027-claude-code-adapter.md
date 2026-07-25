@@ -50,6 +50,18 @@ Forces at play:
 - **`PreCompact`'s payload carries no `transcript_path`.** `Stop`,
   `SessionStart`, and `SessionEnd` do. Any design that wants to flush
   transcript content at compaction must already hold a cursor.
+
+  *Corrected 2026-07-25 (step 3): it does carry one. Recording the
+  fixtures decision 14 asks for put the payload shapes under a microscope,
+  and all four events are built from one common envelope — `session_id`,
+  `transcript_path`, `cwd`, and what the harness has of `prompt_id`,
+  `permission_mode`, `agent_id`, `agent_type`, `effort` — verified against
+  Claude Code 2.1.220. The design the false premise led to is unchanged
+  and still right: the payload is another program's internal format
+  (decision 9), so the adapter reads the path when it is there and falls
+  back to the spooled one when it is not, and the spool has to exist for
+  the cursor regardless. What the correction costs is only the argument
+  that `PreCompact` forced it.*
 - **The transcript is an internal format.** Session JSONL entries of
   type `user`/`assistant` carry `uuid`, `timestamp`, `sessionId`,
   `message`, `isMeta`, `isSidechain` — verified against a live

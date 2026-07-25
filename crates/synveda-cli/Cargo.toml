@@ -23,8 +23,19 @@ synveda-policy = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }
 
+base64 = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
+# `synveda login`'s loopback CSRF state (ADPT-1, ADR-0027 decision 5) —
+# the same CSPRNG the login flow itself uses for state/nonce/verifier.
+getrandom = { workspace = true }
+# The CLI is a gateway client for `login`, `auth token`, and everything
+# else a running gateway serves (ADR-0027 decision 4).
+reqwest = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }
-tokio = { workspace = true }
+# `net`/`io-util` for the loopback listener `synveda login` binds; there is
+# no daemon and no long-lived server, only one request from one browser.
+tokio = { workspace = true, features = ["net", "io-util"] }
+url = { workspace = true }

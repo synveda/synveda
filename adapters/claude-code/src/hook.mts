@@ -51,6 +51,16 @@ await main();
 
 async function main(): Promise<void> {
   const input = await readInput();
+  // Nothing parseable arrived at all. The mode argument alone would be
+  // enough to go on, and that is exactly the trap: without a payload
+  // there is no session id to correlate by and no `cwd` to read the
+  // project's own configuration from — so a project that turned the
+  // adapter off would be captured anyway (decision 13). A hook with no
+  // input does nothing.
+  if (input === undefined) {
+    log("hook.no_payload", { argv: process.argv[2] });
+    return;
+  }
   const mode = resolveMode(process.argv[2], input.hook_event_name);
   if (mode === "none") {
     log("hook.unrecognised", { argv: process.argv[2], hook: input.hook_event_name });
@@ -97,17 +107,18 @@ function resolveMode(argument: string | undefined, event: string | undefined): M
   return "none";
 }
 
-async function readInput(): Promise<HookInput> {
+/** The hook payload, or `undefined` when none arrived that this can read. */
+async function readInput(): Promise<HookInput | undefined> {
   // No stdin to speak of (a human running the binary by hand): there is
   // nothing to do, and blocking on a terminal would hang the watchdog out.
-  if (process.stdin.isTTY === true) return {};
+  if (process.stdin.isTTY === true) return undefined;
   let raw = "";
   try {
     process.stdin.setEncoding("utf8");
     for await (const piece of process.stdin) raw += String(piece);
   } catch (error) {
     log("hook.stdin_failed", { error: String(error) });
-    return {};
+    return undefined;
   }
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -119,7 +130,7 @@ async function readInput(): Promise<HookInput> {
     // (decision 9): do nothing, quietly, and let the session proceed.
   }
   log("hook.stdin_unparsed", { bytes: raw.length });
-  return {};
+  return undefined;
 }
 
 function emit(output: HookOutput): void {

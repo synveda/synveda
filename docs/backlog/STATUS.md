@@ -43,7 +43,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [CTX-1: Hybrid retrieval](CTX-1.md) — done 2026-07-23, AC tests: crates/synveda-retrieval/tests/quality.rs (the fixture set, each leg blind to half the corpus by construction: sparse-only 0.500, dense-only 0.500, hybrid 1.000 recall@6), crates/synveda-gateway/tests/retrieval_live.rs (`--ignored`: the same fixtures through live TEI/BGE-M3 — sparse-only 0.500, hybrid 0.792 recall@6, MRR 1.0), crates/synveda-retrieval/tests/latency.rs (`--ignored`: 1M records/tenant, median asserted under the 80ms budget, tails reported — the HIER-1/MEM-1 discipline), crates/synveda-retrieval/tests/hybrid.rs (fusion order end to end; adversarial no-leak on both legs at once; one-sided staleness; degradation modes; watermark/overlap/rebuild), crates/synveda-retrieval/tests/permitted_scopes.rs (the PDP-derived predicate: own chain, quarantine, unplaced, the service-identity floor), demo: demos/ctx-1-hybrid-retrieval.sh (observe → pipeline → real-TEI vectors → sidecar convergence → live quality harness)
 - [x] [CTX-2: Composition engine](CTX-2.md) — done 2026-07-23, AC tests: crates/synveda-retrieval/tests/compose.rs (deterministic: byte-identical re-composition at the same instant, unrelated writes notwithstanding; the watermark: BLAKE3 version hashes + record ids on every block, block hash recomputable from the entry hashes; tokens_per_inject recorded on every compose including the zero-entry one; plus gradient/pinned-first assembly, first-fit budget, channel rules, the seed §4.4 conflict matrix, valid-time as-of, the sensitivity clamp, relevance ranking), crates/synveda-retrieval/tests/composition_plan.rs (the PDP sweep: per-scope channel rules and the home-scope budget from effective packs; bank-mode subtree inheritance; quarantine/unplaced plan nothing), crates/synveda-store/tests/policy_packs.rs (the composition config rides the stored pack; re-apply clears; garbage json reads unconfigured), demo: demos/ctx-2-composition.sh (observe → pipeline → seeded scope material → the compose example over the real product path — identity → HIER-2 chain → PDP plan → compose — then the bank-mode pack flip governs the very next compose)
 - [x] [CTX-3: inject API](CTX-3.md) — done 2026-07-23, AC tests: crates/synveda-gateway/tests/inject.rs (the degradation matrix: embedder down → sparse-only still ranked + the warning header; broken sidecar → unranked compose + the header; contract rejections stay honest errors — plus the full product path with the watermark and exactly one `context.injected` event, aggregated decisions, task as hash only; taskless recency; quarantined/unplaced → the empty block, still audited; budget narrowing never widening; the bank-mode pack governing the very next inject), crates/synveda-gateway/tests/inject_latency.rs (`--ignored`: 1,000 concurrent sessions arriving at 50/s — p50 18.6ms, p95 22ms, p99 24ms against the 150ms budget, median asserted, tails + stage split reported; the closed-loop saturation probe prints the per-tenant chain-lock ceiling every run), demo: demos/ctx-3-inject.sh (real TEI end to end; TEI stopped mid-demo degrades the same inject to sparse-only with the header and recovers on restart; audit tail + verify)
-- [ ] [ADPT-1: Claude Code adapter](ADPT-1.md)
+- [x] [ADPT-1: Claude Code adapter](ADPT-1.md) — done 2026-07-25, AC test: demos/adpt-1-claude-code.sh (a clean HOME to a personalised session in 1.5s of the 120s budget: the prebuilt plugin enabled, `synveda login` through live Rauthy with AUTH-2 placing a first-time identity, a watermarked block composed from team memory the user never configured, the turn observed back, then `context.injected` + `memory.observed` joined under one `claude-code:<id>` in a verifying chain, the access token renewing itself, and the observed turn returning as memory in the next session), adapters/claude-code/src/driver.test.mts + `node dist/driver.mjs` (the recorded-payload driver over fixtures/, sixteen cases against a mock and against the live gateway — dead gateway, 401, degraded header, oversized tool result, replayed batch, cursor resume after a failed flush, damaged transcript line, unreadable payload; every one exits 0), adapters/claude-code/src/{hook,events,transcript,spool,credentials,log}.test.mts (the handler, mapping, parser, spool, and CLI-seam suites), crates/synveda-gateway/tests/cli_login.rs (the loopback allowlist, the single-use state-bound handoff, the refresh grant, no token in any redirect URL)
 - [ ] [EVAL-1: Eval harness skeleton](EVAL-1.md)
 
 _Order revised 2026-07-18 (was TEN → AUTH → AUTHZ → HIER → MEM → CTX →
@@ -425,6 +425,99 @@ narrowing the budget to the harness's remaining room); CTX-5 owns the
 as-of parameter (transaction time + refs) and the recall surface;
 EVAL-4 owns quality over the inject path; EVAL-6 owns percentile SLO
 enforcement on production-shaped IO._
+
+_ADPT-1 in progress (ADR-0027), landing in steps. Step 1 (2026-07-24):
+the `adapters/claude-code` plugin — `SessionStart` → `/v1/inject` as
+`additionalContext`, `Stop`/`PreCompact`/`SessionEnd` → `/v1/observe`
+over a durable per-session cursor that advances only on a 2xx (MEM-1's
+idempotency makes at-least-once effectively exact), every hook exiting 0
+by construction. Note that "PreCompact → inject" from the feature text is
+not implementable — `PreCompact` has no context-injection output — so
+post-compaction re-injection is `SessionStart` with `source: "compact"`
+(ADR-0027 decision 2). Step 2 (2026-07-24): the credential half. The
+gateway grew the three surfaces decision 5 named — `cli_redirect_uri` +
+`cli_state` on `/auth/login`, a one-time 60-second state-bound handoff
+code on the callback, and `POST /auth/cli/exchange` / `POST
+/auth/refresh` — all reusing AUTH-1 unchanged, so a CLI login is
+PKCE-verified, tenant-resolved, and AUTH-2-provisioned exactly like a
+browser one. `synveda login` and `synveda auth token --json` are the
+CLI half; the adapter's `resolveBearer` now shells out to the latter and
+holds no OAuth at all. Three readings the ADR left to implementation,
+recorded here because they are behaviour: (1) "state-bound" is
+CLI-minted — `synveda login` sends its own `cli_state`, which returns on
+the loopback redirect (so the CLI can tell its own callback from any
+other local process reaching an ephemeral port) and is required again at
+redemption, so a leaked code alone redeems nothing; (2) a CLI-resolved
+credential's own `gateway_url` overrides `.synveda/config.json` —
+`synveda login` is what binds a machine to a gateway, and a
+`gateway_url` in a checked-out repository must not be able to redirect
+someone's bearer to a host of the repository's choosing (an explicit
+`SYNVEDA_TOKEN` keeps the configured gateway); (3) `synveda auth logout`
+joins the two subcommands decision 4 named, because a credential you
+cannot revoke locally is not one this product should write. Every way a
+login can fail now 302s back to the loopback with an `error`, rather than
+leaving the terminal to time out. Deferrals: refresh chains no audit
+event — it mints a bearer without provisioning or mutating anything, and
+attributing one would mean verifying the returned token to learn its
+tenant (ADR-0027's compliance note stands: no new action types in
+ADPT-1); the handoff store is in-memory like AUTH-1's pending logins, so
+single-replica until OPS-2; `SYNVEDA_TOKEN` remains as the explicit
+override for CI and demos. Step 3 (2026-07-25) closed the AC — see the
+entry below._
+
+_ADPT-1 step 3 (2026-07-25): the AC itself. `demos/adpt-1-claude-code.sh`
+splits at the person it is a claim about: the estate (a tenant, the
+acme/eng/platform hierarchy, and team memory an operator wrote before
+anyone arrives) is untimed, and what a developer does on a machine that
+has never seen Synveda is timed — enable the prebuilt plugin, `synveda
+login` against live Rauthy (driven headlessly, PoW and all), and a
+session that receives its watermarked block and observes its turn back.
+**1.5s of the 120s budget**, alice's first-ever login and AUTH-2
+placement included. Then, untimed: `context.injected` and
+`memory.observed` joined under one `claude-code:<id>` in a chain that
+verifies, the access token renewing itself with no login, the observed
+turn coming back as memory in the next session, and the
+recorded-payload driver run against that same live gateway. Every hook
+runs the command `hooks/hooks.json` registers, with recorded payloads on
+stdin, so what is timed is the product.
+
+The driver (decision 14) lives in `adapters/claude-code/src/driver.mts`
+over `fixtures/`, and runs both against its own mock (in `npm test`) and
+against a live gateway (the demo's last section): sixteen cases — dead
+gateway, 401, degraded header, oversized tool result, replayed batch,
+cursor resume after a failed flush, damaged transcript line, unreadable
+payload — every one asserting exit 0 first. Three things it found, all
+fixed here:
+
+1. **An unreadable payload used to inject anyway.** `hooks.json` names
+   the mode, so the entry point could dispatch without a payload — and
+   would then compose for a session it could not name, in a project whose
+   `.synveda/config.json` it could not read, silently overriding a
+   `disabled: true` that was right there on disk. A hook with no input now
+   does nothing. Only the live run could catch this: a mock is asked
+   nothing when the client asks nothing.
+2. **The observe envelope never carried the model.** Decision 8 names it,
+   but only `SessionStart` payloads have one, and the flush hooks are
+   `Stop`/`PreCompact`/`SessionEnd`. The spool now carries it across, and
+   the harness version rides from the transcript entry — the two halves of
+   decision 8's "harness and model" that were missing.
+3. **A pre-emptive refresh the issuer refuses no longer costs a session
+   its memory.** Rauthy will not honour a refresh token until the access
+   token is inside its last minute — `issued_at + lifetime - 60s` — which
+   is the same instant `REFRESH_SKEW_SECS` fires the refresh, so which of
+   the two clocks is ahead decided whether a hook got a bearer. `synveda
+   auth token` now falls back to the stored token whenever it is still
+   valid, and fails only when nothing usable is left.
+
+One factual correction to ADR-0027, recorded in the ADR: `PreCompact`
+*does* carry a `transcript_path` (all four payloads are built from one
+envelope — verified against 2.1.220 while recording the fixtures). The
+spool fallback stays: the payload is another program's internal format,
+and the spool holds the cursor regardless. Deferrals: the degraded-inject
+case is mock-only, because producing a live degradation means stopping
+TEI, which is CTX-3's demo; subagent (sidechain) turns still go
+unobserved (decision 8); and the demo runs the deterministic embedder and
+rule-based extractor, so the real-TEI path stays CTX-1/CTX-3's to prove._
 
 ## Phase 2 — Governance (wk 6–10)
 

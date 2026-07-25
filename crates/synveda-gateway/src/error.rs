@@ -27,24 +27,29 @@ pub fn status_of(error: &Error) -> StatusCode {
     }
 }
 
+/// The caller-facing form of an error. Operator-side failures keep their
+/// detail in traces and logs; the caller sees only the classification
+/// (same doctrine as `/readyz`).
+pub fn caller_facing(error: &Error) -> Error {
+    match error {
+        Error::Storage { .. } => Error::Storage {
+            message: "storage unavailable".to_owned(),
+        },
+        Error::Dependency { service, .. } => Error::Dependency {
+            service: service.clone(),
+            message: "dependency unavailable".to_owned(),
+        },
+        Error::Internal { .. } => Error::Internal {
+            message: "internal error".to_owned(),
+        },
+        safe => safe.clone(),
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = status_of(&self.0);
-        // Operator-side failures keep their detail in traces and logs; the
-        // caller sees only the classification (same doctrine as /readyz).
-        let body = match &self.0 {
-            Error::Storage { .. } => Json(Error::Storage {
-                message: "storage unavailable".to_owned(),
-            }),
-            Error::Dependency { service, .. } => Json(Error::Dependency {
-                service: service.clone(),
-                message: "dependency unavailable".to_owned(),
-            }),
-            Error::Internal { .. } => Json(Error::Internal {
-                message: "internal error".to_owned(),
-            }),
-            caller_facing => Json(caller_facing.clone()),
-        };
+        let body = Json(caller_facing(&self.0));
         let mut response = (status, body).into_response();
         if status == StatusCode::UNAUTHORIZED {
             response

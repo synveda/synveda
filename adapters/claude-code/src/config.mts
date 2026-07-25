@@ -8,6 +8,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { Bearer } from "./credentials.mjs";
 import { log } from "./log.mjs";
 
 /** The gateway's own default listen address (`SYNVEDA_LISTEN_ADDR`). */
@@ -58,6 +59,25 @@ export function loadConfig(cwd: string | undefined): AdapterConfig {
     budgetTokens: positive(project.budget_tokens),
     compactBudgetTokens: positive(project.compact_budget_tokens),
   };
+}
+
+/**
+ * The gateway a call actually goes to, once a credential is in hand.
+ *
+ * A bearer the CLI resolved names the gateway it was issued for, and that
+ * one wins: `synveda login` is what binds a machine to a gateway, and
+ * `.synveda/config.json` lives inside a checked-out repository — a
+ * `gateway_url` there must not be able to send someone's bearer to a host
+ * of the repository's choosing. An explicit `SYNVEDA_TOKEN` keeps the
+ * configured gateway: an operator who set both meant both.
+ */
+export function resolveGateway(config: AdapterConfig, bearer: Bearer): AdapterConfig {
+  const credentialed = bearer.gatewayUrl;
+  if (bearer.source !== "cli" || credentialed === undefined) return config;
+  const gatewayUrl = trimSlash(credentialed);
+  if (gatewayUrl === config.gatewayUrl) return config;
+  log("gateway.from_credential", { configured: config.gatewayUrl, credential: gatewayUrl });
+  return { ...config, gatewayUrl };
 }
 
 function readProjectConfig(cwd: string | undefined): ProjectConfig {

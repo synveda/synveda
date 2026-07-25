@@ -4,8 +4,20 @@
 //! (TEN-1, ADR-0008) go to the database directly because they exist
 //! precisely for the moment there is no usable gateway yet — applying
 //! migrations, admitting the first tenant, minting a dev token.
+//!
+//! Since ADPT-1 it is also the credential authority (ADR-0027 decision 4):
+//! `synveda login` runs the loopback flow and `synveda auth token` hands a
+//! currently-valid bearer to whoever asks — the Claude Code adapter's
+//! hooks, a script, a human. One implementation of PKCE, expiry, and
+//! refresh, here, rather than a second drifting one per adapter.
 
-#![forbid(unsafe_code)]
+// `unsafe` is forbidden in the product code; the credentials tests set
+// process environment variables, which is unsafe in edition 2024, and
+// they hold a lock while they do it.
+#![cfg_attr(not(test), forbid(unsafe_code))]
+
+mod credentials;
+mod login;
 
 use std::process::ExitCode;
 use std::time::Duration;
@@ -29,6 +41,31 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Log in to a gateway through your browser (AUTH-1 end to end,
+    /// ADR-0027 decision 5) and store the session under a profile. This
+    /// is the whole of "zero-config": every other Synveda client on this
+    /// machine reads its bearer from what this writes.
+    Login {
+        /// Gateway base URL. Defaults to $SYNVEDA_GATEWAY, else
+        /// http://127.0.0.1:8120.
+        #[arg(long)]
+        gateway: Option<String>,
+        /// Which configured issuer to log in against; optional when the
+        /// gateway has exactly one.
+        #[arg(long)]
+        issuer: Option<String>,
+        /// Credential profile to write. Defaults to $SYNVEDA_PROFILE,
+        /// else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Print the login URL instead of opening a browser (headless
+        /// machines, SSH sessions).
+        #[arg(long)]
+        no_browser: bool,
+    },
+    /// Stored credentials (ADR-0027 decisions 4 and 6).
+    #[command(subcommand)]
+    Auth(AuthCommand),
     /// Database administration (dev bootstrap).
     #[command(subcommand)]
     Db(DbCommand),
@@ -60,6 +97,32 @@ enum Command {
     /// auditor's chain check ahead of AUD-2's query surface.
     #[command(subcommand)]
     Audit(AuditCommand),
+}
+
+#[derive(Subcommand)]
+enum AuthCommand {
+    /// Print a currently-valid bearer for the profile, refreshing it
+    /// through the gateway first if it has expired. Exits non-zero when
+    /// there is nothing to print and says what to run.
+    Token {
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Print the token with its expiry, tenant, and gateway as one
+        /// JSON object — the shape the Claude Code adapter reads.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Forget a profile's credentials.
+    Logout {
+        /// Credential profile to forget.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Forget every profile.
+        #[arg(long, conflicts_with = "profile")]
+        all: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -261,9 +324,56 @@ fn main() -> ExitCode {
     }
 }
 
+/// The credential profile a command acts on: `--profile`, then
+/// `SYNVEDA_PROFILE`, then `default`.
+fn profile_name(flag: Option<String>) -> String {
+    flag.or_else(|| std::env::var("SYNVEDA_PROFILE").ok())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| credentials::DEFAULT_PROFILE.to_owned())
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
+        Command::Login {
+            gateway,
+            issuer,
+            profile,
+            no_browser,
+        } => {
+            login::login(
+                login::gateway_url(gateway),
+                issuer,
+                profile_name(profile),
+                !no_browser,
+            )
+            .await
+        }
+        Command::Auth(AuthCommand::Token { profile, json }) => {
+            login::auth_token(profile_name(profile), json).await
+        }
+        Command::Auth(AuthCommand::Logout { profile, all }) => {
+            let mut stored = credentials::load()?;
+            if all {
+                let count = stored.profiles.len();
+                stored.profiles.clear();
+                credentials::save(&stored)?;
+                eprintln!("synveda: forgot {count} profile(s)");
+            } else {
+                let name = profile_name(profile);
+                if stored.profiles.remove(&name).is_none() {
+                    return Err(format!("no credentials for profile `{name}`"));
+                }
+                credentials::save(&stored)?;
+                eprintln!("synveda: forgot profile `{name}`");
+            }
+            // The gateway is not told: the IdP owns revocation, and a
+            // local forget is exactly that — local (ADR-0027 decision 6).
+            eprintln!(
+                "         the tokens themselves remain valid at the issuer until they expire"
+            );
+            Ok(())
+        }
         Command::Db(DbCommand::Migrate) => {
             let pool = connect().await?;
             synveda_store::migrate(&pool)

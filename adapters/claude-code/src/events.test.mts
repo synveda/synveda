@@ -65,7 +65,13 @@ test("entries with nothing to say are skipped", () => {
 
 test("context carries the project name, never the full path", () => {
   const [event] = toObserveEvents(
-    [entry({ cwd: "/Users/someone/Source/synveda", gitBranch: "feat/ADPT-1" })],
+    [
+      entry({
+        cwd: "/Users/someone/Source/synveda",
+        gitBranch: "feat/ADPT-1",
+        version: "2.1.220",
+      }),
+    ],
     "claude-opus-5",
   );
   assert.ok(event);
@@ -73,7 +79,14 @@ test("context carries the project name, never the full path", () => {
     project: "synveda",
     git_branch: "feat/ADPT-1",
     model: "claude-opus-5",
+    harness_version: "2.1.220",
   });
+});
+
+test("the harness version rides even when nothing else does", () => {
+  const [event] = toObserveEvents([entry({ version: "2.1.220" })], undefined);
+  assert.ok(event);
+  assert.deepEqual(payloadOf(event.payload).context, { harness_version: "2.1.220" });
 });
 
 test("context is omitted entirely when there is nothing to say", () => {

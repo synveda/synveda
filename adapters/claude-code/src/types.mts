@@ -12,11 +12,12 @@ export interface HookInput {
   /** `SessionStart` | `Stop` | `PreCompact` | `SessionEnd`. */
   hook_event_name?: string;
   session_id?: string;
-  /** Absent on `PreCompact` — which is why the spool holds it. */
+  /** Present on all four events today; the spool holds one regardless. */
   transcript_path?: string;
   cwd?: string;
   /** `SessionStart` only: startup | resume | clear | compact | fork. */
   source?: string;
+  /** `SessionStart` only, which is why the spool carries it to the flush. */
   model?: string;
 }
 

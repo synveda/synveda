@@ -2,11 +2,15 @@
  * `Stop`, `PreCompact`, and `SessionEnd` → `POST /v1/observe`
  * (ADR-0027 decisions 2 and 7).
  *
- * `Stop` is the real write seam: it carries the transcript path and
- * fires at the end of every turn. `PreCompact` and `SessionEnd` are the
- * same code doing a retry — they inject nothing, because they cannot,
- * and `PreCompact` does not even carry a transcript path, which is why
- * the spool holds one.
+ * `Stop` is the real write seam: it fires at the end of every turn.
+ * `PreCompact` and `SessionEnd` are the same code doing a retry — they
+ * inject nothing, because they cannot: `PreCompact`'s output becomes
+ * compaction instructions and `Stop`'s is not context at all.
+ *
+ * All four payloads carry a transcript path today, and the spool holds
+ * one anyway: the payload is another program's internal format
+ * (decision 9), and an adapter that needs a particular field of it is an
+ * adapter that breaks on a harness release.
  *
  * The cursor advances only on a gateway 2xx. Everything else — a failed
  * batch, a killed hook, a crashed machine — leaves it where the last
@@ -17,7 +21,7 @@
  */
 
 import { observe } from "./client.mjs";
-import type { AdapterConfig } from "./config.mjs";
+import { resolveGateway, type AdapterConfig } from "./config.mjs";
 import { resolveBearer } from "./credentials.mjs";
 import { chunk, MAX_EVENTS_PER_BATCH, toObserveEvents } from "./events.mjs";
 import { log } from "./log.mjs";
@@ -26,12 +30,13 @@ import { loadSession, saveSession } from "./spool.mjs";
 import { entriesAfter, readTranscript } from "./transcript.mjs";
 import type { HookInput, HookOutput } from "./types.mjs";
 
-export async function flush(input: HookInput, config: AdapterConfig): Promise<HookOutput> {
-  if (!config.observe) return {};
+export async function flush(input: HookInput, configured: AdapterConfig): Promise<HookOutput> {
+  if (!configured.observe) return {};
   const sessionId = qualifiedSessionId(input.session_id);
   const state = loadSession(sessionId);
 
-  // `PreCompact` carries no transcript path; the spool does.
+  // Whatever the payload says, or what the last hook of this session left
+  // in the spool.
   const transcriptPath = input.transcript_path ?? state?.transcript_path;
   if (transcriptPath === undefined) {
     log("observe.no_transcript", { session: sessionId, hook: input.hook_event_name });
@@ -42,6 +47,7 @@ export async function flush(input: HookInput, config: AdapterConfig): Promise<Ho
   // Silent: the session-start hook already told the user to log in, and
   // saying it again on every turn would be noise, not help.
   if (bearer === undefined) return {};
+  const config = resolveGateway(configured, bearer);
 
   // Read before anything else. `PreCompact` runs in the background while
   // compaction proceeds, so the content must be in memory before the
@@ -51,9 +57,12 @@ export async function flush(input: HookInput, config: AdapterConfig): Promise<Ho
     log("observe.resynced", { session: sessionId, entries: delta.entries.length });
   }
 
-  const events = toObserveEvents(delta.entries, input.model);
+  // Only `SessionStart` carries the model; the spool is what brings it to
+  // the write path (ADR-0027 decision 8).
+  const model = input.model ?? state?.model;
+  const events = toObserveEvents(delta.entries, model);
   if (events.length === 0) {
-    saveSession(sessionId, transcriptPath, state?.cursor);
+    saveSession(sessionId, { transcript_path: transcriptPath, cursor: state?.cursor, model });
     return {};
   }
 
@@ -61,7 +70,10 @@ export async function flush(input: HookInput, config: AdapterConfig): Promise<Ho
   let accepted = 0;
   let duplicates = 0;
   for (const batch of chunk(events, MAX_EVENTS_PER_BATCH)) {
-    const result = await observe(config, bearer, { session_id: sessionId, events: batch });
+    const result = await observe(config, bearer.token, {
+      session_id: sessionId,
+      events: batch,
+    });
     if (!result.ok) {
       log("observe.failed", {
         session: sessionId,
@@ -77,7 +89,7 @@ export async function flush(input: HookInput, config: AdapterConfig): Promise<Ho
     const last = batch[batch.length - 1];
     if (last !== undefined) {
       cursor = last.idempotency_key;
-      saveSession(sessionId, transcriptPath, cursor);
+      saveSession(sessionId, { transcript_path: transcriptPath, cursor, model });
     }
     if (result.value.denied > 0 || result.value.quarantined > 0) {
       log("observe.withheld", {

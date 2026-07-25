@@ -11,16 +11,22 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
+import { startGateway, type RecordedRequest, type Reply } from "./mock-gateway.mjs";
+
 const stateHome = mkdtempSync(join(tmpdir(), "synveda-state-"));
 process.env.XDG_STATE_HOME = stateHome;
 process.env.SYNVEDA_TOKEN = "dev-bearer";
+// Pin the credential seam away from whatever `synveda` this machine has
+// installed: these cases are about the hook contract, not about whether
+// the person running them happens to be logged in. The CLI seam's own
+// cases live in credentials.test.mts.
+process.env.SYNVEDA_CLI = join(stateHome, "no-cli-here");
 
 const { flush } = await import("./flush.mjs");
 const { sessionStart } = await import("./session-start.mjs");
@@ -31,59 +37,9 @@ type AdapterConfig = (typeof import("./config.mjs"))["loadConfig"] extends (
   ? T
   : never;
 
-interface Recorded {
-  path: string;
-  body: Record<string, unknown>;
-}
-
-interface Reply {
-  status: number;
-  body?: unknown;
-  headers?: Record<string, string>;
-}
-
-interface MockGateway {
-  url: string;
-  requests: Recorded[];
-  close: () => Promise<void>;
-}
-
-async function gateway(respond: (recorded: Recorded, index: number) => Reply): Promise<MockGateway> {
-  const requests: Recorded[] = [];
-  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
-    let raw = "";
-    request.on("data", (piece: unknown) => {
-      raw += String(piece);
-    });
-    request.on("end", () => {
-      let body: Record<string, unknown> = {};
-      try {
-        const parsed: unknown = JSON.parse(raw);
-        if (parsed !== null && typeof parsed === "object") body = parsed as Record<string, unknown>;
-      } catch {
-        body = {};
-      }
-      const recorded: Recorded = { path: request.url ?? "", body };
-      const index = requests.length;
-      requests.push(recorded);
-      const reply = respond(recorded, index);
-      response.writeHead(reply.status, { "content-type": "application/json", ...reply.headers });
-      response.end(JSON.stringify(reply.body ?? {}));
-    });
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  const port = typeof address === "object" && address !== null ? address.port : 0;
-  return {
-    url: `http://127.0.0.1:${String(port)}`,
-    requests,
-    close: async () => {
-      server.close();
-      await once(server, "close");
-    },
-  };
-}
+/** The scriptable gateway lives in `mock-gateway.mts`, shared with the driver. */
+const gateway = (respond: (recorded: RecordedRequest, index: number) => Reply) =>
+  startGateway(respond);
 
 function config(gatewayUrl: string, overrides: Partial<AdapterConfig> = {}): AdapterConfig {
   return {
@@ -308,7 +264,7 @@ test("a failed flush leaves the cursor, and the next one resends", async () => {
   }
 });
 
-test("PreCompact carries no transcript path, so the spool supplies one", async () => {
+test("a flush whose payload carries no transcript path falls back to the spool", async () => {
   const mock = await gateway(() => ({ status: 200, body: accepted(1) }));
   const path = transcript([turn("u1", "before the compaction")]);
   try {
@@ -321,6 +277,30 @@ test("PreCompact carries no transcript path, so the spool supplies one", async (
     assert.equal(mock.requests.length, 1);
     assert.equal(mock.requests[0]?.path, "/v1/observe");
     assert.equal(loadSession("claude-code:f4")?.cursor, "u1");
+  } finally {
+    await mock.close();
+  }
+});
+
+test("the model a session start reported rides every observed event", async () => {
+  const mock = await gateway(() => ({ status: 200, body: accepted(1) }));
+  const path = transcript([turn("u1", "the ask")]);
+  try {
+    // Only `SessionStart` carries a model; `Stop` does not, which is why
+    // the spool has to bring it across (ADR-0027 decision 8).
+    await sessionStart(
+      {
+        hook_event_name: "SessionStart",
+        session_id: "f6",
+        source: "startup",
+        transcript_path: path,
+        model: "claude-opus-5",
+      },
+      config(mock.url, { inject: false }),
+    );
+    await flush({ hook_event_name: "Stop", session_id: "f6", transcript_path: path }, config(mock.url));
+    const events = mock.requests[0]?.body.events as { payload: { context?: { model?: string } } }[];
+    assert.equal(events[0]?.payload.context?.model, "claude-opus-5");
   } finally {
     await mock.close();
   }
@@ -396,13 +376,23 @@ test("the entry point exits 0 and stays silent when the gateway fails", async ()
   }
 });
 
-test("the entry point exits 0 on a payload it cannot parse", async () => {
-  const result = await runHook("session-start", "this is not json", {
-    XDG_STATE_HOME: stateHome,
-    SYNVEDA_GATEWAY: "http://127.0.0.1:1",
-  });
-  assert.equal(result.code, 0);
-  assert.equal(result.stdout, "");
+test("a payload it cannot parse asks the gateway for nothing", async () => {
+  const mock = await gateway(() => ({ status: 200, body: block("should never be asked for") }));
+  try {
+    // The mode argument would be enough to dispatch on, and that is the
+    // trap: with no payload there is no session to name and no `cwd` to
+    // read the project's opt-out from (ADR-0027 decision 13).
+    const result = await runHook("session-start", "this is not json", {
+      XDG_STATE_HOME: stateHome,
+      SYNVEDA_GATEWAY: mock.url,
+      SYNVEDA_TOKEN: "dev-bearer",
+    });
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(mock.requests.length, 0);
+  } finally {
+    await mock.close();
+  }
 });
 
 test("the entry point exits 0 with no credentials and asks for a login", async () => {

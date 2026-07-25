@@ -12,7 +12,7 @@
  */
 
 import { inject } from "./client.mjs";
-import type { AdapterConfig } from "./config.mjs";
+import { resolveGateway, type AdapterConfig } from "./config.mjs";
 import { resolveBearer, SIGN_IN_MESSAGE } from "./credentials.mjs";
 import { log } from "./log.mjs";
 import { claimDisclosure, loadSession, saveSession } from "./spool.mjs";
@@ -31,16 +31,18 @@ export function qualifiedSessionId(sessionId: string | undefined): string {
 
 export async function sessionStart(
   input: HookInput,
-  config: AdapterConfig,
+  configured: AdapterConfig,
 ): Promise<HookOutput> {
   const sessionId = qualifiedSessionId(input.session_id);
-  // Remember the transcript path even when injection is off: PreCompact
-  // carries no path of its own and the observe hooks need one.
-  rememberTranscript(sessionId, input.transcript_path);
-  if (!config.inject) return {};
+  // Remember the transcript path and the model even when injection is
+  // off: this is the only hook whose payload carries either, and the
+  // observe hooks want both.
+  remember(sessionId, input);
+  if (!configured.inject) return {};
 
   const bearer = await resolveBearer();
   if (bearer === undefined) return { systemMessage: SIGN_IN_MESSAGE };
+  const config = resolveGateway(configured, bearer);
 
   const request: InjectRequest = { session_id: sessionId };
   const task = deriveTask(input.source, input.transcript_path);
@@ -49,7 +51,7 @@ export async function sessionStart(
   if (budget !== undefined) request.budget_tokens = budget;
 
   const started = Date.now();
-  const result = await inject(config, bearer, request);
+  const result = await inject(config, bearer.token, request);
   const elapsedMs = Date.now() - started;
 
   if (!result.ok) {
@@ -116,10 +118,19 @@ function budgetFor(source: string | undefined, config: AdapterConfig): number | 
   return config.budgetTokens;
 }
 
-function rememberTranscript(sessionId: string, transcriptPath: string | undefined): void {
-  if (transcriptPath === undefined) return;
+/**
+ * Carries forward what only this hook's payload knows — the transcript
+ * path and the model — without disturbing the cursor, which belongs to
+ * the flush path alone.
+ */
+function remember(sessionId: string, input: HookInput): void {
+  if (input.transcript_path === undefined && input.model === undefined) return;
   const existing = loadSession(sessionId);
-  saveSession(sessionId, transcriptPath, existing?.cursor);
+  saveSession(sessionId, {
+    transcript_path: input.transcript_path ?? existing?.transcript_path,
+    cursor: existing?.cursor,
+    model: input.model ?? existing?.model,
+  });
 }
 
 function disclose(cwd: string | undefined, config: AdapterConfig): string | undefined {

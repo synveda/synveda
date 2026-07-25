@@ -20,6 +20,8 @@ export interface TranscriptEntry {
   message: unknown;
   cwd?: string;
   gitBranch?: string;
+  /** The harness version that wrote the entry (ADR-0027 decision 8). */
+  version?: string;
 }
 
 /** One tool result carried by a transcript entry. */
@@ -74,6 +76,7 @@ function parseEntry(line: string): TranscriptEntry | undefined {
     message: record.message,
     cwd: typeof record.cwd === "string" ? record.cwd : undefined,
     gitBranch: typeof record.gitBranch === "string" ? record.gitBranch : undefined,
+    version: typeof record.version === "string" ? record.version : undefined,
   };
 }
 

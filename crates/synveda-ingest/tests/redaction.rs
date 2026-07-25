@@ -88,7 +88,10 @@ fn secret_rules_detect_their_grammars() {
     );
     assert_redacts(
         "openai-api-key",
-        &format!("sk-proj-{}{}", "AbCdEfGhIjKlMnOpQrStT3Blbk", "FJUvWxYz0123456789Ab"),
+        &format!(
+            "sk-proj-{}{}",
+            "AbCdEfGhIjKlMnOpQrStT3Blbk", "FJUvWxYz0123456789Ab"
+        ),
         "T3BlbkFJ",
     );
     assert_redacts(

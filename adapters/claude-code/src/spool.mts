@@ -1,7 +1,7 @@
 /**
  * Per-session state (ADR-0027 decision 7): the cursor that makes observe
- * at-least-once, and the transcript path — which `PreCompact` needs and
- * does not carry in its payload.
+ * at-least-once, plus the two things only some payloads carry — the
+ * transcript path and the model.
  *
  * The cursor is the uuid of the last transcript entry a gateway 2xx has
  * accepted, and nothing else advances it. A failed flush therefore
@@ -32,8 +32,17 @@ export interface SessionState {
   session_id: string;
   transcript_path?: string;
   cursor?: string;
+  /**
+   * The model the session runs on. `SessionStart` is the only hook whose
+   * payload carries it, and the observe envelope wants it on every event
+   * (ADR-0027 decision 8), so the spool is what carries it across.
+   */
+  model?: string;
   updated_at: string;
 }
+
+/** The mutable half of the state: what a caller may set. */
+export type SessionFacts = Omit<SessionState, "session_id" | "updated_at">;
 
 export function loadSession(sessionId: string): SessionState | undefined {
   try {
@@ -48,14 +57,16 @@ export function loadSession(sessionId: string): SessionState | undefined {
   return undefined;
 }
 
-export function saveSession(
-  sessionId: string,
-  transcriptPath: string | undefined,
-  cursor: string | undefined,
-): void {
+/**
+ * Writes the whole state. Facts are given, never merged: a caller that
+ * knows less than the last one would otherwise silently drop a cursor,
+ * and a dropped cursor is a re-sent session.
+ */
+export function saveSession(sessionId: string, facts: SessionFacts): void {
   const state: SessionState = { session_id: sessionId, updated_at: new Date().toISOString() };
-  if (transcriptPath !== undefined) state.transcript_path = transcriptPath;
-  if (cursor !== undefined) state.cursor = cursor;
+  if (facts.transcript_path !== undefined) state.transcript_path = facts.transcript_path;
+  if (facts.cursor !== undefined) state.cursor = facts.cursor;
+  if (facts.model !== undefined) state.model = facts.model;
   try {
     mkdirSync(sessionDir(), { recursive: true });
     const file = sessionFile(sessionId);

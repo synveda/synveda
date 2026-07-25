@@ -178,9 +178,14 @@ pub fn router(state: AppState) -> Router {
         .route("/readyz", get(readyz))
         .route("/metrics", get(render_metrics))
         // The auth plane is unauthenticated by nature: it is how a caller
-        // becomes authenticated (AUTH-1, ADR-0010).
+        // becomes authenticated (AUTH-1, ADR-0010). The two CLI routes
+        // serve `synveda login` over the same flow (ADPT-1, ADR-0027
+        // decisions 5 and 6) — they exist so the client needs no OAuth
+        // configuration and no client credentials of its own.
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
+        .route("/auth/cli/exchange", post(auth::cli_exchange))
+        .route("/auth/refresh", post(auth::refresh))
         .merge(authenticated)
         .layer(middleware::from_fn(track_http_metrics))
         // Added last so the request span is outermost and every inner span —

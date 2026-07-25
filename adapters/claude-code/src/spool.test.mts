@@ -15,7 +15,7 @@ const { claimDisclosure, loadSession, prune, saveSession } = await import("./spo
 const { sessionDir } = await import("./paths.mjs");
 
 test("a saved cursor round trips", () => {
-  saveSession("claude-code:s1", "/tmp/s1.jsonl", "u42");
+  saveSession("claude-code:s1", { transcript_path: "/tmp/s1.jsonl", cursor: "u42" });
   const state = loadSession("claude-code:s1");
   assert.equal(state?.session_id, "claude-code:s1");
   assert.equal(state?.transcript_path, "/tmp/s1.jsonl");
@@ -27,15 +27,15 @@ test("an unknown session has no state, and that is not an error", () => {
 });
 
 test("a session may have a transcript path before it has a cursor", () => {
-  saveSession("claude-code:s2", "/tmp/s2.jsonl", undefined);
+  saveSession("claude-code:s2", { transcript_path: "/tmp/s2.jsonl" });
   const state = loadSession("claude-code:s2");
   assert.equal(state?.transcript_path, "/tmp/s2.jsonl");
   assert.equal(state?.cursor, undefined);
 });
 
 test("ids that sanitise alike do not share a cursor", () => {
-  saveSession("claude-code:a/b", "/tmp/a.jsonl", "cursor-a");
-  saveSession("claude-code:a:b", "/tmp/b.jsonl", "cursor-b");
+  saveSession("claude-code:a/b", { transcript_path: "/tmp/a.jsonl", cursor: "cursor-a" });
+  saveSession("claude-code:a:b", { transcript_path: "/tmp/b.jsonl", cursor: "cursor-b" });
   assert.equal(loadSession("claude-code:a/b")?.cursor, "cursor-a");
   assert.equal(loadSession("claude-code:a:b")?.cursor, "cursor-b");
 });
@@ -52,8 +52,8 @@ test("a project with no working directory discloses nothing", () => {
 });
 
 test("prune drops state no one will resume and keeps the rest", () => {
-  saveSession("claude-code:old", "/tmp/old.jsonl", "u1");
-  saveSession("claude-code:fresh", "/tmp/fresh.jsonl", "u1");
+  saveSession("claude-code:old", { transcript_path: "/tmp/old.jsonl", cursor: "u1" });
+  saveSession("claude-code:fresh", { transcript_path: "/tmp/fresh.jsonl", cursor: "u1" });
   const stale = readdirSync(sessionDir()).find((name) => name.startsWith("claude-code_old"));
   assert.ok(stale);
   const ancient = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);

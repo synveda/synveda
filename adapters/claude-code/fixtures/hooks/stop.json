@@ -1,0 +1,13 @@
+{
+  "session_id": "0198e4c1-6c2a-7b3d-9f10-4e5a6b7c8d90",
+  "transcript_path": "/Users/dev/.claude/projects/-Users-dev-Source-acme-api/0198e4c1-6c2a-7b3d-9f10-4e5a6b7c8d90.jsonl",
+  "cwd": "/Users/dev/Source/acme-api",
+  "prompt_id": "b3f0a1d2-5c64-4a08-9d77-1e2f3a4b5c6d",
+  "permission_mode": "default",
+  "agent_type": "main",
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "Switched the retry budget to 3 attempts with jitter.",
+  "background_tasks": [],
+  "session_crons": []
+}

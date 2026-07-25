@@ -50,6 +50,8 @@ interface PayloadContext {
   project?: string;
   git_branch?: string;
   model?: string;
+  /** The harness version, as the transcript entry itself records it. */
+  harness_version?: string;
 }
 
 export function toObserveEvents(
@@ -93,21 +95,20 @@ export function chunk<T>(items: T[], size: number): T[][] {
  * directory, not the path: extraction benefits from knowing which
  * project a memory came from, while a full home-directory path is user
  * data that would otherwise ride into every record. The harness is not
- * named here — the session id already says it (decision 10).
+ * named here — the session id already says it (decision 10) — but its
+ * version is, because nothing else does.
  */
 function contextOf(
   entry: TranscriptEntry,
   model: string | undefined,
 ): PayloadContext | undefined {
   const project = entry.cwd !== undefined ? basename(entry.cwd) : undefined;
-  if (project === undefined && entry.gitBranch === undefined && model === undefined) {
-    return undefined;
-  }
   const context: PayloadContext = {};
   if (project !== undefined) context.project = project;
   if (entry.gitBranch !== undefined) context.git_branch = entry.gitBranch;
   if (model !== undefined) context.model = model;
-  return context;
+  if (entry.version !== undefined) context.harness_version = entry.version;
+  return Object.keys(context).length > 0 ? context : undefined;
 }
 
 /**

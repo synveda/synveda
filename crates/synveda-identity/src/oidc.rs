@@ -151,6 +151,12 @@ pub(crate) struct DiscoveryDocument {
     pub(crate) authorization_endpoint: String,
     pub(crate) token_endpoint: String,
     jwks_uri: String,
+    /// RFC 8414's optional `scopes_supported`. Absent means the issuer
+    /// published no list, which is not the same as publishing an empty
+    /// one: both read as "do not ask for scopes it never advertised"
+    /// (ADR-0027 decision 6).
+    #[serde(default)]
+    scopes_supported: Option<Vec<String>>,
 }
 
 /// A cached verification key: the decoded key plus the algorithms it may
@@ -165,6 +171,18 @@ struct VerifyingKey {
 pub(crate) struct IssuerState {
     pub(crate) discovery: DiscoveryDocument,
     keys: HashMap<String, VerifyingKey>,
+}
+
+impl IssuerState {
+    /// Whether the issuer's discovery document advertises `scope`. The
+    /// login flow asks this before requesting `offline_access` (ADR-0027
+    /// decision 6).
+    pub(crate) fn advertises_scope(&self, scope: &str) -> bool {
+        self.discovery
+            .scopes_supported
+            .as_ref()
+            .is_some_and(|supported| supported.iter().any(|entry| entry == scope))
+    }
 }
 
 struct IssuerEntry {
