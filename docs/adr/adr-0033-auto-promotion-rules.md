@@ -181,12 +181,30 @@ Decisions, specifically:
    fact — the privacy floor — seen from the trigger side and the target
    side.
 
-   What the ≥3-member rule *does* apply to is material that is already
-   at a shared node: a team-, department-, or org-anchored service
-   identity's derived memories (ADR-0018), which land at its home scope
-   and are readable by everyone whose chain contains that node. That is
-   the agent-fleet case the product exists for, and it is what the soak
-   test exercises.
+   The reach of that is wider than it first looks, and worth stating
+   exactly: **a service identity is "placed like a user"** (ADR-0018
+   decision 2 — registration creates a `ScopeKind::User` personal leaf
+   under the anchor and points the identity row at it), so a
+   team-anchored agent's extracted memories land on a user-kind leaf too,
+   not on the team node. Every record the write path produces, human or
+   agent, lands somewhere only its owner can read. `distinct_members` is
+   therefore 1 for **everything `observe` → extraction can produce
+   today**, without exception.
+
+   So the rules that can fire today are the `min_distinct_members: 1`
+   ones, and they are worth having on their own terms (decision 7): under
+   bank mode a scope's derived material does not compose at all, so
+   promoting a member's own well-used memory to their own published
+   channel is the difference between a record existing and a record
+   counting. That is what the soak test exercises, over the real product
+   path — `observe` → extraction → repeated `inject` → sweep → proposal.
+
+   A rule wanting two or more distinct members needs material at a
+   *shared* scope, and nothing writes one yet: `MemoryWrite`'s floor is
+   the owner's own home, and the pipeline commits there. Shared-scope
+   material arrives with the first authoring path (PRMT-1's prompts,
+   context packs) or with FLOW-5's climb. The engine needs no change for
+   either — the threshold is already a number in a pack.
 
    A rule therefore names its `target_channel` and inherits its target
    scope from the material, and the same-scope constraint lives in one
@@ -381,9 +399,12 @@ Decisions, specifically:
   three renderings, deliberately, and they must be written from one
   computed value or they will drift. Auto-opened proposals make
   `MAX_OPEN_PROPOSALS` a live limit rather than a theoretical one for the
-  first time. And the honest one: on today's material, the tech plan's
-  headline rule fires only for shared-scope identities, so FLOW-4 ships a
-  rule engine whose most valuable case is waiting on FLOW-5.
+  first time. And the honest one: on today's material only
+  `min_distinct_members: 1` rules can fire at all, because every record
+  the write path produces lands on a user-kind leaf — a service
+  identity's included — so FLOW-4 ships a rule engine whose
+  multi-member case is waiting on a shared-scope writer (PRMT-1) or on
+  FLOW-5's climb.
 - **Reversal triggers**: (a) the sweep falling behind — cursor lag
   against the chain head growing across cadences — → the fold is doing
   per-row work that belongs in a set-based statement, before the cadence

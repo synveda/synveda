@@ -16,6 +16,7 @@ mod id;
 mod identity;
 mod observe;
 mod policy;
+mod promotion;
 mod proposal;
 mod record;
 mod redaction;
@@ -24,8 +25,8 @@ mod sensitivity;
 mod tenant;
 
 pub use approval::{
-    ApprovalMatrix, ApprovalRequirement, ApprovalRule, CastApproval, Outstanding,
-    RequirementOrigin, RoleRequirement,
+    ApprovalMatrix, ApprovalRequirement, ApprovalRule, CastApproval, Outstanding, RequiredAudit,
+    RequirementAudit, RequirementOrigin, RoleAudit, RoleRequirement,
 };
 pub use asset::AssetKind;
 pub use channel::Channel;
@@ -36,6 +37,10 @@ pub use id::{IdentityId, ObserveEventId, ProposalId, RecordId, ScopeId, TenantId
 pub use identity::{Identity, IdentityKind};
 pub use observe::{ObserveKind, QuarantineState};
 pub use policy::{PackConfig, PolicyAssignment};
+pub use promotion::{
+    MAX_PROMOTION_RULES, MAX_RULE_NAME, MemberEvidence, PromotionConfig, PromotionEvidence,
+    PromotionRule, UsageFacts,
+};
 pub use proposal::{ProposalState, ProposalView, Verdict};
 pub use record::{RecordClass, RecordKind};
 pub use redaction::{RedactionConfig, RedactionMode};

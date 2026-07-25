@@ -8,6 +8,10 @@
 //! observe queue's consumer, spawned by the gateway. Embedding (MEM-4,
 //! ADR-0023) is live: [`embedding`] is the Embedder seam, and the worker
 //! commits every record atomically with its vector — embed-or-fail.
+//! Auto-promotion (FLOW-4, ADR-0033) is live: [`promotion`] sweeps
+//! recall evidence out of the audit chain and opens FLOW-3 proposals
+//! under the material owner's authority — a second background loop
+//! beside the extraction worker, spawned by the same binary.
 //! Dedup (MEM-5) lands next on the same seams.
 
 #![forbid(unsafe_code)]
@@ -15,6 +19,7 @@
 
 pub mod embedding;
 pub mod extraction;
+pub mod promotion;
 mod redaction;
 pub mod worker;
 

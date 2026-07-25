@@ -22,6 +22,7 @@ mod event;
 
 pub use chain::{
     AUDIT_APPEND_FAILURES_TOTAL, AUDIT_EVENTS_TOTAL, AUDIT_VERIFICATIONS_TOTAL, AppendedEvent,
-    BreakReason, ChainVerification, StoredEvent, append, compute_hash, genesis_hash, tail, verify,
+    BreakReason, ChainVerification, StoredEvent, append, compute_hash, genesis_hash, head_seq,
+    since, tail, verify,
 };
 pub use event::{Actor, ActorKind, AuditAction, AuditEvent, Outcome};

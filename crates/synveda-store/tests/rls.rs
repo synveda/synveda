@@ -201,11 +201,13 @@ const COVERED: &[&str] = &[
     "hierarchy_closure",
     "hierarchy_nodes",
     "identities",
+    "memory_usage",
     "observe_events",
     "observe_quarantine",
     "policy_pack_assignments",
     "policy_pack_defaults",
     "policy_packs",
+    "promotion_watermarks",
     "record_embeddings",
     "records",
     "records_history",
@@ -2546,5 +2548,179 @@ fn same_tenant_proposal_lifecycle_works_under_rls() {
         .expect("publish own proposal");
         assert_eq!(closed.rows_affected(), 1);
         tx.commit().await.expect("commit the lifecycle");
+    });
+}
+
+// ── FLOW-4: the usage projection and the sweeper's watermark ─────────────────
+
+/// Seeds one tenant with a usage row and a watermark. The projection is
+/// deliberately un-FK'd on `records` (migration 0020), so a bare record id
+/// is a faithful fixture: the sweeper folds ids out of the audit chain
+/// before anything checks whether they still exist.
+async fn seed_usage(pool: &PgPool) -> (TenantId, uuid::Uuid) {
+    let (tenant, _) = seed_tenant(pool).await;
+    let record = uuid::Uuid::now_v7();
+    sqlx::query!(
+        "insert into memory_usage
+             (tenant_id, record_id, subject, recalls, first_recall_at, last_recall_at)
+         values ($1, $2, 'rls-fixture', 3, now(), now())",
+        tenant.as_uuid(),
+        record,
+    )
+    .execute(pool)
+    .await
+    .expect("seed usage");
+    sqlx::query!(
+        "insert into promotion_watermarks (tenant_id, last_seq) values ($1, 7)",
+        tenant.as_uuid(),
+    )
+    .execute(pool)
+    .await
+    .expect("seed watermark");
+    (tenant, record)
+}
+
+/// Rows of `tenant` visible through the promotion tables, in the order
+/// (usage, watermarks).
+async fn visible_promotion_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64) {
+    let row = sqlx::query!(
+        r#"select
+             (select count(*) from memory_usage where tenant_id = $1) as "usage!",
+             (select count(*) from promotion_watermarks where tenant_id = $1)
+                 as "watermarks!""#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count promotion rows");
+    (row.usage, row.watermarks)
+}
+
+/// Who recalled what is a behavioural record of named people. It leaks
+/// nothing across a tenant boundary, and nothing at all without a GUC.
+#[test]
+fn wrong_tenant_guc_sees_no_promotion_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _) = seed_usage(&db.pool).await;
+        let (adversary, _) = seed_usage(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        assert_eq!(
+            visible_promotion_rows(&mut tx, victim).await,
+            (1, 1),
+            "a tenant must see its own usage projection and watermark"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_promotion_rows(&mut tx, victim).await,
+            (0, 0),
+            "another tenant's usage leaked — which names who recalled what"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_promotion_rows(&mut tx, victim).await,
+            (0, 0),
+            "an unset GUC must see nothing at all"
+        );
+    });
+}
+
+/// A forged tenant id trips each policy's WITH CHECK, and a cross-tenant
+/// watermark advance affects zero rows — which matters more here than it
+/// looks: rewinding a victim's watermark would refold their chain and
+/// double every count in their evidence.
+#[test]
+fn cross_tenant_promotion_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_record) = seed_usage(&db.pool).await;
+        let (adversary, _) = seed_usage(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            "insert into memory_usage
+                 (tenant_id, record_id, subject, recalls, first_recall_at, last_recall_at)
+             values ($1, $2, 'forged', 99, now(), now())",
+            victim.as_uuid(),
+            uuid::Uuid::now_v7(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "an adversary wrote a usage row into another tenant's projection"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let rewound = sqlx::query!(
+            "update promotion_watermarks set last_seq = 0 where tenant_id = $1",
+            victim.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("the statement runs; RLS makes it match nothing");
+        assert_eq!(
+            rewound.rows_affected(),
+            0,
+            "an adversary rewound another tenant's sweep watermark"
+        );
+        let inflated = sqlx::query!(
+            "update memory_usage set recalls = 10_000 where tenant_id = $1 and record_id = $2",
+            victim.as_uuid(),
+            victim_record,
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("the statement runs; RLS makes it match nothing");
+        assert_eq!(
+            inflated.rows_affected(),
+            0,
+            "an adversary inflated another tenant's promotion evidence"
+        );
+    });
+}
+
+/// The projection is derived state, and the app role holds the DELETE that
+/// says so: ADR-0033 decision 3's rebuild has to be an operation the
+/// product can actually perform, unlike the governed-history tables beside
+/// it, where the same grant is deliberately absent.
+#[test]
+fn the_projection_is_rebuildable_by_the_app_role() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed_usage(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let cleared = sqlx::query!(
+            "delete from memory_usage where tenant_id = $1",
+            tenant.as_uuid()
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("the app role may discard the projection");
+        assert_eq!(cleared.rows_affected(), 1);
+        let cleared = sqlx::query!(
+            "delete from promotion_watermarks where tenant_id = $1",
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("the app role may discard the watermark");
+        assert_eq!(cleared.rows_affected(), 1);
+        assert_eq!(
+            visible_promotion_rows(&mut tx, tenant).await,
+            (0, 0),
+            "a reset leaves nothing to refold from"
+        );
+        tx.commit().await.expect("commit the reset");
     });
 }

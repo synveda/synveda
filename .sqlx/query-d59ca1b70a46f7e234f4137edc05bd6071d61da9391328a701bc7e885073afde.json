@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into memory_usage\n             (tenant_id, record_id, subject, recalls, first_recall_at, last_recall_at)\n         values ($1, $2, 'rls-fixture', 3, now(), now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d59ca1b70a46f7e234f4137edc05bd6071d61da9391328a701bc7e885073afde"
+}

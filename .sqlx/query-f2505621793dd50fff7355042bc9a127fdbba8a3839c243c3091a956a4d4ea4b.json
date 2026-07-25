@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into promotion_watermarks (tenant_id, last_seq) values ($1, 0)\n         on conflict (tenant_id) do nothing",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f2505621793dd50fff7355042bc9a127fdbba8a3839c243c3091a956a4d4ea4b"
+}

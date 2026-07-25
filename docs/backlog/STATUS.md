@@ -576,7 +576,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [FLOW-1: Object store](FLOW-1.md) — done 2026-07-25, ADR-0030, AC tests: crates/synveda-vedaflow/tests/object_store.rs (both properties over a live Postgres — dedup across objects, trees, and commits, with the row count pinned to the number of *distinct* (kind, content) pairs, and the same bytes in two tenants proven to be two rows at one address; immutability under 8 genuinely concurrent writers on their own connections, asserting every landed commit is reachable from the head, the chain is root + every commit, and no commit row exists that the head cannot reach — the headline run reports the compare-and-swaps actually lost, and fails if none were, since a race nobody lost tested nothing; plus the append-only grants and triggers, a trigger-suppressing attacker caught by `verify`, fast-forward vs. force, and the foreign keys refusing a dangling tree, parent, or entry), crates/synveda-store/tests/rls.rs (the six VedaFlow tables join the adversarial suite and its completeness guard), crates/synveda-vedaflow (27 unit tests: the length-prefixed encodings, per-kind domain separation, parent order, the policy-snapshot canonical form, and the signer seam), demo: demos/flow-1-object-store.sh
 - [x] [FLOW-2: Channels](FLOW-2.md) — done 2026-07-25, ADR-0031, AC test: crates/synveda-gateway/tests/channels.rs (the bank-mode switch over real refs, end to end on product surfaces: extracted memories land on `{scope}/memory/derived`, a curator publishes one through `POST /v1/channels/{scope}/publish` under the PDP, inject renders it unmarked while the rest still says unreviewed, a `published-only` pack becomes the tenant default, and the very next inject — same token, same session, no restart — composes the published record alone and cites the commit the curator made; plus the PDP gate, the read requirement that keeps a curator out of a teammate's personal scope, whole-request refusal of another scope's record, the `vedaflow.channel.published` event carrying ids and addresses but never content, and `GET /v1/channels`), crates/synveda-retrieval/tests/compose.rs (12 tests on real channels — including authored-but-unpublished material failing bank mode, and an edit demoting a published record to unreviewed), crates/synveda-gateway/tests/extraction.rs (the derived-channel commit lands in the pipeline's own write transaction), crates/synveda-policy/tests/{roles,packs,pdp}.rs (the channel plane joins the role×action matrix at pack `@6`), demo: demos/flow-2-channels.sh
 - [x] [FLOW-3: Proposals & approval matrix](FLOW-3.md) — done 2026-07-25, ADR-0032, AC tests: crates/synveda-policy/tests/approvals.rs (the **full matrix golden**: 3 packs × 5 asset kinds × 4 sensitivities × 5 scope kinds = 300 cells rendered canonically against tests/golden/approval-matrix.txt, so a wrong requirement and a wrong *absence* of one both fail and the diff names the cell; plus the packs proven to actually differ where tech plan §2.4 says they do, the floor holding under a pack written specifically to author it away, and an unsatisfiable matrix refused at install rather than discovered at review), crates/synveda-gateway/tests/proposals.rs (the **team→published promotion with 1 curator** over the product surfaces — a contributor opens, the response states what the pack requires and that it is unmet, the contributor cannot run the effect, the curator reads the content and approves, and the publication is a merge commit whose second parent is the proposal; and **restricted → compliance + dual approval**, refused on the direct route by name, refused again for a principal holding *both* roles because two distinct approvers means two people, then carried by curator + compliance — with the deciding compliance vote unable to publish, which is the case that decided against auto-publishing; plus approvals binding bytes, a curator file adding a named approver without granting them anything, rejection/withdrawal, and the uniform 404), crates/synveda-store/tests/rls.rs (the two new tables join the adversarial suite and its completeness guard: a forged approval on another tenant's proposal, the append-only review log, and the one permitted open → closed transition), crates/synveda-types (18 unit tests on the counting rule) and crates/synveda-vedaflow (curator-file parsing, the one-wildcard glob, and approvals that never carry to another commit), demo: demos/flow-3-proposals.sh
-- [ ] [FLOW-4: Auto-promotion rules](FLOW-4.md)
+- [x] [FLOW-4: Auto-promotion rules](FLOW-4.md) — done 2026-07-25, ADR-0033, AC tests: crates/synveda-gateway/tests/promotion.rs (the **soak**, over real product surfaces with a real signal — nothing writes a usage counter, every recall is an actual `POST /v1/inject` whose `context.injected` event the engine folds out of the audit chain: two recalls open nothing, the third crosses the rule's threshold and a proposal appears with nobody deciding to, targeting the scope the material already sits on, proposed under the *owner's* identity rather than a system principal; and the **evidence**, which is checked rather than displayed — `evidence_is_checkable_against_the_chain` re-derives the recall and distinct-member counts from the hash-chained events in the `[from_seq, to_seq]` range the evidence names, without consulting the projection that produced it; plus a ten-round soak that never proposes the same bytes twice, a rejection binding those bytes and an edit freeing them, the projection discarded and refolded from seq 1 to the identical counts, a quarantined owner proposing nothing, an unconfigured pack promoting nothing while still sweeping usage, and — pinning the fact ADR-0033 decision 8 rests on — twenty injects by a teammate adding neither a member nor a recall to someone else's personal record), crates/synveda-store/tests/rls.rs (the two new tables join the adversarial suite and its completeness guard: a forged usage row, a rewound watermark that would refold a victim's chain and double their evidence, and the DELETE grant that makes the rebuild an operation rather than an aspiration), crates/synveda-types (16 unit tests on the rule vocabulary: every threshold load-bearing, the sensitivity ceiling, and refusal at install of a rule that asks nothing or could never fire), demo: demos/flow-4-auto-promotion.sh (on a scratch database, the gateway's own background loop — not a test harness — crossing the threshold, then the evidence re-derived from the chain in SQL, idempotence under a continuing soak, a curator refused because publishing needs MemoryRead on material nobody else can read, and the owner publishing her own through the ordinary FLOW-3 path into a merge commit whose second parent is the proposal a rule opened)
 - [ ] [FLOW-5: Cross-scope promotion](FLOW-5.md)
 - [ ] [FLOW-6: CLI review flow](FLOW-6.md)
 - [ ] [FLOW-7: Rollback & pinning](FLOW-7.md)
@@ -595,6 +595,39 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [ ] [EVAL-5: Security evals](EVAL-5.md)
 - [ ] [PRMT-1: Prompt templates as assets](PRMT-1.md)
 - [ ] [PRMT-2: Context packs](PRMT-2.md)
+
+_FLOW-4 (2026-07-25, ADR-0033) landed with a finding that constrains
+FLOW-5 and PRMT-1 rather than FLOW-4. The tech plan's illustrative rule —
+"a procedure recalled >N times across ≥3 team members" — **cannot fire on
+anything the write path produces**, and not by an oversight: a derived
+record lands at its owner's personal node, a service identity is placed
+"like a user" (ADR-0018 decision 2, a `ScopeKind::User` leaf under its
+anchor), and composition never leaves the caller's own chain —
+`permitted_chain_scopes` decides `MemoryRead` once per *chain node*, so
+another member's personal scope is never a candidate the PDP then
+rejects. A distinct-member count over anything `observe` → extraction
+writes is therefore identically 1, at two independent layers.
+
+What ships is the engine plus the rules that *can* fire — the
+`min_distinct_members: 1` case, which is a product case rather than a
+weakened one: under bank mode a scope's derived material does not compose
+at all, so promoting a member's own well-used memory to their own
+published channel is the difference between a record existing and a
+record counting. Multi-member rules need material at a shared scope,
+which arrives with the first authoring path (PRMT-1, context packs) or
+with FLOW-5's climb; the threshold is already a number in a pack, so
+neither needs an engine change.
+
+Two bugs the acceptance suite found are worth naming because both were
+concurrency, not logic: two overlapping sweeps read the same watermark
+and folded the same events twice, inflating every count they produced
+(fixed by a `for update` on the watermark row — the AUD-1 chain-head
+pattern); and an idle tenant was paying a write and a row lock per pass
+just to discover it had nothing to do (fixed by an unlocked head-vs-
+watermark check before either). The second matters on the shared dev
+database, where a pass visits thousands of leftover test tenants — which
+is also why the demo runs on a scratch database, the discipline EVAL-1
+recorded for the same reason._
 
 _GRPH-4 (2026-07-25, ADR-0029): the phase gate ran first, because it is
 the only Phase 2 item that can invalidate an Accepted ADR and the schema

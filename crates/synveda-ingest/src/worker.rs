@@ -873,7 +873,7 @@ async fn append_event(
 /// a field copy duplicated across a layering boundary is the trade
 /// ADR-0030 already took for the RLS backstop marker. The address it
 /// produces is pinned to retrieval's by the AC test.
-fn memory_asset(id: RecordId, state: &RecordState) -> MemoryAsset {
+pub(crate) fn memory_asset(id: RecordId, state: &RecordState) -> MemoryAsset {
     MemoryAsset {
         id,
         scope_id: state.scope_id,

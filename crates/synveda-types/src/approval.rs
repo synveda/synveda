@@ -116,6 +116,52 @@ pub enum RequirementOrigin {
     },
 }
 
+impl RequirementOrigin {
+    /// The name an audit payload and an API response both use.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match self {
+            RequirementOrigin::Floor => "floor".to_owned(),
+            RequirementOrigin::Pack => "pack".to_owned(),
+            RequirementOrigin::Curators { scope_id } => format!("curators:{scope_id}"),
+        }
+    }
+}
+
+/// One requirement as every audit payload and API response renders it
+/// ([`ApprovalRequirement::audit_view`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RequirementAudit {
+    /// What was asked for.
+    pub required: RequiredAudit,
+    /// A one-line rendering of what is still missing.
+    pub outstanding: String,
+    /// Whether nothing is missing.
+    pub satisfied: bool,
+}
+
+/// The asked-for half of [`RequirementAudit`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RequiredAudit {
+    /// Roles required, with counts.
+    pub roles: Vec<RoleAudit>,
+    /// Distinct identities required.
+    pub distinct_approvers: u8,
+    /// Named subjects a curator file requires.
+    pub subjects: Vec<String>,
+    /// Where each part came from: `floor`, `pack`, or `curators:{scope}`.
+    pub origins: Vec<String>,
+}
+
+/// One role line of a [`RequiredAudit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct RoleAudit {
+    /// The role's wire name.
+    pub role: &'static str,
+    /// How many approvers holding it are required.
+    pub count: u8,
+}
+
 /// A pack's approval matrix: an ordered list of rules.
 ///
 /// Stored in `policy_packs.approvals` for custom packs and compiled in
@@ -271,6 +317,58 @@ impl ApprovalRequirement {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.roles.is_empty() && self.subjects.is_empty() && self.distinct_approvers == 0
+    }
+
+    /// The shape every act against this requirement records: what was
+    /// required, where each part came from, and what is still
+    /// outstanding afterwards.
+    ///
+    /// A `Serialize` view rather than rendered JSON, because this crate
+    /// is the root of the graph and stays format-agnostic — each caller
+    /// serialises with its own `serde_json`. The *shape* lives here
+    /// because ADR-0032's compliance note promises the requirement is
+    /// recorded as resolved at every act, and since FLOW-4 more than one
+    /// kind of actor writes those events. Two renderings of one
+    /// requirement would eventually differ, and an auditor would have to
+    /// know which surface wrote which.
+    #[must_use]
+    pub fn audit_view(&self, outstanding: &Outstanding) -> RequirementAudit {
+        RequirementAudit {
+            required: RequiredAudit {
+                roles: self
+                    .roles
+                    .iter()
+                    .map(|required| RoleAudit {
+                        role: required.role.as_str(),
+                        count: required.count,
+                    })
+                    .collect(),
+                distinct_approvers: self.distinct_approvers,
+                subjects: self.subjects.clone(),
+                origins: self.origins.iter().map(RequirementOrigin::label).collect(),
+            },
+            outstanding: outstanding.describe(),
+            satisfied: outstanding.is_empty(),
+        }
+    }
+
+    /// A one-line rendering of what this requirement asks for, for an
+    /// error or a summary a reviewer reads.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        if self.is_empty() {
+            return "no approvals".to_owned();
+        }
+        let mut parts: Vec<String> = self
+            .roles
+            .iter()
+            .map(|role| format!("{} × {}", role.role, role.count))
+            .collect();
+        parts.extend(self.subjects.iter().map(|subject| format!("@{subject}")));
+        if self.distinct_approvers > 1 {
+            parts.push(format!("{} distinct approvers", self.distinct_approvers));
+        }
+        parts.join(", ")
     }
 
     /// Merges one matching rule in, taking maxima.

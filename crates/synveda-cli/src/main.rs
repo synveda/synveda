@@ -28,8 +28,8 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::{Hs256Verifier, personal_slug};
 use synveda_types::{
-    CompositionConfig, IdentityId, IdentityKind, InjectChannels, PackConfig, RedactionConfig,
-    RedactionMode, Role, ScopeId, ScopeKind, TenantId, TenantStatus,
+    CompositionConfig, IdentityId, IdentityKind, InjectChannels, PackConfig, PromotionConfig,
+    RedactionConfig, RedactionMode, Role, ScopeId, ScopeKind, TenantId, TenantStatus,
 };
 
 #[derive(Parser)]
@@ -200,6 +200,15 @@ enum PolicyCommand {
         /// published-only is the bank-mode switch).
         #[arg(long, requires = "composition_budget")]
         composition_channels: Option<InjectChannels>,
+        /// Path to a JSON file of auto-promotion rules (FLOW-4,
+        /// ADR-0033): `{"rules":[{"name":..., "min_recalls":...,
+        /// "min_distinct_members":..., "max_sensitivity":...}]}`. A file
+        /// rather than flags because a rule set is a list, not a scalar.
+        /// Omitted means the pack carries no rules and nothing
+        /// auto-promotes at the scopes it governs — a trigger's fail-safe
+        /// is silence.
+        #[arg(long)]
+        promotion: Option<std::path::PathBuf>,
         /// Path to the Cedar policy source file.
         file: std::path::PathBuf,
     },
@@ -422,6 +431,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             redaction_pii,
             composition_budget,
             composition_channels,
+            promotion,
             file,
         }) => {
             let source = std::fs::read_to_string(&file)
@@ -442,6 +452,22 @@ async fn run(cli: Cli) -> Result<(), String> {
                         budget_tokens,
                         channels,
                     });
+            // Validated here as well as at install: a rule that asks for
+            // zero recalls, or names an asset with no usage signal, is
+            // refused when it is written rather than discovered when a
+            // sweep silently does nothing (ADR-0033 decision 6).
+            let promotion = promotion
+                .map(|path| {
+                    let raw = std::fs::read_to_string(&path)
+                        .map_err(|err| format!("read {}: {err}", path.display()))?;
+                    let config: PromotionConfig = serde_json::from_str(&raw)
+                        .map_err(|err| format!("parse {}: {err}", path.display()))?;
+                    config
+                        .validate()
+                        .map_err(|err| format!("{}: {err}", path.display()))?;
+                    Ok::<_, String>(config)
+                })
+                .transpose()?;
             let pool = connect().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
@@ -454,6 +480,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 &PackConfig {
                     redaction,
                     composition,
+                    promotion,
                     ..Default::default()
                 },
             )
@@ -469,6 +496,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     "version": pack.version,
                     "redaction": pack.config.redaction,
                     "composition": pack.config.composition,
+                    "promotion": pack.config.promotion,
                 }),
             )
             .await?;

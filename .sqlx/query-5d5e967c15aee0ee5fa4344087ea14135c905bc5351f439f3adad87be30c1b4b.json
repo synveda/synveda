@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select distinct e.object_hash as \"object_hash!\"\n        from vedaflow_proposals p\n        join vedaflow_commits c\n            on c.tenant_id = p.tenant_id and c.hash = p.commit_hash\n        join vedaflow_tree_entries e\n            on e.tenant_id = c.tenant_id and e.tree_hash = c.tree_hash\n        where p.tenant_id = $1\n          and p.target_scope_id = $2\n          and p.state in ('open', 'rejected')\n          and e.object_hash = any($3)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "object_hash!",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "ByteaArray"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "5d5e967c15aee0ee5fa4344087ea14135c905bc5351f439f3adad87be30c1b4b"
+}

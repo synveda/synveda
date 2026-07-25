@@ -16,7 +16,7 @@
 //! still readable after the pack changes.
 
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use sqlx::PgConnection;
 use synveda_policy::{Resource, effective_roles_at};
 use synveda_types::{
@@ -116,35 +116,10 @@ pub(crate) fn require_single_actor(
         reason: format!(
             "publishing this here needs {} beyond what one principal can supply; \
              open a proposal (POST /v1/proposals) — still outstanding: {}",
-            requirement_summary(requirement),
+            requirement.describe(),
             outstanding.describe()
         ),
     })
-}
-
-/// A one-line rendering of a requirement, for an error a reviewer reads.
-pub(crate) fn requirement_summary(requirement: &ApprovalRequirement) -> String {
-    if requirement.is_empty() {
-        return "no approvals".to_owned();
-    }
-    let mut parts: Vec<String> = requirement
-        .roles
-        .iter()
-        .map(|role| format!("{} × {}", role.role, role.count))
-        .collect();
-    parts.extend(
-        requirement
-            .subjects
-            .iter()
-            .map(|subject| format!("@{subject}")),
-    );
-    if requirement.distinct_approvers > 1 {
-        parts.push(format!(
-            "{} distinct approvers",
-            requirement.distinct_approvers
-        ));
-    }
-    parts.join(", ")
 }
 
 /// A requirement as the API and the audit payload render it.
@@ -184,37 +159,20 @@ impl RequirementView {
                 .collect(),
             distinct_approvers: requirement.distinct_approvers,
             subjects: requirement.subjects.clone(),
-            origins: requirement.origins.iter().map(origin_name).collect(),
+            origins: requirement
+                .origins
+                .iter()
+                .map(RequirementOrigin::label)
+                .collect(),
         }
     }
 }
 
-fn origin_name(origin: &RequirementOrigin) -> String {
-    match origin {
-        RequirementOrigin::Floor => "floor".to_owned(),
-        RequirementOrigin::Pack => "pack".to_owned(),
-        RequirementOrigin::Curators { scope_id } => format!("curators:{scope_id}"),
-    }
-}
-
-/// The audit payload fragment every FLOW-3 event carries: what was
-/// required, and what is still outstanding after the act.
+/// The audit payload fragment every act against the matrix carries.
+/// The shape is [`ApprovalRequirement::audit_view`]'s: since FLOW-4 the
+/// rule engine writes these events too, and one shape is the point
+/// (ADR-0032's compliance note, ADR-0033 decision 9).
 pub(crate) fn audit_context(requirement: &ApprovalRequirement, outstanding: &Outstanding) -> Value {
-    json!({
-        "required": {
-            "roles": requirement
-                .roles
-                .iter()
-                .map(|required| json!({
-                    "role": required.role.as_str(),
-                    "count": required.count,
-                }))
-                .collect::<Vec<_>>(),
-            "distinct_approvers": requirement.distinct_approvers,
-            "subjects": requirement.subjects,
-            "origins": requirement.origins.iter().map(origin_name).collect::<Vec<_>>(),
-        },
-        "outstanding": outstanding.describe(),
-        "satisfied": outstanding.is_empty(),
-    })
+    serde_json::to_value(requirement.audit_view(outstanding))
+        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
 }

@@ -18,7 +18,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use sqlx::postgres::PgConnection;
-use synveda_types::{ApprovalMatrix, Error, PackConfig, Result, TenantId};
+use synveda_types::{ApprovalMatrix, Error, PackConfig, PromotionConfig, Result, TenantId};
 
 /// A tenant's stored policy pack.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,21 +106,28 @@ pub async fn apply(
         .as_ref()
         .map(|value| config_json("approvals", serde_json::to_value(value)))
         .transpose()?;
+    let promotion_json = config
+        .promotion
+        .as_ref()
+        .map(|value| config_json("promotion", serde_json::to_value(value)))
+        .transpose()?;
     let row = sqlx::query_as!(
         PolicyPackRow,
         r#"
         insert into policy_packs
-            (tenant_id, name, version, source, redaction, composition, approvals)
-        values ($1, $2, 1, $3, $4, $5, $6)
+            (tenant_id, name, version, source, redaction, composition, approvals,
+             promotion)
+        values ($1, $2, 1, $3, $4, $5, $6, $7)
         on conflict (tenant_id, name) do update
             set source = excluded.source,
                 redaction = excluded.redaction,
                 composition = excluded.composition,
                 approvals = excluded.approvals,
+                promotion = excluded.promotion,
                 version = policy_packs.version + 1,
                 updated_at = now()
         returning tenant_id, name, version, source, redaction, composition,
-                  approvals, updated_at
+                  approvals, promotion, updated_at
         "#,
         tenant_id.as_uuid(),
         name,
@@ -128,6 +135,7 @@ pub async fn apply(
         redaction_json,
         composition_json,
         approvals_json,
+        promotion_json,
     )
     .fetch_one(executor)
     .await
@@ -148,7 +156,7 @@ pub async fn stored(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Resul
         PolicyPackRow,
         r#"
         select tenant_id, name, version, source, redaction, composition,
-               approvals, updated_at
+               approvals, promotion, updated_at
         from policy_packs where tenant_id = $1
         order by name
         "#,
@@ -176,7 +184,7 @@ pub async fn get(
         PolicyPackRow,
         r#"
         select tenant_id, name, version, source, redaction, composition,
-               approvals, updated_at
+               approvals, promotion, updated_at
         from policy_packs where tenant_id = $1 and name = $2
         "#,
         tenant_id.as_uuid(),
@@ -242,6 +250,7 @@ struct PolicyPackRow {
     redaction: Option<serde_json::Value>,
     composition: Option<serde_json::Value>,
     approvals: Option<serde_json::Value>,
+    promotion: Option<serde_json::Value>,
     updated_at: DateTime<Utc>,
 }
 
@@ -290,6 +299,27 @@ impl From<PolicyPackRow> for PolicyPack {
                     .ok()
                     .map(|()| matrix)
             });
+        // A rule set that parses but asks nothing (or asks the
+        // impossible) would fire on everything or never — and unlike the
+        // matrix, whose fail-safe is the floor, a trigger's fail-safe is
+        // silence. Treat it as no rules, and say so.
+        let promotion: Option<PromotionConfig> =
+            parse_config(&row.name, "promotion", row.promotion).and_then(
+                |config: PromotionConfig| {
+                    config
+                        .validate()
+                        .inspect_err(|err| {
+                            tracing::warn!(
+                                policy.pack = %row.name,
+                                error = %err,
+                                "stored promotion config is invalid; \
+                                 treating the pack as carrying no rules"
+                            );
+                        })
+                        .ok()
+                        .map(|()| config)
+                },
+            );
         PolicyPack {
             tenant_id: TenantId::from_uuid(row.tenant_id),
             name: row.name,
@@ -299,6 +329,7 @@ impl From<PolicyPackRow> for PolicyPack {
                 redaction,
                 composition,
                 approvals,
+                promotion,
             },
             updated_at: row.updated_at,
         }

@@ -15,7 +15,7 @@ use sqlx::PgConnection;
 use synveda_types::{Error, Result, TenantId};
 
 use crate::canonical::{canonical_event, truncate_to_micros};
-use crate::event::AuditEvent;
+use crate::event::{AuditAction, AuditEvent};
 
 /// Counts appended events, labelled by action and outcome. Emitted here;
 /// described by the gateway's recorder (ADR-0007).
@@ -393,6 +393,80 @@ pub async fn tail(
     .fetch_all(&mut *conn)
     .await
     .map_err(|err| storage_error("read audit tail", &err))
+}
+
+/// Events with `seq > after` whose action is one of `actions`, oldest
+/// first, at most `limit` of them.
+///
+/// The forward read a projection folds from (FLOW-4, ADR-0033 decision
+/// 2). `audit_log.seq` is 1-based and contiguous per tenant — a gap is a
+/// verification failure, ADR-0019 — which is what lets a single integer
+/// serve as a cursor with no ambiguity in it: everything at or below
+/// `after` has been folded, everything above it has not.
+///
+/// Actions are named from the closed in-process vocabulary rather than
+/// as strings, so a reader cannot quietly fold an action that does not
+/// exist and conclude the tenant is idle.
+#[tracing::instrument(
+    name = "audit.since",
+    skip_all,
+    fields(tenant.id = %tenant, after = after, limit = limit),
+    err(Display)
+)]
+pub async fn since(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    after: i64,
+    actions: &[AuditAction],
+    limit: i64,
+) -> Result<Vec<StoredEvent>> {
+    if actions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names: Vec<String> = actions
+        .iter()
+        .map(|action| action.as_str().to_owned())
+        .collect();
+    sqlx::query_as!(
+        StoredEvent,
+        r#"select seq, occurred_at, actor_kind, actor_subject, action,
+                  resource, outcome, payload, trace_id, prev_hash, hash
+           from audit_log
+           where tenant_id = $1 and seq > $2 and action = any($3)
+           order by seq
+           limit $4"#,
+        tenant.as_uuid(),
+        after,
+        &names,
+        limit,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|err| storage_error("read audit events since", &err))
+}
+
+/// How long the tenant's chain is: the seq of its most recent event, or
+/// 0 for a chain with none.
+///
+/// Read from `audit_chain_heads` rather than `max(seq)` because the head
+/// row is the chain's own statement of its length, and a reader that
+/// disagreed with it would be reading past a truncation rather than
+/// noticing one.
+#[tracing::instrument(
+    name = "audit.head_seq",
+    skip_all,
+    fields(tenant.id = %tenant),
+    err(Display)
+)]
+pub async fn head_seq(conn: &mut PgConnection, tenant: TenantId) -> Result<i64> {
+    let seq = sqlx::query_scalar!(
+        "select seq from audit_chain_heads where tenant_id = $1",
+        tenant.as_uuid(),
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|err| storage_error("read audit chain head", &err))?;
+    Ok(seq.unwrap_or(0))
 }
 
 /// One verification page: events with `seq > after`, ascending.

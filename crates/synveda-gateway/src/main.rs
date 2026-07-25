@@ -27,6 +27,12 @@
 //! `SYNVEDA_EXTRACTION_VT_SECS` (default 60),
 //! `SYNVEDA_EXTRACTION_MAX_READS` (default 5).
 //!
+//! The auto-promotion engine (FLOW-4, ADR-0033) runs every
+//! `SYNVEDA_PROMOTION_INTERVAL_SECS` (default 300) and folds up to
+//! `SYNVEDA_PROMOTION_BATCH` (default 1024) audit events per tenant per
+//! pass. It cannot be turned off because it does nothing until a pack
+//! carries promotion rules, and no embedded pack does.
+//!
 //! The search index sidecar (CTX-1, ADR-0024) lives under
 //! `SYNVEDA_SEARCH_INDEX_DIR` (default `./data/search-index`; one
 //! subdirectory per tenant — deleting a tenant's directory is the
@@ -165,6 +171,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("SYNVEDA_EXTRACTOR=off: observe signals will accumulate unconsumed");
     }
 
+    // The auto-promotion engine (FLOW-4, ADR-0033): a second background
+    // loop, on a cadence of minutes rather than the extraction worker's
+    // second. It writes nothing on the read path — it folds
+    // `context.injected` events the gateway already records into a usage
+    // projection, and opens FLOW-3 proposals under the material owner's
+    // authority when a pack's rules fire.
+    let promotion_config = promotion_config_from_env();
+    tracing::info!(
+        interval_secs = promotion_config.interval.as_secs(),
+        batch = promotion_config.batch,
+        "promotion engine starting (FLOW-4, ADR-0033)"
+    );
+    let promotion_engine = synveda_ingest::promotion::spawn(
+        synveda_ingest::promotion::SweepDeps {
+            pool: pool.clone(),
+            pdp: Arc::clone(&pdp),
+            chains: Arc::clone(&scope_chains),
+        },
+        promotion_config,
+    );
+
     // The search index sidecar and its indexer (CTX-1, ADR-0024): a
     // boot failure here means the index root is unusable — refuse to
     // boot rather than serve a read path whose lexical leg can never
@@ -221,6 +248,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     refresher.abort();
     search_indexer.abort();
+    promotion_engine.abort();
     if let Some(worker) = extraction_worker {
         worker.abort();
     }
@@ -320,6 +348,24 @@ fn embedder_from_env() -> Result<synveda_ingest::embedding::AnyEmbedder, String>
 /// Worker pacing from `SYNVEDA_EXTRACTION_*`, with the defaults the
 /// module header documents. Unparseable values fall back to defaults:
 /// pacing is tuning, never a fail-closed control.
+/// `SYNVEDA_PROMOTION_INTERVAL_SECS` / `SYNVEDA_PROMOTION_BATCH`, with
+/// the engine's defaults for anything unset or unparseable.
+fn promotion_config_from_env() -> synveda_ingest::promotion::SweepConfig {
+    let defaults = synveda_ingest::promotion::SweepConfig::default();
+    synveda_ingest::promotion::SweepConfig {
+        interval: std::env::var("SYNVEDA_PROMOTION_INTERVAL_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|secs| *secs > 0)
+            .map_or(defaults.interval, Duration::from_secs),
+        batch: std::env::var("SYNVEDA_PROMOTION_BATCH")
+            .ok()
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|batch| *batch > 0)
+            .unwrap_or(defaults.batch),
+    }
+}
+
 fn extraction_config_from_env() -> synveda_ingest::worker::WorkerConfig {
     let defaults = synveda_ingest::worker::WorkerConfig::default();
     let parse = |name: &str| {

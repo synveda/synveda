@@ -20,8 +20,8 @@ use cedar_policy::{
     PolicySet, Request, Schema, ValidationMode, Validator,
 };
 use synveda_types::{
-    ApprovalMatrix, CompositionConfig, Error, HierarchyNode, PackConfig, RedactionConfig, Result,
-    Role, ScopeId, ScopeKind, TenantId,
+    ApprovalMatrix, CompositionConfig, Error, HierarchyNode, PackConfig, PromotionConfig,
+    RedactionConfig, Result, Role, ScopeId, ScopeKind, TenantId,
 };
 
 use crate::entity_store::EntityStore;
@@ -86,6 +86,10 @@ struct LoadedPack {
     /// [`EffectivePack`] per candidate scope on the inject path, and a
     /// matrix is the one config that is not `Copy` (FLOW-3, ADR-0032).
     approvals: Arc<ApprovalMatrix>,
+    /// The promotion rules (FLOW-4, ADR-0033 decision 6), behind an `Arc`
+    /// for the same reason as the matrix. Empty means nothing
+    /// auto-promotes at scopes this pack governs.
+    promotion: Arc<PromotionConfig>,
 }
 
 /// Where the effective pack came from — logged with every decision so the
@@ -124,6 +128,11 @@ pub struct EffectivePack {
     /// Resolving it always merges the invariant floor, so this is what
     /// the pack adds *above* the product's non-negotiables.
     pub approvals: Arc<ApprovalMatrix>,
+    /// The pack's promotion rules (FLOW-4, ADR-0033): what opens a
+    /// proposal at scopes this pack governs without a human deciding to.
+    /// Empty in every embedded pack — a trigger nobody configured must
+    /// not fire.
+    pub promotion: Arc<PromotionConfig>,
 }
 
 impl fmt::Display for PackOrigin {
@@ -191,9 +200,16 @@ impl Pdp {
                 name,
                 *version,
                 source,
-                redaction,
-                CompositionConfig::DEFAULT,
-                crate::approvals::embedded(name),
+                PackConfig {
+                    redaction: Some(redaction),
+                    composition: Some(CompositionConfig::DEFAULT),
+                    approvals: Some(crate::approvals::embedded(name)),
+                    // No embedded pack auto-promotes: ADR-0033 decision
+                    // 6's fail-safe is silence, and a product default
+                    // that opened proposals nobody asked for would be a
+                    // surprise arriving through an upgrade.
+                    promotion: None,
+                },
             )
             .map_err(|err| Error::Internal {
                 message: format!("embedded pack invalid: {err}"),
@@ -238,9 +254,12 @@ impl Pdp {
             name,
             0,
             source,
-            RedactionConfig::STRICT,
-            CompositionConfig::DEFAULT,
-            ApprovalMatrix::empty(),
+            PackConfig {
+                redaction: Some(RedactionConfig::STRICT),
+                composition: Some(CompositionConfig::DEFAULT),
+                approvals: Some(ApprovalMatrix::empty()),
+                promotion: None,
+            },
         )
         .map(|_| ())
     }
@@ -269,15 +288,7 @@ impl Pdp {
                 message: format!("pack name {name:?} is reserved for the product (ADR-0014)"),
             });
         }
-        let pack = compile(
-            &self.schema,
-            name,
-            version,
-            source,
-            config.redaction.unwrap_or_default(),
-            config.composition.unwrap_or_default(),
-            config.approvals.unwrap_or_default(),
-        )?;
+        let pack = compile(&self.schema, name, version, source, config)?;
         self.write_packs()
             .entry(tenant_id)
             .or_default()
@@ -432,6 +443,7 @@ impl Pdp {
             redaction: pack.redaction,
             composition: pack.composition,
             approvals: Arc::clone(&pack.approvals),
+            promotion: Arc::clone(&pack.promotion),
         }
     }
 
@@ -810,15 +822,23 @@ fn compile(
     name: &str,
     version: i64,
     source: &str,
-    redaction: RedactionConfig,
-    composition: CompositionConfig,
-    approvals: ApprovalMatrix,
+    config: PackConfig,
 ) -> Result<LoadedPack> {
+    let redaction = config.redaction.unwrap_or_default();
+    let composition = config.composition.unwrap_or_default();
+    let approvals = config.approvals.unwrap_or_default();
+    let promotion = config.promotion.unwrap_or_default();
     // A matrix asking more of one role than it asks of people is
     // unsatisfiable at every cell it governs, and it would fail silently
     // at review time rather than loudly at install time (ADR-0032).
     approvals.validate().map_err(|err| Error::Invalid {
         message: format!("policy pack {name}@{version} approval matrix: {err}"),
+    })?;
+    // Same discipline for a trigger: a rule asking for zero recalls, or
+    // one naming an asset with no usage signal, can only fire on
+    // everything or on nothing (ADR-0033 decision 6).
+    promotion.validate().map_err(|err| Error::Invalid {
+        message: format!("policy pack {name}@{version} promotion rules: {err}"),
     })?;
     let combined = format!("{BASE_SRC}\n{source}");
     let policies: PolicySet = combined.parse().map_err(|err| Error::Invalid {
@@ -844,5 +864,6 @@ fn compile(
         redaction,
         composition,
         approvals: Arc::new(approvals),
+        promotion: Arc::new(promotion),
     })
 }

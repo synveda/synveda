@@ -371,6 +371,47 @@ pub async fn current_at_scope(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// The current versions of `ids`, wherever they live.
+///
+/// The scope-blind sibling of [`current_at_scope`], for a caller that
+/// learns about records before it learns where they are: the FLOW-4
+/// sweep folds record ids out of the audit chain and only then asks
+/// which scope each belongs to, so it can group by scope and resolve one
+/// effective pack per group (ADR-0033 decision 14). Records that have
+/// since been deleted simply do not come back.
+#[tracing::instrument(
+    name = "store.records.current_many",
+    skip_all,
+    fields(tenant.id = %tenant_id, ids.count = ids.len()),
+    err(Display)
+)]
+pub async fn current_many(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    ids: &[RecordId],
+) -> Result<Vec<RecordVersion>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<Uuid> = ids.iter().map(RecordId::as_uuid).collect();
+    let rows = sqlx::query_as!(
+        RecordRow,
+        r#"
+        select id, tenant_id, scope_id, owner_id, kind, class, content,
+               sensitivity, provenance, valid_from, valid_to, tx_from, tx_to
+        from records
+        where tenant_id = $1 and id = any($2)
+        order by id
+        "#,
+        tenant_id.as_uuid(),
+        &ids,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// Transaction-time as-of: the version of `id` the database held as truth at
 /// `tx_at` — "what did we know at time T". Returns `None` if the record did
 /// not exist (or was temporally deleted) at that instant. Transaction periods

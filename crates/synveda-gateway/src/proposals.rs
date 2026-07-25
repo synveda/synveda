@@ -42,8 +42,8 @@ use synveda_store::records::RecordState;
 use synveda_store::{hierarchy, records, rls};
 use synveda_types::{
     ApprovalRequirement, AssetKind, CastApproval, Channel, Error, HierarchyNode, IdentityId,
-    ProposalId, ProposalState, ProposalView, RecordId, Result, Role, ScopeId, Sensitivity,
-    TenantId, Verdict,
+    PromotionEvidence, ProposalId, ProposalState, ProposalView, RecordId, Result, Role, ScopeId,
+    Sensitivity, TenantId, Verdict,
 };
 use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
 
@@ -124,6 +124,12 @@ struct ProposalSummary {
     required: RequirementView,
     /// What it still lacks, in one line a reviewer reads.
     outstanding: String,
+    /// Why a rule opened this, when one did (FLOW-4, ADR-0033 decision
+    /// 12): the counts, the actions counted, and the audit range they
+    /// were folded from — so a reviewer can check the claim against the
+    /// chain rather than trust it. Absent on a human's proposal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    promotion: Option<PromotionEvidence>,
 }
 
 /// One review act as the API renders it.
@@ -430,6 +436,8 @@ async fn open_inner(
             proposer_subject: &input.principal.subject,
             committed_at: Utc::now(),
             policy_snapshot: &snapshot,
+            // A human opened this one (FLOW-4, ADR-0033 decision 12).
+            evidence: None,
         },
         &Signer::Unsigned,
     )
@@ -1129,6 +1137,7 @@ fn render(
         close_reason: proposal.close_reason.clone(),
         required: RequirementView::of(requirement),
         outstanding: outstanding.describe(),
+        promotion: proposal.evidence.clone(),
     }
 }
 

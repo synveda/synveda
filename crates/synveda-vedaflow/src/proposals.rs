@@ -30,11 +30,13 @@
 //! here (ADR-0030 decision 1); whether the approvals recorded here are
 //! *enough* is [`synveda_types::ApprovalRequirement`]'s arithmetic.
 
+use std::collections::HashSet;
+
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
 use synveda_types::{
-    AssetKind, CastApproval, Channel, Error, IdentityId, ProposalId, ProposalState, Result, Role,
-    ScopeId, Sensitivity, TenantId, Verdict,
+    AssetKind, CastApproval, Channel, Error, IdentityId, PromotionEvidence, ProposalId,
+    ProposalState, Result, Role, ScopeId, Sensitivity, TenantId, Verdict,
 };
 use uuid::Uuid;
 
@@ -90,6 +92,16 @@ pub struct NewProposal<'a> {
     pub committed_at: DateTime<Utc>,
     /// The pack in force, as the caller resolved it.
     pub policy_snapshot: &'a PolicySnapshot,
+    /// Why a rule opened this, when one did (FLOW-4, ADR-0033 decision
+    /// 12). `None` on every human-opened proposal, which is the honest
+    /// value — no rule fired.
+    ///
+    /// Written in the insert rather than set afterwards: the transition
+    /// trigger permits a proposal row exactly one update, open → closed,
+    /// so evidence either arrives with the row or cannot arrive at all.
+    /// That is the right shape anyway — it is a fact about why the
+    /// proposal was opened.
+    pub evidence: Option<&'a PromotionEvidence>,
 }
 
 /// A proposal as stored.
@@ -128,6 +140,9 @@ pub struct StoredProposal {
     pub closed_by: Option<IdentityId>,
     /// Why it closed — always present on a rejection.
     pub close_reason: Option<String>,
+    /// Why a rule opened it, when one did (FLOW-4, ADR-0033 decision
+    /// 12). `None` on a human's proposal.
+    pub evidence: Option<PromotionEvidence>,
 }
 
 /// One recorded review act.
@@ -257,12 +272,20 @@ pub async fn open(
     .await?;
 
     let id = ProposalId::new();
+    let evidence = new
+        .evidence
+        .map(|evidence| {
+            serde_json::to_value(evidence).map_err(|err| Error::Internal {
+                message: format!("serialise promotion evidence: {err}"),
+            })
+        })
+        .transpose()?;
     let row = sqlx::query!(
         r#"insert into vedaflow_proposals
                (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
                 target_channel, commit_hash, sensitivity, title, proposer_id,
-                proposer_subject)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                proposer_subject, evidence)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            returning created_at, updated_at"#,
         tenant.as_uuid(),
         id.as_uuid(),
@@ -275,6 +298,7 @@ pub async fn open(
         new.title,
         new.proposer.as_uuid(),
         new.proposer_subject,
+        evidence,
     )
     .fetch_one(&mut *conn)
     .await
@@ -301,6 +325,7 @@ pub async fn open(
         closed_at: None,
         closed_by: None,
         close_reason: None,
+        evidence: new.evidence.cloned(),
     })
 }
 
@@ -315,7 +340,7 @@ pub async fn read(
         ProposalRow,
         r#"select id, target_scope_id, source_scope_id, asset_kind, target_channel,
                   commit_hash, sensitivity, state, title, proposer_id, proposer_subject,
-                  created_at, updated_at, closed_at, closed_by, close_reason
+                  created_at, updated_at, closed_at, closed_by, close_reason, evidence
            from vedaflow_proposals
            where tenant_id = $1 and id = $2"#,
         tenant.as_uuid(),
@@ -350,7 +375,7 @@ pub async fn list(
         ProposalRow,
         r#"select id, target_scope_id, source_scope_id, asset_kind, target_channel,
                   commit_hash, sensitivity, state, title, proposer_id, proposer_subject,
-                  created_at, updated_at, closed_at, closed_by, close_reason
+                  created_at, updated_at, closed_at, closed_by, close_reason, evidence
            from vedaflow_proposals
            where tenant_id = $1
              and ($2::uuid is null or target_scope_id = $2)
@@ -564,6 +589,67 @@ pub async fn members(
         .collect()
 }
 
+/// Which of `addresses` a rule must not raise again at `scope`.
+///
+/// The idempotency key is the content address, not the record id
+/// (ADR-0033 decision 11). An address already standing in an **open**
+/// proposal is under review; one in a **rejected** proposal is bytes a
+/// human refused, and re-proposing exactly those is the pile-up
+/// `MAX_OPEN_PROPOSALS` exists to survive rather than to permit.
+///
+/// This costs no new state, which is the point: ADR-0032 decision 6 made
+/// approvals bind bytes, and the same commit tree that records what was
+/// approved records what was refused. An *edited* record has a different
+/// address and is new material — proposable again, as a reviewer would
+/// expect — with no cooldown timer and no suppression table to age out.
+///
+/// Withdrawn proposals do not suppress: a withdrawal is the proposer
+/// saying "not like this, not yet", not a reviewer saying no.
+#[tracing::instrument(
+    name = "vedaflow.suppressed_addresses",
+    skip_all,
+    fields(tenant.id = %tenant, scope.id = %scope, addresses = addresses.len()),
+    err(Display)
+)]
+pub async fn suppressed_addresses(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    scope: ScopeId,
+    addresses: &[ObjectHash],
+) -> Result<HashSet<ObjectHash>> {
+    if addresses.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let raw: Vec<Vec<u8>> = addresses
+        .iter()
+        .map(|address| address.as_slice().to_vec())
+        .collect();
+    let rows = sqlx::query!(
+        r#"
+        select distinct e.object_hash as "object_hash!"
+        from vedaflow_proposals p
+        join vedaflow_commits c
+            on c.tenant_id = p.tenant_id and c.hash = p.commit_hash
+        join vedaflow_tree_entries e
+            on e.tenant_id = c.tenant_id and e.tree_hash = c.tree_hash
+        where p.tenant_id = $1
+          and p.target_scope_id = $2
+          and p.state in ('open', 'rejected')
+          and e.object_hash = any($3)
+        "#,
+        tenant.as_uuid(),
+        scope.as_uuid(),
+        &raw,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|err| storage_error("read suppressed addresses", &err))?;
+
+    rows.into_iter()
+        .map(|row| ObjectHash::from_slice(&row.object_hash))
+        .collect()
+}
+
 /// Counts one lifecycle act.
 pub fn act(kind: &'static str, asset: AssetKind) {
     metrics::counter!(PROPOSAL_ACTS_TOTAL, "act" => kind, "asset" => asset.as_str()).increment(1);
@@ -587,6 +673,7 @@ struct ProposalRow {
     closed_at: Option<DateTime<Utc>>,
     closed_by: Option<Uuid>,
     close_reason: Option<String>,
+    evidence: Option<serde_json::Value>,
 }
 
 impl TryFrom<ProposalRow> for StoredProposal {
@@ -610,6 +697,22 @@ impl TryFrom<ProposalRow> for StoredProposal {
             closed_at: row.closed_at,
             closed_by: row.closed_by.map(IdentityId::from_uuid),
             close_reason: row.close_reason,
+            // Stored by this crate on the way in, so unparseable json can
+            // only come from an out-of-band write. Fail safe and loud:
+            // report the proposal without its evidence rather than
+            // refusing to render a real proposal at all.
+            evidence: row.evidence.and_then(|value| {
+                serde_json::from_value(value)
+                    .inspect_err(|err: &serde_json::Error| {
+                        tracing::warn!(
+                            proposal.id = %row.id,
+                            error = %err,
+                            "stored promotion evidence does not parse; \
+                             rendering the proposal without it"
+                        );
+                    })
+                    .ok()
+            }),
         })
     }
 }
