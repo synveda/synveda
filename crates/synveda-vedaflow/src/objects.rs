@@ -6,6 +6,8 @@
 //! attests to it. A caller who skipped it writes zero rows — forced RLS with
 //! an unset GUC matches nothing (ADR-0009).
 
+use std::collections::HashMap;
+
 use sqlx::PgConnection;
 use synveda_types::{AssetKind, Error, Result, TenantId};
 
@@ -124,4 +126,53 @@ pub async fn read_object(
         })
     })
     .transpose()
+}
+
+/// [`read_object`] for a set of addresses, in one statement.
+///
+/// Addresses with no row are simply absent from the map — the same answer
+/// `read_object` gives one at a time, and also what another tenant's object
+/// looks like. Duplicates in `hashes` cost nothing: the address is the key.
+///
+/// FLOW-6 renders a proposal's diff from two objects per member (ADR-0035
+/// decision 6), so a per-member read would make the review route's statement
+/// count grow with the member set. This keeps it constant.
+#[tracing::instrument(
+    name = "vedaflow.read_objects",
+    skip_all,
+    fields(tenant.id = %tenant, vedaflow.requested = hashes.len()),
+    err(Display)
+)]
+pub async fn read_objects(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    hashes: &[ObjectHash],
+) -> Result<HashMap<ObjectHash, StoredObject>> {
+    if hashes.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let addresses: Vec<Vec<u8>> = hashes.iter().map(|hash| hash.as_slice().to_vec()).collect();
+    let rows = sqlx::query!(
+        "select hash, kind, content from vedaflow_objects
+         where tenant_id = $1 and hash = any($2)",
+        tenant.as_uuid(),
+        &addresses,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|err| storage_error("read objects", &err))?;
+
+    let mut objects = HashMap::with_capacity(rows.len());
+    for row in rows {
+        objects.insert(
+            ObjectHash::from_slice(&row.hash)?,
+            StoredObject {
+                kind: row.kind.parse().map_err(|err| Error::Internal {
+                    message: format!("stored object kind outside vocabulary: {err}"),
+                })?,
+                content: row.content,
+            },
+        );
+    }
+    Ok(objects)
 }

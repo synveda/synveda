@@ -94,7 +94,7 @@ pub use curators::{
     MAX_CURATOR_FILE_BYTES, StoredCuratorFile, nearest_curators, read_curators, write_curators,
 };
 pub use hash::{CommitHash, ObjectHash, PolicySnapshotHash, TreeHash};
-pub use objects::{MAX_OBJECT_BYTES, StoredObject, put_object, read_object};
+pub use objects::{MAX_OBJECT_BYTES, StoredObject, put_object, read_object, read_objects};
 pub use policy::PolicySnapshot;
 pub use proposals::{
     MAX_OPEN_PROPOSALS, MAX_PROPOSAL_MEMBERS, NewApproval, NewProposal, ProposalFilter,

@@ -42,6 +42,19 @@
 //! when a `compliance` reviewer casts the deciding vote — a role that
 //! holds no publish grant in any pack — and that is a PDP bypass however
 //! it is spelled (ADR-0032 decision 9).
+//!
+//! # What a reviewer is shown (FLOW-6, ADR-0035)
+//!
+//! `GET /v1/proposals/{id}` renders each member as the *effect* publishing
+//! it would have on the target's published channel — `add`, `update`, or
+//! `none` — with the bytes on both sides of that effect: the object at the
+//! proposed address, and (for an `update`) the object the target's tree
+//! names today. That is what makes a terminal review possible without a
+//! console, and it is the same disclosure ADR-0034 decision 1 already
+//! makes, one version back: the old side is shown to whoever holds
+//! `ProposalRead` at the target, because a review of a change that hides
+//! one side of the change is not a review. The CLI does the rendering;
+//! this route ships bytes.
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -119,6 +132,15 @@ struct ProposalSummary {
     id: ProposalId,
     target_scope_id: ScopeId,
     source_scope_id: ScopeId,
+    /// The target's hierarchy path. A review surface that renders two
+    /// UUIDs is not one a person can use, and for a climb the *source*
+    /// is half of what is being judged (FLOW-6, ADR-0035 decision 9).
+    /// Absent only inside TEN-5's disposal window, when the scope the
+    /// proposal targets has already gone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_scope_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_scope_path: Option<String>,
     asset: String,
     channel: Channel,
     /// The five-state vocabulary tech plan §2.3 describes: the stored
@@ -168,8 +190,44 @@ struct ApprovalView {
     created_at: DateTime<Utc>,
 }
 
+/// What publishing this proposal would do to the target's published
+/// channel, for one member (FLOW-6, ADR-0035 decision 5). Membership in
+/// the target's tree is the predicate — the same sense of "this scope
+/// holds it" ADR-0034 decision 3 used one scope over.
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+enum MemberEffect {
+    /// The channel names no version of this record; publication admits it.
+    Add,
+    /// The channel names it at a different address; publication replaces
+    /// that version with this one.
+    Update,
+    /// The channel already names it at exactly this address; publication
+    /// changes nothing about this member.
+    None,
+}
+
+/// The version the target's published channel holds for a member now —
+/// the old side of the diff, present only for [`MemberEffect::Update`].
+///
+/// This is the one content-visibility widening in FLOW-6 (ADR-0035
+/// decision 8): a reviewer holding no `MemoryRead` sees what a
+/// publication would overwrite. Bounded by the proposal's own member set,
+/// the target's own channel, and the target scope the reviewer already
+/// holds `ProposalRead` on — and admitted because a review of a change
+/// that hides one side of the change is not a review.
+#[derive(Serialize)]
+struct BaselineView {
+    /// The address the target's tree names for this record today.
+    object_hash: String,
+    /// That object's canonical bytes as text (ADR-0030 decision 4's
+    /// human-readable form, which FLOW-1 chose for exactly this).
+    text: String,
+}
+
 /// One member of a proposal — the id and the address that was proposed,
-/// plus the record's current content so a reviewer can review it.
+/// plus what a reviewer needs to review it: the bytes under review, the
+/// bytes they would replace, and the record's current content.
 #[derive(Serialize)]
 struct MemberView {
     record_id: RecordId,
@@ -181,7 +239,20 @@ struct MemberView {
     unchanged: bool,
     class: String,
     sensitivity: Sensitivity,
+    /// The record's text **as it stands now**. Beside `unchanged` this is
+    /// what makes drift legible; it is not what the approvals bind.
     content: String,
+    /// What publication would do to the target's channel for this member.
+    effect: MemberEffect,
+    /// The canonical bytes at the proposed address — what the approvals
+    /// bind, read from the object store rather than re-derived from the
+    /// record, because an edited record is no longer what anyone approved
+    /// (ADR-0035 decision 6). Empty only if the object is missing, which
+    /// the append-only store makes impossible.
+    proposed: String,
+    /// The version being replaced, when there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline: Option<BaselineView>,
 }
 
 /// One proposal, in full.
@@ -576,7 +647,15 @@ async fn open_inner(
     commit(tx).await?;
 
     Ok(Json(OpenResponse {
-        summary: render(&proposal, &requirement, &outstanding),
+        summary: render(
+            &proposal,
+            &ScopePaths {
+                target: Some(node.path.clone()),
+                source: Some(source.path.clone()),
+            },
+            &requirement,
+            &outstanding,
+        ),
     }))
 }
 
@@ -697,6 +776,7 @@ async fn approve_inner(
     let mut now = cast;
     now.push(candidate.clone());
     let after = requirement.outstanding(&now);
+    let paths = ScopePaths::resolve(&mut tx, &proposal, &node).await?;
     audit::record(
         &mut tx,
         tenant_id,
@@ -718,7 +798,7 @@ async fn approve_inner(
     commit(tx).await?;
 
     Ok(Json(ReviewResponse {
-        summary: render(&proposal, &requirement, &after),
+        summary: render(&proposal, &paths, &requirement, &after),
         counted_roles: candidate
             .roles
             .iter()
@@ -800,6 +880,7 @@ async fn reject_inner(
     vedaflow::proposals::act("rejected", proposal.asset);
 
     let requirement = requirement_for(state, &mut tx, tenant_id, &input, &node, &proposal).await?;
+    let paths = ScopePaths::resolve(&mut tx, &proposal, &node).await?;
     audit::record(
         &mut tx,
         tenant_id,
@@ -827,7 +908,7 @@ async fn reject_inner(
     closed.state = ProposalState::Rejected;
     closed.close_reason = Some(reason.to_owned());
     let outstanding = requirement.outstanding(&[]);
-    Ok(Json(render(&closed, &requirement, &outstanding)))
+    Ok(Json(render(&closed, &paths, &requirement, &outstanding)))
 }
 
 /// `POST /v1/proposals/{id}/withdraw` — the proposer closes their own.
@@ -876,6 +957,7 @@ pub(crate) async fn withdraw(
         vedaflow::proposals::act("withdrawn", proposal.asset);
         let requirement =
             requirement_for(&state, &mut tx, tenant_id, &input, &node, &proposal).await?;
+        let paths = ScopePaths::resolve(&mut tx, &proposal, &node).await?;
         audit::record(
             &mut tx,
             tenant_id,
@@ -895,7 +977,7 @@ pub(crate) async fn withdraw(
         let mut closed = proposal;
         closed.state = ProposalState::Withdrawn;
         let outstanding = requirement.outstanding(&[]);
-        Ok(Json(render(&closed, &requirement, &outstanding)))
+        Ok(Json(render(&closed, &paths, &requirement, &outstanding)))
     }
     .await;
     respond(&state, "withdraw", result).await
@@ -1238,20 +1320,56 @@ async fn summarise(
             let requirement = ApprovalRequirement::default();
             return Ok(render(
                 proposal,
+                &ScopePaths::default(),
                 &requirement,
                 &requirement.outstanding(&[]),
             ));
         }
     };
+    let paths = ScopePaths::resolve(tx, proposal, &node).await?;
     let requirement = requirement_for(state, tx, tenant_id, input, &node, proposal).await?;
     let recorded = vedaflow::proposals::approvals(tx, tenant_id, proposal.id).await?;
     let cast = vedaflow::proposals::cast_for(&recorded, proposal.commit);
     let outstanding = requirement.outstanding(&cast);
-    Ok(render(proposal, &requirement, &outstanding))
+    Ok(render(proposal, &paths, &requirement, &outstanding))
+}
+
+/// The two scopes a proposal names, as a person reads them (FLOW-6,
+/// ADR-0035 decision 9). `None` on either side is TEN-5's disposal
+/// window: the scope is gone and the proposal's rows await disposal.
+#[derive(Default)]
+struct ScopePaths {
+    target: Option<String>,
+    source: Option<String>,
+}
+
+impl ScopePaths {
+    /// Resolves both from the target node the caller already holds. The
+    /// source costs a read only when it differs — that is, only for a
+    /// climb, which is the only case where the two paths say different
+    /// things.
+    async fn resolve(
+        tx: &mut sqlx::PgConnection,
+        proposal: &vedaflow::StoredProposal,
+        target: &HierarchyNode,
+    ) -> Result<Self> {
+        let source = if proposal.source_scope_id == proposal.target_scope_id {
+            Some(target.path.clone())
+        } else {
+            hierarchy::node(&mut *tx, proposal.source_scope_id)
+                .await?
+                .map(|node| node.path)
+        };
+        Ok(Self {
+            target: Some(target.path.clone()),
+            source,
+        })
+    }
 }
 
 fn render(
     proposal: &vedaflow::StoredProposal,
+    paths: &ScopePaths,
     requirement: &ApprovalRequirement,
     outstanding: &synveda_types::Outstanding,
 ) -> ProposalSummary {
@@ -1259,6 +1377,8 @@ fn render(
         id: proposal.id,
         target_scope_id: proposal.target_scope_id,
         source_scope_id: proposal.source_scope_id,
+        target_scope_path: paths.target.clone(),
+        source_scope_path: paths.source.clone(),
         asset: proposal.asset.as_str().to_owned(),
         channel: proposal.channel,
         state: ProposalView::of(proposal.state, outstanding.is_empty()),
@@ -1276,7 +1396,9 @@ fn render(
     }
 }
 
-/// A proposal's members with their current content and a drift flag.
+/// A proposal's members with their current content, a drift flag, and the
+/// two sides of the diff a reviewer needs (FLOW-6, ADR-0035 decisions 5
+/// and 6).
 async fn member_views(
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
@@ -1289,6 +1411,27 @@ async fn member_views(
     // make every climb unreviewable (ADR-0034 decision 3). The address
     // comparison below is what says whether they still match the review.
     let versions = records::current_many(&mut *tx, tenant_id, &ids).await?;
+    // The baseline is the **target's** channel, which for a climb is the
+    // ancestor's: what the proposal would move is the target's published
+    // set, so that is what the diff is against.
+    let published = published_at(tx, tenant_id, proposal.target_scope_id).await?;
+    // Both sides of every member's diff, in one statement rather than two
+    // per member (ADR-0035 decision 10).
+    let mut wanted: Vec<vedaflow::hash::ObjectHash> =
+        proposed.iter().map(|member| member.object).collect();
+    wanted.extend(ids.iter().filter_map(|id| published.get(id).copied()));
+    let objects = vedaflow::read_objects(tx, tenant_id, &wanted).await?;
+    // The store is append-only, so an address a tree or a commit names
+    // always resolves; a miss would be corruption, and rendering it as an
+    // empty side is honest about having nothing to show rather than
+    // failing a review that is otherwise fine.
+    let text_at = |hash: &vedaflow::hash::ObjectHash| -> String {
+        objects
+            .get(hash)
+            .map(|object| String::from_utf8_lossy(&object.content).into_owned())
+            .unwrap_or_default()
+    };
+
     Ok(proposed
         .into_iter()
         .zip(ids)
@@ -1309,6 +1452,17 @@ async fn member_views(
                 // exactly what publishing will refuse on.
                 None => (false, String::new(), proposal.sensitivity, String::new()),
             };
+            let (effect, baseline) = match published.get(&record_id) {
+                None => (MemberEffect::Add, None),
+                Some(held) if *held == member.object => (MemberEffect::None, None),
+                Some(held) => (
+                    MemberEffect::Update,
+                    Some(BaselineView {
+                        object_hash: held.to_hex(),
+                        text: text_at(held),
+                    }),
+                ),
+            };
             MemberView {
                 record_id,
                 object_hash: member.object.to_hex(),
@@ -1316,6 +1470,9 @@ async fn member_views(
                 class,
                 sensitivity,
                 content,
+                effect,
+                proposed: text_at(&member.object),
+                baseline,
             }
         })
         .collect())

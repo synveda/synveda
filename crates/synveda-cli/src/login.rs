@@ -196,41 +196,54 @@ pub async fn login(
     Ok(())
 }
 
-/// Returns a currently-valid bearer for `profile`, refreshing through the
-/// gateway when the stored access token is spent (ADR-0027 decision 4).
-/// This is what the Claude Code adapter's hooks shell out to, so its
-/// stdout is a contract: the raw token, or one JSON object.
-pub async fn auth_token(profile_name: String, json: bool) -> Result<(), String> {
-    let mut profile = credentials::profile(&profile_name)?;
+/// The profile with a currently-valid access token, refreshing through
+/// the gateway when the stored one is spent (ADR-0027 decision 4).
+///
+/// One implementation of expiry, skew, and refresh in this binary:
+/// `synveda auth token` prints what this returns, and every governed
+/// command (`synveda proposal ...`, FLOW-6) carries it as its bearer. A
+/// second copy would drift, and the thing it would drift on is whether a
+/// reviewer's approval reaches the gateway at all.
+pub async fn resolve(profile_name: &str) -> Result<Profile, String> {
+    let mut profile = credentials::profile(profile_name)?;
     let skew = chrono::Duration::seconds(REFRESH_SKEW_SECS);
-
-    if !profile.valid_for(skew) {
-        let Some(refresh_token) = profile.refresh_token.clone() else {
-            return Err(format!(
-                "the credentials for profile `{profile_name}` have expired and this \
-                 issuer granted no refresh token; run `synveda login` again"
-            ));
-        };
-        match refresh(&profile.gateway_url, &profile.issuer, &refresh_token).await {
-            Ok(refreshed) => {
-                profile.access_token = refreshed.access_token;
-                profile.token_type = refreshed.token_type;
-                profile.expires_at = refreshed
-                    .expires_in
-                    .map(|seconds| Utc::now() + chrono::Duration::seconds(seconds as i64));
-                // Issuers that rotate refresh tokens invalidate the old one;
-                // keep the new one or the next refresh fails.
-                if refreshed.refresh_token.is_some() {
-                    profile.refresh_token = refreshed.refresh_token.clone();
-                }
-                credentials::store(&profile_name, profile.clone())?;
-            }
-            Err(error) => match recover(&profile, &error) {
-                Recovery::UseStored => eprintln!("synveda: {error}; using the stored token"),
-                Recovery::Fail(message) => return Err(message),
-            },
-        }
+    if profile.valid_for(skew) {
+        return Ok(profile);
     }
+
+    let Some(refresh_token) = profile.refresh_token.clone() else {
+        return Err(format!(
+            "the credentials for profile `{profile_name}` have expired and this \
+             issuer granted no refresh token; run `synveda login` again"
+        ));
+    };
+    match refresh(&profile.gateway_url, &profile.issuer, &refresh_token).await {
+        Ok(refreshed) => {
+            profile.access_token = refreshed.access_token;
+            profile.token_type = refreshed.token_type;
+            profile.expires_at = refreshed
+                .expires_in
+                .map(|seconds| Utc::now() + chrono::Duration::seconds(seconds as i64));
+            // Issuers that rotate refresh tokens invalidate the old one;
+            // keep the new one or the next refresh fails.
+            if refreshed.refresh_token.is_some() {
+                profile.refresh_token = refreshed.refresh_token.clone();
+            }
+            credentials::store(profile_name, profile.clone())?;
+        }
+        Err(error) => match recover(&profile, &error) {
+            Recovery::UseStored => eprintln!("synveda: {error}; using the stored token"),
+            Recovery::Fail(message) => return Err(message),
+        },
+    }
+    Ok(profile)
+}
+
+/// Prints a currently-valid bearer for `profile`. This is what the Claude
+/// Code adapter's hooks shell out to, so its stdout is a contract: the raw
+/// token, or one JSON object.
+pub async fn auth_token(profile_name: String, json: bool) -> Result<(), String> {
+    let profile = resolve(&profile_name).await?;
 
     if json {
         println!(

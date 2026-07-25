@@ -16,8 +16,11 @@
 // they hold a lock while they do it.
 #![cfg_attr(not(test), forbid(unsafe_code))]
 
+mod api;
 mod credentials;
+mod diff;
 mod login;
+mod proposal;
 
 use std::process::ExitCode;
 use std::time::Duration;
@@ -29,7 +32,8 @@ use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::{Hs256Verifier, personal_slug};
 use synveda_types::{
     CompositionConfig, IdentityId, IdentityKind, InjectChannels, PackConfig, PromotionConfig,
-    RedactionConfig, RedactionMode, Role, ScopeId, ScopeKind, TenantId, TenantStatus,
+    ProposalId, ProposalState, RedactionConfig, RedactionMode, Role, ScopeId, ScopeKind, TenantId,
+    TenantStatus,
 };
 
 #[derive(Parser)]
@@ -97,6 +101,110 @@ enum Command {
     /// auditor's chain check ahead of AUD-2's query surface.
     #[command(subcommand)]
     Audit(AuditCommand),
+    /// The VedaFlow review flow (FLOW-6, ADR-0035): read, review, and
+    /// decide promotion proposals from a terminal.
+    ///
+    /// These are not dev plumbing, and they open no database connection.
+    /// Every verb is a call to /v1/proposals under the bearer `synveda
+    /// login` stored, so the PDP decides who may act exactly as it would
+    /// for a console, and the gateway chains the event under your own
+    /// identity. Run `synveda login` first.
+    #[command(subcommand)]
+    Proposal(ProposalCommand),
+}
+
+#[derive(Subcommand)]
+enum ProposalCommand {
+    /// List proposals, newest first.
+    ///
+    /// Without `--scope` this is a tenant-wide listing, which the packs
+    /// grant to tenant-wide review and admin roles only; a curator bound
+    /// at one team passes `--scope` instead.
+    List {
+        /// Restrict to proposals targeting this scope.
+        #[arg(long)]
+        scope: Option<ScopeId>,
+        /// Restrict to one stored state (open/rejected/withdrawn/
+        /// published). `approved` is computed, not stored: filter on
+        /// `open` and read each row's state.
+        #[arg(long)]
+        state: Option<ProposalState>,
+        /// How many, 1..=500.
+        #[arg(long)]
+        limit: Option<i64>,
+        /// Print the gateway's answer verbatim.
+        #[arg(long)]
+        json: bool,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Show one proposal in full: what it needs, who has acted, and what
+    /// publishing it would do to the target's channel — with a diff.
+    Show {
+        /// The proposal UUID.
+        id: ProposalId,
+        /// Print the gateway's answer verbatim.
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Walk the open proposals one at a time, rendering each in full and
+    /// asking for a verdict. Oldest first. End of input casts nothing.
+    Review {
+        /// Review just this one.
+        id: Option<ProposalId>,
+        /// Restrict the queue to one scope.
+        #[arg(long)]
+        scope: Option<ScopeId>,
+        /// How many to queue, 1..=500.
+        #[arg(long)]
+        limit: Option<i64>,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Approve one proposal.
+    Approve {
+        /// The proposal UUID.
+        id: ProposalId,
+        /// What you want to say about it.
+        #[arg(long)]
+        comment: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Reject one proposal, with a reason. Terminal — a revision is a new
+    /// proposal.
+    Reject {
+        /// The proposal UUID.
+        id: ProposalId,
+        /// Why. Mandatory: a rejection an auditor cannot read the reason
+        /// for is not a review.
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Close your own proposal without a verdict. The proposer's act; a
+    /// reviewer rejects with a reason instead.
+    Withdraw {
+        /// The proposal UUID.
+        id: ProposalId,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Run an approved proposal's effect: move the target's published
+    /// channel. A separate act from the deciding approval by design
+    /// (ADR-0032 decision 9) — it takes `ChannelPublish` and `MemoryRead`
+    /// at the target, which the deciding reviewer may not hold.
+    Publish {
+        /// The proposal UUID.
+        id: ProposalId,
+        #[arg(long)]
+        profile: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -777,6 +885,40 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Proposal(command) => match command {
+            ProposalCommand::List {
+                scope,
+                state,
+                limit,
+                json,
+                profile,
+            } => proposal::list(&profile_name(profile), scope, state, limit, json).await,
+            ProposalCommand::Show { id, json, profile } => {
+                proposal::show(&profile_name(profile), id, json).await
+            }
+            ProposalCommand::Review {
+                id,
+                scope,
+                limit,
+                profile,
+            } => proposal::review(&profile_name(profile), id, scope, limit).await,
+            ProposalCommand::Approve {
+                id,
+                comment,
+                profile,
+            } => proposal::approve(&profile_name(profile), id, comment).await,
+            ProposalCommand::Reject {
+                id,
+                reason,
+                profile,
+            } => proposal::reject(&profile_name(profile), id, reason).await,
+            ProposalCommand::Withdraw { id, profile } => {
+                proposal::withdraw(&profile_name(profile), id).await
+            }
+            ProposalCommand::Publish { id, profile } => {
+                proposal::publish(&profile_name(profile), id).await
+            }
+        },
         Command::Token(TokenCommand::Issue {
             tenant,
             subject,

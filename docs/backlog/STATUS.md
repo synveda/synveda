@@ -4,6 +4,12 @@
 feature in this directory. Phases per the Sequencing section. Regenerate with
 `node scripts/generate-backlog.mjs` (preserves done-marks listed in the script).
 
+Note (2026-07-25): the per-feature **narrative paragraphs** below are
+hand-written here and are *not* in the generator's `PHASE_NOTES`, so a
+regeneration would discard everything from FLOW-3's paragraph onward. Add
+the done-mark to `DONE` in the script as usual; if you ever need to
+regenerate, lift the paragraphs out of git first.
+
 Phase 1+ must not start until FND is complete and `make dev-up && make smoke`
 passes (CLAUDE.md, current phase).
 
@@ -578,7 +584,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [FLOW-3: Proposals & approval matrix](FLOW-3.md) — done 2026-07-25, ADR-0032, AC tests: crates/synveda-policy/tests/approvals.rs (the **full matrix golden**: 3 packs × 5 asset kinds × 4 sensitivities × 5 scope kinds = 300 cells rendered canonically against tests/golden/approval-matrix.txt, so a wrong requirement and a wrong *absence* of one both fail and the diff names the cell; plus the packs proven to actually differ where tech plan §2.4 says they do, the floor holding under a pack written specifically to author it away, and an unsatisfiable matrix refused at install rather than discovered at review), crates/synveda-gateway/tests/proposals.rs (the **team→published promotion with 1 curator** over the product surfaces — a contributor opens, the response states what the pack requires and that it is unmet, the contributor cannot run the effect, the curator reads the content and approves, and the publication is a merge commit whose second parent is the proposal; and **restricted → compliance + dual approval**, refused on the direct route by name, refused again for a principal holding *both* roles because two distinct approvers means two people, then carried by curator + compliance — with the deciding compliance vote unable to publish, which is the case that decided against auto-publishing; plus approvals binding bytes, a curator file adding a named approver without granting them anything, rejection/withdrawal, and the uniform 404), crates/synveda-store/tests/rls.rs (the two new tables join the adversarial suite and its completeness guard: a forged approval on another tenant's proposal, the append-only review log, and the one permitted open → closed transition), crates/synveda-types (18 unit tests on the counting rule) and crates/synveda-vedaflow (curator-file parsing, the one-wildcard glob, and approvals that never carry to another commit), demo: demos/flow-3-proposals.sh
 - [x] [FLOW-4: Auto-promotion rules](FLOW-4.md) — done 2026-07-25, ADR-0033, AC tests: crates/synveda-gateway/tests/promotion.rs (the **soak**, over real product surfaces with a real signal — nothing writes a usage counter, every recall is an actual `POST /v1/inject` whose `context.injected` event the engine folds out of the audit chain: two recalls open nothing, the third crosses the rule's threshold and a proposal appears with nobody deciding to, targeting the scope the material already sits on, proposed under the *owner's* identity rather than a system principal; and the **evidence**, which is checked rather than displayed — `evidence_is_checkable_against_the_chain` re-derives the recall and distinct-member counts from the hash-chained events in the `[from_seq, to_seq]` range the evidence names, without consulting the projection that produced it; plus a ten-round soak that never proposes the same bytes twice, a rejection binding those bytes and an edit freeing them, the projection discarded and refolded from seq 1 to the identical counts, a quarantined owner proposing nothing, an unconfigured pack promoting nothing while still sweeping usage, and — pinning the fact ADR-0033 decision 8 rests on — twenty injects by a teammate adding neither a member nor a recall to someone else's personal record), crates/synveda-store/tests/rls.rs (the two new tables join the adversarial suite and its completeness guard: a forged usage row, a rewound watermark that would refold a victim's chain and double their evidence, and the DELETE grant that makes the rebuild an operation rather than an aspiration), crates/synveda-types (16 unit tests on the rule vocabulary: every threshold load-bearing, the sensitivity ceiling, and refusal at install of a rule that asks nothing or could never fire), demo: demos/flow-4-auto-promotion.sh (on a scratch database, the gateway's own background loop — not a test harness — crossing the threshold, then the evidence re-derived from the chain in SQL, idempotence under a continuing soak, a curator refused because publishing needs MemoryRead on material nobody else can read, and the owner publishing her own through the ordinary FLOW-3 path into a merge commit whose second parent is the proposal a rule opened)
 - [x] [FLOW-5: Cross-scope promotion](FLOW-5.md) — done 2026-07-25, ADR-0034, AC test: crates/synveda-gateway/tests/cross_scope.rs (the **two-level climb with distinct approver sets**, asserted from the reader's side because that is what makes it a promotion rather than a row: a platform-team runbook reaches Engineering and then ACME, and between the hops a payments-team member — who could not read platform before and still cannot — starts receiving it in her own \`POST /v1/inject\`, sectioned under the department and unmarked, while a member of *another department* still gets nothing until the second hop lands; each level refuses the level below by name, because bindings inherit downward and never up, and each publication takes what the pack asks at that scope kind — one curator at a team, a curator **and** a steward at a department or the org, with the steward unable to run the effect since steward reads no content in any pack; the **denial audited with reason** is the org's rejection between the hops, carrying its mandatory reason and both scopes, with the chain verifying over all of it; plus the direction rule refusing sideways and downward by name, the disclosure rule — a team curator cannot climb a teammate's personal memory and the owner can climb her own, then the curator reviews content she cannot read at its source — and the two senses in which a scope holds material, including the second hop proposed by a department that holds the record only by publishing it, and an edit that takes it out of both at once), crates/synveda-retrieval/tests/compose.rs (\`an_ancestors_published_channel_admits_a_record_living_below_it\`: the read-path half in isolation — the same record composes nothing when only a sibling team published it and composes as reviewed at the *department's* gradient position and section once the department does, surviving bank mode, with the record never moving), crates/synveda-gateway/tests/proposals.rs + crates/synveda-retrieval/tests/compose.rs (FLOW-2/3/4's suites unchanged and green: when source and target are the same scope both composition substitutions are identities), demo: demos/flow-5-cross-scope.sh (the runbook climbing \`acme/eng/platform → acme/eng → acme\` over the HTTP surfaces, with the two readers' injects before and after each hop, and the trail printed as a table whose from/to columns are the climb)
-- [ ] [FLOW-6: CLI review flow](FLOW-6.md)
+- [x] [FLOW-6: CLI review flow](FLOW-6.md) — done 2026-07-25, ADR-0035, AC demo: demos/flow-6-cli-review.sh (**the whole review from a terminal**, and shaped so the claim cannot be fudged: from the moment a proposal exists, every governed act is `synveda proposal ...` and `DATABASE_URL` is *unset* for all of it — cora lists her queue, reads one in full with its requirement and its effect, approves, and runs that effect; the runbook is then edited and re-proposed and the review renders it as an `update` with the published version beside it and one line marked out of three; `synveda proposal review` walks the queue oldest-first and takes three verdicts in one command — skip, reject with the empty reason refused and re-asked, approve — while the same command over `/dev/null` casts nothing at all; then the refusals a reviewer meets in the product's own words: a contributor denied `ProposalReview`, a team curator's tenant-wide listing denied with `--scope` named, a `restricted` record that one curator cannot carry, compliance reading content it holds no `MemoryRead` for and then unable to publish what it just decided; and the trail, where all twelve acts carry `actor_kind=subject` under the reviewer's own subject with **not one break-glass row**, chain verifying), AC tests: crates/synveda-gateway/tests/review_surface.rs (what the CLI cannot invent: `add`/`update`/`none` read off the *target's* tree rather than the record's row, the old side being the object the tree names now and the new side the object the **proposal** names — asserted specifically for a record edited under its own review, where the two differ; a `compliance` reviewer proven to compose nothing from `POST /v1/inject` at that scope and shown both sides of the change anyway, which is ADR-0035 decision 8 as a test rather than a paragraph; both scope paths on a climb through the listing and the detail; and a climb's baseline being the scope it would land on — the department `add`s what the team has already published, and only a second climb of the same bytes is the no-op), crates/synveda-cli (33 unit tests: the LCS line diff — hunk headers, context merging, identical texts producing nothing — the field-wise renderer refusing to show a sensitivity change as no change, the prompt whose EOF casts nothing and whose rejection is re-asked until it says why, the tenant-wide denial that names `--scope`, and refusals rendered from the shared taxonomy), crates/synveda-vedaflow (the batched object read the detail route uses so its statement count does not grow with the member set)
 - [ ] [FLOW-7: Rollback & pinning](FLOW-7.md)
 - [ ] [AUTHZ-4: Lapses (controlled relaxation)](AUTHZ-4.md)
 - [ ] [AUTHZ-5: ABAC conditions](AUTHZ-5.md)
@@ -696,6 +702,101 @@ that climbs accumulates at the org root, where `MAX_CHANNEL_MEMBERS`
 recorded upgrade. And a rewind at a source (FLOW-7) will not un-publish
 at the target — a climbed record survives its source's rollback, which is
 FLOW-7's decision to make, not this ADR's._
+
+_FLOW-6 (2026-07-25, ADR-0035): the CLI review flow. The feature adds no
+capability — FLOW-3 shipped every route it calls — so the whole of it is
+two questions: **who is a reviewer to this binary**, and **what do they
+have to be shown**.
+
+**A reviewer is a governed principal, not an operator.** `synveda
+proposal` opens no database connection, issues no SQL, and has no
+`--database-url`; every verb is an HTTP call under the bearer `synveda
+login` stored. That is not a style preference. This CLI already has a
+store-backed half — `db migrate`, `tenant create`, `policy apply`, `role
+bind` — which exists because a database with no usable gateway must still
+be bootstrapped, and which audits itself as break-glass with OS-user
+attribution. A review has no such moment. Approving is an act whose
+authority is `ProposalReview`, whose count is the approval matrix, and
+whose event is chained by the gateway; a CLI that inserted the approval
+row would be the counting rule acting as authority, from a laptop, and it
+would have to invent an identity, since `vedaflow_proposal_approvals`
+names an `IdentityId` and the roles held at the target and the break-glass
+actor has neither. The demo makes the claim un-fudgeable by **unsetting
+`DATABASE_URL`** before the review begins, and the trail at the end shows
+twelve governed acts with `actor_kind=subject` and not one break-glass
+row.
+
+**What a reviewer is shown is the effect on the target's channel, not the
+proposal's contents.** Publishing is keyed by record id, so a proposal
+either admits a record the channel does not name (`add`), replaces the
+version it does name (`update`), or changes nothing (`none`) — read off
+the *target's* tree, which for a climb is the ancestor's. The `update`
+case is the one a review surface exists for and the one that had no
+representation at all: FLOW-3's own AC establishes that the way to
+republish edited content is a new proposal, so the channel is holding the
+old version precisely when the review matters most, and
+`GET /v1/proposals/{id}` returned the record's current text and nothing to
+compare it with. It now returns both sides as object bytes.
+
+Three readings the implementation settled, recorded because they are
+behaviour. (1) **The new side is the object the proposal names, never the
+record's row.** Once a record has been edited under its own review those
+are two different texts, and showing the row would be showing content
+nobody proposed; `unchanged` marks the drift and `proposed` keeps naming
+what the approvals bind. (2) **The diff is field-wise with a line diff for
+the text.** A memory object is canonical JSON with sorted keys — the form
+`MemoryAsset::canonical_bytes` chose two features ago, in a comment that
+says "FLOW-6 renders diffs of it" — and diffing those bytes as text would
+render a multi-line content edit as one enormous escaped line, the worst
+rendering of the most important case, while a content-only diff would
+render a raised `sensitivity` or a closed `valid_to` as no change at all.
+(3) **`publish` and `withdraw` joined the five named verbs**, because a
+curator who can approve but not run the effect still has to leave the
+terminal, and the deciding approval deliberately does not publish
+(ADR-0032 decision 9). `open` deliberately did **not** join them: opening
+is the proposer's act, the AC is about review, and the demo opens its
+proposals the way proposals actually arrive — a contributor's POST, or a
+FLOW-4 rule with nobody deciding to.
+
+**One content-visibility widening, made on purpose.** Showing the old side
+means a `ProposalRead` holder sees what a publication would overwrite, and
+`compliance` holds no `MemoryRead` in any pack. It is admitted for the
+reason ADR-0034 decision 1 admitted the proposed side — a review of a
+change that hides one side of the change is not a review — and refusing it
+would make the one role the invariant floor requires on everything
+`restricted` approve replacements sight unseen. Bounded by the proposal's
+own member set, the target's own channel, and the scope the reviewer
+already reviews for; `review_surface.rs` asserts it against a compliance
+principal proven, in the same test, to compose nothing from `POST
+/v1/inject` at that scope.
+
+Deferrals and standing friction, all recorded in ADR-0035: a curator bound
+at one team is denied the tenant-wide listing (a *tenant*-resource
+decision the packs grant to tenant-wide review roles only) and must pass
+`--scope` — FLOW-3's boundary, not this feature's, and the CLI names the
+flag in the refusal rather than leaving someone to read a Cedar file. The
+detail response now carries up to three texts per member where it carried
+one, bounded by `MAX_PROPOSAL_MEMBERS` (200) and `MAX_OBJECT_BYTES` as
+before; a `?diff=` param is the recorded first move if size ever becomes
+the reason someone cannot review, ahead of pagination. The line diff is
+hand-written (LCS over lines, ~100 lines) rather than a dependency,
+because the core path's licence rule makes even a small one a reviewed
+diff — its correctness is ours, and the unit tests are the mitigation.
+PRMT-1's prompts and SKIL-1's skill bundles will need a per-asset-kind
+renderer behind the same seam, which is a new ADR rather than a widened
+`match`; until then a non-object payload falls back to a plain text diff
+rather than rendering nothing. And CNSL-1 landing does not retire this
+surface — a console that recomputes the diff instead of reading these
+fields is the bug.
+
+One thing worth naming that was not this feature's: the demo pattern
+every FLOW/CTX demo shares — start a gateway, poll `/healthz`, proceed —
+**cannot tell its own gateway from someone else's**. A leftover process
+from an earlier session held the port, the new gateway died on bind, and
+`healthz` answered from a stranger signed with a different dev secret; the
+symptom was a 401 on the first API call, twenty lines from the cause. This
+demo now checks the child process is alive before and after the poll and
+fails with the port named. The other demos still have it._
 
 _GRPH-4 (2026-07-25, ADR-0029): the phase gate ran first, because it is
 the only Phase 2 item that can invalidate an Accepted ADR and the schema
