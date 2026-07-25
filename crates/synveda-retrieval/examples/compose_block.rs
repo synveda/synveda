@@ -48,8 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &pack.name,
             pack.version,
             &pack.source,
-            pack.redaction,
-            pack.composition,
+            pack.config.clone(),
         )?;
     }
 

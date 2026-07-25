@@ -144,11 +144,15 @@ packs bumped to `@2`; governed requests also read the subject's
 bindings for the resource chain per request — kept per-request by
 design since HIER-2 (ADR-0016 decision 6).
 Roles whose actions land later are marker rows in the golden matrix
-until those features extend it: curator approvals (FLOW-3),
-security-reviewer (SKIL-2), compliance (AUTHZ-5/FLOW-3), auditor's
-audit surface (AUD-2), contributor writes (MEM-1 — closed 2026-07-19:
-`MemoryWrite` at bound non-personal scopes for contributor/curator,
-ADR-0020 decision 3)._
+until those features extend it: auditor's audit surface (AUD-2), and
+security-reviewer's skill approval (SKIL-2). Closed since: contributor
+writes (MEM-1, 2026-07-19 — `MemoryWrite` at bound non-personal scopes
+for contributor/curator, ADR-0020 decision 3); security-reviewer's first
+live action (MEM-2, 2026-07-19 — the quarantine review plane); curator's
+"can pin/approve" (FLOW-2, 2026-07-25 — the channel plane, then FLOW-3's
+proposal review); and **compliance** (FLOW-3, 2026-07-25 — `ProposalRead`
+and `ProposalReview`, with the invariant approval floor requiring the
+role on everything `restricted`, ADR-0032 decision 4)._
 
 _HIER-2 notes (ADR-0016): scope chains are cached in-process,
 invalidated post-commit by the hierarchy-mutating handlers; the gateway
@@ -571,7 +575,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 
 - [x] [FLOW-1: Object store](FLOW-1.md) — done 2026-07-25, ADR-0030, AC tests: crates/synveda-vedaflow/tests/object_store.rs (both properties over a live Postgres — dedup across objects, trees, and commits, with the row count pinned to the number of *distinct* (kind, content) pairs, and the same bytes in two tenants proven to be two rows at one address; immutability under 8 genuinely concurrent writers on their own connections, asserting every landed commit is reachable from the head, the chain is root + every commit, and no commit row exists that the head cannot reach — the headline run reports the compare-and-swaps actually lost, and fails if none were, since a race nobody lost tested nothing; plus the append-only grants and triggers, a trigger-suppressing attacker caught by `verify`, fast-forward vs. force, and the foreign keys refusing a dangling tree, parent, or entry), crates/synveda-store/tests/rls.rs (the six VedaFlow tables join the adversarial suite and its completeness guard), crates/synveda-vedaflow (27 unit tests: the length-prefixed encodings, per-kind domain separation, parent order, the policy-snapshot canonical form, and the signer seam), demo: demos/flow-1-object-store.sh
 - [x] [FLOW-2: Channels](FLOW-2.md) — done 2026-07-25, ADR-0031, AC test: crates/synveda-gateway/tests/channels.rs (the bank-mode switch over real refs, end to end on product surfaces: extracted memories land on `{scope}/memory/derived`, a curator publishes one through `POST /v1/channels/{scope}/publish` under the PDP, inject renders it unmarked while the rest still says unreviewed, a `published-only` pack becomes the tenant default, and the very next inject — same token, same session, no restart — composes the published record alone and cites the commit the curator made; plus the PDP gate, the read requirement that keeps a curator out of a teammate's personal scope, whole-request refusal of another scope's record, the `vedaflow.channel.published` event carrying ids and addresses but never content, and `GET /v1/channels`), crates/synveda-retrieval/tests/compose.rs (12 tests on real channels — including authored-but-unpublished material failing bank mode, and an edit demoting a published record to unreviewed), crates/synveda-gateway/tests/extraction.rs (the derived-channel commit lands in the pipeline's own write transaction), crates/synveda-policy/tests/{roles,packs,pdp}.rs (the channel plane joins the role×action matrix at pack `@6`), demo: demos/flow-2-channels.sh
-- [ ] [FLOW-3: Proposals & approval matrix](FLOW-3.md)
+- [x] [FLOW-3: Proposals & approval matrix](FLOW-3.md) — done 2026-07-25, ADR-0032, AC tests: crates/synveda-policy/tests/approvals.rs (the **full matrix golden**: 3 packs × 5 asset kinds × 4 sensitivities × 5 scope kinds = 300 cells rendered canonically against tests/golden/approval-matrix.txt, so a wrong requirement and a wrong *absence* of one both fail and the diff names the cell; plus the packs proven to actually differ where tech plan §2.4 says they do, the floor holding under a pack written specifically to author it away, and an unsatisfiable matrix refused at install rather than discovered at review), crates/synveda-gateway/tests/proposals.rs (the **team→published promotion with 1 curator** over the product surfaces — a contributor opens, the response states what the pack requires and that it is unmet, the contributor cannot run the effect, the curator reads the content and approves, and the publication is a merge commit whose second parent is the proposal; and **restricted → compliance + dual approval**, refused on the direct route by name, refused again for a principal holding *both* roles because two distinct approvers means two people, then carried by curator + compliance — with the deciding compliance vote unable to publish, which is the case that decided against auto-publishing; plus approvals binding bytes, a curator file adding a named approver without granting them anything, rejection/withdrawal, and the uniform 404), crates/synveda-store/tests/rls.rs (the two new tables join the adversarial suite and its completeness guard: a forged approval on another tenant's proposal, the append-only review log, and the one permitted open → closed transition), crates/synveda-types (18 unit tests on the counting rule) and crates/synveda-vedaflow (curator-file parsing, the one-wildcard glob, and approvals that never carry to another commit), demo: demos/flow-3-proposals.sh
 - [ ] [FLOW-4: Auto-promotion rules](FLOW-4.md)
 - [ ] [FLOW-5: Cross-scope promotion](FLOW-5.md)
 - [ ] [FLOW-6: CLI review flow](FLOW-6.md)
@@ -763,6 +767,91 @@ FLOW-8's export covers `published` cleanly and would need the snapshot
 question reopened for `derived`; records written before this feature have
 no derived commit and are simply unpublished material, with no backfill
 attempted. Signing stays `Unsigned` — key management is still TEN-4's._
+
+_FLOW-3 (2026-07-25, ADR-0032): proposals and the approval matrix — the
+review ADR-0031 wrote its own reversal trigger against ("FLOW-3 landing →
+publication moves behind proposals"). It is discharged in the form that
+keeps **one** matrix rather than two paths: the direct
+`POST /v1/channels/{scope}/publish` resolves the same requirement a
+proposal does, with the acting principal counting as the only approver.
+A curator publishing internal memory under `regulated-strict` still works
+— the matrix asks for one curator and one curator acted — and a
+`restricted` record refuses, names the missing role, and points at the
+proposal route. The direct route did not become a hole to close; it
+became the degenerate case where one approval is enough, which is why
+FLOW-2's acceptance walk still passes unchanged.
+
+**A proposal is a commit plus a row.** The commit is the reviewed
+content, a tree naming every member at the address of exactly the version
+proposed; the row is workflow, and a trigger permits it one transition,
+open → closed. It gets no ref: a ref names a moving head, and one ref per
+proposal would leave a permanent pointer per closed proposal in a table
+that deliberately holds no DELETE grant. That also settles `staged` —
+FLOW-3 is not its writer after all, for a reason now known rather than
+pending: a set channel cannot express withdrawal, and "what is open here"
+is one indexed query that stays correct where a set would drift.
+
+**Approvals bind the commit, and publication rechecks the bytes.**
+ADR-0031 decision 5 one layer up: approve, edit, publish is the attack,
+and publishing recomputes every address from the record as it stands then
+and refuses with a `Conflict` naming the record that moved. The review
+surface shows the drift before anyone tries.
+
+**The floor is the `base.cedar` pattern applied to configuration.** Two
+rules merge into every matrix — embedded pack, stored pack, or none at
+all: anything `restricted` needs `compliance` and two distinct approvers;
+any `skill` needs `security-reviewer`. There is deliberately no API that
+resolves a matrix without them. `compliance` and `security-reviewer` stop
+being marker roles here.
+
+Three readings the ADR settles because they are behaviour, not taste.
+(1) **No self-approval ban.** It was the obvious rule and the wrong one:
+on the direct route the actor is necessarily the only approver, so a ban
+would make the two paths disagree about the same matrix.
+`distinct_approvers` expresses separation of duties precisely and
+identically at both surfaces, and one person holding two required roles
+satisfies both role lines while still counting as one identity.
+(2) **The deciding approval does not publish.** Auto-publishing would run
+under system authority exactly when a `compliance` reviewer casts the
+deciding vote — a role with no publish grant in any pack — and no
+spelling of that is not a PDP bypass. `POST /v1/proposals/{id}/publish`
+takes the same two decisions the direct route takes.
+(3) **`approved` is a rendering, not a stored state.** Requirements
+resolve live (a pack switch governs the very next request, ADR-0014
+decision 3), so a stored `approved` would need a background re-evaluator
+or it would be a lie; the stored column holds only what happened.
+
+**Curator files add requirements and grant nothing.** A per-scope
+CODEOWNERS-shaped file, stored as an `AssetKind::Policy` object under a
+`curators` ref, resolved nearest-ancestor-first like pack assignment. A
+named subject still has to pass `ProposalReview`, so a file naming
+someone the pack denies makes a proposal unsatisfiable rather than making
+that person an approver — `CompositionConfig`'s "the config never grants"
+rule, on the other side of the boundary. Written through `PolicyAssign`
+rather than a new action: the steward who can swap the whole pack can
+obviously edit the file its matrix composes with.
+
+The publication of a proposal is a **merge commit**, `[channel head,
+proposal commit]`, so tech plan §2.5's "every published sentence traces
+to an author through an approval" is a fact about the commit graph rather
+than a join, and FLOW-8 carries it into a real repository for free.
+
+Deferrals and forward obligations: **there is no revise verb** — a
+revision is a new proposal, and the machinery exists (approvals name a
+commit) but the surface does not, because a proposal whose content
+changes under its approvals is a review nobody consented to. FLOW-3 is
+same-scope; **FLOW-5 relaxes `source_scope_id = target_scope_id`** and
+inherits the disclosure question a climb raises, which is why
+`ProposalRead` is shaped like `MemoryRead` now. `MAX_OPEN_PROPOSALS`
+(500 per scope) is the reviewer-DoS bound FLOW-4's rule engine will press
+on. The curator file's glob language is one wildcard on purpose and will
+need real path semantics when SKIL-1 and PRMT-1 bring path-named
+entries — the shape is accepted now so that growth is not a format
+change. Rejected and withdrawn proposals leave unreferenced commits,
+which is the packing/GC question ADR-0030 left open and does not worsen
+in kind. `PackConfig` replaced the three positional config arguments
+`policy_packs::apply` and `Pdp::install_source` were growing. Signing
+stays `Unsigned`; key management is still TEN-4's._
 
 ## Phase 3 — Enterprise (wk 11–16)
 

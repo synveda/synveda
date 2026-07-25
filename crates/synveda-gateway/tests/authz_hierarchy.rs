@@ -26,7 +26,7 @@ use synveda_gateway::{authz, telemetry};
 use synveda_identity::Hs256Verifier;
 use synveda_policy::{Pdp, REGULATED_STRICT};
 use synveda_store::{policy_assignments, policy_packs, rls, role_bindings};
-use synveda_types::{Role, TenantId};
+use synveda_types::{PackConfig, Role, TenantId};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"authz-1-test-secret";
@@ -163,7 +163,7 @@ async fn store_pack(pool: &PgPool, tenant: TenantId, name: &str, source: &str) {
     let mut tx = rls::begin_tenant_tx(pool, tenant)
         .await
         .expect("begin tenant tx");
-    policy_packs::apply(&mut *tx, tenant, name, source, None, None)
+    policy_packs::apply(&mut *tx, tenant, name, source, &PackConfig::default())
         .await
         .expect("store pack");
     tx.commit().await.expect("commit pack");

@@ -651,6 +651,7 @@ async fn commit_group(
                 scope: batch.scope,
                 channel: vedaflow::ChannelRef::memory(Channel::Derived),
                 members: &batch.members,
+                merge_parents: &[],
                 author: *owner,
                 message: &message,
                 committed_at: now,

@@ -156,4 +156,35 @@ namespace Synveda {
             resource: [Scope],
             context: { roles: Set<String> },
         };
+
+    // The VedaFlow proposal plane (/v1/proposals/*, FLOW-3, ADR-0032
+    // decision 16): reading proposals, opening one against a scope, and
+    // casting a review verdict on one.
+    //
+    // These decide who may act, never how many acts are needed. "Have
+    // enough of the right people approved" is a count over stored
+    // approvals that the PDP cannot see and must not be given storage to
+    // see (seed §2.4); that arithmetic lives in the approval matrix the
+    // pack carries beside its policies.
+    //
+    // ProposalRead applies to the Tenant as well as a Scope: the review
+    // inbox (FLOW-6's `proposal list`, CNSL-1's hero screen) is a
+    // tenant-wide read, and the packs grant that to review and admin
+    // roles only — the per-scope membership floor deliberately does not
+    // reach it.
+    action ProposalRead
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Scope],
+            context: { roles: Set<String> },
+        };
+
+    // Opening and reviewing are always acts against a node — the target
+    // scope whose channel would move — never against the tenant.
+    action ProposalOpen, ProposalReview
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String> },
+        };
 }

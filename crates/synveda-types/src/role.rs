@@ -18,14 +18,20 @@ use crate::{Error, ScopeId, TenantId};
 /// The product role vocabulary (seed §5; ADR-0015 decision 1). Closed:
 /// new roles are a product decision, not tenant data, so packs and the
 /// golden matrix can name them portably.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// `Ord` is declaration order — the seed §5 ordering — so approval
+/// requirements sort into a stable, readable sequence (FLOW-3,
+/// ADR-0032). It carries no privilege meaning: `curator < steward` here
+/// is alphabetical-by-seed, not a lattice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Role {
     /// Read content in the bound subtree.
     Viewer,
     /// Viewer, plus content writes when the write surface lands (MEM-1).
     Contributor,
-    /// Contributor, plus pin/approve when proposals land (FLOW-3).
+    /// Contributor, plus the review authority seed §5 names: publishing
+    /// onto a channel (FLOW-2) and casting proposal verdicts (FLOW-3).
     Curator,
     /// Policy + membership administration for the bound subtree.
     Steward,
@@ -34,10 +40,15 @@ pub enum Role {
     /// Read-only administrative surfaces, including audit logs (AUD-2);
     /// never content.
     Auditor,
-    /// Approves executable skills (SKIL-2); marker until then.
+    /// Adjudicates quarantined observe events (MEM-2) and reviews
+    /// proposals — the approval floor requires one on every `skill`,
+    /// because a skill is executable (FLOW-3, ADR-0032 decision 4).
+    /// SKIL-2 brings the skills themselves.
     SecurityReviewer,
-    /// Approves restricted-sensitivity assets (FLOW-3, AUTHZ-5); marker
-    /// until then.
+    /// Reviews proposals, and the invariant approval floor requires the
+    /// role on everything `restricted` (FLOW-3, ADR-0032 decision 4).
+    /// Grants no content access: a compliance reviewer sees a proposal,
+    /// not the corpus. AUTHZ-5 adds classification-time duties.
     Compliance,
 }
 

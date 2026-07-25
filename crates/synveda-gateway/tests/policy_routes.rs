@@ -26,7 +26,7 @@ use synveda_gateway::{authz, telemetry};
 use synveda_identity::Hs256Verifier;
 use synveda_policy::{Pdp, REGULATED_STRICT};
 use synveda_store::{policy_packs, rls, role_bindings};
-use synveda_types::{Role, TenantId};
+use synveda_types::{PackConfig, Role, TenantId};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"authz-2-test-secret";
@@ -285,8 +285,7 @@ async fn assignments_govern_per_node_from_the_next_request() {
             tenant_id,
             "authz2-frozen",
             FROZEN_PACK,
-            None,
-            None,
+            &PackConfig::default(),
         )
         .await
         .expect("store pack");

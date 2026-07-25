@@ -96,7 +96,25 @@ pub enum Action {
     /// composes it as reviewed material. Never a tenant-level action —
     /// a channel belongs to a node — and never cross-scope: climbing to
     /// a higher scope's channel needs that scope's approvers (FLOW-5).
+    ///
+    /// Since FLOW-3 this decision is necessary but no longer sufficient:
+    /// the approval matrix resolved at the same scope decides whether the
+    /// acting principal's authority is enough on its own (ADR-0032
+    /// decision 8).
     ChannelPublish,
+    /// Read proposals targeting the resource scope — `GET /v1/proposals`
+    /// and `GET /v1/proposals/{id}` (FLOW-3, ADR-0032 decision 16).
+    ProposalRead,
+    /// Open a proposal against the resource scope's published channel.
+    /// Grants nothing — a proposal asks — so the packs floor it on
+    /// membership: a placed principal may propose at a scope it belongs
+    /// to (tech plan §2.3's climb).
+    ProposalOpen,
+    /// Cast a review verdict on a proposal at the resource scope. This is
+    /// where `compliance` and `security-reviewer` stop being markers.
+    /// Whether the verdicts recorded so far are *enough* is the approval
+    /// matrix's arithmetic, never this decision's (ADR-0032 decision 5).
+    ProposalReview,
 }
 
 impl Action {
@@ -121,6 +139,9 @@ impl Action {
             Action::ServiceIdentityManage => "service_identity.manage",
             Action::ChannelRead => "channel.read",
             Action::ChannelPublish => "channel.publish",
+            Action::ProposalRead => "proposal.read",
+            Action::ProposalOpen => "proposal.open",
+            Action::ProposalReview => "proposal.review",
         }
     }
 
@@ -143,6 +164,9 @@ impl Action {
             Action::ServiceIdentityManage => "ServiceIdentityManage",
             Action::ChannelRead => "ChannelRead",
             Action::ChannelPublish => "ChannelPublish",
+            Action::ProposalRead => "ProposalRead",
+            Action::ProposalOpen => "ProposalOpen",
+            Action::ProposalReview => "ProposalReview",
         }
     }
 }

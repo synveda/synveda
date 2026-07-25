@@ -21,6 +21,12 @@
 //! mutation, allowed read, denial, provisioning, and seam rejection chains
 //! into the tenant's hash-chained audit log through the [`audit`] seams.
 //!
+//! Since FLOW-2 the VedaFlow trust boundary has a surface ([`channels`],
+//! ADR-0031), and since FLOW-3 a review in front of it ([`proposals`] and
+//! [`curators`], ADR-0032): both publish paths resolve one approval
+//! matrix at [`approvals`], so what it takes to move content across the
+//! boundary is answered in one place.
+//!
 //! This is a library crate only so integration tests can build the router;
 //! nothing outside the workspace consumes it.
 
@@ -28,15 +34,18 @@
 #![warn(missing_docs)]
 
 pub mod app;
+mod approvals;
 mod audit;
 pub mod auth;
 pub mod authz;
 pub mod channels;
+pub mod curators;
 pub mod error;
 pub mod hierarchy;
 mod inject;
 pub mod observe;
 pub mod policy;
+pub mod proposals;
 mod provision;
 pub mod quarantine;
 pub mod roles;

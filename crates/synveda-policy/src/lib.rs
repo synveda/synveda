@@ -15,13 +15,14 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod approvals;
 mod entity_store;
 mod pdp;
 mod request;
 
 pub use pdp::{
     EMBEDDED_PACKS, EffectivePack, OPEN_COLLABORATION, PackOrigin, Pdp, REGULATED_STRICT, STANDARD,
-    is_reserved,
+    effective_roles_at, is_reserved,
 };
 pub use request::{Action, AuthzContext, AuthzDecision, Principal, Resource};
 

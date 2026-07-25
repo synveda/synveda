@@ -24,8 +24,8 @@ use synveda_store::{
     rls, role_bindings, tenants,
 };
 use synveda_types::{
-    Error, IdentityId, IdentityKind, ObserveKind, RecordClass, RecordId, RecordKind, Role, ScopeId,
-    ScopeKind, Sensitivity, TenantId, TenantStatus,
+    Error, IdentityId, IdentityKind, ObserveKind, PackConfig, RecordClass, RecordId, RecordKind,
+    Role, ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -213,6 +213,8 @@ const COVERED: &[&str] = &[
     "vedaflow_commit_parents",
     "vedaflow_commits",
     "vedaflow_objects",
+    "vedaflow_proposal_approvals",
+    "vedaflow_proposals",
     "vedaflow_refs",
     "vedaflow_tree_entries",
     "vedaflow_trees",
@@ -488,8 +490,7 @@ async fn seed_policy_pack(pool: &PgPool) -> TenantId {
         tenant,
         "rls-fixture",
         "permit (principal, action, resource);",
-        None,
-        None,
+        &PackConfig::default(),
     )
     .await
     .expect("apply pack");
@@ -542,7 +543,8 @@ fn cross_tenant_policy_pack_write_is_rejected() {
         let tenant = seed_policy_pack(&db.pool).await;
         let other = seed_policy_pack(&db.pool).await;
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let result = policy_packs::apply(&mut *tx, other, "forged", "permit;", None, None).await;
+        let result =
+            policy_packs::apply(&mut *tx, other, "forged", "permit;", &PackConfig::default()).await;
         assert!(
             matches!(result, Err(Error::Internal { .. })),
             "cross-tenant pack write must be rejected by RLS as an internal \
@@ -560,13 +562,25 @@ fn same_tenant_policy_pack_lifecycle_works_under_rls() {
     db.rt.block_on(async {
         let tenant = seed_policy_pack(&db.pool).await;
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let first = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "forbid;", None, None)
-            .await
-            .expect("apply under RLS");
+        let first = policy_packs::apply(
+            &mut *tx,
+            tenant,
+            "rls-lifecycle",
+            "forbid;",
+            &PackConfig::default(),
+        )
+        .await
+        .expect("apply under RLS");
         assert_eq!(first.version, 1, "a new name starts at v1");
-        let bumped = policy_packs::apply(&mut *tx, tenant, "rls-lifecycle", "permit;", None, None)
-            .await
-            .expect("re-apply under RLS");
+        let bumped = policy_packs::apply(
+            &mut *tx,
+            tenant,
+            "rls-lifecycle",
+            "permit;",
+            &PackConfig::default(),
+        )
+        .await
+        .expect("re-apply under RLS");
         assert_eq!(bumped.version, 2, "re-applying the name must bump to v2");
         let stored = policy_packs::get(&mut *tx, tenant, "rls-lifecycle")
             .await
@@ -2228,5 +2242,309 @@ fn same_tenant_vedaflow_lifecycle_works_under_rls() {
             "everything written in-tenant is visible in-tenant"
         );
         tx.commit().await.expect("commit");
+    });
+}
+
+// ── VedaFlow proposals (FLOW-3, ADR-0032) ───────────────────────────────────
+
+/// Seeds one tenant's proposal: the commit it names (the FK insists on real
+/// history), the row, and one recorded approval.
+///
+/// Raw SQL again, and for the same reason as [`seed_vedaflow`]: this suite is
+/// about the backstop, not about whether an address is honest.
+async fn seed_proposal(pool: &PgPool) -> (TenantId, ScopeId, uuid::Uuid) {
+    let (tenant, scope) = seed_vedaflow(pool).await;
+    let proposal = uuid::Uuid::now_v7();
+    let approver = IdentityId::new();
+    sqlx::query!(
+        "insert into vedaflow_proposals
+             (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
+              target_channel, commit_hash, sensitivity, title, proposer_id,
+              proposer_subject)
+         values ($1, $2, $3, $3, 'memory', 'published', $4, 'internal',
+                 'rls fixture proposal', $5, 'rls-fixture')",
+        tenant.as_uuid(),
+        proposal,
+        scope.as_uuid(),
+        &[4u8; 32][..],
+        approver.as_uuid(),
+    )
+    .execute(pool)
+    .await
+    .expect("seed proposal");
+    sqlx::query!(
+        "insert into vedaflow_proposal_approvals
+             (tenant_id, proposal_id, approver_id, commit_hash, verdict, roles,
+              approver_subject)
+         values ($1, $2, $3, $4, 'approve', array['curator']::text[], 'rls-fixture')",
+        tenant.as_uuid(),
+        proposal,
+        approver.as_uuid(),
+        &[4u8; 32][..],
+    )
+    .execute(pool)
+    .await
+    .expect("seed approval");
+    (tenant, scope, proposal)
+}
+
+/// Rows of `tenant` visible through the proposal tables, in the order
+/// (proposals, approvals).
+async fn visible_proposal_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64) {
+    let row = sqlx::query!(
+        r#"select
+             (select count(*) from vedaflow_proposals where tenant_id = $1)
+                 as "proposals!",
+             (select count(*) from vedaflow_proposal_approvals where tenant_id = $1)
+                 as "approvals!""#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count proposal rows");
+    (row.proposals, row.approvals)
+}
+
+#[test]
+fn wrong_tenant_guc_sees_no_proposal_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _, _) = seed_proposal(&db.pool).await;
+        let (adversary, _, _) = seed_proposal(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        assert_eq!(
+            visible_proposal_rows(&mut tx, victim).await,
+            (1, 1),
+            "a tenant must see its own proposals and their review log"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_proposal_rows(&mut tx, victim).await,
+            (0, 0),
+            "another tenant's proposals leaked — including who approved what"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_proposal_rows(&mut tx, victim).await,
+            (0, 0),
+            "an unset GUC must see nothing at all"
+        );
+    });
+}
+
+/// Forging another tenant's id trips each policy's WITH CHECK, and a
+/// cross-tenant close affects zero rows — a proposal at another tenant is
+/// unreachable, not merely unwritten.
+#[test]
+fn cross_tenant_proposal_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_scope, victim_proposal) = seed_proposal(&db.pool).await;
+        let (adversary, _, _) = seed_proposal(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            "insert into vedaflow_proposals
+                 (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
+                  target_channel, commit_hash, sensitivity, title, proposer_id,
+                  proposer_subject)
+             values ($1, $2, $3, $3, 'memory', 'published', $4, 'internal',
+                     'forged', $5, 'intruder')",
+            victim.as_uuid(),
+            uuid::Uuid::now_v7(),
+            victim_scope.as_uuid(),
+            &[4u8; 32][..],
+            IdentityId::new().as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant proposal write must be rejected"
+        );
+        drop(tx);
+
+        // An approval forged onto someone else's proposal is the attack
+        // that would fabricate a review: the FK cannot see the victim's
+        // proposal from here, and the policy's WITH CHECK refuses the row.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            "insert into vedaflow_proposal_approvals
+                 (tenant_id, proposal_id, approver_id, commit_hash, verdict, roles,
+                  approver_subject)
+             values ($1, $2, $3, $4, 'approve', array['compliance']::text[], 'intruder')",
+            victim.as_uuid(),
+            victim_proposal,
+            IdentityId::new().as_uuid(),
+            &[4u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged approval on another tenant's proposal must be rejected"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let closed = sqlx::query!(
+            "update vedaflow_proposals
+             set state = 'published', closed_at = now(), closed_by = $3
+             where tenant_id = $1 and id = $2",
+            victim.as_uuid(),
+            victim_proposal,
+            IdentityId::new().as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("cross-tenant proposal close");
+        assert_eq!(
+            closed.rows_affected(),
+            0,
+            "another tenant's proposal must be unreachable, not merely unwritten"
+        );
+    });
+}
+
+/// The review log is history: no UPDATE, no DELETE, for anyone. The
+/// proposal row holds no DELETE either, and its one permitted change is
+/// open → closed — a second close raises, and so does editing anything
+/// else about it (ADR-0032 decision 1).
+#[test]
+fn the_proposal_review_log_is_append_only_and_the_row_closes_once() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _, proposal) = seed_proposal(&db.pool).await;
+
+        for statement in [
+            "update vedaflow_proposal_approvals set verdict = 'approve'",
+            "delete from vedaflow_proposal_approvals",
+            "delete from vedaflow_proposals",
+        ] {
+            let mut tx = app_tx(&db.pool, Some(tenant)).await;
+            let outcome = sqlx::raw_sql(statement).execute(&mut *tx).await;
+            assert!(
+                outcome.is_err(),
+                "the app role must not be able to run: {statement}"
+            );
+        }
+
+        // Retitling an open proposal — the attack that would change what a
+        // recorded approval was about — is refused by the transition
+        // trigger, table owner included.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let retitled = sqlx::raw_sql("update vedaflow_proposals set title = 'something else'")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            retitled.is_err(),
+            "a proposal is immutable except for its closure"
+        );
+        drop(tx);
+
+        // The one permitted transition works once...
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let closed = sqlx::query!(
+            "update vedaflow_proposals
+             set state = 'withdrawn', closed_at = now(), closed_by = $3
+             where tenant_id = $1 and id = $2 and state = 'open'",
+            tenant.as_uuid(),
+            proposal,
+            IdentityId::new().as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("close an open proposal");
+        assert_eq!(closed.rows_affected(), 1);
+        tx.commit().await.expect("commit the close");
+
+        // ...and never again, whatever the state column is set to.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let reopened = sqlx::query!(
+            "update vedaflow_proposals set state = 'published'
+             where tenant_id = $1 and id = $2",
+            tenant.as_uuid(),
+            proposal,
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            reopened.is_err(),
+            "a closed proposal must never be reopened or re-closed"
+        );
+    });
+}
+
+/// In-tenant, the app role can do everything the review flow needs: open a
+/// proposal, record verdicts against it, and close it exactly once.
+#[test]
+fn same_tenant_proposal_lifecycle_works_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, scope, _) = seed_proposal(&db.pool).await;
+        let proposal = uuid::Uuid::now_v7();
+        let proposer = IdentityId::new();
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        sqlx::query!(
+            "insert into vedaflow_proposals
+                 (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
+                  target_channel, commit_hash, sensitivity, title, proposer_id,
+                  proposer_subject)
+             values ($1, $2, $3, $3, 'memory', 'published', $4, 'restricted',
+                     'own proposal', $5, 'own-subject')",
+            tenant.as_uuid(),
+            proposal,
+            scope.as_uuid(),
+            &[3u8; 32][..],
+            proposer.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("open own proposal");
+
+        // Two distinct approvers, which is what `restricted` takes.
+        for (approver, role) in [
+            (IdentityId::new(), "curator"),
+            (IdentityId::new(), "compliance"),
+        ] {
+            sqlx::query!(
+                "insert into vedaflow_proposal_approvals
+                     (tenant_id, proposal_id, approver_id, commit_hash, verdict,
+                      roles, approver_subject)
+                 values ($1, $2, $3, $4, 'approve', array[$5]::text[], $6)",
+                tenant.as_uuid(),
+                proposal,
+                approver.as_uuid(),
+                &[3u8; 32][..],
+                role,
+                format!("{role}-subject"),
+            )
+            .execute(&mut *tx)
+            .await
+            .expect("record own approval");
+        }
+
+        let closed = sqlx::query!(
+            "update vedaflow_proposals
+             set state = 'published', closed_at = now(), closed_by = $3
+             where tenant_id = $1 and id = $2 and state = 'open'",
+            tenant.as_uuid(),
+            proposal,
+            proposer.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("publish own proposal");
+        assert_eq!(closed.rows_affected(), 1);
+        tx.commit().await.expect("commit the lifecycle");
     });
 }

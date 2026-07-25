@@ -193,6 +193,13 @@ pub struct ChannelWrite<'a> {
     pub channel: ChannelRef,
     /// What this write contributes: the members to add.
     pub members: &'a [(String, ObjectHash)],
+    /// Additional parents beyond the channel head — the proposal commit a
+    /// publication is the effect of (FLOW-3, ADR-0032 decision 10). The
+    /// head stays the first parent, so the channel's own line is
+    /// unbroken and the fast-forward check is unaffected; the extras
+    /// make lineage a fact about the commit graph rather than a join.
+    /// Empty for a publication nobody proposed.
+    pub merge_parents: &'a [CommitHash],
     /// Who is writing.
     pub author: IdentityId,
     /// Why — an auditor reads this.
@@ -334,12 +341,21 @@ async fn write_channel(
             .collect();
         let entry_count = tree_entries.len();
         let tree = put_tree(conn, tenant, &tree_entries).await?;
+        // Head first (the mainline), then the merge parents, with any
+        // that duplicate the head or each other dropped: a commit listing
+        // one parent twice is meaningless and the table rejects it.
+        let mut parents: Vec<CommitHash> = head.iter().map(|head| head.commit_hash).collect();
+        for parent in write.merge_parents {
+            if !parents.contains(parent) {
+                parents.push(*parent);
+            }
+        }
         let minted = commit(
             conn,
             tenant,
             &NewCommit {
                 tree: tree.hash,
-                parents: head.iter().map(|head| head.commit_hash).collect(),
+                parents,
                 author: write.author,
                 message: write.message.to_owned(),
                 committed_at: write.committed_at,

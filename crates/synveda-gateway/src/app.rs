@@ -24,11 +24,13 @@ use tower_http::trace::TraceLayer;
 
 use crate::auth;
 use crate::channels;
+use crate::curators;
 use crate::error::ApiError;
 use crate::hierarchy;
 use crate::inject;
 use crate::observe;
 use crate::policy;
+use crate::proposals;
 use crate::quarantine;
 use crate::roles;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
@@ -163,9 +165,28 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/quarantine/{event_id}/reject", post(quarantine::reject))
         // The VedaFlow channel plane (FLOW-2, ADR-0031 decision 12):
         // reading a scope's standing channels, and publishing records
-        // across the trust boundary onto its published one.
+        // across the trust boundary onto its published one. Since FLOW-3
+        // the publish resolves the same approval matrix a proposal does,
+        // satisfied by the acting principal alone (ADR-0032 decision 8).
         .route("/v1/channels/{scope_id}", get(channels::list))
         .route("/v1/channels/{scope_id}/publish", post(channels::publish))
+        // The VedaFlow proposal plane (FLOW-3, ADR-0032): the review in
+        // front of a publication. Opening asks, approving counts, and
+        // publishing runs the effect under `ChannelPublish` — approvals
+        // go in front of that decision, they do not replace it.
+        .route("/v1/proposals", get(proposals::list).post(proposals::open))
+        .route("/v1/proposals/{id}", get(proposals::get))
+        .route("/v1/proposals/{id}/approve", post(proposals::approve))
+        .route("/v1/proposals/{id}/reject", post(proposals::reject))
+        .route("/v1/proposals/{id}/withdraw", post(proposals::withdraw))
+        .route("/v1/proposals/{id}/publish", post(proposals::publish))
+        // CODEOWNERS-style curator files (FLOW-3, ADR-0032 decisions
+        // 13–15), under the policy plane's own actions: they add required
+        // approvers and grant nothing.
+        .route(
+            "/v1/hierarchy/nodes/{id}/curators",
+            get(curators::get).put(curators::put),
+        )
         // The service-identity plane (AUTH-3, ADR-0018 decision 3).
         .route(
             "/v1/service-identities",

@@ -9,7 +9,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{ScopeId, TenantId};
+use crate::{ApprovalMatrix, CompositionConfig, RedactionConfig, ScopeId, TenantId};
 
 /// A per-node policy pack assignment: the node (and its subtree, until a
 /// deeper assignment) runs `pack_name`.
@@ -24,4 +24,28 @@ pub struct PolicyAssignment {
     pub pack_name: String,
     /// When the assignment was last changed.
     pub updated_at: DateTime<Utc>,
+}
+
+/// A policy pack's non-Cedar configuration — everything an engine carries
+/// beside its policies.
+///
+/// One struct rather than a growing parameter list, and one place to look
+/// for "what does a pack configure": the redaction modes the observe scan
+/// applies (MEM-2, ADR-0021 decision 3), the budget and channel rule the
+/// read path composes under (CTX-2, ADR-0025 decisions 2–3), and the
+/// approvals a publication needs (FLOW-3, ADR-0032 decision 3).
+///
+/// Every field is optional because a stored pack may configure none of
+/// them, and each has its own fail-safe default resolved downstream:
+/// strict redaction, the product composition config (which only ever
+/// narrows), and the empty approval matrix — which still resolves to the
+/// invariant floor, never to "no review needed".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackConfig {
+    /// The pack's redaction configuration.
+    pub redaction: Option<RedactionConfig>,
+    /// The pack's composition configuration.
+    pub composition: Option<CompositionConfig>,
+    /// The pack's approval matrix.
+    pub approvals: Option<ApprovalMatrix>,
 }

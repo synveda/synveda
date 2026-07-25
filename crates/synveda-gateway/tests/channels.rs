@@ -42,7 +42,7 @@ use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::{hierarchy, identities, policy_assignments, role_bindings, tenants};
 use synveda_types::{
     Channel, CompositionConfig, HierarchyNode, Identity, IdentityId, IdentityKind, InjectChannels,
-    RecordClass, RecordId, RecordKind, Role, ScopeId, ScopeKind, Sensitivity, TenantId,
+    PackConfig, RecordClass, RecordId, RecordKind, Role, ScopeId, ScopeKind, Sensitivity, TenantId,
     TenantStatus,
 };
 use tower::ServiceExt;
@@ -420,11 +420,13 @@ async fn bank_mode_flips_composition_over_real_channels() {
         "bank",
         1,
         "permit (principal, action, resource) when { resource in principal.tenant };",
-        None,
-        Some(CompositionConfig {
-            budget_tokens: CompositionConfig::DEFAULT.budget_tokens,
-            channels: InjectChannels::PublishedOnly,
-        }),
+        PackConfig {
+            composition: Some(CompositionConfig {
+                budget_tokens: CompositionConfig::DEFAULT.budget_tokens,
+                channels: InjectChannels::PublishedOnly,
+            }),
+            ..Default::default()
+        },
     )
     .expect("install bank pack");
     policy_assignments::set_default(&pool, tenant, "bank")

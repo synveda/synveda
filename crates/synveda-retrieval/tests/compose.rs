@@ -229,6 +229,7 @@ fn publish(db: &Db, tenant: TenantId, scope: ScopeId, ids: &[RecordId]) {
                 scope,
                 channel: ChannelRef::memory(Channel::Published),
                 members: &members,
+                merge_parents: &[],
                 author: IdentityId::new(),
                 message: "ctx-2 fixture publication",
                 committed_at: Utc::now(),

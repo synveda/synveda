@@ -38,8 +38,8 @@ use synveda_store::{
     hierarchy, identities, policy_assignments, policy_packs, rls, role_bindings, tenants,
 };
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, RedactionConfig, RedactionMode, Role,
-    ScopeId, ScopeKind, TenantId, TenantStatus,
+    HierarchyNode, Identity, IdentityId, IdentityKind, PackConfig, RedactionConfig, RedactionMode,
+    Role, ScopeId, ScopeKind, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -527,8 +527,10 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         tenant,
         "acme-deny",
         MEMBER_PACK,
-        Some(&deny_config),
-        None,
+        &PackConfig {
+            redaction: Some(deny_config),
+            ..Default::default()
+        },
     )
     .await
     .expect("store deny pack");

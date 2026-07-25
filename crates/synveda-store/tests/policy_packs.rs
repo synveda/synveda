@@ -14,7 +14,8 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_store::{hierarchy, policy_assignments, policy_packs, rls, tenants};
 use synveda_types::{
-    CompositionConfig, Error, InjectChannels, ScopeId, ScopeKind, TenantId, TenantStatus,
+    CompositionConfig, Error, InjectChannels, PackConfig, ScopeId, ScopeKind, TenantId,
+    TenantStatus,
 };
 
 /// Connects and migrates. `None` = no database configured; the test skips
@@ -73,8 +74,7 @@ async fn apply_versions_per_name_and_clear_removes() {
         tenant,
         "authz2-test",
         "permit (p) v1;",
-        None,
-        None,
+        &PackConfig::default(),
     )
     .await
     .expect("first apply");
@@ -87,8 +87,7 @@ async fn apply_versions_per_name_and_clear_removes() {
         tenant,
         "authz2-strict",
         "permit (p) v1;",
-        None,
-        None,
+        &PackConfig::default(),
     )
     .await
     .expect("sibling apply");
@@ -102,8 +101,7 @@ async fn apply_versions_per_name_and_clear_removes() {
         tenant,
         "authz2-test",
         "permit (p) v1;",
-        None,
-        None,
+        &PackConfig::default(),
     )
     .await
     .expect("re-apply");
@@ -163,28 +161,37 @@ async fn composition_config_rides_the_pack_and_clears_on_reapply() {
         tenant,
         "ctx2-bank",
         "permit (p);",
-        None,
-        Some(&config),
+        &PackConfig {
+            composition: Some(config),
+            ..Default::default()
+        },
     )
     .await
     .expect("apply with composition config");
-    assert_eq!(stored.composition, Some(config));
+    assert_eq!(stored.config.composition, Some(config));
     assert_eq!(
         policy_packs::get(&mut *tx, tenant, "ctx2-bank")
             .await
             .expect("get")
             .expect("stored")
+            .config
             .composition,
         Some(config),
         "the config reads back"
     );
 
-    let cleared = policy_packs::apply(&mut *tx, tenant, "ctx2-bank", "permit (p);", None, None)
-        .await
-        .expect("re-apply without config");
+    let cleared = policy_packs::apply(
+        &mut *tx,
+        tenant,
+        "ctx2-bank",
+        "permit (p);",
+        &PackConfig::default(),
+    )
+    .await
+    .expect("re-apply without config");
     assert_eq!(cleared.version, 2);
     assert_eq!(
-        cleared.composition, None,
+        cleared.config.composition, None,
         "an apply is a full statement — the config cleared"
     );
 
@@ -201,6 +208,7 @@ async fn composition_config_rides_the_pack_and_clears_on_reapply() {
             .await
             .expect("get corrupted")
             .expect("stored")
+            .config
             .composition,
         None,
         "unparseable stored json is unconfigured, never a panic"
@@ -221,9 +229,15 @@ async fn clear_refuses_while_assignments_reference_the_pack() {
     hierarchy::create(&mut tx, root, tenant, None, ScopeKind::Org, "acme", "ACME")
         .await
         .expect("create org root");
-    policy_packs::apply(&mut *tx, tenant, "authz2-pinned", "permit (p);", None, None)
-        .await
-        .expect("apply pack");
+    policy_packs::apply(
+        &mut *tx,
+        tenant,
+        "authz2-pinned",
+        "permit (p);",
+        &PackConfig::default(),
+    )
+    .await
+    .expect("apply pack");
 
     // Referenced by a node assignment.
     policy_assignments::assign(&mut *tx, tenant, root, "authz2-pinned")
@@ -346,8 +360,14 @@ async fn constraints_map_onto_the_taxonomy() {
     let mut tx = rls::begin_tenant_tx(&pool, tenant)
         .await
         .expect("begin tenant tx");
-    let bad_name =
-        policy_packs::apply(&mut *tx, tenant, "Not A Slug!", "permit;", None, None).await;
+    let bad_name = policy_packs::apply(
+        &mut *tx,
+        tenant,
+        "Not A Slug!",
+        "permit;",
+        &PackConfig::default(),
+    )
+    .await;
     assert!(
         matches!(bad_name, Err(Error::Invalid { .. })),
         "malformed name must be Invalid, got {bad_name:?}"
@@ -364,7 +384,14 @@ async fn constraints_map_onto_the_taxonomy() {
         let mut tx = rls::begin_tenant_tx(&pool, tenant)
             .await
             .expect("begin tenant tx");
-        let refused = policy_packs::apply(&mut *tx, tenant, reserved, "permit;", None, None).await;
+        let refused = policy_packs::apply(
+            &mut *tx,
+            tenant,
+            reserved,
+            "permit;",
+            &PackConfig::default(),
+        )
+        .await;
         assert!(
             matches!(refused, Err(Error::Invalid { .. })),
             "storing {reserved} must be Invalid, got {refused:?}"
@@ -376,7 +403,8 @@ async fn constraints_map_onto_the_taxonomy() {
     let mut tx = rls::begin_tenant_tx(&pool, tenant)
         .await
         .expect("begin tenant tx");
-    let empty = policy_packs::apply(&mut *tx, tenant, "authz2-empty", "", None, None).await;
+    let empty =
+        policy_packs::apply(&mut *tx, tenant, "authz2-empty", "", &PackConfig::default()).await;
     assert!(
         matches!(empty, Err(Error::Invalid { .. })),
         "empty source must be Invalid, got {empty:?}"
@@ -388,7 +416,14 @@ async fn constraints_map_onto_the_taxonomy() {
     let mut tx = rls::begin_tenant_tx(&pool, ghost)
         .await
         .expect("begin ghost tx");
-    let orphan = policy_packs::apply(&mut *tx, ghost, "authz2-ghost", "permit;", None, None).await;
+    let orphan = policy_packs::apply(
+        &mut *tx,
+        ghost,
+        "authz2-ghost",
+        "permit;",
+        &PackConfig::default(),
+    )
+    .await;
     assert!(
         matches!(orphan, Err(Error::NotFound { .. })),
         "unknown tenant must be NotFound, got {orphan:?}"

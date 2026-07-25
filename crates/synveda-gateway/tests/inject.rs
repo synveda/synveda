@@ -40,7 +40,8 @@ use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::{hierarchy, identities, policy_assignments, rls, tenants};
 use synveda_types::{
     Channel, CompositionConfig, HierarchyNode, Identity, IdentityId, IdentityKind, InjectChannels,
-    RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+    PackConfig, RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity, TenantId,
+    TenantStatus,
 };
 use synveda_vedaflow::{
     self as vedaflow, ChannelRef, ChannelWrite, MemoryAsset, PolicySnapshot, Signer,
@@ -403,6 +404,7 @@ async fn publish_fixture(pool: &PgPool, tenant: TenantId, scope: ScopeId, ids: &
             scope,
             channel: ChannelRef::memory(Channel::Published),
             members: &members,
+            merge_parents: &[],
             author: IdentityId::new(),
             message: "ctx-3 fixture publication",
             committed_at: chrono::Utc::now(),
@@ -834,11 +836,13 @@ async fn bank_mode_pack_governs_the_very_next_inject() {
         "bank",
         1,
         BLANKET,
-        None,
-        Some(CompositionConfig {
-            budget_tokens: CompositionConfig::DEFAULT.budget_tokens,
-            channels: InjectChannels::PublishedOnly,
-        }),
+        PackConfig {
+            composition: Some(CompositionConfig {
+                budget_tokens: CompositionConfig::DEFAULT.budget_tokens,
+                channels: InjectChannels::PublishedOnly,
+            }),
+            ..Default::default()
+        },
     )
     .expect("install bank pack");
     policy_assignments::set_default(&pool, tenant, "bank")

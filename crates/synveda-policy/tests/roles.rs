@@ -26,7 +26,7 @@ use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
 };
 use synveda_types::{
-    HierarchyNode, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind, TenantId,
+    HierarchyNode, PackConfig, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind, TenantId,
 };
 
 /// Every scope of the fixture — the candidate set a composition sweep
@@ -45,7 +45,7 @@ const ALL_SCOPES: [&str; 8] = [
 /// The decision columns: the action vocabulary, with `RoleAssign` split
 /// by what is being granted — the base layer decides those differently
 /// (ADR-0015 decision 5).
-const COLUMNS: [(Action, Option<Role>); 17] = [
+const COLUMNS: [(Action, Option<Role>); 20] = [
     (Action::HierarchyCreate, None),
     (Action::HierarchyRead, None),
     (Action::HierarchyUpdate, None),
@@ -63,6 +63,9 @@ const COLUMNS: [(Action, Option<Role>); 17] = [
     (Action::ServiceIdentityManage, None),
     (Action::ChannelRead, None),
     (Action::ChannelPublish, None),
+    (Action::ProposalRead, None),
+    (Action::ProposalOpen, None),
+    (Action::ProposalReview, None),
 ];
 
 struct Fixture {
@@ -212,11 +215,16 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
     match role {
         // Viewer: composition read only — read-only by name (ADR-0020
         // decision 3).
-        Role::Viewer => vec![(Action::MemoryRead, None)],
+        Role::Viewer => vec![(Action::MemoryRead, None), (Action::ProposalRead, None)],
         // Contributing content roles: read plus the shared-scope write
         // grant (MEM-1, ADR-0020 decision 3 — ADR-0015's
         // contributor-writes marker discharged).
-        Role::Contributor => vec![(Action::MemoryRead, None), (Action::MemoryWrite, None)],
+        Role::Contributor => vec![
+            (Action::MemoryRead, None),
+            (Action::MemoryWrite, None),
+            (Action::ProposalRead, None),
+            (Action::ProposalOpen, None),
+        ],
         // Curator is contributor plus the channel plane: the role seed §5
         // defines as the one that "can pin/approve" is the role that
         // moves content across the trust boundary (FLOW-2, ADR-0031
@@ -227,6 +235,9 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::MemoryWrite, None),
             (Action::ChannelRead, None),
             (Action::ChannelPublish, None),
+            (Action::ProposalRead, None),
+            (Action::ProposalOpen, None),
+            (Action::ProposalReview, None),
         ],
         // Steward: the full admin plane — the quarantine review plane
         // included (MEM-2, ADR-0021 decision 6) — but never org-admin
@@ -246,6 +257,9 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::ServiceIdentityManage, None),
             (Action::ChannelRead, None),
             (Action::ChannelPublish, None),
+            (Action::ProposalRead, None),
+            (Action::ProposalOpen, None),
+            (Action::ProposalReview, None),
         ],
         // Org-admin: steward plus org-admin grants; still no content.
         Role::OrgAdmin => vec![
@@ -264,6 +278,9 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::ServiceIdentityManage, None),
             (Action::ChannelRead, None),
             (Action::ChannelPublish, None),
+            (Action::ProposalRead, None),
+            (Action::ProposalOpen, None),
+            (Action::ProposalReview, None),
         ],
         // Auditor: the read-only admin surfaces; never content, never
         // mutations (seed §5). The quarantine queue is (redacted)
@@ -275,17 +292,26 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::RoleRead, None),
             (Action::ServiceIdentityRead, None),
             (Action::ChannelRead, None),
+            (Action::ProposalRead, None),
         ],
         // Security-reviewer's first live actions (MEM-2, ADR-0021
         // decision 6): adjudicating quarantined observe events. SKIL-2
         // adds skill approval.
+        // Security-reviewer's live actions: adjudicating quarantined
+        // observe events (MEM-2, ADR-0021 decision 6) and, since FLOW-3,
+        // reviewing proposals — the floor requires one on every skill,
+        // and SKIL-2 is what makes skills exist to review.
         Role::SecurityReviewer => vec![
             (Action::QuarantineRead, None),
             (Action::QuarantineReview, None),
+            (Action::ProposalRead, None),
+            (Action::ProposalReview, None),
         ],
-        // Marker role until its approval actions land (FLOW-3, AUTHZ-5):
-        // no standing grants.
-        Role::Compliance => Vec::new(),
+        // Compliance stops being a marker at FLOW-3 (ADR-0032
+        // decision 16): it reviews, and the invariant floor requires it
+        // on everything `restricted`. It grants no content access — a
+        // compliance reviewer sees a proposal, not the corpus.
+        Role::Compliance => vec![(Action::ProposalRead, None), (Action::ProposalReview, None)],
     }
 }
 
@@ -344,14 +370,20 @@ fn assert_matrix(pack: &str, version: i64) {
                         | Action::ServiceIdentityManage
                         | Action::ChannelRead
                         | Action::ChannelPublish
+                        | Action::ProposalOpen
+                        | Action::ProposalReview
                 ) && target.is_none()
                 {
                     // The schema scopes the memory plane,
-                    // QuarantineReview, ServiceIdentityManage, and the
-                    // channel plane to Scope resources; a tenant-resource
-                    // request is unrepresentable (ADR-0018 decision 3,
-                    // ADR-0020 decision 3, ADR-0021 decision 6, ADR-0031
-                    // decision 12).
+                    // QuarantineReview, ServiceIdentityManage, the
+                    // channel plane, and proposal open/review to Scope
+                    // resources; a tenant-resource request is
+                    // unrepresentable (ADR-0018 decision 3, ADR-0020
+                    // decision 3, ADR-0021 decision 6, ADR-0031
+                    // decision 12, ADR-0032 decision 16). ProposalRead is
+                    // deliberately not in this list: the tenant-wide
+                    // review inbox is a real resource, and a node binding
+                    // must not reach it.
                     continue;
                 }
                 let decision = decide(
@@ -379,20 +411,20 @@ fn assert_matrix(pack: &str, version: i64) {
 /// regulated-strict: the golden matrix (the AC).
 #[test]
 fn matrix_regulated_strict() {
-    assert_matrix(REGULATED_STRICT, 6);
+    assert_matrix(REGULATED_STRICT, 7);
 }
 
 /// standard: identical role matrix — packs differ on composition
 /// membership, never on who administers (ADR-0015 decision 4).
 #[test]
 fn matrix_standard() {
-    assert_matrix(STANDARD, 6);
+    assert_matrix(STANDARD, 7);
 }
 
 /// open-collaboration: identical role matrix.
 #[test]
 fn matrix_open_collaboration() {
-    assert_matrix(OPEN_COLLABORATION, 6);
+    assert_matrix(OPEN_COLLABORATION, 7);
 }
 
 /// A tenant-wide binding is in force everywhere, the tenant plane
@@ -519,8 +551,7 @@ fn the_escalation_guard_survives_custom_packs() {
         "authz3-blanket",
         1,
         "permit (principal, action, resource) when { resource in principal.tenant };",
-        None,
-        None,
+        PackConfig::default(),
     )
     .expect("install blanket pack");
     let assignments = [fx.assignment("org", "authz3-blanket")];

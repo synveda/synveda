@@ -22,7 +22,9 @@ use chrono::Utc;
 use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
 };
-use synveda_types::{HierarchyNode, PolicyAssignment, Role, ScopeId, ScopeKind, TenantId};
+use synveda_types::{
+    HierarchyNode, PackConfig, PolicyAssignment, Role, ScopeId, ScopeKind, TenantId,
+};
 
 /// Every scope of the fixture — the candidate set a composition sweep
 /// would consider.
@@ -342,7 +344,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 /// (seed §6; lapses, AUTHZ-4, are the sanctioned relaxation).
 #[test]
 fn golden_regulated_strict() {
-    assert_pack_golden(REGULATED_STRICT, 6, &["org", "eng", "team-a", "alice-user"]);
+    assert_pack_golden(REGULATED_STRICT, 7, &["org", "eng", "team-a", "alice-user"]);
 }
 
 /// standard: own chain plus the department subtree — sibling team-b joins;
@@ -351,7 +353,7 @@ fn golden_regulated_strict() {
 fn golden_standard() {
     assert_pack_golden(
         STANDARD,
-        6,
+        7,
         &["org", "eng", "team-a", "team-b", "alice-user"],
     );
 }
@@ -362,7 +364,7 @@ fn golden_standard() {
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        6,
+        7,
         &[
             "org",
             "eng",
@@ -502,12 +504,20 @@ fn redaction_config_rides_the_effective_pack() {
         "acme-deny",
         1,
         MEMBER_READ,
-        Some(deny_secrets),
-        None,
+        PackConfig {
+            redaction: Some(deny_secrets),
+            ..Default::default()
+        },
     )
     .expect("install configured pack");
-    pdp.install_source(fx.tenant, "acme-unconfigured", 1, MEMBER_READ, None, None)
-        .expect("install unconfigured pack");
+    pdp.install_source(
+        fx.tenant,
+        "acme-unconfigured",
+        1,
+        MEMBER_READ,
+        PackConfig::default(),
+    )
+    .expect("install unconfigured pack");
     for (pack, expected) in [
         ("acme-deny", deny_secrets),
         ("acme-unconfigured", RedactionConfig::STRICT),

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update vedaflow_proposals\n             set state = 'published', closed_at = now(), closed_by = $3\n             where tenant_id = $1 and id = $2 and state = 'open'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b6eee8e1c9e2f16f817de8431a03827158ce9d72e169a949a33fc5390bcca28c"
+}

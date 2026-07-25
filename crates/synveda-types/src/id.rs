@@ -103,3 +103,10 @@ define_id!(
     /// staging table, admitted once per idempotency key (MEM-1, ADR-0020).
     ObserveEventId
 );
+
+define_id!(
+    /// Identifies a VedaFlow proposal — one governed request to move a
+    /// reviewed set of assets onto a scope's published channel (FLOW-3,
+    /// ADR-0032).
+    ProposalId
+);

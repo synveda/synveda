@@ -165,7 +165,30 @@ pub enum AuditAction {
     /// pack that governed — never record content. The pipeline's
     /// derived-channel commits ride `memory.extracted` instead: one event
     /// per group, not a second event asserting the same fact.
+    ///
+    /// Since FLOW-3 the payload also names the proposal a publication was
+    /// the effect of, when it had one, and the approval requirement the
+    /// publisher satisfied (ADR-0032 decision 18): publishing through a
+    /// proposal is the same governed act with the same consequence as a
+    /// direct publish, so it is the same action with a fuller payload,
+    /// not a second one asserting the same fact.
     ChannelPublished,
+    /// A proposal was opened against a scope's published channel
+    /// (FLOW-3, ADR-0032 decision 18). Payload carries the target, asset
+    /// kind, member ids and addresses, the proposal commit, the maximum
+    /// sensitivity, and the requirement **as resolved at that moment** —
+    /// so a trail explains what the proposal needed without reading a
+    /// pack that has since changed. Never record content.
+    ProposalOpened,
+    /// A reviewer approved a proposal, with the effective roles their
+    /// approval counted under and what the requirement still lacked
+    /// afterwards.
+    ProposalApproved,
+    /// A reviewer rejected a proposal, closing it. The reason is
+    /// mandatory and rides the payload.
+    ProposalRejected,
+    /// A proposer withdrew their own proposal, closing it.
+    ProposalWithdrawn,
 }
 
 impl AuditAction {
@@ -199,6 +222,10 @@ impl AuditAction {
             AuditAction::TenantCreated => "tenant.created",
             AuditAction::ContextInjected => "context.injected",
             AuditAction::ChannelPublished => "vedaflow.channel.published",
+            AuditAction::ProposalOpened => "vedaflow.proposal.opened",
+            AuditAction::ProposalApproved => "vedaflow.proposal.approved",
+            AuditAction::ProposalRejected => "vedaflow.proposal.rejected",
+            AuditAction::ProposalWithdrawn => "vedaflow.proposal.withdrawn",
         }
     }
 }

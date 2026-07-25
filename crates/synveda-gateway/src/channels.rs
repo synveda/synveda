@@ -15,8 +15,14 @@
 //! channel's tree, so a later edit demotes the record to unreviewed
 //! rather than riding a published id (ADR-0031 decision 5).
 //!
-//! FLOW-3 puts required approvals in front of `ChannelPublish`; it does
-//! not replace it. This route becomes the proposal's effect.
+//! Since FLOW-3 (ADR-0032 decision 8) this route resolves the **same**
+//! approval matrix a proposal does, with the acting principal counting as
+//! the only approver. A curator publishing internal memory under
+//! `regulated-strict` still works — the matrix asks for one curator and
+//! one curator acted — and a `restricted` record refuses and names the
+//! proposal route. That is what keeps one matrix rather than two paths:
+//! the direct route did not become a hole to close, it became the
+//! degenerate case where one approval is enough.
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -29,10 +35,13 @@ use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::records::RecordState;
 use synveda_store::{hierarchy, records, rls};
-use synveda_types::{Channel, Error, IdentityId, RecordId, Result, ScopeId};
+use synveda_types::{
+    AssetKind, CastApproval, Channel, Error, IdentityId, RecordId, Result, ScopeId, Sensitivity,
+};
 use synveda_vedaflow::{self as vedaflow, ChannelRef, MemoryAsset, PolicySnapshot, Signer};
 
 use crate::app::AppState;
+use crate::approvals;
 use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
@@ -192,6 +201,12 @@ struct PublishResponse {
     /// names, and what composition recomputes to decide the record is
     /// still the version that was reviewed.
     published: Vec<PublishedRecord>,
+    /// What the approval matrix asked for here, and which of the acting
+    /// principal's roles supplied it (FLOW-3, ADR-0032 decision 8).
+    /// A publication that needed nothing renders an empty requirement,
+    /// which is the honest answer: this pack asks for no review at this
+    /// cell.
+    required: crate::approvals::RequirementView,
 }
 
 #[derive(Serialize)]
@@ -283,6 +298,41 @@ async fn publish_inner(
         });
     }
 
+    // The approval matrix, resolved at this scope from this pack, this
+    // asset kind, the *maximum* sensitivity over the set (a set is
+    // reviewed as a set), and the nearest curator file on the chain —
+    // then satisfied by the acting principal alone or refused with the
+    // proposal route named (ADR-0032 decision 8). Same resolution
+    // function a proposal uses; there is one matrix, not two.
+    let sensitivity = versions
+        .iter()
+        .map(|version| version.state.sensitivity)
+        .max()
+        .unwrap_or(Sensitivity::Public);
+    let entries: Vec<String> = versions
+        .iter()
+        .map(|version| version.id.as_uuid().to_string())
+        .collect();
+    let requirement = approvals::resolve(
+        state,
+        &mut tx,
+        tenant_id,
+        &input,
+        &approvals::Requested {
+            target: &node,
+            asset: AssetKind::Memory,
+            sensitivity,
+            entries: &entries,
+        },
+    )
+    .await?;
+    let actor = CastApproval {
+        identity: author,
+        subject: input.principal.subject.clone(),
+        roles: approvals::roles_at(&input, &node),
+    };
+    approvals::require_single_actor(&requirement, &actor, "channel")?;
+
     // Objects first: each record's content address, computed from the
     // version being published, then stored. Content-addressed, so
     // re-publishing unchanged content stores nothing new.
@@ -310,6 +360,7 @@ async fn publish_inner(
             scope: scope_id,
             channel,
             members: &members,
+            merge_parents: &[],
             author,
             message: &body.message,
             committed_at: Utc::now(),
@@ -340,6 +391,20 @@ async fn publish_inner(
             "parent": committed.parent.map(|parent| parent.to_hex()),
             "members": committed.entries,
             "added": committed.added,
+            "sensitivity": sensitivity.as_str(),
+            // The requirement *as resolved at this moment*, and the roles
+            // the acting principal supplied it with — so an auditor can
+            // reconstruct why one signature was enough without reading a
+            // pack that has since changed (ADR-0032 decision 18).
+            "approvals": approvals::audit_context(
+                &requirement,
+                &requirement.outstanding(std::slice::from_ref(&actor)),
+            ),
+            "approved_by": [{
+                "identity_id": actor.identity,
+                "subject": actor.subject,
+                "roles": actor.roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
+            }],
         }),
     )
     .await?;
@@ -353,6 +418,7 @@ async fn publish_inner(
         members: committed.entries,
         added: committed.added,
         published,
+        required: crate::approvals::RequirementView::of(&requirement),
     }))
 }
 

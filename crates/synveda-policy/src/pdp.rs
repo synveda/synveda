@@ -20,8 +20,8 @@ use cedar_policy::{
     PolicySet, Request, Schema, ValidationMode, Validator,
 };
 use synveda_types::{
-    CompositionConfig, Error, HierarchyNode, RedactionConfig, Result, Role, ScopeId, ScopeKind,
-    TenantId,
+    ApprovalMatrix, CompositionConfig, Error, HierarchyNode, PackConfig, RedactionConfig, Result,
+    Role, ScopeId, ScopeKind, TenantId,
 };
 
 use crate::entity_store::EntityStore;
@@ -47,11 +47,12 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// decision 3). `@4`: MEM-1 added the `MemoryWrite` own-home floor and
 /// content-role write grant (ADR-0020 decision 3). `@5`: MEM-2 added the
 /// quarantine review plane (ADR-0021 decision 6). `@6`: FLOW-2 added the
-/// channel plane (ADR-0031 decision 12).
+/// channel plane (ADR-0031 decision 12). `@7`: FLOW-3 added the proposal
+/// plane and each pack's approval matrix (ADR-0032 decisions 3 and 16).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 6),
-    (STANDARD, 6),
-    (OPEN_COLLABORATION, 6),
+    (REGULATED_STRICT, 7),
+    (STANDARD, 7),
+    (OPEN_COLLABORATION, 7),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -81,6 +82,10 @@ struct LoadedPack {
     policies: PolicySet,
     redaction: RedactionConfig,
     composition: CompositionConfig,
+    /// Behind an `Arc` because [`Pdp::effective`] clones the whole
+    /// [`EffectivePack`] per candidate scope on the inject path, and a
+    /// matrix is the one config that is not `Copy` (FLOW-3, ADR-0032).
+    approvals: Arc<ApprovalMatrix>,
 }
 
 /// Where the effective pack came from — logged with every decision so the
@@ -114,6 +119,11 @@ pub struct EffectivePack {
     /// The pack's composition configuration (CTX-2, ADR-0025): the
     /// inject budget and channel rule at scopes this pack governs.
     pub composition: CompositionConfig,
+    /// The pack's approval matrix (FLOW-3, ADR-0032): what it takes to
+    /// publish an asset onto a channel at scopes this pack governs.
+    /// Resolving it always merges the invariant floor, so this is what
+    /// the pack adds *above* the product's non-negotiables.
+    pub approvals: Arc<ApprovalMatrix>,
 }
 
 impl fmt::Display for PackOrigin {
@@ -183,6 +193,7 @@ impl Pdp {
                 source,
                 redaction,
                 CompositionConfig::DEFAULT,
+                crate::approvals::embedded(name),
             )
             .map_err(|err| Error::Internal {
                 message: format!("embedded pack invalid: {err}"),
@@ -229,6 +240,7 @@ impl Pdp {
             source,
             RedactionConfig::STRICT,
             CompositionConfig::DEFAULT,
+            ApprovalMatrix::empty(),
         )
         .map(|_| ())
     }
@@ -238,18 +250,19 @@ impl Pdp {
     /// pack stays in force (ADR-0012 decision 5: a bad apply must not
     /// widen or brick a tenant). Reserved product names are refused —
     /// the in-process face of the store's check constraint.
-    /// `redaction: None` (an unconfigured stored pack) falls back to the
-    /// strict config — fail safe (ADR-0021 decision 3); `composition:
-    /// None` to the product config, which only ever narrows (ADR-0025
-    /// decision 2).
+    /// An unconfigured field of `config` falls back to that config's own
+    /// fail-safe: strict redaction (ADR-0021 decision 3), the product
+    /// composition config which only ever narrows (ADR-0025 decision 2),
+    /// and the empty approval matrix — which still resolves to the
+    /// invariant floor, never to "no review needed" (ADR-0032
+    /// decision 4).
     pub fn install_source(
         &self,
         tenant_id: TenantId,
         name: &str,
         version: i64,
         source: &str,
-        redaction: Option<RedactionConfig>,
-        composition: Option<CompositionConfig>,
+        config: PackConfig,
     ) -> Result<()> {
         if is_reserved(name) {
             return Err(Error::Invalid {
@@ -261,8 +274,9 @@ impl Pdp {
             name,
             version,
             source,
-            redaction.unwrap_or_default(),
-            composition.unwrap_or_default(),
+            config.redaction.unwrap_or_default(),
+            config.composition.unwrap_or_default(),
+            config.approvals.unwrap_or_default(),
         )?;
         self.write_packs()
             .entry(tenant_id)
@@ -417,6 +431,7 @@ impl Pdp {
             origin,
             redaction: pack.redaction,
             composition: pack.composition,
+            approvals: Arc::clone(&pack.approvals),
         }
     }
 
@@ -718,16 +733,25 @@ impl Pdp {
 /// apply: a root-scoped steward manages nodes, never the tenant plane.
 /// Foreign-tenant rows are dropped defensively (the store's RLS already
 /// makes them unrepresentable). Sorted for a deterministic decision log.
-fn effective_roles(
+/// The principal's effective role set at `resource` (ADR-0015
+/// decision 3): tenant-wide bindings always, node bindings when the bound
+/// node is on the resource's chain.
+///
+/// Public because FLOW-3 records the roles an approval counted under
+/// (ADR-0032 decision 5), and that set has to be *the same* set the
+/// `ProposalReview` decision weighed — one implementation, so the two can
+/// never drift into disagreeing about who held what.
+#[must_use]
+pub fn effective_roles_at(
     principal: &Principal,
     resource: Resource,
     context: &AuthzContext<'_>,
-) -> Vec<&'static str> {
+) -> Vec<Role> {
     let chain: HashSet<ScopeId> = match resource {
         Resource::Scope(_) => context.scopes.iter().map(|node| node.id).collect(),
         Resource::Tenant(_) => HashSet::new(),
     };
-    let mut roles: Vec<&'static str> = context
+    let mut roles: Vec<Role> = context
         .role_bindings
         .iter()
         .filter(|binding| binding.tenant_id == principal.tenant_id)
@@ -735,11 +759,22 @@ fn effective_roles(
             None => true,
             Some(scope) => chain.contains(&scope),
         })
-        .map(|binding| binding.role.as_str())
+        .map(|binding| binding.role)
         .collect();
     roles.sort_unstable();
     roles.dedup();
     roles
+}
+
+fn effective_roles(
+    principal: &Principal,
+    resource: Resource,
+    context: &AuthzContext<'_>,
+) -> Vec<&'static str> {
+    effective_roles_at(principal, resource, context)
+        .into_iter()
+        .map(|role| role.as_str())
+        .collect()
 }
 
 /// [`Entity::new`] mapped onto the taxonomy — shared by the fragment
@@ -777,7 +812,14 @@ fn compile(
     source: &str,
     redaction: RedactionConfig,
     composition: CompositionConfig,
+    approvals: ApprovalMatrix,
 ) -> Result<LoadedPack> {
+    // A matrix asking more of one role than it asks of people is
+    // unsatisfiable at every cell it governs, and it would fail silently
+    // at review time rather than loudly at install time (ADR-0032).
+    approvals.validate().map_err(|err| Error::Invalid {
+        message: format!("policy pack {name}@{version} approval matrix: {err}"),
+    })?;
     let combined = format!("{BASE_SRC}\n{source}");
     let policies: PolicySet = combined.parse().map_err(|err| Error::Invalid {
         message: format!("policy pack {name}@{version} does not parse: {err}"),
@@ -801,5 +843,6 @@ fn compile(
         policies,
         redaction,
         composition,
+        approvals: Arc::new(approvals),
     })
 }

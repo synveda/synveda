@@ -28,8 +28,8 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::{Hs256Verifier, personal_slug};
 use synveda_types::{
-    CompositionConfig, IdentityId, IdentityKind, InjectChannels, RedactionConfig, RedactionMode,
-    Role, ScopeId, ScopeKind, TenantId, TenantStatus,
+    CompositionConfig, IdentityId, IdentityKind, InjectChannels, PackConfig, RedactionConfig,
+    RedactionMode, Role, ScopeId, ScopeKind, TenantId, TenantStatus,
 };
 
 #[derive(Parser)]
@@ -451,8 +451,11 @@ async fn run(cli: Cli) -> Result<(), String> {
                 tenant,
                 &name,
                 &source,
-                redaction.as_ref(),
-                composition.as_ref(),
+                &PackConfig {
+                    redaction,
+                    composition,
+                    ..Default::default()
+                },
             )
             .await
             .map_err(|err| err.to_string())?;
@@ -464,8 +467,8 @@ async fn run(cli: Cli) -> Result<(), String> {
                 json!({
                     "pack": pack.name,
                     "version": pack.version,
-                    "redaction": pack.redaction,
-                    "composition": pack.composition,
+                    "redaction": pack.config.redaction,
+                    "composition": pack.config.composition,
                 }),
             )
             .await?;

@@ -1,4 +1,4 @@
-// standard@6 — team-shares-by-default within a department (seed §6,
+// standard@7 — team-shares-by-default within a department (seed §6,
 // ADR-0014, ADR-0015, ADR-0018, ADR-0020, ADR-0021).
 //
 // Own-chain reads plus the department subtree: sibling teams under the
@@ -142,4 +142,86 @@ permit (
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["curator", "steward", "org-admin"])
+};
+
+// The VedaFlow proposal plane (FLOW-3, ADR-0032 decision 16): pack-uniform,
+// like the channel and quarantine planes and for the same reason — how
+// content crosses the trust boundary does not loosen per pack. What varies
+// per pack is the *approval matrix*, which is the thing FLOW-3's text says
+// varies (asset × sensitivity × scope × pack).
+
+// The tenant-wide listing: review and admin roles only. Being placed
+// somewhere is not a reason to see every proposal in the tenant, so the
+// membership floor below is deliberately absent here.
+permit (
+    principal,
+    action == Synveda::Action::"ProposalRead",
+    resource
+) when {
+    resource is Synveda::Tenant
+        && resource in principal.tenant
+        && context.roles.containsAny([
+            "curator", "steward", "org-admin", "auditor", "compliance",
+            "security-reviewer"
+        ])
+};
+
+// At a scope, reading proposals mirrors this pack's MemoryRead shape — the
+// membership floor, then content roles with personal scopes excluded — plus
+// the review and audit roles, who have to see a proposal before acting.
+permit (
+    principal,
+    action == Synveda::Action::"ProposalRead",
+    resource
+) when { resource is Synveda::Scope && principal in resource };
+
+permit (
+    principal,
+    action == Synveda::Action::"ProposalRead",
+    resource
+) when {
+    resource is Synveda::Scope
+        && resource in principal.tenant
+        && context.roles.containsAny([
+            "viewer", "contributor", "curator", "steward", "org-admin",
+            "auditor", "compliance", "security-reviewer"
+        ])
+        && resource.kind != "user"
+};
+
+// Opening a proposal grants nothing — it asks. So the floor is membership:
+// a placed principal may propose at a scope it belongs to, which is how
+// tribal knowledge climbs the gradient without needing a grant first (tech
+// plan §2.3). Content roles reach the rest of the bound subtree; viewer
+// stays read-only by name.
+permit (
+    principal,
+    action == Synveda::Action::"ProposalOpen",
+    resource
+) when { principal in resource };
+
+permit (
+    principal,
+    action == Synveda::Action::"ProposalOpen",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["contributor", "curator", "steward", "org-admin"])
+        && resource.kind != "user"
+};
+
+// Reviewing is a role act with no membership floor: casting a verdict is
+// authority, and this is where compliance and security-reviewer stop being
+// markers. Auditor is excluded — read-only by name. Whether a given approval
+// is *enough* is the matrix's arithmetic, never Cedar's (ADR-0032
+// decision 5).
+permit (
+    principal,
+    action == Synveda::Action::"ProposalReview",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny([
+            "curator", "steward", "org-admin", "compliance", "security-reviewer"
+        ])
 };

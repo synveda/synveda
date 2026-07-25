@@ -18,7 +18,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use sqlx::postgres::PgConnection;
-use synveda_types::{CompositionConfig, Error, RedactionConfig, Result, TenantId};
+use synveda_types::{ApprovalMatrix, Error, PackConfig, Result, TenantId};
 
 /// A tenant's stored policy pack.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,14 +33,13 @@ pub struct PolicyPack {
     pub version: i64,
     /// Cedar policy source.
     pub source: String,
-    /// The pack's redaction configuration (MEM-2, ADR-0021 decision 3).
-    /// `None` means unconfigured: the PDP falls back to the strict
-    /// default (fail safe).
-    pub redaction: Option<RedactionConfig>,
-    /// The pack's composition configuration (CTX-2, ADR-0025
-    /// decisions 2–3). `None` means unconfigured: the PDP falls back to
-    /// the product default (which only ever narrows — never a widening).
-    pub composition: Option<CompositionConfig>,
+    /// The pack's non-Cedar configuration: redaction (MEM-2, ADR-0021
+    /// decision 3), composition (CTX-2, ADR-0025 decisions 2–3), and the
+    /// approval matrix (FLOW-3, ADR-0032 decision 3). Each field is
+    /// `None` when unconfigured, and each resolves to its own fail-safe
+    /// downstream — for approvals that is the empty matrix, which still
+    /// carries the invariant floor, never "no review".
+    pub config: PackConfig,
     /// When the pack was last applied.
     pub updated_at: DateTime<Utc>,
 }
@@ -87,38 +86,48 @@ pub async fn apply(
     tenant_id: TenantId,
     name: &str,
     source: &str,
-    redaction: Option<&RedactionConfig>,
-    composition: Option<&CompositionConfig>,
+    config: &PackConfig,
 ) -> Result<PolicyPack> {
     let config_json = |label: &str, value: serde_json::Result<serde_json::Value>| {
         value.map_err(|err| Error::Internal {
             message: format!("serialise {label} config: {err}"),
         })
     };
-    let redaction_json = redaction
-        .map(|config| config_json("redaction", serde_json::to_value(config)))
+    let redaction_json = config
+        .redaction
+        .map(|value| config_json("redaction", serde_json::to_value(value)))
         .transpose()?;
-    let composition_json = composition
-        .map(|config| config_json("composition", serde_json::to_value(config)))
+    let composition_json = config
+        .composition
+        .map(|value| config_json("composition", serde_json::to_value(value)))
+        .transpose()?;
+    let approvals_json = config
+        .approvals
+        .as_ref()
+        .map(|value| config_json("approvals", serde_json::to_value(value)))
         .transpose()?;
     let row = sqlx::query_as!(
         PolicyPackRow,
         r#"
-        insert into policy_packs (tenant_id, name, version, source, redaction, composition)
-        values ($1, $2, 1, $3, $4, $5)
+        insert into policy_packs
+            (tenant_id, name, version, source, redaction, composition, approvals)
+        values ($1, $2, 1, $3, $4, $5, $6)
         on conflict (tenant_id, name) do update
             set source = excluded.source,
                 redaction = excluded.redaction,
                 composition = excluded.composition,
+                approvals = excluded.approvals,
                 version = policy_packs.version + 1,
                 updated_at = now()
-        returning tenant_id, name, version, source, redaction, composition, updated_at
+        returning tenant_id, name, version, source, redaction, composition,
+                  approvals, updated_at
         "#,
         tenant_id.as_uuid(),
         name,
         source,
         redaction_json,
         composition_json,
+        approvals_json,
     )
     .fetch_one(executor)
     .await
@@ -138,7 +147,8 @@ pub async fn stored(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Resul
     let rows = sqlx::query_as!(
         PolicyPackRow,
         r#"
-        select tenant_id, name, version, source, redaction, composition, updated_at
+        select tenant_id, name, version, source, redaction, composition,
+               approvals, updated_at
         from policy_packs where tenant_id = $1
         order by name
         "#,
@@ -165,7 +175,8 @@ pub async fn get(
     let row = sqlx::query_as!(
         PolicyPackRow,
         r#"
-        select tenant_id, name, version, source, redaction, composition, updated_at
+        select tenant_id, name, version, source, redaction, composition,
+               approvals, updated_at
         from policy_packs where tenant_id = $1 and name = $2
         "#,
         tenant_id.as_uuid(),
@@ -230,6 +241,7 @@ struct PolicyPackRow {
     source: String,
     redaction: Option<serde_json::Value>,
     composition: Option<serde_json::Value>,
+    approvals: Option<serde_json::Value>,
     updated_at: DateTime<Utc>,
 }
 
@@ -259,13 +271,35 @@ impl From<PolicyPackRow> for PolicyPack {
         }
         let redaction = parse_config(&row.name, "redaction", row.redaction);
         let composition = parse_config(&row.name, "composition", row.composition);
+        let approvals: Option<ApprovalMatrix> = parse_config(&row.name, "approvals", row.approvals)
+            // A matrix that parses but cannot be satisfied is worse
+            // than none: it would deny every proposal at the cells it
+            // governs with no error anywhere. Treat it as
+            // unconfigured — the floor still applies — and say so.
+            .and_then(|matrix: ApprovalMatrix| {
+                matrix
+                    .validate()
+                    .inspect_err(|err| {
+                        tracing::warn!(
+                            policy.pack = %row.name,
+                            error = %err,
+                            "stored approval matrix is unsatisfiable; \
+                             treating the pack as unconfigured (floor only)"
+                        );
+                    })
+                    .ok()
+                    .map(|()| matrix)
+            });
         PolicyPack {
             tenant_id: TenantId::from_uuid(row.tenant_id),
             name: row.name,
             version: row.version,
             source: row.source,
-            redaction,
-            composition,
+            config: PackConfig {
+                redaction,
+                composition,
+                approvals,
+            },
             updated_at: row.updated_at,
         }
     }

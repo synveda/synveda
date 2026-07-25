@@ -4,15 +4,19 @@
 //!
 //! # What this crate is
 //!
-//! The substrate and the channel vocabulary built on it. FLOW-1 shipped the
-//! object store: content addressing, immutable history, and
-//! compare-and-swap ref updates. FLOW-2 ([`channels`], ADR-0031) gives ref
-//! names meaning — `{asset-kind}/{channel}` per scope, published and staged
-//! carrying their whole membership and derived carrying a log of what each
-//! commit added. The rest comes later: FLOW-3 hangs proposals and the
-//! approval matrix off two refs, FLOW-7 rolls a ref back. Nothing here
-//! decides who may write what; that is the PDP's job, at the seam the
-//! caller crossed to get here.
+//! The substrate, the channel vocabulary built on it, and the review that
+//! stands in front of it. FLOW-1 shipped the object store: content
+//! addressing, immutable history, and compare-and-swap ref updates.
+//! FLOW-2 ([`channels`], ADR-0031) gives ref names meaning —
+//! `{asset-kind}/{channel}` per scope, published and staged carrying their
+//! whole membership and derived carrying a log of what each commit added.
+//! FLOW-3 ([`proposals`] and [`curators`], ADR-0032) adds the governed
+//! request that moves content onto a published channel: a commit holding
+//! exactly what is reviewed, an append-only log of who approved it under
+//! which roles, and a per-scope CODEOWNERS file that adds required
+//! approvers. FLOW-7 rolls a ref back. Nothing here decides who may write
+//! what, and nothing here counts as authority; that is the PDP's job, at
+//! the seam the caller crossed to get here.
 //!
 //! # How it is used
 //!
@@ -69,9 +73,11 @@
 
 pub mod channels;
 pub mod commits;
+pub mod curators;
 pub mod hash;
 pub mod objects;
 pub mod policy;
+pub mod proposals;
 pub mod refs;
 pub mod signer;
 pub mod trees;
@@ -83,9 +89,17 @@ pub use channels::{
     read_memory_members,
 };
 pub use commits::{NewCommit, StoredCommit, commit, is_ancestor, read_commit};
+pub use curators::{
+    Approver, CURATORS_REF, CuratorCommit, CuratorFile, CuratorRule, CuratorWrite,
+    MAX_CURATOR_FILE_BYTES, StoredCuratorFile, nearest_curators, read_curators, write_curators,
+};
 pub use hash::{CommitHash, ObjectHash, PolicySnapshotHash, TreeHash};
 pub use objects::{MAX_OBJECT_BYTES, StoredObject, put_object, read_object};
 pub use policy::PolicySnapshot;
+pub use proposals::{
+    MAX_OPEN_PROPOSALS, MAX_PROPOSAL_MEMBERS, NewApproval, NewProposal, ProposalFilter,
+    StoredApproval, StoredProposal,
+};
 pub use refs::{
     RefUpdate, StoredRef, create_ref, force_update_ref, list_refs, read_ref, update_ref,
 };

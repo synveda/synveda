@@ -357,8 +357,7 @@ async fn refresh_tenant(
             &pack.name,
             pack.version,
             &pack.source,
-            pack.redaction,
-            pack.composition,
+            pack.config.clone(),
         ) {
             Ok(()) => outcomes.push("installed"),
             Err(error) => {

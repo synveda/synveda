@@ -12,7 +12,8 @@ use synveda_policy::{
     Action, AuthzContext, Pdp, Principal, REGULATED_STRICT, Resource, is_reserved,
 };
 use synveda_types::{
-    Error, HierarchyNode, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind, TenantId,
+    Error, HierarchyNode, PackConfig, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind,
+    TenantId,
 };
 
 const ADMIN_ACTIONS: [Action; 6] = [
@@ -150,7 +151,7 @@ fn the_default_pack_is_regulated_strict_and_admits_bound_admins() {
             .expect("authorize");
         assert!(decision.allowed, "{action} must be allowed on own scope");
         assert_eq!(decision.pack_name, REGULATED_STRICT);
-        assert_eq!(decision.pack_version, 6);
+        assert_eq!(decision.pack_version, 7);
         assert!(
             !decision.determining.is_empty(),
             "an allow must name its permitting policies"
@@ -189,8 +190,7 @@ fn the_base_quarantine_forbid_is_compiled_into_stored_packs() {
         "authz2-blanket",
         1,
         "permit (principal, action, resource) when { resource in principal.tenant };",
-        None,
-        None,
+        PackConfig::default(),
     )
     .expect("install test pack");
     let assignments = [assignment(tenant, org_of(&scopes), "authz2-blanket")];
@@ -272,7 +272,7 @@ fn the_default_pack_denies_a_foreign_principal_everything() {
             assert_eq!(action, "hierarchy.read");
             assert_eq!(resource, format!("tenant {victim}"));
             assert!(
-                reason.contains(&format!("{REGULATED_STRICT}@6")),
+                reason.contains(&format!("{REGULATED_STRICT}@7")),
                 "denial must name pack@version, got: {reason}"
             );
         }
@@ -309,8 +309,14 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
     let (org, dept, team) = (scopes[0].id, scopes[1].id, scopes[2].id);
     let alice = principal(tenant);
     let bindings = [admin_binding(tenant)];
-    pdp.install_source(tenant, "authz2-readonly", 4, READ_ONLY_PACK, None, None)
-        .expect("install test pack");
+    pdp.install_source(
+        tenant,
+        "authz2-readonly",
+        4,
+        READ_ONLY_PACK,
+        PackConfig::default(),
+    )
+    .expect("install test pack");
 
     // Assigned at the department: the team inherits it.
     let at_dept = [assignment(tenant, dept, "authz2-readonly")];
@@ -397,8 +403,14 @@ fn policy_assign_is_decided_under_the_inherited_pack() {
     let scopes = chain(tenant);
     let team = team_of(&scopes);
     let alice = principal(tenant);
-    pdp.install_source(tenant, "authz2-frozen", 1, READ_ONLY_PACK, None, None)
-        .expect("install test pack");
+    pdp.install_source(
+        tenant,
+        "authz2-frozen",
+        1,
+        READ_ONLY_PACK,
+        PackConfig::default(),
+    )
+    .expect("install test pack");
     let assignments = [assignment(tenant, team, "authz2-frozen")];
     let bindings = [admin_binding(tenant)];
     let context = AuthzContext {
@@ -480,8 +492,14 @@ fn stored_packs_install_and_remove_by_name_per_tenant() {
     let team = team_of(&scopes);
     let alice = principal(tenant);
 
-    pdp.install_source(tenant, "authz2-readonly", 7, READ_ONLY_PACK, None, None)
-        .expect("install test pack");
+    pdp.install_source(
+        tenant,
+        "authz2-readonly",
+        7,
+        READ_ONLY_PACK,
+        PackConfig::default(),
+    )
+    .expect("install test pack");
     assert_eq!(
         pdp.installed_versions(tenant),
         vec![("authz2-readonly".to_owned(), 7)]
@@ -556,7 +574,7 @@ fn reserved_pack_names_cannot_be_stored() {
         "bootstrap",
     ] {
         assert!(is_reserved(name), "{name} must be reserved");
-        let refused = pdp.install_source(tenant, name, 1, READ_ONLY_PACK, None, None);
+        let refused = pdp.install_source(tenant, name, 1, READ_ONLY_PACK, PackConfig::default());
         assert!(
             matches!(refused, Err(Error::Invalid { .. })),
             "storing {name} must be refused, got {refused:?}"
@@ -579,8 +597,7 @@ fn an_explicit_forbid_reports_its_determining_policy() {
         permit (principal, action, resource) when { resource in principal.tenant };
         forbid (principal, action == Synveda::Action::"HierarchyDelete", resource);
         "#,
-        None,
-        None,
+        PackConfig::default(),
     )
     .expect("install test pack");
     let assignments = [assignment(tenant, team, "authz2-no-delete")];
@@ -612,8 +629,14 @@ fn invalid_packs_are_rejected_and_leave_the_previous_pack_in_force() {
     let team = team_of(&scopes);
     let alice = principal(tenant);
 
-    pdp.install_source(tenant, "authz2-readonly", 1, READ_ONLY_PACK, None, None)
-        .expect("install good pack");
+    pdp.install_source(
+        tenant,
+        "authz2-readonly",
+        1,
+        READ_ONLY_PACK,
+        PackConfig::default(),
+    )
+    .expect("install good pack");
 
     // Syntax error: does not parse.
     let syntax = pdp.install_source(
@@ -621,8 +644,7 @@ fn invalid_packs_are_rejected_and_leave_the_previous_pack_in_force() {
         "authz2-readonly",
         2,
         "permit (principal",
-        None,
-        None,
+        PackConfig::default(),
     );
     assert!(
         matches!(syntax, Err(Error::Invalid { .. })),
@@ -635,8 +657,7 @@ fn invalid_packs_are_rejected_and_leave_the_previous_pack_in_force() {
         "authz2-readonly",
         3,
         r#"permit (principal, action == Synveda::Action::"LaunchMissiles", resource);"#,
-        None,
-        None,
+        PackConfig::default(),
     );
     assert!(
         matches!(unknown_action, Err(Error::Invalid { .. })),

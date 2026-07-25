@@ -9,8 +9,8 @@ use chrono::Utc;
 use synveda_policy::{Pdp, Principal};
 use synveda_retrieval::{MemoryReadInputs, composition_plan};
 use synveda_types::{
-    CompositionConfig, HierarchyNode, InjectChannels, PolicyAssignment, ScopeId, ScopeKind,
-    TenantId,
+    CompositionConfig, HierarchyNode, InjectChannels, PackConfig, PolicyAssignment, ScopeId,
+    ScopeKind, TenantId,
 };
 
 struct Fixture {
@@ -120,11 +120,13 @@ fn published_only_pack_governs_its_subtree_and_the_budget() {
         "acme-bank",
         1,
         BLANKET,
-        None,
-        Some(CompositionConfig {
-            budget_tokens: 900,
-            channels: InjectChannels::PublishedOnly,
-        }),
+        PackConfig {
+            composition: Some(CompositionConfig {
+                budget_tokens: 900,
+                channels: InjectChannels::PublishedOnly,
+            }),
+            ..Default::default()
+        },
     )
     .expect("install bank pack");
     let team = fixture.chain[1].id;
@@ -165,8 +167,14 @@ fn published_only_pack_governs_its_subtree_and_the_budget() {
 fn unconfigured_stored_pack_gets_the_product_config() {
     let fixture = fixture();
     let pdp = Pdp::new().expect("embedded packs compile");
-    pdp.install_source(fixture.tenant, "acme-plain", 1, BLANKET, None, None)
-        .expect("install unconfigured pack");
+    pdp.install_source(
+        fixture.tenant,
+        "acme-plain",
+        1,
+        BLANKET,
+        PackConfig::default(),
+    )
+    .expect("install unconfigured pack");
     let assignments = [assignment(&fixture, fixture.chain[3].id, "acme-plain")];
     let alice = principal(&fixture, false);
     let plan = composition_plan(

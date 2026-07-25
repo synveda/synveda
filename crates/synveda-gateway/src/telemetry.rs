@@ -100,6 +100,25 @@ pub const QUARANTINE_OPERATIONS_TOTAL: &str = "synveda_quarantine_operations_tot
 /// allowed decision (ADR-0019 decision 4).
 pub const CHANNEL_OPERATIONS_TOTAL: &str = "synveda_channel_operations_total";
 
+/// Proposal API operations (FLOW-3, ADR-0032), labelled by `op`
+/// (`list`/`get`/`open`/`approve`/`reject`/`withdraw`/`publish`) and
+/// `outcome` (`ok`, `rejected`, `error`). Every op but the reads chains
+/// its own `vedaflow.proposal.*` event; `publish` chains
+/// `vedaflow.channel.published` with the proposal id, since it is the
+/// same governed act as a direct publish (ADR-0032 decision 18).
+pub const PROPOSAL_OPERATIONS_TOTAL: &str = "synveda_proposal_operations_total";
+
+/// Publications refused because the approval matrix could not be met by
+/// the acting principal alone (FLOW-3, ADR-0032 decision 8), labelled by
+/// `surface` (`channel` for the direct route, `proposal` for a
+/// proposal's effect). Nonzero on `channel` is the product working: it
+/// counts the publications that were pushed onto the review path.
+pub const PUBLISH_REVIEW_REQUIRED_TOTAL: &str = "synveda_publish_review_required_total";
+
+/// Curator-file edits (FLOW-3, ADR-0032 decision 15), labelled by `op`
+/// (`get`/`put`) and `outcome`.
+pub const CURATOR_OPERATIONS_TOTAL: &str = "synveda_curator_operations_total";
+
 /// Inject requests (CTX-3, ADR-0026 decision 8), labelled by `outcome`,
 /// funnel-collapsed worst-first: `error`, `rejected`, `degraded` (a
 /// block was served under a degradation), `empty` (nothing composed),
@@ -407,6 +426,22 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         CHANNEL_OPERATIONS_TOTAL,
         "Channel API operations by op (list/publish) and outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        PROPOSAL_OPERATIONS_TOTAL,
+        "Proposal API operations by op and outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        PUBLISH_REVIEW_REQUIRED_TOTAL,
+        "Publications refused for want of approvals, by surface (channel/proposal)"
+    );
+    metrics::describe_counter!(
+        CURATOR_OPERATIONS_TOTAL,
+        "Curator-file operations by op (get/put) and outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        synveda_vedaflow::proposals::PROPOSAL_ACTS_TOTAL,
+        "VedaFlow proposal lifecycle acts by act and asset kind"
     );
     metrics::describe_counter!(
         synveda_retrieval::COMPOSED_ENTRIES_TOTAL,
