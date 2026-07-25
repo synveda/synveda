@@ -396,6 +396,11 @@ EPIC EVAL — Evaluation (functional requirement)
 EVAL-1 Eval harness skeleton (M)
   Rust runner + fixtures; executes scenario suites against a live stack; CI-integrated with
   regression gates on the five axes: accuracy, latency, tokens, recall, abstention.
+  AC: `make eval` runs the scenario suite against a live stack and reports all five axes as
+  machine-readable JSON plus a human summary; a committed baseline gates the run; a real
+  product change that degrades quality (a bank-mode pack flip withholding derived memory)
+  fails the gate naming the axis, the baseline, the measurement, and the delta; nightly
+  workflow; demo script.
 EVAL-2 Extraction quality suite (M)
   Labelled transcript fixtures → precision/recall per memory class; hallucinated-memory rate
   (HaluMem-style). AC: dashboard; gate on regression >2pts.

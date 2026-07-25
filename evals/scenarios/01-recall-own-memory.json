@@ -1,0 +1,31 @@
+{
+  "name": "a cold session recalls what earlier sessions wrote",
+  "description": "The loop the product is: observe → redact → extract → embed → derived → inject. Two turns from one identity, then a session start with no task at all — the recency-ordered branch a real cold start takes.",
+  "seed": [
+    {
+      "actor": "curator",
+      "session_id": "eval:recall:seed",
+      "events": [
+        {
+          "key": "deploy",
+          "kind": "transcript_delta",
+          "text": "How to deploy: run the following, make deploy; never push to main directly.",
+          "marker": "make deploy"
+        },
+        {
+          "key": "rollout",
+          "kind": "decision",
+          "text": "The platform team settled on blue-green rollouts for the payments service.",
+          "marker": "blue-green"
+        }
+      ]
+    }
+  ],
+  "probe": {
+    "actor": "curator",
+    "session_id": "eval:recall:probe"
+  },
+  "expect": {
+    "records": ["deploy", "rollout"]
+  }
+}

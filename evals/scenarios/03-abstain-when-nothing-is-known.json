@@ -1,0 +1,13 @@
+{
+  "name": "an identity with no memory receives nothing, not something",
+  "description": "The newcomer sits in the same team as the curator and has written nothing. Under regulated-strict a colleague's personal scope is not in her chain, so the honest answer is the empty block — and a memory system that invents context here is worse than one that stays quiet.",
+  "probe": {
+    "actor": "newcomer",
+    "session_id": "eval:abstain:probe",
+    "task": "how do we deploy and what did we decide about rollouts"
+  },
+  "expect": {
+    "abstain": true,
+    "must_not_contain": ["make deploy", "blue-green", "three attempts"]
+  }
+}

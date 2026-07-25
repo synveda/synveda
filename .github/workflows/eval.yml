@@ -1,0 +1,45 @@
+name: Eval
+
+# The eval gate (EVAL-1, ADR-0028 decision 8). It needs a live stack, so
+# it runs nightly rather than on every pull request — that is the trade:
+# a regression is caught within a day, and `ci.yml` stays database-free
+# and fast. `workflow_dispatch` is there for the day you want it before a
+# merge; EVAL-4's composition scenarios are the trigger to move it onto
+# the pull-request path for good.
+on:
+  schedule:
+    # 03:00 UTC, after the day's merges and before anyone reads it.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The harness brings up its own scratch database inside the compose
+      # postgres; nothing else from the dev environment is needed — no
+      # IdP, no model server (ADR-0028 decision 6).
+      - name: Start Postgres
+        run: docker compose -f deploy/compose/docker-compose.yml up --detach --wait postgres
+
+      # The report is the artefact: axis by axis, scenario by scenario,
+      # with each block's watermark. A failed gate still uploads it —
+      # that is the run someone needs to read.
+      - name: Run the suite against the gate
+        run: mkdir -p eval-report && make eval
+        env:
+          EVAL_REPORT: eval-report/report.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: eval-report/
+          if-no-files-found: warn

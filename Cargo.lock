@@ -3624,6 +3624,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "synveda-eval"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "synveda-gateway"
 version = "0.1.0"
 dependencies = [

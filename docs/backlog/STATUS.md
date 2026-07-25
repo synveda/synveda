@@ -44,7 +44,14 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [CTX-2: Composition engine](CTX-2.md) — done 2026-07-23, AC tests: crates/synveda-retrieval/tests/compose.rs (deterministic: byte-identical re-composition at the same instant, unrelated writes notwithstanding; the watermark: BLAKE3 version hashes + record ids on every block, block hash recomputable from the entry hashes; tokens_per_inject recorded on every compose including the zero-entry one; plus gradient/pinned-first assembly, first-fit budget, channel rules, the seed §4.4 conflict matrix, valid-time as-of, the sensitivity clamp, relevance ranking), crates/synveda-retrieval/tests/composition_plan.rs (the PDP sweep: per-scope channel rules and the home-scope budget from effective packs; bank-mode subtree inheritance; quarantine/unplaced plan nothing), crates/synveda-store/tests/policy_packs.rs (the composition config rides the stored pack; re-apply clears; garbage json reads unconfigured), demo: demos/ctx-2-composition.sh (observe → pipeline → seeded scope material → the compose example over the real product path — identity → HIER-2 chain → PDP plan → compose — then the bank-mode pack flip governs the very next compose)
 - [x] [CTX-3: inject API](CTX-3.md) — done 2026-07-23, AC tests: crates/synveda-gateway/tests/inject.rs (the degradation matrix: embedder down → sparse-only still ranked + the warning header; broken sidecar → unranked compose + the header; contract rejections stay honest errors — plus the full product path with the watermark and exactly one `context.injected` event, aggregated decisions, task as hash only; taskless recency; quarantined/unplaced → the empty block, still audited; budget narrowing never widening; the bank-mode pack governing the very next inject), crates/synveda-gateway/tests/inject_latency.rs (`--ignored`: 1,000 concurrent sessions arriving at 50/s — p50 18.6ms, p95 22ms, p99 24ms against the 150ms budget, median asserted, tails + stage split reported; the closed-loop saturation probe prints the per-tenant chain-lock ceiling every run), demo: demos/ctx-3-inject.sh (real TEI end to end; TEI stopped mid-demo degrades the same inject to sparse-only with the header and recovers on restart; audit tail + verify)
 - [x] [ADPT-1: Claude Code adapter](ADPT-1.md) — done 2026-07-25, AC test: demos/adpt-1-claude-code.sh (a clean HOME to a personalised session in 1.5s of the 120s budget: the prebuilt plugin enabled, `synveda login` through live Rauthy with AUTH-2 placing a first-time identity, a watermarked block composed from team memory the user never configured, the turn observed back, then `context.injected` + `memory.observed` joined under one `claude-code:<id>` in a verifying chain, the access token renewing itself, and the observed turn returning as memory in the next session), adapters/claude-code/src/driver.test.mts + `node dist/driver.mjs` (the recorded-payload driver over fixtures/, sixteen cases against a mock and against the live gateway — dead gateway, 401, degraded header, oversized tool result, replayed batch, cursor resume after a failed flush, damaged transcript line, unreadable payload; every one exits 0), adapters/claude-code/src/{hook,events,transcript,spool,credentials,log}.test.mts (the handler, mapping, parser, spool, and CLI-seam suites), crates/synveda-gateway/tests/cli_login.rs (the loopback allowlist, the single-use state-bound handoff, the refresh grant, no token in any redirect URL)
-- [ ] [EVAL-1: Eval harness skeleton](EVAL-1.md)
+- [x] [EVAL-1: Eval harness skeleton](EVAL-1.md) — done 2026-07-25, AC test: demos/eval-1-harness.sh (the suite green and the gate holding, then the bank-mode switch thrown for real — a published-only pack assigned at the org — and the very next run measuring the same product answering worse: recall 1.0 → 0.0, accuracy 1.0 → 0.5, the gate failing with the axis, the baseline, the measurement, and the delta; then the pack withdrawn and the suite green again, which is what makes the failure a measurement rather than a broken demo), crates/synveda-eval (20 unit tests: the scenario format refusing unknown fields and dangling keys, per-axis reduction over the scenarios that measure each axis, nearest-rank percentiles, floor and ceiling breaches, a bounded metric that stopped being measured, baseline updates keeping each bound on its own side, and the grading rules — recall, leak, abstention, and the budget invariant), `make eval` (the live run), `make eval-check` (suite and baseline parse with no stack, in `make ci`), nightly: .github/workflows/eval.yml
+
+_Phase 1 complete 2026-07-25. The phase demo goal — "SSO login →
+auto-scoped → live Claude Code session writes and receives governed
+memory, fully audited" — is `demos/adpt-1-claude-code.sh` end to end, and
+`demos/eval-1-harness.sh` is the phase's other half: the same spine, now
+measured on five axes with a gate that fails when it gets worse. Phase 2
+(VedaFlow) may start._
 
 _Order revised 2026-07-18 (was TEN → AUTH → AUTHZ → HIER → MEM → CTX →
 AUD): the epic-grouped sequence was not a valid topological order. HIER-1
@@ -518,6 +525,45 @@ case is mock-only, because producing a live degradation means stopping
 TEI, which is CTX-3's demo; subagent (sidechain) turns still go
 unobserved (decision 8); and the demo runs the deterministic embedder and
 rule-based extractor, so the real-TEI path stays CTX-1/CTX-3's to prove._
+
+_EVAL-1 (2026-07-25, ADR-0028): the feature arrived with no acceptance
+criteria, so they were written first (SYNVEDA_FEATURES.md and
+docs/backlog/EVAL-1.md) and the gate is the load-bearing half — a harness
+that reports without failing is a dashboard. `crates/synveda-eval`
+depends on no Synveda crate at all, and `check-crate-deps.mjs` holds it
+to that empty set: an eval that can link the store can seed and read
+around the PDP and would then report quality the product cannot deliver.
+It speaks `/v1` with each actor's own bearer, seeds through
+`/v1/observe` and waits for the real pipeline, and grades a single probe
+per scenario. Scenarios are JSON under `evals/scenarios/`, so EVAL-2/4/5
+add coverage by adding files.
+
+Three things the first live runs settled, each recorded because it is a
+limit rather than a preference: (1) **retrieval precision cannot be
+honestly measured here.** The suite runs the deterministic hash embedder
+(no model server, so the nightly stays cheap — decision 6), and its
+geometry carries no meaning by construction (ADR-0023 decision 6), so the
+dense leg ranks by nothing; a "keep the irrelevant record out" scenario
+failed for exactly that reason and was rewritten to assert what the
+deterministic path does guarantee — reachability under a task, inside the
+requested budget. Precision with real embeddings is EVAL-4's, over live
+TEI, as CTX-1's own quality suite already says. (2) **A block that
+outspends its requested budget now fails every scenario**, not just the
+ones that thought to ask: ADR-0026 decision 7's narrowing rule is an
+invariant, so the runner checks it for free. (3) **`--update-baseline`
+leaves headroom on cost ceilings** (half again) and none on quality
+floors: a ceiling pinned to the last measurement fails on the next run's
+jitter, and a gate that cries wolf nightly is a gate someone turns off.
+
+Deferrals: the gate is nightly rather than per-PR, which is a trade —
+a regression is caught within a day, and pull requests keep the
+database-free CI that makes them fast; EVAL-4's composition scenarios are
+the stated trigger to move it. `make ci` runs `eval-check`, which parses
+the suite and the baseline with no stack at all, so a scenario that would
+have measured nothing still fails on every pull request. The suite's four
+scenarios exercise one tenant on a scratch database with dev-mode bearers
+(ADR-0008); the OIDC path is AUTH-1's and ADPT-1's to prove, and both
+do._
 
 ## Phase 2 — Governance (wk 6–10)
 

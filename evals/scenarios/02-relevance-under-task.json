@@ -1,0 +1,33 @@
+{
+  "name": "a task-carrying probe reaches the right record, inside its budget",
+  "description": "A resumed or compacted session carries a task, which takes the whole read path — plan, query embed, hybrid retrieval, compose — where a cold start takes none of it. The second record is corpus, not a distractor to be excluded: this suite runs the deterministic hash embedder, whose geometry carries no meaning by construction (ADR-0023 decision 6), so the dense leg here ranks by nothing at all. Retrieval *precision* therefore cannot be honestly asserted against this stack and is EVAL-4's, over live TEI. What is asserted is what the deterministic path really guarantees: the material is reachable under a task, and the block never exceeds the budget the caller asked for.",
+  "seed": [
+    {
+      "actor": "curator",
+      "session_id": "eval:relevance:seed",
+      "events": [
+        {
+          "key": "retries",
+          "kind": "decision",
+          "text": "We decided to cap payment retries at three attempts with full jitter.",
+          "marker": "three attempts"
+        },
+        {
+          "key": "vacuum",
+          "kind": "transcript_delta",
+          "text": "Postgres vacuum maintenance runs weekly on the reporting replica.",
+          "marker": "vacuum maintenance"
+        }
+      ]
+    }
+  ],
+  "probe": {
+    "actor": "curator",
+    "session_id": "eval:relevance:probe",
+    "task": "what did we decide about payment retries",
+    "budget_tokens": 200
+  },
+  "expect": {
+    "records": ["retries"]
+  }
+}

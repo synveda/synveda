@@ -1,0 +1,10 @@
+{
+  "note": "EVAL-1's gate (ADR-0028 decision 5). The three quality axes are absolutes and stay that way: this suite is small enough that any scenario failing is a regression, not noise. The two cost axes are ceilings, and they are calibrated differently on purpose. tokens_mean is environment-independent — a deterministic corpus through a deterministic composition — so it sits at roughly twice the 76.5 this suite measures, tight enough that a composition which starts spending double is caught. latency_p95_ms is not environment-independent at all: a debug-profile gateway on a shared CI runner is nothing like a laptop, so this ceiling is a shape detector for an order-of-magnitude change (measured ~16ms here) and emphatically not an SLO. EVAL-6 owns latency under load, EVAL-4 owns retrieval quality with real embeddings, EVAL-2 owns extraction precision, EVAL-5 owns the zero-tolerance policy-leak gate. Nothing here is a target for any of them. `--update-baseline` rewrites floors to what a run achieved and ceilings to half again above what it cost.",
+  "metrics": {
+    "accuracy": { "min": 1.0 },
+    "recall": { "min": 1.0 },
+    "abstention": { "min": 1.0 },
+    "tokens_mean": { "max": 150.0 },
+    "latency_p95_ms": { "max": 250.0 }
+  }
+}

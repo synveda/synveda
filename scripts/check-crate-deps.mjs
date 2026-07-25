@@ -33,6 +33,13 @@ const ALLOWED = {
   // a pack against the same schema the gateway's reloader enforces.
   // Audit added with AUD-1 (ADR-0019): the break-glass audits itself, and
   // `synveda audit verify` is the operator's chain check.
+  // The eval harness depends on no Synveda crate at all, and this empty
+  // set is the enforcement (EVAL-1, ADR-0028 decision 1). An eval that can
+  // link the store can seed and read around the PDP and would then report
+  // quality the product cannot deliver; one that speaks only `/v1` measures
+  // what a caller gets. It is the standing the seed gives adapters and SDKs,
+  // applied to the thing that grades the product.
+  "synveda-eval": [],
   "synveda-cli": [
     "synveda-types",
     "synveda-store",

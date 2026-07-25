@@ -1,0 +1,25 @@
+[package]
+name = "synveda-eval"
+description = "The eval harness (EVAL-1): scenario suites against a live stack, five axes, a committed baseline as the gate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "synveda-eval"
+path = "src/main.rs"
+
+# No Synveda crates, deliberately, and `scripts/check-crate-deps.mjs`
+# holds it to that (ADR-0028 decision 1). An eval that can link the store
+# can seed and read around the PDP, and would then report quality the
+# product cannot deliver. This one speaks `/v1` and nothing else, which is
+# also what lets it be pointed at a deployment whose source it does not
+# have.
+[dependencies]
+chrono = { workspace = true }
+clap = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

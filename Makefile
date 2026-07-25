@@ -7,7 +7,7 @@ COMPOSE = docker compose -f deploy/compose/docker-compose.yml
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps ts-build ts-test ci dev-up dev-down smoke db-test
+.PHONY: fmt lint test build deny check-deps ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -17,6 +17,17 @@ dev-down:
 
 smoke:
 	bash scripts/smoke.sh
+
+# The eval harness (EVAL-1, ADR-0028): a scenario suite against a live
+# stack on a scratch database, five axes, gated by evals/baseline.json.
+# Needs the dev compose (postgres) and node. Exit status is the gate's.
+eval:
+	sh evals/run.sh
+
+# Parses the suite and the baseline with no stack at all — what `ci`
+# can run, and what catches a scenario that would measure nothing.
+eval-check:
+	cargo run -q -p synveda-eval -- check
 
 db-test:
 	DATABASE_URL=$(DATABASE_URL) cargo test --workspace
@@ -47,4 +58,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps ts-build ts-test
+ci: fmt lint test build deny check-deps eval-check ts-build ts-test
