@@ -188,6 +188,15 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/proposals/{id}/reject", post(proposals::reject))
         .route("/v1/proposals/{id}/withdraw", post(proposals::withdraw))
         .route("/v1/proposals/{id}/publish", post(proposals::publish))
+        // The lapse plane (AUTHZ-4, ADR-0037). `POST /v1/lapses` opens a
+        // *proposal* and grants nothing; the grant is that proposal's
+        // effect, beside `/publish` and taking the same shape.
+        .route("/v1/proposals/{id}/lapse", post(crate::lapses::grant))
+        .route(
+            "/v1/lapses",
+            get(crate::lapses::list).post(crate::lapses::propose),
+        )
+        .route("/v1/lapses/{id}/revoke", post(crate::lapses::revoke))
         // CODEOWNERS-style curator files (FLOW-3, ADR-0032 decisions
         // 13–15), under the policy plane's own actions: they add required
         // approvers and grant nothing.

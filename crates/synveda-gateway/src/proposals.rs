@@ -69,8 +69,8 @@ use synveda_store::records::RecordState;
 use synveda_store::{hierarchy, records, rls};
 use synveda_types::{
     ApprovalRequirement, AssetKind, CastApproval, Channel, Error, HierarchyNode, IdentityId,
-    PromotionEvidence, ProposalId, ProposalState, ProposalView, RecordId, Result, Role, ScopeId,
-    Sensitivity, TenantId, Verdict,
+    PromotionEvidence, ProposalEffect, ProposalId, ProposalState, ProposalView, RecordId, Result,
+    Role, ScopeId, Sensitivity, TenantId, Verdict,
 };
 use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
 
@@ -142,7 +142,13 @@ struct ProposalSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     source_scope_path: Option<String>,
     asset: String,
-    channel: Channel,
+    /// What running this proposal would do (AUTHZ-4, ADR-0037
+    /// decision 16). `published` for every FLOW-3 proposal; `lapse` for a
+    /// grant. Named for the effect rather than the channel because a lapse
+    /// has no channel, and a field that said `published` on a proposal that
+    /// publishes nothing would be the paper-over this feature refused at
+    /// the schema.
+    effect: ProposalEffect,
     /// The five-state vocabulary tech plan §2.3 describes: the stored
     /// state, with `approved` rendered from `open` plus a satisfied
     /// requirement (ADR-0032 decision 11).
@@ -564,7 +570,7 @@ async fn open_inner(
             // the climb needed no schema (ADR-0034 decision 8).
             source_scope: source_scope_id,
             asset: AssetKind::Memory,
-            channel: Channel::Published,
+            effect: ProposalEffect::Published,
             members: &members,
             sensitivity,
             title: &body.title,
@@ -1380,7 +1386,7 @@ fn render(
         target_scope_path: paths.target.clone(),
         source_scope_path: paths.source.clone(),
         asset: proposal.asset.as_str().to_owned(),
-        channel: proposal.channel,
+        effect: proposal.effect,
         state: ProposalView::of(proposal.state, outstanding.is_empty()),
         sensitivity: proposal.sensitivity,
         title: proposal.title.clone(),

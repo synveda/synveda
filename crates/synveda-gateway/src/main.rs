@@ -192,6 +192,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         promotion_config,
     );
 
+    // The lapse expiry sweep (AUTHZ-4, ADR-0037 decision 4). Bookkeeping:
+    // it chains `policy.lapse.expired` for windows that have closed, and
+    // every grant it touches stopped deciding reads at `expires_at`
+    // whether or not this loop is running. The default cadence is
+    // deliberately slack for that reason — a late audit line is the only
+    // thing a slow sweep costs.
+    let lapse_sweep_secs = match std::env::var("SYNVEDA_LAPSE_SWEEP_SECS") {
+        Ok(value) => value
+            .parse::<u64>()
+            .map_err(|_| "SYNVEDA_LAPSE_SWEEP_SECS must be a positive integer")?,
+        Err(_) => 60,
+    };
+    let lapse_sweep = synveda_gateway::lapses::spawn_expiry_sweep(
+        pool.clone(),
+        Duration::from_secs(lapse_sweep_secs.max(1)),
+    );
+
     // The search index sidecar and its indexer (CTX-1, ADR-0024): a
     // boot failure here means the index root is unusable — refuse to
     // boot rather than serve a read path whose lexical leg can never
@@ -249,6 +266,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     refresher.abort();
     search_indexer.abort();
     promotion_engine.abort();
+    lapse_sweep.abort();
     if let Some(worker) = extraction_worker {
         worker.abort();
     }

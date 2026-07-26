@@ -32,7 +32,8 @@ use synveda_store::records::{self, RecordVersion};
 use synveda_store::{ScopeChainCache, identities, policy_assignments, rls, role_bindings, tenants};
 use synveda_types::{
     AssetKind, Channel, Error, HierarchyNode, IdentityId, IdentityKind, MemberEvidence,
-    PromotionEvidence, PromotionRule, RecordId, Result, ScopeId, Sensitivity, TenantId,
+    PromotionEvidence, PromotionRule, ProposalEffect, RecordId, Result, ScopeId, Sensitivity,
+    TenantId,
 };
 use synveda_vedaflow::hash::{ObjectHash, object_hash};
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
@@ -661,7 +662,7 @@ async fn open_proposal(
             // differ (ADR-0033 decision 8).
             source_scope: node.id,
             asset: AssetKind::Memory,
-            channel: Channel::Published,
+            effect: ProposalEffect::Published,
             members: &entries,
             sensitivity: key.sensitivity,
             title: &title,

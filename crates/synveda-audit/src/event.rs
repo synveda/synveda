@@ -209,6 +209,28 @@ pub enum AuditAction {
     ProposalRejected,
     /// A proposer withdrew their own proposal, closing it.
     ProposalWithdrawn,
+    /// An approved lapse proposal's effect ran: a time-boxed grant now
+    /// stands over the target scope's material (AUTHZ-4, ADR-0037
+    /// decision 17). Payload carries both scopes, the action granted, the
+    /// window, the mandatory reason, the proposal, and the requirement as
+    /// resolved — never any of the material the grant discloses.
+    ///
+    /// The window is the load-bearing field: with it recorded here, the
+    /// trail is complete even if the expiry sweep never runs, because when
+    /// the grant stopped deciding anything is arithmetic over this event.
+    LapseGranted,
+    /// A standing grant was ended early, with its mandatory reason and the
+    /// window it cut short.
+    LapseRevoked,
+    /// A grant reached the end of its window. Emitted by the sweep under
+    /// `actor_kind=system`, and **bookkeeping only** — the grant stopped
+    /// deciding anything at `expires_at` whether or not this was ever
+    /// written (ADR-0037 decision 4).
+    ///
+    /// Revoked grants deliberately get no expiry event: their ending is
+    /// already on the chain, and a second event asserting the same fact is
+    /// something an auditor would have to reconcile (ADR-0019 decision 4).
+    LapseExpired,
 }
 
 impl AuditAction {
@@ -249,6 +271,9 @@ impl AuditAction {
             AuditAction::ProposalApproved => "vedaflow.proposal.approved",
             AuditAction::ProposalRejected => "vedaflow.proposal.rejected",
             AuditAction::ProposalWithdrawn => "vedaflow.proposal.withdrawn",
+            AuditAction::LapseGranted => "policy.lapse.granted",
+            AuditAction::LapseRevoked => "policy.lapse.revoked",
+            AuditAction::LapseExpired => "policy.lapse.expired",
         }
     }
 }

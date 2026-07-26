@@ -43,6 +43,7 @@ pub mod curators;
 pub mod error;
 pub mod hierarchy;
 mod inject;
+pub mod lapses;
 pub mod observe;
 pub mod policy;
 pub mod proposals;

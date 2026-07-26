@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::Error;
+use crate::{Channel, Error};
 
 /// A proposal's stored lifecycle — only what *happened* (ADR-0032
 /// decision 11).
@@ -128,6 +128,81 @@ impl fmt::Display for ProposalView {
     }
 }
 
+/// What running a proposal's effect would do.
+///
+/// Until AUTHZ-4 a proposal had exactly one possible effect — publish its
+/// members onto the target scope's published channel — and the column
+/// holding this was called `target_channel` with a `= 'published'` check.
+/// A lapse has no target channel at all: its effect is a grant row
+/// (ADR-0037 decision 16). So the column names the *effect*, and this is
+/// its vocabulary.
+///
+/// [`ProposalEffect::Lapse`] is deliberately **not** a [`Channel`] variant.
+/// No scope has a `policy/lapse` ref, nothing writes one, and a channel
+/// that cannot express withdrawal cannot express expiry either — the same
+/// fact that kept `staged` unwritten (ADR-0032 decision 2).
+///
+/// There is no `Default`: what a proposal would *do* is the first thing a
+/// reviewer needs to know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProposalEffect {
+    /// Publish the members onto the target scope's published channel
+    /// (FLOW-3). The only effect there was until AUTHZ-4.
+    Published,
+    /// Open a time-boxed grant over the target scope's material
+    /// (AUTHZ-4, ADR-0037). Always an [`crate::AssetKind::Policy`]
+    /// proposal whose one member is the lapse's reviewed terms.
+    Lapse,
+}
+
+impl ProposalEffect {
+    /// Every effect.
+    pub const ALL: [ProposalEffect; 2] = [ProposalEffect::Published, ProposalEffect::Lapse];
+
+    /// Stable wire name, identical to the serde form and to the stored
+    /// column (whose CHECK constraint mirrors this list).
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            ProposalEffect::Published => "published",
+            ProposalEffect::Lapse => "lapse",
+        }
+    }
+
+    /// The channel this effect writes, when it writes one.
+    ///
+    /// `None` for a lapse, which is the honest answer rather than a
+    /// stand-in: its effect is a row, and a caller that needs a channel
+    /// here has taken a wrong turn.
+    #[must_use]
+    pub const fn channel(&self) -> Option<Channel> {
+        match self {
+            ProposalEffect::Published => Some(Channel::Published),
+            ProposalEffect::Lapse => None,
+        }
+    }
+}
+
+impl fmt::Display for ProposalEffect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ProposalEffect {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        ProposalEffect::ALL
+            .into_iter()
+            .find(|effect| effect.as_str() == s)
+            .ok_or_else(|| Error::Invalid {
+                message: format!("unknown proposal effect: {s:?}"),
+            })
+    }
+}
+
 /// A reviewer's verdict on a proposal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -221,6 +296,31 @@ mod tests {
         assert!(ProposalState::Rejected.is_terminal());
         assert!(ProposalState::Withdrawn.is_terminal());
         assert!(ProposalState::Published.is_terminal());
+    }
+
+    #[test]
+    fn an_effect_round_trips_and_only_publication_names_a_channel() {
+        for effect in ProposalEffect::ALL {
+            assert_eq!(
+                effect.to_string().parse::<ProposalEffect>().unwrap(),
+                effect
+            );
+            assert_eq!(
+                serde_json::to_string(&effect).unwrap(),
+                format!("\"{}\"", effect.as_str())
+            );
+        }
+        assert_eq!(
+            ProposalEffect::Published.channel(),
+            Some(Channel::Published)
+        );
+        assert_eq!(
+            ProposalEffect::Lapse.channel(),
+            None,
+            "a lapse writes a row, not a channel; standing in for one would be a lie"
+        );
+        assert!("derived".parse::<ProposalEffect>().is_err());
+        assert!("staged".parse::<ProposalEffect>().is_err());
     }
 
     #[test]

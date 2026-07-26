@@ -46,7 +46,7 @@ pub use promotion::{
     MAX_PROMOTION_RULES, MAX_RULE_NAME, MemberEvidence, PromotionConfig, PromotionEvidence,
     PromotionRule, UsageFacts,
 };
-pub use proposal::{ProposalState, ProposalView, Verdict};
+pub use proposal::{ProposalEffect, ProposalState, ProposalView, Verdict};
 pub use record::{RecordClass, RecordKind};
 pub use redaction::{RedactionConfig, RedactionMode};
 pub use role::{Role, RoleBinding};

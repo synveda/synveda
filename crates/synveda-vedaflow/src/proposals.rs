@@ -35,7 +35,7 @@ use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
 use synveda_types::{
-    AssetKind, CastApproval, Channel, Error, IdentityId, PromotionEvidence, ProposalId,
+    AssetKind, CastApproval, Error, IdentityId, PromotionEvidence, ProposalEffect, ProposalId,
     ProposalState, Result, Role, ScopeId, Sensitivity, TenantId, Verdict,
 };
 use uuid::Uuid;
@@ -79,8 +79,10 @@ pub struct NewProposal<'a> {
     pub source_scope: ScopeId,
     /// Which asset type.
     pub asset: AssetKind,
-    /// Which channel it would join.
-    pub channel: Channel,
+    /// What running this proposal would do: publish its members onto the
+    /// target's channel, or — since AUTHZ-4 — open a lapse (ADR-0037
+    /// decision 16). This module runs neither; the caller does.
+    pub effect: ProposalEffect,
     /// The members, as `(entry name, content address)`.
     pub members: &'a [(String, ObjectHash)],
     /// The maximum sensitivity over the members.
@@ -118,8 +120,8 @@ pub struct StoredProposal {
     pub source_scope_id: ScopeId,
     /// Which asset type.
     pub asset: AssetKind,
-    /// Which channel it would join.
-    pub channel: Channel,
+    /// What running this proposal would do.
+    pub effect: ProposalEffect,
     /// The commit holding exactly what is proposed.
     pub commit: CommitHash,
     /// The maximum sensitivity over its members.
@@ -295,7 +297,7 @@ pub async fn open(
         new.target_scope.as_uuid(),
         new.source_scope.as_uuid(),
         new.asset.as_str(),
-        new.channel.as_str(),
+        new.effect.as_str(),
         minted.hash.as_slice(),
         new.sensitivity.as_str(),
         new.title,
@@ -316,7 +318,7 @@ pub async fn open(
         target_scope_id: new.target_scope,
         source_scope_id: new.source_scope,
         asset: new.asset,
-        channel: new.channel,
+        effect: new.effect,
         commit: minted.hash,
         sensitivity: new.sensitivity,
         state: ProposalState::Open,
@@ -688,7 +690,7 @@ impl TryFrom<ProposalRow> for StoredProposal {
             target_scope_id: ScopeId::from_uuid(row.target_scope_id),
             source_scope_id: ScopeId::from_uuid(row.source_scope_id),
             asset: row.asset_kind.parse().map_err(vocabulary)?,
-            channel: row.target_channel.parse().map_err(vocabulary)?,
+            effect: row.target_channel.parse().map_err(vocabulary)?,
             commit: CommitHash::from_slice(&row.commit_hash)?,
             sensitivity: row.sensitivity.parse().map_err(vocabulary)?,
             state: row.state.parse().map_err(vocabulary)?,

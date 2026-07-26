@@ -110,6 +110,26 @@ pub const CHANNEL_OPERATIONS_TOTAL: &str = "synveda_channel_operations_total";
 /// same governed act as a direct publish (ADR-0032 decision 18).
 pub const PROPOSAL_OPERATIONS_TOTAL: &str = "synveda_proposal_operations_total";
 
+/// Lapse API operations (AUTHZ-4, ADR-0037), labelled by `op`
+/// (`propose`/`grant`/`revoke`/`list`) and `outcome` (`ok`, `rejected`,
+/// `error`).
+///
+/// `propose` chains `vedaflow.proposal.opened` like any other proposal —
+/// a lapse is one — and `grant`/`revoke` chain `policy.lapse.granted` and
+/// `policy.lapse.revoked`. The expiry sweep chains
+/// `policy.lapse.expired` under `actor_kind=system` and is counted
+/// separately: it is bookkeeping, not an operation anyone requested.
+pub const LAPSE_OPERATIONS_TOTAL: &str = "synveda_lapse_operations_total";
+
+/// Standing lapse grants that reached the end of their window and had
+/// their expiry chained by the sweep (AUTHZ-4, ADR-0037 decision 4).
+///
+/// Deliberately *not* a gauge of standing grants: nothing needs to know
+/// how many stand, because the read path asks the question per request.
+/// A flat counter with a growing backlog in `policy_lapses` would mean
+/// the sweep is wedged — which costs an audit line, never access.
+pub const LAPSE_EXPIRIES_TOTAL: &str = "synveda_lapse_expiries_total";
+
 /// Publications refused because the approval matrix could not be met by
 /// the acting principal alone (FLOW-3, ADR-0032 decision 8), labelled by
 /// `surface` (`channel` for the direct route, `proposal` for a

@@ -43,7 +43,8 @@ struct Summary {
     #[serde(default)]
     source_scope_path: Option<String>,
     asset: String,
-    channel: String,
+    /// What running it would do: `published`, or `lapse` since AUTHZ-4.
+    effect: String,
     state: ProposalView,
     sensitivity: Sensitivity,
     title: String,
@@ -391,7 +392,7 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
             .clone()
             .unwrap_or_else(|| summary.target_scope_id.to_string()),
         summary.asset,
-        summary.channel,
+        summary.effect,
     ));
     if summary.source_scope_id != summary.target_scope_id {
         out.push_str(&format!(
@@ -459,7 +460,7 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
             .clone()
             .unwrap_or_else(|| summary.target_scope_id.to_string()),
         summary.asset,
-        summary.channel,
+        summary.effect,
     ));
     for member in &detail.members {
         let (mark, label) = match member.effect {
@@ -686,7 +687,7 @@ mod tests {
             target_scope_path: Some(target.to_owned()),
             source_scope_path: Some(source.to_owned()),
             asset: "memory".to_owned(),
-            channel: "published".to_owned(),
+            effect: "published".to_owned(),
             state,
             sensitivity: Sensitivity::Internal,
             title: "promote the key-rotation runbook".to_owned(),
