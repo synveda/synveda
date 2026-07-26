@@ -3,6 +3,18 @@
 # state persists in named volumes — wipe with `$(COMPOSE) down -v`.
 
 COMPOSE = docker compose -f deploy/compose/docker-compose.yml
+
+# The TEI image is per-architecture (deploy/compose/docker-compose.yml
+# explains why). Upstream ships a versioned amd64 release and an unversioned
+# arm64 build, so the arm64 side is pinned by commit; both serve BGE-M3 and
+# agree to float32 rounding. Override SYNVEDA_TEI_IMAGE to pin something
+# else.
+TEI_IMAGE_amd64  = ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1
+TEI_IMAGE_x86_64 = $(TEI_IMAGE_amd64)
+TEI_IMAGE_arm64  = ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-sha-4150561
+TEI_IMAGE_aarch64 = $(TEI_IMAGE_arm64)
+SYNVEDA_TEI_IMAGE ?= $(or $(TEI_IMAGE_$(shell uname -m)),$(TEI_IMAGE_amd64))
+export SYNVEDA_TEI_IMAGE
 # Dev-compose credentials (FND-2); tests that need Postgres read DATABASE_URL
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda

@@ -71,7 +71,26 @@ services:
     # downloads the model (~2.3 GB) into the tei-cache volume.
     # max-batch-tokens is capped: the default (16384, with 8192-token
     # sequences) OOM-kills warmup on a 16 GB Docker VM.
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1
+    #
+    # The image is per-architecture, because upstream publishes two builds
+    # and only one of them is versioned:
+    #
+    #   amd64  cpu-1.8.1                 a release tag
+    #   arm64  cpu-arm64-sha-4150561     a main-branch build (TEI 1.9.3);
+    #                                    there are no versioned arm64 tags,
+    #                                    so this is pinned by commit rather
+    #                                    than left on `cpu-arm64-latest`
+    #
+    # The two are a drop-in for each other where it counts: the same model
+    # at the same dimension, and vectors that agree to float32 rounding
+    # (cosine 1.000000000, max |diff| 7e-8 over the same inputs, measured
+    # 2026-07-26). That is the property that matters — `record_embeddings`
+    # stores a model and a dim, and a corpus embedded on one architecture
+    # has to stay comparable to one embedded on the other.
+    #
+    # `make dev-up` sets SYNVEDA_TEI_IMAGE from `uname -m`; the default here
+    # is the amd64 release, which is what CI runs.
+    image: ${SYNVEDA_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1}
     command:
       ["--model-id", "BAAI/bge-m3", "--max-batch-tokens", "4096", "--auto-truncate"]
     ports:
