@@ -1713,11 +1713,18 @@ fn cross_tenant_observe_write_is_rejected() {
     });
 }
 
-/// The app role cannot rewrite or remove what was observed even inside its
-/// own tenant scope: UPDATE and DELETE on `observe_events` were never
-/// granted — staging rows are provenance (ADR-0020 decision 1).
+/// The app role cannot rewrite what was observed even inside its own tenant
+/// scope: UPDATE on `observe_events` was never granted — staging rows are
+/// provenance (ADR-0020 decision 1).
+///
+/// DELETE *is* granted since migration 0025, and deliberately: disposal is
+/// the obligation ADR-0020 parked on MEM-6 and migration 0012 said would
+/// "bring its own grants" (ADR-0040 decision 7). What bounds it is the
+/// horizon the sweep reads from the pack, not the absence of a grant — so
+/// what this test still holds is the immutability of a staged payload,
+/// which is the property the provenance doctrine was ever about.
 #[test]
-fn observe_events_are_append_only_for_the_app_role() {
+fn observe_events_are_immutable_and_only_retention_removes_them() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let (tenant, _, _) = seed_observe(&db.pool).await;
@@ -1732,14 +1739,33 @@ fn observe_events_are_append_only_for_the_app_role() {
         );
         drop(tx);
 
+        // A payload cannot be edited into something else...
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let delete = sqlx::raw_sql("delete from observe_events")
+        let rewritten = sqlx::raw_sql("update observe_events set occurred_at = now()")
             .execute(&mut *tx)
             .await;
         assert!(
-            delete.is_err(),
-            "the app role must not hold DELETE on observe_events"
+            rewritten.is_err(),
+            "nor may its stamps move: a staging row is what was observed"
         );
+        drop(tx);
+
+        // ...and disposal removes it whole, which is a different act.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let disposed = sqlx::raw_sql("delete from observe_events")
+            .execute(&mut *tx)
+            .await
+            .expect("disposal is granted since MEM-6")
+            .rows_affected();
+        assert!(disposed > 0, "and it takes whole rows, never part of one");
+        let left = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from observe_events where tenant_id = $1"#,
+            tenant.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count staging");
+        assert_eq!(left, 0, "the tenant's own staging plane, and only its own");
     });
 }
 
@@ -3332,5 +3358,205 @@ fn an_expiry_can_only_be_chained_once() {
         .execute(&mut *tx)
         .await;
         assert!(restamped.is_err(), "a chained expiry must not move");
+    });
+}
+
+// ── MEM-6: the destruction path (ADR-0040 decision 6) ───────────────────────
+
+/// The one statement in the product that removes recorded content, and the
+/// three things that must stay true of it.
+///
+/// Migration 0025 opens `records_history` to DELETE only while a named
+/// flag is set, because migration 0001's own comment says the append-only
+/// trigger "is not a security boundary … defence in depth against
+/// application bugs". The boundary that *is* one is RLS, and this test is
+/// what says so: with the flag on and the app role's new grant in hand, a
+/// purge still cannot reach another tenant's history — however the flag is
+/// set, and whatever tenant the statement names.
+#[test]
+fn a_purge_is_flag_gated_scoped_to_its_tenant_and_never_a_rewrite() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _) = seed_tenant(&db.pool).await;
+        let (adversary, _) = seed_tenant(&db.pool).await;
+        // Each fixture's update archived one version.
+        let archived = |tenant: TenantId| async move {
+            sqlx::query_scalar!(
+                r#"select count(*) as "count!" from records_history where tenant_id = $1"#,
+                tenant.as_uuid(),
+            )
+            .fetch_one(&db.pool)
+            .await
+            .expect("count history")
+        };
+        assert_eq!(archived(victim).await, 1);
+        assert_eq!(archived(adversary).await, 1);
+
+        // 1. Without the flag, the grant buys nothing: the trigger refuses.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let unflagged = sqlx::query!(
+            "delete from records_history where tenant_id = $1",
+            adversary.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            unflagged.is_err(),
+            "history is append-only until something deliberately says otherwise"
+        );
+        drop(tx);
+
+        // 2. With the flag, a purge naming the victim's tenant is a legal
+        //    statement that matches nothing. This is the attack: the
+        //    adversary knows the flag, holds the grant, and names the rows.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        sqlx::query_scalar!("select set_config('synveda.retention_purge', 'on', true)")
+            .fetch_one(&mut *tx)
+            .await
+            .expect("set the purge flag");
+        let reached = sqlx::query!(
+            "delete from records_history where tenant_id = $1",
+            victim.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("cross-tenant purge runs")
+        .rows_affected();
+        assert_eq!(
+            reached, 0,
+            "another tenant's history must be unreachable — the flag opens the \
+             trigger, never the isolation policy"
+        );
+        // Unqualified, it destroys exactly its own.
+        let own = sqlx::query!("delete from records_history")
+            .execute(&mut *tx)
+            .await
+            .expect("own purge runs")
+            .rows_affected();
+        assert_eq!(
+            own, 1,
+            "the adversary can only ever destroy its own history"
+        );
+        tx.commit().await.expect("commit purge");
+        assert_eq!(archived(victim).await, 1, "the victim's history stands");
+        assert_eq!(archived(adversary).await, 0);
+
+        // 3. The flag opens a DELETE and nothing else: a rewrite of history
+        //    is refused with the flag on, which is what keeps "destroyed"
+        //    and "altered" different words.
+        let (rewriter, _) = seed_tenant(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(rewriter)).await;
+        sqlx::query_scalar!("select set_config('synveda.retention_purge', 'on', true)")
+            .fetch_one(&mut *tx)
+            .await
+            .expect("set the purge flag");
+        let rewritten = sqlx::query!(
+            "update records_history set content = 'never happened' where tenant_id = $1",
+            rewriter.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            rewritten.is_err(),
+            "retention destroys rows; it never edits one"
+        );
+    });
+}
+
+/// The staging plane's new DELETE grants (migration 0025), under the same
+/// adversarial reading: disposal is per tenant, and the marker cannot
+/// outlive the row it points at.
+#[test]
+fn staging_disposal_is_scoped_to_its_tenant_and_takes_its_markers_with_it() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_event) = seed_quarantined(&db.pool).await;
+        let (adversary, _) = seed_quarantined(&db.pool).await;
+
+        // A disposal naming another tenant's staging rows matches nothing.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        sqlx::query_scalar!("select set_config('synveda.retention_purge', 'on', true)")
+            .fetch_one(&mut *tx)
+            .await
+            .expect("declare the disposal");
+        let reached = sqlx::query!(
+            "delete from observe_quarantine where tenant_id = $1",
+            victim.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("cross-tenant marker disposal runs")
+        .rows_affected();
+        assert_eq!(reached, 0);
+        let reached = sqlx::query!(
+            "delete from observe_events where tenant_id = $1",
+            victim.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("cross-tenant staging disposal runs")
+        .rows_affected();
+        assert_eq!(reached, 0, "another tenant's payloads are unreachable");
+        drop(tx);
+
+        // And the FK is the order: the staging row cannot go first, which
+        // is why the sweep disposes of markers before payloads (ADR-0040
+        // decision 7).
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let orphaned = sqlx::query!(
+            "delete from observe_events where tenant_id = $1 and id = $2",
+            victim.as_uuid(),
+            victim_event.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            orphaned.is_err(),
+            "a quarantine marker must never point at a payload that is gone"
+        );
+        drop(tx);
+
+        // Migration 0013's trigger refuses a marker delete outright until
+        // the transaction says it is a retention disposal — the same flag
+        // the history purge sets, and the reason a handler cannot retire a
+        // pending review by accident.
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let undeclared = sqlx::query!(
+            "delete from observe_quarantine where tenant_id = $1 and event_id = $2",
+            victim.as_uuid(),
+            victim_event.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            undeclared.is_err(),
+            "a marker delete outside a declared disposal must raise"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        sqlx::query_scalar!("select set_config('synveda.retention_purge', 'on', true)")
+            .fetch_one(&mut *tx)
+            .await
+            .expect("declare the disposal");
+        sqlx::query!(
+            "delete from observe_quarantine where tenant_id = $1 and event_id = $2",
+            victim.as_uuid(),
+            victim_event.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("dispose of the marker");
+        let disposed = sqlx::query!(
+            "delete from observe_events where tenant_id = $1 and id = $2",
+            victim.as_uuid(),
+            victim_event.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("dispose of the payload")
+        .rows_affected();
+        assert_eq!(disposed, 1, "marker first, then the payload it named");
+        tx.commit().await.expect("commit disposal");
     });
 }

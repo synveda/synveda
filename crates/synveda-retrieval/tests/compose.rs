@@ -25,8 +25,8 @@ use synveda_retrieval::{ComposeRequest, ComposeScope, ComposedBlock, compose};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::rls;
 use synveda_types::{
-    Channel, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity,
-    TenantId,
+    Channel, ClassTtl, IdentityId, RecordClass, RecordId, RecordKind, RetentionConfig, ScopeId,
+    ScopeKind, Sensitivity, TenantId,
 };
 use synveda_vedaflow::{
     self as vedaflow, ChannelRef, ChannelWrite, MemoryAsset, PolicySnapshot, Signer,
@@ -125,6 +125,10 @@ impl Chain {
             sensitivities: sensitivities.to_vec(),
             // The caller's own chain: nothing here arrives by a grant.
             lapse: None,
+            // The product config: the machinery on, no record horizon,
+            // so these fixtures compose exactly as they did before MEM-6
+            // (ADR-0040 decision 13).
+            retention: RetentionConfig::DEFAULT,
         })
         .collect()
     }
@@ -1057,5 +1061,220 @@ fn tokens_per_inject_is_emitted_including_zero() {
     assert!(
         sum >= f64::from(block.tokens),
         "the composed block's tokens are in the sum"
+    );
+}
+
+// ── Retention and staleness (MEM-6, ADR-0040) ────────────────────────────────
+
+/// The read cut: a scope's own pack decides what that scope serves, and it
+/// decides it in the query that asks (ADR-0040 decision 2). Nothing is
+/// stamped on a record, so the same corpus composes differently under two
+/// plans built a line apart.
+#[test]
+fn a_scopes_horizon_removes_its_own_material_from_the_block() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+    let fresh = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(chain.user, "a fact from yesterday", now - Duration::days(1)),
+    ));
+    let old = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(
+            chain.user,
+            "a fact from last year",
+            now - Duration::days(300),
+        ),
+    ));
+
+    let both = run(db, tenant, &ComposeRequest::new(chain.scopes(), 1_500, now));
+    assert_eq!(
+        ids(&both),
+        vec![fresh, old],
+        "under the product default nothing expires"
+    );
+
+    let mut scoped = chain.scopes();
+    scoped[0].retention = RetentionConfig {
+        ttl: ClassTtl {
+            fact: 90,
+            ..ClassTtl::KEEP
+        },
+        ..RetentionConfig::DEFAULT
+    };
+    let narrowed = run(db, tenant, &ComposeRequest::new(scoped, 1_500, now));
+    assert_eq!(
+        ids(&narrowed),
+        vec![fresh],
+        "the horizon removed the old fact and nothing else"
+    );
+}
+
+/// Pinned material is exempt from the read cut — seed §4.2, and a clause in
+/// the candidate query rather than a pack setting (ADR-0040 decision 8).
+#[test]
+fn a_horizon_never_reaches_pinned_material() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+    let ancient_pin = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::pinned(chain.user, "canonical, and old", now - Duration::days(900)),
+    ));
+    db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(chain.user, "derived, and old", now - Duration::days(900)),
+    ));
+
+    let mut scoped = chain.scopes();
+    scoped[0].retention = RetentionConfig {
+        ttl: ClassTtl {
+            fact: 30,
+            ..ClassTtl::KEEP
+        },
+        ..RetentionConfig::DEFAULT
+    };
+    let block = run(db, tenant, &ComposeRequest::new(scoped, 1_500, now));
+    assert_eq!(
+        ids(&block),
+        vec![ancient_pin],
+        "the derived record went; the pinned one of the same age did not"
+    );
+}
+
+/// Staleness decays *relevance*, and only within a gradient position: a
+/// stale record two ranks ahead of a fresh one loses its place, and the
+/// budget then drops it rather than the fresh one (ADR-0040 decision 12).
+///
+/// Both records live at the same scope, so seed §4.4's ordering is not in
+/// play here — which is the point: freshness reorders inside a position and
+/// never across one.
+#[test]
+fn staleness_ages_a_ranked_record_out_of_its_place() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+    let stale = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(chain.user, "the stale answer", now - Duration::days(720)),
+    ));
+    let fresh = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(chain.user, "the fresh answer", now - Duration::days(1)),
+    ));
+
+    // The hybrid engine ranked the stale record first.
+    let ranked = |scopes: Vec<ComposeScope>| ComposeRequest {
+        relevance: Some(vec![stale, fresh]),
+        ..ComposeRequest::new(scopes, 1_500, now)
+    };
+
+    // With no half-life the rank is the order, exactly as before MEM-6.
+    let mut undecayed = chain.scopes();
+    undecayed[0].retention = RetentionConfig {
+        staleness_half_life_days: 0,
+        ..RetentionConfig::DEFAULT
+    };
+    let block = run(db, tenant, &ranked(undecayed));
+    assert_eq!(ids(&block), vec![stale, fresh], "rank alone decides");
+
+    // With one, two years of silence costs the stale record its place.
+    let mut decayed = chain.scopes();
+    decayed[0].retention = RetentionConfig {
+        staleness_half_life_days: 90,
+        ..RetentionConfig::DEFAULT
+    };
+    let block = run(db, tenant, &ranked(decayed));
+    assert_eq!(
+        ids(&block),
+        vec![fresh, stale],
+        "the fresh record composes first"
+    );
+    let scores: Vec<u16> = block
+        .entries
+        .iter()
+        .map(|entry| entry.staleness_permille)
+        .collect();
+    assert!(
+        scores[0] >= 990,
+        "one day at a 90-day half-life is all but fresh: {scores:?}"
+    );
+    assert!(
+        scores[1] < 50,
+        "two years at a 90-day half-life is nearly nothing left: {scores:?}"
+    );
+}
+
+/// A MEM-5 merge is the staleness clock's other input: retention runs from
+/// first assertion and staleness from last, so a fact somebody restated
+/// yesterday scores fresh even though its window opened long ago (ADR-0040
+/// decisions 3 and 12).
+#[test]
+fn a_restatement_refreshes_the_staleness_clock_without_moving_the_retention_one() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+    let old = now - Duration::days(400);
+    let id = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(chain.user, "a fact stated long ago", old),
+    ));
+    // Exactly what `records::reinforce` writes when a restatement is
+    // absorbed (ADR-0039 decision 10).
+    db.rt.block_on(async {
+        let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("tenant tx");
+        records::reinforce(
+            &mut *tx,
+            tenant,
+            id,
+            synveda_types::ObserveEventId::new(),
+            now - Duration::days(1),
+        )
+        .await
+        .expect("reinforce");
+        tx.commit().await.expect("commit");
+    });
+
+    let mut scoped = chain.scopes();
+    scoped[0].retention = RetentionConfig {
+        staleness_half_life_days: 90,
+        ttl: ClassTtl {
+            fact: 200,
+            ..ClassTtl::KEEP
+        },
+        ..RetentionConfig::DEFAULT
+    };
+    let block = run(db, tenant, &ComposeRequest::new(scoped, 1_500, now));
+    assert!(
+        block.entries.is_empty(),
+        "the retention clock did not move: 400 days old under a 200-day \
+         horizon is still expired, however often it was restated"
+    );
+
+    let mut kept = chain.scopes();
+    kept[0].retention = RetentionConfig {
+        staleness_half_life_days: 90,
+        ..RetentionConfig::DEFAULT
+    };
+    let block = run(db, tenant, &ComposeRequest::new(kept, 1_500, now));
+    assert!(
+        block.entries[0].staleness_permille >= 990,
+        "and the staleness clock did: last asserted yesterday, so it scores \
+         as a day old rather than as four hundred ({})",
+        block.entries[0].staleness_permille
     );
 }

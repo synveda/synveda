@@ -473,7 +473,10 @@ async fn valid_at(
 ) -> Vec<String> {
     let mut tx = rls::begin_tenant_tx(pool, tenant).await.expect("tenant tx");
     let pairs = synveda_types::ScopeTier::expand(scope, &Sensitivity::ALL);
-    let found = synveda_store::search::compose_candidates(&mut tx, tenant, &pairs, at, 64)
+    // No horizons: this helper asks what the composition engine would
+    // see, and MEM-6's product default expires nothing (ADR-0040
+    // decision 13).
+    let found = synveda_store::search::compose_candidates(&mut tx, tenant, &pairs, &[], at, 64)
         .await
         .expect("compose candidates");
     found

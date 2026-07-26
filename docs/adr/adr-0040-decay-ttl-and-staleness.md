@@ -215,6 +215,18 @@ Decisions, specifically:
     pack decides what the team retains. Neither can widen anything: a
     horizon only ever removes.
 
+    Two resolution points follow from this and are worth stating, because
+    they are where the rule meets a table. Records and their history
+    resolve **per scope**, from the scope the record lives at — the sweep
+    visits the scopes that hold material rather than every hierarchy node,
+    and the destruction stage additionally visits scopes that hold only
+    *closed* versions, because a record that has already expired leaves no
+    live row to be found by. The **staging plane resolves once, at the org
+    root**: its rows deliberately carry no scope foreign key (ADR-0020
+    calls them provenance records, and a service identity's revocation
+    must not destroy them), so the buffer is a tenant-level object and its
+    horizon is a tenant-level number.
+
 11. **The derived channel is a log, so an expiry re-commits nothing.**
     ADR-0031's inherited obligation is about a record whose *address*
     changes — MEM-5 discharged it by re-committing closed records, because

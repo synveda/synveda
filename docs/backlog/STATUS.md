@@ -589,7 +589,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [AUTHZ-4: Lapses (controlled relaxation)](AUTHZ-4.md) — done 2026-07-26, ADR-0037, AC demo: demos/authz-4-lapses.sh (**a cross-team read the pack forbids, opened by two stewards and closed by the clock**, asserted from the reader's side throughout: bea on payments receives nothing of platform's, then receives its published runbook under a section the block marks `[lapse]`, then receives nothing again ten seconds later with **nobody acting** — no revocation, no restart, no operator, because the read path's own predicate is what closes the window; the unpublished draft beside it never travels, which is the honest half — a lapse discloses what the target *stands behind*, not its corpus; then the trail, where the proposal, both approvals, the grant with its window, four of bea's injects and one `policy.lapse.expired` under `actor_kind=system` read in order on one verifying chain with no record text anywhere; the refusals in the product's own words — a personal scope denied by the PDP before the surface sees it, a target the grantee already composes, an action outside the closed vocabulary refused at the wire, a 45-day window against regulated-strict's 30-day ceiling naming both numbers, and the reader herself denied when she asks for the access she wants; and revocation, where a security-reviewer ends a standing grant he could never have opened, which is the whole reason `LapseGrant` and `LapseRevoke` are two actions), AC tests: crates/synveda-gateway/tests/lapses.rs (5 tests over the product surfaces: the AC end to end with a **real** wall-clock expiry — no injected clock, because a duration is seconds with no minimum precisely so this can be demonstrated rather than asserted; one steward refused at the effect with the outstanding requirement named; published-only disclosure with an unreviewed sibling record proven absent; a security-reviewer who revokes but cannot propose, whose revoked grant then gets no expiry event because its ending is already on the chain; the four surface refusals, including the privacy floor at both layers — the PDP stops a steward reaching another principal's personal scope, and the surface stops the owner themselves; and the listing keeping ended grants, because "who could read this scope's material in March" is the question it exists for), crates/synveda-policy/tests/lapses.rs (8 tests on the permit: the decision flipping on one row and back; a grant reaching its target and neither its neighbours nor its subtree; no grant opening a personal scope under any pack; a scope-shaped grantee reaching everyone under it and nobody else; a zero-ceiling pack ending standing grants on the very next request; **a forbid still beating the base layer's first permit** — quarantine, and a service identity that cannot be widened past its anchor; the closed vocabulary refusing to turn a read grant into a write; and the plan and the permit sharing one containment rule), crates/synveda-store/tests/rls.rs (`a_grant_cannot_be_forged_resurrected_or_extended` — a forged tenant, an un-revocation, and the attack the table exists for: an `expires_at` pushed forward, which would make a 30-day grant permanent while the proposal, the approvals and the chain all still said 30 days; plus `an_expiry_can_only_be_chained_once`), crates/synveda-types (16 unit tests on the vocabulary and the ceiling) and crates/synveda-vedaflow (5 on the reviewed terms' canonical form, where every term is in the address so an approval can never carry to different ones)
 - [x] [AUTHZ-5: ABAC conditions](AUTHZ-5.md) — done 2026-07-26, ADR-0038, AC test: crates/synveda-gateway/tests/leak.rs (**the tier is earned, then never reaches a reader without the signature that earned it**: the record becomes `restricted` through the only path that can mint it — a classification proposal the invariant floor priced at `compliance` plus two distinct approvers, refused by name when one curator tries to run it — is published through that same floor, and is then asked back under 40-plus generated query variants (every word, every adjacent pair, reversed and upper-cased, plus the taskless session start) by four readers including a steward above the scope and *the record's own author*, with the working-tier corpus proven to travel so the sweep is not vacuous; then a two-steward lapse that declared only the working tier changes nothing about the top one, a lapse that declares `restricted` is refused with both stewards' approvals in hand until compliance signs — which is the AC's "compliance-granted permission", reached by the floor rather than by any rule this feature wrote — the reader receives it marked twice (`[lapse]` section, `[restricted]` line), a different department's reader never does, and the window closes with nobody acting; plus `confidential_material_takes_an_explicit_grant_and_a_binding_is_one`, where membership alone does not reach the tier, a content-role binding does on the very next request, and a caller asking for `internal` gets less rather than more), demo: demos/authz-5-abac.sh (the same arc over HTTP with the trail printed: `memory.classified` carrying `internal -> restricted`, the grant carrying the ceiling its approvers signed for, both expiries under `actor_kind=system`, chain verifying over 36 events; and the refusals in the product's own words — a classify proposal with no tier, a publication naming one it would not move, a classification pushed through the publish route, and the reader asking for her own access), AC tests: crates/synveda-policy/tests/sensitivity.rs (9 tests on the per-tier decision: membership reads the working tiers and stops, an explicit binding or one's own home reaches `confidential`, `restricted` denied under every pack at every scope *including the reader's own* to a principal holding every role, only a lapse that declared the tier lifts it and only at the target it named, `open-collaboration` reading the org at `confidential` and never above, quarantine and service-identity confinement still beating the base layer's permit, and a read decided without a tier refused rather than defaulted), crates/synveda-retrieval (the per-scope predicate: one scope's tier set never leaking into another's on the same chain, the plan carrying what the walk decided, the engine returning exactly the pairs it was handed — including the top tier when the plan names it, which is what makes the refusal policy's rather than a constant's), crates/synveda-store/tests/rls.rs (`a_grant_cannot_be_forged_resurrected_or_extended` gains the tier attack: a `max_sensitivity` raised after approval, which would widen an `internal` grant past what its approvers signed while the proposal, the approvals and the chain all still said `internal`), crates/synveda-gateway/tests/extraction.rs (`an_extractor_can_never_mint_the_top_tier`: a mock Claude proposing `restricted` persists `confidential`), and the latency AC re-measured with four times the decisions — p50 13.44ms, plan stage 4.42ms against CTX-3's 4.5ms at a quarter of the work
 - [x] [MEM-5: Always-on dedup & conflict detection](MEM-5.md) — done 2026-07-26, ADR-0039, AC test: crates/synveda-gateway/tests/dedup.rs (**both halves of the AC over the real product path**, never a seeded row: alice states a fact, restates it — one record, `provenance.merged.count=1`, where an ADD-only store made two — then states its replacement, and the very next `POST /v1/inject` carries `ledger-live` and *not* `ledger-archive`, while the composition engine's own valid-time query asked at Monday still answers `ledger-archive` and `records_versions` still holds the open-ended version the record had before the close; plus the governance boundary — a *published* fact contradicted is refused, counted in `refused_published`, and left composing for a human — the late-arrival case, where an observation that reaches the pipeline after the fact that replaced it lands with its window already shut rather than being dropped, and a pack that turns the feature off and gets the pre-MEM-5 store back exactly), eval axis: `knowledge_update` in evals/baseline.json (floor 1.0, measured 1.000 with the gate held; evals/scenarios/05,06 in LongMemEval's knowledge-update shape — and with dedup off, the state the AC test's last case puts the product in and the state it was in before this feature, an ADD-only store composes the superseded fact beside its replacement, both scenarios' `must_not_contain` fails, and the axis reads 0.0), unit suites: crates/synveda-ingest/src/dedup.rs (14 tests: the changed-value update supersedes, the changed-*subject* one does not, two facts about one subject both survive, a paraphrase only cosine can see, the published refusal, the valid-time tie, and every mode bound), crates/synveda-store/src/dedup.rs (6 tests: the frame/value split, determinism of the signature across processes, the canonical updates sharing a band and unrelated statements not, and the full-rewording blind spot recorded rather than assumed away), crates/synveda-store/tests/rls.rs (`record_signatures` and `record_supersessions` join the adversarial suite and its completeness guard — including the one that matters here: the LSH nominator is a similarity oracle, and asked for another tenant's corpus with that corpus's own bands and placement it must answer nothing), demo: demos/mem-5-dedup.sh
-- [ ] [MEM-6: Decay, TTL & staleness](MEM-6.md)
+- [x] [MEM-6: Decay, TTL & staleness](MEM-6.md) — done 2026-07-26, ADR-0040, AC test: crates/synveda-gateway/tests/retention.rs (**both halves of the AC over the real product path**, never a seeded record: alice's ninety-day-old session summary composes, a steward applies a retention schedule, and the **very next inject** stops carrying it with nobody acting, nothing restarted and no sweep having run — while the record is still in the store, because nothing was ever stamped on it and enforcement is the read path's; then the sweep expires it and chains `memory.expired` under `actor_kind=system` naming the horizon, the class, the id and the age in whole days, with no record content anywhere in the payload and the chain verifying; plus the bitemporal half, where the expired record's version is still in `records_versions` — the temporal delete FND-4 built, which is what keeps "what did the agent know in April" answerable; pinned material of the same age exempt from the read cut *and* the sweep, by seed §4.2 rather than by a pack field; the **second horizon**, where the destruction stage takes the history the expiry deliberately left and the as-of question that had an answer stops having one, audited as `memory.disposed`; the observe staging plane disposed of on its own horizon — the obligation ADR-0020 and ADR-0021 both parked here, with the extracted records untouched; and a pack that turns the feature off getting the pre-MEM-6 product back exactly, horizons set and ignored), read-path tests: crates/synveda-retrieval/tests/compose.rs (the per-scope cut removing one scope's own material and nothing else, a horizon never reaching pinned material, staleness ageing a *ranked* record out of its place while unranked order stays recency, and the two clocks proven distinct — a MEM-5 restatement refreshes staleness without moving the retention clock), crates/synveda-store/tests/rls.rs (the destruction path joins the adversarial suite: DELETE on `records_history` refused without the named flag, refused across tenants *with* it — the flag opens the trigger, never the isolation policy — and an UPDATE still refused under it, because "destroyed" and "altered" are different words; plus the staging plane's new grants, where the FK forces markers before payloads and a marker delete outside a declared disposal raises), crates/synveda-types (9 unit tests on the vocabulary: the product config expiring nothing, `off` ignoring horizons rather than lacking them, a cutoff as the horizon subtracted from the instant asked at, every class answered and none inventable, and staleness halving at the half-life and never exceeding fresh), demo: demos/mem-6-retention.sh (on a scratch database, the gateway's own sweep — not a test harness — with the schedule applied over the CLI, the trail printed, and the chain verifying)
 - [ ] [CTX-4: Tiered injection / progressive disclosure](CTX-4.md)
 - [ ] [CTX-5: recall API + MCP tool](CTX-5.md)
 - [ ] [GRPH-1: Multi-graph AGE schema](GRPH-1.md)
@@ -1191,6 +1191,98 @@ and the first workspace change since EVAL-1 landed broke `make eval`
 outright. The build is now `SQLX_OFFLINE=true`, against the committed
 `.sqlx` data — which is what CI compiles against, and for the same
 reason._
+
+_MEM-6 (2026-07-26, ADR-0040): decay, TTL & staleness. The acceptance
+criterion turns out to be a statement about *when* retention is read
+rather than about what it does, and the whole design falls out of taking
+that literally: **nothing is stamped on a record.** No `expires_at`, no
+per-record TTL, no sweep bookkeeping table — a record's fate is a function
+of facts it already carries (class, kind, valid time) and the pack in
+force at its scope *now*. "A retention policy change re-evaluates existing
+records" is therefore structural rather than a backfill, and a backfill is
+exactly what it would have been: a job over every record in every tenant
+that fails silently when it misses rows. Seed §4.2's "`ttl` / decay policy
+**reference**" is read as the reference it says it is, and the referent is
+the scope's pack.
+
+**Two enforcement points, and the earlier one is the read path.** The
+composition plan already carried per-scope channel rules (CTX-2) and
+per-scope tier sets (AUTHZ-5); it now carries per-scope horizons, and
+`compose_candidates` refuses material past them in SQL. The sweep is
+*disposal*, not enforcement — ADR-0037 decision 4's shape applied a second
+time, for the same reason: the interval between a policy change and the
+next sweep must not be a window in which expired material is still
+injectable. The demo is the proof: a schedule applied over the CLI changes
+the very next inject, with nobody acting and nothing restarted.
+
+**Two horizons, because one cannot serve both.** *Expire* is the FND-4
+temporal delete: the record leaves the live corpus, its version archives,
+the CTX-1 sidecar drops the document through the change feed it already
+tails, and `records_versions` keeps answering — which is what the seed's
+own killer demo needs. *Destroy* is the history rows themselves, past a
+second and longer horizon, and it is the first thing in the product that
+removes recorded content from the database. A product that only expires
+keeps every payload forever behind an as-of query, which is not retention;
+one that only destroys cannot answer what the agent knew last March. The
+destruction path is a **named flag** the append-only trigger honours
+(`synveda.retention_purge`) rather than a `SECURITY DEFINER` function,
+because the function would run as the owner and bypass RLS — trading a
+trigger migration 0001 itself calls "not a security boundary" for a hole
+in the boundary that is one. The adversarial suite asserts the
+consequence: with the flag set and the grant held, a purge naming another
+tenant's history matches nothing.
+
+**The staging plane's disposal closes the oldest parked obligation in the
+repo.** ADR-0020, ADR-0021 and migration 0012's own comment all named
+MEM-6/TEN-5; `observe_events` has held every payload ever observed,
+pre-extraction, since MEM-1. It is disposed of on its own horizon (the one
+number an embedded pack does set — 7 days under `regulated-strict`, 30
+elsewhere), markers before payloads because the FK says so, with pending
+reviews that aged out counted separately in the event. The honest cost is
+named rather than discovered: disposal frees `(tenant_id,
+idempotency_key)`, so **MEM-1's admission guarantee is worth exactly as
+long as this plane is kept** — days, with a validated one-day floor,
+against adapters that retry in seconds.
+
+**No embedded pack names a record TTL, and that is the deliberate part.**
+An upgrade that silently deletes a tenant's memory is the one surprise
+this product must never spring (ADR-0033 decision 6's fail-safe, restated),
+so the machinery is on, the horizons are unset, and a schedule is a
+decision somebody takes. Pinned material is exempt from all of it by seed
+§4.2 — one clause in the candidate query and one branch in the scorer, not
+a pack field that could re-admit it.
+
+**Staleness scores; it does not label.** Exponential decay over time since
+*last assertion* — MEM-5's merge stamp is that signal, which ADR-0039
+decision 10 predicted this feature would want — computed in the engine
+from the instant CTX-2 already takes, so the determinism AC never sees a
+clock. A ranked record that has halved in freshness sorts as though it
+ranked twice as far down, within its gradient position and never across
+one; unranked order is already recency, so decay adds nothing there. The
+score rides the inject response and the audit event as integer per mille;
+the rendered block gets no `[stale]` marker, because the labels there are
+trust statements and an age is not one. **Retention runs from first
+assertion, staleness from last** — two clocks, two questions, and a
+restatement moves only the second.
+
+Deferrals and forward obligations: expiry is not reversible through any
+product surface, and past the destruction horizon not at all — which is
+what destruction means, and why no embedded pack sets one; a published
+tree can name a record a horizon has removed, inert by construction
+(`compose_members` already refuses it) because a commit is an authored act
+and a sweep has no author; ADR-0031's "re-commit when they rewrite"
+obligation is discharged with *nothing to do*, since a log channel's tree
+is exactly the write it recorded and an expiry changes no address;
+`pgmq.a_observe` and `audit_log` retention are deliberately out of scope
+(TEN-5, against AUD-3's anchoring — an append-only hash chain a background
+loop can delete from is not tamper-evident); the staleness half-life
+defaults are a product guess until EVAL-4 measures them, and staleness
+does not reach RRF fusion, which is recorded there too; and the sweep's
+per-tenant cost is bounded by an idle look — one transaction and three
+indexed reads for a tenant with nothing to dispose of — the FLOW-4/AUTHZ-4
+lesson, which this feature's own demo re-learned on the shared dev
+database and answered the same way they did, with a scratch database per
+run._
 
 _GRPH-4 (2026-07-25, ADR-0029): the phase gate ran first, because it is
 the only Phase 2 item that can invalidate an Accepted ADR and the schema
