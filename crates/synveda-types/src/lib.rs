@@ -50,5 +50,5 @@ pub use proposal::{ProposalEffect, ProposalState, ProposalView, Verdict};
 pub use record::{RecordClass, RecordKind};
 pub use redaction::{RedactionConfig, RedactionMode};
 pub use role::{Role, RoleBinding};
-pub use sensitivity::Sensitivity;
+pub use sensitivity::{ScopeTier, Sensitivity};
 pub use tenant::{Tenant, TenantStatus};

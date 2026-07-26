@@ -10,10 +10,10 @@
 //! — are recall's deep-query surface; CTX-5 owns enumerating a broader
 //! universe (ADR-0024 option 2).
 
-use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
+use synveda_policy::{Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource};
 use synveda_types::{
-    CompositionConfig, HierarchyNode, Lapse, LapseId, PolicyAssignment, Result, RoleBinding,
-    ScopeId, Sensitivity,
+    CompositionConfig, Error, HierarchyNode, Lapse, LapseId, PolicyAssignment, Result, RoleBinding,
+    ScopeId, ScopeTier, Sensitivity,
 };
 
 use crate::compose::ComposeScope;
@@ -74,12 +74,22 @@ pub struct LapsedScope<'a> {
     pub assignments: &'a [PolicyAssignment],
 }
 
-/// The chain scopes the caller may compose memories from: one
-/// `MemoryRead` decision per chain node under that node's effective
-/// pack, its own chain suffix as the resource chain. Returns allowed
-/// scopes in chain order (nearest-first — the gradient order CTX-2
-/// composes in). ≤ hierarchy-depth decisions at µs each, prebuilt
-/// entity fragments (HIER-3) inherited through the facade.
+/// The `(scope, tier)` pairs the caller may compose memories from: one
+/// `MemoryRead` decision per chain node **per tier**, under that node's
+/// effective pack, with its own chain suffix as the resource chain.
+///
+/// Four decisions per scope rather than one, because that is what makes a
+/// per-record attribute decidable at a seam that holds no record: the tier
+/// vocabulary is closed, so it can be enumerated before anything is fetched
+/// (AUTHZ-5, ADR-0038 decision 1). The four asks at one scope differ in a
+/// single context attribute and share their entity graph, so HIER-3's
+/// cached fragments absorb most of the cost — but the decision count is
+/// real, and the latency AC measures it.
+///
+/// Pairs come back in chain order (nearest-first — the gradient order CTX-2
+/// composes in), ascending by tier within a scope. A scope that permits
+/// nothing contributes no pairs, which is the fail-empty shape the whole
+/// read path is built on.
 #[tracing::instrument(
     name = "retrieval.permitted_scopes",
     skip_all,
@@ -87,13 +97,15 @@ pub struct LapsedScope<'a> {
         principal.subject = %inputs.principal.subject,
         chain.len = inputs.chain.len(),
         permitted = tracing::field::Empty,
+        pairs = tracing::field::Empty,
     ),
     err(Display)
 )]
-pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Vec<ScopeId>> {
-    let mut permitted = Vec::with_capacity(inputs.chain.len());
+pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Vec<ScopeTier>> {
+    let mut permitted: Vec<ScopeTier> = Vec::with_capacity(inputs.chain.len());
+    let mut scopes = 0usize;
     for (position, node) in inputs.chain.iter().enumerate() {
-        let context = AuthzContext {
+        let context = |sensitivity: Sensitivity| AuthzContext {
             scopes: &inputs.chain[position..],
             principal_scopes: inputs.chain,
             assignments: inputs.assignments,
@@ -101,26 +113,54 @@ pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Resul
             role_bindings: inputs.role_bindings,
             grant: None,
             lapses: inputs.lapses,
-            // The working tier, which is every tier the read path composed
-            // before AUTHZ-5 (`inject` and `ComposeRequest::new` both asked
-            // for `internal`). The per-tier walk — ask four times, keep the
-            // answers as a set — lands with the read path's own change
-            // (ADR-0038 decisions 1 and 3); until then this decides exactly
-            // what it decided before, which is what keeps this a refactor.
-            sensitivity: Some(Sensitivity::WORKING),
+            sensitivity: Some(sensitivity),
         };
+        let tiers = permitted_tiers(pdp, inputs.principal, node.id, context)?.0;
+        if !tiers.is_empty() {
+            scopes += 1;
+        }
+        permitted.extend(ScopeTier::expand(node.id, &tiers));
+    }
+    let span = tracing::Span::current();
+    span.record("permitted", scopes);
+    span.record("pairs", permitted.len());
+    Ok(permitted)
+}
+
+/// One scope's allowed tier set, ascending, plus the decision the pack
+/// identity is read from.
+///
+/// Every ask is a real PDP call: there is no short-circuit on the first
+/// allow and no monotonicity assumption, so a pack that permits
+/// `confidential` while denying `internal` gets exactly what it said rather
+/// than what it probably meant (ADR-0038 decision 3, option 6 records the
+/// upgrade if the decision count ever binds).
+fn permitted_tiers<'a>(
+    pdp: &Pdp,
+    principal: &Principal,
+    scope_id: ScopeId,
+    context: impl Fn(Sensitivity) -> AuthzContext<'a>,
+) -> Result<(Vec<Sensitivity>, AuthzDecision)> {
+    let mut tiers = Vec::with_capacity(Sensitivity::ALL.len());
+    let mut last: Option<AuthzDecision> = None;
+    for tier in Sensitivity::ALL {
         let decision = pdp.authorize(
-            inputs.principal,
+            principal,
             Action::MemoryRead,
-            Resource::Scope(node.id),
-            &context,
+            Resource::Scope(scope_id),
+            &context(tier),
         )?;
         if decision.allowed {
-            permitted.push(node.id);
+            tiers.push(tier);
         }
+        last = Some(decision);
     }
-    tracing::Span::current().record("permitted", permitted.len());
-    Ok(permitted)
+    // Four tiers are always asked, so this is always set; the pack that
+    // decided is the same for all four (one resource, one resolution).
+    let decision = last.ok_or_else(|| Error::Internal {
+        message: "the sensitivity vocabulary is empty".to_owned(),
+    })?;
+    Ok((tiers, decision))
 }
 
 /// A composition plan (CTX-2, ADR-0025 decision 1): the PDP-allowed
@@ -147,8 +187,16 @@ pub struct CompositionPlan {
 pub struct ScopeDecision {
     /// The scope decided.
     pub scope_id: ScopeId,
-    /// Allow or deny.
+    /// Whether any tier at all composes here.
     pub allowed: bool,
+    /// The tiers the walk permitted, ascending (AUTHZ-5, ADR-0038
+    /// decision 13).
+    ///
+    /// The audit event carries this rather than a bare allow, because
+    /// "what could this reader see at that scope in March" is a question
+    /// about tiers, and it is the question a regulator actually asks about
+    /// a `restricted` record.
+    pub sensitivities: Vec<Sensitivity>,
     /// The pack that decided.
     pub pack_name: String,
     /// The pack's version at decision time.
@@ -182,7 +230,7 @@ pub struct ScopeDecision {
 )]
 pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<CompositionPlan> {
     let tenant_id = inputs.principal.tenant_id;
-    let context_at = |position: usize| AuthzContext {
+    let context_at = |position: usize, sensitivity: Sensitivity| AuthzContext {
         scopes: &inputs.chain[position..],
         principal_scopes: inputs.chain,
         assignments: inputs.assignments,
@@ -190,44 +238,53 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
         role_bindings: inputs.role_bindings,
         grant: None,
         lapses: inputs.lapses,
-        sensitivity: Some(Sensitivity::WORKING),
+        sensitivity: Some(sensitivity),
     };
     let budget_tokens = match inputs.chain.first() {
         Some(home) => {
-            pdp.effective(tenant_id, Resource::Scope(home.id), &context_at(0))
-                .composition
-                .budget_tokens
+            // The pack resolution is tier-blind — an effective pack is a
+            // property of the resource (ADR-0014 decision 3) — so any tier
+            // reads the same config.
+            pdp.effective(
+                tenant_id,
+                Resource::Scope(home.id),
+                &context_at(0, Sensitivity::WORKING),
+            )
+            .composition
+            .budget_tokens
         }
         None => CompositionConfig::DEFAULT.budget_tokens,
     };
     let mut scopes = Vec::with_capacity(inputs.chain.len());
     let mut decisions = Vec::with_capacity(inputs.chain.len());
     for (position, node) in inputs.chain.iter().enumerate() {
-        let context = context_at(position);
-        let decision = pdp.authorize(
-            inputs.principal,
-            Action::MemoryRead,
-            Resource::Scope(node.id),
-            &context,
-        )?;
+        let (sensitivities, decision) = permitted_tiers(pdp, inputs.principal, node.id, |tier| {
+            context_at(position, tier)
+        })?;
         decisions.push(ScopeDecision {
             scope_id: node.id,
-            allowed: decision.allowed,
+            allowed: !sensitivities.is_empty(),
+            sensitivities: sensitivities.clone(),
             pack_name: decision.pack_name,
             pack_version: decision.pack_version,
             lapse: None,
         });
-        if !decision.allowed {
+        if sensitivities.is_empty() {
             continue;
         }
         // The channel rule comes from the same effective-pack resolution
         // that just decided the scope (ADR-0025 decision 2).
-        let effective = pdp.effective(tenant_id, Resource::Scope(node.id), &context);
+        let effective = pdp.effective(
+            tenant_id,
+            Resource::Scope(node.id),
+            &context_at(position, Sensitivity::WORKING),
+        );
         scopes.push(ComposeScope {
             scope_id: node.id,
             kind: node.kind,
             path: node.path.clone(),
             include_derived: effective.composition.channels.includes_derived(),
+            sensitivities,
             lapse: None,
         });
     }
@@ -248,36 +305,31 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             // the same fail-closed reading an unplaced principal gets.
             continue;
         };
-        let context = AuthzContext {
-            scopes: lapsed.chain,
-            principal_scopes: inputs.chain,
-            assignments: lapsed.assignments,
-            default_pack: inputs.default_pack,
-            role_bindings: inputs.role_bindings,
-            grant: None,
-            lapses: inputs.lapses,
-            // The working tier, which is every tier the read path composed
-            // before AUTHZ-5 (`inject` and `ComposeRequest::new` both asked
-            // for `internal`). The per-tier walk — ask four times, keep the
-            // answers as a set — lands with the read path's own change
-            // (ADR-0038 decisions 1 and 3); until then this decides exactly
-            // what it decided before, which is what keeps this a refactor.
-            sensitivity: Some(Sensitivity::WORKING),
-        };
-        let decision = pdp.authorize(
-            inputs.principal,
-            Action::MemoryRead,
-            Resource::Scope(target),
-            &context,
-        )?;
+        // Per tier here too, and this is where the grant's declared ceiling
+        // shows up as a *smaller set*: the PDP sets `context.lapsed` only
+        // at tiers at or below what the grant declared (ADR-0038
+        // decision 6), so a working-tier grant plans the working tiers and
+        // a restricted one plans all four.
+        let (sensitivities, decision) =
+            permitted_tiers(pdp, inputs.principal, target, |tier| AuthzContext {
+                scopes: lapsed.chain,
+                principal_scopes: inputs.chain,
+                assignments: lapsed.assignments,
+                default_pack: inputs.default_pack,
+                role_bindings: inputs.role_bindings,
+                grant: None,
+                lapses: inputs.lapses,
+                sensitivity: Some(tier),
+            })?;
         decisions.push(ScopeDecision {
             scope_id: target,
-            allowed: decision.allowed,
+            allowed: !sensitivities.is_empty(),
+            sensitivities: sensitivities.clone(),
             pack_name: decision.pack_name,
             pack_version: decision.pack_version,
             lapse: Some(lapsed.lapse.id),
         });
-        if !decision.allowed {
+        if sensitivities.is_empty() {
             continue;
         }
         scopes.push(ComposeScope {
@@ -290,6 +342,7 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             // looked at, and it is the one thing the approvers could not
             // inspect before consenting (ADR-0037 decision 11).
             include_derived: false,
+            sensitivities,
             lapse: Some(lapsed.lapse.id),
         });
     }

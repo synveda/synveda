@@ -6,14 +6,20 @@
 //! Every query here filters on `tenant_id` explicitly — tenant
 //! correctness never rides on the RLS backstop alone, which the
 //! dev-compose superuser bypasses (ADR-0009) — and the dense leg and
-//! hydration additionally take the caller's allowed scopes and
-//! sensitivities: there is no unfiltered variant to call (ADR-0024
-//! decision 2). Orchestration (Tantivy, fusion, the PDP-derived scope
-//! set) lives in `synveda-retrieval`; this module owns only the SQL.
+//! hydration additionally take the caller's allowed `(scope, tier)` pairs:
+//! there is no unfiltered variant to call (ADR-0024 decision 2).
+//! Orchestration (Tantivy, fusion, the PDP-derived pair set) lives in
+//! `synveda-retrieval`; this module owns only the SQL.
+//!
+//! The predicate is a **pair** since AUTHZ-5 (ADR-0038 decision 3), not a
+//! scope set plus a ceiling: the PDP decides per scope and per tier, so one
+//! scope may admit `confidential` while its neighbour admits only the
+//! working tiers. `unnest` of two parallel arrays is how a pair set reaches
+//! SQL while every query here stays compile-checked.
 
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
-use synveda_types::{Error, RecordId, Result, ScopeId, Sensitivity, TenantId};
+use synveda_types::{Error, RecordId, Result, ScopeId, ScopeTier, Sensitivity, TenantId};
 use uuid::Uuid;
 
 use crate::records::{RecordRow, RecordVersion, storage_error};
@@ -22,6 +28,19 @@ use crate::records::{RecordRow, RecordVersion, storage_error};
 /// compile-checked query (migration 0016, ADR-0024 decision 5): the
 /// deterministic hash embedder and BGE-M3 dense.
 pub const SUPPORTED_ANN_DIMS: [usize; 2] = [16, 1024];
+
+/// The two parallel arrays one pair set becomes on the wire.
+fn pair_arrays(allowed: &[ScopeTier]) -> (Vec<Uuid>, Vec<String>) {
+    allowed
+        .iter()
+        .map(|pair| {
+            (
+                pair.scope_id.as_uuid(),
+                pair.sensitivity.as_str().to_owned(),
+            )
+        })
+        .unzip()
+}
 
 /// One change-scan result: every record id whose bitemporal state moved
 /// after `since`, with the stamps the indexer advances its watermark by.
@@ -158,7 +177,7 @@ pub async fn for_index(
 }
 
 /// The dense ANN leg: nearest current records to `query_vector` among
-/// the allowed scopes and sensitivities, for vectors written by `model`.
+/// the allowed `(scope, tier)` pairs, for vectors written by `model`.
 /// Dispatches to the compile-checked query for the vector's dimension;
 /// an unsupported dimension is [`Error::Invalid`] naming
 /// [`SUPPORTED_ANN_DIMS`] (ADR-0024 decision 5).
@@ -177,15 +196,10 @@ pub async fn dense_candidates(
     tenant_id: TenantId,
     model: &str,
     query_vector: &[f32],
-    scopes: &[ScopeId],
-    sensitivities: &[Sensitivity],
+    allowed: &[ScopeTier],
     limit: i64,
 ) -> Result<Vec<DenseHit>> {
-    let scopes: Vec<Uuid> = scopes.iter().map(ScopeId::as_uuid).collect();
-    let sensitivities: Vec<String> = sensitivities
-        .iter()
-        .map(|level| level.as_str().to_owned())
-        .collect();
+    let (scopes, sensitivities) = pair_arrays(allowed);
     // Iterative scanning (pgvector ≥0.8) is what makes predicate
     // pushdown real for HNSW: without it, a selective scope filter
     // starves the LIMIT after ef_search candidates (ADR-0024 decision 5).
@@ -212,8 +226,8 @@ pub async fn dense_candidates(
                   and e.dim = 16
                   and e.model = $3
                   and r.tenant_id = $1
-                  and r.scope_id = any($4)
-                  and r.sensitivity = any($5)
+                  and (r.scope_id, r.sensitivity)
+                      in (select * from unnest($4::uuid[], $5::text[]))
                 order by e.embedding::vector(16) <=> $2::real[]::vector(16)
                 limit $6
                 "#,
@@ -240,8 +254,8 @@ pub async fn dense_candidates(
                   and e.dim = 1024
                   and e.model = $3
                   and r.tenant_id = $1
-                  and r.scope_id = any($4)
-                  and r.sensitivity = any($5)
+                  and (r.scope_id, r.sensitivity)
+                      in (select * from unnest($4::uuid[], $5::text[]))
                 order by e.embedding::vector(1024) <=> $2::real[]::vector(1024)
                 limit $6
                 "#,
@@ -291,22 +305,17 @@ struct DenseHitRow {
 #[tracing::instrument(
     name = "store.search.compose_candidates",
     skip_all,
-    fields(tenant.id = %tenant_id, scopes.count = scopes.len(), at = %at),
+    fields(tenant.id = %tenant_id, pairs.count = allowed.len(), at = %at),
     err(Display)
 )]
 pub async fn compose_candidates(
     conn: &mut PgConnection,
     tenant_id: TenantId,
-    scopes: &[ScopeId],
-    sensitivities: &[Sensitivity],
+    allowed: &[ScopeTier],
     at: DateTime<Utc>,
     per_scope_kind_limit: i64,
 ) -> Result<Vec<RecordVersion>> {
-    let scopes: Vec<Uuid> = scopes.iter().map(ScopeId::as_uuid).collect();
-    let sensitivities: Vec<String> = sensitivities
-        .iter()
-        .map(|level| level.as_str().to_owned())
-        .collect();
+    let (scopes, sensitivities) = pair_arrays(allowed);
     let rows = sqlx::query_as!(
         RecordRow,
         r#"
@@ -323,8 +332,9 @@ pub async fn compose_candidates(
                        order by valid_from desc, tx_from desc, id
                    ) as position
             from records
-            where tenant_id = $1 and scope_id = any($2)
-              and sensitivity = any($3)
+            where tenant_id = $1
+              and (scope_id, sensitivity)
+                  in (select * from unnest($2::uuid[], $3::text[]))
               and valid_from <= $4 and (valid_to is null or valid_to > $4)
         ) ranked
         where position <= $5
@@ -361,6 +371,13 @@ pub async fn compose_candidates(
 /// record lives at a scope you may read". Residence still decides for
 /// derived material, which has crossed no boundary
 /// ([`compose_candidates`] keeps its scope predicate exactly).
+///
+/// `sensitivities` is the **union** over the planned scopes rather than a pair
+/// set, because this query deliberately has no scope predicate: the caller
+/// knows which planned scope's tree named each id and verifies that scope's
+/// own tier set there (ADR-0038 decision 3). The union is the hard ceiling —
+/// nothing above what *some* planned scope admits ever leaves SQL — and the
+/// exact pair is enforced where the attribution happens.
 ///
 /// An id the predicate rejects — deleted, re-classified above the
 /// ceiling, or outside its valid window — simply does not come back. A
@@ -413,10 +430,12 @@ pub async fn compose_members(
 }
 
 /// Verify-and-hydrate for the fused candidate set: re-reads `ids`
-/// against current truth with the scope and sensitivity predicate
-/// re-applied in SQL, so a lagging sidecar index can only miss — never
-/// resurface a deleted, re-scoped, or re-classified record (ADR-0024
-/// decision 6). Row order is unspecified; the caller restores fused
+/// against current truth with the `(scope, tier)` predicate re-applied in
+/// SQL, so a lagging sidecar index can only miss — never resurface a
+/// deleted, re-scoped, or re-classified record (ADR-0024 decision 6). Since
+/// AUTHZ-5 that includes a record whose tier moved *above* what the caller
+/// may read at its scope: reclassification takes effect on the next read,
+/// through this predicate, with nothing to reindex (ADR-0038 decision 3). Row order is unspecified; the caller restores fused
 /// rank order.
 #[tracing::instrument(
     name = "store.search.hydrate",
@@ -428,15 +447,10 @@ pub async fn hydrate_verified(
     conn: &mut PgConnection,
     tenant_id: TenantId,
     ids: &[RecordId],
-    scopes: &[ScopeId],
-    sensitivities: &[Sensitivity],
+    allowed: &[ScopeTier],
 ) -> Result<Vec<RecordVersion>> {
     let ids: Vec<Uuid> = ids.iter().map(RecordId::as_uuid).collect();
-    let scopes: Vec<Uuid> = scopes.iter().map(ScopeId::as_uuid).collect();
-    let sensitivities: Vec<String> = sensitivities
-        .iter()
-        .map(|level| level.as_str().to_owned())
-        .collect();
+    let (scopes, sensitivities) = pair_arrays(allowed);
     let rows = sqlx::query_as!(
         RecordRow,
         r#"
@@ -444,7 +458,8 @@ pub async fn hydrate_verified(
                sensitivity, provenance, valid_from, valid_to, tx_from, tx_to
         from records
         where tenant_id = $1 and id = any($2)
-          and scope_id = any($3) and sensitivity = any($4)
+          and (scope_id, sensitivity)
+              in (select * from unnest($3::uuid[], $4::text[]))
         "#,
         tenant_id.as_uuid(),
         &ids,

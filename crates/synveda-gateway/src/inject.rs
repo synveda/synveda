@@ -77,6 +77,13 @@ pub(crate) struct InjectBody {
     /// only: the effective budget is `min(pack budget, this)`
     /// (ADR-0026 decision 7).
     budget_tokens: Option<u32>,
+    /// A caller-side sensitivity ceiling. Narrows only, exactly as the
+    /// budget does (AUTHZ-5, ADR-0038 decision 12): the plan is the PDP's
+    /// answer, and this can only take tiers out of it.
+    ///
+    /// An agent that knows it is about to paste into a pull request asks
+    /// for `internal` and gets a block it can be careless with.
+    max_sensitivity: Option<synveda_types::Sensitivity>,
 }
 
 #[derive(Serialize)]
@@ -300,9 +307,17 @@ async fn handle(
             let request = SearchRequest {
                 query: task.clone(),
                 vector,
+                // The plan's own pairs: the retrieval legs never learn
+                // what a tier means, they are handed the answer
+                // (ADR-0038 decision 3).
                 filter: SearchFilter {
-                    scopes: plan.scopes.iter().map(|scope| scope.scope_id).collect(),
-                    max_sensitivity: synveda_types::Sensitivity::Internal,
+                    tiers: plan
+                        .scopes
+                        .iter()
+                        .flat_map(|scope| {
+                            synveda_types::ScopeTier::expand(scope.scope_id, &scope.sensitivities)
+                        })
+                        .collect(),
                 },
                 limit: RELEVANCE_LIMIT,
                 per_leg: RELEVANCE_LIMIT,
@@ -337,6 +352,9 @@ async fn handle(
         None => "scope none".to_owned(),
     };
     let mut request = ComposeRequest::new(plan.scopes, budget_tokens, as_of);
+    if let Some(ceiling) = payload.max_sensitivity {
+        request = request.narrowed_to(ceiling);
+    }
     request.relevance = relevance;
     let stage = Instant::now();
     let block = compose(&mut tx, tenant_id, &request).await?;
@@ -389,10 +407,19 @@ async fn handle(
             // The aggregated per-scope MemoryRead decisions (ADR-0019
             // decision 4): one event, every chain scope's verdict. The
             // per-call decision log stays the full-fidelity record.
+            // Since AUTHZ-5 each verdict carries the *tiers* the walk
+            // permitted, not just an allow (ADR-0038 decision 13): "who
+            // could see this scope's restricted material on date D" is the
+            // question a regulator asks, and this is what answers it.
             "decisions": scope_decisions.iter().map(|decision| json!({
                 "scope_id": decision.scope_id,
                 "allowed": decision.allowed,
+                "sensitivities": decision.sensitivities
+                    .iter()
+                    .map(|tier| tier.as_str())
+                    .collect::<Vec<_>>(),
                 "pack": format!("{}@{}", decision.pack_name, decision.pack_version),
+                "lapse_id": decision.lapse,
             })).collect::<Vec<_>>(),
         }),
     )

@@ -10,7 +10,7 @@ use synveda_policy::{Pdp, Principal};
 use synveda_retrieval::{MemoryReadInputs, composition_plan};
 use synveda_types::{
     CompositionConfig, HierarchyNode, InjectChannels, PackConfig, PolicyAssignment, ScopeId,
-    ScopeKind, TenantId,
+    ScopeKind, Sensitivity, TenantId,
 };
 
 struct Fixture {
@@ -104,6 +104,41 @@ fn default_pack_plans_both_channels_at_the_default_budget() {
     );
     assert_eq!(plan.scopes[0].kind, ScopeKind::User);
     assert_eq!(plan.scopes[0].path, fixture.chain[0].path);
+
+    // Every planned scope carries the tiers the walk permitted there
+    // (AUTHZ-5, ADR-0038 decision 3), and zero-config membership means the
+    // working tiers — except at alice's own home, which reads its own
+    // `confidential` material with no binding (decision 4).
+    assert_eq!(
+        plan.scopes[0].sensitivities,
+        vec![
+            Sensitivity::Public,
+            Sensitivity::Internal,
+            Sensitivity::Confidential
+        ],
+        "own home reaches confidential"
+    );
+    for scope in &plan.scopes[1..] {
+        assert_eq!(
+            scope.sensitivities,
+            vec![Sensitivity::Public, Sensitivity::Internal],
+            "membership above home reads the working tiers"
+        );
+    }
+    // The audit's half: the decisions carry the same sets, so one event
+    // can answer "what could this reader see at that scope" (decision 13).
+    assert!(
+        plan.decisions
+            .iter()
+            .all(|decision| decision.allowed != decision.sensitivities.is_empty()),
+        "an allow is exactly a non-empty tier set"
+    );
+    assert!(
+        plan.decisions
+            .iter()
+            .all(|decision| !decision.sensitivities.contains(&Sensitivity::Restricted)),
+        "and no walk reaches the top tier without a grant that declared it"
+    );
 }
 
 /// The bank-mode switch (ADR-0025 decision 2): a stored pack with

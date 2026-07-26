@@ -26,7 +26,7 @@ use synveda_retrieval::indexer::{self, IndexerConfig};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::rls;
 use synveda_types::{
-    IdentityId, RecordClass, RecordId, RecordKind, ScopeId, Sensitivity, TenantId,
+    IdentityId, RecordClass, RecordId, RecordKind, ScopeId, ScopeTier, Sensitivity, TenantId,
 };
 
 #[derive(Deserialize)]
@@ -148,8 +148,7 @@ async fn live_tei_hybrid_quality_on_the_fixture_set() {
         let mut request = SearchRequest::new(
             query.text.as_str(),
             SearchFilter {
-                scopes: vec![scope],
-                max_sensitivity: Sensitivity::Internal,
+                tiers: ScopeTier::expand(scope, &[Sensitivity::Public, Sensitivity::Internal]),
             },
         );
         request.limit = 6;

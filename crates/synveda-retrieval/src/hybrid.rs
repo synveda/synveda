@@ -2,11 +2,12 @@
 //! sparse Tantivy leg, fused by reciprocal rank, verified and hydrated
 //! from current Postgres truth.
 //!
-//! The filter is mandatory and fails empty (decision 2): an empty
-//! allowed-scope set returns no results without touching either index —
-//! there is no unfiltered code path to call. `restricted` records are
-//! never retrievable regardless of the requested ceiling until AUTHZ-5
-//! makes sensitivity a policy attribute. Both legs are
+//! The filter is mandatory and fails empty (decision 2): an empty pair set
+//! returns no results without touching either index — there is no
+//! unfiltered code path to call. Since AUTHZ-5 the pairs are the PDP's own
+//! answer per scope *and* tier (ADR-0038 decision 3); the old blanket clamp
+//! below `restricted` is gone, because a clamp decides nothing and a
+//! decision that nothing asks for grants nothing. Both legs are
 //! optional-but-at-least-one: no query vector → BM25 only (the
 //! embedder-down degradation CTX-3 leans on); no tenant index yet →
 //! dense only.
@@ -21,7 +22,7 @@ use std::time::Instant;
 use sqlx::PgConnection;
 use synveda_store::records::RecordVersion;
 use synveda_store::search::{self, DenseHit};
-use synveda_types::{Error, RecordId, Result, ScopeId, Sensitivity, TenantId};
+use synveda_types::{Error, RecordId, Result, ScopeId, ScopeTier, Sensitivity, TenantId};
 
 use crate::index::{SearchIndex, SparseHit};
 use crate::{RETRIEVAL_LEG_SECONDS, RETRIEVAL_SEARCHES_TOTAL};
@@ -30,17 +31,39 @@ use crate::{RETRIEVAL_LEG_SECONDS, RETRIEVAL_SEARCHES_TOTAL};
 /// ADR-0024 decision 6).
 pub const RRF_K: f64 = 60.0;
 
-/// The authz-derived pushdown predicate: the PDP-allowed scopes (from
-/// [`crate::authz::permitted_chain_scopes`] in the product paths) and
-/// the sensitivity ceiling.
+/// The authz-derived pushdown predicate: the PDP-allowed `(scope, tier)`
+/// pairs, from [`crate::authz::permitted_chain_scopes`] or a composition
+/// plan in the product paths.
 #[derive(Debug, Clone)]
 pub struct SearchFilter {
-    /// Scopes whose records the caller may read. Empty = no results.
-    pub scopes: Vec<ScopeId>,
-    /// The inclusive ceiling. Clamped to `confidential` — `restricted`
-    /// is structurally out of retrieval until AUTHZ-5 (ADR-0024
-    /// decision 2).
-    pub max_sensitivity: Sensitivity,
+    /// Pairs the caller may read. Empty = no results, without touching an
+    /// index (ADR-0024 decision 2's fail-empty rule, unchanged).
+    ///
+    /// A pair set rather than scopes plus a ceiling: one scope on a chain
+    /// may admit `confidential` through an explicit binding while the next
+    /// admits only the working tiers, and no single ceiling can say that
+    /// (ADR-0038 decision 3).
+    pub tiers: Vec<ScopeTier>,
+}
+
+impl SearchFilter {
+    /// One scope's allowed set, expanded into pairs.
+    #[must_use]
+    pub fn for_scope(scope_id: ScopeId, sensitivities: &[Sensitivity]) -> Self {
+        SearchFilter {
+            tiers: ScopeTier::expand(scope_id, sensitivities),
+        }
+    }
+
+    /// The distinct scopes the pairs name — the tracing field and the
+    /// sparse leg's scope term.
+    #[must_use]
+    pub fn scopes(&self) -> Vec<ScopeId> {
+        let mut scopes: Vec<ScopeId> = self.tiers.iter().map(|pair| pair.scope_id).collect();
+        scopes.sort_unstable();
+        scopes.dedup();
+        scopes
+    }
 }
 
 /// A pre-computed query embedding (the caller's, never this crate's —
@@ -105,7 +128,7 @@ pub struct RetrievedRecord {
     skip_all,
     fields(
         tenant.id = %tenant_id,
-        scopes.count = request.filter.scopes.len(),
+        pairs.count = request.filter.tiers.len(),
         limit = request.limit,
         mode = tracing::field::Empty,
         results = tracing::field::Empty,
@@ -119,18 +142,25 @@ pub async fn hybrid_search(
     request: &SearchRequest,
 ) -> Result<Vec<RetrievedRecord>> {
     let span = tracing::Span::current();
-    if request.filter.scopes.is_empty() {
+    if request.filter.tiers.is_empty() {
         span.record("mode", "empty_filter");
         span.record("results", 0);
         metrics::counter!(RETRIEVAL_SEARCHES_TOTAL, "mode" => "empty_filter").increment(1);
         return Ok(vec![]);
     }
-    let scopes = &request.filter.scopes;
-    let sensitivities = allowed_sensitivities(request.filter.max_sensitivity);
+    let allowed = &request.filter.tiers;
+    let scopes = request.filter.scopes();
+    // The sparse leg indexes scope and tier as separate terms, so it takes
+    // the two unions and can admit a pair no scope actually permits — a
+    // *candidate* generator, exactly as it was for scope alone. Hydration
+    // re-applies the pairs against current Postgres truth, which is where
+    // the predicate is enforced (ADR-0024 decision 6, ADR-0038 decision 3).
+    let sensitivities = union_sensitivities(allowed);
     let per_leg = request.per_leg.max(request.limit).max(1);
 
     let started = Instant::now();
-    let sparse = index.search_sparse(tenant_id, &request.query, scopes, &sensitivities, per_leg)?;
+    let sparse =
+        index.search_sparse(tenant_id, &request.query, &scopes, &sensitivities, per_leg)?;
     metrics::histogram!(RETRIEVAL_LEG_SECONDS, "leg" => "sparse")
         .record(started.elapsed().as_secs_f64());
 
@@ -147,8 +177,7 @@ pub async fn hybrid_search(
                 tenant_id,
                 &query_vector.model,
                 &query_vector.vector,
-                scopes,
-                &sensitivities,
+                allowed,
                 per_leg as i64,
             )
             .await?;
@@ -186,8 +215,7 @@ pub async fn hybrid_search(
         .map(|entry| entry.record_id)
         .collect();
     let started = Instant::now();
-    let hydrated =
-        search::hydrate_verified(conn, tenant_id, &candidates, scopes, &sensitivities).await?;
+    let hydrated = search::hydrate_verified(conn, tenant_id, &candidates, allowed).await?;
     metrics::histogram!(RETRIEVAL_LEG_SECONDS, "leg" => "hydrate")
         .record(started.elapsed().as_secs_f64());
     let mut by_id: HashMap<RecordId, RecordVersion> = hydrated
@@ -260,14 +288,13 @@ fn fuse(dense: &[DenseHit], sparse: &[SparseHit]) -> Vec<FusedCandidate> {
     fused
 }
 
-/// The sensitivity levels at or below the (clamped) ceiling (ADR-0024
-/// decision 2). Shared with the composition engine — one clamp for the
-/// whole read path (ADR-0025 compliance).
-pub(crate) fn allowed_sensitivities(max: Sensitivity) -> Vec<Sensitivity> {
-    let ceiling = max.min(Sensitivity::Confidential);
+/// Every tier some pair permits, ascending — the union the sidecar's own
+/// term filter takes, and the hard ceiling on what can leave either index
+/// before hydration re-applies the pairs (ADR-0038 decision 3).
+pub(crate) fn union_sensitivities(allowed: &[ScopeTier]) -> Vec<Sensitivity> {
     Sensitivity::ALL
         .into_iter()
-        .filter(|level| *level <= ceiling)
+        .filter(|tier| allowed.iter().any(|pair| pair.sensitivity == *tier))
         .collect()
 }
 
@@ -279,26 +306,46 @@ mod tests {
         RecordId::from_uuid(uuid::Uuid::from_bytes([byte; 16]))
     }
 
+    fn scope(byte: u8) -> ScopeId {
+        ScopeId::from_uuid(uuid::Uuid::from_bytes([byte; 16]))
+    }
+
+    /// The union is what the sidecar's term filter takes, and it is a
+    /// ceiling on what either index can yield — never a statement about any
+    /// one scope, which is why hydration re-applies the pairs
+    /// (ADR-0038 decision 3).
     #[test]
-    fn restricted_is_never_an_allowed_sensitivity() {
-        for ceiling in Sensitivity::ALL {
-            assert!(
-                !allowed_sensitivities(ceiling).contains(&Sensitivity::Restricted),
-                "requested ceiling {ceiling:?} must clamp below restricted"
-            );
-        }
+    fn the_union_is_every_tier_some_pair_names_and_no_more() {
+        let mixed = SearchFilter {
+            tiers: [
+                ScopeTier::expand(scope(1), &[Sensitivity::Public, Sensitivity::Internal]),
+                ScopeTier::expand(scope(2), &[Sensitivity::Confidential]),
+            ]
+            .concat(),
+        };
         assert_eq!(
-            allowed_sensitivities(Sensitivity::Public),
-            vec![Sensitivity::Public]
-        );
-        assert_eq!(
-            allowed_sensitivities(Sensitivity::Confidential),
+            union_sensitivities(&mixed.tiers),
             vec![
                 Sensitivity::Public,
                 Sensitivity::Internal,
                 Sensitivity::Confidential
-            ]
+            ],
+            "ascending, deduplicated, and never a tier no pair named"
         );
+        assert!(!union_sensitivities(&mixed.tiers).contains(&Sensitivity::Restricted));
+        assert_eq!(union_sensitivities(&[]), Vec::<Sensitivity>::new());
+    }
+
+    /// There is no clamp here any more, and that is the feature: the engine
+    /// executes the plan it is handed. `restricted` reaches these pairs only
+    /// when the PDP put it there, which takes a lapse that declared the tier
+    /// and therefore cleared the compliance floor.
+    #[test]
+    fn the_engine_carries_whatever_tier_the_plan_permitted() {
+        let top = SearchFilter::for_scope(scope(1), &Sensitivity::ALL);
+        assert!(union_sensitivities(&top.tiers).contains(&Sensitivity::Restricted));
+        assert_eq!(top.scopes(), vec![scope(1)]);
+        assert_eq!(top.tiers.len(), 4, "one pair per tier");
     }
 
     /// The RRF promise: a candidate on both legs outranks one that tops

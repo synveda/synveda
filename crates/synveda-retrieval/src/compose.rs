@@ -24,6 +24,19 @@
 //! says: authored/canonical versus pipeline-derived. Authorship is not
 //! review, and a pinned record nobody published does not survive bank
 //! mode.
+//!
+//! # Tiers
+//!
+//! Each planned scope carries the sensitivity tiers the PDP permitted
+//! there, and composition applies them per scope rather than as one
+//! ceiling over the plan (AUTHZ-5, ADR-0038 decision 3): a chain can admit
+//! `confidential` at the reader's own home and only the working tiers one
+//! level up. For published members — fetched by id, with no scope
+//! predicate, because a tree may name a record living below it — the tier
+//! is checked against the *naming* scope's set, which is the only scope
+//! whose permission admitted that record at all. Anything above the working
+//! tier is marked in the rendered line: the harness cannot know what it is
+//! holding unless the block says so.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -33,13 +46,13 @@ use sqlx::PgConnection;
 use synveda_store::records::{RecordState, RecordVersion};
 use synveda_store::search;
 use synveda_types::{
-    Channel, LapseId, RecordClass, RecordId, RecordKind, Result, ScopeId, ScopeKind, Sensitivity,
-    TenantId,
+    Channel, LapseId, RecordClass, RecordId, RecordKind, Result, ScopeId, ScopeKind, ScopeTier,
+    Sensitivity, TenantId,
 };
 use synveda_vedaflow::{ChannelRef, MemoryAsset, read_memory_members};
 
 use crate::TOKENS_PER_INJECT;
-use crate::hybrid::allowed_sensitivities;
+use crate::hybrid::union_sensitivities;
 
 /// Counts composed entries, labelled by the channel they composed from —
 /// the production evidence that bank mode does what its AC says
@@ -60,6 +73,15 @@ pub struct ComposeScope {
     /// Whether derived-channel records compose here (the scope's
     /// effective pack's [`synveda_types::InjectChannels`]).
     pub include_derived: bool,
+    /// The tiers the PDP permitted at this scope, ascending (AUTHZ-5,
+    /// ADR-0038 decision 3).
+    ///
+    /// Per scope, never one ceiling for the plan: a chain can permit
+    /// `confidential` at the reader's own home and only the working tiers
+    /// one level up, and a single ceiling could express neither without
+    /// widening or losing something. Empty never reaches here — a scope
+    /// that permits no tier is not planned at all.
+    pub sensitivities: Vec<Sensitivity>,
     /// The lapse this scope is on the plan by, when it is not on the
     /// caller's own chain (AUTHZ-4, ADR-0037 decisions 10 and 12).
     ///
@@ -82,9 +104,6 @@ pub struct ComposeRequest {
     /// The estimated-token budget (the caller's home-scope pack;
     /// seed §4.4 default 1,500).
     pub budget_tokens: u32,
-    /// The inclusive sensitivity ceiling; clamped below `restricted`
-    /// exactly as retrieval clamps it (ADR-0024 decision 2).
-    pub max_sensitivity: Sensitivity,
     /// The valid-time instant: records compose only if their valid
     /// window covers it. An explicit input — never a clock read — for
     /// the determinism AC, and the valid-time half of CTX-5's as-of.
@@ -99,19 +118,38 @@ pub struct ComposeRequest {
 }
 
 impl ComposeRequest {
-    /// A request with the product defaults: the given plan and budget,
-    /// `internal` ceiling (the extraction floor), 64 candidates per
-    /// `(scope, kind)`, no relevance ranking.
+    /// A request with the product defaults: the given plan and budget, 64
+    /// candidates per `(scope, kind)`, no relevance ranking.
+    ///
+    /// There is no ceiling here to default: every scope of the plan carries
+    /// the tiers the PDP permitted at it, so a composition can no longer be
+    /// asked for a tier nobody decided (AUTHZ-5, ADR-0038 decision 3). A
+    /// caller that wants *less* narrows the plan — which is what
+    /// `POST /v1/inject`'s `max_sensitivity` does, never widening it
+    /// (decision 12).
     #[must_use]
     pub fn new(scopes: Vec<ComposeScope>, budget_tokens: u32, at: DateTime<Utc>) -> Self {
         Self {
             scopes,
             budget_tokens,
-            max_sensitivity: Sensitivity::Internal,
             at,
             relevance: None,
             per_scope_kind_candidates: 64,
         }
+    }
+
+    /// Narrows every planned scope to tiers at or below `ceiling`.
+    ///
+    /// A scope left with no tier stops composing entirely — the honest
+    /// consequence of asking for less, and never a widening: the plan is
+    /// the PDP's answer and this only removes from it.
+    #[must_use]
+    pub fn narrowed_to(mut self, ceiling: Sensitivity) -> Self {
+        for scope in &mut self.scopes {
+            scope.sensitivities.retain(|tier| *tier <= ceiling);
+        }
+        self.scopes.retain(|scope| !scope.sensitivities.is_empty());
+        self
     }
 }
 
@@ -318,7 +356,24 @@ pub async fn compose(
     }
 
     let scope_ids: Vec<ScopeId> = request.scopes.iter().map(|scope| scope.scope_id).collect();
-    let sensitivities = allowed_sensitivities(request.max_sensitivity);
+    // The plan's own pairs: one scope's permitted tiers never leak into
+    // another's, which is what a single ceiling could not express
+    // (ADR-0038 decision 3).
+    let allowed: Vec<ScopeTier> = request
+        .scopes
+        .iter()
+        .flat_map(|scope| ScopeTier::expand(scope.scope_id, &scope.sensitivities))
+        .collect();
+    // What every planned scope permits, taken together. It bounds the
+    // published-member read, which has no scope predicate by design
+    // (ADR-0034 decision 6) — the exact pair is enforced below, where the
+    // tree that named each member is known.
+    let sensitivities = union_sensitivities(&allowed);
+    let tier_at: HashMap<ScopeId, &[Sensitivity]> = request
+        .scopes
+        .iter()
+        .map(|scope| (scope.scope_id, scope.sensitivities.as_slice()))
+        .collect();
 
     let chain_position: HashMap<ScopeId, usize> = request
         .scopes
@@ -350,11 +405,11 @@ pub async fn compose(
     // capped per-(scope, kind) sweep, and only over scopes whose pack
     // admits it — bank mode removes the read rather than filtering its
     // results (ADR-0031 decisions 9 and 10).
-    let derived_scopes: Vec<ScopeId> = request
+    let derived_allowed: Vec<ScopeTier> = request
         .scopes
         .iter()
         .filter(|scope| scope.include_derived)
-        .map(|scope| scope.scope_id)
+        .flat_map(|scope| ScopeTier::expand(scope.scope_id, &scope.sensitivities))
         .collect();
     // Published members are fetched by id alone: tree membership at a
     // planned scope is the predicate, because that tree may name a record
@@ -363,14 +418,13 @@ pub async fn compose(
     let members =
         search::compose_members(conn, tenant_id, &published_ids, &sensitivities, request.at)
             .await?;
-    let swept = if derived_scopes.is_empty() {
+    let swept = if derived_allowed.is_empty() {
         Vec::new()
     } else {
         search::compose_candidates(
             conn,
             tenant_id,
-            &derived_scopes,
-            &sensitivities,
+            &derived_allowed,
             request.at,
             request.per_scope_kind_candidates.max(1),
         )
@@ -386,10 +440,17 @@ pub async fn compose(
 
     // Where each candidate composes as *published* (ADR-0031 decision 5,
     // as ADR-0034 decision 6 widened it): the nearest planned scope whose
-    // tree names it at exactly the address its current content produces.
-    // A record whose content moved since publication fails the comparison
-    // and is unreviewed again — publication binds bytes, not ids — and
-    // one no tree names is not hashed at all.
+    // tree names it at exactly the address its current content produces
+    // **and whose own tier set admits its sensitivity**. A record whose
+    // content moved since publication fails the comparison and is
+    // unreviewed again — publication binds bytes, not ids — and one no tree
+    // names is not hashed at all.
+    //
+    // The tier is checked here rather than in SQL because this read has no
+    // scope predicate by design: a published tree may name a record living
+    // below its scope (ADR-0034 decision 6), so residence cannot answer
+    // "which scope's permission admitted this". The tree that named it can,
+    // and this is where that is known (ADR-0038 decision 3).
     let published_at = |version: &RecordVersion| {
         if !admitted
             .iter()
@@ -400,7 +461,12 @@ pub async fn compose(
         let address = memory_asset(version.id, &version.state).address();
         admitted
             .iter()
-            .find(|(_, _, members)| members.get(&version.id) == Some(&address))
+            .find(|(_, scope_id, members)| {
+                members.get(&version.id) == Some(&address)
+                    && tier_at
+                        .get(scope_id)
+                        .is_some_and(|tiers| tiers.contains(&version.state.sensitivity))
+            })
             .map(|(position, scope_id, _)| (*position, *scope_id))
     };
 
@@ -671,11 +737,23 @@ fn empty_block(budget_tokens: u32) -> ComposedBlock {
 /// One entry's rendered line. Anything not published is marked
 /// unreviewed (tech plan §2.2: "clearly watermarked as unreviewed") —
 /// which since FLOW-2 includes authored material nobody has published.
+///
+/// A tier above the working one is marked too (AUTHZ-5, ADR-0038
+/// decision 11): the harness is a guest (seed §2.6) and cannot know what it
+/// is holding unless the block says so, and an agent that has been told a
+/// line is `confidential` can behave differently about pasting it into a
+/// pull request. `public` and `internal` are left unmarked — a label on
+/// every line is a label nobody reads.
 fn entry_line(candidate: Candidate<'_>) -> String {
     let state = &candidate.version.state;
+    let tier = if state.sensitivity > Sensitivity::WORKING {
+        format!(" [{}]", state.sensitivity)
+    } else {
+        String::new()
+    };
     match candidate.channel {
-        Channel::Published => format!("- [{}] {}\n", state.class, state.content),
-        _ => format!("- [{}] {} [unreviewed]\n", state.class, state.content),
+        Channel::Published => format!("- [{}] {}{tier}\n", state.class, state.content),
+        _ => format!("- [{}] {}{tier} [unreviewed]\n", state.class, state.content),
     }
 }
 

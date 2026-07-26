@@ -6,11 +6,14 @@
 //! caller's input.
 //!
 //! Retrieval is policy-shaped before it touches an index: the engine's
-//! only entry takes an allowed-scope set, produced in the product paths
-//! by [`authz::permitted_chain_scopes`] — one PDP `MemoryRead` decision
-//! per candidate scope (seed §2.2 is never bypassed). The Tantivy
-//! sidecar is maintained by [`indexer`]; Postgres current truth decides
-//! what hydrates, so a lagging sidecar can only miss, never leak.
+//! only entry takes an allowed `(scope, tier)` pair set, produced in the
+//! product paths by [`authz::permitted_chain_scopes`] — one PDP
+//! `MemoryRead` decision per candidate scope *and tier* (seed §2.2 is never
+//! bypassed). Since AUTHZ-5 that is the whole of the sensitivity rule here:
+//! this crate holds no ceiling of its own, because a clamp is a decision
+//! nobody took (ADR-0038 decision 3). The Tantivy sidecar is maintained by
+//! [`indexer`]; Postgres current truth decides what hydrates, so a lagging
+//! sidecar can only miss, never leak.
 //!
 //! The crate also carries the read path's readiness probe — the "core"
 //! leg of the gateway→core→store trace (FND-5, ADR-0007).

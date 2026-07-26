@@ -106,6 +106,37 @@ impl FromStr for Sensitivity {
     }
 }
 
+/// One `(scope, tier)` pair a caller may read — the read path's predicate
+/// unit since AUTHZ-5 (ADR-0038 decision 3).
+///
+/// A pair rather than a scope set plus a global ceiling, because the PDP
+/// answers per scope *and* per tier: one scope may admit `confidential`
+/// through an explicit binding while its neighbour on the same chain admits
+/// only the working tiers. A single ceiling over the whole set could only
+/// express the wrong thing — the maximum (a widening) or the minimum (a
+/// silent loss).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ScopeTier {
+    /// The scope.
+    pub scope_id: crate::ScopeId,
+    /// One tier the caller may read there.
+    pub sensitivity: Sensitivity,
+}
+
+impl ScopeTier {
+    /// Every pair for one scope's allowed set.
+    #[must_use]
+    pub fn expand(scope_id: crate::ScopeId, sensitivities: &[Sensitivity]) -> Vec<ScopeTier> {
+        sensitivities
+            .iter()
+            .map(|sensitivity| ScopeTier {
+                scope_id,
+                sensitivity: *sensitivity,
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

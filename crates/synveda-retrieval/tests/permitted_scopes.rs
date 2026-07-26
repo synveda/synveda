@@ -8,7 +8,7 @@
 use chrono::Utc;
 use synveda_policy::{Pdp, Principal};
 use synveda_retrieval::{MemoryReadInputs, permitted_chain_scopes};
-use synveda_types::{HierarchyNode, ScopeId, ScopeKind, TenantId};
+use synveda_types::{HierarchyNode, ScopeId, ScopeKind, ScopeTier, Sensitivity, TenantId};
 
 struct Fixture {
     tenant: TenantId,
@@ -72,6 +72,18 @@ fn inputs<'a>(principal: &'a Principal, chain: &'a [HierarchyNode]) -> MemoryRea
     }
 }
 
+/// The distinct scopes a pair set names, in first-seen order — the sweep's
+/// old return value, which several assertions here are still about.
+fn scopes_of(pairs: &[ScopeTier]) -> Vec<ScopeId> {
+    let mut scopes: Vec<ScopeId> = Vec::new();
+    for pair in pairs {
+        if !scopes.contains(&pair.scope_id) {
+            scopes.push(pair.scope_id);
+        }
+    }
+    scopes
+}
+
 /// The zero-config path (strict default pack): a placed user composes
 /// its whole chain — own personal scope, team, department, org — in
 /// chain order, nearest first (the CTX-2 gradient order).
@@ -83,7 +95,47 @@ fn placed_user_composes_its_whole_chain_nearest_first() {
     let permitted =
         permitted_chain_scopes(&pdp, &inputs(&alice, &fixture.chain)).expect("chain sweep decides");
     let expected: Vec<ScopeId> = fixture.chain.iter().map(|node| node.id).collect();
-    assert_eq!(permitted, expected, "own chain permits, order preserved");
+    assert_eq!(
+        scopes_of(&permitted),
+        expected,
+        "own chain permits, order preserved"
+    );
+    // The tiers each scope came back with (AUTHZ-5, ADR-0038 decision 4):
+    // membership is not an explicit grant, so `confidential` is reached
+    // only at the reader's *own home* — the material extracted from their
+    // own sessions. Everything above it stops at the working tiers, and
+    // that difference along one chain is precisely why the predicate is a
+    // pair rather than a ceiling.
+    let home = fixture.chain[0].id;
+    let tiers_at = |scope: ScopeId| -> Vec<Sensitivity> {
+        permitted
+            .iter()
+            .filter(|pair| pair.scope_id == scope)
+            .map(|pair| pair.sensitivity)
+            .collect()
+    };
+    assert_eq!(
+        tiers_at(home),
+        vec![
+            Sensitivity::Public,
+            Sensitivity::Internal,
+            Sensitivity::Confidential
+        ],
+        "own home reaches confidential with no binding"
+    );
+    for node in &fixture.chain[1..] {
+        assert_eq!(
+            tiers_at(node.id),
+            vec![Sensitivity::Public, Sensitivity::Internal],
+            "membership above home reads the working tiers"
+        );
+    }
+    assert!(
+        permitted
+            .iter()
+            .all(|pair| pair.sensitivity < Sensitivity::Restricted),
+        "and nothing on a zero-config chain reaches the top tier"
+    );
 }
 
 /// The base layer's quarantine forbid reaches retrieval like every
@@ -154,7 +206,8 @@ fn service_identity_composes_its_own_chain_through_confinement() {
     .expect("chain sweep decides");
     let expected: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
     assert_eq!(
-        permitted, expected,
+        scopes_of(&permitted),
+        expected,
         "the own-chain MemoryRead floor survives confinement"
     );
 }

@@ -101,7 +101,15 @@ impl Chain {
         }
     }
 
+    /// The plan a placed reader gets with no explicit grant anywhere: the
+    /// whole chain at the working tiers (AUTHZ-5, ADR-0038 decision 4).
     fn scopes(&self) -> Vec<ComposeScope> {
+        self.scopes_at(&[Sensitivity::Public, Sensitivity::Internal])
+    }
+
+    /// The same plan with a stated tier set — what a binding, an own-home
+    /// read, or a lapse that declared a ceiling produces.
+    fn scopes_at(&self, sensitivities: &[Sensitivity]) -> Vec<ComposeScope> {
         [
             (self.user, ScopeKind::User, "acme/eng/team-a/alice"),
             (self.team, ScopeKind::Team, "acme/eng/team-a"),
@@ -114,6 +122,7 @@ impl Chain {
             kind,
             path: path.to_owned(),
             include_derived: true,
+            sensitivities: sensitivities.to_vec(),
             // The caller's own chain: nothing here arrives by a grant.
             lapse: None,
         })
@@ -834,7 +843,7 @@ fn valid_time_window_is_applied_at_the_explicit_instant() {
 /// The ceiling is inclusive and clamped: `restricted` never composes,
 /// whatever the caller asks for (ADR-0024 decision 2 reused).
 #[test]
-fn sensitivity_ceiling_clamps_below_restricted() {
+fn the_plans_tiers_are_what_composes() {
     let Some(db) = db() else { return };
     let tenant = admit(db);
     let chain = Chain::new();
@@ -859,22 +868,104 @@ fn sensitivity_ceiling_clamps_below_restricted() {
         ));
     }
 
-    let mut internal = ComposeRequest::new(chain.scopes(), 1_500, now);
-    internal.max_sensitivity = Sensitivity::Internal;
+    // The plan carries the tiers, so "what composes" is what the PDP said
+    // and nothing else (AUTHZ-5, ADR-0038 decision 3). The working-tier
+    // plan is what every reader gets with no explicit grant anywhere.
+    let internal = ComposeRequest::new(chain.scopes(), 1_500, now);
     let block = run(db, tenant, &internal);
     assert_eq!(block.entries.len(), 2, "public + internal under the floor");
 
-    let mut asks_restricted = ComposeRequest::new(chain.scopes(), 1_500, now);
-    asks_restricted.max_sensitivity = Sensitivity::Restricted;
-    let block = run(db, tenant, &asks_restricted);
+    // A plan that permits every tier composes every tier: there is no
+    // clamp here any more, because a clamp is a decision nobody took. What
+    // keeps `restricted` out of a real block is the PDP, which needs a
+    // compliance-signed lapse to put it in a plan at all.
+    let restricted_plan = ComposeRequest::new(chain.scopes_at(&Sensitivity::ALL), 1_500, now);
+    let block = run(db, tenant, &restricted_plan);
     let composed = ids(&block);
-    assert_eq!(composed.len(), 3, "clamped to confidential");
+    assert_eq!(composed.len(), 4, "every tier the plan named");
     let restricted = by_level
         .iter()
         .find(|(level, _)| *level == Sensitivity::Restricted)
         .map(|(_, id)| *id)
         .expect("restricted fixture");
-    assert!(!composed.contains(&restricted), "restricted never composes");
+    assert!(composed.contains(&restricted), "including the top tier");
+    assert!(
+        block.text.contains("[restricted]") && block.text.contains("[confidential]"),
+        "and the block says which lines carry them: {}",
+        block.text
+    );
+
+    // A caller narrowing takes tiers back out, never adds one
+    // (ADR-0038 decision 12).
+    let narrowed = ComposeRequest::new(chain.scopes_at(&Sensitivity::ALL), 1_500, now)
+        .narrowed_to(Sensitivity::Internal);
+    let block = run(db, tenant, &narrowed);
+    assert_eq!(block.entries.len(), 2, "narrowing is not widening");
+}
+
+/// The property a single ceiling could not express, and the reason the
+/// predicate is a pair (AUTHZ-5, ADR-0038 decision 3): one scope of a chain
+/// admits `confidential` while the next admits only the working tiers —
+/// which is exactly what the packs produce, since an explicit binding or
+/// one's own home reaches the tier and mere membership does not.
+#[test]
+fn one_scopes_tier_set_never_leaks_into_another() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+
+    let home_confidential = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert {
+            sensitivity: Sensitivity::Confidential,
+            ..Insert::derived(chain.user, "my own confidential note", now)
+        },
+    ));
+    let team_confidential = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert {
+            sensitivity: Sensitivity::Confidential,
+            ..Insert::derived(chain.team, "the team's confidential note", now)
+        },
+    ));
+    let team_internal = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(chain.team, "the team's ordinary note", now),
+    ));
+
+    // The plan a placed reader with no binding actually gets: confidential
+    // at home, the working tiers above it.
+    let mut scopes = chain.scopes();
+    scopes[0].sensitivities = vec![
+        Sensitivity::Public,
+        Sensitivity::Internal,
+        Sensitivity::Confidential,
+    ];
+    let block = run(db, tenant, &ComposeRequest::new(scopes, 1_500, now));
+    let composed = ids(&block);
+    assert!(
+        composed.contains(&home_confidential),
+        "the reader's own confidential material composes"
+    );
+    assert!(
+        composed.contains(&team_internal),
+        "and the team's ordinary material"
+    );
+    assert!(
+        !composed.contains(&team_confidential),
+        "but not the team's confidential material, which no grant reached"
+    );
+    // The one that did compose says what it is, so the harness knows what
+    // it is holding (decision 11).
+    assert!(
+        block.text.contains("[confidential]"),
+        "the tier is marked in the line: {}",
+        block.text
+    );
 }
 
 // ── Relevance ────────────────────────────────────────────────────────────────

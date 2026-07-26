@@ -23,7 +23,7 @@ use synveda_retrieval::hybrid::{QueryVector, SearchFilter, SearchRequest, hybrid
 use synveda_retrieval::index::SearchIndex;
 use synveda_retrieval::indexer::{self, IndexerConfig};
 use synveda_store::rls;
-use synveda_types::{IdentityId, ScopeId, Sensitivity, TenantId};
+use synveda_types::{IdentityId, ScopeId, ScopeTier, Sensitivity, TenantId};
 use uuid::Uuid;
 
 const TOTAL_RECORDS: usize = 1_000_000;
@@ -247,8 +247,12 @@ fn hybrid_median_under_budget_at_one_million_records() {
             let mut request = SearchRequest::new(
                 text,
                 SearchFilter {
-                    scopes: chain.clone(),
-                    max_sensitivity: Sensitivity::Internal,
+                    tiers: chain
+                        .iter()
+                        .flat_map(|scope| {
+                            ScopeTier::expand(*scope, &[Sensitivity::Public, Sensitivity::Internal])
+                        })
+                        .collect(),
                 },
             );
             request.vector = Some(QueryVector {

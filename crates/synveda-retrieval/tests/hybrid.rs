@@ -17,7 +17,7 @@ use synveda_retrieval::indexer::{self, IndexerConfig, TenantSweep};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::rls;
 use synveda_types::{
-    Error, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, Sensitivity, TenantId,
+    Error, IdentityId, RecordClass, RecordId, RecordKind, ScopeId, ScopeTier, Sensitivity, TenantId,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -151,9 +151,17 @@ async fn search(
 }
 
 fn filter(scopes: &[ScopeId]) -> SearchFilter {
+    filter_at(scopes, &[Sensitivity::Public, Sensitivity::Internal])
+}
+
+/// The filter as the PDP now hands it over: a pair per (scope, tier)
+/// (AUTHZ-5, ADR-0038 decision 3).
+fn filter_at(scopes: &[ScopeId], tiers: &[Sensitivity]) -> SearchFilter {
     SearchFilter {
-        scopes: scopes.to_vec(),
-        max_sensitivity: Sensitivity::Internal,
+        tiers: scopes
+            .iter()
+            .flat_map(|scope| ScopeTier::expand(*scope, tiers))
+            .collect(),
     }
 }
 
@@ -297,7 +305,7 @@ fn filters_never_leak_on_either_leg() {
         sweep(pool, &index, tenant).await;
         sweep(pool, &index, other_tenant).await;
 
-        // Ceiling internal: only the permitted record may surface.
+        // Working tiers only: one permitted record.
         let results = search(
             pool,
             &index,
@@ -312,17 +320,57 @@ fn filters_never_leak_on_either_leg() {
             "internal ceiling: one permitted record"
         );
 
-        // Ceiling restricted (requested): confidential joins, restricted
-        // still never does — the clamp holds structurally.
+        // The engine returns exactly the pairs it was handed, and nothing
+        // else — which is the AUTHZ-5 change (ADR-0038 decision 3). Before
+        // it, this leg clamped below `restricted` on its own; now the
+        // refusal lives where it can be decided rather than assumed, in the
+        // PDP (crates/synveda-policy/tests/sensitivity.rs) and end to end
+        // in the leak suite. An engine that clamped would be a second
+        // opinion on a question policy already answered.
         let mut relaxed = query("vault rotation runbook", &[scope], Some(0.0));
-        relaxed.filter.max_sensitivity = Sensitivity::Restricted;
+        relaxed.filter = filter_at(
+            &[scope],
+            &[
+                Sensitivity::Public,
+                Sensitivity::Internal,
+                Sensitivity::Confidential,
+            ],
+        );
         let results = search(pool, &index, tenant, &relaxed).await;
-        assert_eq!(results.len(), 2, "confidential joins under the clamp");
+        assert_eq!(results.len(), 2, "confidential joins when a pair says so");
         assert!(
             results
                 .iter()
                 .all(|hit| hit.record.state.sensitivity < Sensitivity::Restricted),
-            "restricted is never retrievable (AUTHZ-5 owns lifting this)"
+            "and restricted does not, because no pair named it"
+        );
+
+        // A pair set that *does* name the top tier surfaces it: the engine
+        // is the plan's executor, never its second guess.
+        let mut top = query("vault rotation runbook", &[scope], Some(0.0));
+        top.filter = filter_at(&[scope], &Sensitivity::ALL);
+        let results = search(pool, &index, tenant, &top).await;
+        assert_eq!(results.len(), 3, "every tier the pairs name");
+        assert!(
+            results
+                .iter()
+                .any(|hit| hit.record.state.sensitivity == Sensitivity::Restricted),
+            "including the one only a compliance-signed lapse can produce"
+        );
+
+        // And a pair set that names a tier at the *wrong* scope admits
+        // nothing: the pair is the unit, not the scope and the tier
+        // separately.
+        let mut mismatched = query("vault rotation runbook", &[scope], Some(0.0));
+        mismatched.filter = SearchFilter {
+            tiers: ScopeTier::expand(other_scope, &[Sensitivity::Confidential]),
+        };
+        let results = search(pool, &index, tenant, &mismatched).await;
+        assert!(
+            results
+                .iter()
+                .all(|hit| hit.record.state.scope_id == other_scope),
+            "a tier permitted at one scope says nothing about another"
         );
 
         // The empty predicate returns nothing without touching an index.

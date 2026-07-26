@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id as \"id!\", tenant_id as \"tenant_id!\", scope_id as \"scope_id!\",\n               owner_id as \"owner_id!\", kind as \"kind!\", class as \"class!\",\n               content as \"content!\", sensitivity as \"sensitivity!\",\n               provenance as \"provenance!\", valid_from as \"valid_from!\",\n               valid_to, tx_from as \"tx_from!\", tx_to\n        from (\n            select id, tenant_id, scope_id, owner_id, kind, class, content,\n                   sensitivity, provenance, valid_from, valid_to, tx_from, tx_to,\n                   row_number() over (\n                       partition by scope_id, kind\n                       order by valid_from desc, tx_from desc, id\n                   ) as position\n            from records\n            where tenant_id = $1 and scope_id = any($2)\n              and sensitivity = any($3)\n              and valid_from <= $4 and (valid_to is null or valid_to > $4)\n        ) ranked\n        where position <= $5\n        ",
+  "query": "\n        select id as \"id!\", tenant_id as \"tenant_id!\", scope_id as \"scope_id!\",\n               owner_id as \"owner_id!\", kind as \"kind!\", class as \"class!\",\n               content as \"content!\", sensitivity as \"sensitivity!\",\n               provenance as \"provenance!\", valid_from as \"valid_from!\",\n               valid_to, tx_from as \"tx_from!\", tx_to\n        from (\n            select id, tenant_id, scope_id, owner_id, kind, class, content,\n                   sensitivity, provenance, valid_from, valid_to, tx_from, tx_to,\n                   row_number() over (\n                       partition by scope_id, kind\n                       order by valid_from desc, tx_from desc, id\n                   ) as position\n            from records\n            where tenant_id = $1\n              and (scope_id, sensitivity)\n                  in (select * from unnest($2::uuid[], $3::text[]))\n              and valid_from <= $4 and (valid_to is null or valid_to > $4)\n        ) ranked\n        where position <= $5\n        ",
   "describe": {
     "columns": [
       {
@@ -94,5 +94,5 @@
       true
     ]
   },
-  "hash": "1e099538e3b198c7d1ac0e2c10c1e85ca6debe1387a2c81fa3b4db3b51373ccc"
+  "hash": "6abd16f5e8106bdff594dd222dddf09f3fd00559d3cc94ddc46977cfe05390b3"
 }
