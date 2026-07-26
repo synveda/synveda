@@ -94,6 +94,16 @@ struct InjectResponse {
     block_hash: String,
     /// Every composed record, in block order.
     record_ids: Vec<RecordId>,
+    /// How fresh each composed record was at `as_of`, per mille and in
+    /// block order — `1000` is fresh, halving every half-life the scope's
+    /// pack configures (MEM-6, ADR-0040 decision 12).
+    ///
+    /// In the response rather than in the rendered text, because the
+    /// block's labels are trust statements and an age is not one — and
+    /// because a number in the block would be spent out of the token
+    /// budget on every entry that carried it. Pinned material is always
+    /// `1000`: seed §4.2 says it cannot be decayed.
+    staleness_permille: Vec<u16>,
     /// Estimated tokens of `text`; never exceeds `budget_tokens`.
     tokens: u32,
     /// The effective budget the block was composed under.
@@ -388,6 +398,11 @@ async fn handle(
                 "record_id": entry.record_id,
                 "object_hash": entry.object_hash,
                 "channel": entry.channel,
+                // Integer per mille, never a float: audit canonicalisation
+                // refuses one (ADR-0019 decision 2), and "how stale was
+                // what that agent was given in March" is a question the
+                // chain should be able to answer.
+                "staleness_permille": entry.staleness_permille,
             })).collect::<Vec<_>>(),
             // Where each scope's published channel pointed when the
             // block was composed: tech plan §2.5's "inject responses
@@ -453,6 +468,11 @@ fn render(
 ) -> InjectResponse {
     InjectResponse {
         record_ids: block.entries.iter().map(|entry| entry.record_id).collect(),
+        staleness_permille: block
+            .entries
+            .iter()
+            .map(|entry| entry.staleness_permille)
+            .collect(),
         channels: block
             .channels
             .iter()

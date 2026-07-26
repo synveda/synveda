@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select distinct scope_id as \"scope_id!\"\n        from records\n        where tenant_id = $1 and kind = 'derived'\n        order by scope_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "dccaa5664c587dff1289aa7fec461e238f8e2a888f530a109fbf8a20efdad0a5"
+}

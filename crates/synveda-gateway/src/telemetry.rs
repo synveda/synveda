@@ -484,6 +484,17 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_retrieval::COMPOSED_ENTRIES_TOTAL,
         "Composed context entries by the channel they composed from (published/derived)"
     );
+    // MEM-6 counters (ADR-0040): emitted by the retention sweep. The
+    // second one is the only counter in the product that measures data
+    // being gone rather than hidden.
+    metrics::describe_counter!(
+        synveda_ingest::retention::RECORDS_EXPIRED_TOTAL,
+        "Records expired out of the live corpus by class (the temporal delete)"
+    );
+    metrics::describe_counter!(
+        synveda_ingest::retention::RETENTION_DESTROYED_TOTAL,
+        "Rows destroyed by retention, by plane (history/staging/quarantine)"
+    );
     // Touch the label-less histogram so it renders (count 0) before the first
     // inject exists — the FND-5 contract is visible in /metrics from boot.
     let _ = metrics::histogram!(TOKENS_PER_INJECT);

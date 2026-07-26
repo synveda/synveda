@@ -33,8 +33,8 @@ use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::{Hs256Verifier, personal_slug};
 use synveda_types::{
     CompositionConfig, DedupConfig, DedupMode, IdentityId, IdentityKind, InjectChannels,
-    PackConfig, PromotionConfig, ProposalId, ProposalState, RedactionConfig, RedactionMode, Role,
-    ScopeId, ScopeKind, TenantId, TenantStatus,
+    PackConfig, PromotionConfig, ProposalId, ProposalState, RedactionConfig, RedactionMode,
+    RetentionConfig, Role, ScopeId, ScopeKind, TenantId, TenantStatus,
 };
 
 #[derive(Parser)]
@@ -447,6 +447,17 @@ enum PolicyCommand {
         /// five flags for the reason `--promotion` is one.
         #[arg(long, conflicts_with = "dedup_mode")]
         dedup_config: Option<std::path::PathBuf>,
+        /// Path to a JSON file holding a full `RetentionConfig` (MEM-6,
+        /// ADR-0040): the mode, the per-class record horizons in days,
+        /// the destruction and staging horizons, and the staleness
+        /// half-life. A file rather than a flag per class for the reason
+        /// `--promotion` is one — a schedule is a table, not a scalar.
+        ///
+        /// Omitted keeps the product config, whose record horizons are
+        /// all unset: nothing this CLI does by default can expire or
+        /// destroy a tenant's memory.
+        #[arg(long)]
+        retention: Option<std::path::PathBuf>,
         /// Path to the Cedar policy source file.
         file: std::path::PathBuf,
     },
@@ -672,6 +683,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             promotion,
             dedup_mode,
             dedup_config,
+            retention,
             file,
         }) => {
             let source = std::fs::read_to_string(&file)
@@ -727,6 +739,22 @@ async fn run(cli: Cli) -> Result<(), String> {
                     ..DedupConfig::DEFAULT
                 }),
             };
+            // A schedule written in seconds, or a staging horizon that
+            // would spend MEM-1's idempotency guarantee for nothing, is
+            // refused here as well as at install — before it destroys
+            // something, rather than after (ADR-0040 decision 7).
+            let retention = retention
+                .map(|path| {
+                    let raw = std::fs::read_to_string(&path)
+                        .map_err(|err| format!("read {}: {err}", path.display()))?;
+                    let config: RetentionConfig = serde_json::from_str(&raw)
+                        .map_err(|err| format!("parse {}: {err}", path.display()))?;
+                    config
+                        .validate()
+                        .map_err(|err| format!("{}: {err}", path.display()))?;
+                    Ok::<_, String>(config)
+                })
+                .transpose()?;
             let pool = connect().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
@@ -741,6 +769,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     composition,
                     promotion,
                     dedup,
+                    retention,
                     ..Default::default()
                 },
             )
@@ -757,6 +786,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     "redaction": pack.config.redaction,
                     "composition": pack.config.composition,
                     "promotion": pack.config.promotion,
+                    "retention": pack.config.retention,
                 }),
             )
             .await?;

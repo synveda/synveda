@@ -18,6 +18,12 @@
 //! contradiction closes the valid window of the record it replaces,
 //! atomically with the record that caused it. The store is no longer
 //! ADD-only.
+//! Retention (MEM-6, ADR-0040) is live: [`retention`] is the third
+//! background loop — expiry out of the live corpus, destruction of closed
+//! versions past a second horizon, and disposal of the observe staging
+//! plane. It enforces nothing: the read path already refused this material
+//! in the query that asked, and every horizon is read from the pack at the
+//! moment the pass runs rather than stamped on a record.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -27,6 +33,7 @@ pub mod embedding;
 pub mod extraction;
 pub mod promotion;
 mod redaction;
+pub mod retention;
 pub mod worker;
 
 pub use redaction::{Finding, FindingCategory, ScanOutcome, scan};

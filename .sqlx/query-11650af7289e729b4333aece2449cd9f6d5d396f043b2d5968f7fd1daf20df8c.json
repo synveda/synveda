@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select distinct scope_id as \"scope_id!\"\n        from records_history\n        where tenant_id = $1 and tx_to <= $2\n        order by scope_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "11650af7289e729b4333aece2449cd9f6d5d396f043b2d5968f7fd1daf20df8c"
+}

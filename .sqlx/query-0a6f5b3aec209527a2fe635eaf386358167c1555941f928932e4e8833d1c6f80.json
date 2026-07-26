@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        delete from records_history h\n        using (\n            select id, tx_from\n            from records_history\n            where tenant_id = $1 and scope_id = $2 and tx_to <= $3\n            order by tx_to\n            limit $4\n        ) due\n        where h.tenant_id = $1 and h.id = due.id and h.tx_from = due.tx_from\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0a6f5b3aec209527a2fe635eaf386358167c1555941f928932e4e8833d1c6f80"
+}

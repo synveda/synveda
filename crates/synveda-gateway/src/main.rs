@@ -192,6 +192,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         promotion_config,
     );
 
+    // The retention sweep (MEM-6, ADR-0040 decision 14): the third
+    // background loop. It enforces nothing — the read path already
+    // refused expired material in the query that asked — so what it does
+    // is disposal: the temporal delete, the destruction of closed
+    // versions past a second horizon, and the observe staging plane
+    // MEM-1 and MEM-2 have been accumulating since they landed. In the
+    // default configuration no pack sets a record horizon, so a pass
+    // expires nothing and destroys nothing; the staging plane is the one
+    // thing every pack disposes of.
+    let retention_config = retention_config_from_env();
+    tracing::info!(
+        interval_secs = retention_config.interval.as_secs(),
+        batch = retention_config.batch,
+        "retention sweep starting (MEM-6, ADR-0040)"
+    );
+    let retention_sweep = synveda_ingest::retention::spawn(
+        synveda_ingest::retention::SweepDeps {
+            pool: pool.clone(),
+            pdp: Arc::clone(&pdp),
+            chains: Arc::clone(&scope_chains),
+        },
+        retention_config,
+    );
+
     // The lapse expiry sweep (AUTHZ-4, ADR-0037 decision 4). Bookkeeping:
     // it chains `policy.lapse.expired` for windows that have closed, and
     // every grant it touches stopped deciding reads at `expires_at`
@@ -266,6 +290,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     refresher.abort();
     search_indexer.abort();
     promotion_engine.abort();
+    retention_sweep.abort();
     lapse_sweep.abort();
     if let Some(worker) = extraction_worker {
         worker.abort();
@@ -377,6 +402,22 @@ fn promotion_config_from_env() -> synveda_ingest::promotion::SweepConfig {
             .filter(|secs| *secs > 0)
             .map_or(defaults.interval, Duration::from_secs),
         batch: std::env::var("SYNVEDA_PROMOTION_BATCH")
+            .ok()
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|batch| *batch > 0)
+            .unwrap_or(defaults.batch),
+    }
+}
+
+fn retention_config_from_env() -> synveda_ingest::retention::SweepConfig {
+    let defaults = synveda_ingest::retention::SweepConfig::default();
+    synveda_ingest::retention::SweepConfig {
+        interval: std::env::var("SYNVEDA_RETENTION_INTERVAL_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|secs| *secs > 0)
+            .map_or(defaults.interval, Duration::from_secs),
+        batch: std::env::var("SYNVEDA_RETENTION_BATCH")
             .ok()
             .and_then(|value| value.parse::<i64>().ok())
             .filter(|batch| *batch > 0)
