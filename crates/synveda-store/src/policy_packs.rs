@@ -18,7 +18,9 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use sqlx::postgres::PgConnection;
-use synveda_types::{ApprovalMatrix, Error, PackConfig, PromotionConfig, Result, TenantId};
+use synveda_types::{
+    ApprovalMatrix, Error, LapseConfig, PackConfig, PromotionConfig, Result, TenantId,
+};
 
 /// A tenant's stored policy pack.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,23 +113,28 @@ pub async fn apply(
         .as_ref()
         .map(|value| config_json("promotion", serde_json::to_value(value)))
         .transpose()?;
+    let lapse_json = config
+        .lapse
+        .map(|value| config_json("lapse", serde_json::to_value(value)))
+        .transpose()?;
     let row = sqlx::query_as!(
         PolicyPackRow,
         r#"
         insert into policy_packs
             (tenant_id, name, version, source, redaction, composition, approvals,
-             promotion)
-        values ($1, $2, 1, $3, $4, $5, $6, $7)
+             promotion, lapse)
+        values ($1, $2, 1, $3, $4, $5, $6, $7, $8)
         on conflict (tenant_id, name) do update
             set source = excluded.source,
                 redaction = excluded.redaction,
                 composition = excluded.composition,
                 approvals = excluded.approvals,
                 promotion = excluded.promotion,
+                lapse = excluded.lapse,
                 version = policy_packs.version + 1,
                 updated_at = now()
         returning tenant_id, name, version, source, redaction, composition,
-                  approvals, promotion, updated_at
+                  approvals, promotion, lapse, updated_at
         "#,
         tenant_id.as_uuid(),
         name,
@@ -136,6 +143,7 @@ pub async fn apply(
         composition_json,
         approvals_json,
         promotion_json,
+        lapse_json,
     )
     .fetch_one(executor)
     .await
@@ -156,7 +164,7 @@ pub async fn stored(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Resul
         PolicyPackRow,
         r#"
         select tenant_id, name, version, source, redaction, composition,
-               approvals, promotion, updated_at
+               approvals, promotion, lapse, updated_at
         from policy_packs where tenant_id = $1
         order by name
         "#,
@@ -184,7 +192,7 @@ pub async fn get(
         PolicyPackRow,
         r#"
         select tenant_id, name, version, source, redaction, composition,
-               approvals, promotion, updated_at
+               approvals, promotion, lapse, updated_at
         from policy_packs where tenant_id = $1 and name = $2
         "#,
         tenant_id.as_uuid(),
@@ -251,6 +259,7 @@ struct PolicyPackRow {
     composition: Option<serde_json::Value>,
     approvals: Option<serde_json::Value>,
     promotion: Option<serde_json::Value>,
+    lapse: Option<serde_json::Value>,
     updated_at: DateTime<Utc>,
 }
 
@@ -320,6 +329,26 @@ impl From<PolicyPackRow> for PolicyPack {
                         .map(|()| config)
                 },
             );
+        // A ceiling above the product maximum is refused at apply; one that
+        // reached the row anyway is treated as unconfigured — the strict
+        // 30-day window — rather than clamped in silence, so the warning is
+        // what an operator sees instead of a window they did not choose.
+        // `resolved_max_secs` bounds it either way (ADR-0037 decision 5).
+        let lapse: Option<LapseConfig> =
+            parse_config(&row.name, "lapse", row.lapse).and_then(|config: LapseConfig| {
+                config
+                    .validate()
+                    .inspect_err(|err| {
+                        tracing::warn!(
+                            policy.pack = %row.name,
+                            error = %err,
+                            "stored lapse config is invalid; \
+                             treating the pack as unconfigured (the strict window)"
+                        );
+                    })
+                    .ok()
+                    .map(|()| config)
+            });
         PolicyPack {
             tenant_id: TenantId::from_uuid(row.tenant_id),
             name: row.name,
@@ -330,6 +359,7 @@ impl From<PolicyPackRow> for PolicyPack {
                 composition,
                 approvals,
                 promotion,
+                lapse,
             },
             updated_at: row.updated_at,
         }

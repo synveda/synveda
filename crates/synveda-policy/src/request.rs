@@ -5,7 +5,7 @@
 use std::fmt;
 
 use synveda_types::{
-    Error, HierarchyNode, PolicyAssignment, Result, Role, RoleBinding, ScopeId, TenantId,
+    Error, HierarchyNode, Lapse, PolicyAssignment, Result, Role, RoleBinding, ScopeId, TenantId,
 };
 
 /// Who is asking: a verified token subject resolved to a tenant (TEN-1)
@@ -135,6 +135,26 @@ pub enum Action {
     /// Whether the verdicts recorded so far are *enough* is the approval
     /// matrix's arithmetic, never this decision's (ADR-0032 decision 5).
     ProposalReview,
+    /// Run an approved lapse proposal's effect at the resource scope: open
+    /// a time-boxed grant of one action over this scope's material to
+    /// another scope's members (AUTHZ-4, ADR-0037 decision 15).
+    ///
+    /// The resource is the scope whose material is *disclosed*, never the
+    /// one receiving it: authority over a disclosure belongs where the
+    /// material is. Like publishing, the route resolves the approval matrix
+    /// on top of this decision — a lapse is the `policy` cell, which every
+    /// pack has carried since FLOW-3.
+    LapseGrant,
+    /// End a standing lapse early, with a mandatory reason (ADR-0037
+    /// decision 15).
+    ///
+    /// Its own action rather than a mode of [`Action::LapseGrant`], on
+    /// [`Action::ChannelRollback`]'s precedent: a pack must be able to grant
+    /// one broadly and the other narrowly. It deliberately resolves *no*
+    /// approval matrix — a revocation installs nothing and can only narrow,
+    /// and a product whose answer to "that grant was a mistake" is "convene
+    /// the two stewards again" has not shipped revocation.
+    LapseRevoke,
 }
 
 impl Action {
@@ -164,6 +184,8 @@ impl Action {
             Action::ProposalRead => "proposal.read",
             Action::ProposalOpen => "proposal.open",
             Action::ProposalReview => "proposal.review",
+            Action::LapseGrant => "lapse.grant",
+            Action::LapseRevoke => "lapse.revoke",
         }
     }
 
@@ -191,6 +213,8 @@ impl Action {
             Action::ProposalRead => "ProposalRead",
             Action::ProposalOpen => "ProposalOpen",
             Action::ProposalReview => "ProposalReview",
+            Action::LapseGrant => "LapseGrant",
+            Action::LapseRevoke => "LapseRevoke",
         }
     }
 }
@@ -260,6 +284,22 @@ pub struct AuthzContext<'a> {
     /// `RoleAssign` decision without it fails closed; other actions
     /// ignore it.
     pub grant: Option<Role>,
+    /// The lapses standing over the caller **as the caller's own read
+    /// found them** (AUTHZ-4, ADR-0037 decision 9): grants whose grantee
+    /// scope is on [`AuthzContext::principal_scopes`], neither revoked nor
+    /// expired at the instant that query ran.
+    ///
+    /// Caller-supplied for the reason [`AuthzContext::role_bindings`] is —
+    /// policy knows nothing of storage (seed §2.4) — and *pre-filtered* for
+    /// the reason that matters more: expiry is a property of the decision
+    /// rather than of a job, so the one query that loads these rows is the
+    /// one place a window ends (decision 4). Empty means no grant stands,
+    /// which is the zero-config answer everywhere.
+    ///
+    /// The PDP still gates them on the resource's own pack: a pack whose
+    /// lapse ceiling is zero admits none of these, standing or not
+    /// (decision 5).
+    pub lapses: &'a [Lapse],
 }
 
 /// The verdict, plus everything the decision log and audit event need to

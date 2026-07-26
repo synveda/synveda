@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update policy_lapses set expires_at = now() + interval '3650 days'\n             where tenant_id = $1 and id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d72d4346397a94efefe5faa69d3c3c1d6c8f096146244a99b108fbfc01a79ac3"
+}

@@ -204,6 +204,7 @@ const COVERED: &[&str] = &[
     "memory_usage",
     "observe_events",
     "observe_quarantine",
+    "policy_lapses",
     "policy_pack_assignments",
     "policy_pack_defaults",
     "policy_packs",
@@ -2824,5 +2825,239 @@ fn the_projection_is_rebuildable_by_the_app_role() {
             "a reset leaves nothing to refold from"
         );
         tx.commit().await.expect("commit the reset");
+    });
+}
+
+// ── AUTHZ-4: standing lapse grants (ADR-0037) ───────────────────────────────
+
+/// Seeds a granted lapse: the proposal whose effect it was, and a standing
+/// window an hour wide.
+async fn seed_lapse(pool: &PgPool) -> (TenantId, ScopeId, uuid::Uuid) {
+    let (tenant, target, proposal) = seed_proposal(pool).await;
+    let lapse = uuid::Uuid::now_v7();
+    sqlx::query!(
+        "insert into policy_lapses
+             (tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
+              action, reason, expires_at, granted_by)
+         values ($1, $2, $3, $4, $5, 'memory.read', 'joint incident review',
+                 now() + interval '1 hour', $6)",
+        tenant.as_uuid(),
+        lapse,
+        proposal,
+        ScopeId::new().as_uuid(),
+        target.as_uuid(),
+        IdentityId::new().as_uuid(),
+    )
+    .execute(pool)
+    .await
+    .expect("seed lapse");
+    (tenant, target, lapse)
+}
+
+/// The three attacks a standing grant invites, all of which the schema has
+/// to refuse rather than the handler (ADR-0037's compliance notes).
+///
+/// The third is the one this table exists to make impossible: an UPDATE
+/// that pushes `expires_at` forward turns a 30-day grant into a permanent
+/// one *without a second approval*, and it would leave the proposal, the
+/// approvals, and the audit chain all still saying "30 days".
+#[test]
+fn a_grant_cannot_be_forged_resurrected_or_extended() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_target, victim_lapse) = seed_lapse(&db.pool).await;
+        let (adversary, _, adversary_lapse) = seed_lapse(&db.pool).await;
+
+        // 1. A grant forged onto another tenant's scope: the ordinary
+        //    isolation, on the one table whose rows widen access.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            "insert into policy_lapses
+                 (tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
+                  action, reason, expires_at, granted_by)
+             values ($1, $2, $3, $4, $5, 'memory.read', 'forged',
+                     now() + interval '1 hour', $6)",
+            victim.as_uuid(),
+            uuid::Uuid::now_v7(),
+            uuid::Uuid::now_v7(),
+            ScopeId::new().as_uuid(),
+            victim_target.as_uuid(),
+            IdentityId::new().as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant grant must be rejected: it would widen another \
+             tenant's reads with no proposal behind it"
+        );
+        drop(tx);
+
+        // A cross-tenant revocation is a legal statement matching nothing —
+        // unreachable rather than merely unwritten.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let reached = sqlx::query!(
+            "update policy_lapses set revoked_at = now(), revoked_by = $2,
+                                      revoke_reason = 'not yours'
+             where tenant_id = $1",
+            victim.as_uuid(),
+            IdentityId::new().as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("cross-tenant revoke runs")
+        .rows_affected();
+        assert_eq!(reached, 0, "another tenant's grant must be unreachable");
+        drop(tx);
+
+        // 2. A revocation is terminal: it cannot be undone, and it cannot
+        //    be re-cast to move the reason or the actor.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        sqlx::query!(
+            "update policy_lapses set revoked_at = now(), revoked_by = $2,
+                                      revoke_reason = 'incident closed'
+             where tenant_id = $1 and id = $3",
+            adversary.as_uuid(),
+            IdentityId::new().as_uuid(),
+            adversary_lapse,
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("revoke own grant");
+        let resurrected = sqlx::query!(
+            "update policy_lapses set revoked_at = null, revoked_by = null,
+                                      revoke_reason = null
+             where tenant_id = $1 and id = $2",
+            adversary.as_uuid(),
+            adversary_lapse,
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            resurrected.is_err(),
+            "a revoked grant must not be un-revoked: reinstating access is a \
+             new proposal, not an UPDATE"
+        );
+        drop(tx);
+
+        // 3. The window is immutable. This is the attack the trigger exists
+        //    for: everything else about the grant still reads as approved.
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let extended = sqlx::query!(
+            "update policy_lapses set expires_at = now() + interval '3650 days'
+             where tenant_id = $1 and id = $2",
+            victim.as_uuid(),
+            victim_lapse,
+        )
+        .execute(&mut *tx)
+        .await;
+        let message = extended
+            .expect_err("expires_at must be immutable")
+            .to_string();
+        assert!(
+            message.contains("second approval"),
+            "the refusal must say why, got: {message}"
+        );
+
+        drop(tx);
+
+        // And the rest of the terms with it — a moved target scope would
+        // point an approved grant at material nobody reviewed, and a moved
+        // grantee would hand it to somebody nobody approved.
+        //
+        // One transaction per attempt: a refused statement aborts the
+        // transaction it ran in, so sharing one would prove only that the
+        // first refusal happened.
+        for column in [
+            "target_scope_id = gen_random_uuid()",
+            "grantee_scope_id = gen_random_uuid()",
+            "reason = 'something else'",
+            "granted_at = now() - interval '1 day'",
+            "proposal_id = gen_random_uuid()",
+            "granted_by = gen_random_uuid()",
+        ] {
+            let mut tx = app_tx(&db.pool, Some(victim)).await;
+            let statement =
+                format!("update policy_lapses set {column} where id = '{victim_lapse}'");
+            let outcome = sqlx::raw_sql(&statement).execute(&mut *tx).await;
+            assert!(outcome.is_err(), "{column} must be immutable");
+            drop(tx);
+        }
+
+        // The app role holds no DELETE: a grant is the record of why an
+        // inject composed what it composed, and the outcome is rendered
+        // from the row rather than by removing it.
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let deleted = sqlx::raw_sql("delete from policy_lapses")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            deleted.is_err(),
+            "the app role must hold no DELETE on grants"
+        );
+        drop(tx);
+
+        // The trigger, for whoever is not running under RLS at all.
+        let owner = sqlx::query!(
+            "delete from policy_lapses where tenant_id = $1",
+            victim.as_uuid(),
+        )
+        .execute(&db.pool)
+        .await;
+        assert!(
+            owner.is_err(),
+            "the table owner must not be able to delete a grant either"
+        );
+    });
+}
+
+/// The expiry stamp is bookkeeping and is written once: two overlapping
+/// sweeps cannot chain one expiry twice.
+///
+/// The row keeps deciding nothing either way — `expires_at` passed — so
+/// this guards the audit chain against a duplicate, not access against a
+/// leak.
+#[test]
+fn an_expiry_can_only_be_chained_once() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _, lapse) = seed_lapse(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+
+        let first = sqlx::query!(
+            "update policy_lapses set expiry_recorded_at = now()
+             where tenant_id = $1 and id = $2 and expiry_recorded_at is null",
+            tenant.as_uuid(),
+            lapse,
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("stamp the expiry")
+        .rows_affected();
+        assert_eq!(first, 1);
+
+        // The loser of the race matches nothing rather than double-chaining.
+        let second = sqlx::query!(
+            "update policy_lapses set expiry_recorded_at = now()
+             where tenant_id = $1 and id = $2 and expiry_recorded_at is null",
+            tenant.as_uuid(),
+            lapse,
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("the second sweep runs")
+        .rows_affected();
+        assert_eq!(second, 0, "one expiry, one event");
+
+        // And an unguarded restamp raises rather than moving the record.
+        let restamped = sqlx::query!(
+            "update policy_lapses set expiry_recorded_at = now() + interval '1 day'
+             where tenant_id = $1 and id = $2",
+            tenant.as_uuid(),
+            lapse,
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(restamped.is_err(), "a chained expiry must not move");
     });
 }

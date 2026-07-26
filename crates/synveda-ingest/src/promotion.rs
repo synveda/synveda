@@ -457,6 +457,9 @@ async fn evaluate_scope(
         default_pack: default_pack.as_deref(),
         role_bindings: &[],
         grant: None,
+        // The engine acts under the material owner's own authority at
+        // their own scope; no lapse bears on that (ADR-0037 decision 2).
+        lapses: &[],
     };
     let pack = deps
         .pdp
@@ -812,6 +815,7 @@ async fn authorize_owner(
         default_pack: default_pack.as_deref(),
         role_bindings: &bindings,
         grant: None,
+        lapses: &[],
     };
     let decision = deps.pdp.authorize(
         &principal,
@@ -858,6 +862,7 @@ async fn resolve_requirement(
         default_pack: default_pack.as_deref(),
         role_bindings: &[],
         grant: None,
+        lapses: &[],
     };
     let pack = deps
         .pdp

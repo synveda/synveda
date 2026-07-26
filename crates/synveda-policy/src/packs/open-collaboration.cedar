@@ -1,5 +1,6 @@
-// open-collaboration@7 — org-wide read (seed §6, ADR-0014, ADR-0015,
-// ADR-0018, ADR-0020, ADR-0021).
+// open-collaboration@9 — org-wide read (seed §6, ADR-0014, ADR-0015,
+// ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032, ADR-0036,
+// ADR-0037).
 //
 // Own-chain reads plus every scope of the tenant, personal (user-kind)
 // scopes excluded — the privacy floor. The seed's "non-restricted
@@ -248,4 +249,40 @@ permit (
         && context.roles.containsAny([
             "curator", "steward", "org-admin", "compliance", "security-reviewer"
         ])
+};
+
+// The lapse plane (AUTHZ-4, ADR-0037 decision 15): pack-uniform, like the
+// channel, quarantine and proposal planes and for the same reason — how
+// content crosses the trust boundary does not loosen per pack. What varies
+// per pack is the *window* (the LapseConfig ceiling) and the *approvals*
+// (the `policy` cell of the matrix, which has carried tech plan §2.4's lapse
+// row since FLOW-3).
+//
+// Granting is the steward's act by name (seed §6: "a steward may apply a
+// scoped, reasoned, time-boxed override"), with org-admin above it. Curator
+// is deliberately absent: a lapse is policy, and ADR-0015 put the policy
+// plane at steward and above. The resource is the scope whose material is
+// disclosed, so a steward bound at a department may open its teams' material
+// and a team's steward may not open a sibling's.
+permit (
+    principal,
+    action == Synveda::Action::"LapseGrant",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["steward", "org-admin"])
+};
+
+// Revoking is wider than granting, which is the whole reason the two are
+// separate actions: security-reviewer joins, because ending a disclosure
+// early is incident response — the same role that adjudicates quarantined
+// events (MEM-2) and reviews executable skills. Revocation installs nothing
+// and can only narrow, so no matrix stands in front of it.
+permit (
+    principal,
+    action == Synveda::Action::"LapseRevoke",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["steward", "org-admin", "security-reviewer"])
 };

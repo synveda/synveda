@@ -40,8 +40,8 @@ use synveda_audit::{AuditAction, Outcome};
 use synveda_ingest::embedding::Embedder as _;
 use synveda_policy::Resource;
 use synveda_retrieval::{
-    ComposeRequest, ComposedBlock, MemoryReadInputs, QueryVector, SearchFilter, SearchRequest,
-    compose, composition_plan, hybrid_search,
+    ComposeRequest, ComposedBlock, LapsedScope, MemoryReadInputs, QueryVector, SearchFilter,
+    SearchRequest, compose, composition_plan, hybrid_search,
 };
 use synveda_store::rls;
 use synveda_types::{Error, RecordId, Result, ScopeId};
@@ -201,7 +201,20 @@ async fn handle(
     let stage = Instant::now();
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let input = authz::gather_at_home(state, &mut tx).await?;
+    // The scopes a standing lapse reaches, each with its own chain and
+    // assignments — read in the same transaction, because the effective
+    // pack is a property of the resource (AUTHZ-4, ADR-0037 decision 10).
+    // Empty for every caller holding no grant, which is almost all of them.
+    let lapsed_chains = authz::gather_lapsed(state, &mut tx, &input).await?;
     drop(tx);
+    let lapsed: Vec<LapsedScope<'_>> = lapsed_chains
+        .iter()
+        .map(|resolved| LapsedScope {
+            lapse: &resolved.lapse,
+            chain: &resolved.chain,
+            assignments: &resolved.assignments,
+        })
+        .collect();
     let plan = composition_plan(
         &state.pdp,
         &MemoryReadInputs {
@@ -210,6 +223,8 @@ async fn handle(
             assignments: &input.assignments,
             default_pack: input.default_pack.as_deref(),
             role_bindings: &input.role_bindings,
+            lapses: &input.lapses,
+            lapsed: &lapsed,
         },
     )?;
     metrics::histogram!(INJECT_STAGE_SECONDS, "stage" => "plan")

@@ -25,7 +25,8 @@ pub mod index;
 pub mod indexer;
 
 pub use authz::{
-    CompositionPlan, MemoryReadInputs, ScopeDecision, composition_plan, permitted_chain_scopes,
+    CompositionPlan, LapsedScope, MemoryReadInputs, ScopeDecision, composition_plan,
+    permitted_chain_scopes,
 };
 pub use compose::{
     COMPOSED_ENTRIES_TOTAL, Candidate, ChannelWatermark, ComposeRequest, ComposeScope,

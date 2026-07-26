@@ -14,6 +14,7 @@ mod error;
 mod hierarchy;
 mod id;
 mod identity;
+mod lapse;
 mod observe;
 mod policy;
 mod promotion;
@@ -33,8 +34,12 @@ pub use channel::Channel;
 pub use composition::{CompositionConfig, InjectChannels};
 pub use error::{Error, Result};
 pub use hierarchy::{HierarchyNode, ScopeKind};
-pub use id::{IdentityId, ObserveEventId, ProposalId, RecordId, ScopeId, TenantId};
+pub use id::{IdentityId, LapseId, ObserveEventId, ProposalId, RecordId, ScopeId, TenantId};
 pub use identity::{Identity, IdentityKind};
+pub use lapse::{
+    Lapse, LapseAction, LapseConfig, LapseOutcome, LapseTerms, MAX_LAPSE_REASON,
+    PRODUCT_MAX_DURATION_SECS, STRICT_MAX_DURATION_SECS,
+};
 pub use observe::{ObserveKind, QuarantineState};
 pub use policy::{PackConfig, PolicyAssignment};
 pub use promotion::{

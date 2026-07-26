@@ -45,7 +45,7 @@ const ALL_SCOPES: [&str; 8] = [
 /// The decision columns: the action vocabulary, with `RoleAssign` split
 /// by what is being granted — the base layer decides those differently
 /// (ADR-0015 decision 5).
-const COLUMNS: [(Action, Option<Role>); 22] = [
+const COLUMNS: [(Action, Option<Role>); 24] = [
     (Action::HierarchyCreate, None),
     (Action::HierarchyRead, None),
     (Action::HierarchyUpdate, None),
@@ -68,6 +68,8 @@ const COLUMNS: [(Action, Option<Role>); 22] = [
     (Action::ProposalRead, None),
     (Action::ProposalOpen, None),
     (Action::ProposalReview, None),
+    (Action::LapseGrant, None),
+    (Action::LapseRevoke, None),
 ];
 
 struct Fixture {
@@ -266,6 +268,12 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::ProposalRead, None),
             (Action::ProposalOpen, None),
             (Action::ProposalReview, None),
+            // The lapse plane is the steward's by name (seed §6: "a
+            // steward may apply a scoped, reasoned, time-boxed
+            // override"). Curator is deliberately absent — a lapse is
+            // policy, and ADR-0015 put the policy plane here.
+            (Action::LapseGrant, None),
+            (Action::LapseRevoke, None),
         ],
         // Org-admin: steward plus org-admin grants; still no content.
         Role::OrgAdmin => vec![
@@ -289,6 +297,8 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::ProposalRead, None),
             (Action::ProposalOpen, None),
             (Action::ProposalReview, None),
+            (Action::LapseGrant, None),
+            (Action::LapseRevoke, None),
         ],
         // Auditor: the read-only admin surfaces; never content, never
         // mutations (seed §5). The quarantine queue is (redacted)
@@ -314,6 +324,11 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::QuarantineReview, None),
             (Action::ProposalRead, None),
             (Action::ProposalReview, None),
+            // Revokes a standing lapse but cannot open one — the whole
+            // reason grant and revoke are two actions (AUTHZ-4, ADR-0037
+            // decision 15): the responder who ends a disclosure at 3am is
+            // not the steward who authorises one.
+            (Action::LapseRevoke, None),
         ],
         // Compliance stops being a marker at FLOW-3 (ADR-0032
         // decision 16): it reviews, and the invariant floor requires it
@@ -382,6 +397,8 @@ fn assert_matrix(pack: &str, version: i64) {
                         | Action::ChannelPin
                         | Action::ProposalOpen
                         | Action::ProposalReview
+                        | Action::LapseGrant
+                        | Action::LapseRevoke
                 ) && target.is_none()
                 {
                     // The schema scopes the memory plane,
@@ -421,20 +438,20 @@ fn assert_matrix(pack: &str, version: i64) {
 /// regulated-strict: the golden matrix (the AC).
 #[test]
 fn matrix_regulated_strict() {
-    assert_matrix(REGULATED_STRICT, 8);
+    assert_matrix(REGULATED_STRICT, 9);
 }
 
 /// standard: identical role matrix — packs differ on composition
 /// membership, never on who administers (ADR-0015 decision 4).
 #[test]
 fn matrix_standard() {
-    assert_matrix(STANDARD, 8);
+    assert_matrix(STANDARD, 9);
 }
 
 /// open-collaboration: identical role matrix.
 #[test]
 fn matrix_open_collaboration() {
-    assert_matrix(OPEN_COLLABORATION, 8);
+    assert_matrix(OPEN_COLLABORATION, 9);
 }
 
 /// A tenant-wide binding is in force everywhere, the tenant plane
@@ -619,6 +636,7 @@ fn role_assign_without_a_grant_fails_closed() {
             scopes: &scopes,
             role_bindings: &bindings,
             grant: None,
+            lapses: &[],
             ..Default::default()
         },
     );

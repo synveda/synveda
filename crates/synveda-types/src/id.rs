@@ -110,3 +110,9 @@ define_id!(
     /// ADR-0032).
     ProposalId
 );
+
+define_id!(
+    /// Identifies a policy lapse — one time-boxed, dual-approved grant of a
+    /// single action from one scope to another (AUTHZ-4, ADR-0037).
+    LapseId
+);

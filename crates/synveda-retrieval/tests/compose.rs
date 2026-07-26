@@ -114,6 +114,8 @@ impl Chain {
             kind,
             path: path.to_owned(),
             include_derived: true,
+            // The caller's own chain: nothing here arrives by a grant.
+            lapse: None,
         })
         .collect()
     }

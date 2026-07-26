@@ -67,6 +67,8 @@ fn inputs<'a>(principal: &'a Principal, chain: &'a [HierarchyNode]) -> MemoryRea
         assignments: &[],
         default_pack: None,
         role_bindings: &[],
+        lapses: &[],
+        lapsed: &[],
     }
 }
 
@@ -145,6 +147,8 @@ fn service_identity_composes_its_own_chain_through_confinement() {
             assignments: &[],
             default_pack: None,
             role_bindings: &[],
+            lapses: &[],
+            lapsed: &[],
         },
     )
     .expect("chain sweep decides");

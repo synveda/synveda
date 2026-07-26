@@ -16,9 +16,12 @@ use sqlx::PgPool;
 use sqlx::postgres::PgConnection;
 use synveda_identity::Claims;
 use synveda_policy::{Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource};
-use synveda_store::{identities, policy_assignments, policy_packs, rls, role_bindings, tenants};
+use synveda_store::{
+    identities, lapses, policy_assignments, policy_packs, rls, role_bindings, tenants,
+};
 use synveda_types::{
-    Error, HierarchyNode, Identity, IdentityKind, Result, Role, RoleBinding, ScopeId, TenantId,
+    Error, HierarchyNode, Identity, IdentityKind, Lapse, LapseAction, Result, Role, RoleBinding,
+    ScopeId, TenantId,
 };
 
 use crate::app::AppState;
@@ -35,6 +38,14 @@ pub(crate) struct DecisionInput {
     pub(crate) assignments: Vec<synveda_types::PolicyAssignment>,
     pub(crate) default_pack: Option<String>,
     pub(crate) role_bindings: Vec<RoleBinding>,
+    /// The lapses standing over this caller, as of this request's own read
+    /// (AUTHZ-4, ADR-0037 decision 4): grants whose grantee scope is on the
+    /// caller's placement chain, neither revoked nor expired.
+    ///
+    /// **This is where expiry happens.** Nothing runs to end a lapse; the
+    /// predicate on this one query does, so a sweep that is down cannot
+    /// leave a grant standing.
+    pub(crate) lapses: Vec<Lapse>,
     /// The caller's identity row, already read for the principal — so
     /// handlers whose resource *is* the placement (observe, MEM-1) never
     /// read it twice. `None` for verified subjects with no identity.
@@ -66,6 +77,7 @@ impl DecisionInput {
             default_pack: self.default_pack.as_deref(),
             role_bindings: &self.role_bindings,
             grant: None,
+            lapses: &self.lapses,
         }
     }
 
@@ -208,6 +220,17 @@ async fn gather_inner(
     let role_bindings =
         role_bindings::for_subject_on_scopes(&mut *conn, tenant_id, &principal.subject, &chain_ids)
             .await?;
+    // The grants standing over this caller (AUTHZ-4, ADR-0037 decision 4).
+    // Keyed on the *placement* chain, not the resource's: a lapse grants to
+    // everyone at or under a grantee scope, and which scope is being
+    // *decided* is the target, resolved per decision inside the PDP.
+    //
+    // Read here, per request, alongside bindings and assignments — and for
+    // a stronger reason than theirs. Their per-request read keeps a
+    // next-request freshness promise; this one *is* the expiry mechanism.
+    // Caching it would make a window end late by the length of the cache.
+    let lapse_scopes: Vec<ScopeId> = principal_scopes.iter().map(|node| node.id).collect();
+    let lapses = lapses::active_for_scopes(&mut *conn, tenant_id, &lapse_scopes).await?;
     Ok(DecisionInput {
         principal,
         chain,
@@ -215,8 +238,69 @@ async fn gather_inner(
         assignments,
         default_pack,
         role_bindings,
+        lapses,
         identity,
     })
+}
+
+/// One off-chain scope a standing lapse reaches, with the rows its own
+/// `MemoryRead` decision needs (AUTHZ-4, ADR-0037 decision 10).
+///
+/// Owned, because the read path borrows from it after the gathering
+/// transaction has been dropped.
+pub(crate) struct LapsedChain {
+    /// The grant that reaches the scope.
+    pub(crate) lapse: Lapse,
+    /// The target's own chain, node-first.
+    pub(crate) chain: Arc<[HierarchyNode]>,
+    /// Pack assignments for that chain.
+    pub(crate) assignments: Vec<synveda_types::PolicyAssignment>,
+}
+
+/// Resolves what an inject needs to decide the caller's lapsed scopes: for
+/// each grant reaching a scope off the caller's own chain, that scope's
+/// chain and assignments.
+///
+/// The cost the feature is honest about (ADR-0037 decision 10): the
+/// effective pack is a property of the resource, so a scope the caller's
+/// chain does not cover needs its own rows. Chains come from the HIER-2
+/// cache, so the usual case is warm; the assignments are one indexed read
+/// per lapsed scope, paid only by callers who actually hold a grant.
+///
+/// A target whose chain no longer resolves is dropped here rather than
+/// planned and denied later — a deleted scope grants nothing, which is the
+/// same fail-closed reading an unplaced principal gets.
+pub(crate) async fn gather_lapsed(
+    state: &AppState,
+    conn: &mut PgConnection,
+    input: &DecisionInput,
+) -> Result<Vec<LapsedChain>> {
+    let tenant_id = input.principal.tenant_id;
+    // One shared containment rule with the PDP's own permit, so the plan
+    // and the decision can never disagree about who a grant reaches.
+    let granting = synveda_policy::lapsed_scopes(
+        &input.principal_scopes,
+        &input.lapses,
+        LapseAction::MemoryRead,
+    );
+    let mut resolved = Vec::with_capacity(granting.len());
+    for lapse in granting {
+        let Some(chain) = state
+            .scope_chains
+            .resolve(&mut *conn, tenant_id, lapse.target_scope_id)
+            .await?
+        else {
+            continue;
+        };
+        let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
+        let assignments = policy_assignments::for_scopes(&mut *conn, tenant_id, &chain_ids).await?;
+        resolved.push(LapsedChain {
+            lapse: lapse.clone(),
+            chain,
+            assignments,
+        });
+    }
+    Ok(resolved)
 }
 
 /// An allowed decision plus what the audit event embeds: the verdict

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        insert into policy_packs\n            (tenant_id, name, version, source, redaction, composition, approvals,\n             promotion)\n        values ($1, $2, 1, $3, $4, $5, $6, $7)\n        on conflict (tenant_id, name) do update\n            set source = excluded.source,\n                redaction = excluded.redaction,\n                composition = excluded.composition,\n                approvals = excluded.approvals,\n                promotion = excluded.promotion,\n                version = policy_packs.version + 1,\n                updated_at = now()\n        returning tenant_id, name, version, source, redaction, composition,\n                  approvals, promotion, updated_at\n        ",
+  "query": "\n        select tenant_id, name, version, source, redaction, composition,\n               approvals, promotion, lapse, updated_at\n        from policy_packs where tenant_id = $1\n        order by name\n        ",
   "describe": {
     "columns": [
       {
@@ -45,19 +45,18 @@
       },
       {
         "ordinal": 8,
+        "name": "lapse",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Text",
-        "Jsonb",
-        "Jsonb",
-        "Jsonb",
-        "Jsonb"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -69,8 +68,9 @@
       true,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "cc7ec0f62dbaa02a35f1623178eab556e537486999805302fc90c3f3ec0a71ea"
+  "hash": "8f54bcea699ff4e809688a881dfcf92684e9b4bd89c2e418d87c75616d4b0134"
 }

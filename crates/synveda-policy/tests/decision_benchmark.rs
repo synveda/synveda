@@ -136,6 +136,7 @@ fn ac_decisions_are_microsecond_level() {
         default_pack: None,
         role_bindings: &bindings,
         grant: None,
+        lapses: &[],
     };
 
     let call = |action: Action| {

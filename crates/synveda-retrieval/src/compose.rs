@@ -33,7 +33,8 @@ use sqlx::PgConnection;
 use synveda_store::records::{RecordState, RecordVersion};
 use synveda_store::search;
 use synveda_types::{
-    Channel, RecordClass, RecordId, RecordKind, Result, ScopeId, ScopeKind, Sensitivity, TenantId,
+    Channel, LapseId, RecordClass, RecordId, RecordKind, Result, ScopeId, ScopeKind, Sensitivity,
+    TenantId,
 };
 use synveda_vedaflow::{ChannelRef, MemoryAsset, read_memory_members};
 
@@ -59,6 +60,15 @@ pub struct ComposeScope {
     /// Whether derived-channel records compose here (the scope's
     /// effective pack's [`synveda_types::InjectChannels`]).
     pub include_derived: bool,
+    /// The lapse this scope is on the plan by, when it is not on the
+    /// caller's own chain (AUTHZ-4, ADR-0037 decisions 10 and 12).
+    ///
+    /// `None` for every chain scope, which is almost all of them. When set,
+    /// `include_derived` is always false — a lapse admits what the target
+    /// published and nothing else — and the section is marked, because a
+    /// block that deliberately contains another scope's material has to say
+    /// so (the CTX-3 degradation-header discipline).
+    pub lapse: Option<LapseId>,
 }
 
 /// One composition request. `scopes` must be in gradient order,
@@ -512,9 +522,18 @@ pub async fn compose(
         .scopes
         .iter()
         .map(|scope| {
+            // A lapsed section says so. The reader is not a member of this
+            // scope and reached it through a time-boxed grant; a header
+            // identical to their own team's would be the block claiming
+            // otherwise (ADR-0037 decision 12).
+            let marker = if scope.lapse.is_some() {
+                " [lapse]"
+            } else {
+                ""
+            };
             (
                 scope.scope_id,
-                format!("\n## {} ({})\n", scope.path, scope.kind),
+                format!("\n## {} ({}){marker}\n", scope.path, scope.kind),
             )
         })
         .collect();
