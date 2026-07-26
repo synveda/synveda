@@ -22,6 +22,7 @@ mod promotion;
 mod proposal;
 mod record;
 mod redaction;
+mod retention;
 mod role;
 mod sensitivity;
 mod tenant;
@@ -51,6 +52,9 @@ pub use promotion::{
 pub use proposal::{ProposalEffect, ProposalState, ProposalView, Verdict};
 pub use record::{RecordClass, RecordKind};
 pub use redaction::{RedactionConfig, RedactionMode};
+pub use retention::{
+    ClassTtl, MAX_RETENTION_DAYS, MIN_STAGING_DAYS, RetentionConfig, RetentionMode,
+};
 pub use role::{Role, RoleBinding};
 pub use sensitivity::{ScopeTier, Sensitivity};
 pub use tenant::{Tenant, TenantStatus};

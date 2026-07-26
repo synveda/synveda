@@ -246,6 +246,32 @@ pub enum AuditAction {
     /// A standing grant was ended early, with its mandatory reason and the
     /// window it cut short.
     LapseRevoked,
+    /// Records left the live corpus because they were past the horizon
+    /// the pack at their scope sets (MEM-6, ADR-0040 decision 15) — one
+    /// event per scope per sweep batch, under `actor_kind=system`.
+    /// Carries the pack and version that decided, the horizon per class,
+    /// the record ids and their ages; never record content.
+    ///
+    /// Unlike [`AuditAction::LapseExpired`] this is **not** bookkeeping: a
+    /// lapse expires whether or not its sweep runs, but a record leaves
+    /// the corpus only because this loop ran, and the event commits in the
+    /// same transaction as the delete.
+    ///
+    /// What it describes is a *temporal* delete: the record stops being
+    /// current, `as_of` keeps answering, and destruction is the second
+    /// horizon's event.
+    MemoryExpired,
+    /// Content was destroyed (MEM-6, ADR-0040 decision 15): closed record
+    /// versions past the destruction horizon, and observe staging rows
+    /// with their quarantine markers past the staging horizon. Per plane,
+    /// with counts, the horizon that authorised it, and — for records —
+    /// the scope. The one action in the product that says data is gone
+    /// rather than hidden.
+    ///
+    /// Deliberately separate from [`AuditAction::MemoryExpired`]: "what
+    /// did we stop using" and "what did we destroy" are different
+    /// questions, and only the second has a legal answer.
+    MemoryDisposed,
     /// A grant reached the end of its window. Emitted by the sweep under
     /// `actor_kind=system`, and **bookkeeping only** — the grant stopped
     /// deciding anything at `expires_at` whether or not this was ever
@@ -300,6 +326,8 @@ impl AuditAction {
             AuditAction::LapseGranted => "policy.lapse.granted",
             AuditAction::LapseRevoked => "policy.lapse.revoked",
             AuditAction::LapseExpired => "policy.lapse.expired",
+            AuditAction::MemoryExpired => "memory.expired",
+            AuditAction::MemoryDisposed => "memory.disposed",
         }
     }
 }

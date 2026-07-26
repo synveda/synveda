@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ApprovalMatrix, CompositionConfig, DedupConfig, LapseConfig, PromotionConfig, RedactionConfig,
-    ScopeId, TenantId,
+    RetentionConfig, ScopeId, TenantId,
 };
 
 /// A per-node policy pack assignment: the node (and its subtree, until a
@@ -39,9 +39,10 @@ pub struct PolicyAssignment {
 /// approvals a publication needs (FLOW-3, ADR-0032 decision 3), the
 /// rules that open a promotion proposal without a human deciding to
 /// (FLOW-4, ADR-0033 decision 6), the longest window a lapse may run
-/// for (AUTHZ-4, ADR-0037 decision 5), and what the ingestion pipeline
+/// for (AUTHZ-4, ADR-0037 decision 5), what the ingestion pipeline
 /// does with a restatement or a contradiction (MEM-5, ADR-0039
-/// decision 12).
+/// decision 12), and how long material is served, kept and destroyed
+/// (MEM-6, ADR-0040).
 ///
 /// Every field is optional because a stored pack may configure none of
 /// them, and each has its own fail-safe default resolved downstream:
@@ -49,9 +50,11 @@ pub struct PolicyAssignment {
 /// narrows), the empty approval matrix — which still resolves to the
 /// invariant floor, never to "no review needed" — no promotion rules
 /// at all, because an absent trigger must not fire, the strict lapse
-/// window, which narrows and never grants, and the product dedup config,
+/// window, which narrows and never grants, the product dedup config,
 /// which removes nothing a reader could otherwise have seen except the
-/// facts a newer statement replaced.
+/// facts a newer statement replaced, and the product retention config,
+/// whose record horizons are all unset — a pack that configures nothing
+/// must not start destroying memory (MEM-6, ADR-0040 decision 13).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackConfig {
     /// The pack's redaction configuration.
@@ -66,4 +69,6 @@ pub struct PackConfig {
     pub lapse: Option<LapseConfig>,
     /// The pack's dedup and conflict-detection configuration.
     pub dedup: Option<DedupConfig>,
+    /// The pack's retention, disposal and staleness configuration.
+    pub retention: Option<RetentionConfig>,
 }

@@ -44,10 +44,10 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, SecondsFormat, Utc};
 use sqlx::PgConnection;
 use synveda_store::records::{RecordState, RecordVersion};
-use synveda_store::search;
+use synveda_store::search::{self, ScopeClassCutoff};
 use synveda_types::{
-    Channel, LapseId, RecordClass, RecordId, RecordKind, Result, ScopeId, ScopeKind, ScopeTier,
-    Sensitivity, TenantId,
+    Channel, LapseId, RecordClass, RecordId, RecordKind, Result, RetentionConfig, ScopeId,
+    ScopeKind, ScopeTier, Sensitivity, TenantId,
 };
 use synveda_vedaflow::{ChannelRef, MemoryAsset, read_memory_members};
 
@@ -82,6 +82,15 @@ pub struct ComposeScope {
     /// widening or losing something. Empty never reaches here — a scope
     /// that permits no tier is not planned at all.
     pub sensitivities: Vec<Sensitivity>,
+    /// The horizons this scope serves material under, and the half-life it
+    /// ranks by (MEM-6, ADR-0040 decisions 2 and 12) — from the same
+    /// effective-pack resolution that decided the scope.
+    ///
+    /// Read at every compose, never stamped on a record: a pack applied a
+    /// second ago governs the very next block, which is the whole of
+    /// MEM-6's acceptance criterion. It only ever removes, and pinned
+    /// material is exempt by seed §4.2 rather than by anything here.
+    pub retention: RetentionConfig,
     /// The lapse this scope is on the plan by, when it is not on the
     /// caller's own chain (AUTHZ-4, ADR-0037 decisions 10 and 12).
     ///
@@ -181,6 +190,20 @@ pub struct ComposedEntry {
     pub object_hash: String,
     /// Estimated tokens of the entry's rendered line.
     pub tokens: u32,
+    /// How fresh the entry was at the composition instant, per mille:
+    /// `1000` is fresh, halving every half-life the scope's pack
+    /// configures (MEM-6, ADR-0040 decision 12).
+    ///
+    /// Per mille rather than a float for the reason ADR-0019 decision 2
+    /// gives about the audit payload and ADR-0039 decision 13 gives about
+    /// the supersession edge: a number jsonb or a client may reshape is a
+    /// number nobody can compare later. Pinned material is always `1000` —
+    /// it cannot be decayed (seed §4.2).
+    ///
+    /// It rides the response rather than the rendered block: the block's
+    /// labels are trust statements, and an age is not one (ADR-0040
+    /// decision 12).
+    pub staleness_permille: u16,
 }
 
 /// One channel the block read: the commit a scope's channel served at
@@ -265,6 +288,11 @@ pub struct Candidate<'a> {
     pub position: usize,
     /// Published or derived at that scope.
     pub channel: Channel,
+    /// The freshness score at the composition instant, `0.0..=1.0`, under
+    /// the retention config of the scope it composed from (MEM-6,
+    /// ADR-0040 decision 12). `1.0` for pinned material and wherever a
+    /// pack configures no half-life.
+    pub staleness: f64,
 }
 
 /// The conflict resolution order (ADR-0025 decision 6, with ADR-0031
@@ -300,6 +328,82 @@ pub fn conflict_precedence(a: Candidate<'_>, b: Candidate<'_>) -> Ordering {
         .then_with(|| b.version.state.valid_from.cmp(&a.version.state.valid_from))
         .then_with(|| b.version.tx_from.cmp(&a.version.tx_from))
         .then_with(|| a.version.id.cmp(&b.version.id))
+}
+
+/// When a record was last *asserted* — the staleness clock, which is
+/// deliberately not the retention clock (MEM-6, ADR-0040 decisions 3 and
+/// 12).
+///
+/// Retention asks how long we have held a fact and runs from `valid_from`;
+/// staleness asks how long since anyone confirmed it, so a MEM-5 merge
+/// counts. `provenance.merged.last_observed_at` is the stamp
+/// `records::reinforce` writes on every absorbed restatement (ADR-0039
+/// decision 10), and a record nobody has restated simply has none.
+///
+/// A malformed stamp — hand-written provenance, a client that wrote
+/// something else — falls back to `valid_from` rather than failing the
+/// compose: freshness is a ranking heuristic, and a heuristic must not be
+/// able to break a block.
+fn last_asserted_at(state: &RecordState) -> DateTime<Utc> {
+    state
+        .provenance
+        .get("merged")
+        .and_then(|merged| merged.get("last_observed_at"))
+        .and_then(serde_json::Value::as_str)
+        .and_then(|text| DateTime::parse_from_rfc3339(text).ok())
+        .map(|stamp| stamp.with_timezone(&Utc))
+        .filter(|stamp| *stamp > state.valid_from)
+        .unwrap_or(state.valid_from)
+}
+
+/// A record's freshness at `at` under `retention`: `1.0` for pinned
+/// material, which seed §4.2 says cannot be decayed, and the config's
+/// half-life decay over time since last assertion for everything else.
+fn staleness_of(state: &RecordState, retention: &RetentionConfig, at: DateTime<Utc>) -> f64 {
+    if !RetentionConfig::governs(state.kind) {
+        return 1.0;
+    }
+    retention.staleness(last_asserted_at(state), at)
+}
+
+/// A relevance rank aged by a freshness score: `(rank + 1) / staleness`
+/// (MEM-6, ADR-0040 decision 12).
+///
+/// Fresh material (`1.0`) keeps its rank exactly, so a corpus with no
+/// half-life configured sorts precisely as it did before this feature.
+/// A zero or non-finite score — unreachable through
+/// [`synveda_types::RetentionConfig::staleness`], which clamps — sorts
+/// last rather than producing an infinity the comparator cannot order.
+fn decayed_rank(rank: usize, staleness: f64) -> f64 {
+    let position = (rank as f64) + 1.0;
+    if staleness <= 0.0 || !staleness.is_finite() {
+        return f64::MAX;
+    }
+    position / staleness
+}
+
+/// A freshness score as it is reported: per mille, rounded, clamped.
+fn permille(score: f64) -> u16 {
+    if score.is_nan() {
+        return 0;
+    }
+    (score * 1000.0).round().clamp(0.0, 1000.0) as u16
+}
+
+/// Whether `retention` still serves a record of this state at `at` — the
+/// read cut for material fetched by id rather than swept (ADR-0040
+/// decision 2).
+///
+/// The derived sweep applies the same rule in SQL; this is the published
+/// path, where the predicate cannot be a scope column because a published
+/// tree may name a record living below it (ADR-0034 decision 6).
+fn retention_admits(state: &RecordState, retention: &RetentionConfig, at: DateTime<Utc>) -> bool {
+    if !RetentionConfig::governs(state.kind) {
+        return true;
+    }
+    retention
+        .cutoff(state.class, at)
+        .is_none_or(|cutoff| state.valid_from > cutoff)
 }
 
 /// The VedaFlow view of a stored record version (ADR-0031 decision 6).
@@ -374,6 +478,15 @@ pub async fn compose(
         .iter()
         .map(|scope| (scope.scope_id, scope.sensitivities.as_slice()))
         .collect();
+    // The horizons each planned scope serves under, and the half-life it
+    // ranks by (MEM-6, ADR-0040 decisions 10 and 12). Keyed by scope for
+    // the same reason as the tiers: a record composes from the scope whose
+    // channel admitted it, which since FLOW-5 need not be where it lives.
+    let retention_at: HashMap<ScopeId, RetentionConfig> = request
+        .scopes
+        .iter()
+        .map(|scope| (scope.scope_id, scope.retention))
+        .collect();
 
     let chain_position: HashMap<ScopeId, usize> = request
         .scopes
@@ -411,6 +524,27 @@ pub async fn compose(
         .filter(|scope| scope.include_derived)
         .flat_map(|scope| ScopeTier::expand(scope.scope_id, &scope.sensitivities))
         .collect();
+    // The retention cut, per (scope, class), carried into SQL beside the
+    // tier pairs (MEM-6, ADR-0040 decision 2). Only classes the scope's
+    // pack actually schedules appear: a class it keeps is absent, never
+    // present with a cutoff at the beginning of time.
+    let horizons: Vec<ScopeClassCutoff> = request
+        .scopes
+        .iter()
+        .filter(|scope| scope.include_derived)
+        .flat_map(|scope| {
+            RecordClass::ALL.into_iter().filter_map(move |class| {
+                scope
+                    .retention
+                    .cutoff(class, request.at)
+                    .map(|cutoff| ScopeClassCutoff {
+                        scope_id: scope.scope_id,
+                        class,
+                        cutoff,
+                    })
+            })
+        })
+        .collect();
     // Published members are fetched by id alone: tree membership at a
     // planned scope is the predicate, because that tree may name a record
     // living below it (ADR-0034 decision 6). Residence still decides for
@@ -425,6 +559,7 @@ pub async fn compose(
             conn,
             tenant_id,
             &derived_allowed,
+            &horizons,
             request.at,
             request.per_scope_kind_candidates.max(1),
         )
@@ -466,6 +601,18 @@ pub async fn compose(
                     && tier_at
                         .get(scope_id)
                         .is_some_and(|tiers| tiers.contains(&version.state.sensitivity))
+                    // A scope's pack decides what that scope *serves*
+                    // (ADR-0040 decision 10). A record past the publishing
+                    // scope's horizon stops composing there; if it lives at
+                    // another planned scope whose own schedule still keeps
+                    // it, it falls through to that scope's derived material,
+                    // which is the honest reading of two schedules
+                    // disagreeing.
+                    && retention_at
+                        .get(scope_id)
+                        .is_some_and(|retention| {
+                            retention_admits(&version.state, retention, request.at)
+                        })
             })
             .map(|(position, scope_id, _)| (*position, *scope_id))
     };
@@ -501,12 +648,29 @@ pub async fn compose(
             if !ranked || !admits_derived(request, position) {
                 continue;
             }
+            // The derived sweep already applied this scope's horizon in
+            // SQL; a record that arrived through the published fetch and
+            // fell through to here has not been asked (ADR-0040
+            // decision 2). Asking twice costs a comparison and closes the
+            // only path around the cut.
+            if !retention_at
+                .get(&scope_id)
+                .is_some_and(|retention| retention_admits(&version.state, retention, request.at))
+            {
+                continue;
+            }
         }
         let candidate = Candidate {
             version,
             scope_id,
             position,
             channel,
+            // Scored under the pack of the scope it composed *from*: the
+            // block is that scope's material as far as this reader is
+            // concerned, so it is that scope's half-life that ages it.
+            staleness: retention_at.get(&scope_id).map_or(1.0, |retention| {
+                staleness_of(&version.state, retention, request.at)
+            }),
         };
         by_id
             .entry(version.id)
@@ -553,17 +717,33 @@ pub async fn compose(
             RecordKind::Pinned => 0_u8,
             RecordKind::Derived => 1,
         };
+        // Relevance, decayed by freshness (MEM-6, ADR-0040 decision 12):
+        // a record that has halved in freshness sorts as though it ranked
+        // twice as far down. Total and deterministic — the score is a
+        // function of the rank and the instant the caller passed in, never
+        // of a clock — and it only ever reorders *within* a gradient
+        // position, because position, channel and kind are compared first
+        // and seed §4.4 owns those.
+        //
+        // Unranked material (a taskless session) keeps its existing order:
+        // `valid_from` descending is already newest-first, so there is
+        // nothing for a freshness score to add there.
         let rank = |candidate: &Candidate<'_>| {
             relevance_rank
                 .as_ref()
                 .and_then(|ranks| ranks.get(&candidate.version.id).copied())
-                .unwrap_or(usize::MAX)
+                .map(|rank| decayed_rank(rank, candidate.staleness))
         };
         a.position
             .cmp(&b.position)
             .then_with(|| channel(a).cmp(&channel(b)))
             .then_with(|| kind(a).cmp(&kind(b)))
-            .then_with(|| rank(a).cmp(&rank(b)))
+            .then_with(|| match (rank(a), rank(b)) {
+                (Some(x), Some(y)) => x.total_cmp(&y),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => Ordering::Equal,
+            })
             .then_with(|| b.version.state.valid_from.cmp(&a.version.state.valid_from))
             .then_with(|| a.version.id.cmp(&b.version.id))
     });
@@ -655,6 +835,7 @@ pub async fn compose(
             class: version.state.class,
             object_hash: memory_asset(version.id, &version.state).address().to_hex(),
             tokens: line_tokens,
+            staleness_permille: permille(candidate.staleness),
         });
     }
 
@@ -831,6 +1012,9 @@ mod tests {
             scope_id: version.state.scope_id,
             position,
             channel,
+            // These unit tests are about seed §4.4's order, which
+            // freshness never reorders across (ADR-0040 decision 12).
+            staleness: 1.0,
         }
     }
 

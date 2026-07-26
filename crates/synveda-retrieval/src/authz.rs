@@ -286,6 +286,11 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             include_derived: effective.composition.channels.includes_derived(),
             sensitivities,
             lapse: None,
+            // The horizons this scope *serves* under, from the same
+            // resolution (MEM-6, ADR-0040 decision 10). Nothing is stamped
+            // on a record, so a pack applied a second ago governs the
+            // block this walk is planning.
+            retention: effective.retention,
         });
     }
 
@@ -344,6 +349,25 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             include_derived: false,
             sensitivities,
             lapse: Some(lapsed.lapse.id),
+            // The *target's* horizons, not the reader's: a lapse discloses
+            // what that scope stands behind, under that scope's schedule
+            // (ADR-0040 decision 10).
+            retention: pdp
+                .effective(
+                    tenant_id,
+                    Resource::Scope(target),
+                    &AuthzContext {
+                        scopes: lapsed.chain,
+                        principal_scopes: inputs.chain,
+                        assignments: lapsed.assignments,
+                        default_pack: inputs.default_pack,
+                        role_bindings: inputs.role_bindings,
+                        grant: None,
+                        lapses: inputs.lapses,
+                        sensitivity: Some(Sensitivity::WORKING),
+                    },
+                )
+                .retention,
         });
     }
 

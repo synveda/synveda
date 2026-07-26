@@ -30,6 +30,7 @@ pub mod policy_packs;
 pub mod promotion;
 pub mod quarantine;
 pub mod records;
+pub mod retention;
 pub mod rls;
 pub mod role_bindings;
 pub mod scope_chain;

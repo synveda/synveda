@@ -19,7 +19,8 @@ use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use sqlx::postgres::PgConnection;
 use synveda_types::{
-    ApprovalMatrix, DedupConfig, Error, LapseConfig, PackConfig, PromotionConfig, Result, TenantId,
+    ApprovalMatrix, DedupConfig, Error, LapseConfig, PackConfig, PromotionConfig, Result,
+    RetentionConfig, TenantId,
 };
 
 /// A tenant's stored policy pack.
@@ -37,11 +38,12 @@ pub struct PolicyPack {
     pub source: String,
     /// The pack's non-Cedar configuration: redaction (MEM-2, ADR-0021
     /// decision 3), composition (CTX-2, ADR-0025 decisions 2–3), the
-    /// approval matrix (FLOW-3, ADR-0032 decision 3), and dedup (MEM-5,
-    /// ADR-0039 decision 12). Each field is `None` when unconfigured, and
-    /// each resolves to its own fail-safe downstream — for approvals that
-    /// is the empty matrix, which still carries the invariant floor,
-    /// never "no review".
+    /// approval matrix (FLOW-3, ADR-0032 decision 3), dedup (MEM-5,
+    /// ADR-0039 decision 12), and retention (MEM-6, ADR-0040). Each field
+    /// is `None` when unconfigured, and each resolves to its own fail-safe
+    /// downstream — for approvals that is the empty matrix, which still
+    /// carries the invariant floor, never "no review"; for retention it is
+    /// the product config, whose record horizons are all unset.
     pub config: PackConfig,
     /// When the pack was last applied.
     pub updated_at: DateTime<Utc>,
@@ -122,13 +124,17 @@ pub async fn apply(
         .dedup
         .map(|value| config_json("dedup", serde_json::to_value(value)))
         .transpose()?;
+    let retention_json = config
+        .retention
+        .map(|value| config_json("retention", serde_json::to_value(value)))
+        .transpose()?;
     let row = sqlx::query_as!(
         PolicyPackRow,
         r#"
         insert into policy_packs
             (tenant_id, name, version, source, redaction, composition, approvals,
-             promotion, lapse, dedup)
-        values ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9)
+             promotion, lapse, dedup, retention)
+        values ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10)
         on conflict (tenant_id, name) do update
             set source = excluded.source,
                 redaction = excluded.redaction,
@@ -137,10 +143,11 @@ pub async fn apply(
                 promotion = excluded.promotion,
                 lapse = excluded.lapse,
                 dedup = excluded.dedup,
+                retention = excluded.retention,
                 version = policy_packs.version + 1,
                 updated_at = now()
         returning tenant_id, name, version, source, redaction, composition,
-                  approvals, promotion, lapse, dedup, updated_at
+                  approvals, promotion, lapse, dedup, retention, updated_at
         "#,
         tenant_id.as_uuid(),
         name,
@@ -151,6 +158,7 @@ pub async fn apply(
         promotion_json,
         lapse_json,
         dedup_json,
+        retention_json,
     )
     .fetch_one(executor)
     .await
@@ -171,7 +179,7 @@ pub async fn stored(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Resul
         PolicyPackRow,
         r#"
         select tenant_id, name, version, source, redaction, composition,
-               approvals, promotion, lapse, dedup, updated_at
+               approvals, promotion, lapse, dedup, retention, updated_at
         from policy_packs where tenant_id = $1
         order by name
         "#,
@@ -199,7 +207,7 @@ pub async fn get(
         PolicyPackRow,
         r#"
         select tenant_id, name, version, source, redaction, composition,
-               approvals, promotion, lapse, dedup, updated_at
+               approvals, promotion, lapse, dedup, retention, updated_at
         from policy_packs where tenant_id = $1 and name = $2
         "#,
         tenant_id.as_uuid(),
@@ -268,6 +276,7 @@ struct PolicyPackRow {
     promotion: Option<serde_json::Value>,
     lapse: Option<serde_json::Value>,
     dedup: Option<serde_json::Value>,
+    retention: Option<serde_json::Value>,
     updated_at: DateTime<Utc>,
 }
 
@@ -377,6 +386,28 @@ impl From<PolicyPackRow> for PolicyPack {
                     .ok()
                     .map(|()| config)
             });
+        // A horizon that reached the row anyway — a schedule written in
+        // seconds, a staging horizon that would spend MEM-1's idempotency
+        // guarantee — is treated as unconfigured rather than clamped: the
+        // product config destroys nothing, so the fail-safe is the one
+        // that cannot delete a tenant's memory (ADR-0040 decision 13).
+        let retention: Option<RetentionConfig> =
+            parse_config(&row.name, "retention", row.retention).and_then(
+                |config: RetentionConfig| {
+                    config
+                        .validate()
+                        .inspect_err(|err| {
+                            tracing::warn!(
+                                policy.pack = %row.name,
+                                error = %err,
+                                "stored retention config is invalid; \
+                                 treating the pack as unconfigured (the product config)"
+                            );
+                        })
+                        .ok()
+                        .map(|()| config)
+                },
+            );
         PolicyPack {
             tenant_id: TenantId::from_uuid(row.tenant_id),
             name: row.name,
@@ -389,6 +420,7 @@ impl From<PolicyPackRow> for PolicyPack {
                 promotion,
                 lapse,
                 dedup,
+                retention,
             },
             updated_at: row.updated_at,
         }

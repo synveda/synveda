@@ -19,7 +19,9 @@
 
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
-use synveda_types::{Error, RecordId, Result, ScopeId, ScopeTier, Sensitivity, TenantId};
+use synveda_types::{
+    Error, RecordClass, RecordId, Result, ScopeId, ScopeTier, Sensitivity, TenantId,
+};
 use uuid::Uuid;
 
 use crate::records::{RecordRow, RecordVersion, storage_error};
@@ -40,6 +42,37 @@ fn pair_arrays(allowed: &[ScopeTier]) -> (Vec<Uuid>, Vec<String>) {
             )
         })
         .unzip()
+}
+
+/// One scope's retention horizon for one record class (MEM-6, ADR-0040
+/// decision 2): material of `class` at `scope_id` whose `valid_from` is at
+/// or before `cutoff` is past what that scope serves.
+///
+/// Only classes a pack actually schedules are represented — a class it
+/// keeps has no triple, never a triple at the beginning of time — so an
+/// empty slice means "this plan expires nothing", which is the product
+/// default and must read as such.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScopeClassCutoff {
+    /// The scope whose pack set the horizon.
+    pub scope_id: ScopeId,
+    /// The class the horizon applies to.
+    pub class: RecordClass,
+    /// The instant at or before which material of that class is past it.
+    pub cutoff: DateTime<Utc>,
+}
+
+/// The three parallel arrays one horizon set becomes on the wire.
+fn horizon_arrays(horizons: &[ScopeClassCutoff]) -> (Vec<Uuid>, Vec<String>, Vec<DateTime<Utc>>) {
+    let mut scopes = Vec::with_capacity(horizons.len());
+    let mut classes = Vec::with_capacity(horizons.len());
+    let mut cutoffs = Vec::with_capacity(horizons.len());
+    for horizon in horizons {
+        scopes.push(horizon.scope_id.as_uuid());
+        classes.push(horizon.class.as_str().to_owned());
+        cutoffs.push(horizon.cutoff);
+    }
+    (scopes, classes, cutoffs)
 }
 
 /// One change-scan result: every record id whose bitemporal state moved
@@ -312,10 +345,12 @@ pub async fn compose_candidates(
     conn: &mut PgConnection,
     tenant_id: TenantId,
     allowed: &[ScopeTier],
+    horizons: &[ScopeClassCutoff],
     at: DateTime<Utc>,
     per_scope_kind_limit: i64,
 ) -> Result<Vec<RecordVersion>> {
     let (scopes, sensitivities) = pair_arrays(allowed);
+    let (horizon_scopes, horizon_classes, horizon_cutoffs) = horizon_arrays(horizons);
     let rows = sqlx::query_as!(
         RecordRow,
         r#"
@@ -336,6 +371,22 @@ pub async fn compose_candidates(
               and (scope_id, sensitivity)
                   in (select * from unnest($2::uuid[], $3::text[]))
               and valid_from <= $4 and (valid_to is null or valid_to > $4)
+              -- The retention cut (MEM-6, ADR-0040 decision 2), applied
+              -- here rather than after hydration so a scope past its
+              -- horizon never competes for the per-(scope, kind) cap.
+              -- Pinned material is never asked: seed §4.2 says it cannot
+              -- be decayed, and that exemption is this clause.
+              and (
+                  kind = 'pinned'
+                  or not exists (
+                      select 1
+                      from unnest($6::uuid[], $7::text[], $8::timestamptz[])
+                          as horizon(scope_id, class, cutoff)
+                      where horizon.scope_id = records.scope_id
+                        and horizon.class = records.class
+                        and records.valid_from <= horizon.cutoff
+                  )
+              )
         ) ranked
         where position <= $5
         "#,
@@ -344,6 +395,9 @@ pub async fn compose_candidates(
         &sensitivities,
         at,
         per_scope_kind_limit,
+        &horizon_scopes,
+        &horizon_classes,
+        &horizon_cutoffs,
     )
     .fetch_all(&mut *conn)
     .await

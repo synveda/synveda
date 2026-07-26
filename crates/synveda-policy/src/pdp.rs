@@ -21,8 +21,8 @@ use cedar_policy::{
 };
 use synveda_types::{
     ApprovalMatrix, CompositionConfig, DedupConfig, Error, HierarchyNode, Lapse, LapseAction,
-    LapseConfig, PackConfig, PromotionConfig, RedactionConfig, Result, Role, ScopeId, ScopeKind,
-    Sensitivity, TenantId,
+    LapseConfig, PackConfig, PromotionConfig, RedactionConfig, Result, RetentionConfig, Role,
+    ScopeId, ScopeKind, Sensitivity, TenantId,
 };
 
 use crate::entity_store::EntityStore;
@@ -105,6 +105,10 @@ struct LoadedPack {
     /// contradiction at scopes this pack governs (MEM-5, ADR-0039
     /// decision 12). `Copy`, so no `Arc`.
     dedup: DedupConfig,
+    /// How long material at scopes this pack governs is served, kept and
+    /// destroyed, and how fast it decays in ranking (MEM-6, ADR-0040).
+    /// `Copy`, so no `Arc`.
+    retention: RetentionConfig,
 }
 
 /// Where the effective pack came from — logged with every decision so the
@@ -157,6 +161,12 @@ pub struct EffectivePack {
     /// the extraction worker does when a candidate restates or contradicts
     /// a record its owner's scope already holds.
     pub dedup: DedupConfig,
+    /// The pack's retention configuration (MEM-6, ADR-0040): the horizons
+    /// scopes this pack governs serve and keep material under, and the
+    /// staleness half-life composition ranks by. Read on the read path at
+    /// every planned scope, and by the sweep at the scope a record lives
+    /// at (ADR-0040 decision 10).
+    pub retention: RetentionConfig,
 }
 
 impl fmt::Display for PackOrigin {
@@ -209,28 +219,38 @@ impl Pdp {
         // own example (30 days) and the relaxed packs the product maximum
         // (90). No pack refuses lapses outright — that is a tenant's
         // decision to make in a stored pack, not a product default.
+        // The retention configs are ADR-0040 decision 13's one product
+        // default that can differ per pack without destroying anything a
+        // tenant expected to keep: no pack sets a record horizon, and
+        // `regulated-strict` disposes of the staging plane at a week
+        // against the relaxed packs' month.
         let sources = [
             (
                 REGULATED_STRICT,
                 REGULATED_STRICT_SRC,
                 RedactionConfig::STRICT,
                 LapseConfig::STRICT,
+                RetentionConfig::STRICT,
             ),
             (
                 STANDARD,
                 STANDARD_SRC,
                 RedactionConfig::REDACT_ALL,
                 LapseConfig::RELAXED,
+                RetentionConfig::DEFAULT,
             ),
             (
                 OPEN_COLLABORATION,
                 OPEN_COLLABORATION_SRC,
                 RedactionConfig::REDACT_ALL,
                 LapseConfig::RELAXED,
+                RetentionConfig::DEFAULT,
             ),
         ];
         let mut embedded = HashMap::new();
-        for ((name, version), (_, source, redaction, lapse)) in EMBEDDED_PACKS.iter().zip(sources) {
+        for ((name, version), (_, source, redaction, lapse, retention)) in
+            EMBEDDED_PACKS.iter().zip(sources)
+        {
             let pack = compile(
                 &schema,
                 name,
@@ -252,6 +272,12 @@ impl Pdp {
                     // pack that let contradictions accumulate would be
                     // the one making a claim (ADR-0039 decision 12).
                     dedup: Some(DedupConfig::DEFAULT),
+                    // No embedded pack names a record TTL: an upgrade
+                    // that silently deletes a tenant's memory is the one
+                    // surprise this product must never spring (ADR-0040
+                    // decision 13). What differs is the staging plane,
+                    // whose disposal ADR-0020/0021 already promised.
+                    retention: Some(retention),
                 },
             )
             .map_err(|err| Error::Internal {
@@ -304,6 +330,7 @@ impl Pdp {
                 promotion: None,
                 lapse: None,
                 dedup: None,
+                retention: None,
             },
         )
         .map(|_| ())
@@ -520,6 +547,7 @@ impl Pdp {
             promotion: Arc::clone(&pack.promotion),
             lapse: pack.lapse,
             dedup: pack.dedup,
+            retention: pack.retention,
         }
     }
 
@@ -1045,6 +1073,10 @@ fn compile(
     // never grants anything, so its default is the honest fallback rather
     // than a widening (ADR-0039 decision 12).
     let dedup = config.dedup.unwrap_or_default();
+    // Unconfigured is the product config, whose record horizons are all
+    // unset: a stored pack that says nothing about retention must not
+    // start destroying a tenant's memory (ADR-0040 decision 13).
+    let retention = config.retention.unwrap_or_default();
     // A matrix asking more of one role than it asks of people is
     // unsatisfiable at every cell it governs, and it would fail silently
     // at review time rather than loudly at install time (ADR-0032).
@@ -1068,6 +1100,13 @@ fn compile(
     // saying so (ADR-0039 decision 12).
     dedup.validate().map_err(|err| Error::Invalid {
         message: format!("policy pack {name}@{version} dedup config: {err}"),
+    })?;
+    // And for a horizon: a schedule written in seconds, or a staging
+    // horizon that would spend MEM-1's idempotency guarantee for nothing,
+    // is refused when it is written rather than when it deletes something
+    // (ADR-0040 decision 7).
+    retention.validate().map_err(|err| Error::Invalid {
+        message: format!("policy pack {name}@{version} retention config: {err}"),
     })?;
     let combined = format!("{BASE_SRC}\n{source}");
     let policies: PolicySet = combined.parse().map_err(|err| Error::Invalid {
@@ -1096,5 +1135,6 @@ fn compile(
         promotion: Arc::new(promotion),
         lapse,
         dedup,
+        retention,
     })
 }
