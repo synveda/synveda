@@ -30,8 +30,10 @@ Never invent information that is not in the event.\n\
 Preserve them verbatim when quoting; never guess what they replaced.\n\
 - confidence is your own estimate in [0,1] that the candidate is a \
 faithful, durable memory of what the event says.\n\
-- sensitivity is optional: internal, confidential, or restricted. Omit it \
-when unsure.\n\
+- sensitivity is optional: internal or confidential. Omit it when unsure. \
+There is no third option here: the tier above these two means a compliance \
+approver signed for it, which is a review rather than a judgement you can \
+make (AUTHZ-5).\n\
 - entities lists proper names mentioned by a candidate; may be empty.";
 
 /// The candidates JSON schema both impls request. Kept as a function
@@ -54,7 +56,11 @@ pub(crate) fn candidates_schema() -> serde_json::Value {
                         "confidence": { "type": "number" },
                         "sensitivity": {
                             "type": "string",
-                            "enum": ["internal", "confidential", "restricted"]
+                            // The pipeline clamps at `confidential`
+                            // anyway (ADR-0038 decision 8); asking for a
+                            // tier we would refuse is an invitation to
+                            // argue with the clamp later.
+                            "enum": ["internal", "confidential"]
                         },
                         "entities": {
                             "type": "array",

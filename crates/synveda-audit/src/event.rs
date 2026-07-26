@@ -147,6 +147,12 @@ pub enum AuditAction {
     /// never one row per record (MEM-3, ADR-0022 decision 5). `failure`
     /// marks a dead-lettered signal (retries exhausted).
     MemoryExtracted,
+    /// An approved classification proposal's effect ran: records moved to
+    /// the sensitivity their reviewed versions carried (AUTHZ-5, ADR-0038
+    /// decision 9). Carries both tiers, the record ids, and the approvals
+    /// as resolved — never record content, which is what the tier is
+    /// about in the first place.
+    MemoryClassified,
     /// A tenant was admitted (CLI break-glass; TEN-5 owns the product
     /// lifecycle surface).
     TenantCreated,
@@ -261,6 +267,7 @@ impl AuditAction {
             AuditAction::QuarantineReleased => "memory.quarantine.released",
             AuditAction::QuarantineRejected => "memory.quarantine.rejected",
             AuditAction::MemoryExtracted => "memory.extracted",
+            AuditAction::MemoryClassified => "memory.classified",
             AuditAction::TenantCreated => "tenant.created",
             AuditAction::ContextInjected => "context.injected",
             AuditAction::ChannelPublished => "vedaflow.channel.published",

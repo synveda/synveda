@@ -37,7 +37,7 @@ use synveda_ingest::worker::{self, WorkerConfig, WorkerDeps};
 use synveda_store::{hierarchy, identities, quarantine, rls, tenants};
 use synveda_types::{
     HierarchyNode, Identity, IdentityId, IdentityKind, ObserveEventId, RecordId, ScopeId,
-    ScopeKind, TenantId, TenantStatus,
+    ScopeKind, Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -816,6 +816,83 @@ async fn redelivered_signals_extract_exactly_once() {
         "exactly one record"
     );
     assert_eq!(queued(&pool, tenant).await, 0);
+}
+
+/// A model cannot mint the tier that means "compliance signed for this"
+/// (AUTHZ-5, ADR-0038 decision 8): an extractor proposing `restricted`
+/// persists `confidential`, which is a real tier with real consequences
+/// and no forged provenance. The top tier arrives only through a reviewed
+/// reclassification.
+#[tokio::test]
+async fn an_extractor_can_never_mint_the_top_tier() {
+    let _serial = serial().await;
+    let Some((pool, tenant, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let (platform, _) = seed_hierarchy(&pool, tenant).await;
+    let idp = MockIdp::spawn().await;
+    let state = state(&db_url, &idp.issuer, tenant);
+    let app = router(state.clone());
+    seed_user(&pool, tenant, "alice", platform.id).await;
+    let token = idp.user_token("alice");
+
+    // A mock Claude endpoint that classifies its own output as the tier
+    // the product reserves for a compliance decision.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock claude");
+    let base_url = format!("http://{}", listener.local_addr().expect("addr"));
+    tokio::spawn(async move {
+        let app = Router::new().route(
+            "/v1/messages",
+            post(|| async {
+                Json(json!({
+                    "model": "claude-opus-4-8",
+                    "stop_reason": "tool_use",
+                    "content": [{
+                        "type": "tool_use", "id": "tu-1", "name": "emit_extraction",
+                        "input": { "candidates": [{
+                            "class": "procedure",
+                            "content": "The vault ceremony needs two custodians.",
+                            "confidence": 0.9,
+                            "sensitivity": "restricted"
+                        }]}
+                    }]
+                }))
+            }),
+        );
+        axum::serve(listener, app).await.expect("mock claude serve");
+    });
+
+    let (status, _) = post_observe(
+        &app,
+        &token,
+        json!({
+            "session_id": "sess-t",
+            "events": [event("t-1", "transcript_delta", "2026-07-21T14:00:00Z",
+                json!({"text": "Walk me through the vault ceremony."}))],
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+
+    let deps = worker_deps(
+        &state,
+        AnyExtractor::Claude(ClaudeExtractor::new(
+            "test-key-never-real".to_owned(),
+            "claude-opus-4-8".to_owned(),
+            base_url,
+        )),
+    );
+    drain(&deps, &worker_config()).await;
+
+    let records = stored_records(&pool, tenant).await;
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records[0].sensitivity,
+        Sensitivity::Confidential.as_str(),
+        "a model asking for the top tier gets the one below it"
+    );
 }
 
 /// The LLM-echo hole is closed (ADR-0022 decision 7): an extractor whose

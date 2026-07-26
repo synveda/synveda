@@ -566,10 +566,19 @@ async fn commit_group(
         batch.events += 1;
         let mut classes: Vec<&'static str> = Vec::new();
         for candidate in item.candidates {
+            // Floored at the working tier because auto-derived content is
+            // never `public` (ADR-0022 decision 7), and — since AUTHZ-5 —
+            // bounded above at `confidential` (ADR-0038 decision 8).
+            // `restricted` is defined by the invariant approval floor as the
+            // tier carrying a compliance signature, and an uncalibrated,
+            // self-reported model judgement cannot manufacture one: a model
+            // that says `restricted` gets `confidential`, which is a real
+            // tier with real consequences and no forged provenance. The top
+            // tier arrives only through a reviewed reclassification.
             let sensitivity = candidate
                 .sensitivity
-                .unwrap_or(Sensitivity::Internal)
-                .max(Sensitivity::Internal);
+                .unwrap_or(Sensitivity::WORKING)
+                .clamp(Sensitivity::WORKING, Sensitivity::MAX_DERIVED);
             let state = RecordState {
                 scope_id: *home,
                 owner_id: item.input.owner_id,

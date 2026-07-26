@@ -314,6 +314,14 @@ enum ProposalCommand {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Run an approved *classification* proposal's effect: move its
+    /// records to the tier the review approved (AUTHZ-5).
+    Classify {
+        /// The proposal UUID.
+        id: ProposalId,
+        #[arg(long)]
+        profile: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1026,6 +1034,9 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
             ProposalCommand::Publish { id, profile } => {
                 proposal::publish(&profile_name(profile), id).await
+            }
+            ProposalCommand::Classify { id, profile } => {
+                proposal::classify(&profile_name(profile), id).await
             }
         },
         Command::Channel(command) => match command {

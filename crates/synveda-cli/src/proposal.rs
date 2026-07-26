@@ -192,6 +192,38 @@ pub async fn withdraw(profile: &str, id: ProposalId) -> Result<(), String> {
     Ok(())
 }
 
+/// `synveda proposal classify <id>` — run an approved classification
+/// proposal's effect (AUTHZ-5, ADR-0038 decision 9).
+///
+/// A sibling verb rather than a mode of `publish`, for the reason the two
+/// routes are separate: they install different things, and a reviewer who
+/// approved a tier change did not approve a channel move.
+pub async fn classify(profile: &str, id: ProposalId) -> Result<(), String> {
+    let (api, origin) = Api::connect(profile).await?;
+    announce(&api, &origin);
+    let classified = api
+        .post(&format!("/v1/proposals/{id}/classify"), None)
+        .await?;
+    let field = |name: &str| {
+        classified
+            .get(name)
+            .and_then(|value| value.as_str())
+            .unwrap_or("?")
+            .to_owned()
+    };
+    let records = classified
+        .get("records")
+        .and_then(|value| value.as_array())
+        .map(Vec::len)
+        .unwrap_or(0);
+    eprintln!(
+        "synveda: reclassified — {records} record(s) at scope {} now carry {}",
+        field("scope_id"),
+        field("sensitivity"),
+    );
+    Ok(())
+}
+
 /// `synveda proposal publish <id>` — run an approved proposal's effect.
 ///
 /// A separate act by design (ADR-0032 decision 9): the deciding approval

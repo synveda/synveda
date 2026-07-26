@@ -587,7 +587,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [FLOW-6: CLI review flow](FLOW-6.md) — done 2026-07-25, ADR-0035, AC demo: demos/flow-6-cli-review.sh (**the whole review from a terminal**, and shaped so the claim cannot be fudged: from the moment a proposal exists, every governed act is `synveda proposal ...` and `DATABASE_URL` is *unset* for all of it — cora lists her queue, reads one in full with its requirement and its effect, approves, and runs that effect; the runbook is then edited and re-proposed and the review renders it as an `update` with the published version beside it and one line marked out of three; `synveda proposal review` walks the queue oldest-first and takes three verdicts in one command — skip, reject with the empty reason refused and re-asked, approve — while the same command over `/dev/null` casts nothing at all; then the refusals a reviewer meets in the product's own words: a contributor denied `ProposalReview`, a team curator's tenant-wide listing denied with `--scope` named, a `restricted` record that one curator cannot carry, compliance reading content it holds no `MemoryRead` for and then unable to publish what it just decided; and the trail, where all twelve acts carry `actor_kind=subject` under the reviewer's own subject with **not one break-glass row**, chain verifying), AC tests: crates/synveda-gateway/tests/review_surface.rs (what the CLI cannot invent: `add`/`update`/`none` read off the *target's* tree rather than the record's row, the old side being the object the tree names now and the new side the object the **proposal** names — asserted specifically for a record edited under its own review, where the two differ; a `compliance` reviewer proven to compose nothing from `POST /v1/inject` at that scope and shown both sides of the change anyway, which is ADR-0035 decision 8 as a test rather than a paragraph; both scope paths on a climb through the listing and the detail; and a climb's baseline being the scope it would land on — the department `add`s what the team has already published, and only a second climb of the same bytes is the no-op), crates/synveda-cli (33 unit tests: the LCS line diff — hunk headers, context merging, identical texts producing nothing — the field-wise renderer refusing to show a sensitivity change as no change, the prompt whose EOF casts nothing and whose rejection is re-asked until it says why, the tenant-wide denial that names `--scope`, and refusals rendered from the shared taxonomy), crates/synveda-vedaflow (the batched object read the detail route uses so its statement count does not grow with the member set)
 - [x] [FLOW-7: Rollback & pinning](FLOW-7.md) — done 2026-07-25, ADR-0036, AC demo: demos/flow-7-rollback.sh (**a bad instruction live in a fleet to not one agent receiving it in 0.2s of the 60s budget**, and the clock is on the incident rather than the estate: the line is authored at a team and climbs to Engineering through review — a curator *and* a steward, because that is how bad content actually becomes trusted — two engineers in different teams and a headless agent all receive it unmarked, and then one operator runs `synveda channel history` and `synveda channel rollback` and the same three agents' next sessions are different, with no second approval, no restart, and nothing to wait out; the two readers deliberately do **not** get the same answer, which is the honest half — the payments engineer loses the line entirely because the record lives off her chain, the platform engineer gets it back as `[unreviewed]`, because what a rewind removes is trust rather than content; then the trail (one `vedaflow.channel.rolled_back` carrying both commits, the record that left, the reason, and no record text, chain verifying), the refusals in the product's own words — a proposal commit *reachable from the head* and refused by name, a rewind forward refused with the way back named, a reader denied `channel.rollback`, and the steward who approved the publication denied `memory.read` — and the pin: the team holds its readers, publishes anyway, the block cites the frozen commit with `pinned=true`, a rewind under it is refused because readers would not heal, releasing catches the reader up, and a rewind at the *source* leaves the department's publication standing), AC tests: crates/synveda-gateway/tests/rollback.rs (8 tests over the product surfaces: the AC end to end with both readers asserted separately; **a proposal commit is reachable and still refused** — including the case that nearly slipped through, a channel's *first* publication, where the proposal sits at ordinal 0 and FLOW-3's own AC pins it there; a rewind that never advances and never guesses what it is leaving (`from == to`, a stale `from` as `Conflict`, and the forward move refused); log channels and asset kinds with no read action refused by name; the two decisions a rewind takes, with the privacy floor keeping a curator out of a teammate's personal channel through `MemoryRead` and no clause about personal scopes anywhere; the pin holding what readers compose while the channel keeps moving, with the watermark, the listing, the refusal, and both audit events; a pin refused at a state the channel never held; and **a climbed record surviving its source's rewind**, which discharges ADR-0034 reversal trigger (c) with the answer recorded rather than assumed), crates/synveda-store/tests/rls.rs (`only_pins_can_be_deleted_and_only_in_their_own_tenant`: the restrictive policy makes an unqualified channel-ref delete a legal statement matching nothing, a cross-tenant unpin matches nothing, a pin releases, and the trigger raises for anyone bypassing RLS), crates/synveda-vedaflow/tests/object_store.rs (`a_side_parent_is_reachable_and_is_not_on_the_first_parent_line`: the substrate distinction the whole feature rests on, asserted against `is_ancestor` in the same test), crates/synveda-vedaflow + crates/synveda-cli (unit tests: pin names that can never parse as channels and always match migration 0021's `pin/%`, set-channel-only operations, and the CLI's channel-name splitting)
 - [x] [AUTHZ-4: Lapses (controlled relaxation)](AUTHZ-4.md) — done 2026-07-26, ADR-0037, AC demo: demos/authz-4-lapses.sh (**a cross-team read the pack forbids, opened by two stewards and closed by the clock**, asserted from the reader's side throughout: bea on payments receives nothing of platform's, then receives its published runbook under a section the block marks `[lapse]`, then receives nothing again ten seconds later with **nobody acting** — no revocation, no restart, no operator, because the read path's own predicate is what closes the window; the unpublished draft beside it never travels, which is the honest half — a lapse discloses what the target *stands behind*, not its corpus; then the trail, where the proposal, both approvals, the grant with its window, four of bea's injects and one `policy.lapse.expired` under `actor_kind=system` read in order on one verifying chain with no record text anywhere; the refusals in the product's own words — a personal scope denied by the PDP before the surface sees it, a target the grantee already composes, an action outside the closed vocabulary refused at the wire, a 45-day window against regulated-strict's 30-day ceiling naming both numbers, and the reader herself denied when she asks for the access she wants; and revocation, where a security-reviewer ends a standing grant he could never have opened, which is the whole reason `LapseGrant` and `LapseRevoke` are two actions), AC tests: crates/synveda-gateway/tests/lapses.rs (5 tests over the product surfaces: the AC end to end with a **real** wall-clock expiry — no injected clock, because a duration is seconds with no minimum precisely so this can be demonstrated rather than asserted; one steward refused at the effect with the outstanding requirement named; published-only disclosure with an unreviewed sibling record proven absent; a security-reviewer who revokes but cannot propose, whose revoked grant then gets no expiry event because its ending is already on the chain; the four surface refusals, including the privacy floor at both layers — the PDP stops a steward reaching another principal's personal scope, and the surface stops the owner themselves; and the listing keeping ended grants, because "who could read this scope's material in March" is the question it exists for), crates/synveda-policy/tests/lapses.rs (8 tests on the permit: the decision flipping on one row and back; a grant reaching its target and neither its neighbours nor its subtree; no grant opening a personal scope under any pack; a scope-shaped grantee reaching everyone under it and nobody else; a zero-ceiling pack ending standing grants on the very next request; **a forbid still beating the base layer's first permit** — quarantine, and a service identity that cannot be widened past its anchor; the closed vocabulary refusing to turn a read grant into a write; and the plan and the permit sharing one containment rule), crates/synveda-store/tests/rls.rs (`a_grant_cannot_be_forged_resurrected_or_extended` — a forged tenant, an un-revocation, and the attack the table exists for: an `expires_at` pushed forward, which would make a 30-day grant permanent while the proposal, the approvals and the chain all still said 30 days; plus `an_expiry_can_only_be_chained_once`), crates/synveda-types (16 unit tests on the vocabulary and the ceiling) and crates/synveda-vedaflow (5 on the reviewed terms' canonical form, where every term is in the address so an approval can never carry to different ones)
-- [ ] [AUTHZ-5: ABAC conditions](AUTHZ-5.md)
+- [x] [AUTHZ-5: ABAC conditions](AUTHZ-5.md) — done 2026-07-26, ADR-0038, AC test: crates/synveda-gateway/tests/leak.rs (**the tier is earned, then never reaches a reader without the signature that earned it**: the record becomes `restricted` through the only path that can mint it — a classification proposal the invariant floor priced at `compliance` plus two distinct approvers, refused by name when one curator tries to run it — is published through that same floor, and is then asked back under 40-plus generated query variants (every word, every adjacent pair, reversed and upper-cased, plus the taskless session start) by four readers including a steward above the scope and *the record's own author*, with the working-tier corpus proven to travel so the sweep is not vacuous; then a two-steward lapse that declared only the working tier changes nothing about the top one, a lapse that declares `restricted` is refused with both stewards' approvals in hand until compliance signs — which is the AC's "compliance-granted permission", reached by the floor rather than by any rule this feature wrote — the reader receives it marked twice (`[lapse]` section, `[restricted]` line), a different department's reader never does, and the window closes with nobody acting; plus `confidential_material_takes_an_explicit_grant_and_a_binding_is_one`, where membership alone does not reach the tier, a content-role binding does on the very next request, and a caller asking for `internal` gets less rather than more), demo: demos/authz-5-abac.sh (the same arc over HTTP with the trail printed: `memory.classified` carrying `internal -> restricted`, the grant carrying the ceiling its approvers signed for, both expiries under `actor_kind=system`, chain verifying over 36 events; and the refusals in the product's own words — a classify proposal with no tier, a publication naming one it would not move, a classification pushed through the publish route, and the reader asking for her own access), AC tests: crates/synveda-policy/tests/sensitivity.rs (9 tests on the per-tier decision: membership reads the working tiers and stops, an explicit binding or one's own home reaches `confidential`, `restricted` denied under every pack at every scope *including the reader's own* to a principal holding every role, only a lapse that declared the tier lifts it and only at the target it named, `open-collaboration` reading the org at `confidential` and never above, quarantine and service-identity confinement still beating the base layer's permit, and a read decided without a tier refused rather than defaulted), crates/synveda-retrieval (the per-scope predicate: one scope's tier set never leaking into another's on the same chain, the plan carrying what the walk decided, the engine returning exactly the pairs it was handed — including the top tier when the plan names it, which is what makes the refusal policy's rather than a constant's), crates/synveda-store/tests/rls.rs (`a_grant_cannot_be_forged_resurrected_or_extended` gains the tier attack: a `max_sensitivity` raised after approval, which would widen an `internal` grant past what its approvers signed while the proposal, the approvals and the chain all still said `internal`), crates/synveda-gateway/tests/extraction.rs (`an_extractor_can_never_mint_the_top_tier`: a mock Claude proposing `restricted` persists `confidential`), and the latency AC re-measured with four times the decisions — p50 13.44ms, plan stage 4.42ms against CTX-3's 4.5ms at a quarter of the work
 - [ ] [MEM-5: Always-on dedup & conflict detection](MEM-5.md)
 - [ ] [MEM-6: Decay, TTL & staleness](MEM-6.md)
 - [ ] [CTX-4: Tiered injection / progressive disclosure](CTX-4.md)
@@ -989,6 +989,109 @@ above `internal` and the invariant floor engages by itself with no
 lapse-specific rule anywhere. `LapseConfig` carries one number today; a
 channel rule would be a new ADR rather than a key, because it changes what
 an approver is consenting to._
+
+_AUTHZ-5 (2026-07-26, ADR-0038): ABAC conditions. The feature text names
+five — sensitivity, residency, channel, time-of-day, purpose-of-use — and
+**one shipped**, each of the others refused or deferred by name rather than
+in bulk. Channel is already decided per scope by the pack's composition
+config at the same seam in the same walk, and a Cedar half would let a pack
+permit what its own config withholds with no defined resolution order.
+Residency needs a second region, and seed §6's cross-region rule turns out
+to be a *degradation* — "metadata-safe summaries" — rather than a denial,
+which is recorded so OPS-3 does not rediscover it. Time-of-day would be a
+second clock in a product that deliberately put expiry in a row read at
+decision time, and a time-based denial returns a smaller block the reader
+cannot distinguish from an empty one. Purpose-of-use is refused as a
+widening permanently: it is the reader authorising their own read, and this
+product's answer is older than the ADR — a disclosure is initiated on the
+disclosing side, and a lapse already carries a reason a reviewer at the
+target consented to.
+
+**A closed vocabulary is decidable without the record**, and that is the
+whole design. The `MemoryRead` seam decides once per scope with nothing in
+hand — the constraint ADR-0037 decision 6 refused to paper over — but there
+are exactly four tiers, so the seam can be asked about each of them before
+anything is fetched. The composition walk asks four times per scope and
+keeps the answers as a *set*; `ScopeTier` (a scope-and-tier pair) becomes
+the read path's predicate unit, and the three scope-keyed store queries
+match `(scope_id, sensitivity) in (select * from unnest($n::uuid[],
+$m::text[]))`. What a single ceiling could never express is now the ordinary
+case: a reader's own home admits `confidential` while the team one level up
+admits only the working tiers, on the same chain, in the same block. The
+rule generalises and is stated as one — an attribute whose domain is small
+and closed can join the decision before the fetch; one that is per-record
+and open cannot, and is refused rather than stored. Record *class* is closed
+too and stays refused anyway, on a product judgement rather than a
+mechanical limit: an extractor assigns it with uncalibrated confidence, and
+a disclosure narrowed by a label a model chose is a control that only looks
+like one.
+
+**The AC's "compliance-granted permission" is not a mechanism this feature
+wrote.** `base.cedar` forbids `MemoryRead` at `restricted` unless a standing
+lapse covers it; `LapseTerms` gained a declared ceiling; the matrix resolves
+at that ceiling, so declaring `restricted` pulls in ADR-0032's invariant
+floor — the `compliance` role and two distinct approvers, under every pack.
+ADR-0037 decision 14 predicted exactly this ("the floor engages by itself,
+with no lapse-specific rule anywhere") and that is what happened. The
+product now has one non-negotiable rule about the tier in both directions,
+signed by the same role: nothing reaches a published channel at `restricted`
+without it, nothing *becomes* `restricted` without it (the classification
+proposal resolves at `max(current, proposed)`, so a declassification is
+priced at the tier it is leaving), and nothing reaches a reader without a
+grant that cleared it.
+
+**Two corrections the implementation forced, both caught by tests rather
+than by review.** The first: asking the *governance* guards — publish, a
+climb's disclosure, a rewind, a pin, a reclassification — at the material's
+own tier reads better in a diff and is wrong. FLOW-3's restricted-publication
+AC failed immediately, because `restricted` is forbidden to every reader
+without a lapse, so a tier-following guard makes restricted material
+unpublishable by *anyone* — which strands the invariant floor's own cell and
+leaves a restricted lapse with nothing to disclose, since a lapse admits only
+what the target published. Those guards ask *whose* material it is and stay
+at the working tier; the matrix prices the tier. Decision 10 states it as the
+rule it is: **governing material is not composing it**, which is ADR-0035
+decision 8's sentence seen from the other side. The second correction was in
+a test the leak suite inherited: a content-role binding at *another* team
+does not bring that team's material into inject, because the candidate
+universe is the caller's chain and widens by lapse and by nothing else
+(ADR-0037 decision 13) — so the tier rule is about scopes a reader already
+composes, and the fixture moved onto her own team.
+
+**The engine stopped clamping.** `allowed_sensitivities` capped every read
+below `restricted` regardless of what any pack said; a clamp is a decision
+nobody took, so it is gone and the retrieval crate executes the plan it is
+handed. `crates/synveda-retrieval/tests/hybrid.rs`'s "restricted is never
+retrievable (AUTHZ-5 owns lifting this)" is now its opposite by name — a
+pair set naming the top tier surfaces it, one naming it at the *wrong* scope
+surfaces nothing — and what keeps a real reader out is policy. Published
+members are the one place the pair is not enforced in SQL: that read has no
+scope predicate by design (a tree may name a record living below it,
+ADR-0034 decision 6), so the tier is checked in Rust against the *naming*
+scope's set, with the union pushed down as the hard ceiling.
+
+Four times the decisions on the hot path, and **the plan stage did not
+move**: p50 13.44ms / p99 30.42ms against the 150ms budget, plan stage
+4.42ms over 1,050 calls where CTX-3 recorded 4.5ms at a quarter of the work.
+The four asks at one scope differ in one context attribute and share their
+entity graph, so HIER-3's fragment cache absorbs them — decision 1's claim,
+now measured. Reversal trigger (a) is nowhere near tripping, and option 6
+(validate tier-monotonicity at install, short-circuit top-down) stays the
+recorded upgrade.
+
+Still standing: `restricted` at a reader's own personal scope is invisible
+to them without a grant, deliberately (decision 7) — the tier means what it
+says, including for the author, and the only way a record carries it is a
+proposal two people approved. The extraction prompt no longer offers the top
+tier and the pipeline clamps at `confidential` (decision 8), so every
+`restricted` record in the product has a compliance signature behind it. A
+tenant wanting more than four tiers gets labels beside the tier rather than
+instead of it, and that is a new ADR because the floor and the matrix key on
+the order. `synveda_authz_decisions_total` now counts up to 4× per inject —
+the metric's meaning is unchanged, but any dashboard reading it as "injects"
+was already wrong and is now wrong by a bigger factor. And EVAL-5 owns what
+the leak suite grows into: 10k variants nightly, the cross-tenant fuzz
+(TEN-6), and the prompt-injection-via-memory half._
 
 _GRPH-4 (2026-07-25, ADR-0029): the phase gate ran first, because it is
 the only Phase 2 item that can invalidate an Accepted ADR and the schema

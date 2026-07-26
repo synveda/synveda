@@ -188,6 +188,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/proposals/{id}/reject", post(proposals::reject))
         .route("/v1/proposals/{id}/withdraw", post(proposals::withdraw))
         .route("/v1/proposals/{id}/publish", post(proposals::publish))
+        .route("/v1/proposals/{id}/classify", post(proposals::classify))
         // The lapse plane (AUTHZ-4, ADR-0037). `POST /v1/lapses` opens a
         // *proposal* and grants nothing; the grant is that proposal's
         // effect, beside `/publish` and taking the same shape.

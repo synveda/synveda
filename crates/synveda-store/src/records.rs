@@ -282,6 +282,54 @@ pub async fn update(
     row.map(TryInto::try_into).transpose()
 }
 
+/// Moves a record to a new sensitivity, leaving everything else alone
+/// (AUTHZ-5, ADR-0038 decision 9) — the effect of an approved
+/// classification proposal.
+///
+/// A narrow UPDATE rather than [`update`], and therefore **no embedding**:
+/// MEM-4's rule is that rewritten content must never ride a stale vector
+/// (ADR-0023 decision 4), and a reclassification rewrites no content. The
+/// vector still describes exactly the text it was computed over.
+///
+/// Bitemporally this is an ordinary version change: the `records_tx_update`
+/// trigger archives the old row, so "what tier did this record carry on
+/// date D" stays answerable from `records_history` — which is the question
+/// an auditor asks about the one tier that needs a compliance signature.
+///
+/// Returns `None` if the record has no current version.
+#[tracing::instrument(
+    name = "store.records.reclassify",
+    skip_all,
+    fields(record.id = %id, sensitivity = %sensitivity),
+    err(Display)
+)]
+pub async fn reclassify(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    id: RecordId,
+    sensitivity: Sensitivity,
+) -> Result<Option<RecordVersion>> {
+    let row = sqlx::query_as!(
+        RecordRow,
+        r#"
+        update records set sensitivity = $3
+        where tenant_id = $1 and id = $2
+        returning id as "id!", tenant_id as "tenant_id!", scope_id as "scope_id!",
+                  owner_id as "owner_id!", kind as "kind!", class as "class!",
+                  content as "content!", sensitivity as "sensitivity!",
+                  provenance as "provenance!", valid_from as "valid_from!",
+                  valid_to, tx_from as "tx_from!", tx_to
+        "#,
+        tenant_id.as_uuid(),
+        id.as_uuid(),
+        sensitivity.as_str(),
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}
+
 /// The stored embedding's metadata for `id`, if the record has one. Records
 /// written before migration 0015 (the MEM-3 window) legitimately return
 /// `None` until the re-embed workflow backfills them.

@@ -451,6 +451,18 @@ pub(crate) struct OpenBody {
     record_ids: Vec<RecordId>,
     /// What this proposes, in one line. A reviewer reads it in a list.
     title: String,
+    /// What running this proposal would *do*. Absent means `published` —
+    /// the effect a proposal had before AUTHZ-4 and the one it has almost
+    /// always. `lapse` is refused here: a lapse's terms are a different
+    /// body and have their own route (ADR-0037).
+    #[serde(default)]
+    effect: Option<ProposalEffect>,
+    /// The tier a `classify` proposal would install (AUTHZ-5, ADR-0038
+    /// decision 9). Required for that effect and refused for any other:
+    /// a publication does not move a tier, and a body that named one would
+    /// be describing something the effect will not do.
+    #[serde(default)]
+    sensitivity: Option<Sensitivity>,
 }
 
 #[derive(Serialize)]
@@ -476,6 +488,10 @@ async fn open_inner(
 ) -> Result<Json<OpenResponse>> {
     let body = body(payload)?;
     validate_open(&body)?;
+    let effect = body.effect.unwrap_or(ProposalEffect::Published);
+    // Present exactly for the effect that installs one, absent for every
+    // other: `validate_open` refuses the two mismatches by name.
+    let proposed_tier = body.sensitivity.unwrap_or(Sensitivity::WORKING);
     let tenant_id = tenant_id()?;
     let source_scope_id = body.source_scope_id.unwrap_or(body.scope_id);
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
@@ -532,7 +548,17 @@ async fn open_inner(
     }
 
     let versions = held_versions(&mut tx, tenant_id, source_scope_id, &body.record_ids).await?;
-    let sensitivity = max_sensitivity(&versions);
+    let held = max_sensitivity(&versions);
+    // A classification's requirement resolves at the **maximum of the
+    // current and proposed tiers** (ADR-0038 decision 9). Taking only the
+    // proposed side would price a declassification at the tier it is
+    // leaving *for* — so removing `restricted` would cost what `internal`
+    // costs, and the one direction that actually removes a control would be
+    // the cheap one.
+    let sensitivity = match effect {
+        ProposalEffect::Classify => held.max(proposed_tier),
+        _ => held,
+    };
     // The disclosure decision (ADR-0034 decision 1): may this principal
     // read what it is about to show the target's reviewers. It is the
     // whole warrant for the climb — the privacy floor then makes "nobody
@@ -556,7 +582,16 @@ async fn open_inner(
     // records as they stand then (ADR-0032 decision 6).
     let mut members: Vec<(String, vedaflow::hash::ObjectHash)> = Vec::with_capacity(versions.len());
     for version in &versions {
-        let asset = memory_asset(version.id, &version.state);
+        let mut asset = memory_asset(version.id, &version.state);
+        if effect == ProposalEffect::Classify {
+            // The proposed version differs from the live record in exactly
+            // one field, and it lives in the object store rather than in
+            // the row: writing the row first would put the change live
+            // before anyone reviewed it (ADR-0038 decision 9). The tier is
+            // inside the memory object's address, so the approvals bind it
+            // the way they bind bytes, with no recheck.
+            asset.sensitivity = proposed_tier;
+        }
         let object = vedaflow::put_memory(&mut tx, tenant_id, &asset).await?;
         members.push((asset.entry_name(), object.hash));
     }
@@ -575,7 +610,7 @@ async fn open_inner(
             // the climb needed no schema (ADR-0034 decision 8).
             source_scope: source_scope_id,
             asset: AssetKind::Memory,
-            effect: ProposalEffect::Published,
+            effect,
             members: &members,
             sensitivity,
             title: &body.title,
@@ -1047,6 +1082,7 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
         Sensitivity::WORKING,
     )?;
     require_open(&proposal)?;
+    require_effect(&proposal, ProposalEffect::Published, "publish")?;
     let publisher = identity_of(&input)?;
 
     let requirement = requirement_for(state, &mut tx, tenant_id, &input, &node, &proposal).await?;
@@ -1209,6 +1245,208 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
         members: committed.entries,
         added: committed.added,
     }))
+}
+
+// ── Classify: the other effect ─────────────────────────────────────────
+
+#[derive(Serialize)]
+struct ClassifyResponse {
+    proposal_id: ProposalId,
+    scope_id: ScopeId,
+    /// The tier every named record now carries.
+    sensitivity: Sensitivity,
+    /// The records that moved, with the tier each left.
+    records: Vec<ClassifiedRecord>,
+    proposal_commit: String,
+    state: &'static str,
+}
+
+#[derive(Serialize)]
+struct ClassifiedRecord {
+    record_id: RecordId,
+    /// What the record carried before this effect ran — the half of the
+    /// change an auditor needs to price it (ADR-0038 decision 9).
+    was: Sensitivity,
+}
+
+/// `POST /v1/proposals/{id}/classify` — run an approved classification
+/// proposal's effect (AUTHZ-5, ADR-0038 decision 9).
+#[tracing::instrument(name = "proposals.classify", skip_all)]
+pub(crate) async fn classify(
+    State(state): State<AppState>,
+    Path(id): Path<ProposalId>,
+) -> Response {
+    let result = classify_inner(&state, id).await;
+    respond(&state, "classify", result).await
+}
+
+async fn classify_inner(state: &AppState, id: ProposalId) -> Result<Json<ClassifyResponse>> {
+    let tenant_id = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let proposal = load(&mut tx, tenant_id, id).await?;
+    let node = target_node(&mut tx, tenant_id, &proposal).await?;
+    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    // Two decisions, the shape every governed act over material takes: may
+    // this principal classify here, and is it a stranger to the material.
+    // The read is at the working tier (ADR-0038 decision 10) — a
+    // reclassification discloses nothing to the actor, and how much
+    // authority the tier takes is the matrix's arithmetic, resolved below at
+    // the maximum of both tiers.
+    let authorized = authz::decide(
+        state,
+        &input,
+        Action::MemoryClassify,
+        Resource::Scope(node.id),
+        None,
+    )?;
+    authz::decide_read(
+        state,
+        &input,
+        Resource::Scope(node.id),
+        Sensitivity::WORKING,
+    )?;
+    require_open(&proposal)?;
+    require_effect(&proposal, ProposalEffect::Classify, "classify")?;
+    let classifier = identity_of(&input)?;
+
+    let requirement = requirement_for(state, &mut tx, tenant_id, &input, &node, &proposal).await?;
+    let recorded = vedaflow::proposals::approvals(&mut tx, tenant_id, id).await?;
+    let cast = vedaflow::proposals::cast_for(&recorded, proposal.commit);
+    let outstanding = requirement.outstanding(&cast);
+    if !outstanding.is_empty() {
+        metrics::counter!(PUBLISH_REVIEW_REQUIRED_TOTAL, "surface" => "classify").increment(1);
+        return Err(Error::Conflict {
+            message: format!(
+                "proposal {id} still needs {}; it cannot reclassify yet",
+                outstanding.describe()
+            ),
+        });
+    }
+
+    // Approvals bind bytes here exactly as they do for a publication, with
+    // one substitution: the member objects were written at the *proposed*
+    // tier, so the address to compare against is the live record's with that
+    // tier substituted. Everything else — content, class, scope, validity —
+    // must be untouched, or the record moved under its own review and this
+    // effect would install a tier decided about different bytes.
+    let proposed = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
+    let ids = member_ids(&proposed)?;
+    let versions = records::current_many(&mut *tx, tenant_id, &ids).await?;
+    let moved = |what: &str, record: RecordId| Error::Conflict {
+        message: format!(
+            "record {record} {what} after this proposal was approved; withdraw it and \
+             open a new one so the change is reviewed"
+        ),
+    };
+    let mut classified: Vec<ClassifiedRecord> = Vec::with_capacity(ids.len());
+    for member in &proposed {
+        let record: RecordId = member.name.parse().map_err(|err| Error::Internal {
+            message: format!(
+                "proposal member {:?} is not a record id: {err}",
+                member.name
+            ),
+        })?;
+        let Some(version) = versions.iter().find(|version| version.id == record) else {
+            return Err(moved("no longer exists", record));
+        };
+        let mut asset = memory_asset(version.id, &version.state);
+        asset.sensitivity = proposal.sensitivity;
+        if asset.address() != member.object {
+            return Err(moved("changed", record));
+        }
+        // The record must still live where the proposal was decided: a
+        // reclassification is authorized at one scope, and material that
+        // moved out of it since is governed somewhere else now.
+        if version.state.scope_id != proposal.target_scope_id {
+            return Err(Error::Conflict {
+                message: format!(
+                    "record {record} no longer lives at scope {}; its classification is \
+                     decided where it lives",
+                    proposal.target_scope_id
+                ),
+            });
+        }
+        let was = version.state.sensitivity;
+        records::reclassify(&mut *tx, tenant_id, record, proposal.sensitivity)
+            .await?
+            .ok_or_else(|| moved("no longer exists", record))?;
+        classified.push(ClassifiedRecord {
+            record_id: record,
+            was,
+        });
+    }
+
+    close(
+        &mut tx,
+        tenant_id,
+        id,
+        ProposalState::Published,
+        classifier,
+        None,
+    )
+    .await?;
+
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::MemoryClassified,
+        Resource::Scope(proposal.target_scope_id).to_string(),
+        Outcome::Success,
+        json!({
+            "authz": audit::decision_context(Action::MemoryClassify, &authorized),
+            "proposal_id": id,
+            "proposal_commit": proposal.commit.to_hex(),
+            "scope_id": proposal.target_scope_id,
+            // Both tiers per record, because the requirement was resolved at
+            // their maximum and an auditor reading this event has to be able
+            // to see why it cost what it cost.
+            "sensitivity": proposal.sensitivity.as_str(),
+            "records": classified.iter().map(|record| json!({
+                "record_id": record.record_id,
+                "was": record.was.as_str(),
+                "now": proposal.sensitivity.as_str(),
+            })).collect::<Vec<_>>(),
+            "approvals": approvals::audit_context(&requirement, &outstanding),
+            "approved_by": cast.iter().map(|approval| json!({
+                "identity_id": approval.identity,
+                "subject": approval.subject,
+                "roles": approval.roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+
+    Ok(Json(ClassifyResponse {
+        proposal_id: id,
+        scope_id: proposal.target_scope_id,
+        sensitivity: proposal.sensitivity,
+        records: classified,
+        proposal_commit: proposal.commit.to_hex(),
+        state: ProposalState::Published.as_str(),
+    }))
+}
+
+/// Refuses a proposal whose effect is not the one this route runs.
+///
+/// A route per effect, and each one checks: running a classification
+/// through the publish route would move a channel to member objects
+/// carrying a tier no row has, and running a publication through this one
+/// would rewrite tiers nobody proposed.
+fn require_effect(
+    proposal: &vedaflow::StoredProposal,
+    expected: ProposalEffect,
+    route: &str,
+) -> Result<()> {
+    if proposal.effect == expected {
+        return Ok(());
+    }
+    Err(Error::Invalid {
+        message: format!(
+            "proposal {} has effect {}; {route} runs {expected} proposals",
+            proposal.id, proposal.effect
+        ),
+    })
 }
 
 // ── Shared plumbing ────────────────────────────────────────────────────
@@ -1622,6 +1860,34 @@ fn validate_open(body: &OpenBody) -> Result<()> {
     let chars = body.title.chars().count();
     if chars == 0 || chars > MAX_TITLE_CHARS {
         return invalid(format!("title must be 1..={MAX_TITLE_CHARS} characters"));
+    }
+    // The effect and the tier travel together or not at all (AUTHZ-5,
+    // ADR-0038 decision 9). A body that says `classify` without a tier has
+    // not said what it would do; one that names a tier for a publication has
+    // described something the effect will not perform, and storing it would
+    // make the proposal read as a reclassification that never happens.
+    match body.effect.unwrap_or(ProposalEffect::Published) {
+        ProposalEffect::Classify if body.sensitivity.is_none() => {
+            return invalid(
+                "a classify proposal must name the sensitivity it would install".to_owned(),
+            );
+        }
+        ProposalEffect::Classify => {}
+        other if body.sensitivity.is_some() => {
+            return invalid(format!(
+                "sensitivity applies to the classify effect only; this proposal's \
+                 effect is {other} and would not move a tier"
+            ));
+        }
+        // A lapse's terms are a different body entirely, and refusing it
+        // here by name beats opening a policy proposal with no terms in it
+        // (ADR-0037 decision 1: POST /v1/lapses is its surface).
+        ProposalEffect::Lapse => {
+            return invalid(
+                "a lapse is proposed at POST /v1/lapses, which is where its terms live".to_owned(),
+            );
+        }
+        ProposalEffect::Published => {}
     }
     Ok(())
 }
