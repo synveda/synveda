@@ -1,0 +1,40 @@
+{
+  "name": "a preference that changed is remembered at its new value, under a task",
+  "description": "The same category through the other read path: this probe carries a task, so the update has to survive hybrid retrieval and ranking as well as composition. It is the case ADR-0039 decision 11 exists for — a superseded record that still sat in the sidecar index would rank, take a slot in the top-k, and be dropped only at assembly. Verification against the valid window is what keeps a stale fact from costing a live one its place.",
+  "category": "knowledge-update",
+  "seed": [
+    {
+      "actor": "curator",
+      "session_id": "eval:knowledge-update:preference:before",
+      "events": [
+        {
+          "key": "roast-before",
+          "kind": "transcript_delta",
+          "text": "I prefer dark-roast coffee before the morning stand-up.",
+          "marker": "dark-roast"
+        }
+      ]
+    },
+    {
+      "actor": "curator",
+      "session_id": "eval:knowledge-update:preference:after",
+      "events": [
+        {
+          "key": "roast-after",
+          "kind": "transcript_delta",
+          "text": "I prefer light-roast coffee before the morning stand-up.",
+          "marker": "light-roast"
+        }
+      ]
+    }
+  ],
+  "probe": {
+    "actor": "curator",
+    "session_id": "eval:knowledge-update:preference:probe",
+    "task": "what coffee do I prefer before stand-up"
+  },
+  "expect": {
+    "records": ["roast-after"],
+    "must_not_contain": ["dark-roast"]
+  }
+}

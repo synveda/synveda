@@ -87,7 +87,13 @@ eval_up() {
   RUST_LOG=${RUST_LOG:-warn}
   export RUST_LOG
 
-  cargo build -p synveda-gateway -p synveda-cli -p synveda-eval
+  # Offline for the build, deliberately: DATABASE_URL now names the empty
+  # scratch database, and sqlx's compile-time checks would validate every
+  # query against a schema that does not exist yet — which passes only
+  # while the build cache happens to be warm, and fails outright the first
+  # time anything in the workspace changes. The committed `.sqlx` data is
+  # what CI compiles against for the same reason.
+  SQLX_OFFLINE=true cargo build -p synveda-gateway -p synveda-cli -p synveda-eval
   ./target/debug/synveda db migrate
   EVAL_TENANT=$(./target/debug/synveda tenant create \
     --slug "eval-$$" --name "EVAL-1 harness" | eval_json_field id)

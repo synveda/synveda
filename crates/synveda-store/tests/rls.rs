@@ -210,6 +210,8 @@ const COVERED: &[&str] = &[
     "policy_packs",
     "promotion_watermarks",
     "record_embeddings",
+    "record_signatures",
+    "record_supersessions",
     "records",
     "records_history",
     "role_bindings",
@@ -1329,6 +1331,230 @@ fn record_embeddings_are_tenant_isolated_and_undeletable_by_the_app_role() {
             orphaned, 0,
             "the record's cascade must remove its embedding"
         );
+        tx.commit().await.expect("commit");
+    });
+}
+
+// ── Dedup & supersession (MEM-5, ADR-0039) ──────────────────────────────────
+
+/// The signature sidecar is content-derived and sits under the backstop
+/// exactly as the embedding does: the wrong tenant GUC nominates nothing,
+/// a forged-tenant write trips WITH CHECK, and no DELETE grant exists — a
+/// signature leaves through its record's cascade.
+///
+/// The nomination *leak* is the interesting one. LSH buckets are a
+/// similarity oracle: if a band query crossed tenants, a competitor could
+/// learn that somebody else holds a document like theirs without ever
+/// reading a row. The band the two tenants share here is identical by
+/// construction, so a leak would be certain rather than probable.
+#[test]
+fn record_signatures_are_tenant_isolated_and_nominate_nothing_across_tenants() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_record) = seed_tenant(&db.pool).await;
+        let (adversary, _) = seed_tenant(&db.pool).await;
+        // Both fixtures store the same content, so their bands are equal.
+        let bands = synveda_store::dedup::signature("v2").bands;
+        // The victim's *own* group, so nothing but the backstop is left to
+        // stop the nomination — a query filtered to a scope the adversary
+        // guessed wrong would prove nothing.
+        let placement = sqlx::query!(
+            "select scope_id, owner_id from records where id = $1",
+            victim_record.as_uuid(),
+        )
+        .fetch_one(&db.pool)
+        .await
+        .expect("read the victim's placement");
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let visible = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from record_signatures where tenant_id = $1"#,
+            victim.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count signatures");
+        assert_eq!(visible, 0, "signature rows leaked across tenants");
+
+        let nominated = synveda_store::dedup::nominate_lexical(
+            &mut tx,
+            &synveda_store::dedup::CandidateGroup {
+                tenant_id: victim,
+                scope_id: ScopeId::from_uuid(placement.scope_id),
+                owner_id: IdentityId::from_uuid(placement.owner_id),
+                class: RecordClass::Fact,
+                at: chrono::Utc::now() - chrono::Duration::days(365),
+            },
+            &bands,
+            16,
+        )
+        .await
+        .expect("nominate across tenants");
+        assert!(
+            nominated.is_empty(),
+            "the LSH nominator is a similarity oracle; it must not answer \
+             for another tenant's corpus"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            r#"insert into record_signatures (record_id, tenant_id, signature, bands)
+               values ($1, $2, array[1::bigint], array[1::bigint])"#,
+            RecordId::new().as_uuid(),
+            victim.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant signature write must be rejected"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let delete = sqlx::raw_sql("delete from record_signatures")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            delete.is_err(),
+            "the app role must not hold DELETE on record_signatures"
+        );
+        drop(tx);
+
+        // In-tenant it works, and the record's cascade takes it away.
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let own = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from record_signatures where record_id = $1"#,
+            victim_record.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count own signature");
+        assert_eq!(own, 1, "every record written through the API is signed");
+        records::delete(&mut *tx, victim_record)
+            .await
+            .expect("delete record");
+        let orphaned = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from record_signatures where record_id = $1"#,
+            victim_record.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count after cascade");
+        assert_eq!(
+            orphaned, 0,
+            "the record's cascade must remove its signature"
+        );
+        tx.commit().await.expect("commit");
+    });
+}
+
+/// Supersession edges say which of a tenant's facts replaced which — a
+/// change log of what an organisation believed and when. Isolated like
+/// every other tenant-scoped table, and append-only by grant: an edge is a
+/// record of a decision that was taken, and a decision that can be deleted
+/// is one an auditor cannot rely on.
+#[test]
+fn record_supersessions_are_tenant_isolated_and_append_only() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_record) = seed_tenant(&db.pool).await;
+        let (adversary, adversary_record) = seed_tenant(&db.pool).await;
+
+        let edge = |superseded, superseding| synveda_store::dedup::Supersession {
+            superseded_id: superseded,
+            superseding_id: superseding,
+            method: "deterministic".to_owned(),
+            reason: "contradiction".to_owned(),
+            jaccard_permille: Some(600),
+            cosine_permille: None,
+            closed_at: chrono::Utc::now(),
+        };
+
+        // A second record to point at, in the victim's own tenant.
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let successor = RecordId::new();
+        insert(&mut *tx, successor, victim, &state("v3"))
+            .await
+            .expect("insert successor");
+        synveda_store::dedup::record_supersession(&mut tx, victim, &edge(victim_record, successor))
+            .await
+            .expect("record the edge in-tenant");
+        tx.commit().await.expect("commit edge");
+
+        // The adversary sees nothing, through the raw table or the surface.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let visible = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from record_supersessions where tenant_id = $1"#,
+            victim.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count edges");
+        assert_eq!(visible, 0, "supersession edges leaked across tenants");
+        assert!(
+            synveda_store::dedup::supersessions_for(&mut tx, victim, victim_record)
+                .await
+                .expect("read edges across tenants")
+                .is_empty(),
+            "and the read surface agrees"
+        );
+
+        // A forged-tenant edge trips WITH CHECK.
+        let forged = synveda_store::dedup::record_supersession(
+            &mut tx,
+            victim,
+            &edge(adversary_record, adversary_record),
+        )
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant edge write must be rejected"
+        );
+        drop(tx);
+
+        // Append-only: no DELETE, no UPDATE.
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        assert!(
+            sqlx::raw_sql("delete from record_supersessions")
+                .execute(&mut *tx)
+                .await
+                .is_err(),
+            "the app role must not hold DELETE on record_supersessions"
+        );
+        drop(tx);
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        assert!(
+            sqlx::raw_sql("update record_supersessions set reason = 'near-duplicate'")
+                .execute(&mut *tx)
+                .await
+                .is_err(),
+            "nor UPDATE: an edge records a decision that was taken"
+        );
+        drop(tx);
+
+        // In-tenant the surface reads its own, and the record's cascade
+        // takes the edge with it.
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let edges = synveda_store::dedup::supersessions_for(&mut tx, victim, victim_record)
+            .await
+            .expect("read own edges");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].superseding_id, successor);
+        assert_eq!(edges[0].jaccard_permille, Some(600));
+        records::delete(&mut *tx, victim_record)
+            .await
+            .expect("delete record");
+        let orphaned = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from record_supersessions
+               where superseded_id = $1"#,
+            victim_record.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count after cascade");
+        assert_eq!(orphaned, 0, "the record's cascade must remove its edges");
         tx.commit().await.expect("commit");
     });
 }

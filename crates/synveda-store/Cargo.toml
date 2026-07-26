@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 synveda-types = { workspace = true }
 
+blake3 = { workspace = true }
 chrono = { workspace = true }
 metrics = { workspace = true }
 serde = { workspace = true }

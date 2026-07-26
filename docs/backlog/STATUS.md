@@ -588,7 +588,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [FLOW-7: Rollback & pinning](FLOW-7.md) — done 2026-07-25, ADR-0036, AC demo: demos/flow-7-rollback.sh (**a bad instruction live in a fleet to not one agent receiving it in 0.2s of the 60s budget**, and the clock is on the incident rather than the estate: the line is authored at a team and climbs to Engineering through review — a curator *and* a steward, because that is how bad content actually becomes trusted — two engineers in different teams and a headless agent all receive it unmarked, and then one operator runs `synveda channel history` and `synveda channel rollback` and the same three agents' next sessions are different, with no second approval, no restart, and nothing to wait out; the two readers deliberately do **not** get the same answer, which is the honest half — the payments engineer loses the line entirely because the record lives off her chain, the platform engineer gets it back as `[unreviewed]`, because what a rewind removes is trust rather than content; then the trail (one `vedaflow.channel.rolled_back` carrying both commits, the record that left, the reason, and no record text, chain verifying), the refusals in the product's own words — a proposal commit *reachable from the head* and refused by name, a rewind forward refused with the way back named, a reader denied `channel.rollback`, and the steward who approved the publication denied `memory.read` — and the pin: the team holds its readers, publishes anyway, the block cites the frozen commit with `pinned=true`, a rewind under it is refused because readers would not heal, releasing catches the reader up, and a rewind at the *source* leaves the department's publication standing), AC tests: crates/synveda-gateway/tests/rollback.rs (8 tests over the product surfaces: the AC end to end with both readers asserted separately; **a proposal commit is reachable and still refused** — including the case that nearly slipped through, a channel's *first* publication, where the proposal sits at ordinal 0 and FLOW-3's own AC pins it there; a rewind that never advances and never guesses what it is leaving (`from == to`, a stale `from` as `Conflict`, and the forward move refused); log channels and asset kinds with no read action refused by name; the two decisions a rewind takes, with the privacy floor keeping a curator out of a teammate's personal channel through `MemoryRead` and no clause about personal scopes anywhere; the pin holding what readers compose while the channel keeps moving, with the watermark, the listing, the refusal, and both audit events; a pin refused at a state the channel never held; and **a climbed record surviving its source's rewind**, which discharges ADR-0034 reversal trigger (c) with the answer recorded rather than assumed), crates/synveda-store/tests/rls.rs (`only_pins_can_be_deleted_and_only_in_their_own_tenant`: the restrictive policy makes an unqualified channel-ref delete a legal statement matching nothing, a cross-tenant unpin matches nothing, a pin releases, and the trigger raises for anyone bypassing RLS), crates/synveda-vedaflow/tests/object_store.rs (`a_side_parent_is_reachable_and_is_not_on_the_first_parent_line`: the substrate distinction the whole feature rests on, asserted against `is_ancestor` in the same test), crates/synveda-vedaflow + crates/synveda-cli (unit tests: pin names that can never parse as channels and always match migration 0021's `pin/%`, set-channel-only operations, and the CLI's channel-name splitting)
 - [x] [AUTHZ-4: Lapses (controlled relaxation)](AUTHZ-4.md) — done 2026-07-26, ADR-0037, AC demo: demos/authz-4-lapses.sh (**a cross-team read the pack forbids, opened by two stewards and closed by the clock**, asserted from the reader's side throughout: bea on payments receives nothing of platform's, then receives its published runbook under a section the block marks `[lapse]`, then receives nothing again ten seconds later with **nobody acting** — no revocation, no restart, no operator, because the read path's own predicate is what closes the window; the unpublished draft beside it never travels, which is the honest half — a lapse discloses what the target *stands behind*, not its corpus; then the trail, where the proposal, both approvals, the grant with its window, four of bea's injects and one `policy.lapse.expired` under `actor_kind=system` read in order on one verifying chain with no record text anywhere; the refusals in the product's own words — a personal scope denied by the PDP before the surface sees it, a target the grantee already composes, an action outside the closed vocabulary refused at the wire, a 45-day window against regulated-strict's 30-day ceiling naming both numbers, and the reader herself denied when she asks for the access she wants; and revocation, where a security-reviewer ends a standing grant he could never have opened, which is the whole reason `LapseGrant` and `LapseRevoke` are two actions), AC tests: crates/synveda-gateway/tests/lapses.rs (5 tests over the product surfaces: the AC end to end with a **real** wall-clock expiry — no injected clock, because a duration is seconds with no minimum precisely so this can be demonstrated rather than asserted; one steward refused at the effect with the outstanding requirement named; published-only disclosure with an unreviewed sibling record proven absent; a security-reviewer who revokes but cannot propose, whose revoked grant then gets no expiry event because its ending is already on the chain; the four surface refusals, including the privacy floor at both layers — the PDP stops a steward reaching another principal's personal scope, and the surface stops the owner themselves; and the listing keeping ended grants, because "who could read this scope's material in March" is the question it exists for), crates/synveda-policy/tests/lapses.rs (8 tests on the permit: the decision flipping on one row and back; a grant reaching its target and neither its neighbours nor its subtree; no grant opening a personal scope under any pack; a scope-shaped grantee reaching everyone under it and nobody else; a zero-ceiling pack ending standing grants on the very next request; **a forbid still beating the base layer's first permit** — quarantine, and a service identity that cannot be widened past its anchor; the closed vocabulary refusing to turn a read grant into a write; and the plan and the permit sharing one containment rule), crates/synveda-store/tests/rls.rs (`a_grant_cannot_be_forged_resurrected_or_extended` — a forged tenant, an un-revocation, and the attack the table exists for: an `expires_at` pushed forward, which would make a 30-day grant permanent while the proposal, the approvals and the chain all still said 30 days; plus `an_expiry_can_only_be_chained_once`), crates/synveda-types (16 unit tests on the vocabulary and the ceiling) and crates/synveda-vedaflow (5 on the reviewed terms' canonical form, where every term is in the address so an approval can never carry to different ones)
 - [x] [AUTHZ-5: ABAC conditions](AUTHZ-5.md) — done 2026-07-26, ADR-0038, AC test: crates/synveda-gateway/tests/leak.rs (**the tier is earned, then never reaches a reader without the signature that earned it**: the record becomes `restricted` through the only path that can mint it — a classification proposal the invariant floor priced at `compliance` plus two distinct approvers, refused by name when one curator tries to run it — is published through that same floor, and is then asked back under 40-plus generated query variants (every word, every adjacent pair, reversed and upper-cased, plus the taskless session start) by four readers including a steward above the scope and *the record's own author*, with the working-tier corpus proven to travel so the sweep is not vacuous; then a two-steward lapse that declared only the working tier changes nothing about the top one, a lapse that declares `restricted` is refused with both stewards' approvals in hand until compliance signs — which is the AC's "compliance-granted permission", reached by the floor rather than by any rule this feature wrote — the reader receives it marked twice (`[lapse]` section, `[restricted]` line), a different department's reader never does, and the window closes with nobody acting; plus `confidential_material_takes_an_explicit_grant_and_a_binding_is_one`, where membership alone does not reach the tier, a content-role binding does on the very next request, and a caller asking for `internal` gets less rather than more), demo: demos/authz-5-abac.sh (the same arc over HTTP with the trail printed: `memory.classified` carrying `internal -> restricted`, the grant carrying the ceiling its approvers signed for, both expiries under `actor_kind=system`, chain verifying over 36 events; and the refusals in the product's own words — a classify proposal with no tier, a publication naming one it would not move, a classification pushed through the publish route, and the reader asking for her own access), AC tests: crates/synveda-policy/tests/sensitivity.rs (9 tests on the per-tier decision: membership reads the working tiers and stops, an explicit binding or one's own home reaches `confidential`, `restricted` denied under every pack at every scope *including the reader's own* to a principal holding every role, only a lapse that declared the tier lifts it and only at the target it named, `open-collaboration` reading the org at `confidential` and never above, quarantine and service-identity confinement still beating the base layer's permit, and a read decided without a tier refused rather than defaulted), crates/synveda-retrieval (the per-scope predicate: one scope's tier set never leaking into another's on the same chain, the plan carrying what the walk decided, the engine returning exactly the pairs it was handed — including the top tier when the plan names it, which is what makes the refusal policy's rather than a constant's), crates/synveda-store/tests/rls.rs (`a_grant_cannot_be_forged_resurrected_or_extended` gains the tier attack: a `max_sensitivity` raised after approval, which would widen an `internal` grant past what its approvers signed while the proposal, the approvals and the chain all still said `internal`), crates/synveda-gateway/tests/extraction.rs (`an_extractor_can_never_mint_the_top_tier`: a mock Claude proposing `restricted` persists `confidential`), and the latency AC re-measured with four times the decisions — p50 13.44ms, plan stage 4.42ms against CTX-3's 4.5ms at a quarter of the work
-- [ ] [MEM-5: Always-on dedup & conflict detection](MEM-5.md)
+- [x] [MEM-5: Always-on dedup & conflict detection](MEM-5.md) — done 2026-07-26, ADR-0039, AC test: crates/synveda-gateway/tests/dedup.rs (**both halves of the AC over the real product path**, never a seeded row: alice states a fact, restates it — one record, `provenance.merged.count=1`, where an ADD-only store made two — then states its replacement, and the very next `POST /v1/inject` carries `ledger-live` and *not* `ledger-archive`, while the composition engine's own valid-time query asked at Monday still answers `ledger-archive` and `records_versions` still holds the open-ended version the record had before the close; plus the governance boundary — a *published* fact contradicted is refused, counted in `refused_published`, and left composing for a human — the late-arrival case, where an observation that reaches the pipeline after the fact that replaced it lands with its window already shut rather than being dropped, and a pack that turns the feature off and gets the pre-MEM-5 store back exactly), eval axis: `knowledge_update` in evals/baseline.json (floor 1.0, measured 1.000 with the gate held; evals/scenarios/05,06 in LongMemEval's knowledge-update shape — and with dedup off, the state the AC test's last case puts the product in and the state it was in before this feature, an ADD-only store composes the superseded fact beside its replacement, both scenarios' `must_not_contain` fails, and the axis reads 0.0), unit suites: crates/synveda-ingest/src/dedup.rs (14 tests: the changed-value update supersedes, the changed-*subject* one does not, two facts about one subject both survive, a paraphrase only cosine can see, the published refusal, the valid-time tie, and every mode bound), crates/synveda-store/src/dedup.rs (6 tests: the frame/value split, determinism of the signature across processes, the canonical updates sharing a band and unrelated statements not, and the full-rewording blind spot recorded rather than assumed away), crates/synveda-store/tests/rls.rs (`record_signatures` and `record_supersessions` join the adversarial suite and its completeness guard — including the one that matters here: the LSH nominator is a similarity oracle, and asked for another tenant's corpus with that corpus's own bands and placement it must answer nothing), demo: demos/mem-5-dedup.sh
 - [ ] [MEM-6: Decay, TTL & staleness](MEM-6.md)
 - [ ] [CTX-4: Tiered injection / progressive disclosure](CTX-4.md)
 - [ ] [CTX-5: recall API + MCP tool](CTX-5.md)
@@ -1092,6 +1092,105 @@ the metric's meaning is unchanged, but any dashboard reading it as "injects"
 was already wrong and is now wrong by a bigger factor. And EVAL-5 owns what
 the leak suite grows into: 10k variants nightly, the cross-tenant fuzz
 (TEN-6), and the prompt-injection-via-memory half._
+
+_MEM-5 (2026-07-26, ADR-0039): dedup & conflict detection. Six accepted
+ADRs deferred to this one, which is the usual sign the design was
+half-settled by the features that left room for it: ADR-0020 refused a
+second dedup mechanism at the observe seam, ADR-0022 left `valid_to` open
+and said so, ADR-0023 declined an embedding staleness check, ADR-0025
+shipped an exact-match conflict predicate and *exported the comparator*,
+ADR-0031 put `valid_to` inside the content address on purpose, and
+ADR-0033 left similarity-triggered promotion here. What they were all
+waiting for turns out to need no new read path at all: **supersession is
+`valid_to` moving, and every composition read already filters on it.**
+Closing a window makes a fact stop composing, keeps it addressable at the
+instant it held, and changes its content address — three properties, none
+of them written by this feature, all of them consequences of decisions
+taken between FND-4 and FLOW-2. The code that had to be written is the
+part that decides *which* window to close.
+
+**Two nomination signals, because one of them is not always meaningful.**
+The feature text says "embedding + minhash" and the temptation is to read
+it as one mechanism with a second opinion. It is not: the default embedder
+is a BLAKE3 hash whose geometry carries no meaning at all — ADR-0023
+decision 6 says so in its own doc comment — and it is what dev, demos,
+every hermetic test and `make eval` run on. A design that nominated only
+by vector neighbourhood would detect exactly nothing in the configurations
+the AC has to pass in, while looking correct in a suite that runs against
+real TEI. So the lexical leg is load-bearing and the semantic leg is the
+upgrade, not the reverse. Everything the AC test proves, it proves through
+MinHash alone.
+
+**The frame is what gets hashed, and that decision was found by a failing
+test.** The first cut hashed the full token set, and the canonical
+knowledge update — "the stand-up is at 09:30" against "the stand-up moved
+to 10:15" — came out at J≈0.4, sitting on top of the band threshold, so
+whether the product noticed a fact had changed depended on a coin flip.
+Hashing the *frame* instead (content words, stopwords and value tokens
+held out) puts the pairs worth judging at 0.6–1.0 and unrelated ones near
+zero, and the scoring still uses the full set — two statements whose
+frames match because only a number changed are precisely *not* duplicates.
+One definition of "frame", used by the index and by the judge, which is
+also why it lives in `synveda-store` beside the columns it encodes while
+the judge lives in `synveda-ingest` beside the pack config that tunes it.
+
+**The judge is a conjunction of refusals and it is honest about being
+one.** Similarity can nominate a pair; it cannot decide one. "We deploy on
+Tuesdays / Thursdays" and "deploys go through make deploy / tests go
+through make test" sit at nearly the same lexical distance and one pair is
+an update while the other is two true facts. Three conjuncts separate
+them — frame overlap by coefficient (an update is routinely *longer* than
+what it replaces, and Jaccard charges for the added words twice), a shared
+leading frame word as a crude subject proxy, and something actually having
+changed. It will miss a subject named last, a passive voice, a language
+whose word order is not English's. That is the asymmetry applied on
+purpose: a missed update leaves a stale fact composing beside a fresh one,
+which is what the product already did; a wrong supersession removes a true
+fact from every future inject, silently. The model-backed judge — the
+Graphiti pattern's actual mechanism — is decision 6's named seam and
+EVAL-2's measurement is its trigger.
+
+**The boundary that took the most thought is the one against published
+material.** A contradiction against a record a scope has reviewed is a
+real and interesting event, and the pipeline refuses to act on it: reviewed
+content leaves the trust boundary through a proposal or a rollback, never
+as a side effect of somebody's session. So the estate can hold a published
+fact its own members have contradicted, which is uncomfortable and correct
+— and the refusal is counted and chained rather than swallowed, because a
+refusal nobody can see is a refusal nobody can act on. FLOW-3's shape (the
+pipeline opens a supersession *proposal*) is the recorded next move, and
+deliberately not invented here.
+
+Two things worth knowing that the AC does not say. **Never ADD-only cuts
+both ways**: an observation that reaches the pipeline after the fact that
+replaced it is inserted with its window already shut, not dropped — the
+whole design is order-independent in valid time, which is what makes it
+safe against a replayed spool or a clock that was behind. And **an
+unindexed vector dimension degrades the stage rather than failing the
+write**: found by the MEM-4 chaos test, whose mock TEI serves a dimension
+with no HNSW index, and fixed the only way that is defensible — dedup is a
+stage of the write, not a gate on it.
+
+Still standing: the deterministic judge's recall is unmeasured (EVAL-2);
+there is no operator surface to reverse a wrong supersession, though the
+data model makes one ordinary — the record, every version of it, and an
+edge saying why are all still there, and AUD-2/CNSL-2 are where a curator
+would act on the `memory.superseded` trail; supersession never crosses a
+scope, an owner, or a class, and each of those is a recorded miss rather
+than an oversight; `record_signatures` is not backfilled for records
+written before migration 0024, exactly as ADR-0023 recorded for the MEM-3
+window; and the real LongMemEval corpus with its judge is still EVAL-3 —
+what shipped is the category, measured on this suite's fixtures, gated at
+a floor the product could not have met a day ago.
+
+One fix outside the feature, found by it: `evals/lib.sh` built the
+workspace *after* pointing `DATABASE_URL` at its empty scratch database,
+so sqlx's compile-time checks validated every query against a schema that
+did not exist. It passed only while the build cache happened to be warm,
+and the first workspace change since EVAL-1 landed broke `make eval`
+outright. The build is now `SQLX_OFFLINE=true`, against the committed
+`.sqlx` data — which is what CI compiles against, and for the same
+reason._
 
 _GRPH-4 (2026-07-25, ADR-0029): the phase gate ran first, because it is
 the only Phase 2 item that can invalidate an Accepted ADR and the schema

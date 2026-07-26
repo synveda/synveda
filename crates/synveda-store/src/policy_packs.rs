@@ -19,7 +19,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use sqlx::postgres::PgConnection;
 use synveda_types::{
-    ApprovalMatrix, Error, LapseConfig, PackConfig, PromotionConfig, Result, TenantId,
+    ApprovalMatrix, DedupConfig, Error, LapseConfig, PackConfig, PromotionConfig, Result, TenantId,
 };
 
 /// A tenant's stored policy pack.
@@ -36,11 +36,12 @@ pub struct PolicyPack {
     /// Cedar policy source.
     pub source: String,
     /// The pack's non-Cedar configuration: redaction (MEM-2, ADR-0021
-    /// decision 3), composition (CTX-2, ADR-0025 decisions 2–3), and the
-    /// approval matrix (FLOW-3, ADR-0032 decision 3). Each field is
-    /// `None` when unconfigured, and each resolves to its own fail-safe
-    /// downstream — for approvals that is the empty matrix, which still
-    /// carries the invariant floor, never "no review".
+    /// decision 3), composition (CTX-2, ADR-0025 decisions 2–3), the
+    /// approval matrix (FLOW-3, ADR-0032 decision 3), and dedup (MEM-5,
+    /// ADR-0039 decision 12). Each field is `None` when unconfigured, and
+    /// each resolves to its own fail-safe downstream — for approvals that
+    /// is the empty matrix, which still carries the invariant floor,
+    /// never "no review".
     pub config: PackConfig,
     /// When the pack was last applied.
     pub updated_at: DateTime<Utc>,
@@ -117,13 +118,17 @@ pub async fn apply(
         .lapse
         .map(|value| config_json("lapse", serde_json::to_value(value)))
         .transpose()?;
+    let dedup_json = config
+        .dedup
+        .map(|value| config_json("dedup", serde_json::to_value(value)))
+        .transpose()?;
     let row = sqlx::query_as!(
         PolicyPackRow,
         r#"
         insert into policy_packs
             (tenant_id, name, version, source, redaction, composition, approvals,
-             promotion, lapse)
-        values ($1, $2, 1, $3, $4, $5, $6, $7, $8)
+             promotion, lapse, dedup)
+        values ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9)
         on conflict (tenant_id, name) do update
             set source = excluded.source,
                 redaction = excluded.redaction,
@@ -131,10 +136,11 @@ pub async fn apply(
                 approvals = excluded.approvals,
                 promotion = excluded.promotion,
                 lapse = excluded.lapse,
+                dedup = excluded.dedup,
                 version = policy_packs.version + 1,
                 updated_at = now()
         returning tenant_id, name, version, source, redaction, composition,
-                  approvals, promotion, lapse, updated_at
+                  approvals, promotion, lapse, dedup, updated_at
         "#,
         tenant_id.as_uuid(),
         name,
@@ -144,6 +150,7 @@ pub async fn apply(
         approvals_json,
         promotion_json,
         lapse_json,
+        dedup_json,
     )
     .fetch_one(executor)
     .await
@@ -164,7 +171,7 @@ pub async fn stored(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Resul
         PolicyPackRow,
         r#"
         select tenant_id, name, version, source, redaction, composition,
-               approvals, promotion, lapse, updated_at
+               approvals, promotion, lapse, dedup, updated_at
         from policy_packs where tenant_id = $1
         order by name
         "#,
@@ -192,7 +199,7 @@ pub async fn get(
         PolicyPackRow,
         r#"
         select tenant_id, name, version, source, redaction, composition,
-               approvals, promotion, lapse, updated_at
+               approvals, promotion, lapse, dedup, updated_at
         from policy_packs where tenant_id = $1 and name = $2
         "#,
         tenant_id.as_uuid(),
@@ -260,6 +267,7 @@ struct PolicyPackRow {
     approvals: Option<serde_json::Value>,
     promotion: Option<serde_json::Value>,
     lapse: Option<serde_json::Value>,
+    dedup: Option<serde_json::Value>,
     updated_at: DateTime<Utc>,
 }
 
@@ -349,6 +357,26 @@ impl From<PolicyPackRow> for PolicyPack {
                     .ok()
                     .map(|()| config)
             });
+        // Thresholds outside `0..=1` make a band unreachable, which reads
+        // as "the feature is off" without saying so. Unconfigured is the
+        // product config, which is the same fail-safe the composition
+        // config takes: this config withholds nothing a reader could
+        // otherwise have seen (ADR-0039 decision 12).
+        let dedup: Option<DedupConfig> =
+            parse_config(&row.name, "dedup", row.dedup).and_then(|config: DedupConfig| {
+                config
+                    .validate()
+                    .inspect_err(|err| {
+                        tracing::warn!(
+                            policy.pack = %row.name,
+                            error = %err,
+                            "stored dedup config is invalid; \
+                             treating the pack as unconfigured (the product config)"
+                        );
+                    })
+                    .ok()
+                    .map(|()| config)
+            });
         PolicyPack {
             tenant_id: TenantId::from_uuid(row.tenant_id),
             name: row.name,
@@ -360,6 +388,7 @@ impl From<PolicyPackRow> for PolicyPack {
                 approvals,
                 promotion,
                 lapse,
+                dedup,
             },
             updated_at: row.updated_at,
         }

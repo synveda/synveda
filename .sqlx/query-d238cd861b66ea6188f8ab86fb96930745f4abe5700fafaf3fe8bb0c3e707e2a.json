@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        with new_record as (\n            insert into records\n                (id, tenant_id, scope_id, owner_id, kind, class, content,\n                 sensitivity, provenance, valid_from, valid_to, tx_from)\n            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())\n            returning id, tenant_id, scope_id, owner_id, kind, class, content,\n                      sensitivity, provenance, valid_from, valid_to, tx_from, tx_to\n        ),\n        new_embedding as (\n            insert into record_embeddings (record_id, tenant_id, model, dim, embedding)\n            select id, tenant_id, $12, cardinality($13::real[]), $13::real[]::vector\n            from new_record\n        )\n        select id as \"id!\", tenant_id as \"tenant_id!\", scope_id as \"scope_id!\",\n               owner_id as \"owner_id!\", kind as \"kind!\", class as \"class!\",\n               content as \"content!\", sensitivity as \"sensitivity!\",\n               provenance as \"provenance!\", valid_from as \"valid_from!\",\n               valid_to, tx_from as \"tx_from!\", tx_to\n        from new_record\n        ",
+  "query": "\n                select r.id as \"id!\", r.tenant_id as \"tenant_id!\",\n                       r.scope_id as \"scope_id!\", r.owner_id as \"owner_id!\",\n                       r.kind as \"kind!\", r.class as \"class!\", r.content as \"content!\",\n                       r.sensitivity as \"sensitivity!\", r.provenance as \"provenance!\",\n                       r.valid_from as \"valid_from!\", r.valid_to,\n                       r.tx_from as \"tx_from!\", r.tx_to,\n                       (e.embedding::vector(16) <=> $7::real[]::vector(16))::float8\n                           as \"distance!\"\n                from record_embeddings e\n                join records r on r.id = e.record_id\n                where e.tenant_id = $1\n                  and e.dim = 16\n                  and e.model = $2\n                  and r.tenant_id = $1\n                  and r.scope_id = $3\n                  and r.owner_id = $4\n                  and r.class = $5\n                  and r.kind = 'derived'\n                  and (r.valid_to is null or r.valid_to > $6)\n                order by e.embedding::vector(16) <=> $7::real[]::vector(16)\n                limit $8\n                ",
   "describe": {
     "columns": [
       {
@@ -67,23 +67,23 @@
         "ordinal": 12,
         "name": "tx_to",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "distance!",
+        "type_info": "Float8"
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
+        "Text",
         "Uuid",
         "Uuid",
-        "Uuid",
         "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Jsonb",
         "Timestamptz",
-        "Timestamptz",
-        "Text",
-        "Float4Array"
+        "Float4Array",
+        "Int8"
       ]
     },
     "nullable": [
@@ -99,8 +99,9 @@
       false,
       true,
       false,
-      true
+      true,
+      null
     ]
   },
-  "hash": "977b798cb45c9dca8996eb6e56fcabdc039e61556c9f6044217cb4cef11d3df1"
+  "hash": "d238cd861b66ea6188f8ab86fb96930745f4abe5700fafaf3fe8bb0c3e707e2a"
 }

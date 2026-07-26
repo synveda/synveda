@@ -321,6 +321,10 @@ async fn handle(
                 },
                 limit: RELEVANCE_LIMIT,
                 per_leg: RELEVANCE_LIMIT,
+                // The same instant composition uses, so ranking and
+                // assembly cannot disagree about which facts are current
+                // (MEM-5, ADR-0039 decision 11).
+                at: as_of,
             };
             let stage = Instant::now();
             let searched = hybrid_search(&mut tx, &state.search_index, tenant_id, &request).await;

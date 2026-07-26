@@ -18,7 +18,8 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use synveda_types::{
-    Error, IdentityId, RecordClass, RecordId, RecordKind, Result, ScopeId, Sensitivity, TenantId,
+    Error, IdentityId, ObserveEventId, RecordClass, RecordId, RecordKind, Result, ScopeId,
+    Sensitivity, TenantId,
 };
 use uuid::Uuid;
 
@@ -178,6 +179,7 @@ pub async fn insert(
             message: "record embedding vector must not be empty".to_owned(),
         });
     }
+    let signature = crate::dedup::signature(&state.content);
     let row = sqlx::query_as!(
         RecordRow,
         r#"
@@ -192,6 +194,11 @@ pub async fn insert(
         new_embedding as (
             insert into record_embeddings (record_id, tenant_id, model, dim, embedding)
             select id, tenant_id, $12, cardinality($13::real[]), $13::real[]::vector
+            from new_record
+        ),
+        new_signature as (
+            insert into record_signatures (record_id, tenant_id, signature, bands)
+            select id, tenant_id, $14::bigint[], $15::bigint[]
             from new_record
         )
         select id as "id!", tenant_id as "tenant_id!", scope_id as "scope_id!",
@@ -214,6 +221,8 @@ pub async fn insert(
         state.valid_to,
         embedding.model,
         &embedding.vector,
+        &signature.signature,
+        &signature.bands,
     )
     .fetch_one(executor)
     .await
@@ -237,6 +246,7 @@ pub async fn update(
             message: "record embedding vector must not be empty".to_owned(),
         });
     }
+    let signature = crate::dedup::signature(&state.content);
     let row = sqlx::query_as!(
         RecordRow,
         r#"
@@ -255,6 +265,14 @@ pub async fn update(
             on conflict (record_id) do update
                 set model = excluded.model, dim = excluded.dim,
                     embedding = excluded.embedding, embedded_at = now()
+        ),
+        resigned as (
+            insert into record_signatures (record_id, tenant_id, signature, bands)
+            select id, tenant_id, $13::bigint[], $14::bigint[]
+            from updated
+            on conflict (record_id) do update
+                set signature = excluded.signature, bands = excluded.bands,
+                    signed_at = now()
         )
         select id as "id!", tenant_id as "tenant_id!", scope_id as "scope_id!",
                owner_id as "owner_id!", kind as "kind!", class as "class!",
@@ -275,6 +293,8 @@ pub async fn update(
         state.valid_to,
         embedding.model,
         &embedding.vector,
+        &signature.signature,
+        &signature.bands,
     )
     .fetch_optional(executor)
     .await
@@ -323,6 +343,119 @@ pub async fn reclassify(
         tenant_id.as_uuid(),
         id.as_uuid(),
         sensitivity.as_str(),
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}
+
+/// Closes `id`'s valid window at `valid_to` — the supersession write
+/// (MEM-5, ADR-0039 decision 7).
+///
+/// A narrow UPDATE, and therefore **no embedding**, for the reason
+/// [`reclassify`] takes none: closing a window rewrites no content, so the
+/// stored vector still describes exactly the text it was computed over
+/// (ADR-0023 decision 4). The signature is untouched for the same reason.
+///
+/// The window only ever *narrows*: the predicate refuses a `valid_to` that
+/// would extend an already-closed window, so a second supersession cannot
+/// resurrect a fact by pushing its end later, and a redelivered group cannot
+/// move an end it already set. Returns `None` when nothing matched — no
+/// current version, or a window that already closed at or before `valid_to`.
+///
+/// Bitemporally this is an ordinary version change: `records_tx_update`
+/// archives the old row, so the record's full history — including the
+/// version that was open-ended — stays queryable through [`as_of`], which is
+/// the half of MEM-5's acceptance criterion that says "retrievable via
+/// as-of".
+#[tracing::instrument(
+    name = "store.records.close_window",
+    skip_all,
+    fields(record.id = %id, valid_to = %valid_to),
+    err(Display)
+)]
+pub async fn close_window(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    id: RecordId,
+    valid_to: DateTime<Utc>,
+) -> Result<Option<RecordVersion>> {
+    let row = sqlx::query_as!(
+        RecordRow,
+        r#"
+        update records set valid_to = $3
+        where tenant_id = $1 and id = $2
+          and valid_from < $3
+          and (valid_to is null or valid_to > $3)
+        returning id as "id!", tenant_id as "tenant_id!", scope_id as "scope_id!",
+                  owner_id as "owner_id!", kind as "kind!", class as "class!",
+                  content as "content!", sensitivity as "sensitivity!",
+                  provenance as "provenance!", valid_from as "valid_from!",
+                  valid_to, tx_from as "tx_from!", tx_to
+        "#,
+        tenant_id.as_uuid(),
+        id.as_uuid(),
+        valid_to,
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}
+
+/// Absorbs a duplicate observation into the record that already asserts it
+/// (MEM-5, ADR-0039 decision 10): `provenance.merged` gains a count, the
+/// absorbing event, and when.
+///
+/// A narrow UPDATE like [`close_window`] and [`reclassify`], and for the
+/// strongest form of the same reason: a merge changes no content, so the
+/// vector and the signature both still describe the stored text, and the
+/// record's VedaFlow address is unchanged — a merge therefore cannot demote
+/// published material to unreviewed, which is what rewriting the survivor's
+/// content to the newer wording would have done (ADR-0039 option 10).
+///
+/// The count is bounded state, not a log: which events merged is on the
+/// audit chain, where an unbounded list belongs. Returns `None` if the
+/// record has no current version.
+#[tracing::instrument(
+    name = "store.records.reinforce",
+    skip_all,
+    fields(record.id = %id, event.id = %event_id),
+    err(Display)
+)]
+pub async fn reinforce(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    id: RecordId,
+    event_id: ObserveEventId,
+    observed_at: DateTime<Utc>,
+) -> Result<Option<RecordVersion>> {
+    let row = sqlx::query_as!(
+        RecordRow,
+        r#"
+        update records
+        set provenance = jsonb_set(
+                provenance,
+                '{merged}',
+                jsonb_build_object(
+                    'count', coalesce((provenance -> 'merged' ->> 'count')::int, 0) + 1,
+                    'last_event_id', $3::text,
+                    'last_observed_at', $4::text
+                ),
+                true
+            )
+        where tenant_id = $1 and id = $2
+        returning id as "id!", tenant_id as "tenant_id!", scope_id as "scope_id!",
+                  owner_id as "owner_id!", kind as "kind!", class as "class!",
+                  content as "content!", sensitivity as "sensitivity!",
+                  provenance as "provenance!", valid_from as "valid_from!",
+                  valid_to, tx_from as "tx_from!", tx_to
+        "#,
+        tenant_id.as_uuid(),
+        id.as_uuid(),
+        event_id.to_string(),
+        observed_at.to_rfc3339(),
     )
     .fetch_optional(executor)
     .await

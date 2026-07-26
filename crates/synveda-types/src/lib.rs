@@ -10,6 +10,7 @@ mod approval;
 mod asset;
 mod channel;
 mod composition;
+mod dedup;
 mod error;
 mod hierarchy;
 mod id;
@@ -32,6 +33,7 @@ pub use approval::{
 pub use asset::AssetKind;
 pub use channel::Channel;
 pub use composition::{CompositionConfig, InjectChannels};
+pub use dedup::{DedupConfig, DedupMode, MAX_DEDUP_NEIGHBOURS, permille};
 pub use error::{Error, Result};
 pub use hierarchy::{HierarchyNode, ScopeKind};
 pub use id::{IdentityId, LapseId, ObserveEventId, ProposalId, RecordId, ScopeId, TenantId};

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        with updated as (\n            update records\n            set scope_id = $2, owner_id = $3, kind = $4, class = $5, content = $6,\n                sensitivity = $7, provenance = $8, valid_from = $9, valid_to = $10\n            where id = $1\n            returning id, tenant_id, scope_id, owner_id, kind, class, content,\n                      sensitivity, provenance, valid_from, valid_to, tx_from, tx_to\n        ),\n        refreshed as (\n            insert into record_embeddings (record_id, tenant_id, model, dim, embedding)\n            select id, tenant_id, $11, cardinality($12::real[]), $12::real[]::vector\n            from updated\n            on conflict (record_id) do update\n                set model = excluded.model, dim = excluded.dim,\n                    embedding = excluded.embedding, embedded_at = now()\n        )\n        select id as \"id!\", tenant_id as \"tenant_id!\", scope_id as \"scope_id!\",\n               owner_id as \"owner_id!\", kind as \"kind!\", class as \"class!\",\n               content as \"content!\", sensitivity as \"sensitivity!\",\n               provenance as \"provenance!\", valid_from as \"valid_from!\",\n               valid_to, tx_from as \"tx_from!\", tx_to\n        from updated\n        ",
+  "query": "\n        with new_record as (\n            insert into records\n                (id, tenant_id, scope_id, owner_id, kind, class, content,\n                 sensitivity, provenance, valid_from, valid_to, tx_from)\n            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())\n            returning id, tenant_id, scope_id, owner_id, kind, class, content,\n                      sensitivity, provenance, valid_from, valid_to, tx_from, tx_to\n        ),\n        new_embedding as (\n            insert into record_embeddings (record_id, tenant_id, model, dim, embedding)\n            select id, tenant_id, $12, cardinality($13::real[]), $13::real[]::vector\n            from new_record\n        ),\n        new_signature as (\n            insert into record_signatures (record_id, tenant_id, signature, bands)\n            select id, tenant_id, $14::bigint[], $15::bigint[]\n            from new_record\n        )\n        select id as \"id!\", tenant_id as \"tenant_id!\", scope_id as \"scope_id!\",\n               owner_id as \"owner_id!\", kind as \"kind!\", class as \"class!\",\n               content as \"content!\", sensitivity as \"sensitivity!\",\n               provenance as \"provenance!\", valid_from as \"valid_from!\",\n               valid_to, tx_from as \"tx_from!\", tx_to\n        from new_record\n        ",
   "describe": {
     "columns": [
       {
@@ -74,6 +74,7 @@
         "Uuid",
         "Uuid",
         "Uuid",
+        "Uuid",
         "Text",
         "Text",
         "Text",
@@ -82,7 +83,9 @@
         "Timestamptz",
         "Timestamptz",
         "Text",
-        "Float4Array"
+        "Float4Array",
+        "Int8Array",
+        "Int8Array"
       ]
     },
     "nullable": [
@@ -101,5 +104,5 @@
       true
     ]
   },
-  "hash": "b26afbb6f434f98b7906f63adca5aebb0ae359203dcdfa65c80690fd136f1182"
+  "hash": "3a08c2c0f46bd492ee7cbf8089d6904d13d4242f49d3f7bf8889176a80c7d28d"
 }

@@ -85,6 +85,7 @@ pub async fn run_scenario(
     Ok(Outcome {
         name: scenario.name.clone(),
         description: scenario.description.clone(),
+        category: scenario.category.clone(),
         passed: failures.is_empty(),
         accuracy: graded.accuracy,
         recall: graded.recall,

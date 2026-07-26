@@ -166,7 +166,7 @@ fn filter_at(scopes: &[ScopeId], tiers: &[Sensitivity]) -> SearchFilter {
 }
 
 fn query(text: &str, scopes: &[ScopeId], angle: Option<f32>) -> SearchRequest {
-    let mut request = SearchRequest::new(text, filter(scopes));
+    let mut request = SearchRequest::new(text, filter(scopes), chrono::Utc::now());
     request.vector = angle.map(|angle| QueryVector {
         model: MODEL.to_owned(),
         vector: vector(angle),

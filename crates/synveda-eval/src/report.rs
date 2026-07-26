@@ -21,6 +21,11 @@ pub struct Outcome {
     pub name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
+    /// The capability family this scenario measures, when it declares one
+    /// (MEM-5, ADR-0039 decision 14). Its accuracy is reduced into a metric
+    /// of that name as well as into the suite's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
     pub passed: bool,
     /// 1.0 when every `must_contain` appeared and no `must_not_contain`
     /// did; 0.0 otherwise. Deliberately binary: a block that leaks one
@@ -160,7 +165,8 @@ impl Baseline {
     }
 }
 
-/// The five axes, reduced from the scenario outcomes.
+/// The five axes, plus one per declared category, reduced from the
+/// scenario outcomes.
 pub fn metrics(outcomes: &[Outcome]) -> BTreeMap<String, f64> {
     let mut metrics = BTreeMap::new();
     if outcomes.is_empty() {
@@ -169,6 +175,25 @@ pub fn metrics(outcomes: &[Outcome]) -> BTreeMap<String, f64> {
 
     let accuracy: f64 = outcomes.iter().map(|outcome| outcome.accuracy).sum();
     metrics.insert("accuracy".to_owned(), accuracy / outcomes.len() as f64);
+
+    // One axis per capability family the suite declares (ADR-0039
+    // decision 14). Only over the scenarios that measure it — the same rule
+    // the recall and abstention axes follow, and what lets a gate say
+    // "knowledge_update fell to 0.5" instead of averaging the regression
+    // away across a suite that mostly measures something else.
+    let mut by_category: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    for outcome in outcomes {
+        if let Some(category) = &outcome.category {
+            by_category
+                .entry(crate::scenario::metric_name(category))
+                .or_default()
+                .push(outcome.accuracy);
+        }
+    }
+    for (metric, scores) in by_category {
+        let mean = scores.iter().sum::<f64>() / scores.len() as f64;
+        metrics.insert(metric, mean);
+    }
 
     let recalls: Vec<f64> = outcomes
         .iter()
@@ -383,6 +408,7 @@ mod tests {
         Outcome {
             name: "scenario".to_owned(),
             description: String::new(),
+            category: None,
             passed: accuracy == 1.0,
             accuracy,
             recall,
@@ -394,6 +420,13 @@ mod tests {
             seed_wait_ms: 0.0,
             degraded: Vec::new(),
             failures: Vec::new(),
+        }
+    }
+
+    fn categorised(category: &str, accuracy: f64) -> Outcome {
+        Outcome {
+            category: Some(category.to_owned()),
+            ..outcome(accuracy, None, None, 100)
         }
     }
 
@@ -419,6 +452,50 @@ mod tests {
             min: None,
             max: Some(value),
         }
+    }
+
+    /// A category is its own axis over its own scenarios (ADR-0039
+    /// decision 14): the point is that a regression in one capability
+    /// family cannot be averaged away by a suite that mostly measures
+    /// something else.
+    #[test]
+    fn a_category_reduces_over_its_own_scenarios_only() {
+        let metrics = metrics(&[
+            categorised("knowledge-update", 0.0),
+            categorised("knowledge-update", 1.0),
+            outcome(1.0, None, None, 100),
+            outcome(1.0, None, None, 100),
+        ]);
+        assert_eq!(metrics.get("knowledge_update"), Some(&0.5));
+        assert_eq!(metrics.get("accuracy"), Some(&0.75), "the suite's own axis");
+        assert!(
+            !metrics.contains_key("knowledge-update"),
+            "the name is folded"
+        );
+
+        // A suite with no categories grows no category axes.
+        let plain = metrics_of_plain();
+        assert!(plain.keys().all(|metric| metric != "knowledge_update"));
+    }
+
+    fn metrics_of_plain() -> BTreeMap<String, f64> {
+        metrics(&[outcome(1.0, Some(1.0), None, 100)])
+    }
+
+    /// The gate names the category, which is the whole reason a category
+    /// is an axis rather than a label in the report.
+    #[test]
+    fn a_category_floor_breaches_naming_the_category() {
+        let measured = metrics(&[
+            categorised("knowledge-update", 0.0),
+            categorised("knowledge-update", 1.0),
+        ]);
+        let gate = gate(&baseline(&[("knowledge_update", min(1.0))]), &measured);
+        assert!(!gate.passed);
+        assert_eq!(gate.breaches.len(), 1);
+        assert_eq!(gate.breaches[0].metric, "knowledge_update");
+        assert_eq!(gate.breaches[0].measured, Some(0.5));
+        assert_eq!(gate.breaches[0].delta, Some(-0.5));
     }
 
     #[test]

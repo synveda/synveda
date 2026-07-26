@@ -26,16 +26,20 @@ use serde_json::json;
 use sqlx::PgPool;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
+use synveda_store::dedup as store_dedup;
 use synveda_store::observe::{ObserveMessage, QueuedSignal, StagedEvent};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::{ScopeChainCache, identities, observe, policy_assignments, rls, role_bindings};
 use synveda_types::{
-    Channel, Error, HierarchyNode, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind,
-    Result, ScopeId, Sensitivity, TenantId,
+    Channel, DedupConfig, Error, HierarchyNode, IdentityId, IdentityKind, RecordClass, RecordId,
+    RecordKind, Result, ScopeId, Sensitivity, TenantId, permille,
 };
 use synveda_vedaflow::hash::ObjectHash;
-use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
+use synveda_vedaflow::{
+    self as vedaflow, MemoryAsset, PolicySnapshot, Signer, read_memory_members,
+};
 
+use crate::dedup::{DEDUP_CANDIDATES, DEDUP_DECISIONS_TOTAL, DEDUP_SECONDS};
 use crate::embedding::{AnyEmbedder, Embedder};
 use crate::extraction::{AnyExtractor, ExtractionInput, ExtractionOutcome, Extractor};
 
@@ -449,6 +453,11 @@ async fn embed_event(deps: &WorkerDeps, item: Extracted) -> Result<Embedded> {
     })
 }
 
+/// The judge that decided a supersession, recorded on every edge row and in
+/// every audit payload. A model-backed judge takes the same field (ADR-0039
+/// decision 6), which is why the column is a name rather than a flag.
+const JUDGE_METHOD: &str = "deterministic";
+
 /// One owner's authorization verdict for this commit group.
 enum OwnerAuth {
     /// The write may land at the owner's current home.
@@ -457,6 +466,10 @@ enum OwnerAuth {
         pack_name: String,
         pack_version: i64,
         roles: Vec<String>,
+        /// The dedup configuration of the pack that governs this write
+        /// (MEM-5, ADR-0039 decision 12) — resolved from the same
+        /// effective-pack walk that decided it.
+        dedup: DedupConfig,
     },
     /// Fail closed: the reason names policies or invariants, never
     /// content.
@@ -530,6 +543,19 @@ async fn commit_group(
     let mut rescan_findings = 0usize;
     let mut lags: Vec<f64> = Vec::new();
     let mut batches: HashMap<IdentityId, DerivedBatch> = HashMap::new();
+    // What each home scope publishes, read once per scope: the governance
+    // boundary the judge needs (ADR-0039 decision 9), and the same indexed
+    // read composition makes.
+    let mut published_at: HashMap<ScopeId, HashMap<RecordId, ObjectHash>> = HashMap::new();
+    // Windows this group closed, and the contradictions it declined to act
+    // on — one chained `memory.superseded` event for the group.
+    let mut superseded: Vec<serde_json::Value> = Vec::new();
+    let mut refused_published: Vec<serde_json::Value> = Vec::new();
+    // Valid-time order, so "which of these two statements is the newer
+    // assertion" is answered the same way whatever order the queue
+    // delivered them in. The archive-lock is order-independent.
+    let mut embedded = embedded;
+    embedded.sort_by_key(|item| (item.input.occurred_at, item.input.event_id));
     for item in embedded {
         // The archive-lock: zero rows means a racing consumer already
         // committed this signal's work — skip without inserting.
@@ -545,6 +571,7 @@ async fn commit_group(
             pack_name,
             pack_version,
             roles,
+            dedup: dedup_config,
         } = auth
         else {
             denied
@@ -554,6 +581,22 @@ async fn commit_group(
             metrics::counter!(EXTRACTION_EVENTS_TOTAL, "outcome" => "denied").increment(1);
             continue;
         };
+        // The scope's published set, read once and reused for every
+        // candidate: a contradiction against reviewed material is refused,
+        // and a restatement of it merges into the reviewed copy rather than
+        // making a second unreviewed one (ADR-0039 decisions 9 and 10).
+        if dedup_config.mode.merges() && !published_at.contains_key(home) {
+            let channels =
+                read_memory_members(&mut tx, tenant_id, &[*home], Channel::Published).await?;
+            let members = channels
+                .into_iter()
+                .find(|channel| channel.scope_id == *home)
+                .map(|channel| channel.members)
+                .unwrap_or_default();
+            published_at.insert(*home, members);
+        }
+        let published = published_at.get(home).cloned().unwrap_or_default();
+
         let batch = batches
             .entry(item.input.owner_id)
             .or_insert_with(|| DerivedBatch {
@@ -565,6 +608,7 @@ async fn commit_group(
             });
         batch.events += 1;
         let mut classes: Vec<&'static str> = Vec::new();
+        let mut merged: Vec<serde_json::Value> = Vec::new();
         for candidate in item.candidates {
             // Floored at the working tier because auto-derived content is
             // never `public` (ADR-0022 decision 7), and — since AUTHZ-5 —
@@ -579,6 +623,60 @@ async fn commit_group(
                 .sensitivity
                 .unwrap_or(Sensitivity::WORKING)
                 .clamp(Sensitivity::WORKING, Sensitivity::MAX_DERIVED);
+            // Dedup & conflict detection (MEM-5, ADR-0039 decision 1): in
+            // this transaction, before the insert, so a record and the
+            // window it closes commit together — and so a candidate sees
+            // the ones this same group already inserted.
+            let judgement = judge_candidate(
+                &mut tx,
+                deps,
+                dedup_config,
+                &JudgeInput {
+                    tenant_id,
+                    scope_id: *home,
+                    owner_id: item.input.owner_id,
+                    class: candidate.class,
+                    content: &candidate.content,
+                    vector: &candidate.vector,
+                    valid_from: item.input.occurred_at,
+                },
+                &published,
+            )
+            .await?;
+
+            for pairing in &judgement.refused_published {
+                metrics::counter!(DEDUP_DECISIONS_TOTAL, "outcome" => "refused_published")
+                    .increment(1);
+                refused_published.push(json!({
+                    "record": pairing.record_id,
+                    "reason": pairing.reason.as_str(),
+                    "event_id": item.input.event_id,
+                }));
+            }
+
+            // A restatement writes no record: the survivor absorbs the
+            // observation, keeping its content, its vector, its signature
+            // and therefore its content address (ADR-0039 decision 10).
+            if let Some(pairing) = judgement.merge_into {
+                records::reinforce(
+                    &mut *tx,
+                    tenant_id,
+                    pairing.record_id,
+                    item.input.event_id,
+                    item.input.occurred_at,
+                )
+                .await?;
+                metrics::counter!(DEDUP_DECISIONS_TOTAL, "outcome" => "merge").increment(1);
+                merged.push(json!({
+                    "into": pairing.record_id,
+                    "reason": pairing.reason.as_str(),
+                    "class": candidate.class.as_str(),
+                    "jaccard_permille": permille(pairing.jaccard),
+                    "cosine_permille": pairing.cosine.map(permille),
+                }));
+                continue;
+            }
+
             let state = RecordState {
                 scope_id: *home,
                 owner_id: item.input.owner_id,
@@ -597,7 +695,10 @@ async fn commit_group(
                     "extracted_at": now.to_rfc3339(),
                 }),
                 valid_from: item.input.occurred_at,
-                valid_to: None,
+                // A candidate that observed something already replaced by a
+                // newer record lands with its window shut rather than being
+                // dropped: never ADD-only cuts both ways (decision 8).
+                valid_to: judgement.valid_to(),
             };
             // Record and vector in one statement (ADR-0023 decision 2):
             // this commit cannot produce an embedding-less record.
@@ -618,6 +719,90 @@ async fn commit_group(
             metrics::counter!(EXTRACTION_RECORDS_TOTAL, "class" => candidate.class.as_str())
                 .increment(1);
             classes.push(candidate.class.as_str());
+
+            // The candidate arrived after the fact that replaced it: the
+            // edge points the other way, and the window it records is the
+            // one this insert already carries.
+            if let Some((pairing, closed_at)) = judgement.closed_by {
+                store_dedup::record_supersession(
+                    &mut tx,
+                    tenant_id,
+                    &store_dedup::Supersession {
+                        superseded_id: record_id,
+                        superseding_id: pairing.record_id,
+                        method: JUDGE_METHOD.to_owned(),
+                        reason: pairing.reason.as_str().to_owned(),
+                        jaccard_permille: Some(permille(pairing.jaccard)),
+                        cosine_permille: pairing.cosine.map(permille),
+                        closed_at,
+                    },
+                )
+                .await?;
+                metrics::counter!(DEDUP_DECISIONS_TOTAL, "outcome" => "superseded_on_arrival")
+                    .increment(1);
+                superseded.push(json!({
+                    "record": record_id,
+                    "by": pairing.record_id,
+                    "reason": pairing.reason.as_str(),
+                    "method": JUDGE_METHOD,
+                    "on_arrival": true,
+                    "jaccard_permille": permille(pairing.jaccard),
+                    "cosine_permille": pairing.cosine.map(permille),
+                    "closed_at": closed_at.to_rfc3339(),
+                }));
+            }
+
+            // Every record this statement contradicts stops being current:
+            // its window closes at the new record's valid-from, an edge
+            // records why, and its changed address is re-committed to the
+            // derived channel — the obligation ADR-0031 decision 6 left
+            // here, discharged in the same commit as the cause.
+            for pairing in &judgement.closes {
+                let Some(closed) =
+                    records::close_window(&mut *tx, tenant_id, pairing.record_id, state.valid_from)
+                        .await?
+                else {
+                    // Another candidate in this same group already closed
+                    // it at or before this instant. The window only ever
+                    // narrows, so there is nothing left to do and nothing
+                    // to record twice.
+                    continue;
+                };
+                store_dedup::record_supersession(
+                    &mut tx,
+                    tenant_id,
+                    &store_dedup::Supersession {
+                        superseded_id: pairing.record_id,
+                        superseding_id: record_id,
+                        method: JUDGE_METHOD.to_owned(),
+                        reason: pairing.reason.as_str().to_owned(),
+                        jaccard_permille: Some(permille(pairing.jaccard)),
+                        cosine_permille: pairing.cosine.map(permille),
+                        closed_at: state.valid_from,
+                    },
+                )
+                .await?;
+                let closed_asset = memory_asset(pairing.record_id, &closed.state);
+                let closed_object = vedaflow::put_memory(&mut tx, tenant_id, &closed_asset).await?;
+                // Pushed after the insert's own entry, so if this group both
+                // created and closed the same record the log commit names it
+                // at the address it ends up holding: a log channel's tree is
+                // exactly this write's members, last one wins per name.
+                batch
+                    .members
+                    .push((closed_asset.entry_name(), closed_object.hash));
+                metrics::counter!(DEDUP_DECISIONS_TOTAL, "outcome" => "supersede").increment(1);
+                superseded.push(json!({
+                    "record": pairing.record_id,
+                    "by": record_id,
+                    "reason": pairing.reason.as_str(),
+                    "method": JUDGE_METHOD,
+                    "on_arrival": false,
+                    "jaccard_permille": permille(pairing.jaccard),
+                    "cosine_permille": pairing.cosine.map(permille),
+                    "closed_at": state.valid_from.to_rfc3339(),
+                }));
+            }
         }
         let outcome_label = if classes.is_empty() { "empty" } else { "ok" };
         metrics::counter!(EXTRACTION_EVENTS_TOTAL, "outcome" => outcome_label).increment(1);
@@ -631,6 +816,10 @@ async fn commit_group(
             "roles": roles,
             "records": classes.len(),
             "classes": classes,
+            // Restatements absorbed into records that already assert them
+            // (ADR-0039 decision 13): an outcome of this extraction, so it
+            // rides this event rather than asserting a second fact.
+            "merged": merged,
         }));
     }
 
@@ -743,6 +932,26 @@ async fn commit_group(
         )
         .await?;
     }
+    // What stopped being current, and what the pipeline found and declined
+    // to touch — its own action, because it asserts a different fact from
+    // "these records were created" and it is the one an auditor arrives
+    // with (MEM-5, ADR-0039 decision 13). One event per group, never one
+    // per pair. Similarities ride as integers: canonicalisation rejects
+    // floats (ADR-0019 decision 2).
+    if !superseded.is_empty() || !refused_published.is_empty() {
+        append_event(
+            &mut tx,
+            tenant_id,
+            AuditAction::MemorySuperseded,
+            format!("tenant {tenant_id}"),
+            Outcome::Success,
+            json!({
+                "superseded": superseded,
+                "refused_published": refused_published,
+            }),
+        )
+        .await?;
+    }
 
     tx.commit().await.map_err(|err| Error::Storage {
         message: format!("commit extraction write transaction: {err}"),
@@ -751,6 +960,134 @@ async fn commit_group(
         metrics::histogram!(EXTRACTION_LAG_SECONDS).record(lag);
     }
     Ok(())
+}
+
+/// What judging one candidate needs, beside the config and the scope's
+/// published set.
+struct JudgeInput<'a> {
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+    owner_id: IdentityId,
+    class: RecordClass,
+    /// The final, rescanned content — exactly what will be persisted, so
+    /// the tokens and the stored signature describe the same text.
+    content: &'a str,
+    /// The vector computed over that content; empty is impossible through
+    /// the embed stage but costs only the dense leg if it ever were.
+    vector: &'a [f32],
+    valid_from: DateTime<Utc>,
+}
+
+/// Nominates and judges one candidate (MEM-5, ADR-0039 decisions 2–5).
+///
+/// Two legs, union'd by record id: the lexical one over LSH bands, which is
+/// meaningful under every configuration, and the dense one over the stored
+/// embedding, which is only as meaningful as the embedder — the default hash
+/// embedder reaches the near-duplicate band exactly when texts are identical
+/// (ADR-0023 decision 6), and that is the honest floor rather than a bug.
+///
+/// Returns the empty judgement when the pack has dedup off, without touching
+/// either index.
+async fn judge_candidate(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    deps: &WorkerDeps,
+    config: &DedupConfig,
+    input: &JudgeInput<'_>,
+    published: &HashMap<RecordId, ObjectHash>,
+) -> Result<crate::dedup::Judgement> {
+    if !config.mode.merges() {
+        metrics::counter!(DEDUP_DECISIONS_TOTAL, "outcome" => "insert").increment(1);
+        return Ok(crate::dedup::Judgement::default());
+    }
+    let started = std::time::Instant::now();
+    let tokens = store_dedup::tokenise(input.content);
+    let signature = store_dedup::signature_of(&tokens);
+    let group = store_dedup::CandidateGroup {
+        tenant_id: input.tenant_id,
+        scope_id: input.scope_id,
+        owner_id: input.owner_id,
+        class: input.class,
+        at: input.valid_from,
+    };
+    let limit = i64::from(config.neighbours);
+
+    let lexical = store_dedup::nominate_lexical(tx, &group, &signature.bands, limit).await?;
+    metrics::histogram!(DEDUP_CANDIDATES, "leg" => "lexical").record(lexical.len() as f64);
+    // The dense leg runs only for a dimension that has an ANN index
+    // (ADR-0024 decision 5). A model outside that set — a custom embedder,
+    // a re-embed in flight — costs this candidate its *semantic*
+    // nomination and nothing else: the lexical leg still runs, and a
+    // write must never fail because dedup could not consult an index.
+    let indexed = synveda_store::search::SUPPORTED_ANN_DIMS.contains(&input.vector.len());
+    let dense = if input.vector.is_empty() || !indexed {
+        if !input.vector.is_empty() {
+            tracing::debug!(
+                dim = input.vector.len(),
+                model = deps.embedder.model(),
+                "no ANN index for this dimension; nominating on the lexical leg alone"
+            );
+        }
+        Vec::new()
+    } else {
+        let hits =
+            store_dedup::nominate_dense(tx, &group, deps.embedder.model(), input.vector, limit)
+                .await?;
+        metrics::histogram!(DEDUP_CANDIDATES, "leg" => "dense").record(hits.len() as f64);
+        hits
+    };
+
+    // Union by id, dense first so a neighbour both legs found keeps its
+    // cosine. Distance is `1 - similarity` for pgvector's `<=>`.
+    let mut nominees: Vec<crate::dedup::Nominee> = Vec::new();
+    let mut seen: Vec<RecordId> = Vec::new();
+    for (version, distance) in dense {
+        seen.push(version.id);
+        nominees.push(nominee(version, Some(1.0 - distance), published));
+    }
+    for version in lexical {
+        if seen.contains(&version.id) {
+            continue;
+        }
+        nominees.push(nominee(version, None, published));
+    }
+
+    let judgement = crate::dedup::judge(
+        config,
+        &crate::dedup::Incoming {
+            content: input.content,
+            tokens: &tokens,
+            valid_from: input.valid_from,
+        },
+        &nominees,
+    );
+    metrics::histogram!(DEDUP_SECONDS).record(started.elapsed().as_secs_f64());
+    if judgement.merge_into.is_none() {
+        metrics::counter!(DEDUP_DECISIONS_TOTAL, "outcome" => "insert").increment(1);
+    }
+    Ok(judgement)
+}
+
+/// One hydrated neighbour, with the publication flag the judge's governance
+/// boundary needs. A tree entry counts as publication only when it names the
+/// address the record's *current* content produces — an edited record is
+/// unreviewed again (ADR-0031 decision 5), and unreviewed material is the
+/// pipeline's to supersede.
+fn nominee(
+    version: synveda_store::records::RecordVersion,
+    cosine: Option<f64>,
+    published: &HashMap<RecordId, ObjectHash>,
+) -> crate::dedup::Nominee {
+    let address = memory_asset(version.id, &version.state).address();
+    let published = published.get(&version.id) == Some(&address);
+    crate::dedup::Nominee {
+        record_id: version.id,
+        tokens: store_dedup::tokenise(&version.state.content),
+        content: version.state.content,
+        valid_from: version.state.valid_from,
+        tx_from: version.tx_from,
+        cosine,
+        published,
+    }
 }
 
 /// Re-decides `MemoryWrite` for one owner at its *current* home under
@@ -827,11 +1164,19 @@ async fn authorize_owner(
             .collect();
         roles.sort_unstable();
         roles.dedup();
+        // The same effective pack the decision came from, read for its
+        // non-Cedar configuration (ADR-0039 decision 12) — the resolution
+        // MEM-2 and CTX-2 already do for redaction and composition.
+        let dedup = deps
+            .pdp
+            .effective(tenant_id, Resource::Scope(identity.scope_id), &context)
+            .dedup;
         Ok(OwnerAuth::Allowed {
             home: identity.scope_id,
             pack_name: decision.pack_name,
             pack_version: decision.pack_version,
             roles,
+            dedup,
         })
     } else {
         let determining = if decision.determining.is_empty() {

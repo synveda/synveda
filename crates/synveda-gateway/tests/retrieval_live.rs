@@ -150,6 +150,7 @@ async fn live_tei_hybrid_quality_on_the_fixture_set() {
             SearchFilter {
                 tiers: ScopeTier::expand(scope, &[Sensitivity::Public, Sensitivity::Internal]),
             },
+            chrono::Utc::now(),
         );
         request.limit = 6;
         for mode in ["sparse", "hybrid"] {

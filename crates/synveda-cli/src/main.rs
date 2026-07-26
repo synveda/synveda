@@ -32,9 +32,9 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::{Hs256Verifier, personal_slug};
 use synveda_types::{
-    CompositionConfig, IdentityId, IdentityKind, InjectChannels, PackConfig, PromotionConfig,
-    ProposalId, ProposalState, RedactionConfig, RedactionMode, Role, ScopeId, ScopeKind, TenantId,
-    TenantStatus,
+    CompositionConfig, DedupConfig, DedupMode, IdentityId, IdentityKind, InjectChannels,
+    PackConfig, PromotionConfig, ProposalId, ProposalState, RedactionConfig, RedactionMode, Role,
+    ScopeId, ScopeKind, TenantId, TenantStatus,
 };
 
 #[derive(Parser)]
@@ -434,6 +434,19 @@ enum PolicyCommand {
         /// is silence.
         #[arg(long)]
         promotion: Option<std::path::PathBuf>,
+        /// What the ingestion pipeline does with a restatement or a
+        /// contradiction at scopes this pack governs (off/merge/supersede
+        /// — MEM-5, ADR-0039). Omitted keeps the product config, which
+        /// supersedes; the thresholds are product constants and are tuned
+        /// through `--dedup-config` rather than one flag each.
+        #[arg(long)]
+        dedup_mode: Option<DedupMode>,
+        /// Path to a JSON file holding a full `DedupConfig` — the mode
+        /// plus the three thresholds in per mille and the nomination
+        /// depth. Takes precedence over `--dedup-mode`; a file rather than
+        /// five flags for the reason `--promotion` is one.
+        #[arg(long, conflicts_with = "dedup_mode")]
+        dedup_config: Option<std::path::PathBuf>,
         /// Path to the Cedar policy source file.
         file: std::path::PathBuf,
     },
@@ -657,6 +670,8 @@ async fn run(cli: Cli) -> Result<(), String> {
             composition_budget,
             composition_channels,
             promotion,
+            dedup_mode,
+            dedup_config,
             file,
         }) => {
             let source = std::fs::read_to_string(&file)
@@ -693,6 +708,25 @@ async fn run(cli: Cli) -> Result<(), String> {
                     Ok::<_, String>(config)
                 })
                 .transpose()?;
+            // A threshold outside `0..=1` makes a band unreachable, which
+            // reads as "dedup is off" without the pack ever saying so —
+            // refused here as well as at install (ADR-0039 decision 12).
+            let dedup = match dedup_config {
+                Some(path) => {
+                    let raw = std::fs::read_to_string(&path)
+                        .map_err(|err| format!("read {}: {err}", path.display()))?;
+                    let config: DedupConfig = serde_json::from_str(&raw)
+                        .map_err(|err| format!("parse {}: {err}", path.display()))?;
+                    config
+                        .validate()
+                        .map_err(|err| format!("{}: {err}", path.display()))?;
+                    Some(config)
+                }
+                None => dedup_mode.map(|mode| DedupConfig {
+                    mode,
+                    ..DedupConfig::DEFAULT
+                }),
+            };
             let pool = connect().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
@@ -706,6 +740,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     redaction,
                     composition,
                     promotion,
+                    dedup,
                     ..Default::default()
                 },
             )

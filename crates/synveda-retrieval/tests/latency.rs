@@ -254,6 +254,7 @@ fn hybrid_median_under_budget_at_one_million_records() {
                         })
                         .collect(),
                 },
+                chrono::Utc::now(),
             );
             request.vector = Some(QueryVector {
                 model: MODEL.to_owned(),

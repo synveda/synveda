@@ -1,0 +1,39 @@
+{
+  "name": "a decision that changed is remembered at its new value, not its old one",
+  "description": "LongMemEval's knowledge-update category, in the shape MEM-5 has to answer: a fact is stated, a later session states its replacement, and the probe must return the replacement alone. Before MEM-5 the store was ADD-only and both composed, which is a memory system telling an agent two contradictory things and letting it choose. The old decision is not deleted — it is closed in valid time, so `--as-of` still finds it (ADR-0039 decision 7) — and this scenario measures only what a live session sees.",
+  "category": "knowledge-update",
+  "seed": [
+    {
+      "actor": "curator",
+      "session_id": "eval:knowledge-update:decision:before",
+      "events": [
+        {
+          "key": "reconciliation-before",
+          "kind": "decision",
+          "text": "We decided the payment reconciliation job runs against the ledger-archive replica.",
+          "marker": "ledger-archive"
+        }
+      ]
+    },
+    {
+      "actor": "curator",
+      "session_id": "eval:knowledge-update:decision:after",
+      "events": [
+        {
+          "key": "reconciliation-after",
+          "kind": "decision",
+          "text": "We decided the payment reconciliation job runs against the ledger-live replica.",
+          "marker": "ledger-live"
+        }
+      ]
+    }
+  ],
+  "probe": {
+    "actor": "curator",
+    "session_id": "eval:knowledge-update:decision:probe"
+  },
+  "expect": {
+    "records": ["reconciliation-after"],
+    "must_not_contain": ["ledger-archive"]
+  }
+}

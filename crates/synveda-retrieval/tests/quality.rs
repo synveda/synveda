@@ -156,6 +156,7 @@ async fn measure(
             SearchFilter {
                 tiers: ScopeTier::expand(scope, &[Sensitivity::Public, Sensitivity::Internal]),
             },
+            chrono::Utc::now(),
         );
         request.limit = 6;
         if mode != "sparse" {

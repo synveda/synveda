@@ -147,6 +147,24 @@ pub enum AuditAction {
     /// never one row per record (MEM-3, ADR-0022 decision 5). `failure`
     /// marks a dead-lettered signal (retries exhausted).
     MemoryExtracted,
+    /// The extraction pipeline closed the valid windows of records a newer
+    /// statement replaced (MEM-5, ADR-0039 decision 13) — one event per
+    /// commit group, with the id pairs, the judge, the signals as integer
+    /// per-mille, and the instant each window closed at. Never record
+    /// content.
+    ///
+    /// Its own action rather than a field on `memory.extracted` because it
+    /// asserts a different fact: extraction says what was created, and this
+    /// says what stopped being current, which is the question an auditor
+    /// arrives with. Restatements *merged* into existing records stay on
+    /// `memory.extracted`, where they belong — a merge creates nothing and
+    /// closes nothing.
+    ///
+    /// The payload also carries the contradictions the pipeline found
+    /// against *published* material and declined to act on: reviewed content
+    /// leaves the trust boundary through a proposal, never through a
+    /// session, and a refusal nobody can see is a refusal nobody can act on.
+    MemorySuperseded,
     /// An approved classification proposal's effect ran: records moved to
     /// the sensitivity their reviewed versions carried (AUTHZ-5, ADR-0038
     /// decision 9). Carries both tiers, the record ids, and the approvals
@@ -267,6 +285,7 @@ impl AuditAction {
             AuditAction::QuarantineReleased => "memory.quarantine.released",
             AuditAction::QuarantineRejected => "memory.quarantine.rejected",
             AuditAction::MemoryExtracted => "memory.extracted",
+            AuditAction::MemorySuperseded => "memory.superseded",
             AuditAction::MemoryClassified => "memory.classified",
             AuditAction::TenantCreated => "tenant.created",
             AuditAction::ContextInjected => "context.injected",

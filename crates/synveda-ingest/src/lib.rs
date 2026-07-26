@@ -12,11 +12,17 @@
 //! recall evidence out of the audit chain and opens FLOW-3 proposals
 //! under the material owner's authority — a second background loop
 //! beside the extraction worker, spawned by the same binary.
-//! Dedup (MEM-5) lands next on the same seams.
+//! Dedup and conflict detection (MEM-5, ADR-0039) are live: [`dedup`] is
+//! the judge, and the worker runs it inside the same write transaction
+//! as the insert — so a restatement merges into what it restates and a
+//! contradiction closes the valid window of the record it replaces,
+//! atomically with the record that caused it. The store is no longer
+//! ADD-only.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod dedup;
 pub mod embedding;
 pub mod extraction;
 pub mod promotion;

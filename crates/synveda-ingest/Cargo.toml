@@ -33,3 +33,6 @@ tracing = { workspace = true }
 # the MockIdp discipline (never a network dependency in tests).
 axum = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "net"] }
+# Fixed record ids in the dedup judge's tests: a verdict that names the
+# wrong neighbour must fail on the id, not on whichever uuid was minted.
+uuid = { workspace = true }

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into record_signatures (record_id, tenant_id, signature, bands)\n               values ($1, $2, array[1::bigint], array[1::bigint])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3ddd348df75379f80bc16f9d30e00db08ed4e20d4248de5f4ecc3eb1c21394e7"
+}

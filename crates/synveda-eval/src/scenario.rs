@@ -63,6 +63,18 @@ pub struct Scenario {
     /// report, where a failing metric is otherwise just a number.
     #[serde(default)]
     pub description: String,
+    /// The capability family this scenario measures, e.g.
+    /// `knowledge-update` (MEM-5, ADR-0039 decision 14).
+    ///
+    /// Scenarios that declare one contribute their accuracy to a metric of
+    /// that name as well as to the suite's, so a baseline can bound a
+    /// *category* and a gate can fail naming it — which is what "category
+    /// score ≥ baseline" has to mean in a harness whose discipline is
+    /// pre-registered gates. The names are LongMemEval's, so EVAL-3's
+    /// benchmark adapters report into the same axes rather than inventing
+    /// a second set.
+    #[serde(default)]
+    pub category: Option<String>,
     /// Memory to plant before probing. Empty for the scenarios whose
     /// whole point is that nothing is known.
     #[serde(default)]
@@ -152,6 +164,14 @@ pub struct Expect {
     pub abstain: bool,
 }
 
+/// The metric a category reduces into: its name with separators folded to
+/// underscores, so `knowledge-update` bounds `knowledge_update` and the
+/// baseline reads like the rest of the axes.
+#[must_use]
+pub fn metric_name(category: &str) -> String {
+    category.trim().replace(['-', ' '], "_").to_lowercase()
+}
+
 /// Every `*.json` in a directory, in filename order so two runs of the
 /// same suite report in the same order.
 pub fn load_suite(dir: &Path) -> Result<Vec<Scenario>, String> {
@@ -178,11 +198,34 @@ pub fn load_suite(dir: &Path) -> Result<Vec<Scenario>, String> {
     Ok(scenarios)
 }
 
+/// Metric names the reduction always produces. A category may not take one
+/// of them: the category's mean would overwrite the suite's axis, and the
+/// gate would then bound something other than what its name says.
+const RESERVED_METRICS: [&str; 7] = [
+    "accuracy",
+    "recall",
+    "abstention",
+    "tokens_mean",
+    "tokens_max",
+    "latency_p50_ms",
+    "latency_p95_ms",
+];
+
 /// The checks serde cannot make: that expectations refer to keys the
 /// scenario actually seeds, and that it asks for something.
 fn validate(scenario: &Scenario) -> Result<(), String> {
     if scenario.probe.repeat == 0 {
         return Err("probe.repeat must be at least 1".to_owned());
+    }
+    if let Some(category) = &scenario.category {
+        if category.trim().is_empty() {
+            return Err("category is present but empty".to_owned());
+        }
+        if RESERVED_METRICS.contains(&metric_name(category).as_str()) {
+            return Err(format!(
+                "category `{category}` collides with the built-in axis of the same name"
+            ));
+        }
     }
     let keys: Vec<&str> = scenario
         .seed

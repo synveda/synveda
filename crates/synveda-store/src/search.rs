@@ -435,12 +435,20 @@ pub async fn compose_members(
 /// deleted, re-scoped, or re-classified record (ADR-0024 decision 6). Since
 /// AUTHZ-5 that includes a record whose tier moved *above* what the caller
 /// may read at its scope: reclassification takes effect on the next read,
-/// through this predicate, with nothing to reindex (ADR-0038 decision 3). Row order is unspecified; the caller restores fused
-/// rank order.
+/// through this predicate, with nothing to reindex (ADR-0038 decision 3).
+///
+/// Since MEM-5 it includes the valid window at `at` (ADR-0039 decision 11):
+/// a record a newer statement superseded is not the current assertion, so it
+/// does not come back — the sidecar may still hold it, which is one more way
+/// for current truth to disagree with a lagging index, and the same
+/// resolution applies. Composition would have refused it anyway; what this
+/// prevents is a stale fact holding a ranking slot a live one needed.
+///
+/// Row order is unspecified; the caller restores fused rank order.
 #[tracing::instrument(
     name = "store.search.hydrate",
     skip_all,
-    fields(tenant.id = %tenant_id, ids.count = ids.len()),
+    fields(tenant.id = %tenant_id, ids.count = ids.len(), at = %at),
     err(Display)
 )]
 pub async fn hydrate_verified(
@@ -448,6 +456,7 @@ pub async fn hydrate_verified(
     tenant_id: TenantId,
     ids: &[RecordId],
     allowed: &[ScopeTier],
+    at: DateTime<Utc>,
 ) -> Result<Vec<RecordVersion>> {
     let ids: Vec<Uuid> = ids.iter().map(RecordId::as_uuid).collect();
     let (scopes, sensitivities) = pair_arrays(allowed);
@@ -460,11 +469,13 @@ pub async fn hydrate_verified(
         where tenant_id = $1 and id = any($2)
           and (scope_id, sensitivity)
               in (select * from unnest($3::uuid[], $4::text[]))
+          and valid_from <= $5 and (valid_to is null or valid_to > $5)
         "#,
         tenant_id.as_uuid(),
         &ids,
         &scopes,
         &sensitivities,
+        at,
     )
     .fetch_all(&mut *conn)
     .await

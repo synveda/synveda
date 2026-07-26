@@ -19,6 +19,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod dedup;
 pub mod group_mappings;
 pub mod hierarchy;
 pub mod identities;

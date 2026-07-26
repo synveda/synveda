@@ -19,6 +19,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
 use synveda_store::records::RecordVersion;
 use synveda_store::search::{self, DenseHit};
@@ -90,18 +91,28 @@ pub struct SearchRequest {
     pub limit: usize,
     /// Candidates fetched per leg before fusion.
     pub per_leg: usize,
+    /// The valid-time instant results are verified against (MEM-5,
+    /// ADR-0039 decision 11): a record whose window closed before this
+    /// instant is no longer the current assertion and does not come back.
+    ///
+    /// An explicit input, never a clock read here, for the same reason
+    /// [`crate::compose::ComposeRequest::at`] is one — and so the two
+    /// stages of one inject agree about *when* they are.
+    pub at: DateTime<Utc>,
 }
 
 impl SearchRequest {
-    /// A request with the default depths (10 results, 50 per leg).
+    /// A request with the default depths (10 results, 50 per leg), verified
+    /// as of `at`.
     #[must_use]
-    pub fn new(query: impl Into<String>, filter: SearchFilter) -> Self {
+    pub fn new(query: impl Into<String>, filter: SearchFilter, at: DateTime<Utc>) -> Self {
         Self {
             query: query.into(),
             vector: None,
             filter,
             limit: 10,
             per_leg: 50,
+            at,
         }
     }
 }
@@ -215,7 +226,8 @@ pub async fn hybrid_search(
         .map(|entry| entry.record_id)
         .collect();
     let started = Instant::now();
-    let hydrated = search::hydrate_verified(conn, tenant_id, &candidates, allowed).await?;
+    let hydrated =
+        search::hydrate_verified(conn, tenant_id, &candidates, allowed, request.at).await?;
     metrics::histogram!(RETRIEVAL_LEG_SECONDS, "leg" => "hydrate")
         .record(started.elapsed().as_secs_f64());
     let mut by_id: HashMap<RecordId, RecordVersion> = hydrated

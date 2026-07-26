@@ -20,9 +20,9 @@ use cedar_policy::{
     PolicySet, Request, Schema, ValidationMode, Validator,
 };
 use synveda_types::{
-    ApprovalMatrix, CompositionConfig, Error, HierarchyNode, Lapse, LapseAction, LapseConfig,
-    PackConfig, PromotionConfig, RedactionConfig, Result, Role, ScopeId, ScopeKind, Sensitivity,
-    TenantId,
+    ApprovalMatrix, CompositionConfig, DedupConfig, Error, HierarchyNode, Lapse, LapseAction,
+    LapseConfig, PackConfig, PromotionConfig, RedactionConfig, Result, Role, ScopeId, ScopeKind,
+    Sensitivity, TenantId,
 };
 
 use crate::entity_store::EntityStore;
@@ -101,6 +101,10 @@ struct LoadedPack {
     /// a lapse at scopes this pack governs may run for, and — at zero —
     /// whether any may stand at all. `Copy`, so no `Arc`.
     lapse: LapseConfig,
+    /// What the ingestion pipeline does with a restatement or a
+    /// contradiction at scopes this pack governs (MEM-5, ADR-0039
+    /// decision 12). `Copy`, so no `Arc`.
+    dedup: DedupConfig,
 }
 
 /// Where the effective pack came from — logged with every decision so the
@@ -149,6 +153,10 @@ pub struct EffectivePack {
     /// stand at all. The grant surface reads it to bound a window; the PDP
     /// reads it on every `MemoryRead` to gate a standing one.
     pub lapse: LapseConfig,
+    /// The pack's dedup configuration (MEM-5, ADR-0039 decision 12): what
+    /// the extraction worker does when a candidate restates or contradicts
+    /// a record its owner's scope already holds.
+    pub dedup: DedupConfig,
 }
 
 impl fmt::Display for PackOrigin {
@@ -238,6 +246,12 @@ impl Pdp {
                     // surprise arriving through an upgrade.
                     promotion: None,
                     lapse: Some(lapse),
+                    // All three dedup identically, and the product
+                    // default supersedes: seed §4.4 already resolves
+                    // conflicts by "newer valid-time beats older", so a
+                    // pack that let contradictions accumulate would be
+                    // the one making a claim (ADR-0039 decision 12).
+                    dedup: Some(DedupConfig::DEFAULT),
                 },
             )
             .map_err(|err| Error::Internal {
@@ -289,6 +303,7 @@ impl Pdp {
                 approvals: Some(ApprovalMatrix::empty()),
                 promotion: None,
                 lapse: None,
+                dedup: None,
             },
         )
         .map(|_| ())
@@ -504,6 +519,7 @@ impl Pdp {
             approvals: Arc::clone(&pack.approvals),
             promotion: Arc::clone(&pack.promotion),
             lapse: pack.lapse,
+            dedup: pack.dedup,
         }
     }
 
@@ -1024,6 +1040,11 @@ fn compile(
     // zero: a lapse ceiling narrows, and a missing narrowing must not become
     // a missing mechanism (ADR-0037 decision 5).
     let lapse = config.lapse.unwrap_or_default();
+    // Unconfigured is the product config — supersession on — for the reason
+    // the composition config's fallback is the product one: this config
+    // never grants anything, so its default is the honest fallback rather
+    // than a widening (ADR-0039 decision 12).
+    let dedup = config.dedup.unwrap_or_default();
     // A matrix asking more of one role than it asks of people is
     // unsatisfiable at every cell it governs, and it would fail silently
     // at review time rather than loudly at install time (ADR-0032).
@@ -1041,6 +1062,12 @@ fn compile(
     // first grant that noticed.
     lapse.validate().map_err(|err| Error::Invalid {
         message: format!("policy pack {name}@{version} lapse config: {err}"),
+    })?;
+    // And for the thresholds: a similarity outside `0..=1` would make a
+    // band unreachable, which reads as "the feature is off" without ever
+    // saying so (ADR-0039 decision 12).
+    dedup.validate().map_err(|err| Error::Invalid {
+        message: format!("policy pack {name}@{version} dedup config: {err}"),
     })?;
     let combined = format!("{BASE_SRC}\n{source}");
     let policies: PolicySet = combined.parse().map_err(|err| Error::Invalid {
@@ -1068,5 +1095,6 @@ fn compile(
         approvals: Arc::new(approvals),
         promotion: Arc::new(promotion),
         lapse,
+        dedup,
     })
 }

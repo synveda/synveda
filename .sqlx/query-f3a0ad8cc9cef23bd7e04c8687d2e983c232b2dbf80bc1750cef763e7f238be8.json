@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, scope_id, owner_id, kind, class, content,\n               sensitivity, provenance, valid_from, valid_to, tx_from, tx_to\n        from records\n        where tenant_id = $1 and id = any($2)\n          and (scope_id, sensitivity)\n              in (select * from unnest($3::uuid[], $4::text[]))\n        ",
+  "query": "\n        select id, tenant_id, scope_id, owner_id, kind, class, content,\n               sensitivity, provenance, valid_from, valid_to, tx_from, tx_to\n        from records\n        where tenant_id = $1 and id = any($2)\n          and (scope_id, sensitivity)\n              in (select * from unnest($3::uuid[], $4::text[]))\n          and valid_from <= $5 and (valid_to is null or valid_to > $5)\n        ",
   "describe": {
     "columns": [
       {
@@ -74,7 +74,8 @@
         "Uuid",
         "UuidArray",
         "UuidArray",
-        "TextArray"
+        "TextArray",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -93,5 +94,5 @@
       true
     ]
   },
-  "hash": "a323bf30a03212ceaddea68dda78da097b17b9ac0c3d3850a19ae3aadf95cb9a"
+  "hash": "f3a0ad8cc9cef23bd7e04c8687d2e983c232b2dbf80bc1750cef763e7f238be8"
 }
