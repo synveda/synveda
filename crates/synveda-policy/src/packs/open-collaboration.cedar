@@ -1,11 +1,14 @@
-// open-collaboration@9 — org-wide read (seed §6, ADR-0014, ADR-0015,
+// open-collaboration@10 — org-wide read (seed §6, ADR-0014, ADR-0015,
 // ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032, ADR-0036,
-// ADR-0037).
+// ADR-0037, ADR-0038).
 //
 // Own-chain reads plus every scope of the tenant, personal (user-kind)
-// scopes excluded — the privacy floor. The seed's "non-restricted
-// content" qualifier is AUTHZ-5's classification context; until it
-// lands, openness stops at other people's personal scopes.
+// scopes excluded — the privacy floor. The seed's "org-wide read for
+// **non-restricted** content" is now the pack rather than a comment
+// pointing at a future feature: the org-wide permit names every tier below
+// `restricted`, and `restricted` is the base layer's forbid, liftable only
+// by a lapse that declared the tier and therefore cleared the invariant
+// floor's compliance requirement (ADR-0038 decisions 4 and 5).
 
 // The mutating admin planes: steward/org-admin over the bound subtree
 // (context.roles is resolved from the resource chain's bindings,
@@ -47,11 +50,32 @@ permit (
     principal,
     action == Synveda::Action::"MemoryRead",
     resource
-) when { principal in resource };
+) when {
+    principal in resource
+        && ["public", "internal"].contains(context.sensitivity)
+};
+
+// Your own home, up to `confidential` — pack-uniform (ADR-0038 decision 4).
+permit (
+    principal,
+    action == Synveda::Action::"MemoryRead",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
 
 // Org-wide, personal scopes excluded — and only for *placed* principals:
 // an identity provisioned into the hierarchy. An unplaced subject (a dev
 // token) composes nothing under any pack (ADR-0014 decision 5).
+//
+// **This is where seed §6's "org-wide read for non-restricted content"
+// finally reads as itself.** The qualifier has been a comment deferring to
+// AUTHZ-5 since ADR-0014; classification arrived, and non-restricted is
+// exactly what this permit now names. `restricted` is left to the base
+// layer's forbid, which is what makes the sentence true under this pack
+// rather than merely stated in it.
 permit (
     principal,
     action == Synveda::Action::"MemoryRead",
@@ -60,6 +84,7 @@ permit (
     principal has home
         && resource in principal.tenant
         && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
 
 // Content roles read the bound subtree, personal scopes excluded
@@ -74,6 +99,7 @@ permit (
     resource in principal.tenant
         && context.roles.containsAny(["viewer", "contributor", "curator"])
         && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
 
 // The write floor, role-free: own personal scope only. Openness is a
@@ -98,6 +124,29 @@ permit (
     resource in principal.tenant
         && context.roles.containsAny(["contributor", "curator"])
         && resource.kind != "user"
+};
+
+// The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform —
+// see regulated-strict for the full rationale. Openness is a read-side
+// property; what a tier *means* is uniform, or `restricted` would mean
+// something different in an open tenant, which is the one thing it must
+// never do.
+permit (
+    principal,
+    action == Synveda::Action::"MemoryClassify",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["curator", "steward", "org-admin"])
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"MemoryClassify",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
 };
 
 // The quarantine review plane (MEM-2, ADR-0021 decision 6):

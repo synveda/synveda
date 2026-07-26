@@ -509,23 +509,22 @@ async fn a_lapse_grants_cross_team_read_and_its_expiry_restores_the_denial() {
     // already gone before it ran. Driving it directly rather than waiting
     // on the background loop is the FLOW-4 discipline — a test asserts the
     // pass, not the scheduler.
-    let chained = synveda_gateway::lapses::expire_once(&pool)
+    //
+    // What is asserted is the event on *this tenant's* chain, never the
+    // sweep's own return value: `expire_once` is tenant-wide, so a
+    // concurrent test's pass can chain this grant first and hand this call
+    // a zero. The property that matters is unchanged by who ran the pass —
+    // one window, exactly one expiry event, ever — and asserting the count
+    // a scheduler happened to produce would be asserting the scheduler.
+    synveda_gateway::lapses::expire_once(&pool)
         .await
         .expect("expiry sweep");
-    assert!(
-        chained >= 1,
-        "the closed window should have chained an event"
-    );
     // Twice is once: the stamp is the idempotency key.
-    let again = synveda_gateway::lapses::expire_once(&pool)
+    synveda_gateway::lapses::expire_once(&pool)
         .await
         .expect("second sweep");
     let expired = events(&pool, tenant, "policy.lapse.expired").await;
-    assert_eq!(
-        expired.len(),
-        1,
-        "one window, one expiry event (second pass chained {again})"
-    );
+    assert_eq!(expired.len(), 1, "one window, one expiry event");
 
     // ── The full story, on one chain, in order ──────────────────────────
     let opened = events(&pool, tenant, "vedaflow.proposal.opened").await;

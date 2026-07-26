@@ -6,7 +6,9 @@
 // "these are the things no pack can escape". It now also holds one permit,
 // so the sentence is weaker: **these are the things no pack can change**
 // (ADR-0037 decision 7). The permit is last, and every forbid above it
-// still wins.
+// still wins — including AUTHZ-5's `restricted` forbid, whose one `unless`
+// is the same grant the permit turns on, so the two read as one rule about
+// lapses seen from either end (ADR-0038 decision 5).
 //
 // Quarantined principals may do nothing (AUTH-2, ADR-0013 decision 5):
 // a forbid overrides any permit a pack adds, current or future.
@@ -46,6 +48,34 @@ forbid (
     !(resource is Synveda::Scope && resource in principal.token_scope) &&
     !(action == Synveda::Action::"MemoryRead" && principal in resource)
 };
+
+// The read side of the `restricted` floor (AUTHZ-5, ADR-0038 decision 5).
+//
+// The product already has one non-negotiable rule about this tier, and it
+// is on the write side: nothing reaches a published channel at `restricted`
+// without the `compliance` role and two distinct approvers, under every
+// pack, unauthorable away (ADR-0032 decision 4's invariant approval floor).
+// This is its mirror. Nothing reaches a *reader* at `restricted` without a
+// standing lapse — and because a lapse's approval matrix resolves at the
+// tier it declares, the grant that lifts this forbid is one a compliance
+// approver signed. One tier, one meaning, both directions, the same role.
+//
+// `context.sensitivity` is required by the schema, so this forbid can never
+// be skipped for want of the attribute — the ADR-0015 decision 5 shape,
+// applied to the rule that would be most dangerous to lose silently.
+//
+// There is deliberately no carve-out for the material's own author at their
+// own personal scope. Under ADR-0038 decision 8 the only way a record
+// carries this tier is a reclassification two people approved, one of them
+// compliance, so what an owner loses here is access a compliance decision
+// deliberately removed — and an owner exception would make the acceptance
+// criterion false as written.
+forbid (
+    principal,
+    action == Synveda::Action::"MemoryRead",
+    resource
+) when { context.sensitivity == "restricted" }
+unless { context.lapsed };
 
 // Lapses (AUTHZ-4, ADR-0037 decision 7): the product's one base-layer
 // *permit*, and it is here rather than in each pack because a lapse is an

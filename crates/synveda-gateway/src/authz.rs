@@ -21,7 +21,7 @@ use synveda_store::{
 };
 use synveda_types::{
     Error, HierarchyNode, Identity, IdentityKind, Lapse, LapseAction, Result, Role, RoleBinding,
-    ScopeId, TenantId,
+    ScopeId, Sensitivity, TenantId,
 };
 
 use crate::app::AppState;
@@ -78,6 +78,11 @@ impl DecisionInput {
             role_bindings: &self.role_bindings,
             grant: None,
             lapses: &self.lapses,
+            // Named per decision by [`decide_read`], which is the only way
+            // to ask `MemoryRead` here: a read decided without a tier is
+            // refused by the PDP rather than defaulted (AUTHZ-5, ADR-0038
+            // decision 2).
+            sensitivity: None,
         }
     }
 
@@ -335,6 +340,9 @@ pub(crate) async fn require(
 /// collapses a deny into the taxonomy, and keeps the allow's context for
 /// the caller's audit event. `grant` is the role being granted or revoked
 /// for [`Action::RoleAssign`] (ADR-0015 decision 5).
+///
+/// Not for [`Action::MemoryRead`]: that one names a tier, through
+/// [`decide_read`].
 pub(crate) fn decide(
     state: &AppState,
     input: &DecisionInput,
@@ -358,8 +366,58 @@ pub(crate) fn decide_from(
     resource: Resource,
     grant: Option<Role>,
 ) -> Result<Authorized> {
+    decide_inner(state, input, position, action, resource, grant, None)
+}
+
+/// [`decide`] for `MemoryRead`, which is the one action that names the tier
+/// it is asking about (AUTHZ-5, ADR-0038 decision 2).
+///
+/// A separate function rather than a seventh parameter on [`decide`],
+/// because "which tier" is a question only this action answers, and a
+/// parameter every other call site passes `None` to is an invitation to
+/// pass `None` here.
+pub(crate) fn decide_read(
+    state: &AppState,
+    input: &DecisionInput,
+    resource: Resource,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    decide_read_from(state, input, 0, resource, sensitivity)
+}
+
+/// [`decide_read`] for a resource whose chain starts at `position` — the
+/// [`decide_from`] shape, for the cross-scope decisions FLOW-5 takes.
+pub(crate) fn decide_read_from(
+    state: &AppState,
+    input: &DecisionInput,
+    position: usize,
+    resource: Resource,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    decide_inner(
+        state,
+        input,
+        position,
+        Action::MemoryRead,
+        resource,
+        None,
+        Some(sensitivity),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decide_inner(
+    state: &AppState,
+    input: &DecisionInput,
+    position: usize,
+    action: Action,
+    resource: Resource,
+    grant: Option<Role>,
+    sensitivity: Option<Sensitivity>,
+) -> Result<Authorized> {
     let mut context = input.context_from(position);
     context.grant = grant;
+    context.sensitivity = sensitivity;
     let decision = state
         .pdp
         .authorize(&input.principal, action, resource, &context)?;

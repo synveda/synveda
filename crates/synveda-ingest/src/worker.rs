@@ -800,6 +800,7 @@ async fn authorize_owner(
         default_pack: default_pack.as_deref(),
         role_bindings: &bindings,
         grant: None,
+        sensitivity: None,
         // A lapse relaxes reads, never writes: the vocabulary has one
         // action and it is `MemoryRead` (ADR-0037 decision 2).
         lapses: &[],

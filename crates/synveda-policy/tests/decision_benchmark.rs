@@ -16,7 +16,7 @@ use std::time::Instant;
 use chrono::Utc;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD};
 use synveda_types::{
-    HierarchyNode, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind, TenantId,
+    HierarchyNode, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind, Sensitivity, TenantId,
 };
 
 const WARMUP: usize = 1_000;
@@ -130,6 +130,7 @@ fn ac_decisions_are_microsecond_level() {
         updated_at: Utc::now(),
     }];
     let context = AuthzContext {
+        sensitivity: Some(Sensitivity::Internal),
         scopes: &scopes,
         principal_scopes: &principal_scopes,
         assignments: &assignments,

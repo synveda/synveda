@@ -13,7 +13,7 @@
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
 use synveda_types::{
     CompositionConfig, HierarchyNode, Lapse, LapseId, PolicyAssignment, Result, RoleBinding,
-    ScopeId,
+    ScopeId, Sensitivity,
 };
 
 use crate::compose::ComposeScope;
@@ -101,6 +101,13 @@ pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Resul
             role_bindings: inputs.role_bindings,
             grant: None,
             lapses: inputs.lapses,
+            // The working tier, which is every tier the read path composed
+            // before AUTHZ-5 (`inject` and `ComposeRequest::new` both asked
+            // for `internal`). The per-tier walk — ask four times, keep the
+            // answers as a set — lands with the read path's own change
+            // (ADR-0038 decisions 1 and 3); until then this decides exactly
+            // what it decided before, which is what keeps this a refactor.
+            sensitivity: Some(Sensitivity::WORKING),
         };
         let decision = pdp.authorize(
             inputs.principal,
@@ -183,6 +190,7 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
         role_bindings: inputs.role_bindings,
         grant: None,
         lapses: inputs.lapses,
+        sensitivity: Some(Sensitivity::WORKING),
     };
     let budget_tokens = match inputs.chain.first() {
         Some(home) => {
@@ -248,6 +256,13 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             role_bindings: inputs.role_bindings,
             grant: None,
             lapses: inputs.lapses,
+            // The working tier, which is every tier the read path composed
+            // before AUTHZ-5 (`inject` and `ComposeRequest::new` both asked
+            // for `internal`). The per-tier walk — ask four times, keep the
+            // answers as a set — lands with the read path's own change
+            // (ADR-0038 decisions 1 and 3); until then this decides exactly
+            // what it decided before, which is what keeps this a refactor.
+            sensitivity: Some(Sensitivity::WORKING),
         };
         let decision = pdp.authorize(
             inputs.principal,

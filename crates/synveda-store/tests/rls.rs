@@ -2838,9 +2838,9 @@ async fn seed_lapse(pool: &PgPool) -> (TenantId, ScopeId, uuid::Uuid) {
     sqlx::query!(
         "insert into policy_lapses
              (tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
-              action, reason, expires_at, granted_by)
-         values ($1, $2, $3, $4, $5, 'memory.read', 'joint incident review',
-                 now() + interval '1 hour', $6)",
+              action, max_sensitivity, reason, expires_at, granted_by)
+         values ($1, $2, $3, $4, $5, 'memory.read', 'internal',
+                 'joint incident review', now() + interval '1 hour', $6)",
         tenant.as_uuid(),
         lapse,
         proposal,
@@ -2874,8 +2874,8 @@ fn a_grant_cannot_be_forged_resurrected_or_extended() {
         let forged = sqlx::query!(
             "insert into policy_lapses
                  (tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
-                  action, reason, expires_at, granted_by)
-             values ($1, $2, $3, $4, $5, 'memory.read', 'forged',
+                  action, max_sensitivity, reason, expires_at, granted_by)
+             values ($1, $2, $3, $4, $5, 'memory.read', 'internal', 'forged',
                      now() + interval '1 hour', $6)",
             victim.as_uuid(),
             uuid::Uuid::now_v7(),
@@ -2957,6 +2957,53 @@ fn a_grant_cannot_be_forged_resurrected_or_extended() {
         assert!(
             message.contains("second approval"),
             "the refusal must say why, got: {message}"
+        );
+        drop(tx);
+
+        // 4. The declared tier is immutable, and it is the same attack in
+        //    the other dimension (AUTHZ-5, ADR-0038): raised after approval,
+        //    an `internal` grant two stewards approved becomes a
+        //    `restricted` one no compliance approver ever saw — while the
+        //    proposal, the approvals and the chain all still say `internal`.
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let widened = sqlx::query!(
+            "update policy_lapses set max_sensitivity = 'restricted'
+             where tenant_id = $1 and id = $2",
+            victim.as_uuid(),
+            victim_lapse,
+        )
+        .execute(&mut *tx)
+        .await;
+        let message = widened
+            .expect_err("max_sensitivity must be immutable")
+            .to_string();
+        assert!(
+            message.contains("approvers signed"),
+            "the refusal must say why, got: {message}"
+        );
+        drop(tx);
+
+        // And a tier outside the vocabulary is refused by the CHECK, not
+        // stored and puzzled over later.
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let nonsense = sqlx::query!(
+            "insert into policy_lapses
+                 (tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
+                  action, max_sensitivity, reason, expires_at, granted_by)
+             values ($1, $2, $3, $4, $5, 'memory.read', 'top-secret', 'invented tier',
+                     now() + interval '1 hour', $6)",
+            victim.as_uuid(),
+            uuid::Uuid::now_v7(),
+            uuid::Uuid::now_v7(),
+            ScopeId::new().as_uuid(),
+            victim_target.as_uuid(),
+            IdentityId::new().as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            nonsense.is_err(),
+            "a tier outside the vocabulary must be refused at the column"
         );
 
         drop(tx);

@@ -19,7 +19,8 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use synveda_types::{
-    Error, IdentityId, Lapse, LapseAction, LapseId, ProposalId, Result, ScopeId, TenantId,
+    Error, IdentityId, Lapse, LapseAction, LapseId, ProposalId, Result, ScopeId, Sensitivity,
+    TenantId,
 };
 
 /// Maps a sqlx error at the storage boundary into the shared taxonomy.
@@ -66,6 +67,7 @@ struct LapseRow {
     grantee_scope_id: uuid::Uuid,
     target_scope_id: uuid::Uuid,
     action: String,
+    max_sensitivity: String,
     reason: String,
     granted_at: DateTime<Utc>,
     expires_at: DateTime<Utc>,
@@ -84,6 +86,7 @@ impl TryFrom<LapseRow> for Lapse {
         // means code and schema drifted. Say so rather than shrug — the
         // role_bindings discipline (ADR-0015).
         let action = LapseAction::from_str(&row.action)?;
+        let max_sensitivity = Sensitivity::from_str(&row.max_sensitivity)?;
         Ok(Lapse {
             id: LapseId::from_uuid(row.id),
             tenant_id: TenantId::from_uuid(row.tenant_id),
@@ -91,6 +94,7 @@ impl TryFrom<LapseRow> for Lapse {
             grantee_scope_id: ScopeId::from_uuid(row.grantee_scope_id),
             target_scope_id: ScopeId::from_uuid(row.target_scope_id),
             action,
+            max_sensitivity,
             reason: row.reason,
             granted_at: row.granted_at,
             expires_at: row.expires_at,
@@ -139,7 +143,7 @@ pub async fn active_for_scopes(
         LapseRow,
         r#"
         select tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
-               action, reason, granted_at, expires_at, granted_by,
+               action, max_sensitivity, reason, granted_at, expires_at, granted_by,
                revoked_at, revoked_by, revoke_reason, expiry_recorded_at
         from policy_lapses
         where tenant_id = $1
@@ -183,6 +187,7 @@ pub async fn grant(
     grantee_scope_id: ScopeId,
     target_scope_id: ScopeId,
     action: LapseAction,
+    max_sensitivity: Sensitivity,
     reason: &str,
     duration_secs: u32,
     granted_by: IdentityId,
@@ -192,11 +197,11 @@ pub async fn grant(
         r#"
         insert into policy_lapses
             (tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
-             action, reason, granted_at, expires_at, granted_by)
-        values ($1, $2, $3, $4, $5, $6, $7, now(),
-                now() + make_interval(secs => $8::double precision), $9)
+             action, max_sensitivity, reason, granted_at, expires_at, granted_by)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, now(),
+                now() + make_interval(secs => $9::double precision), $10)
         returning tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
-                  action, reason, granted_at, expires_at, granted_by,
+                  action, max_sensitivity, reason, granted_at, expires_at, granted_by,
                   revoked_at, revoked_by, revoke_reason, expiry_recorded_at
         "#,
         tenant_id.as_uuid(),
@@ -205,6 +210,7 @@ pub async fn grant(
         grantee_scope_id.as_uuid(),
         target_scope_id.as_uuid(),
         action.as_str(),
+        max_sensitivity.as_str(),
         reason,
         f64::from(duration_secs),
         granted_by.as_uuid(),
@@ -242,7 +248,7 @@ pub async fn revoke(
            and revoked_at is null
            and expires_at > now()
         returning tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
-                  action, reason, granted_at, expires_at, granted_by,
+                  action, max_sensitivity, reason, granted_at, expires_at, granted_by,
                   revoked_at, revoked_by, revoke_reason, expiry_recorded_at
         "#,
         tenant_id.as_uuid(),
@@ -275,7 +281,7 @@ pub async fn by_id(
         LapseRow,
         r#"
         select tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
-               action, reason, granted_at, expires_at, granted_by,
+               action, max_sensitivity, reason, granted_at, expires_at, granted_by,
                revoked_at, revoked_by, revoke_reason, expiry_recorded_at
         from policy_lapses where tenant_id = $1 and id = $2
         "#,
@@ -309,7 +315,7 @@ pub async fn at_target(
         LapseRow,
         r#"
         select tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
-               action, reason, granted_at, expires_at, granted_by,
+               action, max_sensitivity, reason, granted_at, expires_at, granted_by,
                revoked_at, revoked_by, revoke_reason, expiry_recorded_at
         from policy_lapses
         where tenant_id = $1 and target_scope_id = $2
@@ -350,7 +356,7 @@ pub async fn due_for_expiry_event(
         LapseRow,
         r#"
         select tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
-               action, reason, granted_at, expires_at, granted_by,
+               action, max_sensitivity, reason, granted_at, expires_at, granted_by,
                revoked_at, revoked_by, revoke_reason, expiry_recorded_at
         from policy_lapses
         where tenant_id = $1

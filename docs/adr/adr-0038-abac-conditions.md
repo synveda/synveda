@@ -245,6 +245,18 @@ Decisions, specifically:
    change. The review surface, the CLI, the audit shape, and the matrix
    are FLOW-3's and FLOW-6's, unchanged.
 
+   **The proposed tier lives in the member object, not in the record
+   row**, and that detail is what makes the whole thing work. A
+   publication proposal's members are addressed from the records *as they
+   stand* (`held_versions`), so a classification proposal that needed the
+   row changed first would put the change live before anyone reviewed it.
+   Instead its members are the same memory assets with one field replaced
+   — content as it stands, tier as proposed — written to the object store,
+   which touches no row. The effect then reads each member, requires the
+   live record's content to still match, and moves the row's tier. A
+   record edited under its own reclassification is the ordinary
+   approvals-bind-bytes conflict, refused with the address that moved.
+
    **The effect resolves the matrix at `max(current, proposed)`**, and
    this is the decision inside the decision. A proposal's stored
    sensitivity is "the maximum over its members", so a *declassification*
@@ -257,22 +269,46 @@ Decisions, specifically:
    A new action rather than reusing `MemoryWrite`, on ADR-0036
    decision 3's separability rule: the write floor grants every principal
    `MemoryWrite` at its own home, and a pack must be able to say "you may
-   write here" without saying "you may classify here". Packs grant it
+   write here" without saying "you may classify here". Like every other
+   act that governs material, it also takes a `MemoryRead` at the working
+   tier — decision 10's whose-material question, which is what keeps a
+   curator out of a teammate's personal scope here too. Packs grant it
    pack-uniformly to curator/steward/org-admin, plus the owner at their
    own home, and the matrix does the heavy lifting at the top tier.
    `records::update` requires an embedding (MEM-4/ADR-0023); a
    reclassification carries the record's existing vector forward, because
    the content it was computed over has not changed.
 
-10. **Reviewers still see what they review, and that is not a leak.**
-    ADR-0035 decision 8 deliberately shows a reviewer both sides of a
-    change regardless of `MemoryRead` — a `compliance` reviewer composes
-    nothing at that scope from `inject` and is shown the content anyway,
-    because approving what you cannot see is not review. Nothing here
-    changes it, and the leak suite asserts the distinction rather than
-    tripping over it: the surface that discloses restricted content to
-    the person the floor requires is the review surface, once, audited,
-    under a proposal — never `inject`, never `recall`.
+10. **Governing material is not composing it, so the governance guards ask
+    at the working tier.** Every act that moves material across the trust
+    boundary already takes a second `MemoryRead` decision beside its own —
+    publish (ADR-0031 decision 12), a climb's disclosure (ADR-0034
+    decision 1), a rewind and a pin (ADR-0036 decision 3), and now a
+    reclassification. Those guards ask **whose** material this is, not how
+    sensitive it is, and they keep asking at `internal`.
+
+    This was decided by trying the other thing. Asking them at the
+    material's own tier reads better in a diff and is wrong in a way the
+    test suite says out loud: `restricted` is forbidden to every reader
+    without a lapse, so a tier-following guard makes restricted material
+    unpublishable *by anyone* — which leaves the invariant floor's own
+    `restricted` cell unreachable, and leaves a restricted lapse with
+    nothing to disclose, since a lapse admits only what the target
+    published. The two mechanisms have different jobs: **the tier governs
+    composition, and the approval matrix prices the boundary crossing** —
+    resolved at the set's maximum, where `restricted` already means
+    compliance and two distinct approvers.
+
+    The accepted cost, stated: a steward who is a member of a scope can
+    publish `confidential` material there without being able to compose
+    it. That is the same shape as ADR-0035 decision 8 — a `compliance`
+    reviewer is shown both sides of a change they compose nothing of,
+    because approving what you cannot see is not review — and it is the
+    same sentence: a governance act is not a read. The leak suite asserts
+    that distinction rather than tripping over it: the surface that
+    discloses restricted content to the person the floor requires is the
+    review surface, once, audited, under a proposal — never `inject`,
+    never `recall`.
 
 11. **The block labels every tier above `internal`.** A composed entry at
     `confidential` or `restricted` is marked the way a lapsed section is

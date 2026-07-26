@@ -154,11 +154,29 @@ pub enum ProposalEffect {
     /// (AUTHZ-4, ADR-0037). Always an [`crate::AssetKind::Policy`]
     /// proposal whose one member is the lapse's reviewed terms.
     Lapse,
+    /// Move the members to the sensitivity their proposed versions carry
+    /// (AUTHZ-5, ADR-0038 decision 9) — the only path to `restricted`, and
+    /// the only path back down from it.
+    ///
+    /// It writes no channel either: a reclassification changes what a record
+    /// *is*, not where it is published, and a record can be reclassified
+    /// without ever having crossed the trust boundary.
+    ///
+    /// Its requirement resolves at the **maximum of the current and proposed
+    /// tiers**, which is the whole reason it is its own effect: taking only
+    /// the proposed side would price a declassification at the tier it is
+    /// leaving for, and the one direction that removes a control would be
+    /// the cheap one.
+    Classify,
 }
 
 impl ProposalEffect {
     /// Every effect.
-    pub const ALL: [ProposalEffect; 2] = [ProposalEffect::Published, ProposalEffect::Lapse];
+    pub const ALL: [ProposalEffect; 3] = [
+        ProposalEffect::Published,
+        ProposalEffect::Lapse,
+        ProposalEffect::Classify,
+    ];
 
     /// Stable wire name, identical to the serde form and to the stored
     /// column (whose CHECK constraint mirrors this list).
@@ -167,19 +185,20 @@ impl ProposalEffect {
         match self {
             ProposalEffect::Published => "published",
             ProposalEffect::Lapse => "lapse",
+            ProposalEffect::Classify => "classify",
         }
     }
 
     /// The channel this effect writes, when it writes one.
     ///
-    /// `None` for a lapse, which is the honest answer rather than a
-    /// stand-in: its effect is a row, and a caller that needs a channel
-    /// here has taken a wrong turn.
+    /// `None` for a lapse and for a reclassification, which is the honest
+    /// answer rather than a stand-in: their effects are rows, and a caller
+    /// that needs a channel here has taken a wrong turn.
     #[must_use]
     pub const fn channel(&self) -> Option<Channel> {
         match self {
             ProposalEffect::Published => Some(Channel::Published),
-            ProposalEffect::Lapse => None,
+            ProposalEffect::Lapse | ProposalEffect::Classify => None,
         }
     }
 }

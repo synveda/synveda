@@ -64,20 +64,21 @@ use crate::error::ApiError;
 use crate::hierarchy::{body, commit, found, tenant_id};
 use crate::telemetry::{LAPSE_EXPIRIES_TOTAL, LAPSE_OPERATIONS_TOTAL};
 
-/// The sensitivity a lapse resolves the approval matrix at (ADR-0037
-/// decision 14).
+/// The tier a lapse declares when its request names none (ADR-0038
+/// decision 6).
 ///
-/// `internal` is the tier `inject` composes: the read path clamps below
-/// `restricted` unconditionally (ADR-0024 decision 2) and requests default
-/// to `internal`, so this is the most sensitive material a grant can
-/// actually disclose. The invariant floor therefore does not engage and the
-/// pack rules decide — `regulated-strict` asks its two stewards, which is
-/// tech plan §2.4's lapse row landing where it was written to land.
+/// ADR-0037 decision 14 fixed this at `internal` and said why: the read path
+/// clamped below `restricted` unconditionally, so `internal` was the most
+/// sensitive material any grant could actually disclose. AUTHZ-5 removed the
+/// clamp and made the tier a term of the grant — so this is now a *default*,
+/// and the matrix resolves at whatever the terms declare.
 ///
-/// When AUTHZ-5 lets a lapse declare a higher ceiling, the matrix resolves
-/// at *that* ceiling and the floor engages by itself, with no
-/// lapse-specific rule anywhere.
-const LAPSE_SENSITIVITY: Sensitivity = Sensitivity::Internal;
+/// The rest of decision 14 happened by itself, which is what it predicted:
+/// a grant declaring `restricted` resolves the `policy` cell at
+/// `restricted`, the invariant floor merges in `compliance` and two distinct
+/// approvers (ADR-0032 decision 4), and no lapse-specific rule was written
+/// anywhere.
+const DEFAULT_LAPSE_SENSITIVITY: Sensitivity = Sensitivity::WORKING;
 
 /// Counts the operation and renders the result — the outcome taxonomy every
 /// governed plane uses.
@@ -171,6 +172,16 @@ pub(crate) struct ProposeBody {
     /// What to relax. A closed vocabulary; anything outside it is refused
     /// by name (ADR-0037 decision 2).
     action: LapseAction,
+    /// The most sensitive material this grant would disclose, and therefore
+    /// the tier its approval matrix resolves at (AUTHZ-5, ADR-0038
+    /// decision 6). Omitted means the working tier, which is what every
+    /// grant meant before the field existed.
+    ///
+    /// Declaring `restricted` is what pulls in the invariant floor —
+    /// `compliance` plus two distinct approvers — so the ask and the price
+    /// of the ask are the same statement.
+    #[serde(default)]
+    max_sensitivity: Option<Sensitivity>,
     /// How long the grant runs **once its effect executes** — never from
     /// now, because a proposal that sits in a queue for a week must not
     /// spend the window it was approved for.
@@ -221,6 +232,7 @@ async fn propose_inner(
         grantee_scope_id: request.grantee_scope_id,
         target_scope_id: request.scope_id,
         action: request.action,
+        max_sensitivity: request.max_sensitivity.unwrap_or(DEFAULT_LAPSE_SENSITIVITY),
         duration_secs: request.duration_secs,
         reason: request.reason.trim().to_owned(),
     };
@@ -268,7 +280,7 @@ async fn propose_inner(
             asset: AssetKind::Policy,
             effect: ProposalEffect::Lapse,
             members: &members,
-            sensitivity: LAPSE_SENSITIVITY,
+            sensitivity: terms.max_sensitivity,
             title: &title,
             proposer,
             proposer_subject: &input.principal.subject,
@@ -289,7 +301,9 @@ async fn propose_inner(
         &approvals::Requested {
             target: &target,
             asset: AssetKind::Policy,
-            sensitivity: LAPSE_SENSITIVITY,
+            // The whole of decision 6: what the grant says it discloses is
+            // what its approvers are asked for.
+            sensitivity: terms.max_sensitivity,
             entries: &entries,
         },
     )
@@ -307,7 +321,7 @@ async fn propose_inner(
             "asset": AssetKind::Policy.as_str(),
             "effect": ProposalEffect::Lapse.as_str(),
             "title": title,
-            "sensitivity": LAPSE_SENSITIVITY.as_str(),
+            "sensitivity": terms.max_sensitivity.as_str(),
             "commit": proposal.commit.to_hex(),
             "source_scope_id": target.id,
             "target_scope_id": target.id,
@@ -331,6 +345,7 @@ async fn propose_inner(
         "grantee_scope_id": grantee.id,
         "grantee_scope_path": grantee.path,
         "action": terms.action.as_str(),
+        "max_sensitivity": terms.max_sensitivity.as_str(),
         "duration_secs": terms.duration_secs,
         "reason": terms.reason,
         "required": requirement.describe(),
@@ -486,6 +501,7 @@ async fn grant_inner(state: &AppState, id: ProposalId) -> Result<Json<LapseView>
         terms.grantee_scope_id,
         terms.target_scope_id,
         terms.action,
+        terms.max_sensitivity,
         &terms.reason,
         terms.duration_secs,
         granter,
@@ -695,6 +711,7 @@ fn lapse_terms_context(terms: &LapseTerms, object_hash: String) -> serde_json::V
         "grantee_scope_id": terms.grantee_scope_id,
         "target_scope_id": terms.target_scope_id,
         "action": terms.action.as_str(),
+        "max_sensitivity": terms.max_sensitivity.as_str(),
         "duration_secs": terms.duration_secs,
         "reason": terms.reason,
         "object_hash": object_hash,

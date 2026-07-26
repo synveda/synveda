@@ -1,13 +1,19 @@
-// standard@9 — team-shares-by-default within a department (seed §6,
+// standard@10 — team-shares-by-default within a department (seed §6,
 // ADR-0014, ADR-0015, ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032, ADR-0036,
-// ADR-0037).
+// ADR-0037, ADR-0038).
 //
 // Own-chain reads plus the department subtree: sibling teams under the
 // principal's department share by default. Other people's personal
-// (user-kind) scopes stay excluded — the privacy floor until AUTHZ-5
-// classification refines it. A hierarchy that skips the department level
-// leaves the principal without a `department` attribute, and this pack
-// collapses to regulated-strict's read surface.
+// (user-kind) scopes stay excluded — the privacy floor, which AUTHZ-5
+// resolved by leaving it exactly where it was: a tier says how sensitive
+// material is, not whose it is (ADR-0038 decision 4). A hierarchy that skips
+// the department level leaves the principal without a `department`
+// attribute, and this pack collapses to regulated-strict's read surface.
+//
+// What sharing by default means here is the *working* tiers: the department
+// subtree is a default, not an explicit grant, so `confidential` still takes
+// a content-role binding or one's own home, exactly as under
+// regulated-strict. `restricted` takes a lapse under every pack.
 
 // The mutating admin planes: steward/org-admin over the bound subtree
 // (context.roles is resolved from the resource chain's bindings,
@@ -43,14 +49,31 @@ permit (
         && context.roles.containsAny(["steward", "org-admin", "auditor"])
 };
 
-// The membership floor: own chain, as under regulated-strict.
+// The membership floor: own chain at the working tiers, as under
+// regulated-strict.
 permit (
     principal,
     action == Synveda::Action::"MemoryRead",
     resource
-) when { principal in resource };
+) when {
+    principal in resource
+        && ["public", "internal"].contains(context.sensitivity)
+};
 
-// The department subtree, personal scopes excluded.
+// Your own home, up to `confidential` — pack-uniform (ADR-0038 decision 4).
+permit (
+    principal,
+    action == Synveda::Action::"MemoryRead",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+// The department subtree, personal scopes excluded, at the working tiers:
+// this pack's sharing default is a default, and `confidential` is the tier
+// held to explicitly granted scopes under every pack.
 permit (
     principal,
     action == Synveda::Action::"MemoryRead",
@@ -59,10 +82,11 @@ permit (
     principal has department
         && resource in principal.department
         && resource.kind != "user"
+        && ["public", "internal"].contains(context.sensitivity)
 };
 
 // Content roles read the bound subtree, personal scopes excluded
-// (ADR-0015 decision 4).
+// (ADR-0015 decision 4) — the explicit grant, so `confidential` joins.
 permit (
     principal,
     action == Synveda::Action::"MemoryRead",
@@ -71,6 +95,7 @@ permit (
     resource in principal.tenant
         && context.roles.containsAny(["viewer", "contributor", "curator"])
         && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
 
 // The write floor, role-free: own personal scope only. Write governance
@@ -96,6 +121,26 @@ permit (
     resource in principal.tenant
         && context.roles.containsAny(["contributor", "curator"])
         && resource.kind != "user"
+};
+
+// The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform —
+// see regulated-strict for the full rationale.
+permit (
+    principal,
+    action == Synveda::Action::"MemoryClassify",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["curator", "steward", "org-admin"])
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"MemoryClassify",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
 };
 
 // The quarantine review plane (MEM-2, ADR-0021 decision 6):

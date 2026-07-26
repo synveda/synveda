@@ -26,7 +26,8 @@ use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
 };
 use synveda_types::{
-    HierarchyNode, PackConfig, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind, TenantId,
+    HierarchyNode, PackConfig, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind,
+    Sensitivity, TenantId,
 };
 
 /// Every scope of the fixture — the candidate set a composition sweep
@@ -201,6 +202,7 @@ fn decide(
         action,
         resource,
         &AuthzContext {
+            sensitivity: Some(Sensitivity::Internal),
             scopes: &scopes,
             principal_scopes: &principal_scopes,
             assignments,
@@ -438,20 +440,20 @@ fn assert_matrix(pack: &str, version: i64) {
 /// regulated-strict: the golden matrix (the AC).
 #[test]
 fn matrix_regulated_strict() {
-    assert_matrix(REGULATED_STRICT, 9);
+    assert_matrix(REGULATED_STRICT, 10);
 }
 
 /// standard: identical role matrix — packs differ on composition
 /// membership, never on who administers (ADR-0015 decision 4).
 #[test]
 fn matrix_standard() {
-    assert_matrix(STANDARD, 9);
+    assert_matrix(STANDARD, 10);
 }
 
 /// open-collaboration: identical role matrix.
 #[test]
 fn matrix_open_collaboration() {
-    assert_matrix(OPEN_COLLABORATION, 9);
+    assert_matrix(OPEN_COLLABORATION, 10);
 }
 
 /// A tenant-wide binding is in force everywhere, the tenant plane
@@ -633,6 +635,7 @@ fn role_assign_without_a_grant_fails_closed() {
         Action::RoleAssign,
         Resource::Scope(fx.node("team-b").id),
         &AuthzContext {
+            sensitivity: Some(Sensitivity::Internal),
             scopes: &scopes,
             role_bindings: &bindings,
             grant: None,

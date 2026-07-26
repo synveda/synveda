@@ -507,18 +507,6 @@ async fn open_inner(
             ),
         });
     };
-    // The disclosure decision (ADR-0034 decision 1): may this principal
-    // read what it is about to show the target's reviewers. It is the
-    // whole warrant for the climb, and it is asked once, here — the
-    // privacy floor then makes "nobody climbs another principal's personal
-    // material" true with no clause about personal scopes anywhere.
-    let disclosed = authz::decide(
-        state,
-        &input,
-        Action::MemoryRead,
-        Resource::Scope(source_scope_id),
-        None,
-    )?;
     let authorized = authz::decide_from(
         state,
         &input,
@@ -544,6 +532,24 @@ async fn open_inner(
     }
 
     let versions = held_versions(&mut tx, tenant_id, source_scope_id, &body.record_ids).await?;
+    let sensitivity = max_sensitivity(&versions);
+    // The disclosure decision (ADR-0034 decision 1): may this principal
+    // read what it is about to show the target's reviewers. It is the
+    // whole warrant for the climb — the privacy floor then makes "nobody
+    // climbs another principal's personal material" true with no clause
+    // about personal scopes anywhere.
+    //
+    // At the working tier (AUTHZ-5, ADR-0038 decision 10): the question is
+    // whose material this is, which the privacy floor answers identically at
+    // every tier. How sensitive it is prices the *review* — the matrix
+    // resolves at the set's maximum, and `restricted` there means compliance
+    // and two distinct approvers before anything moves.
+    let disclosed = authz::decide_read(
+        state,
+        &input,
+        Resource::Scope(source_scope_id),
+        Sensitivity::WORKING,
+    )?;
     // Objects first: each member's address, computed from the version
     // being proposed. This is what binds the review to bytes — approvals
     // name this commit, and publishing recomputes these addresses from the
@@ -554,7 +560,6 @@ async fn open_inner(
         let object = vedaflow::put_memory(&mut tx, tenant_id, &asset).await?;
         members.push((asset.entry_name(), object.hash));
     }
-    let sensitivity = max_sensitivity(&versions);
     let snapshot = PolicySnapshot::new(
         authorized.decision.pack_name.clone(),
         authorized.decision.pack_version,
@@ -1032,12 +1037,14 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
         Resource::Scope(node.id),
         None,
     )?;
-    authz::decide(
+    // At the working tier, like the direct route (ADR-0038 decision 10):
+    // running an approved effect governs material, it does not compose it,
+    // and the tier was priced by the matrix these approvals satisfied.
+    authz::decide_read(
         state,
         &input,
-        Action::MemoryRead,
         Resource::Scope(node.id),
-        None,
+        Sensitivity::WORKING,
     )?;
     require_open(&proposal)?;
     let publisher = identity_of(&input)?;

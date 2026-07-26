@@ -264,6 +264,7 @@ fn a_stored_packs_matrix_rides_its_effective_pack() {
         tenant,
         synveda_policy::Resource::Tenant(tenant),
         &synveda_policy::AuthzContext {
+            sensitivity: Some(Sensitivity::Internal),
             default_pack: Some("acme-two-stewards"),
             ..Default::default()
         },
@@ -291,6 +292,7 @@ fn a_stored_packs_matrix_rides_its_effective_pack() {
         tenant,
         synveda_policy::Resource::Tenant(tenant),
         &synveda_policy::AuthzContext {
+            sensitivity: Some(Sensitivity::Internal),
             default_pack: Some("acme-plain"),
             ..Default::default()
         },

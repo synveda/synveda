@@ -23,7 +23,7 @@ use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
 };
 use synveda_types::{
-    HierarchyNode, PackConfig, PolicyAssignment, Role, ScopeId, ScopeKind, TenantId,
+    HierarchyNode, PackConfig, PolicyAssignment, Role, ScopeId, ScopeKind, Sensitivity, TenantId,
 };
 
 /// Every scope of the fixture — the candidate set a composition sweep
@@ -139,6 +139,7 @@ fn memory(
         action,
         Resource::Scope(fx.node(target).id),
         &AuthzContext {
+            sensitivity: Some(Sensitivity::Internal),
             scopes: &scopes,
             principal_scopes: &principal_scopes,
             assignments,
@@ -264,6 +265,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
                     action,
                     Resource::Scope(fx.node("team-b").id),
                     &AuthzContext {
+                        sensitivity: Some(Sensitivity::Internal),
                         scopes: &scopes,
                         assignments: &assignments,
                         // RoleAssign requires the grant in context; the
@@ -344,7 +346,11 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 /// (seed §6; lapses, AUTHZ-4, are the sanctioned relaxation).
 #[test]
 fn golden_regulated_strict() {
-    assert_pack_golden(REGULATED_STRICT, 9, &["org", "eng", "team-a", "alice-user"]);
+    assert_pack_golden(
+        REGULATED_STRICT,
+        10,
+        &["org", "eng", "team-a", "alice-user"],
+    );
 }
 
 /// standard: own chain plus the department subtree — sibling team-b joins;
@@ -353,18 +359,19 @@ fn golden_regulated_strict() {
 fn golden_standard() {
     assert_pack_golden(
         STANDARD,
-        9,
+        10,
         &["org", "eng", "team-a", "team-b", "alice-user"],
     );
 }
 
 /// open-collaboration: org-wide — only other people's personal scopes
-/// stay out (the privacy floor until AUTHZ-5 classification).
+/// stay out (the privacy floor, which AUTHZ-5 left exactly where it was:
+/// a tier says how sensitive material is, not whose it is).
 #[test]
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        9,
+        10,
         &[
             "org",
             "eng",
@@ -470,6 +477,7 @@ fn redaction_config_rides_the_effective_pack() {
             fx.tenant,
             Resource::Scope(team),
             &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 assignments: &assignments,
                 ..Default::default()
@@ -484,6 +492,7 @@ fn redaction_config_rides_the_effective_pack() {
         fx.tenant,
         Resource::Scope(team),
         &AuthzContext {
+            sensitivity: Some(Sensitivity::Internal),
             scopes: &scopes,
             ..Default::default()
         },
@@ -527,6 +536,7 @@ fn redaction_config_rides_the_effective_pack() {
             fx.tenant,
             Resource::Scope(team),
             &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 assignments: &assignments,
                 ..Default::default()

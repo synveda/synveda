@@ -21,7 +21,8 @@ use cedar_policy::{
 };
 use synveda_types::{
     ApprovalMatrix, CompositionConfig, Error, HierarchyNode, Lapse, LapseAction, LapseConfig,
-    PackConfig, PromotionConfig, RedactionConfig, Result, Role, ScopeId, ScopeKind, TenantId,
+    PackConfig, PromotionConfig, RedactionConfig, Result, Role, ScopeId, ScopeKind, Sensitivity,
+    TenantId,
 };
 
 use crate::entity_store::EntityStore;
@@ -51,11 +52,14 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// plane and each pack's approval matrix (ADR-0032 decisions 3 and 16).
 /// `@8`: FLOW-7 added the rewind and pin actions (ADR-0036 decision 3).
 /// `@9`: AUTHZ-4 added the lapse plane and the base layer's first permit
-/// (ADR-0037 decisions 7 and 15).
+/// (ADR-0037 decisions 7 and 15). `@10`: AUTHZ-5 made sensitivity a policy
+/// attribute — every `MemoryRead` permit names the tiers it covers, the base
+/// layer forbids `restricted` outright unless a lapse declared it, and the
+/// classification plane joined (ADR-0038 decisions 4, 5 and 9).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 9),
-    (STANDARD, 9),
-    (OPEN_COLLABORATION, 9),
+    (REGULATED_STRICT, 10),
+    (STANDARD, 10),
+    (OPEN_COLLABORATION, 10),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -403,8 +407,11 @@ impl Pdp {
             action,
             resource,
             &roles,
-            context.grant,
-            !lapsed.is_empty(),
+            RequestContext {
+                grant: context.grant,
+                lapsed: !lapsed.is_empty(),
+                sensitivity: context.sensitivity,
+            },
         )?;
         let response = self
             .authorizer
@@ -725,9 +732,13 @@ impl Pdp {
         action: Action,
         resource: Resource,
         roles: &[&'static str],
-        grant: Option<Role>,
-        lapsed: bool,
+        extras: RequestContext,
     ) -> Result<Request> {
+        let RequestContext {
+            grant,
+            lapsed,
+            sensitivity,
+        } = extras;
         use cedar_policy::RestrictedExpression;
 
         let resource_uid = match resource {
@@ -752,11 +763,20 @@ impl Pdp {
             ));
         }
         if action == Action::MemoryRead {
-            // Required by the schema, exactly like `grant` on RoleAssign and
-            // for the same reason: a missing attribute makes the base
-            // layer's lapse permit error, and Cedar drops a policy that
-            // errors (ADR-0015 decision 5's shape, ADR-0037 decision 9).
+            // Both required by the schema, exactly like `grant` on
+            // RoleAssign and for the same reason: a missing attribute makes
+            // the base layer's lapse permit — and, since AUTHZ-5, its
+            // `restricted` forbid — error, and Cedar drops a policy that
+            // errors (ADR-0015 decision 5's shape, ADR-0037 decision 9,
+            // ADR-0038 decision 2).
             pairs.push(("lapsed".to_owned(), RestrictedExpression::new_bool(lapsed)));
+            let sensitivity = sensitivity.ok_or_else(|| Error::Internal {
+                message: "MemoryRead decided without a sensitivity tier in context".to_owned(),
+            })?;
+            pairs.push((
+                "sensitivity".to_owned(),
+                RestrictedExpression::new_string(sensitivity.as_str().to_owned()),
+            ));
         }
         let context = Context::from_pairs(pairs).map_err(|err| Error::Internal {
             message: format!("build authorization context: {err}"),
@@ -796,6 +816,22 @@ impl Pdp {
         })?;
         Ok(EntityUid::from_type_name_and_id(type_name.clone(), eid))
     }
+}
+
+/// The per-action context attributes, resolved by the PDP rather than
+/// supplied: which role a `RoleAssign` grants (ADR-0015 decision 5),
+/// whether a standing lapse covers a `MemoryRead` (ADR-0037 decision 9),
+/// and which tier that read is asking about (ADR-0038 decision 2).
+///
+/// One struct rather than three parameters because they arrive together and
+/// are set together — and because the schema requires each of them for its
+/// action, so a caller that forgets one gets a build error rather than a
+/// dropped policy.
+#[derive(Debug, Clone, Copy)]
+struct RequestContext {
+    grant: Option<Role>,
+    lapsed: bool,
+    sensitivity: Option<Sensitivity>,
 }
 
 /// The principal's effective roles at the resource (AUTHZ-3, ADR-0015
@@ -887,7 +923,13 @@ fn covers(
 }
 
 /// The grants bearing on one decision — [`covers`] over the context's rows,
+/// bounded by the tier each grant declared (AUTHZ-5, ADR-0038 decision 6),
 /// and empty for every action no lapse may relax.
+///
+/// A decision with no tier in context relaxes nothing, which cannot happen
+/// for the one lapsable action — [`Pdp::request`] refuses to build a
+/// `MemoryRead` request without one — and is the fail-closed reading if the
+/// vocabulary ever grows an action whose seam has no tier.
 fn lapsing<'a>(
     action: Action,
     resource: Resource,
@@ -899,10 +941,12 @@ fn lapsing<'a>(
         Resource::Tenant(_) => None,
     };
     context.lapses.iter().filter(move |lapse| {
-        let (Some(wanted), Some(target)) = (wanted, target) else {
+        let (Some(wanted), Some(target), Some(sensitivity)) = (wanted, target, context.sensitivity)
+        else {
             return false;
         };
         covers(lapse, context.principal_scopes, wanted, target)
+            && lapse.grants_at(wanted, target, sensitivity)
     })
 }
 

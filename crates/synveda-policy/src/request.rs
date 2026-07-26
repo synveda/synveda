@@ -5,7 +5,8 @@
 use std::fmt;
 
 use synveda_types::{
-    Error, HierarchyNode, Lapse, PolicyAssignment, Result, Role, RoleBinding, ScopeId, TenantId,
+    Error, HierarchyNode, Lapse, PolicyAssignment, Result, Role, RoleBinding, ScopeId, Sensitivity,
+    TenantId,
 };
 
 /// Who is asking: a verified token subject resolved to a tenant (TEN-1)
@@ -61,6 +62,23 @@ pub enum Action {
     /// principal's own personal scope role-free (zero-config) and bound
     /// content roles beyond it.
     MemoryWrite,
+    /// Run a classification proposal's effect at the resource scope: move
+    /// records to the sensitivity their proposed versions carry (AUTHZ-5,
+    /// ADR-0038 decision 9).
+    ///
+    /// Its own action rather than [`Action::MemoryWrite`], on
+    /// [`Action::ChannelRollback`]'s separability rule: the write floor
+    /// grants every principal `MemoryWrite` at its own home, and a pack must
+    /// be able to say "you may write here" without saying "you may classify
+    /// here".
+    ///
+    /// Like publishing, the route resolves the approval matrix on top of
+    /// this decision — at the **maximum** of the current and proposed tiers,
+    /// so a declassification is priced at the tier it is leaving — and
+    /// additionally requires [`Action::MemoryRead`] at the working tier,
+    /// which is the whose-material question every governance act asks
+    /// (ADR-0038 decision 10).
+    MemoryClassify,
     /// List/read quarantined observe events: the tenant's pending queue
     /// (the tenant resource) or a subtree's (a scope) — `/v1/quarantine`
     /// (MEM-2, ADR-0021 decision 6).
@@ -169,6 +187,7 @@ impl Action {
             Action::HierarchyDelete => "hierarchy.delete",
             Action::MemoryRead => "memory.read",
             Action::MemoryWrite => "memory.write",
+            Action::MemoryClassify => "memory.classify",
             Action::QuarantineRead => "quarantine.read",
             Action::QuarantineReview => "quarantine.review",
             Action::PolicyRead => "policy.read",
@@ -198,6 +217,7 @@ impl Action {
             Action::HierarchyDelete => "HierarchyDelete",
             Action::MemoryRead => "MemoryRead",
             Action::MemoryWrite => "MemoryWrite",
+            Action::MemoryClassify => "MemoryClassify",
             Action::QuarantineRead => "QuarantineRead",
             Action::QuarantineReview => "QuarantineReview",
             Action::PolicyRead => "PolicyRead",
@@ -247,7 +267,12 @@ impl fmt::Display for Resource {
 /// What the engine cannot fetch itself (seed §2.4: policy knows nothing of
 /// storage): the caller supplies the data entities are materialised from
 /// and the effective pack is resolved from (ADR-0014 decision 3).
-/// AUTHZ-5 adds ABAC attributes (sensitivity, residency, channel, ...) here.
+///
+/// ABAC arrived with AUTHZ-5 as exactly one attribute —
+/// [`AuthzContext::sensitivity`] — because a closed, ordered vocabulary is
+/// the only kind a per-scope seam can be asked about without holding a
+/// record (ADR-0038 decision 1). Channel, residency, time-of-day and
+/// purpose-of-use are refused or deferred there, each for its own reason.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AuthzContext<'a> {
     /// The resource's scope chain — the node and its ancestors, in any
@@ -284,6 +309,16 @@ pub struct AuthzContext<'a> {
     /// `RoleAssign` decision without it fails closed; other actions
     /// ignore it.
     pub grant: Option<Role>,
+    /// For [`Action::MemoryRead`] only: the tier being asked about, passed
+    /// to policies as `context.sensitivity` (AUTHZ-5, ADR-0038 decision 2).
+    /// A `MemoryRead` decision without it fails closed — the `grant`
+    /// discipline, applied to the attribute the base layer's `restricted`
+    /// forbid stands on; other actions ignore it.
+    ///
+    /// One tier per decision, never a ceiling: the read path asks per tier
+    /// and keeps the answers as a set, so a pack that says something
+    /// non-contiguous gets exactly what it said (decision 3).
+    pub sensitivity: Option<Sensitivity>,
     /// The lapses standing over the caller **as the caller's own read
     /// found them** (AUTHZ-4, ADR-0037 decision 9): grants whose grantee
     /// scope is on [`AuthzContext::principal_scopes`], neither revoked nor

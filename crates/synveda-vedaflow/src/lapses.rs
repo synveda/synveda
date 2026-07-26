@@ -44,12 +44,20 @@ impl LapseAsset {
     /// `duration_secs` is rendered as a JSON number, which the canonical
     /// rule admits because it is an integer — the one case
     /// [`canonical_json`] accepts, and the reason it rejects floats.
+    ///
+    /// `max_sensitivity` is always written, including at the working tier
+    /// (AUTHZ-5, ADR-0038 decision 6). It is the term that decides what the
+    /// approval matrix asks for, so it belongs in the address unconditionally
+    /// — omitting it when it happens to be the default would make two grants
+    /// with different requirements address identically the day the default
+    /// changes.
     #[must_use]
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let value = json!({
             "action": self.terms.action.as_str(),
             "duration_secs": self.terms.duration_secs,
             "grantee_scope": self.terms.grantee_scope_id.as_uuid().to_string(),
+            "max_sensitivity": self.terms.max_sensitivity.as_str(),
             "reason": self.terms.reason,
             "target_scope": self.terms.target_scope_id.as_uuid().to_string(),
         });
@@ -110,10 +118,20 @@ impl LapseAsset {
                 message: format!("lapse object field {name:?} is not a scope id: {err}"),
             })
         };
+        // An object written before AUTHZ-5 has no tier, and it means the
+        // working one: the read path composed nothing above `internal` when
+        // it was approved, so that is what its approvers consented to
+        // (ADR-0038 decision 6). Absent is a known shape; present-and-wrong
+        // is still a drift, and still says so.
+        let max_sensitivity = match value.get("max_sensitivity") {
+            None => synveda_types::Sensitivity::WORKING,
+            Some(_) => field("max_sensitivity")?.parse()?,
+        };
         Ok(LapseTerms {
             grantee_scope_id: scope("grantee_scope")?,
             target_scope_id: scope("target_scope")?,
             action: field("action")?.parse()?,
+            max_sensitivity,
             duration_secs,
             reason: field("reason")?,
         })
@@ -152,7 +170,7 @@ pub async fn read_lapse(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use synveda_types::{LapseAction, ScopeId};
+    use synveda_types::{LapseAction, ScopeId, Sensitivity};
     use uuid::Uuid;
 
     fn terms() -> LapseTerms {
@@ -160,6 +178,7 @@ mod tests {
             grantee_scope_id: ScopeId::from_uuid(Uuid::from_bytes([1; 16])),
             target_scope_id: ScopeId::from_uuid(Uuid::from_bytes([2; 16])),
             action: LapseAction::MemoryRead,
+            max_sensitivity: Sensitivity::Internal,
             duration_secs: 3_600,
             reason: "joint incident review".to_owned(),
         }
@@ -173,6 +192,7 @@ mod tests {
             "action",
             "duration_secs",
             "grantee_scope",
+            "max_sensitivity",
             "reason",
             "target_scope",
         ]
@@ -209,6 +229,14 @@ mod tests {
             },
             LapseTerms {
                 target_scope_id: ScopeId::from_uuid(Uuid::from_bytes([9; 16])),
+                ..terms()
+            },
+            // The tier is a term like any other, and the one that decides
+            // what the matrix asks for: an approval given for a working-tier
+            // grant can never carry to a restricted one (ADR-0038
+            // decision 6).
+            LapseTerms {
+                max_sensitivity: Sensitivity::Restricted,
                 ..terms()
             },
         ];

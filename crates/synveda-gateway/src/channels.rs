@@ -292,20 +292,6 @@ async fn publish_inner(
         Resource::Scope(scope_id),
         None,
     )?;
-    // Two decisions, not one (ADR-0031 decision 12): may this principal
-    // publish here, *and* may it read what it is about to declare
-    // reviewed. Publication is same-scope, so the second decision is the
-    // same scope — but it is the one that keeps a team's curator out of
-    // a teammate's personal channel, because the privacy floor
-    // (ADR-0015 decision 4) denies `MemoryRead` there. Nobody publishes
-    // material they cannot read.
-    authz::decide(
-        state,
-        &input,
-        Action::MemoryRead,
-        Resource::Scope(scope_id),
-        None,
-    )?;
     // The commit's author is the curator who published, which is what
     // makes blame and lineage run through the history (tech plan §2.5).
     // A verified subject with no identity row cannot reach here — the
@@ -353,6 +339,28 @@ async fn publish_inner(
         .map(|version| version.state.sensitivity)
         .max()
         .unwrap_or(Sensitivity::Public);
+    // The second decision (ADR-0031 decision 12): may this principal *read*
+    // what it is about to declare reviewed. Publication is same-scope, so it
+    // is the same scope — but it is the one that keeps a team's curator out
+    // of a teammate's personal channel, because the privacy floor
+    // (ADR-0015 decision 4) denies `MemoryRead` there. Nobody publishes
+    // material they cannot read.
+    //
+    // At the working tier, deliberately (AUTHZ-5, ADR-0038 decision 10):
+    // this guard asks *whose* material it is, not how sensitive it is.
+    // Publishing discloses nothing to the publisher that they did not
+    // already hold, and what prices the tier is the approval matrix
+    // immediately below — resolved at the set's maximum, where `restricted`
+    // means compliance and two distinct approvers. Asking it at the set's
+    // tier instead would make `restricted` material unpublishable by
+    // anyone, which would leave the invariant floor's own cell unreachable
+    // and a restricted lapse with nothing to disclose.
+    authz::decide_read(
+        state,
+        &input,
+        Resource::Scope(scope_id),
+        Sensitivity::WORKING,
+    )?;
     let entries: Vec<String> = versions
         .iter()
         .map(|version| version.id.as_uuid().to_string())
@@ -737,12 +745,18 @@ async fn rollback_inner(
     )?;
     // The second decision, as for publishing: nobody governs material they
     // cannot read (ADR-0031 decision 12, ADR-0036 decision 3).
-    authz::decide(
+    // At the working tier, deliberately: moving a ref discloses no content
+    // to the actor (the response carries ids and addresses, never record
+    // text), so this guard is a *whose-material* question, which the privacy
+    // floor answers identically at every tier (ADR-0038 decision 4). The
+    // asset kind is still validated, which is what refuses a prompt or a
+    // skill by name until PRMT-1 and SKIL-1 bring their own read actions.
+    read_action(channel.asset)?;
+    authz::decide_read(
         state,
         &input,
-        read_action(channel.asset)?,
         Resource::Scope(scope_id),
-        None,
+        Sensitivity::WORKING,
     )?;
     let author = acting_identity(&input, "rewinding")?;
 
@@ -892,12 +906,18 @@ async fn pin_inner(
         Resource::Scope(scope_id),
         None,
     )?;
-    authz::decide(
+    // At the working tier, deliberately: moving a ref discloses no content
+    // to the actor (the response carries ids and addresses, never record
+    // text), so this guard is a *whose-material* question, which the privacy
+    // floor answers identically at every tier (ADR-0038 decision 4). The
+    // asset kind is still validated, which is what refuses a prompt or a
+    // skill by name until PRMT-1 and SKIL-1 bring their own read actions.
+    read_action(channel.asset)?;
+    authz::decide_read(
         state,
         &input,
-        read_action(channel.asset)?,
         Resource::Scope(scope_id),
-        None,
+        Sensitivity::WORKING,
     )?;
     let author = acting_identity(&input, "pinning")?;
 
@@ -972,12 +992,18 @@ async fn unpin_inner(
         Resource::Scope(scope_id),
         None,
     )?;
-    authz::decide(
+    // At the working tier, deliberately: moving a ref discloses no content
+    // to the actor (the response carries ids and addresses, never record
+    // text), so this guard is a *whose-material* question, which the privacy
+    // floor answers identically at every tier (ADR-0038 decision 4). The
+    // asset kind is still validated, which is what refuses a prompt or a
+    // skill by name until PRMT-1 and SKIL-1 bring their own read actions.
+    read_action(channel.asset)?;
+    authz::decide_read(
         state,
         &input,
-        read_action(channel.asset)?,
         Resource::Scope(scope_id),
-        None,
+        Sensitivity::WORKING,
     )?;
 
     let released = vedaflow::unpin(&mut tx, tenant_id, scope_id, channel).await?;

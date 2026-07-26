@@ -18,7 +18,7 @@
 
 use chrono::Utc;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD};
-use synveda_types::{HierarchyNode, PolicyAssignment, ScopeId, ScopeKind, TenantId};
+use synveda_types::{HierarchyNode, PolicyAssignment, ScopeId, ScopeKind, Sensitivity, TenantId};
 
 struct Fixture {
     tenant: TenantId,
@@ -108,6 +108,7 @@ fn alice_reads(pdp: &Pdp, fx: &Fixture, target: &str, assignments: &[PolicyAssig
         Action::MemoryRead,
         Resource::Scope(fx.node(target).id),
         &AuthzContext {
+            sensitivity: Some(Sensitivity::Internal),
             scopes: &scopes,
             principal_scopes: &principal_scopes,
             assignments,

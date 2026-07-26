@@ -19,7 +19,7 @@
 
 use chrono::Utc;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
-use synveda_types::{HierarchyNode, Role, RoleBinding, ScopeId, ScopeKind, TenantId};
+use synveda_types::{HierarchyNode, Role, RoleBinding, ScopeId, ScopeKind, Sensitivity, TenantId};
 
 struct Fixture {
     tenant: TenantId,
@@ -127,6 +127,7 @@ fn decide(
         action,
         resource,
         &AuthzContext {
+            sensitivity: Some(Sensitivity::Internal),
             scopes: &scopes,
             principal_scopes: &principal_scopes,
             role_bindings: bindings,

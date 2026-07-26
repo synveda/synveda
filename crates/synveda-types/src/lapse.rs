@@ -21,7 +21,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, IdentityId, LapseId, ProposalId, ScopeId, TenantId};
+use crate::{Error, IdentityId, LapseId, ProposalId, ScopeId, Sensitivity, TenantId};
 
 /// The longest a lapse's reason may be. The reason is mandatory, travels
 /// into the audit chain, and is read by two approvers and later by an
@@ -201,10 +201,15 @@ impl Default for LapseConfig {
 ///
 /// These are the bytes of the `AssetKind::Policy` object the proposal's
 /// commit names, so they are what the approvals bind. There is deliberately
-/// no record-type or sensitivity qualifier: the seam a lapse widens decides
-/// once per scope with no record in hand, and a stored narrowing that
-/// nothing applies is a widening wearing a narrowing's name (decision 6).
-/// AUTHZ-5 brings per-record context and the field arrives with it.
+/// no record-*type* qualifier: the seam a lapse widens decides once per
+/// scope with no record in hand, and a stored narrowing that nothing
+/// applies is a widening wearing a narrowing's name (decision 6).
+///
+/// [`LapseTerms::max_sensitivity`] is the exception AUTHZ-5 earned, and it
+/// is an exception for a reason rather than a change of mind: a tier is a
+/// closed, ordered vocabulary, so the decision seam can be asked about one
+/// without holding a record (ADR-0038 decision 1). A class cannot, and
+/// stays refused.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LapseTerms {
@@ -217,12 +222,31 @@ pub struct LapseTerms {
     pub target_scope_id: ScopeId,
     /// What is relaxed.
     pub action: LapseAction,
+    /// The most sensitive material this grant discloses (AUTHZ-5, ADR-0038
+    /// decision 6).
+    ///
+    /// **The approval matrix resolves at this tier**, so declaring
+    /// `restricted` is what pulls in the invariant floor — the `compliance`
+    /// role and two distinct approvers, under every pack, unauthorable away
+    /// (ADR-0032 decision 4). Nobody wrote a rule for that; declaring what
+    /// you are disclosing is the rule.
+    ///
+    /// Defaults to [`Sensitivity::WORKING`] on the wire, which is what every
+    /// grant written before this field existed means.
+    #[serde(default = "working_tier")]
+    pub max_sensitivity: Sensitivity,
     /// How long the grant runs once its effect executes. Seconds, and with
     /// no minimum — which is what lets an acceptance test observe a real
     /// expiry rather than a clock it controls (ADR-0037 decision 4).
     pub duration_secs: u32,
     /// Why. Mandatory, by the feature's own text and seed §6's example.
     pub reason: String,
+}
+
+/// The tier a lapse means when it says nothing — see
+/// [`LapseTerms::max_sensitivity`].
+fn working_tier() -> Sensitivity {
+    Sensitivity::WORKING
 }
 
 impl LapseTerms {
@@ -290,10 +314,20 @@ impl LapseTerms {
 
     /// The one-line summary the proposal title and the commit message both
     /// carry — the human rendering of the same fact the structure holds.
+    ///
+    /// The tier is named whenever it is above the working one, because that
+    /// is the half of the terms that decides what the matrix asks for: a
+    /// reviewer reading a queue should see "up to restricted" before they
+    /// open anything.
     #[must_use]
     pub fn summary(&self) -> String {
+        let tier = if self.max_sensitivity > Sensitivity::WORKING {
+            format!(" up to {}", self.max_sensitivity)
+        } else {
+            String::new()
+        };
         format!(
-            "lapse: {} may {} at {} for {}",
+            "lapse: {} may {} at {}{tier} for {}",
             self.grantee_scope_id,
             self.action,
             self.target_scope_id,
@@ -322,6 +356,10 @@ pub struct Lapse {
     pub target_scope_id: ScopeId,
     /// What is relaxed.
     pub action: LapseAction,
+    /// The most sensitive material this grant discloses, carried from the
+    /// reviewed terms — and the tier its approval matrix resolved at
+    /// (AUTHZ-5, ADR-0038 decision 6).
+    pub max_sensitivity: Sensitivity,
     /// Why, carried from the reviewed terms.
     pub reason: String,
     /// When the effect ran — the instant the window starts, never the
@@ -355,9 +393,29 @@ impl Lapse {
 
     /// Whether this grant covers `action` at `resource` — the target scope
     /// itself, never its subtree (ADR-0037 decision 8).
+    ///
+    /// Scope-level only: this is the containment question the read path's
+    /// *plan* asks, where no tier is in hand yet. A decision asks
+    /// [`Lapse::grants_at`], which is this plus the tier.
     #[must_use]
     pub fn grants(&self, action: LapseAction, resource: ScopeId) -> bool {
         self.action == action && self.target_scope_id == resource
+    }
+
+    /// Whether this grant covers `action` at `resource` for material at
+    /// `sensitivity` (AUTHZ-5, ADR-0038 decision 6).
+    ///
+    /// The declared ceiling is what two approvers consented to, so it bounds
+    /// what the grant reaches: a grant written for the working tier does not
+    /// quietly become a door to `restricted` because somebody asked.
+    #[must_use]
+    pub fn grants_at(
+        &self,
+        action: LapseAction,
+        resource: ScopeId,
+        sensitivity: Sensitivity,
+    ) -> bool {
+        self.grants(action, resource) && sensitivity <= self.max_sensitivity
     }
 
     /// How the grant ended, for an audit payload and a listing.
@@ -446,6 +504,7 @@ mod tests {
             grantee_scope_id: scope(1),
             target_scope_id: scope(2),
             action: LapseAction::MemoryRead,
+            max_sensitivity: Sensitivity::Internal,
             duration_secs: 3_600,
             reason: "joint incident review".to_owned(),
         }
@@ -459,6 +518,7 @@ mod tests {
             grantee_scope_id: scope(1),
             target_scope_id: scope(2),
             action: LapseAction::MemoryRead,
+            max_sensitivity: Sensitivity::Internal,
             reason: "joint incident review".to_owned(),
             granted_at: expires_at - TimeDelta::seconds(3_600),
             expires_at,
@@ -678,7 +738,8 @@ mod tests {
         let json = serde_json::to_string(&terms()).unwrap();
         assert_eq!(serde_json::from_str::<LapseTerms>(&json).unwrap(), terms());
         // A qualifier this feature deliberately does not enforce must not
-        // parse into silence (ADR-0037 decision 6).
+        // parse into silence (ADR-0037 decision 6; ADR-0038 decision 17
+        // keeps class refused while sensitivity became enforceable).
         let with_qualifier = format!(
             r#"{{"grantee_scope_id":"{}","target_scope_id":"{}","action":"memory.read",
                 "duration_secs":60,"reason":"r","classes":["procedure"]}}"#,
@@ -687,6 +748,66 @@ mod tests {
         );
         let err = serde_json::from_str::<LapseTerms>(&with_qualifier).expect_err("unknown field");
         assert!(err.to_string().contains("classes"), "{err}");
+    }
+
+    /// Terms written before the ceiling existed mean the working tier —
+    /// which is what they granted, since the read path composed nothing
+    /// above `internal` (ADR-0038 decision 6).
+    #[test]
+    fn terms_without_a_declared_tier_mean_the_working_one() {
+        let without = format!(
+            r#"{{"grantee_scope_id":"{}","target_scope_id":"{}","action":"memory.read",
+                "duration_secs":60,"reason":"joint incident review"}}"#,
+            scope(1),
+            scope(2)
+        );
+        let parsed = serde_json::from_str::<LapseTerms>(&without).expect("ceiling is optional");
+        assert_eq!(parsed.max_sensitivity, Sensitivity::Internal);
+        assert_eq!(Sensitivity::WORKING, Sensitivity::Internal);
+    }
+
+    /// The declared ceiling bounds what the grant reaches. Two approvers
+    /// consented to a tier, not to a scope.
+    #[test]
+    fn a_grant_reaches_no_further_up_the_tiers_than_it_declared() {
+        let now = Utc::now();
+        let working = lapse(now + TimeDelta::seconds(60));
+        assert!(working.grants_at(LapseAction::MemoryRead, scope(2), Sensitivity::Public));
+        assert!(working.grants_at(LapseAction::MemoryRead, scope(2), Sensitivity::Internal));
+        assert!(
+            !working.grants_at(LapseAction::MemoryRead, scope(2), Sensitivity::Confidential),
+            "a working-tier grant is not a door to confidential material"
+        );
+        assert!(!working.grants_at(LapseAction::MemoryRead, scope(2), Sensitivity::Restricted));
+
+        let restricted = Lapse {
+            max_sensitivity: Sensitivity::Restricted,
+            ..lapse(now + TimeDelta::seconds(60))
+        };
+        for tier in Sensitivity::ALL {
+            assert!(
+                restricted.grants_at(LapseAction::MemoryRead, scope(2), tier),
+                "a restricted-tier grant reaches {tier}"
+            );
+        }
+        // The scope rule is unchanged by the tier: a neighbour is still a
+        // neighbour at every tier the grant declares.
+        assert!(!restricted.grants_at(LapseAction::MemoryRead, scope(3), Sensitivity::Public));
+    }
+
+    #[test]
+    fn the_summary_names_a_tier_only_when_it_is_above_the_working_one() {
+        assert!(
+            !terms().summary().contains("up to"),
+            "{}",
+            terms().summary()
+        );
+        let restricted = LapseTerms {
+            max_sensitivity: Sensitivity::Restricted,
+            ..terms()
+        };
+        let summary = restricted.summary();
+        assert!(summary.contains("up to restricted"), "{summary}");
     }
 
     #[test]

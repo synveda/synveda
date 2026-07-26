@@ -29,7 +29,7 @@ use synveda_policy::{
 };
 use synveda_types::{
     ApprovalMatrix, HierarchyNode, IdentityId, Lapse, LapseAction, LapseConfig, LapseId,
-    PackConfig, PolicyAssignment, ProposalId, ScopeId, ScopeKind, TenantId,
+    PackConfig, PolicyAssignment, ProposalId, ScopeId, ScopeKind, Sensitivity, TenantId,
 };
 
 struct Fixture {
@@ -79,8 +79,15 @@ impl Fixture {
         }
     }
 
-    /// A grant from `grantee` to `target`, standing for an hour.
+    /// A grant from `grantee` to `target`, standing for an hour at the
+    /// working tier — what every grant meant before AUTHZ-5 gave a lapse a
+    /// declared ceiling (ADR-0038 decision 6).
     fn lapse(&self, grantee: &str, target: &str) -> Lapse {
+        self.lapse_at(grantee, target, Sensitivity::Internal)
+    }
+
+    /// A grant that declares how sensitive the material it discloses may be.
+    fn lapse_at(&self, grantee: &str, target: &str, max_sensitivity: Sensitivity) -> Lapse {
         let now = Utc::now();
         Lapse {
             id: LapseId::new(),
@@ -89,6 +96,7 @@ impl Fixture {
             grantee_scope_id: self.node(grantee).id,
             target_scope_id: self.node(target).id,
             action: LapseAction::MemoryRead,
+            max_sensitivity,
             reason: "joint incident review".to_owned(),
             granted_at: now,
             expires_at: now + TimeDelta::hours(1),
@@ -150,6 +158,7 @@ fn read(
         Action::MemoryRead,
         Resource::Scope(fx.node(target).id),
         &AuthzContext {
+            sensitivity: Some(Sensitivity::Internal),
             scopes: &scopes,
             principal_scopes: &principal_scopes,
             assignments,
@@ -455,6 +464,7 @@ fn only_the_lapsable_action_carries_a_grant() {
             Action::MemoryWrite,
             Resource::Scope(fx.node("team-b").id),
             &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 principal_scopes: &principal_scopes,
                 assignments: &assignments,

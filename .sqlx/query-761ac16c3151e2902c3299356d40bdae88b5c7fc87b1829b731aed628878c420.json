@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,\n               action, reason, granted_at, expires_at, granted_by,\n               revoked_at, revoked_by, revoke_reason, expiry_recorded_at\n        from policy_lapses where tenant_id = $1 and id = $2\n        ",
+  "query": "\n        select tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,\n               action, max_sensitivity, reason, granted_at, expires_at, granted_by,\n               revoked_at, revoked_by, revoke_reason, expiry_recorded_at\n        from policy_lapses where tenant_id = $1 and id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -35,41 +35,46 @@
       },
       {
         "ordinal": 6,
-        "name": "reason",
+        "name": "max_sensitivity",
         "type_info": "Text"
       },
       {
         "ordinal": 7,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "granted_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "expires_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "granted_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "revoked_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "revoked_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "revoke_reason",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "expiry_recorded_at",
         "type_info": "Timestamptz"
       }
@@ -91,11 +96,12 @@
       false,
       false,
       false,
+      false,
       true,
       true,
       true,
       true
     ]
   },
-  "hash": "8204dbd9cd5a5d6360aefca0992e0365fca2a486886f544d95c93b56ebf93705"
+  "hash": "761ac16c3151e2902c3299356d40bdae88b5c7fc87b1829b731aed628878c420"
 }

@@ -13,7 +13,7 @@ use synveda_policy::{
 };
 use synveda_types::{
     Error, HierarchyNode, PackConfig, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind,
-    TenantId,
+    Sensitivity, TenantId,
 };
 
 const ADMIN_ACTIONS: [Action; 6] = [
@@ -140,6 +140,7 @@ fn the_default_pack_is_regulated_strict_and_admits_bound_admins() {
     let alice = principal(tenant);
     let bindings = [admin_binding(tenant)];
     let context = AuthzContext {
+        sensitivity: Some(Sensitivity::Internal),
         scopes: &scopes,
         role_bindings: &bindings,
         ..Default::default()
@@ -151,7 +152,7 @@ fn the_default_pack_is_regulated_strict_and_admits_bound_admins() {
             .expect("authorize");
         assert!(decision.allowed, "{action} must be allowed on own scope");
         assert_eq!(decision.pack_name, REGULATED_STRICT);
-        assert_eq!(decision.pack_version, 9);
+        assert_eq!(decision.pack_version, 10);
         assert!(
             !decision.determining.is_empty(),
             "an allow must name its permitting policies"
@@ -167,6 +168,7 @@ fn the_default_pack_is_regulated_strict_and_admits_bound_admins() {
                 action,
                 Resource::Tenant(tenant),
                 &AuthzContext {
+                    sensitivity: Some(Sensitivity::Internal),
                     role_bindings: &bindings,
                     ..Default::default()
                 },
@@ -195,6 +197,7 @@ fn the_base_quarantine_forbid_is_compiled_into_stored_packs() {
     .expect("install test pack");
     let assignments = [assignment(tenant, org_of(&scopes), "authz2-blanket")];
     let context = AuthzContext {
+        sensitivity: Some(Sensitivity::Internal),
         scopes: &scopes,
         assignments: &assignments,
         ..Default::default()
@@ -243,6 +246,7 @@ fn the_default_pack_denies_a_foreign_principal_everything() {
     let team = team_of(&scopes);
     let intruder = principal(TenantId::new());
     let context = AuthzContext {
+        sensitivity: Some(Sensitivity::Internal),
         scopes: &scopes,
         ..Default::default()
     };
@@ -272,7 +276,7 @@ fn the_default_pack_denies_a_foreign_principal_everything() {
             assert_eq!(action, "hierarchy.read");
             assert_eq!(resource, format!("tenant {victim}"));
             assert!(
-                reason.contains(&format!("{REGULATED_STRICT}@9")),
+                reason.contains(&format!("{REGULATED_STRICT}@10")),
                 "denial must name pack@version, got: {reason}"
             );
         }
@@ -326,6 +330,7 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
             Action::HierarchyDelete,
             Resource::Scope(team),
             &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 assignments: &at_dept,
                 role_bindings: &bindings,
@@ -344,6 +349,7 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
             Action::HierarchyDelete,
             Resource::Scope(org),
             &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes[..1],
                 assignments: &at_dept,
                 role_bindings: &bindings,
@@ -365,6 +371,7 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
             Action::HierarchyDelete,
             Resource::Scope(team),
             &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 assignments: &overridden,
                 role_bindings: &bindings,
@@ -382,6 +389,7 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
             Action::HierarchyDelete,
             Resource::Scope(team),
             &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 default_pack: Some("authz2-readonly"),
                 role_bindings: &bindings,
@@ -414,6 +422,7 @@ fn policy_assign_is_decided_under_the_inherited_pack() {
     let assignments = [assignment(tenant, team, "authz2-frozen")];
     let bindings = [admin_binding(tenant)];
     let context = AuthzContext {
+        sensitivity: Some(Sensitivity::Internal),
         scopes: &scopes,
         assignments: &assignments,
         role_bindings: &bindings,
@@ -470,6 +479,7 @@ fn a_dangling_assignment_falls_back_to_regulated_strict() {
             Action::HierarchyRead,
             Resource::Scope(team),
             &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 assignments: &assignments,
                 role_bindings: &bindings,
@@ -524,6 +534,7 @@ fn stored_packs_install_and_remove_by_name_per_tenant() {
             Action::HierarchyDelete,
             Resource::Scope(team_of(&other_scopes)),
             &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
                 scopes: &other_scopes,
                 assignments: &other_assignments,
                 role_bindings: &other_bindings,
@@ -538,6 +549,7 @@ fn stored_packs_install_and_remove_by_name_per_tenant() {
     let assignments = [assignment(tenant, team, "authz2-readonly")];
     let bindings = [admin_binding(tenant)];
     let context = AuthzContext {
+        sensitivity: Some(Sensitivity::Internal),
         scopes: &scopes,
         assignments: &assignments,
         role_bindings: &bindings,
@@ -608,6 +620,7 @@ fn an_explicit_forbid_reports_its_determining_policy() {
             Action::HierarchyDelete,
             Resource::Scope(team),
             &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 assignments: &assignments,
                 ..Default::default()
@@ -676,6 +689,7 @@ fn invalid_packs_are_rejected_and_leave_the_previous_pack_in_force() {
             Action::HierarchyDelete,
             Resource::Scope(team),
             &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 assignments: &assignments,
                 ..Default::default()

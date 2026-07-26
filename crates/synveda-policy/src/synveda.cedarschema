@@ -12,8 +12,17 @@
 // (ADR-0015 decision 3): `context.roles` is the principal's effective
 // role set at the resource, resolved by the PDP from caller-supplied
 // binding rows — tenant-wide bindings always, node bindings when the
-// bound node is on the resource's chain. AUTHZ-5 adds ABAC context;
-// HIER-3 takes over entity materialisation.
+// bound node is on the resource's chain. HIER-3 takes over entity
+// materialisation.
+//
+// ABAC context arrived with AUTHZ-5 (ADR-0038) and is one attribute:
+// `context.sensitivity` on MemoryRead. Channel stays the pack's
+// composition config — one rule, one place (decision 14); residency waits
+// for a second region and may turn out to be a composition rule rather
+// than a permit (decision 15); time-of-day would be a second clock in a
+// product that put expiry in a row (decision 16); and purpose-of-use is
+// refused outright as a widening, because a disclosure is initiated on the
+// disclosing side (decision 17).
 namespace Synveda {
     entity Tenant;
 
@@ -58,15 +67,28 @@ namespace Synveda {
     // principal's inject/recall composition include memories attached to
     // this scope? CTX-1/2/3 ask exactly this question per candidate scope.
     //
+    // Since AUTHZ-5 it asks per candidate scope *and tier* (ADR-0038
+    // decision 1). `sensitivity` is one of `public`, `internal`,
+    // `confidential`, `restricted` — a closed, ordered vocabulary, which is
+    // precisely why a per-record attribute can be decided here at all: the
+    // seam holds no record, but it can be asked about each of four tiers
+    // before any record is fetched. A pack names the tiers it permits
+    // (`["public", "internal"].contains(context.sensitivity)`) rather than
+    // comparing an encoding, because with four values the enumeration is the
+    // documentation and there is no arithmetic to get wrong.
+    //
     // `lapsed` is required — not optional — for the reason `grant` is on
     // RoleAssign: a policy that referenced a missing attribute would error,
     // Cedar would drop it, and the base layer's lapse permit would silently
     // stop existing. The PDP sets it on every MemoryRead request, true only
     // when a standing grant covers exactly this (principal, action, scope)
-    // *and* the pack in force at that scope still admits lapses at all
-    // (AUTHZ-4, ADR-0037 decisions 5 and 9).
+    // **at or above this tier** *and* the pack in force at that scope still
+    // admits lapses at all (AUTHZ-4, ADR-0037 decisions 5 and 9; AUTHZ-5,
+    // ADR-0038 decision 6). `sensitivity` is required for the same reason:
+    // the base layer's `restricted` forbid must never go missing for want of
+    // an attribute.
     //
-    // It is deliberately the only action that carries it. A lapse relaxes a
+    // They are deliberately the only action's attributes. A lapse relaxes a
     // closed vocabulary (synveda_types::LapseAction), and an attribute that
     // existed on every action would be an invitation to widen that
     // vocabulary in a pack rather than in a reviewed diff.
@@ -74,7 +96,28 @@ namespace Synveda {
         appliesTo {
             principal: [Principal],
             resource: [Scope],
-            context: { roles: Set<String>, lapsed: Bool },
+            context: { roles: Set<String>, lapsed: Bool, sensitivity: String },
+        };
+
+    // Reclassification (AUTHZ-5, ADR-0038 decision 9): may this principal
+    // run a classification proposal's effect at this scope — moving records
+    // to the sensitivity their proposed versions carry?
+    //
+    // Its own action rather than MemoryWrite, on ChannelRollback's
+    // separability rule: the write floor grants every principal MemoryWrite
+    // at its own home, and a pack must be able to say "you may write here"
+    // without saying "you may classify here".
+    //
+    // It carries no sensitivity attribute, and that is not an oversight: how
+    // much authority a reclassification needs is the approval matrix's
+    // arithmetic, resolved at the maximum of the current and proposed tiers,
+    // and duplicating that as a Cedar condition would put the rule in two
+    // places that can disagree.
+    action MemoryClassify
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String> },
         };
 
     // The write seam (MEM-1, ADR-0020 decision 3): may this principal

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,\n               action, reason, granted_at, expires_at, granted_by,\n               revoked_at, revoked_by, revoke_reason, expiry_recorded_at\n        from policy_lapses\n        where tenant_id = $1\n          and expiry_recorded_at is null\n          and revoked_at is null\n          and expires_at <= now()\n        order by expires_at, id\n        limit $2\n        ",
+  "query": "\n        select tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,\n               action, max_sensitivity, reason, granted_at, expires_at, granted_by,\n               revoked_at, revoked_by, revoke_reason, expiry_recorded_at\n        from policy_lapses\n        where tenant_id = $1 and target_scope_id = $2\n        order by granted_at desc, id\n        ",
   "describe": {
     "columns": [
       {
@@ -35,41 +35,46 @@
       },
       {
         "ordinal": 6,
-        "name": "reason",
+        "name": "max_sensitivity",
         "type_info": "Text"
       },
       {
         "ordinal": 7,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "granted_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "expires_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "granted_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "revoked_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "revoked_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "revoke_reason",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "expiry_recorded_at",
         "type_info": "Timestamptz"
       }
@@ -77,10 +82,11 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -97,5 +103,5 @@
       true
     ]
   },
-  "hash": "60ee229d317ccf580c48ca79916e563c56cddcfb983e348bfe8f68bf3ae3e3cd"
+  "hash": "dcb6e5d3e4d2e93f4830badd1911404ee7fde5ec0733755218ddfaec1e340d3c"
 }

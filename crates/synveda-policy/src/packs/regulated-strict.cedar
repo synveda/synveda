@@ -1,6 +1,6 @@
-// regulated-strict@9 — the default product pack (seed §6, ADR-0014,
+// regulated-strict@10 — the default product pack (seed §6, ADR-0014,
 // ADR-0015, ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032, ADR-0036,
-// ADR-0037).
+// ADR-0037, ADR-0038).
 //
 // Deny-first: composition reads the principal's own chain, plus whatever
 // a content-role binding explicitly grants — under this pack a viewer/
@@ -9,6 +9,14 @@
 // this pack does not name is denied by Cedar's default-deny, and the
 // compiled-in base layer forbids quarantined principals everything and
 // guards org-admin escalation.
+//
+// Since AUTHZ-5 every MemoryRead permit also names the tiers it covers
+// (ADR-0038 decision 4), and the three mechanisms are graded by how
+// deliberate they are: membership reads the working tiers, an explicit
+// content-role binding (or one's own home) reaches `confidential`, and
+// `restricted` is reachable by nothing this pack can say — the base layer
+// forbids it outright unless a lapse that declared the tier stands, and such
+// a lapse cleared the invariant floor's compliance requirement to exist.
 
 // The mutating admin planes: steward/org-admin, over the bound subtree —
 // which roles are effective here is resolved from the bindings on the
@@ -49,16 +57,44 @@ permit (
 // The membership floor, role-free (zero-config): the principal (parented
 // to its placement scope) is a member of the resource scope. An unplaced
 // principal has no scope parent and reads nothing.
+//
+// Membership reads the working tiers and no further: belonging to a scope
+// is not a grant, and `confidential` is defined as the tier held to
+// explicitly granted scopes (ADR-0038 decision 4).
 permit (
     principal,
     action == Synveda::Action::"MemoryRead",
     resource
-) when { principal in resource };
+) when {
+    principal in resource
+        && ["public", "internal"].contains(context.sensitivity)
+};
 
-// Content roles read the bound subtree — the explicit-grant mechanism.
-// Personal (user-kind) scopes stay excluded: the privacy floor until
-// AUTHZ-5 classification (ADR-0015 decision 4). Admin and audit roles
-// deliberately grant no content read (least privilege).
+// Your own home, up to `confidential`: material extracted from your own
+// sessions, at your own personal scope. Without this a model's tier
+// proposal could make an author's own memory invisible to them, which is
+// not a control but an accident (ADR-0038 decision 4).
+permit (
+    principal,
+    action == Synveda::Action::"MemoryRead",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+// Content roles read the bound subtree — the explicit-grant mechanism, and
+// therefore the mechanism that reaches `confidential` (ADR-0038 decision 4).
+// Admin and audit roles deliberately grant no content read (least
+// privilege).
+//
+// Personal (user-kind) scopes stay excluded, and AUTHZ-5 resolved that
+// deferral rather than lifting it: classification says how sensitive
+// material is, and the privacy floor is about *whose* it is (ADR-0015
+// decision 4). A tier cannot answer a question about ownership, so the
+// exclusion stays exactly where it was — and a lapse cannot target a
+// user-kind scope either.
 permit (
     principal,
     action == Synveda::Action::"MemoryRead",
@@ -67,6 +103,7 @@ permit (
     resource in principal.tenant
         && context.roles.containsAny(["viewer", "contributor", "curator"])
         && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
 
 // The write floor, role-free (zero-config): every placed principal may
@@ -95,6 +132,38 @@ permit (
     resource in principal.tenant
         && context.roles.containsAny(["contributor", "curator"])
         && resource.kind != "user"
+};
+
+// The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform,
+// like the channel, quarantine and proposal planes and for the same reason
+// — what a tier *means* cannot loosen per pack, or `restricted` stops
+// meaning one thing. The same three roles as publishing, plus the owner at
+// their own home, because classifying your own memory is not an act of
+// authority over anyone else.
+//
+// This decides who may run a classification effect, never how much
+// approval it takes: that is the matrix, resolved at the maximum of the
+// current and proposed tiers. The route additionally requires MemoryRead at
+// the *working* tier — decision 10's whose-material question, the same guard
+// publishing takes — so you may not reclassify material at a scope you are a
+// stranger to, and the top tier stays maintainable by someone who could
+// never compose it.
+permit (
+    principal,
+    action == Synveda::Action::"MemoryClassify",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["curator", "steward", "org-admin"])
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"MemoryClassify",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
 };
 
 // The quarantine review plane (MEM-2, ADR-0021 decision 6): stewards,

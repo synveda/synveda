@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        insert into policy_lapses\n            (tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,\n             action, reason, granted_at, expires_at, granted_by)\n        values ($1, $2, $3, $4, $5, $6, $7, now(),\n                now() + make_interval(secs => $8::double precision), $9)\n        returning tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,\n                  action, reason, granted_at, expires_at, granted_by,\n                  revoked_at, revoked_by, revoke_reason, expiry_recorded_at\n        ",
+  "query": "\n        insert into policy_lapses\n            (tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,\n             action, max_sensitivity, reason, granted_at, expires_at, granted_by)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, now(),\n                now() + make_interval(secs => $9::double precision), $10)\n        returning tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,\n                  action, max_sensitivity, reason, granted_at, expires_at, granted_by,\n                  revoked_at, revoked_by, revoke_reason, expiry_recorded_at\n        ",
   "describe": {
     "columns": [
       {
@@ -35,41 +35,46 @@
       },
       {
         "ordinal": 6,
-        "name": "reason",
+        "name": "max_sensitivity",
         "type_info": "Text"
       },
       {
         "ordinal": 7,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "granted_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "expires_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "granted_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "revoked_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "revoked_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "revoke_reason",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "expiry_recorded_at",
         "type_info": "Timestamptz"
       }
@@ -81,6 +86,7 @@
         "Uuid",
         "Uuid",
         "Uuid",
+        "Text",
         "Text",
         "Text",
         "Float8",
@@ -98,11 +104,12 @@
       false,
       false,
       false,
+      false,
       true,
       true,
       true,
       true
     ]
   },
-  "hash": "5f2b1245af6d21002ba1d106bff74368d262328f1d57e8dcc4533e44a7154965"
+  "hash": "76e2d71b00891ff396bafde68dbb8e48eb07ef9f0886ec593c375b8cee0008da"
 }

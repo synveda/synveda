@@ -40,6 +40,38 @@ impl Sensitivity {
         Sensitivity::Restricted,
     ];
 
+    /// The working tier: what a request means when it says nothing, and
+    /// what the extraction pipeline floors its proposals at (ADR-0022
+    /// decision 7).
+    pub const WORKING: Sensitivity = Sensitivity::Internal;
+
+    /// The highest tier the extraction pipeline may assign (AUTHZ-5,
+    /// ADR-0038 decision 8).
+    ///
+    /// `restricted` is defined by the invariant approval floor as the tier
+    /// carrying a compliance signature (ADR-0032 decision 4), and an
+    /// uncalibrated, self-reported model judgement cannot manufacture one —
+    /// so a model that says `restricted` gets this instead, and the top tier
+    /// arrives only through a reviewed reclassification.
+    pub const MAX_DERIVED: Sensitivity = Sensitivity::Confidential;
+
+    /// Every tier at or below `self`, ascending — the set form of a
+    /// ceiling.
+    ///
+    /// The read path pushes a *set* rather than a ceiling (ADR-0038
+    /// decision 3), because a per-scope answer the PDP produced tier by tier
+    /// need not be contiguous: a pack that permits `confidential` while
+    /// denying `internal` has said something strange, and the honest
+    /// response is to enforce exactly what it said. This is the helper for
+    /// the ordinary case, where a ceiling is what somebody meant.
+    #[must_use]
+    pub fn at_or_below(self) -> Vec<Sensitivity> {
+        Sensitivity::ALL
+            .into_iter()
+            .filter(|level| *level <= self)
+            .collect()
+    }
+
     /// Stable wire name, identical to the serde form.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
@@ -71,5 +103,38 @@ impl FromStr for Sensitivity {
                 message: format!("unknown sensitivity level: {other:?}"),
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_ceiling_expands_to_every_tier_at_or_below_it_ascending() {
+        assert_eq!(Sensitivity::Public.at_or_below(), [Sensitivity::Public]);
+        assert_eq!(
+            Sensitivity::Confidential.at_or_below(),
+            [
+                Sensitivity::Public,
+                Sensitivity::Internal,
+                Sensitivity::Confidential
+            ]
+        );
+        assert_eq!(Sensitivity::Restricted.at_or_below(), Sensitivity::ALL);
+    }
+
+    /// The two product constants, pinned rather than assumed: the tier a
+    /// request means when it says nothing, and the highest one an extractor
+    /// may assign (ADR-0038 decision 8).
+    #[test]
+    fn the_working_tier_and_the_extraction_ceiling_are_what_the_adrs_say() {
+        assert_eq!(Sensitivity::WORKING, Sensitivity::Internal);
+        assert_eq!(Sensitivity::MAX_DERIVED, Sensitivity::Confidential);
+        assert!(
+            Sensitivity::MAX_DERIVED < Sensitivity::Restricted,
+            "no pipeline output may carry the tier that means compliance signed off"
+        );
+        assert!(Sensitivity::WORKING <= Sensitivity::MAX_DERIVED);
     }
 }

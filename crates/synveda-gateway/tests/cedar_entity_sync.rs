@@ -33,7 +33,7 @@ use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD};
 use synveda_store::{rls, role_bindings};
-use synveda_types::{HierarchyNode, Role, ScopeId, TenantId};
+use synveda_types::{HierarchyNode, Role, ScopeId, Sensitivity, TenantId};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"hier-3-test-secret";
@@ -191,6 +191,7 @@ async fn member_reads(
                 scopes: &scopes,
                 principal_scopes: &principal_scopes,
                 default_pack: Some(STANDARD),
+                sensitivity: Some(Sensitivity::WORKING),
                 ..Default::default()
             },
         )

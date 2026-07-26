@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,\n               action, reason, granted_at, expires_at, granted_by,\n               revoked_at, revoked_by, revoke_reason, expiry_recorded_at\n        from policy_lapses\n        where tenant_id = $1\n          and grantee_scope_id = any($2)\n          and revoked_at is null\n          and expires_at > now()\n        order by granted_at, id\n        ",
+  "query": "\n        update policy_lapses\n           set revoked_at = now(), revoked_by = $3, revoke_reason = $4\n         where tenant_id = $1 and id = $2\n           and revoked_at is null\n           and expires_at > now()\n        returning tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,\n                  action, max_sensitivity, reason, granted_at, expires_at, granted_by,\n                  revoked_at, revoked_by, revoke_reason, expiry_recorded_at\n        ",
   "describe": {
     "columns": [
       {
@@ -35,41 +35,46 @@
       },
       {
         "ordinal": 6,
-        "name": "reason",
+        "name": "max_sensitivity",
         "type_info": "Text"
       },
       {
         "ordinal": 7,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "granted_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "expires_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "granted_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "revoked_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "revoked_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "revoke_reason",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "expiry_recorded_at",
         "type_info": "Timestamptz"
       }
@@ -77,10 +82,13 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "UuidArray"
+        "Uuid",
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -97,5 +105,5 @@
       true
     ]
   },
-  "hash": "36e17fbcaf712e8eb3faa1217a42340db23e6fc9723433c22c8d9c1adacff51e"
+  "hash": "506b8991392ca1c18c1c93ab6534d57b8711117f68d00ef7de9e83d2fe50181a"
 }
