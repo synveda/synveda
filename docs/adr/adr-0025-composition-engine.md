@@ -227,8 +227,11 @@ Decisions, specifically:
   stays marked unreviewed).
 - Reversal triggers: EVAL-4 measures estimator bias beyond what
   budget headroom absorbs → per-adapter tokenizer behind the
-  estimator seam; CTX-4's index tier or watermark overhead measured
-  material → short-id watermark scheme; FLOW-1/2 land → commit hashes
+  estimator seam; ~~CTX-4's index tier or watermark overhead measured
+  material → short-id watermark scheme~~ **(measured 2026-07-27, ADR-0041
+  decision 14: the record id is ~9 tokens of an index entry's ~122, so the
+  overhead is the elided body rather than the id; the short-id scheme
+  stays unbuilt and ADR-0041 option 11 records why)**; FLOW-1/2 land → commit hashes
   replace version hashes and channel refs replace the kind stand-in
   (this ADR's decisions 2 and 7 are explicitly transitional); MEM-5
   lands → semantic predicate replaces exact-match, comparator reused.
