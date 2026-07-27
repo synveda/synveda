@@ -1284,6 +1284,264 @@ lesson, which this feature's own demo re-learned on the shared dev
 database and answered the same way they did, with a scratch database per
 run._
 
+_CTX-4 (2026-07-27, ADR-0041): tiered injection. **The defect
+progressive disclosure actually fixes is not token efficiency — it is
+silence.** ADR-0025's first-fit assembly skipped an entry that exceeded
+the remaining budget and carried on; the count reached the audit event as
+`skipped_over_budget` and reached the caller as nothing at all. An agent
+that does not know a runbook exists cannot ask for it, and a thin block
+is indistinguishable from an empty corpus. So a candidate whose body does
+not fit is now offered its **index line** instead of being dropped — the
+body truncated at 320 characters with the record id as the handle,
+rendered through the same code a body line uses, so a body and its index
+form can never disagree about a trust marker.
+
+**The index tier is the same permitted set rendered shallow, and there is
+no new Cedar action.** Index candidates are the candidates `compose`
+already fetched under the plan: the same per-scope `MemoryRead`
+decisions, the same tiers, the same channel rules, the same retention cut
+and pinned exemption. A "may list but not read" verdict was the honest
+reading and the wrong one — a name and a description are content, and a
+second, weaker decision is a second leak surface across every pack × role
+× scope × tier cell the AUTHZ-5 suite covers.
+
+**A demotion happens only when it saves.** Both renderings are estimated,
+the index line is tried only when the body does not fit, and taken only
+when it is strictly cheaper. That one rule is what let a mechanism built
+for assets that do not exist yet ship against a corpus made entirely of
+assets that do: the median memory record is summarised at write time
+(seed §4.2, MEM-3) and is never demoted, because demoting it would spend
+budget to say less. `AssetKind` has five variants and one populated —
+when PRMT-1/2 and SKIL-1 bring assets carrying an authored name and
+description, the index slot renders those, which is why this is a
+per-kind rendering seam rather than a memory-record special case.
+
+**A handle is a name, not a capability.** `POST /v1/recall` takes ids and
+re-runs `composition_plan` exactly as inject does, so an id the current
+plan does not admit is not served — including one that sat in a block
+composed five minutes ago under a role the caller has since lost. Signed
+expiring handles were the obvious performance answer and were rejected
+outright: they would be the first construct in the product to outlive the
+decision that minted it, and every freshness promise since ADR-0014 dies
+there. The plan walk is ~100µs; the promise is worth more. Refusals are
+uniform and silent — a missing id, another tenant's id, a denied scope, a
+tier not earned, a horizon passed and a channel bank mode closed are one
+outcome, absence — so recall never becomes an existence oracle, and a
+request naming ten ids of which three are inadmissible serves seven
+rather than refusing the whole.
+
+**The measurement is the acceptance criterion, so it is a number rather
+than a paragraph.** One corpus composed twice at a deliberately tight
+240-token budget: with the tier `off`, one record named and 80 tokens
+spent; with `demote`, two records named and 217, of which the tier cost
+**122 — 56% of the block**. That is ~90 for the index line, ~23 for the
+legend, ~9 for the id the watermark grew by. Read honestly the tier is
+expensive at that budget and under 8% at the seed §4.4 default of 1,500,
+because the cost is a fixed ~90 per named record against whatever the
+body would have been: nothing at all for the 15-token records MEM-3's
+write-time summarisation produces, roughly 4× for a 360-token runbook,
+one to two orders of magnitude for the context packs and skills PRMT-2
+and SKIL-1 will bring. **ADR-0025's short-id trigger is discharged with a
+number rather than closed** — the id is 9 of the 122, so that scheme
+would recover about 7% of the tier's cost in exchange for read-path state
+or a prefix oracle. The line to watch is the 90, and its lever,
+`index_entry_chars`, is already a pack field.
+
+Two things worth naming. The legend — the one line saying what
+`(recall <id>)` means — is charged to the first demotion, so a block with
+no index entry never pays for it and stays byte-identical to today's; and
+it **must not contain the parenthesised form it describes**, which the
+first draft did and its own acceptance test caught, because an agent
+scanning the block for `(recall …)` finds the legend first and goes
+looking for a record called `<id>`. And ADR-0027's option 6 was
+reconsidered on the record and re-rejected: tiering landing was the
+trigger for revisiting a per-prompt inject at `UserPromptSubmit`, and the
+answer is no — the index tier *reduces* the need for per-prompt
+injection, and recall is one call for one body rather than a whole
+recomposition.
+
+Deferrals and forward obligations: `index_tier: off` restores the
+pre-CTX-4 product byte-identically, which is a test rather than a claim
+(the MEM-5/MEM-6 discipline); a truncated body is a poor description
+until authored assets exist, and inventing one would be the model call
+the read path structurally cannot make — MEM-3 owns it at write time;
+option 9's always-index threshold waits behind the pack knob for bodies
+that far exceed their index lines; option 4's separate index budget is
+the answer if EVAL-4 shows demotions displacing bodies that mattered; a
+demotion can displace a smaller, lower-priority body, which is the seed
+§4.4 gradient doing its job and still a real change in what a fixed
+budget buys; recall pays inject's decision cost without its retrieval leg
+and is deliberately uncapped in body size; and the 32-id cap is a blunt
+instrument against corpus exfiltration where a rate limit is the sharp
+one — AUTH-6's. `context.recalled` is the third primitive's first chained
+event (seed §2.2 principle 5), and `context.injected` gains a per-entry
+tier, so "was that agent given the payments runbook, or only told it
+exists" is answered by reading the chain rather than by re-deriving
+rendered widths from a corpus that has since moved._
+
+_CTX-5 (2026-07-27, ADR-0042): recall becomes a query. **Most of this
+feature shipped in CTX-4, on purpose** — the route, the audit action, and
+a `RecallEntry` already carrying scope, channel, kind, class,
+sensitivity, provenance, the valid window, the object address and
+staleness, which is the feature text's "results labelled with channel,
+provenance, validity" already done. What did not exist was a way to ask a
+question rather than name an answer, a universe wider than the chain, and
+a second time axis. So `POST /v1/recall` takes `{ids}` xor `{query}` xor
+neither-with-an-instant, under one audit action, one 32-entry ceiling and
+one universe: a second way in to one surface rather than a second
+surface.
+
+**The chain-only universe was a cost decision in CTX-1 and had become a
+functional defect.** The packs grant beyond the chain and say so in
+Cedar — `standard` permits the department, every pack permits a content
+role's bound subtree — and under ADR-0024's universe none of those reads
+could be *performed*: grants nothing in the product could exercise,
+carried since CTX-1 and hit from the other side by AUTHZ-4, which found
+the same wall and answered it by widening on lapses alone. The AC asserts
+the fix from the reader's side rather than at the PDP: one corpus, one
+identity, the real `standard` pack, and `POST /v1/inject` returns nothing
+of the sibling team's material while `POST /v1/recall` returns it — with
+`regulated-strict` over the identical corpus still refusing, which is
+what makes the widening **more scopes asked rather than more allowed**.
+
+**The universe is the scopes that can contribute to this request, and
+every one of them is decided.** The ids form decides the scopes that hold
+or publish the named ids; the query form decides the tenant's *occupied*
+scopes — those holding at least one record, plus those whose
+`memory/published` ref is non-empty. That narrowing is cost with no
+semantic content: `admit` reaches records only through a scope-predicated
+derived sweep and a published-member read, so a scope that holds nothing
+and publishes nothing contributes the empty set whether the PDP allowed
+it or denied it. Inferring the universe from a pack's shape would have
+been far cheaper and was refused outright — a second model of what the
+policies mean, living beside the policies, silently under-returning the
+moment a custom pack grants something the heuristic does not know about.
+
+**The broad plan is AUTHZ-4's lapse mechanism generalised rather than a
+new one**: `LapsedScope`'s lapse becomes an `Option` and its candidates
+come from occupancy instead of `lapsed_scopes`, and the per-scope body —
+four `MemoryRead` asks, the target's own effective pack for its channel
+rule, its own horizons, its own tier config — is byte-for-byte the loop
+that was already there, so composition, inject and both recall forms keep
+sharing exactly one answer to "may this caller see this record". A
+widened universe needed a widened *binding* set, which is the one thing
+the design missed: `gather` reads the caller's bindings on their own
+chain, right for inject and silently wrong here, since a binding at a
+scope off that chain is exactly the grant an administrator issues to
+widen someone's reach — one of the two ADR-0024 left unreachable. Recall
+now reads every binding the subject holds in the tenant, while
+`effective_roles_at` still admits one only at a resource whose own chain
+contains its scope, so what widened is what is *read*, never what a
+decision considers. It was found by its own acceptance test failing.
+
+**As-of is two explicit instants, and it rewinds the corpus but never the
+authority.** `as_of` is transaction time and `valid_at` is valid time —
+FND-4's two axes, no third concept — both defaulting to the request
+instant, which makes CTX-4's surface a special case of this one rather
+than a sibling. The PDP decides with the caller's *current* identity,
+roles, packs, lapses and placement whatever the instant says: a leaver, a
+demoted user, a caller whose lapse closed last night reads nothing
+historical, because there is no historical permission to inherit. That is
+ADR-0041's "a handle is a name, not a capability" restated for time, and
+it draws the line to AUD-2 — CTX-5 answers *what was there*, AUD-2
+answers *who could see it*, from the chain that recorded the decisions as
+they were taken.
+
+**The axis is fact versus judgment, and it decides all three.** Where
+material lived is a fact about the past, so a version is attributed to
+its own `scope_id` and that scope is decided. What material *is*, and
+whether the organisation *stands behind* it, are judgments — revisable,
+and a revision governs every read including historical ones. So
+**classification is retroactive**: a version is admitted at the strictest
+tier its record has carried at or after the instant, which means the
+AUTHZ-5 leak suite cannot be walked around with a timestamp, while a
+declassification does not retroactively expose the history written when
+the record was classified. At `as_of = now` the maximum degenerates to
+the current tier, so today's behaviour is unchanged. And the
+`memory/published` tree is read at its current state, never rewound: the
+symmetric reading was tempting and would undo FLOW-7, whose entire claim
+is that a rolled-back instruction reaches not one further agent. A record
+published in March and withdrawn since is still *served* as-of March if
+the caller may read its scope — as derived material, marked unreviewed,
+which is the true statement that nobody stands behind it any more.
+
+**A bare instant sweeps; a query with an instant ranks the survivors.**
+The search indexes hold current truth by construction (ADR-0024 decision
+4) — the sidecar re-reads each changed id's current version, HNSW is over
+live embeddings — so a since-expired record cannot be ranked, only swept
+or named. Rather than pretend a query leg and a time machine compose for
+free, the two shapes are honestly different: `{as_of}` alone reads
+`records_versions` through the same admission and is the complete answer
+to "what did the agent know on March 3rd", which is the `--as-of` demo's
+shape. As-of reaches expired material and never destroyed material —
+MEM-6's two horizons inherited rather than retaken, which is what keeps
+retention real. And the degradation posture inverts from inject's: an
+embedder failure still degrades to sparse-only, but a retrieval failure
+is an honest 5xx, because inject's caller cannot see an error and
+recall's caller asked the question.
+
+**The measured number moved three times, and each move was a different
+lesson.** The plan stage over 512 occupied teams cost 378ms
+re-materialising Cedar's entity store per decision; **one materialisation
+per walk took it to 120ms** — 3.1×, a decision written into the ADR
+before the code existed and the only reason the feature was ever
+plausible, since Cedar's per-decision cost is dominated by building the
+entity store rather than by evaluating policy against it. The next two
+optimisations — resolving the pack once per scope, reading assignments
+once per request — bought nothing measurable, which said the cap and not
+the code was the lever left. At the shipped **32-scope cap the plan stage
+is 13.2ms**, inside the **15ms** ADR-0029 pre-registered for it before
+anyone could tune to the result, and the whole request is 17.1ms of that
+gate's 300ms — so the slice GRPH-3 will claim for graph expansion is
+measured as still being there. Roughly 7.7ms of the 13.2 is fixed cost
+(identity, chain, occupancy, assignment and binding reads) on Docker
+Desktop's virtualised fsync, which makes 32 a dev-hardware number.
+
+Stated plainly, because it is a real limitation on the day this ships
+rather than a theoretical one: **32 occupied scopes is a small universe
+for an enterprise product**, and a tenant wider than that gets a
+genuinely incomplete answer to a query. It is reported — `truncated`,
+with both counts, in the response and on the audit chain — and candidates
+are ordered nearest-first, so what drops is the farthest material rather
+than an arbitrary slice. `SYNVEDA_RECALL_MAX_SCOPES` is the lever for an
+operator who has measured their own plan histogram.
+
+**One MCP tool, over the route that already exists.** `recall` ships as a
+third entry point in `adapters/claude-code` beside the hook and the
+driver, registered through the `mcpServers` slot ADR-0027 reserved for
+it — that trigger discharged as configuration rather than restructuring —
+with `{query?, ids?, as_of?, valid_at?, limit?}` in one tool rather than
+one per shape, so there is no second place for the id/query exclusivity
+to be got wrong. The JSON-RPC framing is written directly rather than
+taken as a dependency: the plugin is `tsc`-built with no bundler and no
+runtime dependencies precisely so enabling it needs no install step, and
+the surface actually needed is `initialize`, `tools/list`, `tools/call`
+and one notification. Its bearer comes from the same `synveda` CLI seam
+the hooks already shell to, and results are rendered by the block's own
+line renderer plus a watermark, so an agent that has read an inject block
+does not learn a second format. ADR-0033's trigger (d) is discharged
+alongside: the promotion sweep's action set gains `context.recalled` —
+the stronger signal that ADR wrote a trigger for — and its evidence names
+which signal it counted, which `promotion.rs` was written to assert.
+
+Deferrals and forward obligations: graph traversal is **not** here —
+GRPH-1 owns the schema decision ADR-0029 pre-registered the criteria for,
+and GRPH-3 is where a third leg joins the fused id list, feature-flagged
+and degradable, without touching admission; indexing historical versions
+in the sidecar is the recorded upgrade if as-of queries ever need to rank
+since-expired material; option 3's pack-declared universe is the lever if
+the shape of real tenants breaks the cap, after EVAL-6 re-derives it on
+production-shaped IO where most of today's fixed cost disappears; the
+caller-supplied query vector was revisited from ADR-0026 and re-rejected,
+because a text/vector mismatch is unverifiable server-side and returns
+plausible nonsense on the deep surface; the id cap and the scope cap stay
+blunt instruments against corpus exfiltration where a rate limit is the
+sharp one — still AUTH-6's; the hand-written JSON-RPC loop is protocol
+code the project now maintains, with the SDK plus a bundler recorded
+against protocol churn or a second transport; and ADPT-2's standalone
+server may take option 9's Rust binary, with this TS entry point becoming
+a thin alias._
+
 _GRPH-4 (2026-07-25, ADR-0029): the phase gate ran first, because it is
 the only Phase 2 item that can invalidate an Accepted ADR and the schema
 is the expensive thing to move. Its criteria were written and committed
