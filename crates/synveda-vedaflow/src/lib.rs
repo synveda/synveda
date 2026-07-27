@@ -90,7 +90,8 @@ pub use channels::{
     ChannelCommit, ChannelHistoryEntry, ChannelMember, ChannelPin, ChannelRef, ChannelRewind,
     ChannelRolledBack, ChannelSnapshot, ChannelStatus, ChannelWrite, MAX_CHANNEL_MEMBERS,
     MemoryAsset, MemoryChannel, PIN_PREFIX, append, history, pin, publish, put_memory,
-    read_members, read_memory_members, read_pin, rollback, unpin,
+    read_members, read_memory_members, read_pin, rollback, scopes_naming, scopes_with_channel,
+    unpin,
 };
 pub use commits::{
     MAX_FIRST_PARENT_WALK, NewCommit, StoredCommit, commit, is_ancestor, is_first_parent_ancestor,

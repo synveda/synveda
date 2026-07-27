@@ -88,6 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             role_bindings: &bindings,
             lapses: &[],
             lapsed: &[],
+            candidates: &[],
         },
     )?;
 

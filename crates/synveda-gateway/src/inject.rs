@@ -251,6 +251,9 @@ async fn handle(
             role_bindings: &input.role_bindings,
             lapses: &input.lapses,
             lapsed: &lapsed,
+            // The hot path's universe is the chain, exactly where
+            // ADR-0024 decision 1 put it. Recall widens; inject does not.
+            candidates: &[],
         },
     )?;
     metrics::histogram!(INJECT_STAGE_SECONDS, "stage" => "plan")

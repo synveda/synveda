@@ -221,6 +221,7 @@ async fn handle(
             role_bindings: &input.role_bindings,
             lapses: &input.lapses,
             lapsed: &lapsed,
+            candidates: &[],
         },
     )?;
     span.record("scopes.permitted", plan.scopes.len());

@@ -267,12 +267,25 @@ Decisions, specifically:
    behaviour is unchanged — and a *declassification* does not retroactively
    expose the history that was written while the record was classified,
    which is the direction a compliance function actually cares about.
-10. **Scope is reported as it was, and that asymmetry is the point.** The
-    version's own `scope_id` attributes it, and the plan decides that
-    scope. Where material lived is a fact about the past; what material
-    *is* is a judgment the organisation may revise. Uniformity between
-    the two would either make classification forgetful (decision 9's
-    hole) or make history a lie about the org chart.
+10. **The axis is fact versus judgment, and it decides all three: scope
+    rewinds, classification and publication do not.** Where material
+    lived is a *fact* about the past, so the version's own `scope_id`
+    attributes it and the plan decides that scope. What material *is*
+    (decision 9) and whether the organisation *stands behind* it are
+    *judgments*, revisable, and a revision governs every read including
+    historical ones — so the `memory/published` tree is read at its
+    current state, never as of the instant, and bank mode's
+    published-only rule is likewise the pack's answer now.
+
+    Rewinding the refs is the tempting symmetry and it would undo
+    FLOW-7. That feature's whole claim is a bad instruction reaching not
+    one further agent 0.2 seconds after a curator rolls the channel back;
+    if `as_of` could re-publish what a rollback withdrew, the withdrawal
+    is defeated by a query parameter — the identical failure shape
+    decision 9 closes for classification. A record published in March and
+    withdrawn since is still *served* as-of March if the caller may read
+    its scope; it is served as derived material, marked unreviewed, which
+    is the honest statement that nobody stands behind it any more.
 11. **As-of reaches expired material and never destroyed material —
     MEM-6's decision, inherited rather than retaken.** ADR-0040
     decision 5 chose the two horizons knowing that "a product that only
@@ -450,6 +463,16 @@ Decisions, specifically:
     `--as-of` demo, neither of which needs a graph; the broader universe
     is a defect being carried since CTX-1; and the sequencing already
     puts graph-augmented recall in GRPH-3 for exactly this reason.
+14. **Rewind the channel refs with the corpus** — the symmetric reading
+    of as-of, genuinely more faithful to "what did the agent know", and
+    what ADR-0025 option 6 had in mind by "the refs half". FLOW-1/2 keep
+    the history to do it: commits are a log and `synveda channel history`
+    already renders it. Rejected in decision 10: it would let `as_of`
+    re-publish material a FLOW-7 rollback withdrew, which is the one
+    thing that feature exists to make impossible. The history is not lost
+    — the withdrawn record still composes as-of, as *derived* and marked
+    unreviewed, which says something true that a rewound ref would not:
+    it was there, and nobody stands behind it now.
 
 ## Consequences
 

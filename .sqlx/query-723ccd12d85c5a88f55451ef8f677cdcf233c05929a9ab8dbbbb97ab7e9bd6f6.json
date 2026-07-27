@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select scope_id as \"scope_id!\"\n           from vedaflow_refs\n           where tenant_id = $1 and name = $2\n           order by scope_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "723ccd12d85c5a88f55451ef8f677cdcf233c05929a9ab8dbbbb97ab7e9bd6f6"
+}

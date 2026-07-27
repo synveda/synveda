@@ -44,6 +44,83 @@ fn pair_arrays(allowed: &[ScopeTier]) -> (Vec<Uuid>, Vec<String>) {
         .unzip()
 }
 
+/// Every scope in the tenant holding at least one record — the residence
+/// half of a recall's candidate universe (CTX-5, ADR-0042 decision 2).
+///
+/// This is the whole of the widened universe's cost control, and it is a
+/// cost control rather than a policy narrowing: [`compose_candidates`]
+/// reaches derived material through a `scope_id` predicate, so a scope
+/// holding nothing contributes the empty set whatever the PDP would have
+/// said about it. Deciding it would change no result, only the clock.
+///
+/// Published material is the other half and does not come from here: a
+/// published tree may name a record living below its scope (FLOW-5,
+/// ADR-0034 decision 6), so residence cannot find it. The caller unions
+/// this with `synveda_vedaflow::scopes_with_channel`.
+///
+/// Deliberately un-capped and un-paginated: the caller applies
+/// ADR-0042 decision 5's cap after ordering by hierarchy distance, which
+/// this query cannot do because SQL does not know the caller's chain.
+#[tracing::instrument(
+    name = "store.search.occupied_scopes",
+    skip_all,
+    fields(tenant.id = %tenant_id, scopes = tracing::field::Empty),
+    err(Display)
+)]
+pub async fn occupied_scopes(conn: &mut PgConnection, tenant_id: TenantId) -> Result<Vec<ScopeId>> {
+    let rows = sqlx::query_scalar!(
+        r#"select distinct scope_id as "scope_id!"
+           from records
+           where tenant_id = $1
+           order by scope_id"#,
+        tenant_id.as_uuid(),
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    tracing::Span::current().record("scopes", rows.len());
+    Ok(rows.into_iter().map(ScopeId::from_uuid).collect())
+}
+
+/// The scopes `ids` live at — the residence half of the *ids* form's
+/// candidate universe (CTX-5, ADR-0042 decision 2).
+///
+/// Reads `records_versions` rather than `records` so a named id whose
+/// current version is gone still resolves to the scope it lived at, which
+/// is what the as-of forms need (ADR-0042 decision 14). Naming an id the
+/// caller may not read yields its scope here and a denial at the PDP;
+/// nothing about the answer leaks back, because a scope that plans nothing
+/// admits nothing.
+#[tracing::instrument(
+    name = "store.search.scopes_holding",
+    skip_all,
+    fields(tenant.id = %tenant_id, ids.count = ids.len(), scopes = tracing::field::Empty),
+    err(Display)
+)]
+pub async fn scopes_holding(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    ids: &[RecordId],
+) -> Result<Vec<ScopeId>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<Uuid> = ids.iter().map(RecordId::as_uuid).collect();
+    let rows = sqlx::query_scalar!(
+        r#"select distinct scope_id as "scope_id!"
+           from records_versions
+           where tenant_id = $1 and id = any($2)
+           order by scope_id"#,
+        tenant_id.as_uuid(),
+        &ids,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    tracing::Span::current().record("scopes", rows.len());
+    Ok(rows.into_iter().map(ScopeId::from_uuid).collect())
+}
+
 /// One scope's retention horizon for one record class (MEM-6, ADR-0040
 /// decision 2): material of `class` at `scope_id` whose `valid_from` is at
 /// or before `cutoff` is past what that scope serves.

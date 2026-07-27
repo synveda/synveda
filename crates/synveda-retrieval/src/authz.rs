@@ -5,10 +5,18 @@
 //! ADR-0014 decision 5).
 //!
 //! The candidate universe is the chain (seed §4.4's composition
-//! contract: user > team > department > org). Scopes packs permit
-//! *beyond* the chain — bound subtrees, `standard`'s department subtree
-//! — are recall's deep-query surface; CTX-5 owns enumerating a broader
-//! universe (ADR-0024 option 2).
+//! contract: user > team > department > org) for `inject`, and that plus
+//! the scopes a request could actually draw from for `recall` (CTX-5,
+//! ADR-0042 decision 2) — which is where the bound subtrees and
+//! `standard`'s department subtree finally become reachable, seven ADRs
+//! after ADR-0024 option 2 parked them.
+//!
+//! Three sources of candidate, one decision per `(scope, tier)` for all
+//! of them: the caller's chain, the scopes a lapse reaches (AUTHZ-4), and
+//! recall's widened set. They differ only in where the scope came from and
+//! what its channel rule is — never in how it is decided, because a second
+//! way to decide would be a second answer to "may this caller see this
+//! record" (seed §2.2).
 
 use synveda_policy::{Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource};
 use synveda_types::{
@@ -49,12 +57,39 @@ pub struct MemoryReadInputs<'a> {
     /// decision needs — `synveda_policy::lapsed_scopes` over `lapses`, with
     /// every target's chain and assignments resolved by the caller.
     ///
-    /// These are the **only** source of off-chain candidates. A pack's own
-    /// permits beyond the chain — bound subtrees, `standard`'s department —
-    /// stay where ADR-0024 put them, on recall's deep-query surface: a
-    /// permit cannot be enumerated, and a lapse is a row that names its
-    /// target (ADR-0037 decision 13).
+    /// A lapse is a row that names its target (ADR-0037 decision 13),
+    /// which is what made these enumerable before `candidates` existed.
     pub lapsed: &'a [LapsedScope<'a>],
+    /// Recall's widened candidate set (CTX-5, ADR-0042 decision 2): the
+    /// scopes that could contribute a record to *this* request, which is
+    /// how a pack's own permits beyond the chain — bound subtrees,
+    /// `standard`'s department — finally get asked.
+    ///
+    /// **Empty for every `inject`**, which is what keeps ADR-0024
+    /// decision 1's universe exactly where it was on the hot path. A scope
+    /// already on `chain` or already reached by a lapse is skipped rather
+    /// than decided twice: the nearer source wins, because it is the one
+    /// that carries the gradient position and, for a lapse, the grant id
+    /// the audit event names.
+    pub candidates: &'a [CandidateScope<'a>],
+}
+
+/// One scope of recall's widened universe, with what deciding it costs
+/// (CTX-5, ADR-0042 decisions 2 and 3).
+///
+/// Structurally a [`LapsedScope`] without the grant, and decided by the
+/// same code — the difference is the channel rule. A lapse admits only
+/// what its target stands behind (ADR-0037 decision 11); a widened
+/// candidate is an ordinary pack grant, so it composes under that scope's
+/// own channel rule exactly as a chain scope does.
+#[derive(Debug, Clone, Copy)]
+pub struct CandidateScope<'a> {
+    /// The scope to decide.
+    pub scope_id: ScopeId,
+    /// That scope's own chain, node-first, from the HIER-2 cache.
+    pub chain: &'a [HierarchyNode],
+    /// Pack assignments for that chain's nodes.
+    pub assignments: &'a [PolicyAssignment],
 }
 
 /// One off-chain scope a lapse reaches, with what deciding it costs
@@ -125,6 +160,105 @@ pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Resul
     span.record("permitted", scopes);
     span.record("pairs", permitted.len());
     Ok(permitted)
+}
+
+/// One off-chain scope to decide, whatever put it on the walk.
+#[derive(Debug, Clone, Copy)]
+struct OffChain<'a> {
+    scope_id: ScopeId,
+    chain: &'a [HierarchyNode],
+    assignments: &'a [PolicyAssignment],
+    /// The grant that reached it, when one did. `None` is recall's widened
+    /// universe: an ordinary pack permit, which is the whole difference
+    /// between the two off-chain sources.
+    lapse: Option<LapseId>,
+}
+
+/// Decides one off-chain scope and appends what it produced.
+///
+/// The lapse loop and recall's widened sweep share this because they must:
+/// two bodies would be two answers to "may this caller see this record",
+/// and the second one would be the one nobody's leak suite covers
+/// (ADR-0042 decision 3).
+///
+/// Each is decided under **its own** chain and assignments — the effective
+/// pack is a property of the resource (ADR-0014 decision 3), and deciding a
+/// scope with somebody else's chain would fall back to the tenant default
+/// and materialise an entity graph with no ancestry.
+fn plan_off_chain(
+    pdp: &Pdp,
+    inputs: &MemoryReadInputs<'_>,
+    scope: OffChain<'_>,
+    decisions: &mut Vec<ScopeDecision>,
+    scopes: &mut Vec<ComposeScope>,
+) -> Result<()> {
+    let target = scope.scope_id;
+    let Some(node) = scope.chain.iter().find(|node| node.id == target) else {
+        // A scope the caller could not resolve: deleted, or the chain
+        // arrived malformed. Plan nothing — the same fail-closed reading an
+        // unplaced principal gets.
+        return Ok(());
+    };
+    let context = |sensitivity: Sensitivity| AuthzContext {
+        scopes: scope.chain,
+        principal_scopes: inputs.chain,
+        assignments: scope.assignments,
+        default_pack: inputs.default_pack,
+        role_bindings: inputs.role_bindings,
+        grant: None,
+        lapses: inputs.lapses,
+        sensitivity: Some(sensitivity),
+    };
+    // Per tier here too, and for a lapse this is where the grant's declared
+    // ceiling shows up as a *smaller set*: the PDP sets `context.lapsed`
+    // only at tiers at or below what the grant declared (ADR-0038
+    // decision 6), so a working-tier grant plans the working tiers and a
+    // restricted one plans all four.
+    let (sensitivities, decision) = permitted_tiers(pdp, inputs.principal, target, context)?;
+    decisions.push(ScopeDecision {
+        scope_id: target,
+        allowed: !sensitivities.is_empty(),
+        sensitivities: sensitivities.clone(),
+        pack_name: decision.pack_name,
+        pack_version: decision.pack_version,
+        lapse: scope.lapse,
+    });
+    if sensitivities.is_empty() {
+        return Ok(());
+    }
+    // The *target's* effective pack, not the reader's: what that scope
+    // stands behind, under that scope's schedule (ADR-0040 decision 10) and
+    // rendered by that scope's rules (ADR-0041 decision 11).
+    let effective = pdp.effective(
+        tenant_id_of(inputs),
+        Resource::Scope(target),
+        &context(Sensitivity::WORKING),
+    );
+    scopes.push(ComposeScope {
+        scope_id: target,
+        kind: node.kind,
+        path: node.path.clone(),
+        // A lapse admits what the target scope stands behind and nothing
+        // else. Not the pack's channel rule: derived material is unreviewed
+        // extraction output nobody at the target has looked at, and it is
+        // the one thing the approvers could not inspect before consenting
+        // (ADR-0037 decision 11).
+        //
+        // A widened candidate is not a grant anybody approved — it is the
+        // pack's own permit, asked at last — so it composes under that
+        // scope's channel rule exactly as a chain scope does.
+        include_derived: scope.lapse.is_none() && effective.composition.channels.includes_derived(),
+        sensitivities,
+        index_tier: effective.composition.index_tier,
+        index_entry_chars: effective.composition.index_entry_chars,
+        lapse: scope.lapse,
+        retention: effective.retention,
+    });
+    Ok(())
+}
+
+fn tenant_id_of(inputs: &MemoryReadInputs<'_>) -> synveda_types::TenantId {
+    inputs.principal.tenant_id
 }
 
 /// One scope's allowed tier set, ascending, plus the decision the pack
@@ -307,74 +441,42 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
     // and deciding a scope with somebody else's chain would fall back to
     // the tenant default and materialise an entity graph with no ancestry.
     for lapsed in inputs.lapsed {
-        let target = lapsed.lapse.target_scope_id;
-        let Some(node) = lapsed.chain.iter().find(|node| node.id == target) else {
-            // A grant whose target the caller could not resolve: the scope
-            // was deleted, or the chain arrived malformed. Plan nothing —
-            // the same fail-closed reading an unplaced principal gets.
-            continue;
-        };
-        // Per tier here too, and this is where the grant's declared ceiling
-        // shows up as a *smaller set*: the PDP sets `context.lapsed` only
-        // at tiers at or below what the grant declared (ADR-0038
-        // decision 6), so a working-tier grant plans the working tiers and
-        // a restricted one plans all four.
-        let (sensitivities, decision) =
-            permitted_tiers(pdp, inputs.principal, target, |tier| AuthzContext {
-                scopes: lapsed.chain,
-                principal_scopes: inputs.chain,
+        plan_off_chain(
+            pdp,
+            inputs,
+            OffChain {
+                scope_id: lapsed.lapse.target_scope_id,
+                chain: lapsed.chain,
                 assignments: lapsed.assignments,
-                default_pack: inputs.default_pack,
-                role_bindings: inputs.role_bindings,
-                grant: None,
-                lapses: inputs.lapses,
-                sensitivity: Some(tier),
-            })?;
-        decisions.push(ScopeDecision {
-            scope_id: target,
-            allowed: !sensitivities.is_empty(),
-            sensitivities: sensitivities.clone(),
-            pack_name: decision.pack_name,
-            pack_version: decision.pack_version,
-            lapse: Some(lapsed.lapse.id),
-        });
-        if sensitivities.is_empty() {
+                lapse: Some(lapsed.lapse.id),
+            },
+            &mut decisions,
+            &mut scopes,
+        )?;
+    }
+
+    // Recall's widened universe, last (CTX-5, ADR-0042 decision 2) and
+    // empty for every inject. Scopes the chain or a lapse already planned
+    // are skipped: deciding one twice would double-count it in the audit
+    // event and could drop a lapse's grant id from the entry that names
+    // why the reader could see it.
+    let planned: Vec<ScopeId> = decisions.iter().map(|decision| decision.scope_id).collect();
+    for candidate in inputs.candidates {
+        if planned.contains(&candidate.scope_id) {
             continue;
         }
-        // The *target's* effective pack, not the reader's: a lapse
-        // discloses what that scope stands behind, under that scope's
-        // schedule (ADR-0040 decision 10) and rendered by that scope's
-        // rules (ADR-0041 decision 11).
-        let effective = pdp.effective(
-            tenant_id,
-            Resource::Scope(target),
-            &AuthzContext {
-                scopes: lapsed.chain,
-                principal_scopes: inputs.chain,
-                assignments: lapsed.assignments,
-                default_pack: inputs.default_pack,
-                role_bindings: inputs.role_bindings,
-                grant: None,
-                lapses: inputs.lapses,
-                sensitivity: Some(Sensitivity::WORKING),
+        plan_off_chain(
+            pdp,
+            inputs,
+            OffChain {
+                scope_id: candidate.scope_id,
+                chain: candidate.chain,
+                assignments: candidate.assignments,
+                lapse: None,
             },
-        );
-        scopes.push(ComposeScope {
-            scope_id: target,
-            kind: node.kind,
-            path: node.path.clone(),
-            // A lapse admits what the target scope stands behind and
-            // nothing else. Not the pack's channel rule: derived material
-            // is unreviewed extraction output nobody at the target has
-            // looked at, and it is the one thing the approvers could not
-            // inspect before consenting (ADR-0037 decision 11).
-            include_derived: false,
-            sensitivities,
-            index_tier: effective.composition.index_tier,
-            index_entry_chars: effective.composition.index_entry_chars,
-            lapse: Some(lapsed.lapse.id),
-            retention: effective.retention,
-        });
+            &mut decisions,
+            &mut scopes,
+        )?;
     }
 
     let span = tracing::Span::current();

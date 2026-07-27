@@ -91,6 +91,7 @@ fn default_pack_plans_both_channels_at_the_default_budget() {
             role_bindings: &[],
             lapses: &[],
             lapsed: &[],
+            candidates: &[],
         },
     )
     .expect("plan");
@@ -180,6 +181,7 @@ fn published_only_pack_governs_its_subtree_and_the_budget() {
             role_bindings: &[],
             lapses: &[],
             lapsed: &[],
+            candidates: &[],
         },
     )
     .expect("plan");
@@ -227,6 +229,7 @@ fn unconfigured_stored_pack_gets_the_product_config() {
             role_bindings: &[],
             lapses: &[],
             lapsed: &[],
+            candidates: &[],
         },
     )
     .expect("plan");
@@ -252,6 +255,7 @@ fn quarantine_and_empty_chain_plan_nothing() {
             role_bindings: &[],
             lapses: &[],
             lapsed: &[],
+            candidates: &[],
         },
     )
     .expect("plan");
@@ -274,6 +278,7 @@ fn quarantine_and_empty_chain_plan_nothing() {
             role_bindings: &[],
             lapses: &[],
             lapsed: &[],
+            candidates: &[],
         },
     )
     .expect("empty chain plans");

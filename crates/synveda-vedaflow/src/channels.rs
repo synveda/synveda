@@ -580,6 +580,96 @@ pub async fn read_memory_members(
         .collect()
 }
 
+/// Every scope whose `channel` ref exists at all — the published half of
+/// a recall's candidate universe (CTX-5, ADR-0042 decision 2).
+///
+/// Deliberately an over-approximation: a ref pointing at an empty tree is
+/// returned, because the question this answers is "could this scope
+/// contribute", and the cost of a wrong *yes* is one PDP decision whose
+/// verdict changes no result. A wrong *no* would silently drop material,
+/// which is why nothing here filters on membership.
+///
+/// A ref materialises on its first write (this module's header), so a
+/// tenant that has published nothing returns nothing rather than every
+/// scope it has.
+#[tracing::instrument(
+    name = "vedaflow.scopes_with_channel",
+    skip_all,
+    fields(tenant.id = %tenant, channel = %channel, scopes = tracing::field::Empty),
+    err(Display)
+)]
+pub async fn scopes_with_channel(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    channel: ChannelRef,
+) -> Result<Vec<ScopeId>> {
+    let rows = sqlx::query_scalar!(
+        r#"select scope_id as "scope_id!"
+           from vedaflow_refs
+           where tenant_id = $1 and name = $2
+           order by scope_id"#,
+        tenant.as_uuid(),
+        channel.name(),
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|err| storage_error("read channel scopes", &err))?;
+    tracing::Span::current().record("scopes", rows.len());
+    Ok(rows.into_iter().map(ScopeId::from_uuid).collect())
+}
+
+/// Every scope whose `channel` names one of `ids` — the published half of
+/// the *ids* form's candidate universe (CTX-5, ADR-0042 decision 2).
+///
+/// The pin is honoured exactly as [`read_members`] honours it: a pinned
+/// channel serves the commit it is pinned to (FLOW-7, ADR-0036), so the
+/// scopes this returns are the scopes that would actually have served
+/// these records, not the ones whose moving ref happens to name them.
+///
+/// Entry names are compared as text because that is how a tree stores
+/// them; only this crate writes memory channels and it names entries by
+/// id, so the comparison is exact rather than a prefix match.
+#[tracing::instrument(
+    name = "vedaflow.scopes_naming",
+    skip_all,
+    fields(tenant.id = %tenant, channel = %channel, ids.count = ids.len(), scopes = tracing::field::Empty),
+    err(Display)
+)]
+pub async fn scopes_naming(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    ids: &[RecordId],
+    channel: ChannelRef,
+) -> Result<Vec<ScopeId>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names: Vec<String> = ids.iter().map(ToString::to_string).collect();
+    let rows = sqlx::query_scalar!(
+        r#"select distinct r.scope_id as "scope_id!"
+           from vedaflow_refs r
+           left join vedaflow_refs p
+               on p.tenant_id = r.tenant_id and p.scope_id = r.scope_id
+                  and p.name = $4
+           join vedaflow_commits c
+               on c.tenant_id = r.tenant_id
+                  and c.hash = coalesce(p.commit_hash, r.commit_hash)
+           join vedaflow_tree_entries e
+               on e.tenant_id = c.tenant_id and e.tree_hash = c.tree_hash
+           where r.tenant_id = $1 and r.name = $2 and e.name = any($3)
+           order by r.scope_id"#,
+        tenant.as_uuid(),
+        channel.name(),
+        &names,
+        channel.pin_name(),
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|err| storage_error("read scopes naming records", &err))?;
+    tracing::Span::current().record("scopes", rows.len());
+    Ok(rows.into_iter().map(ScopeId::from_uuid).collect())
+}
+
 /// Every channel that exists at one scope, in ref-name order, with the
 /// size of the commit each points at.
 ///
