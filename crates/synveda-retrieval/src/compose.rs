@@ -234,6 +234,29 @@ impl ComposeRequest {
         request
     }
 
+    /// The plan swept rather than named: everything the plan admits at
+    /// `at`, bodies in full (CTX-5, ADR-0042 decision 14).
+    ///
+    /// The shape a bare `as_of` recall composes under — "what did the
+    /// agent know on March 3rd", asked without a question. It is the
+    /// *complete* historical answer, and the reason it exists as its own
+    /// shape: a query cannot find a record that no longer exists, because
+    /// the search indexes hold current truth by construction (ADR-0024
+    /// decision 4). A sweep reads the corpus itself and finds it.
+    ///
+    /// Like [`ComposeRequest::naming`] it demotes nothing and cannot be
+    /// truncated by a budget; unlike it, the per-`(scope, kind)` cap stays
+    /// at the product default, because here that cap is the only thing
+    /// bounding the read.
+    #[must_use]
+    pub fn sweeping(scopes: Vec<ComposeScope>, at: DateTime<Utc>) -> Self {
+        let mut request = ComposeRequest::new(scopes, u32::MAX, at);
+        for scope in &mut request.scopes {
+            scope.index_tier = IndexTier::Off;
+        }
+        request
+    }
+
     /// Narrows every planned scope to tiers at or below `ceiling`.
     ///
     /// A scope left with no tier stops composing entirely — the honest

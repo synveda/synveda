@@ -144,6 +144,11 @@ enum Command {
         /// Ask a question instead of naming records: hybrid retrieval over
         /// every scope your policy lets you read, which is wider than the
         /// scopes an inject block composes from.
+        ///
+        /// Omit both this and the ids, with --as-of, to sweep everything
+        /// you may read as it stood at that instant — the complete
+        /// historical read, including material the live corpus no longer
+        /// holds.
         #[arg(long, conflicts_with = "ids")]
         query: Option<String>,
         /// Serve bodies as the database held them at this instant —

@@ -21,8 +21,8 @@ mod pdp;
 mod request;
 
 pub use pdp::{
-    EMBEDDED_PACKS, EffectivePack, OPEN_COLLABORATION, PackOrigin, Pdp, REGULATED_STRICT, STANDARD,
-    effective_roles_at, is_reserved, lapsable, lapsed_scopes,
+    EMBEDDED_PACKS, EffectivePack, EntityBatch, OPEN_COLLABORATION, PackOrigin, Pdp,
+    REGULATED_STRICT, STANDARD, effective_roles_at, is_reserved, lapsable, lapsed_scopes,
 };
 pub use request::{Action, AuthzContext, AuthzDecision, Principal, Resource};
 

@@ -78,11 +78,18 @@ impl Ask<'_> {
             }
             None => {
                 if self.ids.is_empty() {
-                    return Err(
-                        "name at least one record id, or ask a question with --query".to_owned(),
-                    );
+                    // A bare `--as-of` is the complete historical read:
+                    // everything you may see, as it stood then. It is the
+                    // one shape a query cannot give, because the search
+                    // indexes hold current truth (ADR-0042 decision 14).
+                    if self.as_of.is_none() {
+                        return Err("name a record id, ask a question with --query, \
+                                    or give an instant with --as-of"
+                            .to_owned());
+                    }
+                } else {
+                    body.insert("ids".to_owned(), json!(self.ids));
                 }
-                body.insert("ids".to_owned(), json!(self.ids));
             }
         }
         if let Some(at) = self.as_of {
@@ -164,7 +171,7 @@ pub async fn recall(
             "{served} of {} available to you at {at} — the rest are not, or no longer are",
             response.requested,
         );
-    } else if response.mode == "query" {
+    } else if response.mode != "ids" {
         println!(
             "{served} of {} scopes you may read at {at}",
             response.scopes_decided,

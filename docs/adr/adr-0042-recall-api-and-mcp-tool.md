@@ -165,11 +165,15 @@ over stdio from the ADPT-1 plugin package and registered through the
 
 Decisions, specifically:
 
-1. **One route, two request shapes, exclusive.** `POST /v1/recall` takes
-   `{ ids }` **xor** `{ query }`, plus optional `as_of`, `valid_at`,
-   `limit` and `session_id`. Both together is an `Invalid` — a query that
-   also names ids is two questions, and answering the intersection would
-   be a third nobody asked. The response shape, `RecallEntry`, is
+1. **One route, three request shapes, exclusive.** `POST /v1/recall` takes
+   `{ ids }` **xor** `{ query }` **xor** neither — plus optional `as_of`,
+   `valid_at`, `limit` and `session_id`. `ids` and `query` together is an
+   `Invalid`: a query that also names ids is two questions, and answering
+   the intersection would be a third nobody asked. *Neither* is valid only
+   when `as_of` is given, and that is the swept form decision 14 needs —
+   "everything I may read, as it stood then" is a complete question, and
+   the one a query cannot answer. A bare recall with nothing at all stays
+   an `Invalid`: it has not said what it wants. The response shape, `RecallEntry`, is
    unchanged: the labels CTX-5 owes are the ones CTX-4 already renders.
    `limit` is bounded by the same 32 the ids form is capped at (ADR-0041
    decision 7) and defaults to it, so both shapes return bodies in full
@@ -209,6 +213,18 @@ Decisions, specifically:
    horizons, its own index-tier config — is byte-for-byte the loop that
    is there. Composition, inject and both recall forms therefore keep
    sharing exactly one answer to "may this caller see this record".
+
+   **A widened universe needs a widened binding set.** `gather` reads the
+   caller's role bindings *on their own chain*, which is right for inject
+   — a binding anywhere else could not bear on a decision it takes. Recall
+   decides scopes off that chain, and a binding at one of those scopes is
+   exactly the grant an administrator issues to widen someone's reach: one
+   of the two ADR-0024 left unreachable. So recall reads every binding the
+   subject holds in the tenant. This widens what is *read*, never what a
+   decision considers — `effective_roles_at` still admits a binding only
+   at a resource whose own chain contains its scope. Missing this makes
+   the feature silently not work, which is how it was found: the AC test
+   for it failed.
 4. **The caller's chain is always decided in full; beyond it, only
    contributors are.** The chain half of the plan is unchanged, denials
    included, so the audit event keeps carrying "you were denied at your
@@ -222,12 +238,14 @@ Decisions, specifically:
    number picked for comfort: it is the count decision 17 measures as
    fitting the **15ms** the graph gate allotted the plan stage of a 300ms
    recall, which is why that measurement is an assert rather than a
-   report. Candidates are ordered nearest-first — the caller's chain, then
-   lapse targets, then remaining occupied scopes by hierarchy distance —
-   so a cap drops the farthest material rather than an arbitrary slice.
-   When it binds, the response carries `truncated: true` with the counts
-   and the audit payload records them. A bounded answer presented as a
-   complete one is the failure mode this product cannot afford.
+   report. It is **32** — a small number, arrived at honestly, and the
+   consequences section says what it costs. Candidates are ordered
+   nearest-first — the caller's chain, then lapse targets, then remaining
+   occupied scopes by hierarchy distance — so a cap drops the farthest
+   material rather than an arbitrary slice. When it binds, the response
+   carries `truncated: true` with the counts and the audit payload records
+   them. A bounded answer presented as a complete one is the failure mode
+   this product cannot afford.
 6. **One entity materialisation per request, evaluated many times.** The
    sweep resolves each candidate's chain through the HIER-2 cache and
    reads the tenant's policy assignments once, then materialises the
@@ -476,6 +494,50 @@ Decisions, specifically:
 
 ## Consequences
 
+### The measurement (decision 17), as taken
+
+`crates/synveda-gateway/tests/recall.rs::the_plan_stage_fits_the_budget_adr_0029_derived`
+seeds 512 occupied teams under one department and drives
+`POST /v1/recall` with a query, reading the stage split from the gateway's
+own Prometheus exposition. The number moved three times before it fit, and
+each move is worth recording because each was a different lesson:
+
+| | plan stage | whole request |
+|---|---|---|
+| 512 scopes, entities re-materialised per decision | 378ms | 411ms |
+| 512 scopes, one materialisation per walk (decision 6) | 120ms | 141ms |
+| 512 scopes, pack + roles resolved once per scope | 120ms | 141ms |
+| 48 scopes, assignments read once rather than per candidate | 15.2ms | — |
+| **32 scopes (the shipped cap)** | **13.2ms** | **17.1ms** |
+
+Read honestly, three things:
+
+1. **Decision 6 was the whole ballgame** — 3.1× — and it was written into
+   this ADR before the code existed, which is the only reason the feature
+   was ever plausible. Cedar's per-decision cost is dominated by building
+   the entity store, not by evaluating policy against it.
+2. **The next two optimisations barely moved it.** Resolving the pack once
+   per scope instead of once per tier is obviously right and bought
+   nothing measurable; what remains is `Request::new` with schema
+   validation, four times per scope, and that is Cedar's floor rather than
+   ours. The lesson is that the cap, not the code, was the lever left.
+3. **Most of the remaining budget is not the sweep at all.** At the
+   shipped cap the fixed cost — identity read, chain, occupancy reads,
+   assignment and binding reads — is roughly 7.7ms of the 13.2ms, on
+   Docker Desktop's virtualised fsync. So 32 is a *dev-hardware* number
+   and deliberately conservative; `SYNVEDA_RECALL_MAX_SCOPES` exists so an
+   operator who has measured their own plan histogram can raise it, and
+   EVAL-6 owns re-deriving it on production-shaped IO.
+
+The uncomfortable part, stated plainly: **32 scopes is a small universe
+for an enterprise product**, and a tenant with more occupied scopes than
+that gets a genuinely incomplete answer to a query. It is reported —
+`truncated`, with both counts, in the response and on the audit chain —
+and the ordering means what is dropped is the farthest material rather
+than an arbitrary slice. But it is a real limitation on the day this
+ships, not a theoretical one, and the reversal triggers below name what
+would lift it.
+
 - Positive: the grants the packs have always made are finally
   exercisable — `standard`'s department default and a curator's bound
   subtree stop being unreachable text; the third primitive becomes the
@@ -507,14 +569,16 @@ Decisions, specifically:
   protocol code the project now maintains; and the id cap plus the scope
   cap remain blunt instruments against corpus exfiltration where a rate
   limit is the sharp one — still AUTH-6's.
-- Reversal triggers: decision 17's plan-stage median exceeds ADR-0029's
-  15ms at realistic tenant shapes → option 3's pack-declared universe,
-  behind a field that rides the existing composition config; the sweep's
-  decisions dominate even after decision 6's single materialisation →
-  revisit Cedar-side batch APIs or the OpenFGA adapter path (AUTHZ-6, the
-  ADR-0002 escape); EVAL-6 or GRPH-3 measures the 300ms decomposition
-  breached end to end → the stage allowances are re-cut where the evidence
-  says, not where this ADR guessed;
+- Reversal triggers: the 32-scope cap is reported as `truncated` often
+  enough to matter in the field → in order, (a) EVAL-6 re-derives it on
+  production-shaped IO, where the ~7.7ms fixed cost that dominates it
+  today largely disappears, (b) option 3's pack-declared universe behind a
+  field on the existing composition config, (c) a cheaper decision —
+  Cedar-side batch APIs, or the OpenFGA adapter path (AUTHZ-6, the
+  ADR-0002 escape) — which is the lever that raises the ceiling rather
+  than moving the ration; EVAL-6 or GRPH-3 measures the 300ms
+  decomposition breached end to end → the stage allowances are re-cut
+  where the evidence says, not where this ADR guessed;
   as-of queries needing to rank since-expired material → index historical
   versions in the sidecar, extending ADR-0024 decision 4's change feed
   rather than replacing it; GRPH-1/2 land → GRPH-3 adds a third leg to

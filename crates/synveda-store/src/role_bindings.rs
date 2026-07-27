@@ -145,6 +145,48 @@ pub async fn for_subject_on_scopes(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// Every binding one subject holds anywhere in the tenant (CTX-5,
+/// ADR-0042 decisions 2 and 3).
+///
+/// The chain-scoped read above is what `inject` wants: its candidate
+/// universe is the caller's chain, so a binding anywhere else could not
+/// bear on any decision it takes. Recall's universe is wider, and a
+/// binding is the grant an administrator actually *issues* to widen
+/// someone's reach — so fetching only the chain's would leave the widened
+/// sweep asking about scopes with the very rows that permit them missing,
+/// and the feature would silently not work.
+///
+/// Bounded by the subject rather than by the scope list: one caller's
+/// bindings are a handful of rows, and `effective_roles_at` still admits
+/// each one only at a resource whose own chain contains its scope — so
+/// this widens what is *read*, never what any single decision considers.
+#[tracing::instrument(
+    name = "store.role_bindings.for_subject",
+    skip_all,
+    fields(tenant.id = %tenant_id),
+    err(Display)
+)]
+pub async fn for_subject(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    subject: &str,
+) -> Result<Vec<RoleBinding>> {
+    let rows = sqlx::query_as!(
+        BindingRow,
+        r#"
+        select tenant_id, subject, scope_id, role, updated_at
+        from role_bindings
+        where tenant_id = $1 and subject = $2
+        "#,
+        tenant_id.as_uuid(),
+        subject,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// The bindings at one node (`GET .../nodes/{id}/roles`).
 #[tracing::instrument(
     name = "store.role_bindings.for_scope",

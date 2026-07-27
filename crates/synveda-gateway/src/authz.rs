@@ -326,23 +326,75 @@ pub(crate) struct CandidateChain {
 /// How many scopes one recall may decide beyond the caller's own chain
 /// (ADR-0042 decision 5).
 ///
-/// Not a round number for comfort: ADR-0029 allotted the plan stage
-/// **15ms** of a 300ms recall, and this is the count
-/// `crates/synveda-gateway/tests/recall.rs::the_plan_stage_fits_its_budget`
-/// measures as fitting it. Raise it only with that test's number in hand;
-/// when it binds, the caller is *told* (`truncated`), because a bounded
-/// answer presented as a complete one is the one failure this surface
-/// cannot afford.
-pub(crate) const MAX_RECALL_SCOPES: usize = 512;
+/// Not a round number for comfort — a measured one. ADR-0029 allotted the
+/// plan stage **15ms** of a 300ms recall, and
+/// `tests/recall.rs::the_plan_stage_fits_the_budget_adr_0029_derived`
+/// measures a decided scope at roughly **230µs**: four `MemoryRead`
+/// evaluations, dominated by Cedar request construction rather than by
+/// anything this feature could hoist out (the batch materialisation of
+/// ADR-0042 decision 6 already took the plan stage from 378ms to 120ms at
+/// 512 scopes; what is left is per-request, not per-sweep).
+///
+/// The stage also carries a fixed cost the sweep does not — the identity
+/// read, the chain, the occupancy reads, the assignment and binding reads
+/// — measured at roughly 7.7ms on the dev stack, so the arithmetic is
+/// `(15ms − fixed) / per-scope`, which lands near 50 and takes 32 for
+/// headroom rather than sitting on the line.
+///
+/// **That fixed cost is virtualised dev IO**, and it is most of the
+/// budget: six or so round trips at Docker Desktop's fsync. The same
+/// sweep on production-shaped storage has far more room, which is why
+/// this is a *default* and not a constant — see [`max_recall_scopes`] —
+/// and why EVAL-6 is where the number gets re-derived on hardware that
+/// resembles a deployment (the HIER-1/MEM-1/CTX-1 discipline).
+///
+/// Prefer the other lever before raising it: the honest fix is making a
+/// decision cheaper, not making the budget bigger. When the cap binds the
+/// caller is *told* (`truncated`), because a bounded answer presented as
+/// a complete one is the one failure this surface cannot afford — and 32
+/// scopes *will* bind in a large tenant, which is exactly why that
+/// reporting is not decoration.
+const DEFAULT_MAX_RECALL_SCOPES: usize = 32;
+
+/// [`DEFAULT_MAX_RECALL_SCOPES`], overridable by
+/// `SYNVEDA_RECALL_MAX_SCOPES`.
+///
+/// An operator who has measured their own plan stage — the
+/// `synveda_recall_stage_duration_seconds{stage="plan"}` histogram is
+/// there for this — can widen the universe on hardware that affords it.
+/// A garbage or zero value takes the default rather than failing a read:
+/// this bounds cost, and the surface stays correct at any value.
+pub(crate) fn max_recall_scopes() -> usize {
+    static CAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        std::env::var("SYNVEDA_RECALL_MAX_SCOPES")
+            .ok()
+            .and_then(|raw| raw.parse::<usize>().ok())
+            .filter(|cap| *cap > 0)
+            .unwrap_or(DEFAULT_MAX_RECALL_SCOPES)
+    })
+}
 
 /// What one recall decides beyond the caller's chain, and what it had to
 /// leave out.
 pub(crate) struct Universe {
     /// The scopes to decide, nearest-first.
     pub(crate) candidates: Vec<CandidateChain>,
+    /// Every binding the caller holds anywhere in the tenant, replacing
+    /// the chain-scoped set [`gather`] read.
+    ///
+    /// A binding is the grant an administrator issues to widen someone's
+    /// reach, and it is one of the two grants ADR-0024 left unreachable.
+    /// Deciding a candidate scope without the binding that permits it
+    /// would ask the question and get the wrong answer — so the widened
+    /// universe needs the widened binding set, or it silently does not
+    /// work. `effective_roles_at` still admits each binding only where its
+    /// scope is on the resource's own chain, so this widens the *read*,
+    /// never a decision.
+    pub(crate) role_bindings: Vec<RoleBinding>,
     /// How many contributing scopes existed before the cap.
     pub(crate) considered: usize,
-    /// Whether [`MAX_RECALL_SCOPES`] dropped any of them.
+    /// Whether the cap ([`max_recall_scopes`]) dropped any of them.
     pub(crate) truncated: bool,
 }
 
@@ -426,24 +478,52 @@ pub(crate) async fn gather_universe(
     let considered = resolved.len();
     resolved
         .sort_by(|(a, left), (b, right)| a.cmp(b).then_with(|| left.scope_id.cmp(&right.scope_id)));
-    let truncated = considered > MAX_RECALL_SCOPES;
-    resolved.truncate(MAX_RECALL_SCOPES);
+    let cap = max_recall_scopes();
+    let truncated = considered > cap;
+    resolved.truncate(cap);
 
-    // Assignments only for what survived the cap: this is one indexed read
-    // per candidate and the cap is what bounds it.
+    // Assignments for everything that survived the cap, in **one** read.
+    //
+    // A read per candidate is the obvious shape and it is the wrong one:
+    // at the cap that is 64 round trips, which measured larger than the
+    // entire PDP sweep they exist to feed. The union is a single indexed
+    // read; partitioning it per chain afterwards is a memory operation.
+    let mut wanted: Vec<ScopeId> = resolved
+        .iter()
+        .flat_map(|(_, candidate)| candidate.chain.iter().map(|node| node.id))
+        .collect();
+    wanted.sort_unstable();
+    wanted.dedup();
+    let all = policy_assignments::for_scopes(&mut *conn, tenant_id, &wanted).await?;
+
     let mut candidates = Vec::with_capacity(resolved.len());
     for (_, mut candidate) in resolved {
-        let chain_ids: Vec<ScopeId> = candidate.chain.iter().map(|node| node.id).collect();
-        candidate.assignments =
-            policy_assignments::for_scopes(&mut *conn, tenant_id, &chain_ids).await?;
+        // Each candidate still gets exactly its own chain's rows: the PDP
+        // resolves the effective pack by walking *this* chain, and handing
+        // it a neighbour's assignment would put a pack in force at a scope
+        // nobody assigned it to (ADR-0014 decision 3).
+        candidate.assignments = all
+            .iter()
+            .filter(|assignment| {
+                candidate
+                    .chain
+                    .iter()
+                    .any(|node| node.id == assignment.scope_id)
+            })
+            .cloned()
+            .collect();
         candidates.push(candidate);
     }
+
+    let role_bindings =
+        role_bindings::for_subject(&mut *conn, tenant_id, &input.principal.subject).await?;
 
     let span = tracing::Span::current();
     span.record("candidates", candidates.len());
     span.record("truncated", truncated);
     Ok(Universe {
         candidates,
+        role_bindings,
         considered,
         truncated,
     })

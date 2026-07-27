@@ -180,6 +180,16 @@ impl fmt::Display for PackOrigin {
     }
 }
 
+/// One entity store, materialised for a set of chains and reused across
+/// many decisions (CTX-5, ADR-0042 decision 6).
+///
+/// Opaque on purpose: it holds no policy and takes no decision, so there
+/// is nothing here a caller could get wrong except handing it to
+/// [`Pdp::authorize_with`] for a chain it does not cover — which denies.
+pub struct EntityBatch {
+    entities: Entities,
+}
+
 /// The Policy Decision Point: the one `authorize` chokepoint every governed
 /// action passes through (seed §2.2). Cheap to share behind an `Arc`;
 /// decisions take a read lock only.
@@ -425,6 +435,117 @@ impl Pdp {
         resource: Resource,
         context: &AuthzContext<'_>,
     ) -> Result<AuthzDecision> {
+        self.decide(None, principal, action, resource, context)
+    }
+
+    /// Materialises one entity store covering every chain a sweep will
+    /// decide, for reuse across many [`Self::authorize_with`] calls
+    /// (CTX-5, ADR-0042 decision 6).
+    ///
+    /// The measurement this exists for: at 516 candidate scopes, four
+    /// tiers each, re-materialising per call put the plan stage at 378ms
+    /// against ADR-0029's 15ms allowance — the cost is
+    /// `Entities::from_entities`, not Cedar evaluation. Building it once
+    /// is what makes a universe wider than the chain affordable at all.
+    ///
+    /// It changes no verdict, which is the property that makes it a
+    /// performance mechanism rather than a policy one: see
+    /// [`Self::entities_over`].
+    pub fn materialise(
+        &self,
+        principal: &Principal,
+        chains: &[&[HierarchyNode]],
+        principal_scopes: &[HierarchyNode],
+    ) -> Result<EntityBatch> {
+        Ok(EntityBatch {
+            entities: self.entities_over(principal, chains, principal_scopes)?,
+        })
+    }
+
+    /// [`Self::authorize`] against a pre-materialised entity store.
+    ///
+    /// Everything else about the decision is unchanged and still
+    /// per-call: the effective pack still resolves from *this* resource's
+    /// chain and assignments, the roles from the bindings that reach it,
+    /// the lapses from the grants that bear on it. Only the entity store
+    /// is shared, and a caller that hands over a batch missing a chain
+    /// gets a *denial*, never a wrong allow — an absent scope entity fails
+    /// the membership tests every permit is built on.
+    pub fn authorize_with(
+        &self,
+        batch: &EntityBatch,
+        principal: &Principal,
+        action: Action,
+        resource: Resource,
+        context: &AuthzContext<'_>,
+    ) -> Result<AuthzDecision> {
+        self.decide(Some(batch), principal, action, resource, context)
+    }
+
+    /// Every `MemoryRead` tier at one scope, as one call (CTX-5, ADR-0042
+    /// decision 6).
+    ///
+    /// The four asks at a scope differ in exactly one context attribute,
+    /// and everything else about them is identical: the same effective
+    /// pack, the same effective roles, the same entity store. Asking them
+    /// separately re-resolved the pack and re-derived the roles four times
+    /// per scope, which at a widened universe's scale is most of the plan
+    /// stage. This resolves once and evaluates four times.
+    ///
+    /// It is the *same* decision either way — `authorize_with` in a loop
+    /// produces identical verdicts, which the AUTHZ-5 golden matrix keeps
+    /// honest — so this is a shape, not a semantics.
+    ///
+    /// Returns the permitted tiers ascending, plus the last decision (the
+    /// pack identity is the same for all four, one resource, one
+    /// resolution) and the pack's own configuration, so a caller planning
+    /// a scope needs no second resolution to read its channel rule.
+    pub fn permitted_read_tiers(
+        &self,
+        batch: &EntityBatch,
+        principal: &Principal,
+        scope_id: ScopeId,
+        context: &AuthzContext<'_>,
+    ) -> Result<(Vec<Sensitivity>, AuthzDecision, EffectivePack)> {
+        let resource = Resource::Scope(scope_id);
+        let (pack, origin) = self.resolve_pack(principal.tenant_id, resource, context, false);
+        let roles = effective_roles(principal, resource, context);
+        let mut tiers = Vec::with_capacity(Sensitivity::ALL.len());
+        let mut last: Option<AuthzDecision> = None;
+        for tier in Sensitivity::ALL {
+            let scoped = AuthzContext {
+                sensitivity: Some(tier),
+                ..*context
+            };
+            let decision = self.evaluate(
+                &pack,
+                origin,
+                &batch.entities,
+                principal,
+                Action::MemoryRead,
+                resource,
+                &roles,
+                &scoped,
+            )?;
+            if decision.allowed {
+                tiers.push(tier);
+            }
+            last = Some(decision);
+        }
+        let decision = last.ok_or_else(|| Error::Internal {
+            message: "the sensitivity vocabulary is empty".to_owned(),
+        })?;
+        Ok((tiers, decision, self.effective_from(&pack, origin)))
+    }
+
+    fn decide(
+        &self,
+        batch: Option<&EntityBatch>,
+        principal: &Principal,
+        action: Action,
+        resource: Resource,
+        context: &AuthzContext<'_>,
+    ) -> Result<AuthzDecision> {
         // Assignment mutations are decided under the pack the node
         // *inherits*, skipping its own assignment (ADR-0014 decision 4):
         // changing a node's governance is authorized by the surrounding
@@ -433,6 +554,35 @@ impl Pdp {
         let skip_self = action == Action::PolicyAssign;
         let (pack, origin) = self.resolve_pack(principal.tenant_id, resource, context, skip_self);
         let roles = effective_roles(principal, resource, context);
+        let owned;
+        let entities = match batch {
+            Some(batch) => &batch.entities,
+            None => {
+                owned = self.entities(principal, context)?;
+                &owned
+            }
+        };
+        self.evaluate(
+            &pack, origin, entities, principal, action, resource, &roles, context,
+        )
+    }
+
+    /// The evaluation half of a decision, once the pack, roles and
+    /// entities are in hand — shared by [`Self::decide`] and
+    /// [`Self::permitted_read_tiers`] so a batched tier sweep and a single
+    /// call cannot drift apart.
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate(
+        &self,
+        pack: &LoadedPack,
+        origin: PackOrigin,
+        entities: &Entities,
+        principal: &Principal,
+        action: Action,
+        resource: Resource,
+        roles: &[&'static str],
+        context: &AuthzContext<'_>,
+    ) -> Result<AuthzDecision> {
         // The standing grants that bear on *this* decision, gated by the
         // pack in force at the resource: a pack whose ceiling is zero
         // admits none of them on the very next request, standing or not
@@ -443,12 +593,11 @@ impl Pdp {
         } else {
             Vec::new()
         };
-        let entities = self.entities(principal, context)?;
         let request = self.request(
             principal,
             action,
             resource,
-            &roles,
+            roles,
             RequestContext {
                 grant: context.grant,
                 lapsed: !lapsed.is_empty(),
@@ -457,7 +606,7 @@ impl Pdp {
         )?;
         let response = self
             .authorizer
-            .is_authorized(&request, &pack.policies, &entities);
+            .is_authorized(&request, &pack.policies, entities);
         // Evaluation errors mean a policy did not evaluate (e.g. a missing
         // attribute); Cedar's semantics keep the outcome fail-closed, and
         // the error belongs in the trace.
@@ -537,6 +686,13 @@ impl Pdp {
         context: &AuthzContext<'_>,
     ) -> EffectivePack {
         let (pack, origin) = self.resolve_pack(tenant_id, resource, context, false);
+        self.effective_from(&pack, origin)
+    }
+
+    /// [`Self::effective`] from an already-resolved pack, so a caller that
+    /// just decided a scope reads its configuration without walking the
+    /// chain a second time (CTX-5, ADR-0042 decision 6).
+    fn effective_from(&self, pack: &LoadedPack, origin: PackOrigin) -> EffectivePack {
         EffectivePack {
             name: pack.name.clone(),
             version: pack.version,
@@ -652,12 +808,33 @@ impl Pdp {
     /// `home`, and `department` keep riding the per-request identity
     /// read (ADR-0016 decision 6).
     fn entities(&self, principal: &Principal, context: &AuthzContext<'_>) -> Result<Entities> {
+        self.entities_over(principal, &[context.scopes], context.principal_scopes)
+    }
+
+    /// [`Self::entities`] over several resource chains at once — the batch
+    /// materialisation recall's widened sweep needs (CTX-5, ADR-0042
+    /// decision 6).
+    ///
+    /// A superset entity store cannot change a verdict: Cedar resolves
+    /// only the entities a request actually names, and every scope carries
+    /// the same parents whether or not its neighbours are present. So one
+    /// store built over every chain a sweep will decide answers exactly as
+    /// N stores built one per chain would — for the price of one
+    /// `Entities::from_entities`, which is where the per-decision cost
+    /// almost entirely lives.
+    fn entities_over(
+        &self,
+        principal: &Principal,
+        chains: &[&[HierarchyNode]],
+        principal_scopes: &[HierarchyNode],
+    ) -> Result<Entities> {
         use cedar_policy::RestrictedExpression;
 
-        // Both chains may share nodes (a team reading its own scope);
-        // Cedar rejects duplicate entity entries, so deduplicate by uid.
+        // Chains may share nodes (a team reading its own scope, or two
+        // candidates under one department); Cedar rejects duplicate entity
+        // entries, so deduplicate by uid.
         let mut merged: HashMap<EntityUid, Entity> = HashMap::new();
-        for chain in [context.scopes, context.principal_scopes] {
+        for chain in chains.iter().copied().chain([principal_scopes]) {
             if chain.is_empty() {
                 continue;
             }
@@ -697,7 +874,7 @@ impl Pdp {
             );
             principal_parents.insert(home_uid);
         }
-        if let Some(department) = nearest_department(context.principal_scopes) {
+        if let Some(department) = nearest_department(principal_scopes) {
             principal_attrs.insert(
                 "department".to_owned(),
                 RestrictedExpression::new_entity_uid(self.scope_uid(department)?),

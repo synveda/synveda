@@ -18,9 +18,11 @@
 //! way to decide would be a second answer to "may this caller see this
 //! record" (seed §2.2).
 
-use synveda_policy::{Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource};
+use synveda_policy::{
+    AuthzContext, AuthzDecision, EffectivePack, EntityBatch, Pdp, Principal, Resource,
+};
 use synveda_types::{
-    CompositionConfig, Error, HierarchyNode, Lapse, LapseId, PolicyAssignment, Result, RoleBinding,
+    CompositionConfig, HierarchyNode, Lapse, LapseId, PolicyAssignment, Result, RoleBinding,
     ScopeId, ScopeTier, Sensitivity,
 };
 
@@ -137,10 +139,11 @@ pub struct LapsedScope<'a> {
     err(Display)
 )]
 pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Vec<ScopeTier>> {
+    let batch = materialise(pdp, inputs)?;
     let mut permitted: Vec<ScopeTier> = Vec::with_capacity(inputs.chain.len());
     let mut scopes = 0usize;
     for (position, node) in inputs.chain.iter().enumerate() {
-        let context = |sensitivity: Sensitivity| AuthzContext {
+        let context = AuthzContext {
             scopes: &inputs.chain[position..],
             principal_scopes: inputs.chain,
             assignments: inputs.assignments,
@@ -148,9 +151,10 @@ pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Resul
             role_bindings: inputs.role_bindings,
             grant: None,
             lapses: inputs.lapses,
-            sensitivity: Some(sensitivity),
+            // Named per tier inside the sweep (ADR-0038 decision 2).
+            sensitivity: None,
         };
-        let tiers = permitted_tiers(pdp, inputs.principal, node.id, context)?.0;
+        let tiers = permitted_tiers(pdp, &batch, inputs.principal, node.id, &context)?.0;
         if !tiers.is_empty() {
             scopes += 1;
         }
@@ -160,6 +164,30 @@ pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Resul
     span.record("permitted", scopes);
     span.record("pairs", permitted.len());
     Ok(permitted)
+}
+
+/// One entity store for every chain this walk will decide (CTX-5,
+/// ADR-0042 decision 6).
+///
+/// The cost of a decision is dominated by materialising Cedar's entity
+/// store, not by evaluating against it: measured at 516 candidate scopes,
+/// re-materialising per call put the plan stage at 378ms against
+/// ADR-0029's 15ms allowance. Building it once per walk is what makes a
+/// universe wider than the chain affordable, and it changes no verdict —
+/// a superset store answers a request identically, because Cedar resolves
+/// only the entities the request names.
+///
+/// Every chain the walk will touch has to be in here. A scope whose chain
+/// is missing denies rather than mis-allows (the entities its permits test
+/// membership against are simply absent), so the failure mode of getting
+/// this wrong is a caller reading less than they should — never more.
+fn materialise(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<EntityBatch> {
+    let mut chains: Vec<&[HierarchyNode]> =
+        Vec::with_capacity(1 + inputs.lapsed.len() + inputs.candidates.len());
+    chains.push(inputs.chain);
+    chains.extend(inputs.lapsed.iter().map(|lapsed| lapsed.chain));
+    chains.extend(inputs.candidates.iter().map(|candidate| candidate.chain));
+    pdp.materialise(inputs.principal, &chains, inputs.chain)
 }
 
 /// One off-chain scope to decide, whatever put it on the walk.
@@ -187,6 +215,7 @@ struct OffChain<'a> {
 /// and materialise an entity graph with no ancestry.
 fn plan_off_chain(
     pdp: &Pdp,
+    batch: &EntityBatch,
     inputs: &MemoryReadInputs<'_>,
     scope: OffChain<'_>,
     decisions: &mut Vec<ScopeDecision>,
@@ -199,7 +228,7 @@ fn plan_off_chain(
         // unplaced principal gets.
         return Ok(());
     };
-    let context = |sensitivity: Sensitivity| AuthzContext {
+    let context = AuthzContext {
         scopes: scope.chain,
         principal_scopes: inputs.chain,
         assignments: scope.assignments,
@@ -207,14 +236,15 @@ fn plan_off_chain(
         role_bindings: inputs.role_bindings,
         grant: None,
         lapses: inputs.lapses,
-        sensitivity: Some(sensitivity),
+        sensitivity: None,
     };
     // Per tier here too, and for a lapse this is where the grant's declared
     // ceiling shows up as a *smaller set*: the PDP sets `context.lapsed`
     // only at tiers at or below what the grant declared (ADR-0038
     // decision 6), so a working-tier grant plans the working tiers and a
     // restricted one plans all four.
-    let (sensitivities, decision) = permitted_tiers(pdp, inputs.principal, target, context)?;
+    let (sensitivities, decision, effective) =
+        permitted_tiers(pdp, batch, inputs.principal, target, &context)?;
     decisions.push(ScopeDecision {
         scope_id: target,
         allowed: !sensitivities.is_empty(),
@@ -228,12 +258,9 @@ fn plan_off_chain(
     }
     // The *target's* effective pack, not the reader's: what that scope
     // stands behind, under that scope's schedule (ADR-0040 decision 10) and
-    // rendered by that scope's rules (ADR-0041 decision 11).
-    let effective = pdp.effective(
-        tenant_id_of(inputs),
-        Resource::Scope(target),
-        &context(Sensitivity::WORKING),
-    );
+    // rendered by that scope's rules (ADR-0041 decision 11). It comes back
+    // from the same resolution that just decided the scope, so planning one
+    // scope walks its chain once rather than twice.
     scopes.push(ComposeScope {
         scope_id: target,
         kind: node.kind,
@@ -257,44 +284,27 @@ fn plan_off_chain(
     Ok(())
 }
 
-fn tenant_id_of(inputs: &MemoryReadInputs<'_>) -> synveda_types::TenantId {
-    inputs.principal.tenant_id
-}
-
-/// One scope's allowed tier set, ascending, plus the decision the pack
-/// identity is read from.
+/// One scope's allowed tier set, ascending, the decision the pack
+/// identity is read from, and that pack's configuration.
 ///
 /// Every ask is a real PDP call: there is no short-circuit on the first
 /// allow and no monotonicity assumption, so a pack that permits
 /// `confidential` while denying `internal` gets exactly what it said rather
-/// than what it probably meant (ADR-0038 decision 3, option 6 records the
-/// upgrade if the decision count ever binds).
-fn permitted_tiers<'a>(
+/// than what it probably meant (ADR-0038 decision 3).
+///
+/// All four go through `permitted_read_tiers`, which resolves the pack and
+/// the roles once and evaluates four times against a shared entity store
+/// (CTX-5, ADR-0042 decision 6). Same verdicts, a fraction of the work —
+/// which is what a universe wider than the chain costs when it is not
+/// done this way.
+fn permitted_tiers(
     pdp: &Pdp,
+    batch: &EntityBatch,
     principal: &Principal,
     scope_id: ScopeId,
-    context: impl Fn(Sensitivity) -> AuthzContext<'a>,
-) -> Result<(Vec<Sensitivity>, AuthzDecision)> {
-    let mut tiers = Vec::with_capacity(Sensitivity::ALL.len());
-    let mut last: Option<AuthzDecision> = None;
-    for tier in Sensitivity::ALL {
-        let decision = pdp.authorize(
-            principal,
-            Action::MemoryRead,
-            Resource::Scope(scope_id),
-            &context(tier),
-        )?;
-        if decision.allowed {
-            tiers.push(tier);
-        }
-        last = Some(decision);
-    }
-    // Four tiers are always asked, so this is always set; the pack that
-    // decided is the same for all four (one resource, one resolution).
-    let decision = last.ok_or_else(|| Error::Internal {
-        message: "the sensitivity vocabulary is empty".to_owned(),
-    })?;
-    Ok((tiers, decision))
+    context: &AuthzContext<'_>,
+) -> Result<(Vec<Sensitivity>, AuthzDecision, EffectivePack)> {
+    pdp.permitted_read_tiers(batch, principal, scope_id, context)
 }
 
 /// A composition plan (CTX-2, ADR-0025 decision 1): the PDP-allowed
@@ -363,8 +373,9 @@ pub struct ScopeDecision {
     err(Display)
 )]
 pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<CompositionPlan> {
+    let batch = materialise(pdp, inputs)?;
     let tenant_id = inputs.principal.tenant_id;
-    let context_at = |position: usize, sensitivity: Sensitivity| AuthzContext {
+    let context_at = |position: usize| AuthzContext {
         scopes: &inputs.chain[position..],
         principal_scopes: inputs.chain,
         assignments: inputs.assignments,
@@ -372,29 +383,30 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
         role_bindings: inputs.role_bindings,
         grant: None,
         lapses: inputs.lapses,
-        sensitivity: Some(sensitivity),
+        // Named per tier inside the sweep (ADR-0038 decision 2).
+        sensitivity: None,
     };
     let budget_tokens = match inputs.chain.first() {
         Some(home) => {
             // The pack resolution is tier-blind — an effective pack is a
             // property of the resource (ADR-0014 decision 3) — so any tier
             // reads the same config.
-            pdp.effective(
-                tenant_id,
-                Resource::Scope(home.id),
-                &context_at(0, Sensitivity::WORKING),
-            )
-            .composition
-            .budget_tokens
+            pdp.effective(tenant_id, Resource::Scope(home.id), &context_at(0))
+                .composition
+                .budget_tokens
         }
         None => CompositionConfig::DEFAULT.budget_tokens,
     };
     let mut scopes = Vec::with_capacity(inputs.chain.len());
     let mut decisions = Vec::with_capacity(inputs.chain.len());
     for (position, node) in inputs.chain.iter().enumerate() {
-        let (sensitivities, decision) = permitted_tiers(pdp, inputs.principal, node.id, |tier| {
-            context_at(position, tier)
-        })?;
+        let (sensitivities, decision, effective) = permitted_tiers(
+            pdp,
+            &batch,
+            inputs.principal,
+            node.id,
+            &context_at(position),
+        )?;
         decisions.push(ScopeDecision {
             scope_id: node.id,
             allowed: !sensitivities.is_empty(),
@@ -407,12 +419,8 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             continue;
         }
         // The channel rule comes from the same effective-pack resolution
-        // that just decided the scope (ADR-0025 decision 2).
-        let effective = pdp.effective(
-            tenant_id,
-            Resource::Scope(node.id),
-            &context_at(position, Sensitivity::WORKING),
-        );
+        // that just decided the scope (ADR-0025 decision 2) — literally the
+        // same one now, returned by the sweep rather than walked again.
         scopes.push(ComposeScope {
             scope_id: node.id,
             kind: node.kind,
@@ -443,6 +451,7 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
     for lapsed in inputs.lapsed {
         plan_off_chain(
             pdp,
+            &batch,
             inputs,
             OffChain {
                 scope_id: lapsed.lapse.target_scope_id,
@@ -467,6 +476,7 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
         }
         plan_off_chain(
             pdp,
+            &batch,
             inputs,
             OffChain {
                 scope_id: candidate.scope_id,

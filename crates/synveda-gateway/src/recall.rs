@@ -133,7 +133,12 @@ pub(crate) struct RecallBody {
 
 impl RecallBody {
     fn mode(&self) -> &'static str {
-        if self.query.is_some() { "query" } else { "ids" }
+        match (&self.ids, &self.query) {
+            (_, Some(_)) => "query",
+            (Some(_), _) => "ids",
+            // Neither, which validation only admits alongside an instant.
+            _ => "sweep",
+        }
     }
 }
 
@@ -214,7 +219,13 @@ fn validate(payload: &RecallBody) -> Result<()> {
             return invalid("recall takes ids or query, never both".to_owned());
         }
         (None, None) => {
-            return invalid("recall takes ids or query".to_owned());
+            // A bare recall must say what it wants. An instant is a
+            // perfectly good answer to that — "everything I may read, as
+            // it stood then" is the complete historical read, and the one
+            // shape a query cannot give (ADR-0042 decision 14).
+            if payload.as_of.is_none() {
+                return invalid("recall takes ids, a query, or an as_of instant".to_owned());
+            }
         }
         (Some(ids), None) => {
             if ids.is_empty() || ids.len() > MAX_RECALL_IDS {
@@ -316,10 +327,7 @@ async fn handle(
     let tenant_id = tenant_id()?;
     let mode = payload.mode();
     let limit = payload.limit.unwrap_or(MAX_RECALL_IDS);
-    let requested = match &payload.ids {
-        Some(ids) => ids.len(),
-        None => limit,
-    };
+    let requested = payload.ids.as_ref().map_or(limit, Vec::len);
     let span = tracing::Span::current();
     span.record("mode", mode);
     span.record("records.requested", requested);
@@ -409,7 +417,11 @@ async fn handle(
             chain: &input.chain,
             assignments: &input.assignments,
             default_pack: input.default_pack.as_deref(),
-            role_bindings: &input.role_bindings,
+            // The tenant-wide binding set, not the chain-scoped one: a
+            // binding at a candidate scope is precisely the grant the
+            // widened universe exists to reach, and deciding that scope
+            // without it would ask the question and get the wrong answer.
+            role_bindings: &universe.role_bindings,
             lapses: &input.lapses,
             lapsed: &lapsed,
             candidates: &candidates,
@@ -527,7 +539,14 @@ async fn handle(
         // result rather than an error (ADR-0026 decision 1).
         (None, None) => Vec::new(),
     };
-    let mut request = ComposeRequest::naming(plan.scopes, named, valid_at);
+    let mut request = if mode == "sweep" {
+        // Nothing named and nothing asked: the plan itself, as it stood at
+        // the instant. The only shape that reaches a record the live
+        // corpus no longer holds (ADR-0042 decision 14).
+        ComposeRequest::sweeping(plan.scopes, valid_at)
+    } else {
+        ComposeRequest::naming(plan.scopes, named, valid_at)
+    };
     if let Some(at) = tx_at {
         request = request.as_of(at);
     }
@@ -567,12 +586,21 @@ async fn handle(
             records.truncate(limit);
         }
         // Gradient order, so a recall reads like the block it came from.
-        None => records.sort_by(|a, b| {
-            a.position
-                .cmp(&b.position)
-                .then_with(|| channel_rank(a).cmp(&channel_rank(b)))
-                .then_with(|| a.version.id.cmp(&b.version.id))
-        }),
+        None => {
+            records.sort_by(|a, b| {
+                a.position
+                    .cmp(&b.position)
+                    .then_with(|| channel_rank(a).cmp(&channel_rank(b)))
+                    .then_with(|| b.version.state.valid_from.cmp(&a.version.state.valid_from))
+                    .then_with(|| a.version.id.cmp(&b.version.id))
+            });
+            // A sweep is bounded by `limit` like a query: it named
+            // nothing, so nothing else bounds it. The ids form is already
+            // bounded by what it named.
+            if mode == "sweep" {
+                records.truncate(limit);
+            }
+        }
     }
     let entries: Vec<RecallEntry> = records.iter().map(render).collect();
 
