@@ -23,7 +23,7 @@ infrastructure review board.
 | System of record | **PostgreSQL 17** | PostgreSQL | Boring, auditable, runs anywhere incl. air-gapped |
 | Vector search | **pgvector** (HNSW) | PostgreSQL | Fine to ~10–50M vectors per tenant shard. Scale-out: **Qdrant** (Rust, Apache-2.0) behind the same `VectorIndex` trait. Note: VectorChord/pgvecto.rs is Rust and faster but AGPL — optional adapter only |
 | Sparse / lexical | Postgres FTS + **Tantivy** (Rust, MIT) sidecar via `synveda-retrieval` | MIT | BM25 quality without ParadeDB's AGPL. Hybrid fusion (RRF) done in Rust |
-| Graph | **Apache AGE** (Postgres extension) | Apache-2.0 | Cypher over Postgres; keeps graph transactional with records. Scale-out: revisit only if graph queries dominate (candidates: **IndraDB**, Rust, MPL; avoid SurrealDB/Memgraph — BSL) |
+| Graph | **Indexed adjacency in plain Postgres** (bitemporal edge pair; named graphs as a mandatory discriminator) | — | Amended 2026-07-27 by GRPH-1/ADR-0043, was **Apache AGE**: the GRPH-4 spike measured adjacency 3–8× faster at 2.5× less storage, and AGE's `cypher()` takes a name constant its statements cannot be sqlx-checked inside. Still transactional with records, still one engine. Ladder: materialised k-hop closure table (the HIER-1 pattern), then a dedicated engine with its own ADR and a licence exception (candidates: **IndraDB**, Rust, MPL; avoid SurrealDB/Memgraph — BSL) |
 | Hierarchy | Plain Postgres (closure table + materialised path) | — | No graph DB needed for tenancy |
 | Queue (simple) | **PGMQ** (Postgres extension) | PostgreSQL | For observe-event ingestion buffer — no extra infra for SMB deployments |
 | Workflow (complex) | **Temporal** | MIT | Extraction pipelines, directory sync, retention jobs, approval timers. Go-based but the best-in-class; Rust SDK (community) or activities via gRPC workers |
@@ -158,8 +158,8 @@ return block.
 **`observe`** (never blocks):
 Gateway authZ → PGMQ enqueue (ack <20ms) → Temporal workflow: redact/secret-scan → extract
 (classify into fact/decision/procedure/…) → dedup & conflict-detect against existing records →
-summarise → embed (TEI) → graph-link (AGE) → **commit to `derived`** → maybe auto-open
-promotion proposal.
+summarise → embed (TEI) → graph-link (adjacency tables, ADR-0043) → **commit to `derived`** →
+maybe auto-open promotion proposal.
 
 **`recall`** (explicit tool):
 Same authZ → richer retrieval incl. graph traversal + as-of queries → results carry
@@ -202,8 +202,9 @@ provenance + channel labels so the agent can weigh derived vs published.
 - **pgvector ceiling** → trait-isolated from day one; Qdrant adapter is Phase 3, not a rewrite.
 - **Cedar ReBAC limits** at deep hierarchies → `authorize()` facade; OpenFGA adapter path proven
   by a spike in Phase 2, before it's needed.
-- **AGE maturity** → graph features are additive (retrieval works without graph-links);
-  degrade gracefully.
+- **Graph layer earning its place** → graph features are additive (retrieval works without
+  graph-links); degrade gracefully. (Was "AGE maturity"; ADR-0043 removed the engine risk by
+  removing the engine, and the mitigation is unchanged — GRPH-3 is feature-flagged.)
 - **Temporal operational weight for SMB** → PGMQ + a simple Rust worker covers SMB mode;
   Temporal required only for enterprise profile.
 - **Extraction quality** (garbage memories poison trust) → derived channel is quarantined by

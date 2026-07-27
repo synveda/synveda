@@ -1,6 +1,7 @@
 # ADR-0004: Multiple named AGE graphs per tenant with bitemporal edges
 
-- **Status**: Accepted; amended in part by ADR-0029 (2026-07-25)
+- **Status**: Accepted; amended in part by ADR-0029 (2026-07-25); **engine
+  choice superseded by ADR-0043 (2026-07-27)**
 - **Date**: 2026-07-18
 - **Feature(s)**: FND-6, GRPH-1..4
 - **Deciders**: sujitn
@@ -23,6 +24,21 @@
 > forms, and the relational alternative rejected as option 4 below
 > outperformed AGE on every measured axis. See ADR-0029 and
 > docs/spikes/grph-4-age-traversal.md.
+>
+> **Superseded in part (ADR-0043, GRPH-1, 2026-07-27).** The schema call
+> ADR-0029 handed to GRPH-1's design ADR went the other way: **option 4
+> is adopted**. The graph layer is indexed adjacency in Postgres, and no
+> crate calls AGE. What survives of this ADR is its *semantic*
+> partitioning — the entity / episode / provenance graphs, the
+> MAGMA-informed argument for them, bitemporal edges, and the additive,
+> degradable posture — now carried by a mandatory `Graph` discriminator
+> on a relational edge pair rather than by three named AGE graphs. What
+> does not survive is the engine: option 1's "clean per-tenant isolation
+> boundary in AGE" is replaced by composite foreign keys that make a
+> cross-tenant edge unrepresentable (restoring, structurally, what the
+> ADR-0029 amendment above had to downgrade to enforcement). Option 3's
+> licence reasoning stands unchanged and still rules out a second engine.
+> See ADR-0043.
 
 ## Context
 

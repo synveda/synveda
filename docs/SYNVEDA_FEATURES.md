@@ -24,8 +24,11 @@ attributed directly to temporal fact modelling over flat vector storage. Graphit
 A-MEM 0.58, MemoryOS 0.553) by maintaining multiple specialised graphs (semantic, episodic,
 causal, entity) rather than one homogeneous graph. 2026 surveys taxonomise graph memory into
 knowledge/temporal/hyper/hierarchical/hybrid variants.
-→ **Design AGE schema as multiple named graphs per tenant from day one (entity graph,
-   episode graph, provenance graph) — cheap now, expensive to retrofit.**
+→ **Design the graph schema as multiple named graphs from day one (entity graph, episode
+   graph, provenance graph) — cheap now, expensive to retrofit. The semantic partitioning is
+   the research finding and it stands; the engine that carries it is a separate question,
+   settled against AGE by GRPH-1/ADR-0043, and the per-tenant instantiation was already
+   dropped by GRPH-4/ADR-0029.**
 
 **Token efficiency is now a first-class benchmark axis.** Mem0's 2026 state-of-memory report
 scores systems on accuracy × latency × tokens-per-query; their new algorithm reports 92.5
@@ -104,10 +107,14 @@ now an explicitly promoted architecture (e.g. Microsoft Azure PostgreSQL guidanc
 The embedded-graph alternatives that appeared in memory stacks have thinned out: the
 notable one is no longer maintained, and the mature property-graph engines are GPL or BSL,
 failing the core-path licence rule.
-→ **AGE choice holds. Keep graph features additive/degradable. The fallback if AGE Cypher
-   perf disappoints is inside Postgres — indexed adjacency, then a materialised k-hop
-   closure table — not a second engine (spike in Phase 2; settled by GRPH-4/ADR-0029:
-   AGE passed on latency, and the fallback ladder was rewritten there).**
+→ **Keep graph features additive/degradable. The fallback if AGE Cypher perf disappoints is
+   inside Postgres — indexed adjacency, then a materialised k-hop closure table — not a
+   second engine (spike in Phase 2; settled by GRPH-4/ADR-0029: AGE passed on latency, and
+   the fallback ladder was rewritten there). Updated 2026-07-27 (GRPH-1/ADR-0043): "AGE
+   choice holds" no longer does — the spike's own relational baseline beat it on every
+   measured axis including the two criteria AGE failed, so rung 1 of that ladder is what
+   ships and no crate calls AGE. The single-engine argument is untouched: the graph is
+   still in Postgres, still transactional with records.**
 
 **AuthZ**: MCP only got "its missing enterprise authorization layer" in mid-2026 —
 authorization for agent access is immature everywhere, which again is our gap to own. Cedar
@@ -294,9 +301,17 @@ CTX-6  Session compression assist (M)
 ──────────────────────────────────────────────
 EPIC GRPH — Knowledge graph & relationships
 ──────────────────────────────────────────────
-GRPH-1 Multi-graph AGE schema (M)
-  Named graphs per tenant: entity, episode, provenance (MAGMA-informed). Edges carry
-  bitemporal validity. AC: Cypher round-trip tests; edge supersession preserves history.
+GRPH-1 Multi-graph schema (M)
+  Named graphs — entity, episode, provenance (MAGMA-informed) — carried as a mandatory
+  discriminator over a bitemporal edge pair in Postgres. Edges carry bitemporal validity.
+  AC: an edge written through the store API reads back through the traversal API with its
+  kind, endpoints and validity intact; a supersession closes the prior edge's window with
+  both versions readable as-of; the shipped statements' plans contain no sequential scan
+  over the edge table.
+  Amended 2026-07-27 (ADR-0043): the title was "Multi-graph AGE schema" and the criterion
+  named Cypher round-trip tests. GRPH-4/ADR-0029 measured relational adjacency 3–8× faster
+  than AGE at 2.5× less storage and handed the schema call to this feature's design ADR;
+  the substance of the criterion survives, the Cypher mechanism does not.
 GRPH-2 Graph-linking stage (M)
   Ingestion links records→entities→episodes; entity resolution against existing nodes.
   AC: entity dedup precision on fixture set; orphan rate tracked.

@@ -260,3 +260,19 @@ which did not occur, so this ADR does not overturn ADR-0004 on that basis
 — but the evidence is recorded here and in the report, GRPH-1's design ADR
 is where the schema call belongs (per G4's own consequence), and the
 burden of proof has moved onto AGE.
+
+**Resolved 2026-07-27 (ADR-0043, GRPH-1): AGE did not discharge it.** The
+schema call went to relational adjacency — rung 1 of this ADR's own
+ladder, adopted on this ADR's own recommendation, with ADR-0004's named
+graphs surviving as a mandatory discriminator and no crate calling AGE.
+The three obligations above are inherited rather than dropped: obligation
+1's amended tenancy shape becomes composite foreign keys that make a
+cross-tenant edge unrepresentable *plus* the same forced RLS; obligation
+2's edge-write mitigation is moot once edges are ordinary rows (1.46ms
+measured, no Cypher to bypass); and obligation 3 — the disciplined forms
+defended by a test that fails on a sequential scan — transfers intact,
+now enforced additionally by a `Depth` enum that makes unbounded
+traversal unrepresentable. This ADR's 300ms recall decomposition, its
+fallback ladder and its trigger conditions all stand; rung 2 (the
+materialised k-hop closure table) is where a breach of the graph-expansion
+slice goes next.
