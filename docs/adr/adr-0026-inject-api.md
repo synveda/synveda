@@ -214,7 +214,12 @@ Decisions, specifically:
   recency-ordered — relevance requires a task by construction.
 - Reversal triggers: the latency AC (or EVAL-6) shows the append or
   chain-head lock dominating → buffered read-path appender (ADR-0019
-  option 2); CTX-5 lands → the as-of parameter extends decision 6;
+  option 2); ~~CTX-5 lands → the as-of parameter extends decision 6~~
+  **(ADR-0042 decision 7: the parameter landed on `recall` rather than on
+  `inject` — two explicit instants, `as_of` for transaction time and
+  `valid_at` for valid time, both defaulting to the request instant. This
+  decision's server-stamped instant is unchanged; inject stays the silent,
+  fast, present-tense primitive, and the time machine is the deep one)**;
   FLOW-1/2 land → commit hashes and channel refs replace the CTX-2
   stand-ins inside an unchanged response shape; EVAL-4/6 evidence →
   revisit options 5 and 7.

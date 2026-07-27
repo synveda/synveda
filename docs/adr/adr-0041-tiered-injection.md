@@ -370,8 +370,14 @@ oracle. The line to watch is the 90, not the 9 — if it binds, the lever is
   far exceeding their index lines → option 9's always-index threshold,
   behind the pack knob decision 11 already added; EVAL-4 shows the index
   tier displacing bodies that mattered → option 4's separate index
-  budget; CTX-5 lands → the query alternative joins this route and the
-  MCP tool joins the ADPT-1 plugin manifest per ADR-0027's own trigger;
+  budget; ~~CTX-5 lands → the query alternative joins this route and the
+  MCP tool joins the ADPT-1 plugin manifest per ADR-0027's own trigger~~
+  **(ADR-0042: both, as recorded — `ids` xor `query` on one route under
+  one audit action (decision 1), and one MCP tool in the ADPT-1 manifest
+  (decision 15). One thing this ADR did not anticipate: the two forms now
+  share the *widened* universe (ADR-0042 decisions 2–3), so a handle
+  resolves against the same answer a query would get, rather than against
+  a narrower chain-only one)**;
   recall volume or latency binds → the buffered read-path appender
   ADR-0019 option 2 records for inject applies unchanged.
 

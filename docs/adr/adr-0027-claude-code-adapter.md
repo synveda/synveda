@@ -293,8 +293,13 @@ Decisions, specifically:
 - Reversal triggers: the harness publishes a supported transcript or
   context API → drop the JSONL parser (decision 9); Node startup
   measured to dominate session start → option 2; CTX-4's tiering lands
-  → revisit option 6; CTX-5/ADPT-2 land → the MCP recall tool joins this
-  plugin's manifest as `mcpServers`, no restructuring; SKIL-4 lands →
+  → revisit option 6; ~~CTX-5/ADPT-2 land → the MCP recall tool joins this
+  plugin's manifest as `mcpServers`, no restructuring~~ **(ADR-0042
+  decision 15: one tool, `recall`, as a third entry point in this package,
+  registered exactly as this decision reserved — configuration, no
+  restructuring. Decision 1's dependency-free constraint held: the
+  JSON-RPC framing is written directly rather than taken as an SDK, and
+  ADR-0042 option 8 records why and what would reverse it)**; SKIL-4 lands →
   `skills/` in the same manifest.
 
 ## Compliance notes

@@ -415,9 +415,13 @@ Decisions, specifically:
   against rejected proposals' trees showing up in the sweep's cost as
   closed proposals accumulate → a suppression index keyed by
   `(scope, object_hash)`, derived and rebuildable exactly as the usage
-  projection is; (d) CTX-5 landing → the swept action set gains explicit
+  projection is; ~~(d) CTX-5 landing → the swept action set gains explicit
   recall, and the evidence's action list is what keeps old proposals
-  honest about which signal they counted; (e) FLOW-5 landing → the
+  honest about which signal they counted~~ **(d — ADR-0042 decision 16:
+  `context.recalled` joins the swept set, and because the evidence already
+  names the actions it counted, a proposal opened before CTX-5 and one
+  opened after stay distinguishable rather than silently the same claim)**;
+  (e) FLOW-5 landing → the
   same-scope constraint in decision 8 moves to a rule's target
   expression, and the disclosure rule FLOW-5 decides governs what a
   rule may propose upward; (f) MEM-5 landing → similarity-triggered

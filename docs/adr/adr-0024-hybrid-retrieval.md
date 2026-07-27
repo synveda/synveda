@@ -240,8 +240,13 @@ Decisions, specifically:
   measured index lag or idle-poll load matters → LISTEN/NOTIFY
   (ADR-0022's recorded upgrade); sidecar operational cost outweighs
   BM25 quality edge in the field → Postgres FTS fallback per option 3;
-  CTX-5's broader universe needs batch PDP evaluation → revisit
-  decision 1's chain-only universe.
+  ~~CTX-5's broader universe needs batch PDP evaluation → revisit
+  decision 1's chain-only universe~~ **(revisited 2026-07-27, ADR-0042:
+  decision 1's chain-only universe stands for `inject` and is widened for
+  `recall` only — to the scopes that can *contribute* to a request rather
+  than to every scope in the tenant (ADR-0042 decision 2), decided through
+  this ADR's own per-`(scope, tier)` facade against one entity
+  materialisation, which is the batch evaluation option 2 deferred here)**.
 
 ## Compliance notes
 

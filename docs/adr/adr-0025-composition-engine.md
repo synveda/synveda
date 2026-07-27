@@ -202,6 +202,10 @@ Decisions, specifically:
    — the full bitemporal inject ("what did the agent know on March
    3rd"). Deferred to CTX-5 with the refs half (tech plan §2.5); the
    `at` input covers valid time now without a second query shape.
+   *Taken up 2026-07-27 by ADR-0042 decisions 7–11: `at` became the
+   `valid_at` half of an explicit pair, `as_of` reads `records_versions`
+   for the transaction-time half, and the corpus rewinds while the
+   authority deciding it never does.*
 7. **A `hierarchy_nodes` column for budget** — lighter than a table,
    but still a second config plane with none of the pack machinery,
    and budget/channels belong together. Rejected with option 1.

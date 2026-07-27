@@ -159,7 +159,11 @@ using CTX-3's measured stage split and ADR-0024's search budget:
 
 - Positive: whichever way it lands, two Accepted ADRs stop resting on an
   assumption; the recall budget gets a written decomposition that CTX-5
-  and EVAL-6 inherit; the relational baseline makes "AGE is slow" and
+  and EVAL-6 inherit *(inherited 2026-07-27: ADR-0042 takes the 15ms "PDP
+  plan (permitted scopes)" allowance as the assert its widened
+  candidate universe is measured against, and sizes its scope cap from it
+  — so a budget derived here to gate a graph now bounds a feature that has
+  no graph in it)*; the relational baseline makes "AGE is slow" and
   "graphs are slow" distinguishable.
 - Negative / accepted trade-offs: the criteria are calibrated on dev
   hardware under virtualised IO, so they bound *relative* behaviour well
