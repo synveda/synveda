@@ -33,7 +33,9 @@ pub use approval::{
 };
 pub use asset::AssetKind;
 pub use channel::Channel;
-pub use composition::{CompositionConfig, InjectChannels};
+pub use composition::{
+    CompositionConfig, DEFAULT_INDEX_ENTRY_CHARS, EntryTier, IndexTier, InjectChannels,
+};
 pub use dedup::{DedupConfig, DedupMode, MAX_DEDUP_NEIGHBOURS, permille};
 pub use error::{Error, Result};
 pub use hierarchy::{HierarchyNode, ScopeKind};

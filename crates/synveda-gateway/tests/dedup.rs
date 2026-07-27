@@ -476,9 +476,12 @@ async fn valid_at(
     // No horizons: this helper asks what the composition engine would
     // see, and MEM-6's product default expires nothing (ADR-0040
     // decision 13).
-    let found = synveda_store::search::compose_candidates(&mut tx, tenant, &pairs, &[], at, 64)
-        .await
-        .expect("compose candidates");
+    // `None` names nothing: the sweep every inject issues, rather than
+    // CTX-4's named-id read (ADR-0041 decision 5).
+    let found =
+        synveda_store::search::compose_candidates(&mut tx, tenant, &pairs, &[], at, 64, None)
+            .await
+            .expect("compose candidates");
     found
         .into_iter()
         .map(|version| version.state.content)

@@ -161,6 +161,7 @@ fn published_only_pack_governs_its_subtree_and_the_budget() {
             composition: Some(CompositionConfig {
                 budget_tokens: 900,
                 channels: InjectChannels::PublishedOnly,
+                ..CompositionConfig::DEFAULT
             }),
             ..Default::default()
         },

@@ -22,6 +22,7 @@ mod credentials;
 mod diff;
 mod login;
 mod proposal;
+mod recall;
 
 use std::process::ExitCode;
 use std::time::Duration;
@@ -32,9 +33,9 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::{Hs256Verifier, personal_slug};
 use synveda_types::{
-    CompositionConfig, DedupConfig, DedupMode, IdentityId, IdentityKind, InjectChannels,
-    PackConfig, PromotionConfig, ProposalId, ProposalState, RedactionConfig, RedactionMode,
-    RetentionConfig, Role, ScopeId, ScopeKind, TenantId, TenantStatus,
+    CompositionConfig, DedupConfig, DedupMode, IdentityId, IdentityKind, IndexTier, InjectChannels,
+    PackConfig, PromotionConfig, ProposalId, ProposalState, RecordId, RedactionConfig,
+    RedactionMode, RetentionConfig, Role, ScopeId, ScopeKind, TenantId, TenantStatus,
 };
 
 #[derive(Parser)]
@@ -123,6 +124,33 @@ enum Command {
     /// identity — never a row a laptop wrote.
     #[command(subcommand)]
     Channel(ChannelCommand),
+    /// Fetch records in full by id (CTX-4, ADR-0041) — the other half of
+    /// tiered injection.
+    ///
+    /// An inject block's index tier ends its lines with `(recall <id>)`;
+    /// this is that instruction. A gateway call under the bearer `synveda
+    /// login` stored, so the PDP decides per scope and the read is chained
+    /// under your own identity.
+    ///
+    /// A handle is a name, not a capability: what you may read is decided
+    /// now, not when the block was composed, so an id you have since lost
+    /// access to simply does not come back.
+    Recall {
+        /// The record ids, as the block printed them.
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<RecordId>,
+        /// Print the gateway's answer verbatim.
+        #[arg(long)]
+        json: bool,
+        /// Skip the "reading as ..." line — for a harness piping the
+        /// bodies straight into a session.
+        #[arg(long)]
+        quiet: bool,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -425,6 +453,22 @@ enum PolicyCommand {
         /// published-only is the bank-mode switch).
         #[arg(long, requires = "composition_budget")]
         composition_channels: Option<InjectChannels>,
+        /// What happens to material that does not fit the budget
+        /// (off/demote — CTX-4, ADR-0041). `demote` names it and hands the
+        /// reader a recall handle; `off` drops it in silence, which is how
+        /// composition behaved before CTX-4. Omitted keeps the product
+        /// config, which demotes. Only meaningful alongside the
+        /// composition pair.
+        #[arg(long, requires = "composition_budget")]
+        composition_index_tier: Option<IndexTier>,
+        /// How wide an index line's content is, in characters (default
+        /// 320 — the feature's "~80 tokens each" through the chars/4
+        /// estimator). Lower it where the corpus is short: a record is
+        /// only ever named instead of shown when naming it is genuinely
+        /// cheaper, so a width near the median record length turns the
+        /// tier off in practice.
+        #[arg(long, requires = "composition_budget")]
+        composition_index_chars: Option<u32>,
         /// Path to a JSON file of auto-promotion rules (FLOW-4,
         /// ADR-0033): `{"rules":[{"name":..., "min_recalls":...,
         /// "min_distinct_members":..., "max_sensitivity":...}]}`. A file
@@ -680,6 +724,8 @@ async fn run(cli: Cli) -> Result<(), String> {
             redaction_pii,
             composition_budget,
             composition_channels,
+            composition_index_tier,
+            composition_index_chars,
             promotion,
             dedup_mode,
             dedup_config,
@@ -703,6 +749,14 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .map(|(budget_tokens, channels)| CompositionConfig {
                         budget_tokens,
                         channels,
+                        // Omitted keeps the product config's tier rather
+                        // than turning the index off: a flag nobody passed
+                        // must not silently remove a rendering the pack it
+                        // replaces was serving (ADR-0041 decision 11).
+                        index_tier: composition_index_tier
+                            .unwrap_or(CompositionConfig::DEFAULT.index_tier),
+                        index_entry_chars: composition_index_chars
+                            .unwrap_or(CompositionConfig::DEFAULT.index_entry_chars),
                     });
             // Validated here as well as at install: a rule that asks for
             // zero recalls, or names an asset with no usage signal, is
@@ -1104,6 +1158,12 @@ async fn run(cli: Cli) -> Result<(), String> {
                 proposal::classify(&profile_name(profile), id).await
             }
         },
+        Command::Recall {
+            ids,
+            json,
+            quiet,
+            profile,
+        } => recall::recall(&profile_name(profile), &ids, json, quiet).await,
         Command::Channel(command) => match command {
             ChannelCommand::Status {
                 scope,

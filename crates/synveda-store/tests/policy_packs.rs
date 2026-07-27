@@ -155,6 +155,7 @@ async fn composition_config_rides_the_pack_and_clears_on_reapply() {
     let config = CompositionConfig {
         budget_tokens: 900,
         channels: InjectChannels::PublishedOnly,
+        ..CompositionConfig::DEFAULT
     };
     let stored = policy_packs::apply(
         &mut *tx,

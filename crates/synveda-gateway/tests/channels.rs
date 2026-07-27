@@ -424,6 +424,7 @@ async fn bank_mode_flips_composition_over_real_channels() {
             composition: Some(CompositionConfig {
                 budget_tokens: CompositionConfig::DEFAULT.budget_tokens,
                 channels: InjectChannels::PublishedOnly,
+                ..CompositionConfig::DEFAULT
             }),
             ..Default::default()
         },

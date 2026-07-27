@@ -335,10 +335,23 @@ struct DenseHitRow {
 /// `tx_from`, then id — and the caller owns final ordering (SQL does
 /// not know chain positions). `at` is the caller's explicit instant:
 /// no clock is read here (the determinism AC).
+///
+/// `only`, when given, restricts the read to those record ids (CTX-4,
+/// ADR-0041 decision 5): the recall path names what it wants rather than
+/// sweeping, and every other predicate in this query — the `(scope, tier)`
+/// pairs, the valid window, the retention cut, the pinned exemption —
+/// applies to it unchanged. That is the whole point of it being one query:
+/// a caller cannot reach a record by naming it that a sweep would not have
+/// returned.
 #[tracing::instrument(
     name = "store.search.compose_candidates",
     skip_all,
-    fields(tenant.id = %tenant_id, pairs.count = allowed.len(), at = %at),
+    fields(
+        tenant.id = %tenant_id,
+        pairs.count = allowed.len(),
+        named = only.map_or(-1, |ids| i64::try_from(ids.len()).unwrap_or(i64::MAX)),
+        at = %at,
+    ),
     err(Display)
 )]
 pub async fn compose_candidates(
@@ -348,9 +361,11 @@ pub async fn compose_candidates(
     horizons: &[ScopeClassCutoff],
     at: DateTime<Utc>,
     per_scope_kind_limit: i64,
+    only: Option<&[RecordId]>,
 ) -> Result<Vec<RecordVersion>> {
     let (scopes, sensitivities) = pair_arrays(allowed);
     let (horizon_scopes, horizon_classes, horizon_cutoffs) = horizon_arrays(horizons);
+    let named: Option<Vec<Uuid>> = only.map(|ids| ids.iter().map(RecordId::as_uuid).collect());
     let rows = sqlx::query_as!(
         RecordRow,
         r#"
@@ -371,6 +386,9 @@ pub async fn compose_candidates(
               and (scope_id, sensitivity)
                   in (select * from unnest($2::uuid[], $3::text[]))
               and valid_from <= $4 and (valid_to is null or valid_to > $4)
+              -- The named-id restriction (CTX-4, ADR-0041 decision 5).
+              -- Null means "sweep", which is what every inject passes.
+              and ($9::uuid[] is null or id = any($9))
               -- The retention cut (MEM-6, ADR-0040 decision 2), applied
               -- here rather than after hydration so a scope past its
               -- horizon never competes for the per-(scope, kind) cap.
@@ -398,6 +416,7 @@ pub async fn compose_candidates(
         &horizon_scopes,
         &horizon_classes,
         &horizon_cutoffs,
+        named.as_deref(),
     )
     .fetch_all(&mut *conn)
     .await

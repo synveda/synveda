@@ -840,6 +840,7 @@ async fn bank_mode_pack_governs_the_very_next_inject() {
             composition: Some(CompositionConfig {
                 budget_tokens: CompositionConfig::DEFAULT.budget_tokens,
                 channels: InjectChannels::PublishedOnly,
+                ..CompositionConfig::DEFAULT
             }),
             ..Default::default()
         },

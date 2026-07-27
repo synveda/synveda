@@ -285,6 +285,10 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             path: node.path.clone(),
             include_derived: effective.composition.channels.includes_derived(),
             sensitivities,
+            // What this scope does with material that does not fit, from
+            // the same resolution (CTX-4, ADR-0041 decision 11).
+            index_tier: effective.composition.index_tier,
+            index_entry_chars: effective.composition.index_entry_chars,
             lapse: None,
             // The horizons this scope *serves* under, from the same
             // resolution (MEM-6, ADR-0040 decision 10). Nothing is stamped
@@ -337,6 +341,24 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
         if sensitivities.is_empty() {
             continue;
         }
+        // The *target's* effective pack, not the reader's: a lapse
+        // discloses what that scope stands behind, under that scope's
+        // schedule (ADR-0040 decision 10) and rendered by that scope's
+        // rules (ADR-0041 decision 11).
+        let effective = pdp.effective(
+            tenant_id,
+            Resource::Scope(target),
+            &AuthzContext {
+                scopes: lapsed.chain,
+                principal_scopes: inputs.chain,
+                assignments: lapsed.assignments,
+                default_pack: inputs.default_pack,
+                role_bindings: inputs.role_bindings,
+                grant: None,
+                lapses: inputs.lapses,
+                sensitivity: Some(Sensitivity::WORKING),
+            },
+        );
         scopes.push(ComposeScope {
             scope_id: target,
             kind: node.kind,
@@ -348,26 +370,10 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             // inspect before consenting (ADR-0037 decision 11).
             include_derived: false,
             sensitivities,
+            index_tier: effective.composition.index_tier,
+            index_entry_chars: effective.composition.index_entry_chars,
             lapse: Some(lapsed.lapse.id),
-            // The *target's* horizons, not the reader's: a lapse discloses
-            // what that scope stands behind, under that scope's schedule
-            // (ADR-0040 decision 10).
-            retention: pdp
-                .effective(
-                    tenant_id,
-                    Resource::Scope(target),
-                    &AuthzContext {
-                        scopes: lapsed.chain,
-                        principal_scopes: inputs.chain,
-                        assignments: lapsed.assignments,
-                        default_pack: inputs.default_pack,
-                        role_bindings: inputs.role_bindings,
-                        grant: None,
-                        lapses: inputs.lapses,
-                        sensitivity: Some(Sensitivity::WORKING),
-                    },
-                )
-                .retention,
+            retention: effective.retention,
         });
     }
 

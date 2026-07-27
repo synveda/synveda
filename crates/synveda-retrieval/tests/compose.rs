@@ -21,12 +21,12 @@ use chrono::{DateTime, Duration, Utc};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_retrieval::{ComposeRequest, ComposeScope, ComposedBlock, compose};
+use synveda_retrieval::{ComposeRequest, ComposeScope, ComposedBlock, compose, estimated_tokens};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::rls;
 use synveda_types::{
-    Channel, ClassTtl, IdentityId, RecordClass, RecordId, RecordKind, RetentionConfig, ScopeId,
-    ScopeKind, Sensitivity, TenantId,
+    Channel, ClassTtl, CompositionConfig, EntryTier, IdentityId, IndexTier, RecordClass, RecordId,
+    RecordKind, RetentionConfig, ScopeId, ScopeKind, Sensitivity, TenantId,
 };
 use synveda_vedaflow::{
     self as vedaflow, ChannelRef, ChannelWrite, MemoryAsset, PolicySnapshot, Signer,
@@ -123,6 +123,12 @@ impl Chain {
             path: path.to_owned(),
             include_derived: true,
             sensitivities: sensitivities.to_vec(),
+            // The product config: the index tier on, so these fixtures
+            // exercise what a real chain composes under (ADR-0041
+            // decision 11). Nothing here is long enough to demote, which
+            // is decision 2 doing its job rather than an accident.
+            index_tier: CompositionConfig::DEFAULT.index_tier,
+            index_entry_chars: CompositionConfig::DEFAULT.index_entry_chars,
             // The caller's own chain: nothing here arrives by a grant.
             lapse: None,
             // The product config: the machinery on, no record horizon,
@@ -1277,4 +1283,343 @@ fn a_restatement_refreshes_the_staleness_clock_without_moving_the_retention_one(
          as a day old rather than as four hundred ({})",
         block.entries[0].staleness_permille
     );
+}
+
+// ── The index tier (CTX-4, ADR-0041) ─────────────────────────────────────────
+
+/// A helper that narrows every planned scope's index configuration —
+/// the pack knob of ADR-0041 decision 11, applied at the fixture level.
+fn with_index(
+    mut scopes: Vec<ComposeScope>,
+    tier: IndexTier,
+    entry_chars: u32,
+) -> Vec<ComposeScope> {
+    for scope in &mut scopes {
+        scope.index_tier = tier;
+        scope.index_entry_chars = entry_chars;
+    }
+    scopes
+}
+
+/// A record long enough that naming it is cheaper than showing it.
+fn long_content(marker: &str) -> String {
+    format!("{marker} {}", "a paragraph of runbook prose ".repeat(40))
+}
+
+/// The feature, at the composition seam: material that does not fit the
+/// budget is **named** rather than dropped in silence, and the name comes
+/// with the handle that fetches the rest (ADR-0041 decisions 2 and 3).
+#[test]
+fn material_that_does_not_fit_is_named_rather_than_dropped() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+    let near = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(chain.user, "alice prefers pnpm", now),
+    ));
+    let runbook = long_content("payments incident runbook:");
+    let far = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::pinned(chain.org, &runbook, now),
+    ));
+
+    // Room for the near record in full and the far one only by name.
+    let budget = 220;
+    let block = run(
+        db,
+        tenant,
+        &ComposeRequest::new(chain.scopes(), budget, now),
+    );
+
+    assert_eq!(
+        ids(&block),
+        vec![near, far],
+        "both records reached the block; the gradient is unchanged"
+    );
+    assert_eq!(
+        block.entries[0].tier,
+        EntryTier::Body,
+        "the near one in full"
+    );
+    assert_eq!(
+        block.entries[1].tier,
+        EntryTier::Index,
+        "the far one by name — the whole feature"
+    );
+    assert_eq!(block.index_entries, 1);
+    assert_eq!(
+        block.skipped_over_budget, 0,
+        "nothing was dropped in silence, which is the defect CTX-4 fixes"
+    );
+    assert!(
+        block.text.contains(&format!("(recall {far})")),
+        "the index line carries the handle that fetches the body:\n{}",
+        block.text
+    );
+    assert!(
+        block.text.contains('…'),
+        "and says it is elided:\n{}",
+        block.text
+    );
+    assert!(
+        !block.text.contains(runbook.trim_end()),
+        "the body itself never composed"
+    );
+    assert!(
+        block.text.contains("synveda recall"),
+        "and the block says how to navigate:\n{}",
+        block.text
+    );
+    // An index entry is a disclosure, so it is watermarked like any other
+    // (ADR-0041 decision 10).
+    assert!(
+        block.text.contains(&far.to_string()),
+        "the named record is in the watermark"
+    );
+    assert!(
+        block.tokens <= budget,
+        "the budget still bounds the block: {} > {budget}",
+        block.tokens
+    );
+    // The measurement the AC asks for, produced by the product rather
+    // than re-derived by the test (decision 14).
+    assert_eq!(
+        block.index_tokens,
+        block.entries[1].tokens
+            + estimated_tokens(
+                "Summarised entries end with a recall handle; \
+                 `synveda recall <id>` fetches the full text.\n",
+            ),
+        "the index tier's cost is its lines plus the legend it had to place"
+    );
+}
+
+/// ADR-0041 decision 2, which is what keeps a mechanism built for assets
+/// that do not exist yet from making today's corpus worse: a record short
+/// enough that naming it costs what showing it costs is **not** demoted.
+/// It is skipped, exactly as it was before CTX-4.
+#[test]
+fn a_short_record_is_never_demoted() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+    let near = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(chain.user, "alice prefers pnpm", now),
+    ));
+    db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        // Short — the shape MEM-3's write-time summarisation produces.
+        Insert::derived(chain.org, "the org uses UTC in logs", now),
+    ));
+
+    // Room for the first entry and nothing else.
+    let block = run(db, tenant, &ComposeRequest::new(chain.scopes(), 80, now));
+
+    assert_eq!(ids(&block), vec![near]);
+    assert_eq!(
+        block.index_entries, 0,
+        "demoting a short record would spend budget to say less"
+    );
+    assert_eq!(block.skipped_over_budget, 1);
+    assert!(
+        !block.text.contains("(recall "),
+        "and no legend or handle was paid for:\n{}",
+        block.text
+    );
+}
+
+/// Decision 11: a pack that turns the tier off gets the pre-CTX-4 product
+/// back — the same corpus, the same budget, the long record dropped in
+/// silence and counted, with no legend and no handle anywhere.
+///
+/// And the other half, which is the one that keeps every CTX-2 test
+/// honest: where nothing demotes, `off` and `demote` compose the same
+/// bytes.
+#[test]
+fn the_tier_off_composes_what_ctx_2_composed() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+    db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(chain.user, "alice prefers pnpm", now),
+    ));
+    let far = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::pinned(chain.org, &long_content("runbook:"), now),
+    ));
+
+    let off = run(
+        db,
+        tenant,
+        &ComposeRequest::new(with_index(chain.scopes(), IndexTier::Off, 320), 220, now),
+    );
+    assert!(!ids(&off).contains(&far), "the long record did not compose");
+    assert_eq!(off.skipped_over_budget, 1, "it was dropped and counted");
+    assert_eq!(off.index_entries, 0);
+    assert_eq!(off.index_tokens, 0);
+    assert!(!off.text.contains("(recall "));
+    assert!(!off.text.contains("synveda recall"));
+
+    // The same plan with the tier on, over a corpus with nothing to
+    // demote, is byte-identical: the feature costs nothing where it does
+    // nothing.
+    let short_only = Chain::new();
+    db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(short_only.user, "alice prefers pnpm", now),
+    ));
+    let quiet_off = run(
+        db,
+        tenant,
+        &ComposeRequest::new(
+            with_index(short_only.scopes(), IndexTier::Off, 320),
+            1_500,
+            now,
+        ),
+    );
+    let quiet_on = run(
+        db,
+        tenant,
+        &ComposeRequest::new(
+            with_index(short_only.scopes(), IndexTier::Demote, 320),
+            1_500,
+            now,
+        ),
+    );
+    assert_eq!(
+        quiet_off.text, quiet_on.text,
+        "a block with nothing to demote is the block CTX-2 rendered"
+    );
+    assert_eq!(quiet_off.block_hash, quiet_on.block_hash);
+}
+
+/// An index entry is the same trust statement as a body, rendered
+/// shallower: the unreviewed marker and the tier marker both survive the
+/// elision (ADR-0041 decision 3, and its compliance note).
+#[test]
+fn an_index_entry_keeps_every_trust_marker() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+    db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert {
+            sensitivity: Sensitivity::Confidential,
+            ..Insert::derived(chain.user, &long_content("the acquisition memo:"), now)
+        },
+    ));
+
+    let block = run(
+        db,
+        tenant,
+        &ComposeRequest::new(
+            chain.scopes_at(&[
+                Sensitivity::Public,
+                Sensitivity::Internal,
+                Sensitivity::Confidential,
+            ]),
+            200,
+            now,
+        ),
+    );
+
+    assert_eq!(block.index_entries, 1, "it composed by name");
+    let line = block
+        .text
+        .lines()
+        .find(|line| line.starts_with("- ["))
+        .expect("an entry line");
+    assert!(
+        line.contains("[confidential]"),
+        "a harness cannot know what it is holding unless the block says so — \
+         and that holds for a name as much as for a body: {line}"
+    );
+    assert!(
+        line.contains("[unreviewed]"),
+        "nobody published it, elision notwithstanding: {line}"
+    );
+    assert!(line.contains("(recall "), "and it is navigable: {line}");
+}
+
+/// Decision 1, stated as a test rather than a paragraph: the index tier
+/// renders the permitted set, it never widens it. Material above the
+/// tiers the plan permits is not named, not elided, and not hinted at —
+/// it is simply not there, exactly as before CTX-4.
+#[test]
+fn the_index_tier_never_names_what_the_plan_excluded() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+    let readable = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(chain.user, "alice prefers pnpm", now),
+    ));
+    let secret = db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert {
+            sensitivity: Sensitivity::Confidential,
+            ..Insert::derived(chain.user, &long_content("the acquisition memo:"), now)
+        },
+    ));
+
+    // A working-tier plan: `confidential` was never permitted here.
+    let block = run(db, tenant, &ComposeRequest::new(chain.scopes(), 1_500, now));
+
+    assert_eq!(ids(&block), vec![readable]);
+    assert_eq!(block.index_entries, 0, "nothing was named");
+    assert!(
+        !block.text.contains(&secret.to_string()),
+        "not even the id, which would be a handle to ask for it:\n{}",
+        block.text
+    );
+    assert!(!block.text.contains("acquisition"));
+}
+
+/// The CTX-2 acceptance criterion — byte-identical re-composition at the
+/// same instant — asserted with the index tier actually demoting, because
+/// a determinism proof over a path the feature does not take proves
+/// nothing about the feature.
+#[test]
+fn determinism_holds_while_the_tier_demotes() {
+    let Some(db) = db() else { return };
+    let tenant = admit(db);
+    let chain = Chain::new();
+    let now = Utc::now();
+    db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::derived(chain.user, "alice prefers pnpm", now),
+    ));
+    db.rt.block_on(insert(
+        &db.pool,
+        tenant,
+        Insert::pinned(chain.org, &long_content("runbook:"), now),
+    ));
+
+    let request = ComposeRequest::new(chain.scopes(), 220, now);
+    let first = run(db, tenant, &request);
+    let second = run(db, tenant, &request);
+
+    assert_eq!(first.index_entries, 1, "the tier is doing something");
+    assert_eq!(first.text, second.text, "byte-identical");
+    assert_eq!(first.block_hash, second.block_hash);
+    assert_eq!(first.index_tokens, second.index_tokens);
 }

@@ -39,6 +39,7 @@
 //! holding unless the block says so.
 
 use std::cmp::Ordering;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -46,8 +47,8 @@ use sqlx::PgConnection;
 use synveda_store::records::{RecordState, RecordVersion};
 use synveda_store::search::{self, ScopeClassCutoff};
 use synveda_types::{
-    Channel, LapseId, RecordClass, RecordId, RecordKind, Result, RetentionConfig, ScopeId,
-    ScopeKind, ScopeTier, Sensitivity, TenantId,
+    Channel, EntryTier, IndexTier, LapseId, RecordClass, RecordId, RecordKind, Result,
+    RetentionConfig, ScopeId, ScopeKind, ScopeTier, Sensitivity, TenantId,
 };
 use synveda_vedaflow::{ChannelRef, MemoryAsset, read_memory_members};
 
@@ -58,6 +59,16 @@ use crate::hybrid::union_sensitivities;
 /// the production evidence that bank mode does what its AC says
 /// (ADR-0031 decision 15).
 pub const COMPOSED_ENTRIES_TOTAL: &str = "synveda_composed_entries_total";
+
+/// Histogram: estimated tokens the index tier spent per composed block —
+/// every index line plus the legend when one was placed (CTX-4, ADR-0041
+/// decision 14).
+///
+/// Recorded on every compose, a block with no index entry recording 0, on
+/// the ADR-0025 decision 8 precedent: an inject that named nothing is
+/// data, not an omission. This is the acceptance criterion's "token cost
+/// of index tier measured" in production rather than in a test.
+pub const INDEX_TIER_TOKENS: &str = "synveda_index_tier_tokens";
 
 /// One scope of a composition plan: a PDP-allowed chain scope plus the
 /// channel rule its effective pack sets (ADR-0025 decisions 1–2).
@@ -91,6 +102,20 @@ pub struct ComposeScope {
     /// MEM-6's acceptance criterion. It only ever removes, and pinned
     /// material is exempt by seed §4.2 rather than by anything here.
     pub retention: RetentionConfig,
+    /// What happens to this scope's material when it does not fit the
+    /// budget, and how wide its index line is (CTX-4, ADR-0041 decision
+    /// 11) — from the same effective-pack resolution that decided the
+    /// scope.
+    ///
+    /// Per candidate scope rather than once for the plan, exactly as the
+    /// channel rule and the horizons are: a department that wants its
+    /// material named rather than dropped, under a reader whose own team
+    /// does not, is a coherent thing to configure, and one setting for the
+    /// plan could express neither.
+    pub index_tier: IndexTier,
+    /// The index line's content width in characters
+    /// ([`synveda_types::DEFAULT_INDEX_ENTRY_CHARS`]).
+    pub index_entry_chars: u32,
     /// The lapse this scope is on the plan by, when it is not on the
     /// caller's own chain (AUTHZ-4, ADR-0037 decisions 10 and 12).
     ///
@@ -124,6 +149,17 @@ pub struct ComposeRequest {
     pub relevance: Option<Vec<RecordId>>,
     /// Candidate fetch cap per `(scope, kind)` (ADR-0025 decision 5).
     pub per_scope_kind_candidates: i64,
+    /// When set, only these records are considered — the recall path
+    /// naming what it wants rather than sweeping (CTX-4, ADR-0041
+    /// decision 5).
+    ///
+    /// It can only ever *remove*: every other rule — the per-scope tiers,
+    /// the channel attribution, the retention cut, the valid window,
+    /// conflict resolution — runs unchanged over what it leaves, which is
+    /// what makes a handle a name rather than a capability. An id nobody
+    /// may read is not admitted by naming it, and an id the plan admits
+    /// composes exactly as a sweep would have composed it.
+    pub only: Option<Vec<RecordId>>,
 }
 
 impl ComposeRequest {
@@ -144,7 +180,31 @@ impl ComposeRequest {
             at,
             relevance: None,
             per_scope_kind_candidates: 64,
+            only: None,
         }
+    }
+
+    /// The same plan restricted to named records, with the index tier off
+    /// and the budget wide: the shape `POST /v1/recall` composes under
+    /// (ADR-0041 decisions 5 and 7).
+    ///
+    /// Recall serves bodies in full — the caller named specific records,
+    /// which is what makes it the deep surface rather than a second
+    /// inject — so nothing here may demote, and the budget must not be
+    /// able to truncate the answer.
+    #[must_use]
+    pub fn naming(scopes: Vec<ComposeScope>, ids: Vec<RecordId>, at: DateTime<Utc>) -> Self {
+        let mut request = ComposeRequest::new(scopes, u32::MAX, at);
+        for scope in &mut request.scopes {
+            scope.index_tier = IndexTier::Off;
+        }
+        // The per-(scope, kind) cap exists so a flood of derived records
+        // cannot crowd out the fetch. Naming ids is already the bound, and
+        // a cap here would silently answer "not found" for a record the
+        // caller may perfectly well read.
+        request.per_scope_kind_candidates = i64::MAX;
+        request.only = Some(ids);
+        request
     }
 
     /// Narrows every planned scope to tiers at or below `ceiling`.
@@ -204,6 +264,15 @@ pub struct ComposedEntry {
     /// labels are trust statements, and an age is not one (ADR-0040
     /// decision 12).
     pub staleness_permille: u16,
+    /// How much of the record composed: its full content, or its elided
+    /// head plus a recall handle (CTX-4, ADR-0041 decision 9).
+    ///
+    /// On the entry rather than derived from the text, because "was that
+    /// agent given the payments runbook or only told it exists" is a
+    /// question an auditor asks about a corpus that has since moved, and
+    /// re-deriving it from rendered widths would need the record as it was
+    /// rather than as it is.
+    pub tier: EntryTier,
 }
 
 /// One channel the block read: the commit a scope's channel served at
@@ -254,8 +323,20 @@ pub struct ComposedBlock {
     pub budget_tokens: u32,
     /// Candidates dropped by conflict resolution (ADR-0025 decision 6).
     pub dropped_conflicts: usize,
-    /// Candidates that survived every rule but did not fit the budget.
+    /// Candidates that survived every rule but did not fit the budget —
+    /// and, since CTX-4, could not be named within it either. A candidate
+    /// that was demoted to an index entry is *not* counted here: it
+    /// composed (ADR-0041 decision 2).
     pub skipped_over_budget: usize,
+    /// Entries that composed as index lines rather than bodies.
+    pub index_entries: usize,
+    /// Estimated tokens the index tier spent: every index line plus the
+    /// legend, when one was placed.
+    ///
+    /// The AC's measurement (ADR-0041 decision 14), carried on the block
+    /// so the number is the product's own rather than a test's
+    /// re-derivation.
+    pub index_tokens: u32,
 }
 
 /// Deterministic token estimator (ADR-0025 decision 4):
@@ -442,6 +523,8 @@ fn memory_asset(id: RecordId, state: &RecordState) -> MemoryAsset {
         budget = request.budget_tokens,
         entries = tracing::field::Empty,
         tokens = tracing::field::Empty,
+        index.entries = tracing::field::Empty,
+        index.tokens = tracing::field::Empty,
     ),
     err(Display)
 )]
@@ -455,10 +538,107 @@ pub async fn compose(
         let block = empty_block(request.budget_tokens);
         span.record("entries", 0);
         span.record("tokens", 0);
+        span.record("index.entries", 0);
+        span.record("index.tokens", 0);
         metrics::histogram!(TOKENS_PER_INJECT).record(0.0);
+        metrics::histogram!(INDEX_TIER_TOKENS).record(0.0);
         return Ok(block);
     }
 
+    let Admission {
+        records,
+        channels,
+        dropped_conflicts,
+    } = admit(conn, tenant_id, request).await?;
+    let survivors: Vec<Candidate<'_>> = records.iter().map(Admitted::candidate).collect();
+    assemble(request, survivors, channels, dropped_conflicts, &span)
+}
+
+/// One record the plan admits, with everything the decision produced:
+/// which scope admitted it, that scope's gradient position, the channel it
+/// is on there, and how fresh it was at the instant asked about.
+///
+/// Owned rather than borrowed because two callers need it — [`compose`],
+/// which renders it into a budgeted block, and `POST /v1/recall`, which
+/// serves it in full (ADR-0041 decision 5). One admission function is what
+/// makes a recall handle a name rather than a capability: there is no
+/// second place where "may this caller see this record" is decided, so
+/// there is nothing for a handle to reach around.
+#[derive(Debug, Clone)]
+pub struct Admitted {
+    /// The record version that was admitted.
+    pub version: RecordVersion,
+    /// The scope that admitted it — the one whose channel carried it and
+    /// whose `MemoryRead` decision covered it, which since FLOW-5 need not
+    /// be where the record lives (ADR-0034 decision 6).
+    pub scope_id: ScopeId,
+    /// That scope's position in the gradient, nearest = 0.
+    pub position: usize,
+    /// Published or derived at that scope — the trust label.
+    pub channel: Channel,
+    /// Freshness at the instant, `0.0..=1.0` (MEM-6, ADR-0040 decision 12).
+    pub staleness: f64,
+}
+
+impl Admitted {
+    /// The borrowed view assembly and the conflict comparator work over.
+    #[must_use]
+    pub fn candidate(&self) -> Candidate<'_> {
+        Candidate {
+            version: &self.version,
+            scope_id: self.scope_id,
+            position: self.position,
+            channel: self.channel,
+            staleness: self.staleness,
+        }
+    }
+}
+
+/// What a composition plan admits: the records, the channels the plan
+/// read, and how many candidates conflict resolution dropped.
+#[derive(Debug, Clone)]
+pub struct Admission {
+    /// Every record the plan admits, conflict-resolved. Unordered — the
+    /// gradient is applied by whoever renders.
+    pub records: Vec<Admitted>,
+    /// The channel refs this plan read, in scope order — present even
+    /// where a channel contributed nothing.
+    pub channels: Vec<ChannelWatermark>,
+    /// Candidates dropped by conflict resolution (ADR-0025 decision 6).
+    pub dropped_conflicts: usize,
+}
+
+/// Decides what the plan admits: the published-channel attribution, the
+/// derived sweep under each scope's channel rule and horizons, the
+/// per-scope tier check, relevance gating, and conflict resolution.
+///
+/// The whole of "what may this caller see", in one place. [`compose`]
+/// renders its answer under a budget; recall serves it in full. Neither
+/// re-decides anything, which is the seed §2.2 posture applied to a
+/// surface that could otherwise have become a way around it.
+#[tracing::instrument(
+    name = "retrieval.admit",
+    skip_all,
+    fields(
+        tenant.id = %tenant_id,
+        scopes.count = request.scopes.len(),
+        named = request.only.as_ref().map_or(-1, |ids| i64::try_from(ids.len()).unwrap_or(i64::MAX)),
+        admitted = tracing::field::Empty,
+    ),
+    err(Display)
+)]
+pub async fn admit(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    request: &ComposeRequest,
+) -> Result<Admission> {
+    if request.scopes.is_empty() {
+        return Ok(Admission {
+            records: Vec::new(),
+            channels: Vec::new(),
+            dropped_conflicts: 0,
+        });
+    }
     let scope_ids: Vec<ScopeId> = request.scopes.iter().map(|scope| scope.scope_id).collect();
     // The plan's own pairs: one scope's permitted tiers never leak into
     // another's, which is what a single ceiling could not express
@@ -509,9 +689,13 @@ pub async fn compose(
         })
         .collect();
     admitted.sort_unstable_by_key(|(position, _, _)| *position);
+    // Named ids narrow the published read the same way they narrow the
+    // derived one: recall asks for records, not for a channel's contents
+    // (ADR-0041 decision 5).
     let published_ids: Vec<RecordId> = published
         .iter()
         .flat_map(|channel| channel.members.keys().copied())
+        .filter(|id| request.only.as_ref().is_none_or(|ids| ids.contains(id)))
         .collect();
 
     // Published members are fetched by id and uncapped; derived is the
@@ -562,6 +746,7 @@ pub async fn compose(
             &horizons,
             request.at,
             request.per_scope_kind_candidates.max(1),
+            request.only.as_deref(),
         )
         .await?
     };
@@ -620,7 +805,7 @@ pub async fn compose(
     // The two fetches can name the same record — a promoted extraction is
     // still `kind = derived`, so the sweep returns it too. Published wins,
     // and the id keys the union so nothing composes twice.
-    let mut by_id: HashMap<RecordId, Candidate<'_>> = HashMap::new();
+    let mut by_id: HashMap<RecordId, Admitted> = HashMap::new();
     for version in members.iter().chain(swept.iter()) {
         let (position, scope_id, channel) = match published_at(version) {
             Some((position, scope_id)) => (position, scope_id, Channel::Published),
@@ -660,8 +845,8 @@ pub async fn compose(
                 continue;
             }
         }
-        let candidate = Candidate {
-            version,
+        let record = Admitted {
+            version: version.clone(),
             scope_id,
             position,
             channel,
@@ -672,37 +857,84 @@ pub async fn compose(
                 staleness_of(&version.state, retention, request.at)
             }),
         };
-        by_id
-            .entry(version.id)
-            .and_modify(|incumbent| {
-                if conflict_precedence(candidate, *incumbent) == Ordering::Less {
-                    *incumbent = candidate;
+        match by_id.entry(version.id) {
+            Entry::Occupied(mut slot) => {
+                if conflict_precedence(record.candidate(), slot.get().candidate()) == Ordering::Less
+                {
+                    slot.insert(record);
                 }
-            })
-            .or_insert(candidate);
+            }
+            Entry::Vacant(slot) => {
+                slot.insert(record);
+            }
+        }
     }
-    let mut survivors: Vec<Candidate<'_>> = by_id.into_values().collect();
+    let mut records: Vec<Admitted> = by_id.into_values().collect();
 
     // Conflict resolution (ADR-0025 decision 6, ADR-0031 decision 8): one
     // winner per trimmed-content group; losers are dropped entirely.
-    let mut winner_by_content: HashMap<&str, Candidate<'_>> = HashMap::new();
-    for candidate in &survivors {
+    let mut winner_by_content: HashMap<&str, (RecordId, Candidate<'_>)> = HashMap::new();
+    for record in &records {
+        let candidate = record.candidate();
         winner_by_content
-            .entry(candidate.version.state.content.trim())
-            .and_modify(|incumbent| {
-                if conflict_precedence(*candidate, *incumbent) == Ordering::Less {
-                    *incumbent = *candidate;
+            .entry(record.version.state.content.trim())
+            .and_modify(|(id, incumbent)| {
+                if conflict_precedence(candidate, *incumbent) == Ordering::Less {
+                    *id = record.version.id;
+                    *incumbent = candidate;
                 }
             })
-            .or_insert(*candidate);
+            .or_insert((record.version.id, candidate));
     }
-    let before = survivors.len();
-    survivors.retain(|candidate| {
-        winner_by_content
-            .get(candidate.version.state.content.trim())
-            .is_some_and(|winner| winner.version.id == candidate.version.id)
+    let winners: HashSet<RecordId> = winner_by_content.values().map(|(id, _)| *id).collect();
+    drop(winner_by_content);
+    let before = records.len();
+    records.retain(|record| winners.contains(&record.version.id));
+    let dropped_conflicts = before - records.len();
+
+    // The channels this plan read, in scope order — kept whether or not
+    // they contributed a record.
+    let channels: Vec<ChannelWatermark> = request
+        .scopes
+        .iter()
+        .filter_map(|scope| {
+            published
+                .iter()
+                .find(|channel| channel.scope_id == scope.scope_id)
+                .map(|channel| ChannelWatermark {
+                    scope_id: channel.scope_id,
+                    channel: ChannelRef::memory(Channel::Published).name(),
+                    commit: channel.commit.to_hex(),
+                    pinned: channel.pinned,
+                })
+        })
+        .collect();
+
+    tracing::Span::current().record("admitted", records.len());
+    Ok(Admission {
+        records,
+        channels,
+        dropped_conflicts,
+    })
+}
+
+/// Orders the admitted set by the seed §4.4 gradient and assembles it
+/// under the budget, demoting what does not fit to the index tier where
+/// the scope's pack allows (ADR-0041 decision 2), then renders and
+/// watermarks.
+fn assemble(
+    request: &ComposeRequest,
+    mut survivors: Vec<Candidate<'_>>,
+    channels: Vec<ChannelWatermark>,
+    dropped_conflicts: usize,
+    span: &tracing::Span,
+) -> Result<ComposedBlock> {
+    let relevance_rank: Option<HashMap<RecordId, usize>> = request.relevance.as_ref().map(|ids| {
+        ids.iter()
+            .enumerate()
+            .map(|(rank, id)| (*id, rank))
+            .collect()
     });
-    let dropped_conflicts = before - survivors.len();
 
     // Assembly order: the gradient — nearest scope first, published
     // before derived within a scope, then pinned before derived-kind,
@@ -783,15 +1015,26 @@ pub async fn compose(
             )
         })
         .collect();
+    // What each planned scope does with material that does not fit, and
+    // how wide its index line is (CTX-4, ADR-0041 decision 11) — keyed by
+    // scope for the same reason the tiers and the horizons are.
+    let index_at: HashMap<ScopeId, (IndexTier, u32)> = request
+        .scopes
+        .iter()
+        .map(|scope| (scope.scope_id, (scope.index_tier, scope.index_entry_chars)))
+        .collect();
+    let legend_tokens = estimated_tokens(INDEX_LEGEND);
+
     let mut open_sections: HashSet<ScopeId> = HashSet::new();
     let mut pieces: Vec<String> = vec![preamble];
     let mut entries: Vec<ComposedEntry> = Vec::new();
     let mut skipped_over_budget = 0_usize;
+    let mut index_entries = 0_usize;
+    let mut index_tokens = 0_u32;
+    let mut legend_placed = false;
 
     for candidate in survivors {
         let version = candidate.version;
-        let line = entry_line(candidate);
-        let line_tokens = estimated_tokens(&line);
         // Sectioned by the scope it composed *from*, which for climbed
         // material is the scope that published it rather than the scope
         // it lives at (ADR-0034 decision 6) — the reader is shown the
@@ -806,27 +1049,59 @@ pub async fn compose(
         };
         // Each entry grows the watermark's record list by ",<uuid>" (the
         // first by "<uuid>"): re-estimate the whole line at its new
-        // width so rounding never drifts.
+        // width so rounding never drifts. An index entry is watermarked
+        // like a body: the block disclosed that the record exists, and a
+        // disclosure the watermark does not cover is one nobody can audit
+        // (ADR-0041 decision 10).
         let id_chars = version.id.to_string().chars().count() + usize::from(!entries.is_empty());
         let new_watermark_chars = watermark_chars + id_chars;
         let new_watermark_tokens =
             u32::try_from(new_watermark_chars.div_ceil(4)).unwrap_or(u32::MAX);
-        let cost = line_tokens + header_tokens + (new_watermark_tokens - watermark_tokens);
-        if used.saturating_add(cost) > request.budget_tokens {
+        let fixed = header_tokens + (new_watermark_tokens - watermark_tokens);
+
+        let body = body_line(candidate);
+        let body_tokens = estimated_tokens(&body);
+        // The body first, always: the index tier is what happens when the
+        // budget has run out for this candidate, never a policy about how
+        // much of a record a reader deserves.
+        let placed = if used.saturating_add(body_tokens + fixed) <= request.budget_tokens {
+            Some((body, body_tokens, EntryTier::Body, 0))
+        } else {
+            demote(
+                candidate,
+                index_at.get(&candidate.scope_id).copied(),
+                body_tokens,
+                if legend_placed { 0 } else { legend_tokens },
+            )
+            .filter(|(_, line_tokens, _, legend_cost)| {
+                used.saturating_add(line_tokens + fixed + legend_cost) <= request.budget_tokens
+            })
+        };
+        let Some((line, line_tokens, tier, legend_cost)) = placed else {
             skipped_over_budget += 1;
             continue;
-        }
+        };
+
         if open_sections.insert(candidate.scope_id)
             && let Some(header) = header_of.get(&candidate.scope_id)
         {
             pieces.push(header.clone());
         }
-        pieces.push(line.clone());
-        used += cost;
+        pieces.push(line);
+        used += line_tokens + fixed + legend_cost;
         watermark_chars = new_watermark_chars;
         watermark_tokens = new_watermark_tokens;
-        metrics::counter!(COMPOSED_ENTRIES_TOTAL, "channel" => candidate.channel.as_str())
-            .increment(1);
+        if tier == EntryTier::Index {
+            index_entries += 1;
+            index_tokens += line_tokens + legend_cost;
+            legend_placed = true;
+        }
+        metrics::counter!(
+            COMPOSED_ENTRIES_TOTAL,
+            "channel" => candidate.channel.as_str(),
+            "tier" => tier.as_str(),
+        )
+        .increment(1);
         entries.push(ComposedEntry {
             record_id: version.id,
             scope_id: candidate.scope_id,
@@ -836,26 +1111,16 @@ pub async fn compose(
             object_hash: memory_asset(version.id, &version.state).address().to_hex(),
             tokens: line_tokens,
             staleness_permille: permille(candidate.staleness),
+            tier,
         });
     }
 
-    // The channels this block read, in scope order — kept whether or not
-    // they contributed an entry.
-    let channels: Vec<ChannelWatermark> = request
-        .scopes
-        .iter()
-        .filter_map(|scope| {
-            published
-                .iter()
-                .find(|channel| channel.scope_id == scope.scope_id)
-                .map(|channel| ChannelWatermark {
-                    scope_id: channel.scope_id,
-                    channel: ChannelRef::memory(Channel::Published).name(),
-                    commit: channel.commit.to_hex(),
-                    pinned: channel.pinned,
-                })
-        })
-        .collect();
+    // The legend goes after the preamble and before the first section —
+    // its cost was already charged to the demotion that earned it, so the
+    // placement moves no tokens (ADR-0041 decision 12).
+    if legend_placed {
+        pieces.insert(1, INDEX_LEGEND.to_owned());
+    }
 
     if entries.is_empty() {
         let block = ComposedBlock {
@@ -866,7 +1131,10 @@ pub async fn compose(
         };
         span.record("entries", 0);
         span.record("tokens", 0);
+        span.record("index.entries", 0);
+        span.record("index.tokens", 0);
         metrics::histogram!(TOKENS_PER_INJECT).record(0.0);
+        metrics::histogram!(INDEX_TIER_TOKENS).record(0.0);
         return Ok(block);
     }
 
@@ -880,7 +1148,10 @@ pub async fn compose(
     let tokens = estimated_tokens(&text);
     span.record("entries", entries.len());
     span.record("tokens", tokens);
+    span.record("index.entries", index_entries);
+    span.record("index.tokens", index_tokens);
     metrics::histogram!(TOKENS_PER_INJECT).record(f64::from(tokens));
+    metrics::histogram!(INDEX_TIER_TOKENS).record(f64::from(index_tokens));
     Ok(ComposedBlock {
         text,
         entries,
@@ -890,7 +1161,35 @@ pub async fn compose(
         budget_tokens: request.budget_tokens,
         dropped_conflicts,
         skipped_over_budget,
+        index_entries,
+        index_tokens,
     })
+}
+
+/// The index line a candidate takes when its body did not fit — or `None`
+/// when the scope's pack does not demote, or when naming the record would
+/// not actually be cheaper than showing it (ADR-0041 decision 2).
+///
+/// Returns the line, its estimate, the tier, and the legend's cost when
+/// this demotion is the one that has to pay for it.
+fn demote<'a>(
+    candidate: Candidate<'a>,
+    index: Option<(IndexTier, u32)>,
+    body_tokens: u32,
+    legend_cost: u32,
+) -> Option<(String, u32, EntryTier, u32)> {
+    let (tier, entry_chars) = index?;
+    if !tier.demotes() {
+        return None;
+    }
+    let line = index_line(candidate, entry_chars);
+    let line_tokens = estimated_tokens(&line);
+    // Strictly cheaper or not at all. Demoting a short record would spend
+    // budget to say less, and the median memory record is short because
+    // MEM-3 summarises at write time — this one comparison is what keeps a
+    // mechanism built for assets that do not exist yet from making the
+    // corpus that does exist worse.
+    (line_tokens < body_tokens).then_some((line, line_tokens, EntryTier::Index, legend_cost))
 }
 
 /// Whether derived material composes at the plan's `position`.
@@ -912,6 +1211,8 @@ fn empty_block(budget_tokens: u32) -> ComposedBlock {
         budget_tokens,
         dropped_conflicts: 0,
         skipped_over_budget: 0,
+        index_entries: 0,
+        index_tokens: 0,
     }
 }
 
@@ -925,7 +1226,29 @@ fn empty_block(budget_tokens: u32) -> ComposedBlock {
 /// line is `confidential` can behave differently about pasting it into a
 /// pull request. `public` and `internal` are left unmarked — a label on
 /// every line is a label nobody reads.
-fn entry_line(candidate: Candidate<'_>) -> String {
+fn body_line(candidate: Candidate<'_>) -> String {
+    render_line(candidate, &candidate.version.state.content, "")
+}
+
+/// One entry's rendered line at the index tier (CTX-4, ADR-0041 decision
+/// 3): the same class and the same trust markers over an elided head,
+/// followed by the handle that fetches the rest.
+///
+/// The ellipsis and the handle are the marker. One piece of text says both
+/// "this is not the whole thing" and "here is how to get the whole thing",
+/// and a block that spent budget on a separate `[index]` label would be
+/// spending it to say what the line already says. Decision 2 keeps that
+/// honest: a record short enough not to elide is never demoted here, so
+/// every index line in a block is genuinely truncated.
+fn index_line(candidate: Candidate<'_>, entry_chars: u32) -> String {
+    let head = elide(&candidate.version.state.content, entry_chars);
+    let handle = format!(" (recall {})", candidate.version.id);
+    render_line(candidate, &head, &handle)
+}
+
+/// The shared line shape, so a body and an index entry can never disagree
+/// about a trust marker.
+fn render_line(candidate: Candidate<'_>, content: &str, suffix: &str) -> String {
     let state = &candidate.version.state;
     let tier = if state.sensitivity > Sensitivity::WORKING {
         format!(" [{}]", state.sensitivity)
@@ -933,10 +1256,37 @@ fn entry_line(candidate: Candidate<'_>) -> String {
         String::new()
     };
     match candidate.channel {
-        Channel::Published => format!("- [{}] {}{tier}\n", state.class, state.content),
-        _ => format!("- [{}] {}{tier} [unreviewed]\n", state.class, state.content),
+        Channel::Published => format!("- [{}] {content}{tier}{suffix}\n", state.class),
+        _ => format!("- [{}] {content}{tier} [unreviewed]{suffix}\n", state.class),
     }
 }
+
+/// Truncates to `chars` Unicode scalar values on a character boundary,
+/// marking the cut. Deterministic and allocation-bounded; no clock, no
+/// model, nothing the read path may not do (ADR-0024 decision 7).
+fn elide(content: &str, chars: u32) -> String {
+    let limit = usize::try_from(chars).unwrap_or(usize::MAX);
+    let mut head: String = content.chars().take(limit).collect();
+    if content.chars().nth(limit).is_some() {
+        // Trailing space before an ellipsis reads as a typo, and the
+        // trimmed form is just as deterministic.
+        head.truncate(head.trim_end().len());
+        head.push('…');
+    }
+    head
+}
+
+/// The one line that makes an index entry navigable. Charged to the first
+/// demotion (ADR-0041 decision 12), so a block with no index entry never
+/// pays for it and stays byte-identical to what CTX-2 rendered.
+///
+/// It deliberately does **not** contain the parenthesised `(recall …)`
+/// form itself. An agent locating handles by scanning the block for that
+/// form would otherwise find this sentence first and go looking for a
+/// record called `<id>`: a legend has to describe the marker without
+/// being one.
+const INDEX_LEGEND: &str =
+    "Summarised entries end with a recall handle; `synveda recall <id>` fetches the full text.\n";
 
 /// The rendered watermark line: block hash plus every composed record
 /// id, in block order.
@@ -1091,12 +1441,12 @@ mod tests {
     fn only_published_material_renders_without_the_unreviewed_marker() {
         let pinned = version(RecordKind::Pinned, "canonical", at(0), 1);
         assert!(
-            entry_line(candidate(&pinned, 0, Channel::Derived)).contains("[unreviewed]"),
+            body_line(candidate(&pinned, 0, Channel::Derived)).contains("[unreviewed]"),
             "authorship is not review"
         );
-        assert!(!entry_line(candidate(&pinned, 0, Channel::Published)).contains("[unreviewed]"));
+        assert!(!body_line(candidate(&pinned, 0, Channel::Published)).contains("[unreviewed]"));
         let derived = version(RecordKind::Derived, "extracted", at(0), 2);
-        assert!(!entry_line(candidate(&derived, 0, Channel::Published)).contains("[unreviewed]"));
+        assert!(!body_line(candidate(&derived, 0, Channel::Published)).contains("[unreviewed]"));
     }
 
     /// The watermark is the VedaFlow object address (ADR-0031
