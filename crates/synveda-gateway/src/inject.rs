@@ -104,6 +104,15 @@ struct InjectResponse {
     /// budget on every entry that carried it. Pinned material is always
     /// `1000`: seed §4.2 says it cannot be decayed.
     staleness_permille: Vec<u16>,
+    /// How much of each composed record the block carried, in block order:
+    /// `body` for full content, `index` for an elided head plus a recall
+    /// handle (CTX-4, ADR-0041 decision 9).
+    tiers: Vec<synveda_types::EntryTier>,
+    /// How many entries composed at the index tier, and what they cost —
+    /// the acceptance criterion's measurement, reported by the product
+    /// rather than counted by a caller (ADR-0041 decision 14).
+    index_entries: usize,
+    index_tokens: u32,
     /// Estimated tokens of `text`; never exceeds `budget_tokens`.
     tokens: u32,
     /// The effective budget the block was composed under.
@@ -398,6 +407,11 @@ async fn handle(
                 "record_id": entry.record_id,
                 "object_hash": entry.object_hash,
                 "channel": entry.channel,
+                // "Was that agent given the payments runbook, or only told
+                // it exists" is a question an auditor asks about a corpus
+                // that has since moved, so the chain answers it rather
+                // than a re-derivation (ADR-0041 decision 9).
+                "tier": entry.tier,
                 // Integer per mille, never a float: audit canonicalisation
                 // refuses one (ADR-0019 decision 2), and "how stale was
                 // what that agent was given in March" is a question the
@@ -422,6 +436,8 @@ async fn handle(
             "budget_tokens": block.budget_tokens,
             "dropped_conflicts": block.dropped_conflicts,
             "skipped_over_budget": block.skipped_over_budget,
+            "index_entries": block.index_entries,
+            "index_tokens": block.index_tokens,
             "degraded": degraded,
             // The aggregated per-scope MemoryRead decisions (ADR-0019
             // decision 4): one event, every chain scope's verdict. The
@@ -473,6 +489,9 @@ fn render(
             .iter()
             .map(|entry| entry.staleness_permille)
             .collect(),
+        tiers: block.entries.iter().map(|entry| entry.tier).collect(),
+        index_entries: block.index_entries,
+        index_tokens: block.index_tokens,
         channels: block
             .channels
             .iter()

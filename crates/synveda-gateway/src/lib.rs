@@ -49,6 +49,7 @@ pub mod policy;
 pub mod proposals;
 mod provision;
 pub mod quarantine;
+mod recall;
 pub mod roles;
 pub mod service_identities;
 pub mod telemetry;

@@ -180,6 +180,20 @@ pub enum AuditAction {
     /// decision 5; ADR-0019 decision 4). Payloads carry no user
     /// content: the task rides as a BLAKE3 hash only.
     ContextInjected,
+    /// A recall served record bodies the caller named — the third
+    /// primitive seed §3 has listed since day one, and the act seed §2.2
+    /// principle 5 requires the chain to record (CTX-4, ADR-0041
+    /// decision 8).
+    ///
+    /// One event per recall, with the requested count, the served
+    /// entries' object addresses and channels — the same watermark shape
+    /// an inject carries, so a recall is exactly as recomputable — and the
+    /// per-scope `MemoryRead` decisions aggregated. Never record content,
+    /// and never the ids that were refused as a distinguishable list: a
+    /// recall answers uniformly for what it will not serve, and an audit
+    /// payload that enumerated the difference would be the oracle the
+    /// surface refuses to be.
+    ContextRecalled,
     /// Records were published onto a scope's VedaFlow published channel —
     /// the act that moves content across the trust boundary so `inject`
     /// composes it as reviewed (FLOW-2, ADR-0031 decision 14). The first
@@ -315,6 +329,7 @@ impl AuditAction {
             AuditAction::MemoryClassified => "memory.classified",
             AuditAction::TenantCreated => "tenant.created",
             AuditAction::ContextInjected => "context.injected",
+            AuditAction::ContextRecalled => "context.recalled",
             AuditAction::ChannelPublished => "vedaflow.channel.published",
             AuditAction::ChannelRolledBack => "vedaflow.channel.rolled_back",
             AuditAction::ChannelPinned => "vedaflow.channel.pinned",

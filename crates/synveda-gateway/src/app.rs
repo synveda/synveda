@@ -32,6 +32,7 @@ use crate::observe;
 use crate::policy;
 use crate::proposals;
 use crate::quarantine;
+use crate::recall;
 use crate::roles;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
@@ -156,6 +157,11 @@ pub fn router(state: AppState) -> Router {
         // session-start seam — plan, retrieve, compose, one chained
         // audit event.
         .route("/v1/inject", post(inject::create))
+        // The recall primitive (CTX-4, ADR-0041): the bodies behind the
+        // handles an inject block's index tier handed out. The plan is
+        // re-decided per call — a handle is a name, not a capability —
+        // and the same `admit` the block composed under answers here.
+        .route("/v1/recall", post(recall::create))
         // The quarantine review plane (MEM-2, ADR-0021 decisions 5–7).
         .route("/v1/quarantine", get(quarantine::list))
         .route(

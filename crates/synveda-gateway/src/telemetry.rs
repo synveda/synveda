@@ -163,6 +163,21 @@ pub const CONTEXT_INJECTS_TOTAL: &str = "synveda_context_injects_total";
 /// guessed (ADR-0026 decision 9).
 pub const INJECT_STAGE_SECONDS: &str = "synveda_inject_stage_duration_seconds";
 
+/// Recall requests (CTX-4, ADR-0041), labelled by `outcome`, on the
+/// inject counter's funnel: `error`, `rejected`, `empty` (nothing the
+/// current plan admits), `ok`. Each served recall chains one
+/// `context.recalled` audit event.
+pub const CONTEXT_RECALLS_TOTAL: &str = "synveda_context_recalls_total";
+
+/// Records served per recall, against records asked for — labelled
+/// `side` (`requested`/`served`).
+///
+/// The gap is the measurement that matters on this surface: a handle is a
+/// name rather than a capability (ADR-0041 decision 5), so a caller
+/// naming ids it may no longer read is a *normal* outcome, and one whose
+/// rate an operator should be able to see without reading the chain.
+pub const RECALL_RECORDS_TOTAL: &str = "synveda_recall_records_total";
+
 /// Handle to the installed tracer provider. Call [`Telemetry::shutdown`] on
 /// exit to flush batched spans; dropping without it can lose the tail of the
 /// trace.
@@ -413,6 +428,20 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         metrics::Unit::Seconds,
         "Inject stage latency by stage (plan/embed/search/compose/audit)"
     );
+    // CTX-4 metrics (ADR-0041): the index tier's cost, emitted in
+    // composition, and the recall surface's, emitted in its route.
+    metrics::describe_histogram!(
+        synveda_retrieval::INDEX_TIER_TOKENS,
+        "Estimated tokens spent on the index tier per composed block"
+    );
+    metrics::describe_counter!(
+        CONTEXT_RECALLS_TOTAL,
+        "Recall requests by outcome (ok/empty/rejected/error)"
+    );
+    metrics::describe_counter!(
+        RECALL_RECORDS_TOTAL,
+        "Records asked for and served by recall, by side (requested/served)"
+    );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).
     metrics::describe_counter!(
@@ -482,7 +511,8 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     );
     metrics::describe_counter!(
         synveda_retrieval::COMPOSED_ENTRIES_TOTAL,
-        "Composed context entries by the channel they composed from (published/derived)"
+        "Composed context entries by the channel they composed from (published/derived) \
+         and the tier they composed at (body/index)"
     );
     // MEM-6 counters (ADR-0040): emitted by the retention sweep. The
     // second one is the only counter in the product that measures data

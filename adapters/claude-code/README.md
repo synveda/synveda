@@ -49,6 +49,14 @@ call `synveda auth token --json` for a currently-valid bearer, and the
 CLI refreshes it through the gateway when it expires. The adapter holds
 no OAuth code of its own (ADR-0027 decisions 4 to 6).
 
+Since CTX-4 the composed block may carry **index entries**: material the
+budget could not fit, named rather than dropped, each ending with a
+`(recall <id>)` handle and preceded by one line saying what that means.
+Nothing here had to change for it — the hook passes the block's text
+verbatim — and an agent navigates from a handle to the body by running
+`synveda recall <id>`, which is on `PATH` already because the same binary
+issues this plugin's bearer.
+
 The MCP recall tool is CTX-5/ADPT-2 and lands in this same manifest as
 `mcpServers`.
 
