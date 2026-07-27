@@ -28,8 +28,8 @@ pub mod index;
 pub mod indexer;
 
 pub use authz::{
-    CompositionPlan, LapsedScope, MemoryReadInputs, ScopeDecision, composition_plan,
-    permitted_chain_scopes,
+    CandidateScope, CompositionPlan, LapsedScope, MemoryReadInputs, ScopeDecision,
+    composition_plan, permitted_chain_scopes,
 };
 pub use compose::{
     Admission, Admitted, COMPOSED_ENTRIES_TOTAL, Candidate, ChannelWatermark, ComposeRequest,

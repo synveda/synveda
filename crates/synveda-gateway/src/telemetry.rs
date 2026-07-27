@@ -165,9 +165,19 @@ pub const INJECT_STAGE_SECONDS: &str = "synveda_inject_stage_duration_seconds";
 
 /// Recall requests (CTX-4, ADR-0041), labelled by `outcome`, on the
 /// inject counter's funnel: `error`, `rejected`, `empty` (nothing the
-/// current plan admits), `ok`. Each served recall chains one
-/// `context.recalled` audit event.
+/// current plan admits), `degraded`, `ok` — and by `mode` (`ids` |
+/// `query`) since CTX-5 gave the route two ways in (ADR-0042 decision 1).
+/// Each served recall chains one `context.recalled` audit event.
 pub const CONTEXT_RECALLS_TOTAL: &str = "synveda_context_recalls_total";
+
+/// Per-stage recall latency in seconds, labelled by `stage`
+/// (`plan`/`embed`/`search`/`admit`).
+///
+/// `plan` is the one this feature is most exposed on: ADR-0029 allotted
+/// the plan stage **15ms** of a 300ms recall, and CTX-5 spends it on a
+/// universe wider than the chain (ADR-0042 decisions 2 and 17). Whether
+/// the widened sweep fits is read here, not guessed.
+pub const RECALL_STAGE_SECONDS: &str = "synveda_recall_stage_duration_seconds";
 
 /// Records served per recall, against records asked for — labelled
 /// `side` (`requested`/`served`).
@@ -251,6 +261,16 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
             // readable when every stage is fast.
             &[
                 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.25, 0.5,
+            ],
+        )
+        .map_err(|err| internal(format!("metric buckets: {err}")))?
+        .set_buckets_for_metric(
+            Matcher::Full(RECALL_STAGE_SECONDS.to_owned()),
+            // Stages subdivide ADR-0029's derived 300ms recall budget; the
+            // 0.015 boundary is the plan-stage allowance CTX-5 spends on
+            // the widened universe, so "did it fit" is one bucket edge.
+            &[
+                0.001, 0.0025, 0.005, 0.01, 0.015, 0.03, 0.08, 0.15, 0.3, 0.6,
             ],
         )
         .map_err(|err| internal(format!("metric buckets: {err}")))?
@@ -436,11 +456,18 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     );
     metrics::describe_counter!(
         CONTEXT_RECALLS_TOTAL,
-        "Recall requests by outcome (ok/empty/rejected/error)"
+        "Recall requests by outcome (ok/degraded/empty/rejected/error) and mode (ids/query)"
     );
     metrics::describe_counter!(
         RECALL_RECORDS_TOTAL,
         "Records asked for and served by recall, by side (requested/served)"
+    );
+    // CTX-5 (ADR-0042): the widened universe's cost, against ADR-0029's
+    // 15ms plan-stage allowance.
+    metrics::describe_histogram!(
+        RECALL_STAGE_SECONDS,
+        metrics::Unit::Seconds,
+        "Recall stage latency by stage (plan/embed/search/admit)"
     );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).

@@ -308,6 +308,147 @@ pub(crate) async fn gather_lapsed(
     Ok(resolved)
 }
 
+/// One scope of recall's widened universe, with the rows its own
+/// `MemoryRead` decision needs (CTX-5, ADR-0042 decisions 2 and 3).
+///
+/// The same shape as [`LapsedChain`] minus the grant, and owned for the
+/// same reason: the read path borrows from it after the gathering
+/// transaction has been dropped.
+pub(crate) struct CandidateChain {
+    /// The scope to decide.
+    pub(crate) scope_id: ScopeId,
+    /// That scope's own chain, node-first.
+    pub(crate) chain: Arc<[HierarchyNode]>,
+    /// Pack assignments for that chain.
+    pub(crate) assignments: Vec<synveda_types::PolicyAssignment>,
+}
+
+/// How many scopes one recall may decide beyond the caller's own chain
+/// (ADR-0042 decision 5).
+///
+/// Not a round number for comfort: ADR-0029 allotted the plan stage
+/// **15ms** of a 300ms recall, and this is the count
+/// `crates/synveda-gateway/tests/recall.rs::the_plan_stage_fits_its_budget`
+/// measures as fitting it. Raise it only with that test's number in hand;
+/// when it binds, the caller is *told* (`truncated`), because a bounded
+/// answer presented as a complete one is the one failure this surface
+/// cannot afford.
+pub(crate) const MAX_RECALL_SCOPES: usize = 512;
+
+/// What one recall decides beyond the caller's chain, and what it had to
+/// leave out.
+pub(crate) struct Universe {
+    /// The scopes to decide, nearest-first.
+    pub(crate) candidates: Vec<CandidateChain>,
+    /// How many contributing scopes existed before the cap.
+    pub(crate) considered: usize,
+    /// Whether [`MAX_RECALL_SCOPES`] dropped any of them.
+    pub(crate) truncated: bool,
+}
+
+/// Resolves recall's widened candidate set: the scopes that could
+/// contribute to this request, ordered nearest-first, capped, each with
+/// the rows its own decision needs (CTX-5, ADR-0042 decision 2).
+///
+/// `occupied` is the raw set — every scope holding or publishing material
+/// the request could draw on — and it is deliberately an
+/// over-approximation. Narrowing it further would mean inferring a verdict
+/// from a pack's shape, which is a second source of truth about policy;
+/// every scope that survives here is still an individual per-`(scope,
+/// tier)` PDP decision, and the PDP is what says no.
+///
+/// The ordering is hierarchy distance from the caller: scopes sharing the
+/// longest prefix of the caller's own chain come first, so a cap drops the
+/// farthest material rather than an arbitrary slice. Scopes already on the
+/// caller's chain are omitted — the chain walk decides those, and it
+/// carries their gradient position.
+#[tracing::instrument(
+    name = "gateway.recall_universe",
+    skip_all,
+    fields(
+        occupied = occupied.len(),
+        candidates = tracing::field::Empty,
+        truncated = tracing::field::Empty,
+    ),
+    err(Display)
+)]
+pub(crate) async fn gather_universe(
+    state: &AppState,
+    conn: &mut PgConnection,
+    input: &DecisionInput,
+    occupied: &[ScopeId],
+) -> Result<Universe> {
+    let tenant_id = input.principal.tenant_id;
+    let own: HashSet<ScopeId> = input.principal_scopes.iter().map(|node| node.id).collect();
+    let own_path: Vec<ScopeId> = input
+        .principal_scopes
+        .iter()
+        .rev()
+        .map(|node| node.id)
+        .collect();
+
+    // Resolve first, then order by distance: the chain is what distance is
+    // measured on, so it has to exist before the cap can be applied
+    // fairly. Chains come from the HIER-2 cache, so this is warm for any
+    // tenant a recall has touched before.
+    let mut resolved: Vec<(usize, CandidateChain)> = Vec::new();
+    for scope_id in occupied.iter().copied().filter(|id| !own.contains(id)) {
+        let Some(chain) = state
+            .scope_chains
+            .resolve(&mut *conn, tenant_id, scope_id)
+            .await?
+        else {
+            // A scope that vanished between the occupancy read and now.
+            // Deciding it would deny anyway; dropping it is the same
+            // fail-closed reading a deleted lapse target gets.
+            continue;
+        };
+        // Root-first, so a shared prefix with the caller's own root-first
+        // path is a common ancestry depth.
+        let path: Vec<ScopeId> = chain.iter().rev().map(|node| node.id).collect();
+        let shared = own_path
+            .iter()
+            .zip(path.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        // Nearer means: more ancestry in common, then shallower. Both are
+        // "closer to this reader" in the seed §4.4 sense.
+        let distance = (own_path.len() - shared) + (path.len() - shared);
+        resolved.push((
+            distance,
+            CandidateChain {
+                scope_id,
+                chain,
+                assignments: Vec::new(),
+            },
+        ));
+    }
+    let considered = resolved.len();
+    resolved
+        .sort_by(|(a, left), (b, right)| a.cmp(b).then_with(|| left.scope_id.cmp(&right.scope_id)));
+    let truncated = considered > MAX_RECALL_SCOPES;
+    resolved.truncate(MAX_RECALL_SCOPES);
+
+    // Assignments only for what survived the cap: this is one indexed read
+    // per candidate and the cap is what bounds it.
+    let mut candidates = Vec::with_capacity(resolved.len());
+    for (_, mut candidate) in resolved {
+        let chain_ids: Vec<ScopeId> = candidate.chain.iter().map(|node| node.id).collect();
+        candidate.assignments =
+            policy_assignments::for_scopes(&mut *conn, tenant_id, &chain_ids).await?;
+        candidates.push(candidate);
+    }
+
+    let span = tracing::Span::current();
+    span.record("candidates", candidates.len());
+    span.record("truncated", truncated);
+    Ok(Universe {
+        candidates,
+        considered,
+        truncated,
+    })
+}
+
 /// An allowed decision plus what the audit event embeds: the verdict
 /// context and the distinct role names the PDP weighed (AUD-1, ADR-0019
 /// decision 4).

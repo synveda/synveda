@@ -501,6 +501,194 @@ pub async fn compose_candidates(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// [`compose_candidates`] at a **transaction-time instant** — the derived
+/// sweep as the database held it at `tx_at` (CTX-5, ADR-0042 decisions 7
+/// and 14).
+///
+/// Three differences from the present-tense read, each a decision rather
+/// than an omission:
+///
+/// - It reads `records_versions`, so a record expired since `tx_at` still
+///   composes. That is what MEM-6 chose expire-as-temporal-delete *for*
+///   (ADR-0040 decision 5), and the destroy horizon is what bounds it.
+/// - It applies **no retention cut**: the horizon governs the live corpus,
+///   and this is a read of history (ADR-0042 decision 11).
+/// - The tier predicate is the **strictest sensitivity the record has
+///   carried at or since `tx_at`**, not the one the served version wore
+///   (ADR-0042 decision 9). A record raised to `restricted` in April is
+///   `restricted` for its March version too, so the AUTHZ-5 leak suite
+///   cannot be defeated by a timestamp. At `tx_at = now` the maximum is
+///   the current tier and this behaves exactly as the present-tense read.
+///
+/// The ceiling is computed *in this statement* rather than by the caller,
+/// because a caller-side check would be a second admission path — which is
+/// the thing the whole read path is arranged to not have.
+#[tracing::instrument(
+    name = "store.search.compose_candidates_as_of",
+    skip_all,
+    fields(
+        tenant.id = %tenant_id,
+        pairs.count = allowed.len(),
+        named = only.map_or(-1, |ids| i64::try_from(ids.len()).unwrap_or(i64::MAX)),
+        tx_at = %tx_at,
+        valid_at = %valid_at,
+    ),
+    err(Display)
+)]
+pub async fn compose_candidates_as_of(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    allowed: &[ScopeTier],
+    tx_at: DateTime<Utc>,
+    valid_at: DateTime<Utc>,
+    per_scope_kind_limit: i64,
+    only: Option<&[RecordId]>,
+) -> Result<Vec<RecordVersion>> {
+    let (scopes, sensitivities) = pair_arrays(allowed);
+    let named: Option<Vec<Uuid>> = only.map(|ids| ids.iter().map(RecordId::as_uuid).collect());
+    let rows = sqlx::query_as!(
+        RecordRow,
+        r#"
+        with asof as (
+            select id, tenant_id, scope_id, owner_id, kind, class, content,
+                   sensitivity, provenance, valid_from, valid_to, tx_from, tx_to
+            from records_versions
+            where tenant_id = $1
+              and tx_from <= $4 and (tx_to is null or tx_to > $4)
+              and valid_from <= $5 and (valid_to is null or valid_to > $5)
+              and ($7::uuid[] is null or id = any($7))
+        ),
+        -- The strictest tier each record has carried at or since `tx_at`
+        -- (ADR-0042 decision 9). Ordinals rather than the text, because
+        -- `confidential` sorts before `internal` as text and this is the
+        -- one place that ordering must not be lexicographic.
+        ceiling as (
+            select v.id,
+                   max(case v.sensitivity
+                           when 'public' then 0 when 'internal' then 1
+                           when 'confidential' then 2 else 3 end) as tier
+            from records_versions v
+            join asof on asof.id = v.id
+            where v.tenant_id = $1 and (v.tx_to is null or v.tx_to > $4)
+            group by v.id
+        )
+        select id as "id!", tenant_id as "tenant_id!", scope_id as "scope_id!",
+               owner_id as "owner_id!", kind as "kind!", class as "class!",
+               content as "content!", sensitivity as "sensitivity!",
+               provenance as "provenance!", valid_from as "valid_from!",
+               valid_to, tx_from as "tx_from!", tx_to
+        from (
+            select asof.id, asof.tenant_id, asof.scope_id, asof.owner_id,
+                   asof.kind, asof.class, asof.content, asof.sensitivity,
+                   asof.provenance, asof.valid_from, asof.valid_to,
+                   asof.tx_from, asof.tx_to,
+                   row_number() over (
+                       partition by asof.scope_id, asof.kind
+                       order by asof.valid_from desc, asof.tx_from desc, asof.id
+                   ) as position
+            from asof
+            join ceiling on ceiling.id = asof.id
+            where (asof.scope_id,
+                   case ceiling.tier
+                       when 0 then 'public' when 1 then 'internal'
+                       when 2 then 'confidential' else 'restricted' end)
+                  in (select * from unnest($2::uuid[], $3::text[]))
+        ) ranked
+        where position <= $6
+        "#,
+        tenant_id.as_uuid(),
+        &scopes,
+        &sensitivities,
+        tx_at,
+        valid_at,
+        per_scope_kind_limit,
+        named.as_deref(),
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// [`compose_members`] at a transaction-time instant — the published-member
+/// read as the database held it at `tx_at` (CTX-5, ADR-0042 decision 14).
+///
+/// The **membership** is not rewound: the caller passes ids from the
+/// channel's *current* tree, because publication is a judgment the
+/// organisation may revise and a rewound ref would let `as_of` re-publish
+/// what a FLOW-7 rollback withdrew (ADR-0042 decision 10). Only the bodies
+/// come from history. Carries the same strictest-tier-since ceiling as
+/// [`compose_candidates_as_of`], against the union ceiling the caller
+/// passes, with the exact pair enforced where attribution happens.
+#[tracing::instrument(
+    name = "store.search.compose_members_as_of",
+    skip_all,
+    fields(tenant.id = %tenant_id, ids.count = ids.len(), tx_at = %tx_at, valid_at = %valid_at),
+    err(Display)
+)]
+pub async fn compose_members_as_of(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    ids: &[RecordId],
+    sensitivities: &[Sensitivity],
+    tx_at: DateTime<Utc>,
+    valid_at: DateTime<Utc>,
+) -> Result<Vec<RecordVersion>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<Uuid> = ids.iter().map(RecordId::as_uuid).collect();
+    let sensitivities: Vec<String> = sensitivities
+        .iter()
+        .map(|level| level.as_str().to_owned())
+        .collect();
+    let rows = sqlx::query_as!(
+        RecordRow,
+        r#"
+        with asof as (
+            select id, tenant_id, scope_id, owner_id, kind, class, content,
+                   sensitivity, provenance, valid_from, valid_to, tx_from, tx_to
+            from records_versions
+            where tenant_id = $1 and id = any($2)
+              and tx_from <= $4 and (tx_to is null or tx_to > $4)
+              and valid_from <= $5 and (valid_to is null or valid_to > $5)
+        ),
+        -- The strictest tier since `tx_at` (ADR-0042 decision 9), as
+        -- ordinals for the reason `compose_candidates_as_of` gives.
+        ceiling as (
+            select v.id,
+                   max(case v.sensitivity
+                           when 'public' then 0 when 'internal' then 1
+                           when 'confidential' then 2 else 3 end) as tier
+            from records_versions v
+            join asof on asof.id = v.id
+            where v.tenant_id = $1 and (v.tx_to is null or v.tx_to > $4)
+            group by v.id
+        )
+        select asof.id as "id!", asof.tenant_id as "tenant_id!",
+               asof.scope_id as "scope_id!", asof.owner_id as "owner_id!",
+               asof.kind as "kind!", asof.class as "class!",
+               asof.content as "content!", asof.sensitivity as "sensitivity!",
+               asof.provenance as "provenance!", asof.valid_from as "valid_from!",
+               asof.valid_to, asof.tx_from as "tx_from!", asof.tx_to
+        from asof
+        join ceiling on ceiling.id = asof.id
+        where (case ceiling.tier
+                   when 0 then 'public' when 1 then 'internal'
+                   when 2 then 'confidential' else 'restricted' end) = any($3)
+        "#,
+        tenant_id.as_uuid(),
+        &ids,
+        &sensitivities,
+        tx_at,
+        valid_at,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// The composition engine's published-channel read (FLOW-2, ADR-0031
 /// decision 9): the current version of each id a planned scope's
 /// published tree names, through the same sensitivity and valid-time

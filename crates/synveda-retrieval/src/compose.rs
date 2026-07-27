@@ -149,6 +149,24 @@ pub struct ComposeRequest {
     pub relevance: Option<Vec<RecordId>>,
     /// Candidate fetch cap per `(scope, kind)` (ADR-0025 decision 5).
     pub per_scope_kind_candidates: i64,
+    /// The **transaction-time** instant, when the caller asked for one
+    /// (CTX-5, ADR-0042 decision 7): bodies are served as the database
+    /// held them at `tx_at`, while [`ComposeRequest::at`] keeps meaning
+    /// valid time — the two axes FND-4 built.
+    ///
+    /// `None` is every inject and every present-tense recall, and reads
+    /// current truth through exactly the queries it always did. `Some`
+    /// switches the two body fetches to `records_versions` and, with them,
+    /// three things ADR-0042 decided rather than omitted: a record expired
+    /// since `tx_at` composes again (decision 11), no retention horizon is
+    /// applied (the horizon governs the live corpus), and the tier
+    /// predicate becomes the strictest sensitivity the record has carried
+    /// since (decision 9), so a reclassification reaches its own history.
+    ///
+    /// What it does **not** rewind is the published channel: membership is
+    /// read at its current state either way, because a rewound ref would
+    /// let an instant re-publish what a rollback withdrew (decision 10).
+    pub tx_at: Option<DateTime<Utc>>,
     /// When set, only these records are considered — the recall path
     /// naming what it wants rather than sweeping (CTX-4, ADR-0041
     /// decision 5).
@@ -180,8 +198,17 @@ impl ComposeRequest {
             at,
             relevance: None,
             per_scope_kind_candidates: 64,
+            tx_at: None,
             only: None,
         }
+    }
+
+    /// The same request read as the database held it at `tx_at` (CTX-5,
+    /// ADR-0042 decision 7).
+    #[must_use]
+    pub fn as_of(mut self, tx_at: DateTime<Utc>) -> Self {
+        self.tx_at = Some(tx_at);
+        self
     }
 
     /// The same plan restricted to named records, with the index tier off
@@ -733,22 +760,61 @@ pub async fn admit(
     // planned scope is the predicate, because that tree may name a record
     // living below it (ADR-0034 decision 6). Residence still decides for
     // the derived sweep.
-    let members =
-        search::compose_members(conn, tenant_id, &published_ids, &sensitivities, request.at)
-            .await?;
+    // The one branch the as-of pair introduces, and it is a branch in
+    // *which rows are current*, never in what is admissible: the pair
+    // predicate, the named-id restriction and the valid window are the
+    // same in both statements, and the historical pair is additionally
+    // ceilinged by the strictest tier since (ADR-0042 decision 9).
+    let members = match request.tx_at {
+        Some(tx_at) => {
+            search::compose_members_as_of(
+                conn,
+                tenant_id,
+                &published_ids,
+                &sensitivities,
+                tx_at,
+                request.at,
+            )
+            .await?
+        }
+        None => {
+            search::compose_members(conn, tenant_id, &published_ids, &sensitivities, request.at)
+                .await?
+        }
+    };
     let swept = if derived_allowed.is_empty() {
         Vec::new()
     } else {
-        search::compose_candidates(
-            conn,
-            tenant_id,
-            &derived_allowed,
-            &horizons,
-            request.at,
-            request.per_scope_kind_candidates.max(1),
-            request.only.as_deref(),
-        )
-        .await?
+        match request.tx_at {
+            // No horizons: a retention schedule says what a scope serves
+            // *live*, and this is a read of what it held (ADR-0042
+            // decision 11). The destroy horizon is what bounds it, and
+            // that one is not a predicate — the rows are gone.
+            Some(tx_at) => {
+                search::compose_candidates_as_of(
+                    conn,
+                    tenant_id,
+                    &derived_allowed,
+                    tx_at,
+                    request.at,
+                    request.per_scope_kind_candidates.max(1),
+                    request.only.as_deref(),
+                )
+                .await?
+            }
+            None => {
+                search::compose_candidates(
+                    conn,
+                    tenant_id,
+                    &derived_allowed,
+                    &horizons,
+                    request.at,
+                    request.per_scope_kind_candidates.max(1),
+                    request.only.as_deref(),
+                )
+                .await?
+            }
+        }
     };
 
     let relevance_rank: Option<HashMap<RecordId, usize>> = request.relevance.as_ref().map(|ids| {
@@ -771,6 +837,18 @@ pub async fn admit(
     // below its scope (ADR-0034 decision 6), so residence cannot answer
     // "which scope's permission admitted this". The tree that named it can,
     // and this is where that is known (ADR-0038 decision 3).
+    // "Does this scope still serve this record" — the MEM-6 read cut, and
+    // the one place as-of switches it off. A horizon says what a scope
+    // serves *now*; a transaction-time read is asking what it held, and
+    // the destroy horizon (not this predicate) is what bounds that
+    // (ADR-0042 decision 11).
+    let serves = |scope_id: &ScopeId, state: &RecordState| {
+        request.tx_at.is_some()
+            || retention_at
+                .get(scope_id)
+                .is_some_and(|retention| retention_admits(state, retention, request.at))
+    };
+
     let published_at = |version: &RecordVersion| {
         if !admitted
             .iter()
@@ -793,11 +871,7 @@ pub async fn admit(
                     // it, it falls through to that scope's derived material,
                     // which is the honest reading of two schedules
                     // disagreeing.
-                    && retention_at
-                        .get(scope_id)
-                        .is_some_and(|retention| {
-                            retention_admits(&version.state, retention, request.at)
-                        })
+                    && serves(scope_id, &version.state)
             })
             .map(|(position, scope_id, _)| (*position, *scope_id))
     };
@@ -838,10 +912,7 @@ pub async fn admit(
             // fell through to here has not been asked (ADR-0040
             // decision 2). Asking twice costs a comparison and closes the
             // only path around the cut.
-            if !retention_at
-                .get(&scope_id)
-                .is_some_and(|retention| retention_admits(&version.state, retention, request.at))
-            {
+            if !serves(&scope_id, &version.state) {
                 continue;
             }
         }

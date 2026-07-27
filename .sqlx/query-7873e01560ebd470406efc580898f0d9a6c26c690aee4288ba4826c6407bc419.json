@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with asof as (\n            select id, tenant_id, scope_id, owner_id, kind, class, content,\n                   sensitivity, provenance, valid_from, valid_to, tx_from, tx_to\n            from records_versions\n            where tenant_id = $1\n              and tx_from <= $4 and (tx_to is null or tx_to > $4)\n              and valid_from <= $5 and (valid_to is null or valid_to > $5)\n              and ($7::uuid[] is null or id = any($7))\n        ),\n        -- The strictest tier each record has carried at or since `tx_at`\n        -- (ADR-0042 decision 9). Ordinals rather than the text, because\n        -- `confidential` sorts before `internal` as text and this is the\n        -- one place that ordering must not be lexicographic.\n        ceiling as (\n            select v.id,\n                   max(case v.sensitivity\n                           when 'public' then 0 when 'internal' then 1\n                           when 'confidential' then 2 else 3 end) as tier\n            from records_versions v\n            join asof on asof.id = v.id\n            where v.tenant_id = $1 and (v.tx_to is null or v.tx_to > $4)\n            group by v.id\n        )\n        select id as \"id!\", tenant_id as \"tenant_id!\", scope_id as \"scope_id!\",\n               owner_id as \"owner_id!\", kind as \"kind!\", class as \"class!\",\n               content as \"content!\", sensitivity as \"sensitivity!\",\n               provenance as \"provenance!\", valid_from as \"valid_from!\",\n               valid_to, tx_from as \"tx_from!\", tx_to\n        from (\n            select asof.id, asof.tenant_id, asof.scope_id, asof.owner_id,\n                   asof.kind, asof.class, asof.content, asof.sensitivity,\n                   asof.provenance, asof.valid_from, asof.valid_to,\n                   asof.tx_from, asof.tx_to,\n                   row_number() over (\n                       partition by asof.scope_id, asof.kind\n                       order by asof.valid_from desc, asof.tx_from desc, asof.id\n                   ) as position\n            from asof\n            join ceiling on ceiling.id = asof.id\n            where (asof.scope_id,\n                   case ceiling.tier\n                       when 0 then 'public' when 1 then 'internal'\n                       when 2 then 'confidential' else 'restricted' end)\n                  in (select * from unnest($2::uuid[], $3::text[]))\n        ) ranked\n        where position <= $6\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "class!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "content!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "sensitivity!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "provenance!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "tx_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "TextArray",
+        "Timestamptz",
+        "Timestamptz",
+        "Int8",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "7873e01560ebd470406efc580898f0d9a6c26c690aee4288ba4826c6407bc419"
+}
