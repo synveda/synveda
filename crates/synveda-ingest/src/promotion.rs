@@ -58,14 +58,19 @@ pub const PROMOTION_QUEUE_FULL_TOTAL: &str = "synveda_promotion_queue_full_total
 /// actor kind).
 const ACTOR_COMPONENT: &str = "promotion";
 
-/// Which audit actions count as a recall (ADR-0033 decision 5).
+/// Which audit actions count as a recall (ADR-0033 decision 5, as CTX-5
+/// grew it — ADR-0042 decision 16).
 ///
-/// One today. CTX-5's explicit recall is a stronger signal than
-/// composition and joins by being added here — the projection, the
-/// rules, and the evidence shape do not change. Every proposal records
-/// the set that was counted, so one opened before that day cannot be
-/// misread as having counted it.
-const SWEPT_ACTIONS: &[AuditAction] = &[AuditAction::ContextInjected];
+/// Two, since the day ADR-0033 wrote a trigger for: an explicit
+/// `context.recalled` is a **stronger** signal than composition, because
+/// somebody asked for that material by name or by question rather than
+/// receiving it in a block they did not choose. It joined by being added
+/// here and nothing else — the projection, the rules and the evidence
+/// shape did not change, because CTX-5 kept recall's watermark the same
+/// shape as inject's on purpose. Every proposal records the set that was
+/// counted, so one opened before that day cannot be misread as having
+/// counted it.
+const SWEPT_ACTIONS: &[AuditAction] = &[AuditAction::ContextInjected, AuditAction::ContextRecalled];
 
 /// The engine's tuning knobs, parsed from `SYNVEDA_PROMOTION_*` by the
 /// gateway.
@@ -330,7 +335,9 @@ fn fold_events(events: &[StoredEvent]) -> Vec<UsageDelta> {
     deltas.into_values().collect()
 }
 
-/// The record ids one `context.injected` event says were composed.
+/// The record ids one swept event says reached a reader — `entries[]` on
+/// a `context.injected` payload or a `context.recalled` one, which carry
+/// the same watermark shape by construction (ADR-0042 decision 16).
 ///
 /// A payload that does not carry the expected shape contributes nothing
 /// rather than failing the sweep: the audit chain is append-only history

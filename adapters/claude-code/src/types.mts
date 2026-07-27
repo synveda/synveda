@@ -52,6 +52,49 @@ export interface InjectResponse {
   degraded: string[];
 }
 
+/**
+ * `POST /v1/recall` request (CTX-4 ADR-0041; CTX-5 ADR-0042 decision 1).
+ *
+ * `ids` xor `query` — the gateway rejects both together, and the MCP tool
+ * checks it first so an agent gets a usable message rather than a 400.
+ */
+export interface RecallRequest {
+  ids?: string[];
+  query?: string;
+  as_of?: string;
+  valid_at?: string;
+  limit?: number;
+  session_id?: string;
+}
+
+/** One record a recall served, with the labels that let an agent weigh it. */
+export interface RecallEntry {
+  record_id: string;
+  scope_id: string;
+  channel: string;
+  kind: string;
+  class: string;
+  sensitivity: string;
+  content: string;
+  valid_from: string;
+  valid_to: string | null;
+  object_hash: string;
+  staleness_permille: number;
+}
+
+/** `POST /v1/recall` response. */
+export interface RecallResponse {
+  entries: RecallEntry[];
+  mode: string;
+  requested: number;
+  as_of: string;
+  valid_at: string;
+  scopes_considered: number;
+  scopes_decided: number;
+  truncated: boolean;
+  degraded: string[];
+}
+
 /** The observe vocabulary (`ObserveKind` in synveda-types). */
 export type ObserveKind = "transcript_delta" | "tool_result" | "decision";
 

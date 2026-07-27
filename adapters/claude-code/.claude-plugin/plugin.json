@@ -5,5 +5,11 @@
   "author": {
     "name": "Synveda"
   },
-  "hooks": "./hooks/hooks.json"
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": {
+    "synveda": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/mcp-server.mjs"]
+    }
+  }
 }

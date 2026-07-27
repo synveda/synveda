@@ -560,8 +560,10 @@ async fn a_rule_fires_on_real_use_and_its_proposal_carries_evidence() {
     assert_eq!(evidence.pack_name, "flow4-promoting");
     assert_eq!(
         evidence.actions,
-        vec!["context.injected".to_owned()],
-        "the evidence names which signal it counted, because the set grows (CTX-5)"
+        vec!["context.injected".to_owned(), "context.recalled".to_owned()],
+        "the set grew when CTX-5 landed (ADR-0042 decision 16), and the evidence \
+         says so — which is what keeps a proposal opened before that day from \
+         reading as though it had counted an explicit recall"
     );
     assert_eq!(evidence.members.len(), 1);
     let member = &evidence.members[0];

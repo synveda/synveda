@@ -27,8 +27,13 @@ use crate::api::{Api, Origin};
 #[derive(Deserialize)]
 struct RecallResponse {
     entries: Vec<RecallEntry>,
+    mode: String,
     requested: usize,
     as_of: DateTime<Utc>,
+    scopes_considered: usize,
+    scopes_decided: usize,
+    truncated: bool,
+    degraded: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -46,18 +51,66 @@ struct RecallEntry {
     staleness_permille: u16,
 }
 
-/// `synveda recall <id>...` — the bodies behind the handles.
+/// What one recall asks for: named records, or a question, at an instant.
+pub struct Ask<'a> {
+    /// The handles, when naming records.
+    pub ids: &'a [RecordId],
+    /// The question, when asking one. Exclusive with `ids` — clap
+    /// enforces it at the surface, the gateway enforces it again.
+    pub query: Option<&'a str>,
+    /// Transaction time (CTX-5, ADR-0042 decision 7).
+    pub as_of: Option<DateTime<Utc>>,
+    /// Valid time; defaults to `as_of` at the gateway.
+    pub valid_at: Option<DateTime<Utc>>,
+    /// Result cap for a question.
+    pub limit: Option<usize>,
+}
+
+impl Ask<'_> {
+    /// The wire body. Only what was asked for is sent, so the gateway's
+    /// defaults stay the gateway's — a CLI that filled them in would be a
+    /// second place the surface's contract lives.
+    fn body(&self) -> Result<serde_json::Value, String> {
+        let mut body = serde_json::Map::new();
+        match self.query {
+            Some(query) => {
+                body.insert("query".to_owned(), json!(query));
+            }
+            None => {
+                if self.ids.is_empty() {
+                    return Err(
+                        "name at least one record id, or ask a question with --query".to_owned(),
+                    );
+                }
+                body.insert("ids".to_owned(), json!(self.ids));
+            }
+        }
+        if let Some(at) = self.as_of {
+            body.insert("as_of".to_owned(), json!(at));
+        }
+        if let Some(at) = self.valid_at {
+            body.insert("valid_at".to_owned(), json!(at));
+        }
+        if let Some(limit) = self.limit {
+            body.insert("limit".to_owned(), json!(limit));
+        }
+        Ok(serde_json::Value::Object(body))
+    }
+}
+
+/// `synveda recall <id>... | --query <question>` — the bodies behind the
+/// handles, or the answer to a question (CTX-4/CTX-5).
 pub async fn recall(
     profile: &str,
-    ids: &[RecordId],
+    ask: Ask<'_>,
     json_out: bool,
     quiet: bool,
 ) -> Result<(), String> {
+    let body = ask.body()?;
     let (api, origin) = Api::connect(profile).await?;
     if !quiet {
         announce(&api, &origin);
     }
-    let body = json!({ "ids": ids });
     if json_out {
         println!("{}", api.post("/v1/recall", Some(body)).await?);
         return Ok(());
@@ -103,15 +156,35 @@ pub async fn recall(
     // and the honest thing is to say how many, without saying which, since
     // the surface itself answers uniformly (decision 6).
     let served = response.entries.len();
-    if served < response.requested {
+    let at = response.as_of.format("%Y-%m-%d %H:%M:%S");
+    if served == 0 {
+        println!("nothing available to you at {at}");
+    } else if response.mode == "ids" && served < response.requested {
         println!(
-            "{} of {} available to you at {} — the rest are not, or no longer are",
-            served,
+            "{served} of {} available to you at {at} — the rest are not, or no longer are",
             response.requested,
-            response.as_of.format("%Y-%m-%d %H:%M:%S"),
         );
-    } else if served == 0 {
-        println!("nothing available to you at {}", response.as_of);
+    } else if response.mode == "query" {
+        println!(
+            "{served} of {} scopes you may read at {at}",
+            response.scopes_decided,
+        );
+    }
+    // A bounded answer must never read as a complete one (ADR-0042
+    // decision 5), so this is stated rather than left to be inferred from
+    // a count nobody was given.
+    if response.truncated {
+        println!(
+            "note: {} scopes could have contributed and {} were searched — \
+             this answer is incomplete",
+            response.scopes_considered, response.scopes_decided,
+        );
+    }
+    if !response.degraded.is_empty() {
+        println!(
+            "note: degraded ({}) — ranking used the lexical leg only",
+            response.degraded.join(", "),
+        );
     }
     Ok(())
 }

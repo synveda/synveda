@@ -27,6 +27,7 @@ mod recall;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
@@ -136,9 +137,31 @@ enum Command {
     /// now, not when the block was composed, so an id you have since lost
     /// access to simply does not come back.
     Recall {
-        /// The record ids, as the block printed them.
-        #[arg(required = true, num_args = 1..)]
+        /// The record ids, as the block printed them. Omit when asking a
+        /// question with --query.
+        #[arg(num_args = 0..)]
         ids: Vec<RecordId>,
+        /// Ask a question instead of naming records: hybrid retrieval over
+        /// every scope your policy lets you read, which is wider than the
+        /// scopes an inject block composes from.
+        #[arg(long, conflicts_with = "ids")]
+        query: Option<String>,
+        /// Serve bodies as the database held them at this instant —
+        /// "what did the agent know on March 3rd" (RFC 3339, e.g.
+        /// 2026-03-03T00:00:00Z).
+        ///
+        /// It rewinds the corpus, never your access: what you may read is
+        /// decided now, so this cannot return material you lost access to.
+        #[arg(long)]
+        as_of: Option<DateTime<Utc>>,
+        /// Valid time — which assertions were true *about the world* at
+        /// this instant. Defaults to --as-of, so one flag asks the
+        /// diagonal question.
+        #[arg(long)]
+        valid_at: Option<DateTime<Utc>>,
+        /// How many records a --query may return.
+        #[arg(long)]
+        limit: Option<usize>,
         /// Print the gateway's answer verbatim.
         #[arg(long)]
         json: bool,
@@ -1160,10 +1183,28 @@ async fn run(cli: Cli) -> Result<(), String> {
         },
         Command::Recall {
             ids,
+            query,
+            as_of,
+            valid_at,
+            limit,
             json,
             quiet,
             profile,
-        } => recall::recall(&profile_name(profile), &ids, json, quiet).await,
+        } => {
+            recall::recall(
+                &profile_name(profile),
+                recall::Ask {
+                    ids: &ids,
+                    query: query.as_deref(),
+                    as_of,
+                    valid_at,
+                    limit,
+                },
+                json,
+                quiet,
+            )
+            .await
+        }
         Command::Channel(command) => match command {
             ChannelCommand::Status {
                 scope,

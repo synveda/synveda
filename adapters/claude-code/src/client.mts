@@ -14,6 +14,8 @@ import type {
   InjectResponse,
   ObserveRequest,
   ObserveResponse,
+  RecallRequest,
+  RecallResponse,
 } from "./types.mjs";
 
 export const CLIENT_NAME = "claude-code";
@@ -37,6 +39,20 @@ export async function observe(
   request: ObserveRequest,
 ): Promise<CallResult<ObserveResponse>> {
   return call<ObserveResponse>(config, bearer, "/v1/observe", request);
+}
+
+/**
+ * The third primitive (CTX-5, ADR-0042 decision 15). Unlike the hooks,
+ * this one's caller *asked*, so the MCP tool reports what goes wrong
+ * rather than degrading silently — but the transport contract is the
+ * same, because a result is still easier to be honest with than a throw.
+ */
+export async function recall(
+  config: AdapterConfig,
+  bearer: string,
+  request: RecallRequest,
+): Promise<CallResult<RecallResponse>> {
+  return call<RecallResponse>(config, bearer, "/v1/recall", request);
 }
 
 async function call<T>(
