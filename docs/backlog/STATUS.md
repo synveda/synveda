@@ -592,7 +592,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [MEM-6: Decay, TTL & staleness](MEM-6.md) — done 2026-07-26, ADR-0040, AC test: crates/synveda-gateway/tests/retention.rs (**both halves of the AC over the real product path**, never a seeded record: alice's ninety-day-old session summary composes, a steward applies a retention schedule, and the **very next inject** stops carrying it with nobody acting, nothing restarted and no sweep having run — while the record is still in the store, because nothing was ever stamped on it and enforcement is the read path's; then the sweep expires it and chains `memory.expired` under `actor_kind=system` naming the horizon, the class, the id and the age in whole days, with no record content anywhere in the payload and the chain verifying; plus the bitemporal half, where the expired record's version is still in `records_versions` — the temporal delete FND-4 built, which is what keeps "what did the agent know in April" answerable; pinned material of the same age exempt from the read cut *and* the sweep, by seed §4.2 rather than by a pack field; the **second horizon**, where the destruction stage takes the history the expiry deliberately left and the as-of question that had an answer stops having one, audited as `memory.disposed`; the observe staging plane disposed of on its own horizon — the obligation ADR-0020 and ADR-0021 both parked here, with the extracted records untouched; and a pack that turns the feature off getting the pre-MEM-6 product back exactly, horizons set and ignored), read-path tests: crates/synveda-retrieval/tests/compose.rs (the per-scope cut removing one scope's own material and nothing else, a horizon never reaching pinned material, staleness ageing a *ranked* record out of its place while unranked order stays recency, and the two clocks proven distinct — a MEM-5 restatement refreshes staleness without moving the retention clock), crates/synveda-store/tests/rls.rs (the destruction path joins the adversarial suite: DELETE on `records_history` refused without the named flag, refused across tenants *with* it — the flag opens the trigger, never the isolation policy — and an UPDATE still refused under it, because "destroyed" and "altered" are different words; plus the staging plane's new grants, where the FK forces markers before payloads and a marker delete outside a declared disposal raises), crates/synveda-types (9 unit tests on the vocabulary: the product config expiring nothing, `off` ignoring horizons rather than lacking them, a cutoff as the horizon subtracted from the instant asked at, every class answered and none inventable, and staleness halving at the half-life and never exceeding fresh), demo: demos/mem-6-retention.sh (on a scratch database, the gateway's own sweep — not a test harness — with the schedule applied over the CLI, the trail printed, and the chain verifying)
 - [x] [CTX-4: Tiered injection / progressive disclosure](CTX-4.md) — done 2026-07-27, ADR-0041, AC test: crates/synveda-gateway/tests/tiered.rs (**both halves of the AC over the real product surfaces**, never a block a harness composed: alice works six sessions, a budget too small for the corpus is applied, and `POST /v1/inject` is asked twice — once under `index_tier: off`, which is the product exactly as it behaved before CTX-4, and once with it on — so the measurement is a *difference* rather than a number: at a 240-token budget, records named 1 → 2, block tokens 80 → 217, the index tier costing 122 tokens or 56% of the block, which is the AC's "token cost of index tier measured" and what discharges ADR-0025's index-overhead reversal trigger — read honestly, and recorded in ADR-0041 rather than rounded off: the tier is *expensive* at a tight budget and under 8% at the seed §4.4 default, because its cost is a flat ~90 tokens per named record against whatever the body would have been; then the navigation, asserted as a round trip with nothing carried between the two calls but the id the block printed — the handle goes back to `POST /v1/recall` and the body comes out in full with its channel, provenance and validity labels; and the decision the whole surface rests on, `a_handle_stops_resolving_when_the_decision_behind_it_changes`, where the same id in the same session stops being served once the pack behind it is replaced, with nothing revoked because there is nothing to revoke — a handle is a name rather than a capability; plus the uniform refusal, where a nonexistent id, another tenant's id and a denied id are indistinguishable in the response *and* on the chain, so a recall never becomes an oracle for "does this record exist", and the 32-id cap), read-path tests: crates/synveda-retrieval/tests/compose.rs (6 tests on the tier itself: material that does not fit named rather than dropped, carrying its handle and joining the watermark because a disclosure the watermark does not cover is one nobody can audit; a short record **never** demoted, because naming it would spend budget to say less — the one rule that keeps a mechanism built for assets that do not exist yet from making today's corpus worse; `off` restoring the pre-CTX-4 bytes exactly, and a corpus with nothing to demote composing byte-identically either way; an index entry keeping every trust marker through the elision, `[confidential]` and `[unreviewed]` alike; the tier never naming what the plan excluded, not even by id; and CTX-2's byte-identical determinism AC re-asserted *while* the tier demotes, because a determinism proof over a path the feature does not take proves nothing about the feature), architecture: `retrieval::admit` extracted so composition and recall share one admission decision — the plan's tiers, channels, horizons and conflict rules — rather than recall re-deciding what a block already decided (seed §2.2), with the 286-test workspace suite green across the refactor, demo: demos/ctx-4-tiered-injection.sh (on a scratch database, six records through the real observe → extract path, the tier applied to the running gateway between two injects, `synveda recall` run with `DATABASE_URL` **unset** so the body can only have come through the gateway under the PDP, the same handle refused after the policy changes, and the trail printed — `context.injected` naming each entry's tier, `context.recalled` carrying counts but never the refused ids, no record content in either payload, chain verifying over 25 events)
 - [x] [CTX-5: recall API + MCP tool](CTX-5.md) — done 2026-07-27, ADR-0042, AC tests: crates/synveda-gateway/tests/recall.rs (**the widening asserted from the reader's side**: one corpus, one identity, and the real `standard` pack — `POST /v1/inject` returns nothing of the sibling team's material because ADR-0024 fixed its universe at the chain, and `POST /v1/recall` returns it, which is the department permit `standard` has carried since AUTHZ-2 and nothing in the product could exercise; `regulated-strict` over the identical corpus still refuses it, so the widening is more scopes *asked* rather than more allowed; a `viewer` binding widens the universe on the very next call; **as-of** returns what was known then and the correction now, a bare instant sweeps material the live corpus has since retired that a query cannot rank, a withdrawn binding is not carried back by naming an instant at which it stood, and a reclassification reaches its own history so the AUTHZ-5 leak suite cannot be walked around with a timestamp; the query form is not an existence oracle; and `--ignored` `the_plan_stage_fits_the_budget_adr_0029_derived` asserts the plan stage inside the **15ms** ADR-0029 pre-registered for it — 13.2ms at the shipped cap, from 378ms before the batch materialisation), adapters/claude-code/src/mcp.test.mts (the protocol frame by frame: handshake, exactly one tool, the failure posture inverted from the hooks — an agent that asked is *told*), demo: demos/ctx-5-recall.sh (inject vs recall over one pack, the as-of pair, the tier boundary a withdrawn grant leaves behind, and a real MCP client speaking JSON-RPC over stdio to the real server against the live gateway)
-- [ ] [GRPH-1: Multi-graph schema](GRPH-1.md) — design ADR accepted 2026-07-27 (ADR-0043: indexed adjacency in Postgres, not AGE); implementation next
+- [x] [GRPH-1: Multi-graph schema](GRPH-1.md) — done 2026-07-28, ADR-0043, migration 0026, AC tests: crates/synveda-store/tests/graph.rs (**all three clauses**: an edge written through the store API read back through the traversal API with kind, endpoints and validity intact; a supersession closing the prior window with both versions readable as-of *and* the traversal answering differently at the two instants; and the plan guard, which explains **the statements the crate ships** — found in `src/graph.rs` by the `-- shipped-traversal:` marker each carries, so it cannot drift from a copy — and fails on a sequential scan over either edge table, all four planning as index scans on both legs; plus the cross-graph refusal on the read *and* write side, undirected 2-hop reach with the third ring excluded, the seed bound, vertex convergence, and the no-op supersession that inserts nothing; `--ignored` `traversal_medians_on_the_shipped_schema` re-takes ADR-0029 G1 on the built schema under RLS at 1M edges — 1-hop median 1.17ms, 2-hop 23.4ms against the 50ms median threshold, tails reported against the 150ms expansion slice), crates/synveda-store/tests/rls.rs (the three tables in the adversarial suite since the migration), crates/synveda-types/tests/serde_roundtrip.rs (`Graph` and `Depth` refuse anything outside their vocabulary, integers included), demo: demos/grph-1-graph-schema.sh
 - [ ] [GRPH-2: Graph-linking stage](GRPH-2.md)
 - [x] [GRPH-4: AGE performance spike / graph fallback assessment](GRPH-4.md) — done 2026-07-25, report: docs/spikes/grph-4-age-traversal.md, criteria + verdict: ADR-0029, harness: crates/synveda-store/tests/graph_spike.rs (`--ignored`), demo: demos/grph-4-graph-spike.sh
 - [ ] [AUD-2: Audit query & auditor role surface](AUD-2.md)
@@ -1603,6 +1603,82 @@ load. The pre-registered rule reserved ADR-0004's option-4 revival for a
 G1/G2 failure, which did not occur, so this gate does not overturn it on
 that basis — but GRPH-1's design ADR is where the schema call belongs, and
 the burden of proof has moved onto AGE._
+
+_GRPH-1 (2026-07-28, ADR-0043): the graph is indexed adjacency in
+Postgres, and **ADR-0004's central technology choice is overturned** —
+on the evidence its own gate gathered and handed forward, not on the
+trigger that gate reserved. What survives is the part ADR-0004 was
+actually right about: the three named graphs, now a discriminator the API
+cannot omit. `graph::expand` takes a `Graph` **by value** and a `Depth`
+**enum**, so a traversal that does not name its semantic domain does not
+compile and one that wants three hops cannot be written — the ADR-0024
+discipline ("the only entry point takes a mandatory filter; there is no
+unfiltered code path") applied to meaning instead of to tenancy. An edge
+is a bitemporal row of exactly the records shape, so "both versions
+readable as-of" is a property of the schema: the demo closes a window
+with a plain `UPDATE` that never touches the store API and the history
+row appears anyway, because the trigger put it there.
+
+**The plan guard is the piece worth describing, because the obvious way
+to build it is worthless.** Decision 9 asks the AC suite to explain the
+shipped statements and fail on a sequential scan; a test that explains a
+*copy* of the SQL proves only that the copy is fast. So each statement
+carries a `-- shipped-traversal:` marker, and the test reads
+`src/graph.rs` through `include_str!`, extracts the four by that marker,
+and explains those — with a second assertion that the number of
+`sqlx::query_as!` calls inside `expand` equals the number of markers
+found, so a fifth traversal cannot be added without joining the guard.
+All four plan as index scans on both legs, on `graph_edges` and on
+`graph_edges_history` alike.
+
+**Two findings, both from the fixtures rather than the feature.** First,
+the plan guard is *scale-dependent*, which is exactly the trait a plan
+guard must not have: below roughly 25,000 edges a sequential scan is the
+correct plan for the second hop's join, the planner is right, and the
+first version of this test passed only because the shared dev database
+happened to hold a million rows from an earlier run. It now seeds 200,000
+— an order past the crossover, ~8× margin — and says so in the test, so
+the next contributor who sees a seq scan on a nearly empty table knows
+what they are looking at. Second, that fixture originally resolved
+endpoints by joining the edge series against the vertex table on a
+computed key; the planner chose a nested loop and 200,000 edges took **five
+and a half minutes**, with a cost that depended on the vertex count. Ids
+are now derived arithmetically from the ordinal — no join to plan — and
+the whole suite runs in 2.7s.
+
+Decision 15's re-measurement, on the built schema under RLS at 1M edges
+and the spike's own shape: **1-hop median 1.17ms, 2-hop 23.4ms**, against
+ADR-0029 G1's 50ms median threshold, with p95 1.4ms/25.2ms reported
+against the 150ms slice the recall decomposition reserves. The spike's
+0.84ms/2.05ms are printed beside them and are **not** a like-for-like
+comparison — it measured a directed join projecting one bigint column,
+while this expands undirected at both hops and returns whole edge rows,
+so the 2-hop shape answers a question roughly four times larger. Most of
+that 23.4ms is materialising ~4,000 rows, not finding them: the same
+traversal counted rather than projected executes in ~7ms server-side.
+**That is a standing note for GRPH-3**, which will decide how much of an
+edge it actually needs on the recall path; the slice has 6× headroom
+either way.
+
+Deferrals and forward obligations: `MAX_EXPANSION_SEEDS` (64) is a bound
+rather than a tuning knob, and the *fan-out* past the frontier is
+unbounded by design — GRPH-3 owns ranking, and a cap here would be a
+silent truncation this repo refuses. Spans are named `store.graph.*` for
+consistency with every other store span rather than the ADR's literal
+`graph.expand`; the fields it asks for (seed count, depth, graph) are all
+there. `record_supersessions` stays the system of record and the
+projection into the edge model is GRPH-2's (ADR-0039 trigger (d) is
+discharged as a projection, not a mirror). Nothing above the store reads
+the graph yet: GRPH-2 writes the edges, GRPH-3 hands `expand`'s output
+into ADR-0042 decision 12's fused id list — **narrowed by `admit`, never
+widened by it**, which is the one property that keeps a knowledge graph
+from becoming a policy bypass, and EVAL-5's leak suite gains graph paths
+explicitly. AGE remains installed for `graph_spike.rs`'s evidence and is
+called by nothing (the demo counts the `cypher(` call sites in the
+workspace: zero); removing it from the image is OPS-1/OPS-2's, with the
+condition named. Direct human authorship or deletion of an edge is
+reserved for "a new action, a new grant and a new ADR"; today the app
+role holds no DELETE on either table._
 
 _FLOW-1 (2026-07-25, ADR-0030): the object store — the substrate ADR-0003
 committed to, and only the substrate. Six `vedaflow_*` tables in migration

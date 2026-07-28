@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into graph_vertices (id, tenant_id, graph, kind, key, label, record_id)\n        values ($1, $2, $3, $4, $5, $6, $7)\n        on conflict (tenant_id, graph, kind, key) do update\n            set label = excluded.label,\n                record_id = coalesce(excluded.record_id, graph_vertices.record_id)\n        returning id as \"id!\", tenant_id as \"tenant_id!\", graph as \"graph!\",\n                  kind as \"kind!\", key as \"key!\", label as \"label!\", record_id,\n                  created_at as \"created_at!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "graph!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "key!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "label!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "record_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "63b28792a9015f07297c416a0caf3022852ec2b42736abeb0f56440482b8288e"
+}

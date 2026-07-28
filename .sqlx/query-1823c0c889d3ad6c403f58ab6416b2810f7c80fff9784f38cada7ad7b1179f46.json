@@ -1,0 +1,95 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, graph, kind, src_id, dst_id, method,\n               confidence_permille, source_record_id, valid_from, valid_to,\n               tx_from, tx_to\n        from graph_edges\n        where tenant_id = $1 and id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "graph",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "src_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "dst_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "method",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "confidence_permille",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_record_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "valid_from",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "tx_from",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "1823c0c889d3ad6c403f58ab6416b2810f7c80fff9784f38cada7ad7b1179f46"
+}

@@ -1,6 +1,10 @@
-//! Storage traits and their Postgres/pgvector/AGE implementations, including the
+//! Storage traits and their Postgres/pgvector implementations, including the
 //! bitemporal record tables and, later, the `VectorIndex` trait that isolates
 //! pgvector from the Qdrant scale-out path (tech plan §1.1).
+//!
+//! Knowledge graph (GRPH-1, ADR-0043): indexed adjacency in the same
+//! database, not Apache AGE — the extension stays installed for the
+//! GRPH-4 spike's evidence and is called by nothing. See [`graph`].
 //!
 //! Bitemporal layout (FND-4, ADR-0006): each bitemporal entity is a
 //! current/history table pair. Transaction time is maintained exclusively by
@@ -20,6 +24,7 @@
 #![warn(missing_docs)]
 
 pub mod dedup;
+pub mod graph;
 pub mod group_mappings;
 pub mod hierarchy;
 pub mod identities;

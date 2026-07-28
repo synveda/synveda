@@ -116,3 +116,17 @@ define_id!(
     /// single action from one scope to another (AUTHZ-4, ADR-0037).
     LapseId
 );
+
+define_id!(
+    /// Identifies a graph vertex — one thing the knowledge graph can talk
+    /// about, which is identity rather than a claim and therefore carries
+    /// no history (GRPH-1, ADR-0043 decision 5).
+    GraphVertexId
+);
+
+define_id!(
+    /// Identifies a graph edge — one claim about a relation, bitemporal
+    /// like a record and superseded the same way (GRPH-1, ADR-0043
+    /// decisions 3 and 4). Stable across the versions of that claim.
+    GraphEdgeId
+);

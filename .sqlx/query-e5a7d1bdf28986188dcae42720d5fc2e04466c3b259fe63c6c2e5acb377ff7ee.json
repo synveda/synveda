@@ -1,0 +1,104 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                -- shipped-traversal: depth=one time=as-of\n                select 1 as \"hop!\", id as \"id!\", tenant_id as \"tenant_id!\",\n                       graph as \"graph!\", kind as \"kind!\", src_id as \"src_id!\",\n                       dst_id as \"dst_id!\", method as \"method!\",\n                       confidence_permille as \"confidence_permille!\",\n                       source_record_id, valid_from as \"valid_from!\", valid_to,\n                       tx_from as \"tx_from!\", tx_to\n                from graph_edges_versions\n                where tenant_id = $1 and graph = $2 and src_id = any($3)\n                  and valid_from <= $4 and (valid_to is null or valid_to > $4)\n                  and tx_from <= $5 and (tx_to is null or tx_to > $5)\n                union all\n                select 1 as \"hop!\", id as \"id!\", tenant_id as \"tenant_id!\",\n                       graph as \"graph!\", kind as \"kind!\", src_id as \"src_id!\",\n                       dst_id as \"dst_id!\", method as \"method!\",\n                       confidence_permille as \"confidence_permille!\",\n                       source_record_id, valid_from as \"valid_from!\", valid_to,\n                       tx_from as \"tx_from!\", tx_to\n                from graph_edges_versions\n                where tenant_id = $1 and graph = $2 and dst_id = any($3)\n                  and valid_from <= $4 and (valid_to is null or valid_to > $4)\n                  and tx_from <= $5 and (tx_to is null or tx_to > $5)\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hop!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "graph!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "src_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "dst_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "method!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "confidence_permille!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "source_record_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "tx_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "UuidArray",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "e5a7d1bdf28986188dcae42720d5fc2e04466c3b259fe63c6c2e5acb377ff7ee"
+}

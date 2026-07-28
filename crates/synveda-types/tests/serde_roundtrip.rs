@@ -6,9 +6,9 @@ use std::str::FromStr;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use synveda_types::{
-    CompositionConfig, Error, IdentityId, InjectChannels, RecordClass, RecordId, RecordKind,
-    RedactionConfig, RedactionMode, Role, RoleBinding, ScopeId, Sensitivity, Tenant, TenantId,
-    TenantStatus,
+    CompositionConfig, Depth, Error, Graph, IdentityId, InjectChannels, RecordClass, RecordId,
+    RecordKind, RedactionConfig, RedactionMode, Role, RoleBinding, ScopeId, Sensitivity, Tenant,
+    TenantId, TenantStatus,
 };
 
 fn json_roundtrip<T>(value: &T) -> T
@@ -235,6 +235,49 @@ fn record_kind_and_class_reject_unknown_values() {
     assert!(RecordKind::from_str("Pinned").is_err(), "lowercase only");
     assert!(serde_json::from_str::<RecordClass>("\"note\"").is_err());
     assert!(RecordClass::from_str("Fact").is_err(), "lowercase only");
+}
+
+// ── Graph vocabulary (GRPH-1, ADR-0043) ──────────────────────────────────────
+
+#[test]
+fn graph_all_roundtrip_and_match_as_str() {
+    for graph in Graph::ALL {
+        json_roundtrip(&graph);
+        let json = serde_json::to_string(&graph).expect("serialize");
+        assert_eq!(json, format!("\"{}\"", graph.as_str()));
+        assert_eq!(Graph::from_str(graph.as_str()).unwrap(), graph);
+        assert_eq!(graph.to_string(), graph.as_str());
+    }
+}
+
+#[test]
+fn depth_all_roundtrip_and_match_as_str() {
+    for depth in Depth::ALL {
+        json_roundtrip(&depth);
+        let json = serde_json::to_string(&depth).expect("serialize");
+        assert_eq!(json, format!("\"{}\"", depth.as_str()));
+        assert_eq!(Depth::from_str(depth.as_str()).unwrap(), depth);
+        assert_eq!(depth.to_string(), depth.as_str());
+    }
+    assert_eq!(Depth::One.hops(), 1);
+    assert_eq!(Depth::Two.hops(), 2);
+}
+
+/// The discriminator ADR-0043 decision 2 says the API cannot omit, and the
+/// depth decision 9 says cannot be an integer: both refuse anything outside
+/// their vocabulary, so an undisciplined traversal cannot be *deserialised*
+/// into existence either — the wire is the one seam where the type system
+/// is not already the answer.
+#[test]
+fn graph_and_depth_reject_unknown_values() {
+    assert!(serde_json::from_str::<Graph>("\"social\"").is_err());
+    assert!(Graph::from_str("Entity").is_err(), "lowercase only");
+    assert!(serde_json::from_str::<Depth>("\"three\"").is_err());
+    assert!(
+        serde_json::from_str::<Depth>("2").is_err(),
+        "not an integer"
+    );
+    assert!(Depth::from_str("One").is_err(), "lowercase only");
 }
 
 // ── Roles ────────────────────────────────────────────────────────────────────

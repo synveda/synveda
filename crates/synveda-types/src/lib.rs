@@ -12,6 +12,7 @@ mod channel;
 mod composition;
 mod dedup;
 mod error;
+mod graph;
 mod hierarchy;
 mod id;
 mod identity;
@@ -38,8 +39,12 @@ pub use composition::{
 };
 pub use dedup::{DedupConfig, DedupMode, MAX_DEDUP_NEIGHBOURS, permille};
 pub use error::{Error, Result};
+pub use graph::{Depth, Graph};
 pub use hierarchy::{HierarchyNode, ScopeKind};
-pub use id::{IdentityId, LapseId, ObserveEventId, ProposalId, RecordId, ScopeId, TenantId};
+pub use id::{
+    GraphEdgeId, GraphVertexId, IdentityId, LapseId, ObserveEventId, ProposalId, RecordId, ScopeId,
+    TenantId,
+};
 pub use identity::{Identity, IdentityKind};
 pub use lapse::{
     Lapse, LapseAction, LapseConfig, LapseOutcome, LapseTerms, MAX_LAPSE_REASON,
