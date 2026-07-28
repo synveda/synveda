@@ -150,15 +150,18 @@ packs bumped to `@2`; governed requests also read the subject's
 bindings for the resource chain per request — kept per-request by
 design since HIER-2 (ADR-0016 decision 6).
 Roles whose actions land later are marker rows in the golden matrix
-until those features extend it: auditor's audit surface (AUD-2), and
-security-reviewer's skill approval (SKIL-2). Closed since: contributor
+until those features extend it: security-reviewer's skill approval
+(SKIL-2) — the last one. Closed since: contributor
 writes (MEM-1, 2026-07-19 — `MemoryWrite` at bound non-personal scopes
 for contributor/curator, ADR-0020 decision 3); security-reviewer's first
 live action (MEM-2, 2026-07-19 — the quarantine review plane); curator's
 "can pin/approve" (FLOW-2, 2026-07-25 — the channel plane, then FLOW-3's
-proposal review); and **compliance** (FLOW-3, 2026-07-25 — `ProposalRead`
+proposal review); **compliance** (FLOW-3, 2026-07-25 — `ProposalRead`
 and `ProposalReview`, with the invariant approval floor requiring the
-role on everything `restricted`, ADR-0032 decision 4)._
+role on everything `restricted`, ADR-0032 decision 4); and **auditor**
+(AUD-2, 2026-07-28 — `AuditRead`, the role's first and only live action,
+on the read-only admin permit whose comment had named the feature since
+AUTHZ-2, ADR-0045 decision 1)._
 
 _HIER-2 notes (ADR-0016): scope chains are cached in-process,
 invalidated post-commit by the hierarchy-mutating handlers; the gateway
@@ -212,7 +215,10 @@ deny-path events run in a short dedicated transaction at the per-plane
 `respond` seams, best-effort (`synveda_audit_append_failures_total`; the
 original error is never masked). The CLI break-glass audits itself
 (actor kind `break_glass`, OS-user attribution). `synveda audit
-verify/tail` is the operator surface until AUD-2's query API. Forward
+verify/tail` was the operator surface until AUD-2's query API landed
+(2026-07-28, ADR-0045); both remain as the direct-to-store break-glass
+for an operator who has lost the gateway, which is the split ADR-0045
+decision 11 draws. Forward
 obligations: MEM-1's observe and CTX-1/2/3's inject/recall are emission
 points on the same seams — inject chains ONE event carrying its
 commit-hash watermarks with per-candidate `MemoryRead` decisions
@@ -595,7 +601,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [GRPH-1: Multi-graph schema](GRPH-1.md) — done 2026-07-28, ADR-0043, migration 0026, AC tests: crates/synveda-store/tests/graph.rs (**all three clauses**: an edge written through the store API read back through the traversal API with kind, endpoints and validity intact; a supersession closing the prior window with both versions readable as-of *and* the traversal answering differently at the two instants; and the plan guard, which explains **the statements the crate ships** — found in `src/graph.rs` by the `-- shipped-traversal:` marker each carries, so it cannot drift from a copy — and fails on a sequential scan over either edge table, all four planning as index scans on both legs; plus the cross-graph refusal on the read *and* write side, undirected 2-hop reach with the third ring excluded, the seed bound, vertex convergence, and the no-op supersession that inserts nothing; `--ignored` `traversal_medians_on_the_shipped_schema` re-takes ADR-0029 G1 on the built schema under RLS at 1M edges — 1-hop median 1.17ms, 2-hop 23.4ms against the 50ms median threshold, tails reported against the 150ms expansion slice), crates/synveda-store/tests/rls.rs (the three tables in the adversarial suite since the migration), crates/synveda-types/tests/serde_roundtrip.rs (`Graph` and `Depth` refuse anything outside their vocabulary, integers included), demo: demos/grph-1-graph-schema.sh
 - [x] [GRPH-2: Graph-linking stage](GRPH-2.md) — done 2026-07-28, ADR-0044, migration 0027, AC tests: crates/synveda-ingest/tests/entity_resolution.rs (**the dedup precision half**, pairwise over the labelled fixture set: 0.973 against a 0.95 provisional target, recall 0.837 reported and not asserted, with the set carrying its own ceiling — `Paris` is two different things sharing one name — and a second test pinning the false merges to *exactly* that pair, so an over-eager rule fails before the threshold's slack absorbs it; plus the refusals a redaction placeholder, a pronoun and an over-long key all get, and the confidence tier that reports what normalisation did), crates/synveda-gateway/tests/graph_linking.rs (**the other half over the real product path**, never a seeded row: two sessions a month apart spell one company two ways and converge on **one** vertex — resolution against nodes that already exist, done by the unique constraint rather than by a lookup — each record hangs off its own session in the episode graph, a 2-hop `expand` walks record → name → the other record, and the graph's work rides the group's existing `memory.extracted` event because GRPH-2 adds no action type; plus the orphan rate counted per graph and asserted on the metric a dashboard reads, a real secret taken through quarantine and release with neither the key nor the placeholder reaching an unscoped vertex, and the provenance projection proved to be a projection — `graph_edges` holds no `supersedes` row and the provenance graph holds no vertex), crates/synveda-store/tests/graph.rs (`asserting_a_claim_that_already_holds_writes_nothing`: migration 0027's partial unique index makes re-assertion a no-op with no second row and no history row, while a different relation still lands and a *superseded* one may be asserted again — the predicate is partial so supersession's second half stays legal), crates/synveda-ingest/src/linking.rs (9 unit tests on the resolver's rules), demo: demos/grph-2-graph-linking.sh
 - [x] [GRPH-4: AGE performance spike / graph fallback assessment](GRPH-4.md) — done 2026-07-25, report: docs/spikes/grph-4-age-traversal.md, criteria + verdict: ADR-0029, harness: crates/synveda-store/tests/graph_spike.rs (`--ignored`), demo: demos/grph-4-graph-spike.sh
-- [ ] [AUD-2: Audit query & auditor role surface](AUD-2.md)
+- [x] [AUD-2: Audit query & auditor role surface](AUD-2.md) — done 2026-07-28, ADR-0045, migration 0028, AC test: crates/synveda-gateway/tests/audit_query.rs (**both questions over the real product path**, and the point is that nothing seeds an audit row: disclosures exist because alice and bob called `POST /v1/inject` and the chain recorded what they got. **Q1** — one `GET /v1/audit/disclosures` names exactly the readers the chain records being *served* the record, with the version, channel, tier and seq each of them actually got, and never the payments reader. **Q2** — one `GET /v1/audit/knowledge` folds to one row per record with the version last delivered and the number of occasions behind it, and the AC's "uses bitemporal + refs" is asserted rather than described: every id in the answer is resolved through `records::as_of` at the instant asked at, so the audit answer and the corpus agree; a companion test pins the instant as load-bearing by asking the same call before her first session and getting nothing. Plus the two lists proven separate with the reason carried *in the response body*; the refusals — a subtree-bound auditor denied on all four routes while the same role held tenant-wide passes, and the subject of the answers denied herself; no record content in any response, swept for whole bodies *and* distinctive fragments; the uniform empty answer that keeps the surface from being an existence oracle; a truncated page reporting itself with a cursor that advances; and dana's own query appearing in the next query's results. The suite runs under the real `regulated-strict` default and installs no permissive pack — a blanket pack would grant `AuditRead` to everyone and make every refusal in the file vacuous), crates/synveda-policy/tests/roles.rs (`the_audit_plane_admits_exactly_the_read_only_admin_roles_and_only_tenant_wide`: all 8 roles × 3 packs, allowed tenant-wide for steward/org-admin/auditor and denied for the same role bound at a subtree), crates/synveda-policy/tests/service_scope.rs (`AuditRead` joins the tenant-plane denial list, so no service identity reads the trail however it is bound), crates/synveda-audit (11 unit tests: the fold's last-wins-by-seq, absence reported as absence across three payload generations, the action taxonomy's uniqueness and column bounds), crates/synveda-gateway/src/audit_query.rs (4 unit tests: the vocabulary round-trips, a typo is refused, a limit over the cap is refused rather than trimmed), demo: demos/aud-2-audit-query.sh (the auditor's whole half with **DATABASE_URL unset**, so every answer can only have come through the gateway under the PDP: both questions, the two lists with the break-glass bootstrap bind and the two governed ones side by side in the authority half, the three refusals in the product's own words, a content sweep returning zero, dana's seven own audit reads on the chain she is reading, and `valid=true over 30 events`)
 - [ ] [EVAL-2: Extraction quality suite](EVAL-2.md)
 - [ ] [EVAL-4: Retrieval & injection quality](EVAL-4.md)
 - [ ] [EVAL-5: Security evals](EVAL-5.md)
@@ -1746,6 +1752,97 @@ lineage and cannot be unmerged. There is no feature flag: GRPH-3 owns the
 degradable half, and an off switch on the *write* would leave a corpus
 the graph could never describe without a backfill nobody has specified —
 the trigger is the extraction lag histogram, not a preference._
+
+_AUD-2 (2026-07-28, ADR-0045): the audit query surface. Unusually for a
+feature this late, most of its design was decided by other features that
+needed the answer to exist — ADR-0042 decision 8 drew the line ("CTX-5
+answers *what was there*, AUD-2 answers *who could see it*"), ADR-0038
+decision 13 put the permitted tier set into `context.injected`, ADR-0041
+decision 9 put `tier` on every entry, ADR-0036 sent "why is this pinned"
+here rather than build a pin log, and ADR-0019 decision 7 left the
+user-or-service join to query time. **No emission point changed**, which
+is the useful evidence that ADR-0019 decision 4's one-event-per-operation
+discipline was applied with the auditor in mind each time.
+
+**The surface answers from the chain as recorded, never from a replay.**
+ADR-0042 option 5 rejected reconstructing historical authority for the
+read path *and named AUD-2 as where the question belongs*; the objection
+is stronger on this side, where being evidence is the whole value. So
+"who could see X on date D" returns **two lists it refuses to merge**:
+`disclosed` (who the chain records being served it, with the version,
+channel, tier and staleness each reader got) and `authority` (the pack,
+bindings, lapses and classifications that governed the window). Merging
+them means deciding, and deciding over reconstructed inputs is the replay
+again. The reason rides the response body, not only the ADR, so a
+consumer cannot read one list as the other. Historical bindings are the
+sharpest case: `role_bindings` is a current-state table and an unbound
+role leaves no row, so `role.bound` on the chain is the *only* record
+that anyone held a role on a given day.
+
+**Tenant-complete or refused, and the schema is the enforcement.**
+`AuditRead` declares `resource: [Tenant]` and omits `Scope` entirely, so
+a subtree-scoped audit request fails schema validation rather than
+relying on a handler to remember. An event's `resource` is a display
+string by AUD-1's specification — a scope for some actions, a binding or
+a tenant or `"scope none"` for others — so a subtree answer could only be
+"the events we could attribute to your subtree", which silently omits the
+rest, and silent omission is the one property an audit answer must never
+have. Two things fall out free: a subtree-bound auditor holds nothing
+(bindings inherit downward, the tenant plane is above every node), and no
+service identity can read the trail however bound, because AUTH-3's
+confinement forbid already covers everything outside the anchor subtree.
+Packs bumped to `@11`, on the read-only admin permit whose comment has
+named this feature since AUTHZ-2 — `auditor` stops being a marker row in
+the golden matrix.
+
+**Migration 0028 adds indexes and not one column.** `audit_log.hash`
+covers a canonical serialisation of the row, so a column *inside* that
+form invalidates every row written since AUD-1 and one *outside* it is an
+audit field the audit chain does not protect. Four indexes, all
+tenant-leading; the disclosure index is `gin (tenant_id, payload
+jsonb_path_ops)` through `btree_gin`, **partial** to `context.injected`
+and `context.recalled`. Measured on the dev chain at 56k events: 4.0MB
+against a 49MB heap, and every query shape plans as an index scan with
+disclosure containment at 0.33ms. The cost of the partial predicate is
+named rather than discovered — record ids that `memory.superseded`,
+`memory.expired` and `vedaflow.channel.published` name are not reachable
+by containment, so "everything the chain says about record X" is not a
+query this feature ships, only "who was served record X"; widening is a
+reviewed diff that rebuilds in place (ADR-0024's rule, restated by
+migration 0027).
+
+Deferrals and forward obligations, none of them discovered later:
+**(1) ADR-0045 decision 11 is half-discharged** — `synveda audit
+verify`/`tail` stay direct-to-store break-glass as designed, but the
+`events`/`disclosures`/`knowledge` subcommands through the gateway are
+not built; the demo uses `curl` with `DATABASE_URL` unset, which
+demonstrates the same property. **(2) The authority half returns raw
+events, not a folded state.** Folding needs the `PolicyNodeAssigned`
+overload handled — `curators.rs` emits it for curator files and
+promotion rules, `policy.rs` for pack assignments, with different payload
+shapes — and CNSL-2 is where a console would want the fold. **(3) The
+200ms median budget decision 12 pre-registers is unmeasured**: the AC
+suite runs on a fixture-sized chain, and nothing yet exercises 1M events.
+EVAL-6 owns percentile SLOs, but the median assert is this feature's and
+is still owed. **(4) One code path is covered by reasoning rather than by
+a test**: `disclosures` computes truncation from the rows the SQL limit
+returned rather than from the disclosures they yielded, because a full
+page that loses a row to the entry filter is still a full page — no test
+produces an event that matches containment without a matching entry,
+since doing so would need a hand-forged payload and the suite's rule is
+no seeded rows. **(5) Payload shapes are versioned by whatever feature
+was live**: an entry written before FLOW-2 carries `version_hash` and no
+`object_hash`, one before AUTHZ-5 has no `tier`. Every extracted field is
+an `Option` that stays `None` rather than taking a default, and the two
+hashes are kept distinct rather than folded — a content address and a
+version hash are different claims, and reporting one as the other would
+be this surface inventing a fact about the past. **(6) The chain grows on
+read**: an allowed admin-plane read chains its own `authz.decision`, so
+an estate with heavy audit use will find `AuditRead` decisions a visible
+share of the trail, and it is why the pages are cursor-paginated. AUD-3's
+WORM export and AUD-4's SIEM stream consume the same reads; CNSL-3
+surfaces "what did the agent know at T" over this API rather than over
+the store._
 
 _FLOW-1 (2026-07-25, ADR-0030): the object store — the substrate ADR-0003
 committed to, and only the substrate. Six `vedaflow_*` tables in migration
