@@ -55,11 +55,15 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// (ADR-0037 decisions 7 and 15). `@10`: AUTHZ-5 made sensitivity a policy
 /// attribute — every `MemoryRead` permit names the tiers it covers, the base
 /// layer forbids `restricted` outright unless a lapse declared it, and the
-/// classification plane joined (ADR-0038 decisions 4, 5 and 9).
+/// classification plane joined (ADR-0038 decisions 4, 5 and 9). `@11`: AUD-2
+/// added `AuditRead` to the read-only admin permit every pack has carried
+/// since AUTHZ-2 — the line whose comment named this feature — which makes
+/// `auditor` a role with a live action rather than a marker row in the
+/// golden matrix (ADR-0045 decision 1).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 10),
-    (STANDARD, 10),
-    (OPEN_COLLABORATION, 10),
+    (REGULATED_STRICT, 11),
+    (STANDARD, 11),
+    (OPEN_COLLABORATION, 11),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the

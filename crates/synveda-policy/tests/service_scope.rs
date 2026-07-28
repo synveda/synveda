@@ -187,6 +187,12 @@ fn token_scope_confines_the_admin_plane_regardless_of_roles() {
         (Action::RoleRead, None),
         (Action::RoleAssign, Some(Role::Viewer)),
         (Action::ServiceIdentityRead, None),
+        // The audit chain included: `AuditRead` reaches only the tenant
+        // resource (ADR-0045 decision 2), and the tenant plane is never
+        // inside a scope subtree — so no service identity can read the
+        // trail however it is bound, and the confinement forbid gets that
+        // for free rather than by naming a new action.
+        (Action::AuditRead, None),
     ] {
         assert!(
             !decide(&pdp, &fx, &agent, action, None, &bindings, grant),

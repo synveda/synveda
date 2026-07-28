@@ -39,14 +39,19 @@ permit (
 };
 
 // The read-only admin surfaces: auditor joins (seed §5 — read-only,
-// including audit logs when AUD-2 lands, never content).
+// including the audit chain since AUD-2, never content).
+//
+// `AuditRead` is the one action here that reaches only the tenant resource
+// (ADR-0045 decision 2), so this permit grants it exactly where the chain
+// lives and a subtree binding does not reach it.
 permit (
     principal,
     action in [
         Synveda::Action::"HierarchyRead",
         Synveda::Action::"PolicyRead",
         Synveda::Action::"RoleRead",
-        Synveda::Action::"ServiceIdentityRead"
+        Synveda::Action::"ServiceIdentityRead",
+        Synveda::Action::"AuditRead"
     ],
     resource
 ) when {

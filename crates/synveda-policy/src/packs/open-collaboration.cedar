@@ -29,14 +29,17 @@ permit (
         && context.roles.containsAny(["steward", "org-admin"])
 };
 
-// The read-only admin surfaces: auditor joins.
+// The read-only admin surfaces: auditor joins — including the audit chain
+// since AUD-2, which reaches only the tenant resource (ADR-0045
+// decision 2), and never content.
 permit (
     principal,
     action in [
         Synveda::Action::"HierarchyRead",
         Synveda::Action::"PolicyRead",
         Synveda::Action::"RoleRead",
-        Synveda::Action::"ServiceIdentityRead"
+        Synveda::Action::"ServiceIdentityRead",
+        Synveda::Action::"AuditRead"
     ],
     resource
 ) when {

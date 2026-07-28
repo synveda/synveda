@@ -36,6 +36,7 @@
 pub mod app;
 mod approvals;
 mod audit;
+mod audit_query;
 pub mod auth;
 pub mod authz;
 pub mod channels;

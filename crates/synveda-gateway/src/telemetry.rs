@@ -94,6 +94,15 @@ pub const REDACTION_FINDINGS_TOTAL: &str = "synveda_redaction_findings_total";
 /// list chains its allowed decision (ADR-0019 decision 4).
 pub const QUARANTINE_OPERATIONS_TOTAL: &str = "synveda_quarantine_operations_total";
 
+/// Audit query API operations (AUD-2, ADR-0045), labelled by `op`
+/// (`events`/`disclosures`/`knowledge`/`verify`) and `outcome` (`ok`,
+/// `rejected`, `error`).
+///
+/// Every allowed op also chains its own `authz.decision`, so reading the
+/// trail is itself on the trail (ADR-0019 decision 4) — this counter and
+/// that chain should agree, and a divergence means appends are failing.
+pub const AUDIT_QUERY_OPERATIONS_TOTAL: &str = "synveda_audit_query_operations_total";
+
 /// Channel API operations (FLOW-2, ADR-0031 decision 12; FLOW-7,
 /// ADR-0036), labelled by `op` (`list`/`publish`/`history`/`rollback`/
 /// `pin`/`unpin`) and `outcome` (`ok`, `rejected`, `error`). Publish,
@@ -530,6 +539,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         PROPOSAL_OPERATIONS_TOTAL,
         "Proposal API operations by op and outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        AUDIT_QUERY_OPERATIONS_TOTAL,
+        "Audit query API operations by op (events/disclosures/knowledge/verify) and \
+         outcome (ok/rejected/error)"
     );
     metrics::describe_counter!(
         PUBLISH_REVIEW_REQUIRED_TOTAL,

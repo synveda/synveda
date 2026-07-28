@@ -200,6 +200,33 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
+    // The audit query plane (/v1/audit/*, AUD-2, ADR-0045 decision 1):
+    // searching the chain, the two questions the feature exists for, and
+    // the chain check itself. One action, not four — verification returns a
+    // verdict and a sequence number and no event content, so a principal
+    // who may read the chain may check it.
+    //
+    // **Tenant only, and that is the enforcement rather than a route
+    // check.** There is one chain per tenant, and an event's `resource` is
+    // a scope for some actions and a binding, a tenant or nothing for
+    // others — so a subtree-scoped audit answer could only ever be "the
+    // events we could attribute to your subtree", which silently omits the
+    // ones it could not parse. Leaving `Scope` out of `appliesTo` makes
+    // that answer unrepresentable: a scope-resource audit request fails
+    // schema validation and denies, rather than relying on every future
+    // handler to remember (ADR-0045 decision 2).
+    //
+    // The base layer's token-scope confinement therefore covers agents for
+    // free: the tenant plane is never inside a scope subtree, so no service
+    // identity can read the trail however it is bound (ADR-0018
+    // decision 4).
+    action AuditRead
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant],
+            context: { roles: Set<String> },
+        };
+
     // The VedaFlow channel plane (/v1/channels/*, FLOW-2, ADR-0031
     // decision 12): reading a scope's channels, and publishing records
     // onto its published channel — the act that moves content across the

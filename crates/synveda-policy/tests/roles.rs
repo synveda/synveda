@@ -440,20 +440,20 @@ fn assert_matrix(pack: &str, version: i64) {
 /// regulated-strict: the golden matrix (the AC).
 #[test]
 fn matrix_regulated_strict() {
-    assert_matrix(REGULATED_STRICT, 10);
+    assert_matrix(REGULATED_STRICT, 11);
 }
 
 /// standard: identical role matrix — packs differ on composition
 /// membership, never on who administers (ADR-0015 decision 4).
 #[test]
 fn matrix_standard() {
-    assert_matrix(STANDARD, 10);
+    assert_matrix(STANDARD, 11);
 }
 
 /// open-collaboration: identical role matrix.
 #[test]
 fn matrix_open_collaboration() {
-    assert_matrix(OPEN_COLLABORATION, 10);
+    assert_matrix(OPEN_COLLABORATION, 11);
 }
 
 /// A tenant-wide binding is in force everywhere, the tenant plane
@@ -798,4 +798,86 @@ fn foreign_tenant_binding_rows_are_ignored() {
         !decision.allowed,
         "a foreign tenant's binding row must grant nothing"
     );
+}
+
+/// `AuditRead` is not a matrix column, because it is the one action that
+/// reaches the tenant resource and nothing else (ADR-0045 decision 2) — a
+/// scope-resource request fails schema validation rather than deciding. So
+/// its role coverage is asserted here instead, over every pack.
+///
+/// Who holds it is the read-only admin permit's answer, unchanged since
+/// AUTHZ-2: steward, org-admin, and — this is the point of the feature —
+/// `auditor`, whose first live action this is (ADR-0045 decision 1).
+#[test]
+fn the_audit_plane_admits_exactly_the_read_only_admin_roles_and_only_tenant_wide() {
+    for pack in [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION] {
+        let pdp = Pdp::new().expect("build pdp");
+        let fx = fixture();
+        let assignments = [fx.assignment("org", pack)];
+
+        for role in Role::ALL {
+            let subject = format!("holder-{role}");
+            let principal = fx.unplaced(&subject);
+            let expected = matches!(role, Role::Steward | Role::OrgAdmin | Role::Auditor);
+
+            let tenant_wide = vec![fx.binding(&subject, None, role)];
+            let decision = decide(
+                &pdp,
+                &fx,
+                &principal,
+                None,
+                Action::AuditRead,
+                None,
+                &tenant_wide,
+                &assignments,
+                None,
+            );
+            assert_eq!(
+                decision.allowed, expected,
+                "{pack}: {role} tenant-wide decided {} for audit.read",
+                decision.allowed,
+            );
+
+            // The same role bound at a subtree reaches nothing here:
+            // bindings inherit downward and never up (ADR-0015
+            // decision 4), and the tenant plane is above every node. This
+            // is what makes "a subtree-bound auditor is refused rather
+            // than served a subset" a property of the model rather than a
+            // check some future handler has to remember.
+            let subtree = vec![fx.binding(&subject, Some("eng"), role)];
+            let decision = decide(
+                &pdp,
+                &fx,
+                &principal,
+                None,
+                Action::AuditRead,
+                None,
+                &subtree,
+                &assignments,
+                None,
+            );
+            assert!(
+                !decision.allowed,
+                "{pack}: {role} bound at eng must not read the tenant's chain",
+            );
+        }
+
+        // An unbound principal holds no administrative power under any
+        // pack (ADR-0015 decision 4), and the audit plane is no exception.
+        let decision = decide(
+            &pdp,
+            &fx,
+            &fx.unplaced("nobody"),
+            None,
+            Action::AuditRead,
+            None,
+            &[],
+            &assignments,
+            None,
+        );
+        assert!(
+            !decision.allowed,
+            "{pack}: an unbound subject reads nothing"
+        );
+    }
 }

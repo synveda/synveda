@@ -298,6 +298,57 @@ pub enum AuditAction {
 }
 
 impl AuditAction {
+    /// Every action, in declaration order — the vocabulary a query surface
+    /// may name (AUD-2, ADR-0045 decision 3).
+    ///
+    /// Hand-maintained beside the enum, like [`synveda_types::Role::ALL`]:
+    /// Rust cannot make an array literal exhaustive, so the guard is the
+    /// unit test below plus the fact that an action missing from here is
+    /// an event `GET /v1/audit/events` cannot filter for. Add the variant
+    /// and add it here in the same diff.
+    pub const ALL: [AuditAction; 40] = [
+        AuditAction::AuthzDecision,
+        AuditAction::TenantResolutionDenied,
+        AuditAction::TokenRejected,
+        AuditAction::RlsBackstopTripped,
+        AuditAction::IdentityProvisioned,
+        AuditAction::HierarchyNodeCreated,
+        AuditAction::HierarchyNodeUpdated,
+        AuditAction::HierarchyNodeDeleted,
+        AuditAction::PolicyDefaultSet,
+        AuditAction::PolicyDefaultCleared,
+        AuditAction::PolicyNodeAssigned,
+        AuditAction::PolicyNodeUnassigned,
+        AuditAction::PolicyPackApplied,
+        AuditAction::PolicyPackCleared,
+        AuditAction::RoleBound,
+        AuditAction::RoleUnbound,
+        AuditAction::ServiceIdentityRegistered,
+        AuditAction::ServiceIdentityRevoked,
+        AuditAction::MemoryObserved,
+        AuditAction::QuarantineReleased,
+        AuditAction::QuarantineRejected,
+        AuditAction::MemoryExtracted,
+        AuditAction::MemorySuperseded,
+        AuditAction::MemoryClassified,
+        AuditAction::TenantCreated,
+        AuditAction::ContextInjected,
+        AuditAction::ContextRecalled,
+        AuditAction::ChannelPublished,
+        AuditAction::ChannelRolledBack,
+        AuditAction::ChannelPinned,
+        AuditAction::ChannelUnpinned,
+        AuditAction::ProposalOpened,
+        AuditAction::ProposalApproved,
+        AuditAction::ProposalRejected,
+        AuditAction::ProposalWithdrawn,
+        AuditAction::LapseGranted,
+        AuditAction::LapseRevoked,
+        AuditAction::LapseExpired,
+        AuditAction::MemoryExpired,
+        AuditAction::MemoryDisposed,
+    ];
+
     /// The stable dotted name stored in the `action` column. Renaming an
     /// existing value is a breaking change to every consumer of the log.
     #[must_use]
@@ -398,4 +449,53 @@ pub struct AuditEvent {
     pub payload: Value,
     /// The OTel trace id live at emission, when there was one.
     pub trace_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_action_name_is_distinct_and_dotted() {
+        // Two actions sharing a name would make the chain ambiguous to
+        // every consumer of it — a query, an export, a SIEM rule.
+        let mut names: Vec<&str> = AuditAction::ALL.iter().map(|a| a.as_str()).collect();
+        let total = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(
+            names.len(),
+            total,
+            "duplicate action name in AuditAction::ALL"
+        );
+
+        for name in names {
+            assert!(!name.is_empty(), "an action name must not be empty");
+            assert!(
+                name.contains('.'),
+                "{name} is not dotted — the taxonomy is `domain.thing.happened`"
+            );
+            assert!(
+                name.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_'),
+                "{name} has characters outside the taxonomy's alphabet"
+            );
+            assert!(
+                name.len() <= 100,
+                "{name} exceeds audit_log_action_check's 100-character bound"
+            );
+        }
+    }
+
+    #[test]
+    fn every_actor_kind_matches_the_column_constraint() {
+        // migration 0011 + 0014: the CHECK accepts exactly these three.
+        for (kind, expected) in [
+            (ActorKind::Subject, "subject"),
+            (ActorKind::BreakGlass, "break_glass"),
+            (ActorKind::System, "system"),
+        ] {
+            assert_eq!(kind.as_str(), expected);
+        }
+    }
 }

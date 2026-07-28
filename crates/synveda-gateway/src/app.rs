@@ -22,6 +22,7 @@ use synveda_policy::Pdp;
 use synveda_types::{Error, Tenant};
 use tower_http::trace::TraceLayer;
 
+use crate::audit_query;
 use crate::auth;
 use crate::channels;
 use crate::curators;
@@ -169,6 +170,15 @@ pub fn router(state: AppState) -> Router {
             post(quarantine::release),
         )
         .route("/v1/quarantine/{event_id}/reject", post(quarantine::reject))
+        // The audit query plane (AUD-2, ADR-0045): one action, `AuditRead`,
+        // decided at the tenant — there is no scope-resource variant, so
+        // an audit answer covers the whole chain or is refused. The two
+        // AC questions get one call each; `verify` is the chain check the
+        // CLI has had since AUD-1, now reachable without DATABASE_URL.
+        .route("/v1/audit/events", get(audit_query::events))
+        .route("/v1/audit/disclosures", get(audit_query::disclosures))
+        .route("/v1/audit/knowledge", get(audit_query::knowledge))
+        .route("/v1/audit/verify", get(audit_query::verify))
         // The VedaFlow channel plane (FLOW-2, ADR-0031 decision 12):
         // reading a scope's standing channels, and publishing records
         // across the trust boundary onto its published one. Since FLOW-3

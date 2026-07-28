@@ -106,6 +106,23 @@ pub enum Action {
     /// anchor). Never a tenant-level action: an agent is always anchored
     /// at a node (ADR-0018 decision 3).
     ServiceIdentityManage,
+    /// Read the tenant's audit chain: the search, the two questions AUD-2
+    /// exists for, and the chain check — `/v1/audit/*` (ADR-0045
+    /// decision 1).
+    ///
+    /// **The only action in the vocabulary that applies to the tenant
+    /// resource and nothing else.** A chain is per tenant, and an audit
+    /// answer that covered part of one would be an answer that quietly
+    /// omitted rows; the schema refuses a scope resource so the refusal
+    /// cannot be forgotten at a route (ADR-0045 decision 2). A
+    /// subtree-bound auditor therefore holds nothing here — deliberately,
+    /// and the denial names what it would take.
+    ///
+    /// Grants no content: this action reads record ids, object addresses,
+    /// channels and tiers, and resolving any of them to a body is
+    /// [`Action::MemoryRead`] through a different route (ADR-0045
+    /// decision 6).
+    AuditRead,
     /// Read the VedaFlow channels standing at the resource scope —
     /// `GET /v1/channels/{scope}` (FLOW-2, ADR-0031 decision 12).
     ChannelRead,
@@ -196,6 +213,7 @@ impl Action {
             Action::RoleAssign => "role.assign",
             Action::ServiceIdentityRead => "service_identity.read",
             Action::ServiceIdentityManage => "service_identity.manage",
+            Action::AuditRead => "audit.read",
             Action::ChannelRead => "channel.read",
             Action::ChannelPublish => "channel.publish",
             Action::ChannelRollback => "channel.rollback",
@@ -226,6 +244,7 @@ impl Action {
             Action::RoleAssign => "RoleAssign",
             Action::ServiceIdentityRead => "ServiceIdentityRead",
             Action::ServiceIdentityManage => "ServiceIdentityManage",
+            Action::AuditRead => "AuditRead",
             Action::ChannelRead => "ChannelRead",
             Action::ChannelPublish => "ChannelPublish",
             Action::ChannelRollback => "ChannelRollback",
