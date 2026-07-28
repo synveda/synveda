@@ -38,6 +38,14 @@
 //! this module, and that absence is the reason a knowledge graph does not
 //! become a policy bypass.
 //!
+//! GRPH-2 (ADR-0044) added two functions and no columns. [`assert_edge`]
+//! is [`insert_edge`] made idempotent against migration 0027's partial
+//! unique index, so the linker can be re-driven without accumulating
+//! duplicate claims; and [`supersession_edges`] is the `provenance`
+//! graph, **projected** from `record_supersessions` rather than written
+//! into `graph_edges` — one system of record per claim (decision 11),
+//! which is why it returns [`RecordId`]s and mints no vertices.
+//!
 //! Every statement here is static and sqlx-checked with its seed set bound
 //! as an array — the criterion (G5) the spike's Cypher path failed.
 
@@ -657,6 +665,167 @@ pub async fn supersede(
             message: format!("supersession of edge {id} returned a partial result"),
         }),
     }
+}
+
+/// Asserts a claim that may already hold (GRPH-2, ADR-0044 decision 11).
+///
+/// The idempotent half of [`insert_edge`]: where that one reports a
+/// [`Error::Conflict`] on a second write, this returns `Ok(None)` when an
+/// open claim of the same `(graph, kind, src, dst)` is already recorded —
+/// no second row, no history row, and no increment of
+/// [`GRAPH_EDGES_TOTAL`], because re-asserting what already holds asserts
+/// nothing. That is what makes a linker safe to re-drive by design rather
+/// than by care.
+///
+/// The conflict target is `graph_edges_open_claim_unique` (migration
+/// 0027), which is partial on `valid_to is null`: a superseded claim
+/// leaves its closed row behind, and only the open one is unique. A
+/// collision on the primary key is *not* absorbed — a duplicate edge id is
+/// a bug in the caller, and it still surfaces as an error.
+#[tracing::instrument(
+    name = "store.graph.assert_edge",
+    skip_all,
+    fields(tenant.id = %tenant_id, graph = %graph, edge.id = %id, edge.kind = %state.kind),
+    err(Display)
+)]
+pub async fn assert_edge(
+    executor: impl PgExecutor<'_>,
+    id: GraphEdgeId,
+    tenant_id: TenantId,
+    graph: Graph,
+    state: &EdgeState,
+) -> Result<Option<EdgeVersion>> {
+    check_confidence(state.confidence_permille)?;
+    let row = sqlx::query_as!(
+        EdgeRow,
+        r#"
+        insert into graph_edges
+            (id, tenant_id, graph, kind, src_id, dst_id, method,
+             confidence_permille, source_record_id, valid_from, valid_to, tx_from)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+        on conflict (tenant_id, graph, kind, src_id, dst_id)
+            where valid_to is null do nothing
+        returning id as "id!", tenant_id as "tenant_id!", graph as "graph!",
+                  kind as "kind!", src_id as "src_id!", dst_id as "dst_id!",
+                  method as "method!", confidence_permille as "confidence_permille!",
+                  source_record_id, valid_from as "valid_from!", valid_to,
+                  tx_from as "tx_from!", tx_to
+        "#,
+        id.as_uuid(),
+        tenant_id.as_uuid(),
+        graph.as_str(),
+        state.kind,
+        state.src_id.as_uuid(),
+        state.dst_id.as_uuid(),
+        state.method,
+        state.confidence_permille,
+        state.source_record_id.map(|id| id.as_uuid()),
+        state.valid_from,
+        state.valid_to,
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    if row.is_some() {
+        metrics::counter!(GRAPH_EDGES_TOTAL, "graph" => graph.as_str()).increment(1);
+    }
+    row.map(TryInto::try_into).transpose()
+}
+
+/// One supersession, seen as an edge of the `provenance` graph
+/// (ADR-0044 decision 14).
+///
+/// Not a row of `graph_edges` and never written to one: `record_supersessions`
+/// (migration 0024) stays the single system of record for this claim, because
+/// the write path reads it inside the record's own transaction (ADR-0039
+/// option 7). This type is the projection ADR-0043 decision 11 called for —
+/// the same fact, in the graph's vocabulary, so a caller can fuse it with
+/// [`expand`]'s output without knowing which table it came from.
+///
+/// Endpoints are [`RecordId`]s rather than [`GraphVertexId`]s because the
+/// records are not vertices. Minting vertices for them would *be* the mirror
+/// this projection exists to avoid — and both halves of GRPH-3's fusion trade
+/// in candidate record ids anyway (ADR-0042 decision 12).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProvenanceEdge {
+    /// The record that closed the other's window: the claim's source end.
+    pub superseding_id: RecordId,
+    /// The record whose window closed: its destination.
+    pub superseded_id: RecordId,
+    /// The judge that decided (`deterministic` today) — the same seam name
+    /// [`EdgeState::method`] carries.
+    pub method: String,
+    /// The verdict class, machine-readable and short.
+    pub reason: String,
+    /// Jaccard as integer per mille, when the lexical leg scored the pair.
+    pub jaccard_permille: Option<i32>,
+    /// Cosine as integer per mille, when the semantic leg did.
+    pub cosine_permille: Option<i32>,
+    /// When the claim started holding: the instant the superseded record's
+    /// window was closed at.
+    pub valid_from: DateTime<Utc>,
+}
+
+impl ProvenanceEdge {
+    /// The graph this projection belongs to. A constant rather than a
+    /// field: every row of it is a `provenance` claim.
+    pub const GRAPH: Graph = Graph::Provenance;
+
+    /// The relation type, in the same open vocabulary
+    /// [`EdgeState::kind`] uses.
+    pub const KIND: &'static str = "supersedes";
+}
+
+/// Every supersession naming any of `records` on either side, projected as
+/// `provenance` edges and totally ordered (ADR-0044 decision 14).
+///
+/// The batch form of [`crate::dedup::supersessions_for`], in the edge
+/// model: GRPH-3 holds a candidate set rather than one record. There is no
+/// seed cap here and there should not be — this is an indexed read by
+/// record id, not a traversal, so nothing fans out and nothing needs
+/// bounding.
+#[tracing::instrument(
+    name = "store.graph.supersession_edges",
+    skip_all,
+    fields(tenant.id = %tenant_id, records.count = records.len()),
+    err(Display)
+)]
+pub async fn supersession_edges(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    records: &[RecordId],
+) -> Result<Vec<ProvenanceEdge>> {
+    if records.is_empty() {
+        return Ok(Vec::new());
+    }
+    let records: Vec<Uuid> = records.iter().map(|id| id.as_uuid()).collect();
+    let rows = sqlx::query!(
+        r#"
+        select superseding_id, superseded_id, method, reason,
+               jaccard_permille, cosine_permille, closed_at
+        from record_supersessions
+        where tenant_id = $1
+          and (superseded_id = any($2) or superseding_id = any($2))
+        order by closed_at, superseding_id, superseded_id
+        "#,
+        tenant_id.as_uuid(),
+        &records,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| ProvenanceEdge {
+            superseding_id: RecordId::from_uuid(row.superseding_id),
+            superseded_id: RecordId::from_uuid(row.superseded_id),
+            method: row.method,
+            reason: row.reason,
+            jaccard_permille: row.jaccard_permille,
+            cosine_permille: row.cosine_permille,
+            valid_from: row.closed_at,
+        })
+        .collect())
 }
 
 /// The current version of edge `id`, if it has one.

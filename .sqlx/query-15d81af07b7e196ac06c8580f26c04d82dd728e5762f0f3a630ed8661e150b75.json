@@ -1,0 +1,104 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into graph_edges\n            (id, tenant_id, graph, kind, src_id, dst_id, method,\n             confidence_permille, source_record_id, valid_from, valid_to, tx_from)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())\n        on conflict (tenant_id, graph, kind, src_id, dst_id)\n            where valid_to is null do nothing\n        returning id as \"id!\", tenant_id as \"tenant_id!\", graph as \"graph!\",\n                  kind as \"kind!\", src_id as \"src_id!\", dst_id as \"dst_id!\",\n                  method as \"method!\", confidence_permille as \"confidence_permille!\",\n                  source_record_id, valid_from as \"valid_from!\", valid_to,\n                  tx_from as \"tx_from!\", tx_to\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "graph!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "src_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "dst_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "method!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "confidence_permille!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_record_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "tx_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int4",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "15d81af07b7e196ac06c8580f26c04d82dd728e5762f0f3a630ed8661e150b75"
+}

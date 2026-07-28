@@ -634,6 +634,80 @@ fn confidence_outside_the_range_is_a_named_error() {
     });
 }
 
+/// GRPH-2's claim identity (ADR-0044 decision 11, migration 0027):
+/// asserting a claim that already holds writes nothing at all — not a
+/// second row, not a history row — and reports it by returning `None`.
+/// That is what makes the linker safe to re-drive by design rather than by
+/// care.
+///
+/// The predicate is partial on `valid_to is null`, so it constrains only
+/// *open* claims: once a claim is superseded, the same relation may be
+/// asserted again, which is the second half of every supersession and must
+/// stay legal.
+#[test]
+fn asserting_a_claim_that_already_holds_writes_nothing() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let pool = &db.pool;
+        let tenant = admit_tenant(pool).await;
+        let ada = vertex(pool, tenant, Graph::Entity, "ada").await;
+        let acme = vertex(pool, tenant, Graph::Entity, "acme").await;
+        let state = edge_state(ada, acme, "mentions");
+
+        let first = graph::assert_edge(pool, GraphEdgeId::new(), tenant, Graph::Entity, &state)
+            .await
+            .expect("first assertion")
+            .expect("a new claim is written");
+        let again = graph::assert_edge(pool, GraphEdgeId::new(), tenant, Graph::Entity, &state)
+            .await
+            .expect("second assertion");
+        assert!(
+            again.is_none(),
+            "a claim that already holds asserts nothing"
+        );
+        assert_eq!(
+            graph::edge_versions(pool, tenant, first.id)
+                .await
+                .expect("versions")
+                .len(),
+            1,
+            "and leaves no history row behind either"
+        );
+
+        // Different relation, same pair: a different claim, so it lands.
+        let sibling = graph::assert_edge(
+            pool,
+            GraphEdgeId::new(),
+            tenant,
+            Graph::Entity,
+            &edge_state(ada, acme, "works_for"),
+        )
+        .await
+        .expect("a different kind is a different claim");
+        assert!(sibling.is_some());
+
+        // Once the first claim's window closes, the relation may be
+        // asserted again — the constraint governs open claims only.
+        tick().await;
+        let closed_at = Utc::now();
+        graph::supersede(
+            pool,
+            tenant,
+            Graph::Entity,
+            first.id,
+            closed_at,
+            GraphEdgeId::new(),
+            &EdgeState {
+                valid_from: closed_at,
+                ..edge_state(ada, acme, "mentions")
+            },
+        )
+        .await
+        .expect("supersede")
+        .expect("the claim was open");
+    });
+}
+
 // ── Clause three: the shipped statements' plans ──────────────────────────────
 
 /// Vertices and edges the plan fixture seeds.
