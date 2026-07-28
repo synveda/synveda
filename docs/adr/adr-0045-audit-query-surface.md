@@ -171,14 +171,18 @@ Decisions, specifically:
 
 7. **Indexes only; no new column on `audit_log`.** Migration 0028 adds
    `(tenant_id, occurred_at, seq)`, `(tenant_id, action, seq)`,
-   `(tenant_id, actor_subject, seq)`, and a `gin (payload
+   `(tenant_id, actor_subject, seq)`, and `gin (tenant_id, payload
    jsonb_path_ops)` for the containment query that finds a record id
-   inside an `entries` array. An index changes no byte any hash covers,
-   so every row written since AUD-1 still verifies unchanged. The
-   migration header states the rejected alternative rather than leaving
-   it to be rediscovered: a `scope_id` column inside the canonical form
-   would invalidate the existing chain, and outside it would be a field
-   the chain does not protect.
+   inside an `entries` array — the last one **partial to
+   `context.injected` and `context.recalled`**, the two actions
+   decision 4 defines a disclosure as, and tenant-leading via
+   `btree_gin` so no containment scan can enter it ahead of the tenant
+   predicate. An index changes no byte any hash covers, so every row
+   written since AUD-1 still verifies unchanged. The migration header
+   states the rejected alternative rather than leaving it to be
+   rediscovered: a `scope_id` column inside the canonical form would
+   invalidate the existing chain, and outside it would be a field the
+   chain does not protect.
 
 8. **A query is itself audited, and it appears in the next query's
    results.** An allowed admin-plane read chains a standalone
@@ -302,10 +306,19 @@ Decisions, specifically:
   heavy audit use will find `authz.decision` events for `AuditRead`
   making up a visible share of the trail, and the cursor pagination
   exists because of it.
-- Negative / accepted trade-off: the GIN index on `payload` is over every
-  payload in the chain, not only the disclosure ones. It is the largest
-  index in the schema on the largest table in the schema, and TEN-5's
-  disposal work inherits it.
+- Negative / accepted trade-off: the disclosure index is partial, so
+  record ids that other actions name — `memory.superseded`,
+  `memory.expired`, `vedaflow.channel.published` — are not reachable by
+  containment. "Everything the chain says about record X" is therefore
+  not a query this feature ships, only "who was served record X".
+  Widening the predicate is a reviewed diff that rebuilds in place, and
+  it waits for a route that asks (ADR-0024's rule, restated by migration
+  0027). Measured on the dev chain at 56k events, the partial index is
+  4.0MB against a 49MB heap; over every payload it would not have been.
+- Negative / accepted trade-off: `btree_gin` joins the extension set, so
+  OPS-1/OPS-2's deployment profiles gain a dependency. It is trusted
+  contrib rather than a third-party extension, and `vector` (migration
+  0015) set the precedent for creating one from a migration.
 - Reversal trigger: if the disclosure or knowledge route's **median**
   exceeds the 200ms budget at 1M events on production-shaped IO — or if
   the GIN index's size or write amplification shows up in the

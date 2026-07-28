@@ -19,6 +19,7 @@
 mod canonical;
 mod chain;
 mod event;
+mod query;
 
 pub use chain::{
     AUDIT_APPEND_FAILURES_TOTAL, AUDIT_EVENTS_TOTAL, AUDIT_VERIFICATIONS_TOTAL, AppendedEvent,
@@ -26,3 +27,7 @@ pub use chain::{
     since, tail, verify,
 };
 pub use event::{Actor, ActorKind, AuditAction, AuditEvent, Outcome};
+pub use query::{
+    AUTHORITY_ACTIONS, ChainFrame, DISCLOSURE_ACTIONS, DisclosedEntry, Disclosure, EventFilter,
+    Known, Page, disclosures, fold_knowledge, frame, knowledge, search,
+};
