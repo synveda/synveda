@@ -22,7 +22,8 @@ const KEYWORD_CONFIDENCE: f64 = 0.6;
 
 /// The ruleset version recorded as `model_version` in provenance. Bump
 /// whenever a rule changes: provenance must name what actually ran.
-const RULESET_VERSION: &str = "builtin@1";
+/// `@2` added entity mentions (GRPH-2, ADR-0044 decision 2).
+const RULESET_VERSION: &str = "builtin@2";
 
 static PREFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(prefers?|always use|never use|i like|we like|favou?rite)\b")
@@ -41,6 +42,132 @@ static PROCEDURE: LazyLock<Regex> = LazyLock::new(|| {
 static ENTITY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[A-Z][A-Za-z0-9_-]* is (a|an|the|our) ").expect("static entity pattern compiles")
 });
+/// The opaque spans MEM-2 leaves behind (ADR-0021). Removed before
+/// mention detection so `REDACTED` never reads as a proper noun — the
+/// linker refuses a mention carrying the marker (ADR-0044 decision 9),
+/// and this makes sure the marker is still attached when it looks.
+static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[REDACTED:[^\]]*\]").expect("static placeholder pattern compiles")
+});
+
+/// Words that open a sentence rather than name a thing. A capitalised run
+/// is stripped of these from the front, so "If Postgres fails" yields
+/// `Postgres` and "We decided" yields nothing.
+///
+/// A stoplist rather than a position rule (GRPH-2, ADR-0044 decision 2):
+/// refusing single capitalised tokens at sentence starts would
+/// systematically miss every entity that opens a sentence, while a
+/// stoplist misses only the words that are not on it — and a list is data
+/// the next contributor can extend, where a position rule is behaviour
+/// they would have to argue with.
+const SENTENCE_OPENERS: &[&str] = &[
+    "a",
+    "after",
+    "again",
+    "all",
+    "also",
+    "an",
+    "and",
+    "another",
+    "any",
+    "as",
+    "at",
+    "be",
+    "because",
+    "before",
+    "both",
+    "but",
+    "by",
+    "can",
+    "could",
+    "did",
+    "do",
+    "does",
+    "during",
+    "each",
+    "either",
+    "every",
+    "finally",
+    "first",
+    "for",
+    "from",
+    "he",
+    "her",
+    "here",
+    "his",
+    "how",
+    "i",
+    "if",
+    "in",
+    "is",
+    "it",
+    "its",
+    "let",
+    "may",
+    "me",
+    "might",
+    "must",
+    "my",
+    "next",
+    "no",
+    "not",
+    "note",
+    "now",
+    "of",
+    "on",
+    "once",
+    "one",
+    "or",
+    "otherwise",
+    "our",
+    "per",
+    "please",
+    "she",
+    "should",
+    "since",
+    "so",
+    "some",
+    "than",
+    "that",
+    "the",
+    "their",
+    "them",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "to",
+    "today",
+    "tomorrow",
+    "us",
+    "use",
+    "using",
+    "via",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "who",
+    "why",
+    "will",
+    "with",
+    "would",
+    "yes",
+    "yesterday",
+    "you",
+    "your",
+];
+
+/// Punctuation that ends a capitalised run: the next capital starts a new
+/// sentence, not a longer name. Without this, "We use Postgres. The team
+/// decided" would read as one mention called "Postgres. The".
+const RUN_TERMINATORS: [char; 6] = ['.', '!', '?', ',', ';', ':'];
 
 /// The rule-based extractor. A unit struct today; construction goes
 /// through [`DeterministicExtractor::new`] so config can arrive later
@@ -67,12 +194,18 @@ impl Extractor for DeterministicExtractor {
             Vec::new()
         } else {
             let (class, confidence) = classify(input.kind, &text);
+            // Mentions come from the content that will actually be
+            // persisted, not from the text before truncation: an edge
+            // claiming this record names a thing must be true of the
+            // record as stored (GRPH-2, ADR-0044 decision 2).
+            let content = truncate(&text);
+            let entities = mentions(&content);
             vec![CandidateRecord {
                 class,
-                content: truncate(&text),
+                content,
                 confidence,
                 sensitivity: None,
-                entities: Vec::new(),
+                entities,
             }]
         };
         Ok(ExtractionOutcome {
@@ -130,6 +263,64 @@ fn collect_strings<'a>(value: &'a serde_json::Value, into: &mut Vec<&'a str>) {
         }
         _ => {}
     }
+}
+
+/// The proper names this content mentions (GRPH-2, ADR-0044 decision 2):
+/// runs of capitalised tokens, stripped of the sentence-opening words that
+/// are capitalised by grammar rather than by name.
+///
+/// Honest about what it is, exactly as the classifier above is: a
+/// capitalisation heuristic, no network and no model. It misses lowercase
+/// names and will occasionally intern an opener that
+/// [`SENTENCE_OPENERS`] does not carry — which is why GRPH-2 measures the
+/// orphan rate rather than claiming a recall number, and why the LLM
+/// extractors, which fill the same field from the shared prompt, are the
+/// product path.
+fn mentions(content: &str) -> Vec<String> {
+    let text = PLACEHOLDER.replace_all(content, " ");
+    let mut found: Vec<String> = Vec::new();
+    let mut run: Vec<&str> = Vec::new();
+    for token in text.split_whitespace() {
+        if token.chars().next().is_some_and(char::is_uppercase) {
+            run.push(token);
+            // A terminator closes the run *including* this token: the next
+            // capital opens a sentence rather than continuing a name.
+            if token.ends_with(RUN_TERMINATORS) {
+                push_run(&mut run, &mut found);
+            }
+        } else {
+            push_run(&mut run, &mut found);
+        }
+    }
+    push_run(&mut run, &mut found);
+    found
+}
+
+/// Drains one capitalised run into `found`, dropping its leading sentence
+/// openers and any duplicate of a mention already seen.
+fn push_run(run: &mut Vec<&str>, found: &mut Vec<String>) {
+    let mut tokens = std::mem::take(run);
+    while tokens
+        .first()
+        .is_some_and(|token| SENTENCE_OPENERS.contains(&bare(token).as_str()))
+    {
+        tokens.remove(0);
+    }
+    if tokens.is_empty() {
+        return;
+    }
+    let mention = tokens.join(" ");
+    if !found.contains(&mention) {
+        found.push(mention);
+    }
+}
+
+/// A token reduced to what a stoplist can match: lowercased, with
+/// surrounding punctuation removed.
+fn bare(token: &str) -> String {
+    token
+        .trim_matches(|ch: char| !ch.is_alphanumeric())
+        .to_lowercase()
 }
 
 /// Truncates on a word boundary with an ellipsis marker; never splits a

@@ -484,7 +484,7 @@ async fn observed_events_become_derived_records_with_provenance() {
         // The AC quadruple, on every record.
         assert_eq!(record.provenance["session_id"], "sess-a");
         assert_eq!(record.provenance["method"], "deterministic");
-        assert_eq!(record.provenance["model_version"], "builtin@1");
+        assert_eq!(record.provenance["model_version"], "builtin@2");
         let confidence = record.provenance["confidence"]
             .as_f64()
             .expect("confidence is a number");

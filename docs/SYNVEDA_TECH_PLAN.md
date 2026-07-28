@@ -160,6 +160,10 @@ Gateway authZ → PGMQ enqueue (ack <20ms) → Temporal workflow: redact/secret-
 (classify into fact/decision/procedure/…) → dedup & conflict-detect against existing records →
 summarise → embed (TEI) → graph-link (adjacency tables, ADR-0043) → **commit to `derived`** →
 maybe auto-open promotion proposal.
+_Amended 2026-07-28 (ADR-0044, GRPH-2): the arrow before "commit to `derived`" is sequence, not
+a transaction boundary — graph-link runs **inside** the write transaction, after the records it
+describes exist and before the channel commit, so a record and every claim about it land
+together or not at all._
 
 **`recall`** (explicit tool):
 Same authZ → richer retrieval incl. graph traversal + as-of queries → results carry

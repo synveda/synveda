@@ -18,6 +18,13 @@
 //! contradiction closes the valid window of the record it replaces,
 //! atomically with the record that caused it. The store is no longer
 //! ADD-only.
+//! Graph linking (GRPH-2, ADR-0044) is live: [`linking`] resolves the
+//! extractor's entity mentions against the vertices that already exist
+//! and writes the `entity` and `episode` graphs — as a step of the same
+//! write transaction, so a record and every claim about it commit
+//! together. The `provenance` graph is projected from
+//! `record_supersessions` rather than written, so one claim keeps one
+//! system of record.
 //! Retention (MEM-6, ADR-0040) is live: [`retention`] is the third
 //! background loop — expiry out of the live corpus, destruction of closed
 //! versions past a second horizon, and disposal of the observe staging
@@ -31,6 +38,7 @@
 pub mod dedup;
 pub mod embedding;
 pub mod extraction;
+pub mod linking;
 pub mod promotion;
 mod redaction;
 pub mod retention;

@@ -1,0 +1,90 @@
+{
+  "_comment": [
+    "GRPH-2's labelled mention set (ADR-0044). Ground truth is the entity id:",
+    "two mentions in the same group are the same thing, two in different groups",
+    "are not. The scorer is pairwise — see tests/entity_resolution.rs.",
+    "",
+    "Fixture discipline mirrors the extraction and redaction suites:",
+    "documentation-only content, no real credentials, no network.",
+    "",
+    "The set deliberately carries the resolver's known failures rather than",
+    "flattering it. `paris` is the precision ceiling of any surface-form",
+    "resolver: two different things share a name, and nothing in the string",
+    "says so. `postgres`, `ibm` and `jorg-muller` are the recall floor: an",
+    "abbreviation, an initialism and a transliteration are equivalences that",
+    "cannot be derived without evidence, and ADR-0044 decision 3 refuses to",
+    "guess at them."
+  ],
+  "entities": [
+    {
+      "entity": "acme",
+      "note": "the corporate-suffix rule, which is why it exists",
+      "mentions": [
+        "ACME Corp",
+        "Acme Corporation",
+        "acme corp.",
+        "ACME Corp's",
+        "The ACME Corporation"
+      ]
+    },
+    {
+      "entity": "north-star",
+      "note": "suffix and bare form converge",
+      "mentions": ["North Star Ltd", "North Star Limited", "North Star"]
+    },
+    {
+      "entity": "bank-of-england",
+      "note": "a leading article is grammar, not identity",
+      "mentions": ["Bank of England", "The Bank of England", "the bank of england"]
+    },
+    {
+      "entity": "ada-lovelace",
+      "note": "case, whitespace and a possessive",
+      "mentions": ["Ada Lovelace", "ada lovelace", "Ada  Lovelace", "Ada Lovelace's"]
+    },
+    {
+      "entity": "ada-byron",
+      "note": "shares a first name with ada-lovelace and must stay distinct",
+      "mentions": ["Ada Byron", "ADA BYRON"]
+    },
+    {
+      "entity": "synveda",
+      "note": "one-token names carry the same rules",
+      "mentions": ["Synveda", "synveda", "Synveda's", "Synveda."]
+    },
+    {
+      "entity": "postgres",
+      "note": "PostgreSQL is the same product; no rule can know that (recall floor)",
+      "mentions": ["Postgres", "postgres", "Postgres.", "(Postgres)", "PostgreSQL"]
+    },
+    {
+      "entity": "ibm",
+      "note": "an initialism and its expansion; also a recall floor",
+      "mentions": ["IBM", "ibm", "International Business Machines"]
+    },
+    {
+      "entity": "jorg-muller",
+      "note": "transliteration is not derivable; the diacritic form is its own key",
+      "mentions": ["Jörg Müller", "Jorg Muller"]
+    },
+    {
+      "entity": "paris-city",
+      "note": "the precision ceiling: this and paris-person are one string",
+      "mentions": ["Paris"]
+    },
+    {
+      "entity": "paris-person",
+      "note": "a colleague named Paris. Surface-form resolution merges them and is wrong",
+      "mentions": ["Paris"]
+    }
+  ],
+  "refused": [
+    "[REDACTED:github-pat]",
+    "The deploy key [REDACTED:aws-key]",
+    "It",
+    "They",
+    "Today",
+    "",
+    "   "
+  ]
+}

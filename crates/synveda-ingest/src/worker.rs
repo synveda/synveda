@@ -42,6 +42,7 @@ use synveda_vedaflow::{
 use crate::dedup::{DEDUP_CANDIDATES, DEDUP_DECISIONS_TOTAL, DEDUP_SECONDS};
 use crate::embedding::{AnyEmbedder, Embedder};
 use crate::extraction::{AnyExtractor, ExtractionInput, ExtractionOutcome, Extractor};
+use crate::linking::{self, LinkedRecord};
 
 /// Counter: staged events the worker resolved, labelled
 /// `outcome = ok | empty | denied | dead_letter | error | skipped`.
@@ -396,12 +397,28 @@ async fn embed_event(deps: &WorkerDeps, item: Extracted) -> Result<Embedded> {
         // persists — and now (ADR-0023) is never embedded either.
         let (content, findings) = rescan(candidate.content);
         rescan_findings += findings;
+        // A mention has to be true of the text this record will actually
+        // hold (GRPH-2, ADR-0044 decision 9). Only a candidate the rescan
+        // *changed* can carry one that is not — an echoed secret the
+        // admission scan missed — so the check runs exactly there, and a
+        // candidate the scanner left alone keeps every mention the
+        // extractor found, including the normalised forms an LLM returns
+        // that never appear verbatim.
+        let entities = if findings == 0 {
+            candidate.entities
+        } else {
+            candidate
+                .entities
+                .into_iter()
+                .filter(|entity| content.contains(entity.as_str()))
+                .collect()
+        };
         candidates.push(EmbeddedCandidate {
             class: candidate.class,
             content,
             confidence: candidate.confidence,
             sensitivity: candidate.sensitivity,
-            entities: candidate.entities,
+            entities,
             vector: Vec::new(),
         });
     }
@@ -551,6 +568,11 @@ async fn commit_group(
     // on — one chained `memory.superseded` event for the group.
     let mut superseded: Vec<serde_json::Value> = Vec::new();
     let mut refused_published: Vec<serde_json::Value> = Vec::new();
+    // What the graph-linking stage will resolve, collected as records are
+    // inserted and linked once for the whole group (GRPH-2, ADR-0044
+    // decision 1) — so a name mentioned by three of this group's records
+    // is one vertex, interned once.
+    let mut linkable: Vec<LinkedRecord> = Vec::new();
     // Valid-time order, so "which of these two statements is the newer
     // assertion" is answered the same way whatever order the queue
     // delivered them in. The archive-lock is order-independent.
@@ -719,6 +741,15 @@ async fn commit_group(
             metrics::counter!(EXTRACTION_RECORDS_TOTAL, "class" => candidate.class.as_str())
                 .increment(1);
             classes.push(candidate.class.as_str());
+            // A restatement absorbed above contributes nothing here: it
+            // `continue`d before this point, because text nobody stored
+            // asserts nothing a reader can audit (ADR-0044 decision 12).
+            linkable.push(LinkedRecord {
+                record_id,
+                session_id: item.input.session_id.clone(),
+                valid_from: state.valid_from,
+                mentions: candidate.entities,
+            });
 
             // The candidate arrived after the fact that replaced it: the
             // edge points the other way, and the window it records is the
@@ -823,6 +854,15 @@ async fn commit_group(
         }));
     }
 
+    // The graph-linking stage (GRPH-2, ADR-0044 decision 1): on this
+    // transaction, after the records it describes exist and before the
+    // channel commit takes its locks, so a record and every claim about it
+    // either both land or neither does. A failure here aborts the group
+    // and the signals redeliver — which is correct, because the resolver
+    // has already refused everything the schema would refuse and what is
+    // left can only fail on a genuine invariant breach (decision 10).
+    let linked = linking::link(&mut tx, tenant_id, &linkable).await?;
+
     // The derived-channel commits: one per owner (equivalently, per home
     // scope — a record lands at its owner's personal node), inside this
     // same transaction and before the audit append, so the lock order
@@ -914,6 +954,11 @@ async fn commit_group(
                 // a second event asserting the same fact is noise an
                 // auditor has to reconcile (ADR-0019 decision 4).
                 "channels": channels,
+                // What the graph learned from this commit (GRPH-2,
+                // ADR-0044's compliance note): linking adds no action
+                // type, because an edge is derived material written
+                // inside the transaction whose event this is.
+                "graph": linked.summary(),
             }),
         )
         .await?;

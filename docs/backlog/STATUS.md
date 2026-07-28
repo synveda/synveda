@@ -593,7 +593,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [CTX-4: Tiered injection / progressive disclosure](CTX-4.md) — done 2026-07-27, ADR-0041, AC test: crates/synveda-gateway/tests/tiered.rs (**both halves of the AC over the real product surfaces**, never a block a harness composed: alice works six sessions, a budget too small for the corpus is applied, and `POST /v1/inject` is asked twice — once under `index_tier: off`, which is the product exactly as it behaved before CTX-4, and once with it on — so the measurement is a *difference* rather than a number: at a 240-token budget, records named 1 → 2, block tokens 80 → 217, the index tier costing 122 tokens or 56% of the block, which is the AC's "token cost of index tier measured" and what discharges ADR-0025's index-overhead reversal trigger — read honestly, and recorded in ADR-0041 rather than rounded off: the tier is *expensive* at a tight budget and under 8% at the seed §4.4 default, because its cost is a flat ~90 tokens per named record against whatever the body would have been; then the navigation, asserted as a round trip with nothing carried between the two calls but the id the block printed — the handle goes back to `POST /v1/recall` and the body comes out in full with its channel, provenance and validity labels; and the decision the whole surface rests on, `a_handle_stops_resolving_when_the_decision_behind_it_changes`, where the same id in the same session stops being served once the pack behind it is replaced, with nothing revoked because there is nothing to revoke — a handle is a name rather than a capability; plus the uniform refusal, where a nonexistent id, another tenant's id and a denied id are indistinguishable in the response *and* on the chain, so a recall never becomes an oracle for "does this record exist", and the 32-id cap), read-path tests: crates/synveda-retrieval/tests/compose.rs (6 tests on the tier itself: material that does not fit named rather than dropped, carrying its handle and joining the watermark because a disclosure the watermark does not cover is one nobody can audit; a short record **never** demoted, because naming it would spend budget to say less — the one rule that keeps a mechanism built for assets that do not exist yet from making today's corpus worse; `off` restoring the pre-CTX-4 bytes exactly, and a corpus with nothing to demote composing byte-identically either way; an index entry keeping every trust marker through the elision, `[confidential]` and `[unreviewed]` alike; the tier never naming what the plan excluded, not even by id; and CTX-2's byte-identical determinism AC re-asserted *while* the tier demotes, because a determinism proof over a path the feature does not take proves nothing about the feature), architecture: `retrieval::admit` extracted so composition and recall share one admission decision — the plan's tiers, channels, horizons and conflict rules — rather than recall re-deciding what a block already decided (seed §2.2), with the 286-test workspace suite green across the refactor, demo: demos/ctx-4-tiered-injection.sh (on a scratch database, six records through the real observe → extract path, the tier applied to the running gateway between two injects, `synveda recall` run with `DATABASE_URL` **unset** so the body can only have come through the gateway under the PDP, the same handle refused after the policy changes, and the trail printed — `context.injected` naming each entry's tier, `context.recalled` carrying counts but never the refused ids, no record content in either payload, chain verifying over 25 events)
 - [x] [CTX-5: recall API + MCP tool](CTX-5.md) — done 2026-07-27, ADR-0042, AC tests: crates/synveda-gateway/tests/recall.rs (**the widening asserted from the reader's side**: one corpus, one identity, and the real `standard` pack — `POST /v1/inject` returns nothing of the sibling team's material because ADR-0024 fixed its universe at the chain, and `POST /v1/recall` returns it, which is the department permit `standard` has carried since AUTHZ-2 and nothing in the product could exercise; `regulated-strict` over the identical corpus still refuses it, so the widening is more scopes *asked* rather than more allowed; a `viewer` binding widens the universe on the very next call; **as-of** returns what was known then and the correction now, a bare instant sweeps material the live corpus has since retired that a query cannot rank, a withdrawn binding is not carried back by naming an instant at which it stood, and a reclassification reaches its own history so the AUTHZ-5 leak suite cannot be walked around with a timestamp; the query form is not an existence oracle; and `--ignored` `the_plan_stage_fits_the_budget_adr_0029_derived` asserts the plan stage inside the **15ms** ADR-0029 pre-registered for it — 13.2ms at the shipped cap, from 378ms before the batch materialisation), adapters/claude-code/src/mcp.test.mts (the protocol frame by frame: handshake, exactly one tool, the failure posture inverted from the hooks — an agent that asked is *told*), demo: demos/ctx-5-recall.sh (inject vs recall over one pack, the as-of pair, the tier boundary a withdrawn grant leaves behind, and a real MCP client speaking JSON-RPC over stdio to the real server against the live gateway)
 - [x] [GRPH-1: Multi-graph schema](GRPH-1.md) — done 2026-07-28, ADR-0043, migration 0026, AC tests: crates/synveda-store/tests/graph.rs (**all three clauses**: an edge written through the store API read back through the traversal API with kind, endpoints and validity intact; a supersession closing the prior window with both versions readable as-of *and* the traversal answering differently at the two instants; and the plan guard, which explains **the statements the crate ships** — found in `src/graph.rs` by the `-- shipped-traversal:` marker each carries, so it cannot drift from a copy — and fails on a sequential scan over either edge table, all four planning as index scans on both legs; plus the cross-graph refusal on the read *and* write side, undirected 2-hop reach with the third ring excluded, the seed bound, vertex convergence, and the no-op supersession that inserts nothing; `--ignored` `traversal_medians_on_the_shipped_schema` re-takes ADR-0029 G1 on the built schema under RLS at 1M edges — 1-hop median 1.17ms, 2-hop 23.4ms against the 50ms median threshold, tails reported against the 150ms expansion slice), crates/synveda-store/tests/rls.rs (the three tables in the adversarial suite since the migration), crates/synveda-types/tests/serde_roundtrip.rs (`Graph` and `Depth` refuse anything outside their vocabulary, integers included), demo: demos/grph-1-graph-schema.sh
-- [ ] [GRPH-2: Graph-linking stage](GRPH-2.md)
+- [x] [GRPH-2: Graph-linking stage](GRPH-2.md) — done 2026-07-28, ADR-0044, migration 0027, AC tests: crates/synveda-ingest/tests/entity_resolution.rs (**the dedup precision half**, pairwise over the labelled fixture set: 0.973 against a 0.95 provisional target, recall 0.837 reported and not asserted, with the set carrying its own ceiling — `Paris` is two different things sharing one name — and a second test pinning the false merges to *exactly* that pair, so an over-eager rule fails before the threshold's slack absorbs it; plus the refusals a redaction placeholder, a pronoun and an over-long key all get, and the confidence tier that reports what normalisation did), crates/synveda-gateway/tests/graph_linking.rs (**the other half over the real product path**, never a seeded row: two sessions a month apart spell one company two ways and converge on **one** vertex — resolution against nodes that already exist, done by the unique constraint rather than by a lookup — each record hangs off its own session in the episode graph, a 2-hop `expand` walks record → name → the other record, and the graph's work rides the group's existing `memory.extracted` event because GRPH-2 adds no action type; plus the orphan rate counted per graph and asserted on the metric a dashboard reads, a real secret taken through quarantine and release with neither the key nor the placeholder reaching an unscoped vertex, and the provenance projection proved to be a projection — `graph_edges` holds no `supersedes` row and the provenance graph holds no vertex), crates/synveda-store/tests/graph.rs (`asserting_a_claim_that_already_holds_writes_nothing`: migration 0027's partial unique index makes re-assertion a no-op with no second row and no history row, while a different relation still lands and a *superseded* one may be asserted again — the predicate is partial so supersession's second half stays legal), crates/synveda-ingest/src/linking.rs (9 unit tests on the resolver's rules), demo: demos/grph-2-graph-linking.sh
 - [x] [GRPH-4: AGE performance spike / graph fallback assessment](GRPH-4.md) — done 2026-07-25, report: docs/spikes/grph-4-age-traversal.md, criteria + verdict: ADR-0029, harness: crates/synveda-store/tests/graph_spike.rs (`--ignored`), demo: demos/grph-4-graph-spike.sh
 - [ ] [AUD-2: Audit query & auditor role surface](AUD-2.md)
 - [ ] [EVAL-2: Extraction quality suite](EVAL-2.md)
@@ -1679,6 +1679,73 @@ workspace: zero); removing it from the image is OPS-1/OPS-2's, with the
 condition named. Direct human authorship or deletion of an edge is
 reserved for "a new action, a new grant and a new ADR"; today the app
 role holds no DELETE on either table._
+
+_GRPH-2 (2026-07-28, ADR-0044): the graph-linking stage. Linking is a
+**step of the extraction commit**, not a pass of its own — it runs after
+the record loop and before the channel commit, on the same transaction,
+so a record and every claim about it either both land or neither does.
+That is ADR-0039's placement for the closed window and ADR-0023's for the
+vector, applied to a third kind of derived material, and it means there
+is no second exactly-once problem, no second lag SLO, and no window in
+which the corpus holds a record the graph has never heard of.
+
+**Resolution is the schema's unique constraint, not a lookup.**
+`upsert_vertex` on `(tenant, graph, kind, key)` is insert-or-converge, so
+there is no read-then-write race to lose and no "check whether this
+entity exists" query anywhere in the stage — which is exactly what
+ADR-0043 decision 5 built the key for. The rules are deterministic and
+few (casefold, collapse whitespace, strip edge punctuation, strip a
+possessive, a leading article, a trailing corporate suffix) and the AC's
+number is **pairwise precision 0.973 on the labelled fixture set**
+against a 0.95 provisional target, with recall 0.837 reported and not
+asserted. The fixture set carries its own failures deliberately: `Paris`
+is two different things with one name, which no surface-form resolver can
+split, and `PostgreSQL`/`International Business Machines`/`Jorg Muller`
+are equivalences it refuses to guess at. A second test pins the false
+merges to *exactly* that one pair, so a rule that starts over-merging
+fails before the threshold's slack absorbs it.
+
+Two design points are worth carrying forward. **Nothing but a name ever
+reaches a vertex.** `graph_vertices` has no scope by ADR-0043 decision
+12, so a key or a label is readable by any tenant-scoped read: a
+record-backed vertex's key and label are its record id and nothing else,
+a name vertex is backed by no record at all (binding it to whichever
+record mentioned it first would privilege that record), and a mention
+carrying a `[REDACTED:` marker is refused before normalisation. The
+rescan gap is closed too — ADR-0022 decision 7 re-scans extractor output,
+so where a rescan *changed* a candidate, mentions no longer present in
+the persisted text are dropped; the AC observes a real secret through
+quarantine and release rather than asserting that in a unit test. And
+**a claim's identity is now enforced**: migration 0027's partial unique
+index on `(tenant, graph, kind, src, dst) where valid_to is null` makes
+`assert_edge` idempotent, so a re-drive writes nothing and reports
+`held` — with the predicate partial precisely so supersession's second
+half stays legal.
+
+`provenance` is **projected, never written** (ADR-0039's trigger (d),
+discharged as ADR-0043 decision 11 specified): `graph::supersession_edges`
+reads `record_supersessions` and returns the edge-shaped view keyed by
+`RecordId`, and the AC asserts that `graph_edges` holds no `supersedes`
+row and the provenance graph holds no vertex. Minting vertices for
+records that already exist would have been the mirror the projection
+exists to avoid.
+
+Deferrals and forward obligations: the deterministic extractor now fills
+`entities` (ruleset `builtin@2`) with a capitalised-run heuristic and a
+sentence-opener stoplist — a floor for the network-free path, not the
+product path, and a stoplist rather than a position rule so the failure
+is data a contributor can extend rather than behaviour they must argue
+with. **Orphan rate is a measurement, not an error**: it is counted per
+graph on `synveda_graph_link_records_total{graph, outcome}`, because "no
+name resolved" and "no usable session id" are facts about different
+pipelines. Fuzzy or embedding-backed resolution is deliberately absent
+and gated on EVAL-2 producing a corpus bigger than a fixture file; when
+it lands it arrives as a new `method` and a confidence band below 900,
+not as a change to the existing keys, because a merged vertex carries no
+lineage and cannot be unmerged. There is no feature flag: GRPH-3 owns the
+degradable half, and an off switch on the *write* would leave a corpus
+the graph could never describe without a backfill nobody has specified —
+the trigger is the extraction lag histogram, not a preference._
 
 _FLOW-1 (2026-07-25, ADR-0030): the object store — the substrate ADR-0003
 committed to, and only the substrate. Six `vedaflow_*` tables in migration

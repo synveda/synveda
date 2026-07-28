@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select graph, kind, src_id, dst_id, method, confidence_permille,\n                source_record_id, valid_from, valid_to\n         from graph_edges where tenant_id = $1 order by graph, kind",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "graph",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "src_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "dst_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "method",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "confidence_permille",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "source_record_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "valid_from",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "e4edba13ede334708708eb34757bc1075f7c5d23216c6ac6bb4d6487069f983f"
+}

@@ -423,7 +423,12 @@ Decisions, specifically:
   `synveda_extraction_lag_seconds` → the ANN leg goes behind a config flag
   before the lexical one, since the lexical leg is the one the AC depends
   on; (d) GRPH-2 landing → these rows are mirrored as graph edges for
-  traversal, the table staying the system of record; (e) a tenant needing
+  traversal, the table staying the system of record — **discharged
+  2026-07-28 (ADR-0044, GRPH-2), and not by mirroring**: with the graph
+  also relational (ADR-0043), a mirror would be a dual write of one claim
+  into two tables, so `graph::supersession_edges` *projects* these rows
+  into the edge model instead. The table stays the system of record, as
+  this trigger required, and nothing is copied; (e) a tenant needing
   supersession across scopes → it is a promotion, and FLOW-5 already knows
   how to climb.
 
