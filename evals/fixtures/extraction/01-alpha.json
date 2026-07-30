@@ -1,0 +1,112 @@
+{
+  "group": "alpha",
+  "actor": "extract-alpha",
+  "note": "Kind-routed events (decision, tool_result) beside clean keyword cases, one genuinely two-claim utterance, and one bait fixture. Every class this corpus measures appears in every group, so a flaky group cannot zero a whole class.",
+  "fixtures": [
+    {
+      "name": "alpha-decision-blake3",
+      "input": {
+        "kind": "decision",
+        "session_id": "alpha-1",
+        "occurred_at": "2026-07-20T10:00:00Z",
+        "payload": { "text": "Chose BLAKE3 over SHA-256 for the audit chain hash." }
+      },
+      "expected": [{ "class": "decision", "content_contains": "BLAKE3" }]
+    },
+    {
+      "name": "alpha-decision-scanner",
+      "input": {
+        "kind": "decision",
+        "session_id": "alpha-2",
+        "occurred_at": "2026-07-20T10:01:00Z",
+        "payload": { "text": "Ship the redaction scanner as pure regex; the ML pass is deferred until we have labelled fixtures." }
+      },
+      "expected": [{ "class": "decision", "content_contains": "regex" }],
+      "must_not_extract": ["scikit-learn", "the ML pass ships"]
+    },
+    {
+      "name": "alpha-episode-cargo-test",
+      "input": {
+        "kind": "tool_result",
+        "session_id": "alpha-3",
+        "occurred_at": "2026-07-20T10:02:00Z",
+        "payload": { "tool": "cargo", "output": "cargo test: 148 passed, 0 failed in 92 seconds." }
+      },
+      "expected": [{ "class": "episode", "content_contains": "148 passed" }]
+    },
+    {
+      "name": "alpha-episode-migrations",
+      "input": {
+        "kind": "tool_result",
+        "session_id": "alpha-4",
+        "occurred_at": "2026-07-20T10:03:00Z",
+        "payload": { "tool": "psql", "output": "Connection to localhost:5432 succeeded, 14 migrations applied." }
+      },
+      "expected": [{ "class": "episode", "content_contains": "migrations" }]
+    },
+    {
+      "name": "alpha-preference-explicit-sql",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "alpha-5",
+        "occurred_at": "2026-07-20T10:04:00Z",
+        "payload": { "text": "I prefer explicit SQL over query builders in this codebase." }
+      },
+      "expected": [{ "class": "preference", "content_contains": "explicit SQL" }]
+    },
+    {
+      "name": "alpha-entity-rauthy",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "alpha-6",
+        "occurred_at": "2026-07-20T10:05:00Z",
+        "payload": { "text": "Rauthy is our development OIDC provider on port 8100." }
+      },
+      "expected": [{ "class": "entity", "content_contains": "Rauthy" }]
+    },
+    {
+      "name": "alpha-fact-chain-head",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "alpha-7",
+        "occurred_at": "2026-07-20T10:06:00Z",
+        "payload": { "text": "The audit chain stores one BLAKE3 head per tenant." }
+      },
+      "expected": [{ "class": "fact", "content_contains": "BLAKE3" }]
+    },
+    {
+      "name": "alpha-procedure-dev-reset",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "alpha-8",
+        "occurred_at": "2026-07-20T10:07:00Z",
+        "payload": { "text": "How to reset the dev environment: make dev-down, then run make dev-up." }
+      },
+      "expected": [{ "class": "procedure", "content_contains": "dev-up" }]
+    },
+    {
+      "name": "alpha-decision-and-preference-pgvector",
+      "note": "Two claims in one utterance. The deterministic ruleset emits one record per event and tests the preference pattern first, so it can reach at most one of these — a recall miss with a named cause (ADR-0022 decision 3), not a mislabelled fixture.",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "alpha-9",
+        "occurred_at": "2026-07-20T10:08:00Z",
+        "payload": { "text": "We agreed to keep pgvector for now, and I prefer explicit index names over generated ones." }
+      },
+      "expected": [
+        { "class": "decision", "content_contains": "pgvector" },
+        { "class": "preference", "content_contains": "index names" }
+      ]
+    },
+    {
+      "name": "alpha-fact-token-budget",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "alpha-10",
+        "occurred_at": "2026-07-20T10:09:00Z",
+        "payload": { "text": "The default composition budget is 1500 estimated tokens per inject." }
+      },
+      "expected": [{ "class": "fact", "content_contains": "1500" }]
+    }
+  ]
+}

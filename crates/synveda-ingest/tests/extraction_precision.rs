@@ -1,15 +1,28 @@
-//! The MEM-3 precision AC (ADR-0022 decision 8): per-class extraction
-//! precision on the labelled fixture set, asserted against the
-//! provisional macro-precision target for the deterministic path. The
-//! same harness runs against a live LLM through the `#[ignore]`d
-//! [`live_precision`] test — the hook EVAL-2 grows into the real target,
-//! dashboard, and calibration measurement.
+//! The MEM-3 precision AC (ADR-0022 decision 8) over EVAL-2's labelled
+//! corpus: per-class precision and recall for the deterministic path,
+//! asserted against the floor EVAL-2 registered. The same harness runs
+//! against a live LLM through the `#[ignore]`d [`live_precision`] test.
+//!
+//! **The corpus lives at `evals/fixtures/extraction/`, not here**
+//! (EVAL-2, ADR-0046 decision 7). One corpus, two readers: this test reads
+//! it as a fast, hermetic, no-stack tripwire on the extractor *function*,
+//! and `synveda-eval` reads the same files to measure the *product path*
+//! over HTTP. Both deserialize the full format with
+//! `deny_unknown_fields`, so a field added for one reader cannot be
+//! silently ignored by the other. This is a data dependency and not a
+//! crate one — the eval's empty dependency set (ADR-0028 decision 1)
+//! is untouched.
+//!
+//! The two targets are deliberately different numbers with different
+//! jobs (ADR-0046 decision 8): the floor here guards the extractor,
+//! `evals/baseline.json` gates the product path.
 //!
 //! Fixture discipline mirrors the redaction suite: transcript-shaped,
 //! documentation-only content, `[REDACTED:*]` placeholders included —
 //! never real credentials, never network access in the asserted test.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -19,20 +32,53 @@ use synveda_ingest::extraction::{
 };
 use synveda_types::{IdentityId, ObserveEventId, ObserveKind, RecordClass, ScopeId, TenantId};
 
-/// The provisional macro-averaged precision target (ADR-0022 decision 8);
-/// EVAL-2 owns the real target.
-const PROVISIONAL_TARGET: f64 = 0.8;
+/// The macro-averaged precision floor for the deterministic path
+/// (ADR-0046 decision 13), raising ADR-0022's provisional 0.8 on the
+/// strength of what the pre-EVAL-2 fixture set already measured.
+///
+/// No recall floor is asserted: recall had never been measured anywhere
+/// in this product before this corpus existed, and a floor invented
+/// before a measurement is a wish. It is reported on every run and
+/// `evals/baseline.json` is where it becomes a gate.
+const DETERMINISTIC_PRECISION_FLOOR: f64 = 0.9;
 
-const FIXTURES: &str = include_str!("fixtures/extraction/labelled.json");
-
+/// One group file — one eval actor's worth of fixtures (ADR-0046
+/// decision 2).
 #[derive(Deserialize)]
-struct Fixture {
-    name: String,
-    input: FixtureInput,
-    expected: Vec<Expected>,
+#[serde(deny_unknown_fields)]
+struct Group {
+    /// The group's short name; the eval report prints it.
+    #[allow(dead_code)]
+    group: String,
+    /// The eval actor whose home scope this group's records land at.
+    /// Unused here — this reader has no gateway — and declared so the
+    /// format stays one format.
+    #[allow(dead_code)]
+    actor: String,
+    /// Why this group exists, for whoever adds to it next.
+    #[allow(dead_code)]
+    note: String,
+    fixtures: Vec<Fixture>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Fixture {
+    name: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    note: String,
+    input: FixtureInput,
+    expected: Vec<Expected>,
+    /// Phrases a hallucinating extractor would plausibly produce from
+    /// this transcript and which the transcript does not support
+    /// (ADR-0046 decision 6).
+    #[serde(default)]
+    must_not_extract: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FixtureInput {
     kind: ObserveKind,
     session_id: String,
@@ -41,14 +87,39 @@ struct FixtureInput {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Expected {
     class: RecordClass,
     #[serde(default)]
     content_contains: Option<String>,
 }
 
+fn corpus_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/fixtures/extraction")
+}
+
+/// Every group file in filename order, flattened. Filename order so two
+/// runs report in the same order.
 fn fixtures() -> Vec<Fixture> {
-    serde_json::from_str(FIXTURES).expect("labelled fixture set parses")
+    let dir = corpus_dir();
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|error| panic!("read the corpus {}: {error}", dir.display()))
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    paths.sort();
+    assert!(!paths.is_empty(), "{} holds no groups", dir.display());
+
+    let mut fixtures = Vec::new();
+    for path in paths {
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        let group: Group = serde_json::from_str(&raw)
+            .unwrap_or_else(|error| panic!("{} is not a valid group: {error}", path.display()));
+        fixtures.extend(group.fixtures);
+    }
+    fixtures
 }
 
 fn input(fixture: &FixtureInput) -> ExtractionInput {
@@ -65,99 +136,252 @@ fn input(fixture: &FixtureInput) -> ExtractionInput {
     }
 }
 
-/// Per-class `(correct, emitted)` plus the recall numerator/denominator.
+/// The gathered-text view of a payload — the same walk the extractor and
+/// the redaction scanner take. Used only by the corpus guards.
+fn gather_text(payload: &serde_json::Value) -> String {
+    fn collect<'a>(value: &'a serde_json::Value, into: &mut Vec<&'a str>) {
+        match value {
+            serde_json::Value::String(text) => into.push(text),
+            serde_json::Value::Array(items) => items.iter().for_each(|item| collect(item, into)),
+            serde_json::Value::Object(map) => map.values().for_each(|item| collect(item, into)),
+            _ => {}
+        }
+    }
+    let mut parts = Vec::new();
+    collect(payload, &mut parts);
+    parts.join(" ")
+}
+
+/// Per class: `(matched, produced)` for precision and `(matched,
+/// expected)` for recall.
+#[derive(Default)]
 struct Report {
-    per_class: BTreeMap<&'static str, (usize, usize)>,
-    matched_expected: usize,
-    total_expected: usize,
+    precision: BTreeMap<&'static str, (usize, usize)>,
+    recall: BTreeMap<&'static str, (usize, usize)>,
+    bait_hits: Vec<String>,
+    unmatched: Vec<String>,
+}
+
+fn macro_average(counts: &BTreeMap<&'static str, (usize, usize)>) -> f64 {
+    if counts.is_empty() {
+        return 0.0;
+    }
+    let sum: f64 = counts
+        .values()
+        .map(|(hit, total)| {
+            if *total == 0 {
+                0.0
+            } else {
+                *hit as f64 / *total as f64
+            }
+        })
+        .sum();
+    sum / counts.len() as f64
 }
 
 impl Report {
-    /// Macro-averaged precision over the classes the extractor emitted.
     fn macro_precision(&self) -> f64 {
-        if self.per_class.is_empty() {
-            return 0.0;
-        }
-        let sum: f64 = self
-            .per_class
-            .values()
-            .map(|(correct, emitted)| *correct as f64 / *emitted as f64)
-            .sum();
-        sum / self.per_class.len() as f64
+        macro_average(&self.precision)
+    }
+
+    fn macro_recall(&self) -> f64 {
+        macro_average(&self.recall)
     }
 
     fn print(&self, method: &str) {
-        println!("extraction precision ({method}):");
-        for (class, (correct, emitted)) in &self.per_class {
+        println!("extraction quality ({method}):");
+        println!("  class        precision        recall");
+        let classes: Vec<&&str> = self
+            .precision
+            .keys()
+            .chain(self.recall.keys())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for class in classes {
+            let show = |counts: &BTreeMap<&'static str, (usize, usize)>| match counts.get(*class) {
+                Some((hit, total)) if *total > 0 => {
+                    format!("{hit}/{total} = {:.3}", *hit as f64 / *total as f64)
+                }
+                _ => "     —".to_owned(),
+            };
             println!(
-                "  {class:<12} {correct}/{emitted} = {:.3}",
-                *correct as f64 / *emitted as f64
+                "  {:<12} {:<16} {}",
+                class,
+                show(&self.precision),
+                show(&self.recall)
             );
         }
         println!(
-            "  macro precision {:.3}; recall (informational) {}/{}",
+            "  macro precision {:.3}; macro recall {:.3} (reported, not asserted)",
             self.macro_precision(),
-            self.matched_expected,
-            self.total_expected
+            self.macro_recall()
         );
+        if !self.unmatched.is_empty() {
+            println!(
+                "  {} record(s) matched no expectation — the review queue for unanticipated invention:",
+                self.unmatched.len()
+            );
+            for entry in &self.unmatched {
+                println!("    {entry}");
+            }
+        }
     }
 }
 
-/// An emission is correct when the ground truth expects its class and the
-/// expected content token (a distinctive term any faithful summary keeps)
-/// appears in it, case-insensitively.
+/// One candidate consumes at most one expectation and one expectation is
+/// consumed at most once (ADR-0046 decision 5): without that, a single
+/// record can satisfy three expectations and inflate recall into
+/// nonsense.
 async fn measure(extractor: &AnyExtractor, fixtures: &[Fixture]) -> Report {
-    let mut per_class: BTreeMap<&'static str, (usize, usize)> = BTreeMap::new();
-    let mut matched_expected = 0usize;
-    let mut total_expected = 0usize;
+    let mut report = Report::default();
     for fixture in fixtures {
         let outcome = extractor
             .extract(&input(&fixture.input))
             .await
             .unwrap_or_else(|error| panic!("fixture {}: extractor failed: {error}", fixture.name));
-        total_expected += fixture.expected.len();
-        let mut expected_hit = vec![false; fixture.expected.len()];
+
+        for expected in &fixture.expected {
+            report.recall.entry(expected.class.as_str()).or_default().1 += 1;
+        }
+
+        let mut taken = vec![false; fixture.expected.len()];
         for candidate in &outcome.candidates {
-            let entry = per_class.entry(candidate.class.as_str()).or_insert((0, 0));
-            entry.1 += 1;
-            let hit = fixture.expected.iter().position(|expected| {
-                expected.class == candidate.class
-                    && expected.content_contains.as_deref().is_none_or(|token| {
-                        candidate
-                            .content
-                            .to_lowercase()
-                            .contains(&token.to_lowercase())
-                    })
-            });
-            if let Some(index) = hit {
-                entry.0 += 1;
-                if !expected_hit[index] {
-                    expected_hit[index] = true;
-                    matched_expected += 1;
+            report
+                .precision
+                .entry(candidate.class.as_str())
+                .or_default()
+                .1 += 1;
+
+            let hit = fixture
+                .expected
+                .iter()
+                .enumerate()
+                .position(|(index, expected)| {
+                    !taken[index]
+                        && expected.class == candidate.class
+                        && expected.content_contains.as_deref().is_none_or(|token| {
+                            candidate
+                                .content
+                                .to_lowercase()
+                                .contains(&token.to_lowercase())
+                        })
+                });
+            match hit {
+                Some(index) => {
+                    taken[index] = true;
+                    report
+                        .precision
+                        .entry(candidate.class.as_str())
+                        .or_default()
+                        .0 += 1;
+                    report.recall.entry(candidate.class.as_str()).or_default().0 += 1;
+                }
+                None => report.unmatched.push(format!(
+                    "{} [{}] {}",
+                    fixture.name,
+                    candidate.class.as_str(),
+                    candidate.content.chars().take(72).collect::<String>()
+                )),
+            }
+
+            let content = candidate.content.to_lowercase();
+            for bait in &fixture.must_not_extract {
+                if content.contains(&bait.to_lowercase()) {
+                    report
+                        .bait_hits
+                        .push(format!("{}: fabricated {bait:?}", fixture.name));
                 }
             }
         }
     }
-    Report {
-        per_class,
-        matched_expected,
-        total_expected,
-    }
+    report
 }
 
-/// The AC: the deterministic extractor's macro precision meets the
-/// provisional target on the labelled fixtures, and every fixture flows
-/// through the exact seam the pipeline uses.
+/// The AC: the deterministic extractor's macro precision meets the floor
+/// EVAL-2 registered, over the shared corpus, through the exact seam the
+/// pipeline uses. Recall is printed and not asserted.
 #[tokio::test]
-async fn deterministic_precision_meets_provisional_target() {
+async fn deterministic_precision_meets_the_registered_floor() {
     let extractor = AnyExtractor::Deterministic(DeterministicExtractor::new());
     let report = measure(&extractor, &fixtures()).await;
     report.print("deterministic");
     assert!(
-        report.macro_precision() >= PROVISIONAL_TARGET,
-        "macro precision {:.3} under the provisional target {PROVISIONAL_TARGET}",
+        report.macro_precision() >= DETERMINISTIC_PRECISION_FLOOR,
+        "macro precision {:.3} under the registered floor {DETERMINISTIC_PRECISION_FLOOR}",
         report.macro_precision()
     );
+}
+
+/// A rule-based extractor copies spans; it cannot invent. That is a
+/// property worth asserting rather than assuming (ADR-0046 decision 6):
+/// this is what fails if a future templating or summarisation step
+/// breaks it.
+#[tokio::test]
+async fn the_deterministic_path_fabricates_nothing() {
+    let extractor = AnyExtractor::Deterministic(DeterministicExtractor::new());
+    let report = measure(&extractor, &fixtures()).await;
+    assert!(
+        report.bait_hits.is_empty(),
+        "the deterministic path fabricated content: {:?}",
+        report.bait_hits
+    );
+}
+
+/// A corpus guard, not an extractor test: an expected token absent from
+/// its own source can never be matched, so a mislabelled fixture would
+/// depress recall forever and silently. Both readers share this corpus,
+/// so both would report the same wrong number.
+#[test]
+fn every_expected_token_appears_in_its_own_source() {
+    for fixture in fixtures() {
+        let text = gather_text(&fixture.input.payload).to_lowercase();
+        for expected in &fixture.expected {
+            if let Some(token) = &expected.content_contains {
+                assert!(
+                    text.contains(&token.to_lowercase()),
+                    "{}: expected token {token:?} is absent from the source — a mislabelled \
+                     fixture, not a real miss",
+                    fixture.name
+                );
+            }
+        }
+    }
+}
+
+/// The mirror guard: bait present in its own source is not bait at all —
+/// any faithful extractor would reproduce it, and the hallucination axis
+/// would be measuring copying.
+#[test]
+fn every_bait_phrase_is_absent_from_its_own_source() {
+    for fixture in fixtures() {
+        let text = gather_text(&fixture.input.payload).to_lowercase();
+        for bait in &fixture.must_not_extract {
+            assert!(
+                !text.contains(&bait.to_lowercase()),
+                "{}: bait {bait:?} appears in its own source, so it can never be a \
+                 hallucination",
+                fixture.name
+            );
+        }
+    }
+}
+
+/// Session ids are the harness's attribution key from a served record
+/// back to the fixture that produced it (`provenance.session_id`), so a
+/// collision would silently merge two fixtures' results.
+#[test]
+fn session_ids_are_unique_across_the_whole_corpus() {
+    let mut seen: BTreeMap<String, String> = BTreeMap::new();
+    for fixture in fixtures() {
+        if let Some(previous) = seen.insert(fixture.input.session_id.clone(), fixture.name.clone())
+        {
+            panic!(
+                "session id {:?} is used by both {previous} and {}",
+                fixture.input.session_id, fixture.name
+            );
+        }
+    }
 }
 
 /// Redaction opacity (ADR-0021, STATUS's MEM-3 obligation): a
@@ -202,8 +426,8 @@ async fn empty_payload_extracts_nothing() {
     assert!(outcome.candidates.is_empty());
 }
 
-/// The live-LLM hook (ADR-0022 decision 8): the same fixtures and the
-/// same scoring against a real endpoint. Ignored by default — run it
+/// The live-LLM hook (ADR-0022 decision 8): the same corpus and the same
+/// scoring against a real endpoint. Ignored by default — run it
 /// deliberately:
 ///
 /// ```sh
@@ -213,6 +437,10 @@ async fn empty_payload_extracts_nothing() {
 /// SYNVEDA_EXTRACTOR=vllm SYNVEDA_VLLM_BASE_URL=http://... SYNVEDA_EXTRACTOR_MODEL=... \
 ///   cargo test -p synveda-ingest --test extraction_precision -- --ignored --nocapture
 /// ```
+///
+/// The live measurement over the *product path*, with its own committed
+/// baseline, is EVAL-2's (ADR-0046 decision 12); this stays the
+/// extractor-level hook it has been since MEM-3.
 #[tokio::test]
 #[ignore = "network + credentials; the deliberate live-LLM measurement"]
 async fn live_precision() {
@@ -233,9 +461,14 @@ async fn live_precision() {
     };
     let report = measure(&extractor, &fixtures()).await;
     report.print(extractor.method());
+    // The bait outcome is the interesting half here: unlike the
+    // deterministic path, a model *can* invent.
+    if !report.bait_hits.is_empty() {
+        println!("  fabrications: {:?}", report.bait_hits);
+    }
     assert!(
-        report.macro_precision() >= PROVISIONAL_TARGET,
-        "macro precision {:.3} under the provisional target {PROVISIONAL_TARGET}",
+        report.macro_precision() >= DETERMINISTIC_PRECISION_FLOOR,
+        "macro precision {:.3} under the registered floor {DETERMINISTIC_PRECISION_FLOOR}",
         report.macro_precision()
     );
 }
