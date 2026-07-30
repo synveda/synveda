@@ -370,8 +370,15 @@ scanner before persisting — an LLM echoing a live-format secret writes the
 placeholder — and sensitivity is floored at `internal` until AUTHZ-5
 brings classification. Confidence is model-elicited and uncalibrated; the
 provisional macro-precision target (≥0.8 on the labelled fixtures) and the
-`--ignored` live-LLM measurement stand in until EVAL-2 owns the real
-target, dashboard, and calibration. Forward obligations: MEM-4 wraps the
+`--ignored` live-LLM measurement stood in until EVAL-2 owned the real
+target, dashboard, and calibration — **discharged 2026-07-30 (ADR-0046)**:
+the corpus moved to `evals/fixtures/extraction/` where the eval harness
+reads it too, the registered floor is ≥0.90 macro precision against 0.983
+measured, recall is measured for the first time at 0.914, and the
+per-class dashboard is `make eval`'s report. Calibration of the *model's*
+confidence is not closed and was never this feature's: the number is still
+model-elicited and uncalibrated, and the unmatched-record list is the
+labelled set a judge would be measured against. Forward obligations: MEM-4 wraps the
 one commit seam with embed-or-fail; MEM-5 inserts dedup between extract
 and commit; FLOW-1/2 replace the direct records insert with the
 derived-channel commit; the <60s pipeline-lag SLO is evidenced by
@@ -665,7 +672,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [GRPH-2: Graph-linking stage](GRPH-2.md) — done 2026-07-28, ADR-0044, migration 0027, AC tests: crates/synveda-ingest/tests/entity_resolution.rs (**the dedup precision half**, pairwise over the labelled fixture set: 0.973 against a 0.95 provisional target, recall 0.837 reported and not asserted, with the set carrying its own ceiling — `Paris` is two different things sharing one name — and a second test pinning the false merges to *exactly* that pair, so an over-eager rule fails before the threshold's slack absorbs it; plus the refusals a redaction placeholder, a pronoun and an over-long key all get, and the confidence tier that reports what normalisation did), crates/synveda-gateway/tests/graph_linking.rs (**the other half over the real product path**, never a seeded row: two sessions a month apart spell one company two ways and converge on **one** vertex — resolution against nodes that already exist, done by the unique constraint rather than by a lookup — each record hangs off its own session in the episode graph, a 2-hop `expand` walks record → name → the other record, and the graph's work rides the group's existing `memory.extracted` event because GRPH-2 adds no action type; plus the orphan rate counted per graph and asserted on the metric a dashboard reads, a real secret taken through quarantine and release with neither the key nor the placeholder reaching an unscoped vertex, and the provenance projection proved to be a projection — `graph_edges` holds no `supersedes` row and the provenance graph holds no vertex), crates/synveda-store/tests/graph.rs (`asserting_a_claim_that_already_holds_writes_nothing`: migration 0027's partial unique index makes re-assertion a no-op with no second row and no history row, while a different relation still lands and a *superseded* one may be asserted again — the predicate is partial so supersession's second half stays legal), crates/synveda-ingest/src/linking.rs (9 unit tests on the resolver's rules), demo: demos/grph-2-graph-linking.sh
 - [x] [GRPH-4: AGE performance spike / graph fallback assessment](GRPH-4.md) — done 2026-07-25, report: docs/spikes/grph-4-age-traversal.md, criteria + verdict: ADR-0029, harness: crates/synveda-store/tests/graph_spike.rs (`--ignored`), demo: demos/grph-4-graph-spike.sh
 - [x] [AUD-2: Audit query & auditor role surface](AUD-2.md) — done 2026-07-28, ADR-0045, migration 0028, AC test: crates/synveda-gateway/tests/audit_query.rs (**both questions over the real product path**, and the point is that nothing seeds an audit row: disclosures exist because alice and bob called `POST /v1/inject` and the chain recorded what they got. **Q1** — one `GET /v1/audit/disclosures` names exactly the readers the chain records being *served* the record, with the version, channel, tier and seq each of them actually got, and never the payments reader. **Q2** — one `GET /v1/audit/knowledge` folds to one row per record with the version last delivered and the number of occasions behind it, and the AC's "uses bitemporal + refs" is asserted rather than described: every id in the answer is resolved through `records::as_of` at the instant asked at, so the audit answer and the corpus agree; a companion test pins the instant as load-bearing by asking the same call before her first session and getting nothing. Plus the two lists proven separate with the reason carried *in the response body*; the refusals — a subtree-bound auditor denied on all four routes while the same role held tenant-wide passes, and the subject of the answers denied herself; no record content in any response, swept for whole bodies *and* distinctive fragments; the uniform empty answer that keeps the surface from being an existence oracle; a truncated page reporting itself with a cursor that advances; and dana's own query appearing in the next query's results. The suite runs under the real `regulated-strict` default and installs no permissive pack — a blanket pack would grant `AuditRead` to everyone and make every refusal in the file vacuous), crates/synveda-policy/tests/roles.rs (`the_audit_plane_admits_exactly_the_read_only_admin_roles_and_only_tenant_wide`: all 8 roles × 3 packs, allowed tenant-wide for steward/org-admin/auditor and denied for the same role bound at a subtree), crates/synveda-policy/tests/service_scope.rs (`AuditRead` joins the tenant-plane denial list, so no service identity reads the trail however it is bound), crates/synveda-audit (11 unit tests: the fold's last-wins-by-seq, absence reported as absence across three payload generations, the action taxonomy's uniqueness and column bounds), crates/synveda-gateway/src/audit_query.rs (4 unit tests: the vocabulary round-trips, a typo is refused, a limit over the cap is refused rather than trimmed), demo: demos/aud-2-audit-query.sh (the auditor's whole half with **DATABASE_URL unset**, so every answer can only have come through the gateway under the PDP: both questions, the two lists with the break-glass bootstrap bind and the two governed ones side by side in the authority half, the three refusals in the product's own words, a content sweep returning zero, dana's seven own audit reads on the chain she is reading, and `valid=true over 30 events`)
-- [ ] [EVAL-2: Extraction quality suite](EVAL-2.md)
+- [x] [EVAL-2: Extraction quality suite](EVAL-2.md) — done 2026-07-30, ADR-0046, corpus: evals/fixtures/extraction/ (5 groups, 50 labelled transcripts, 54 expectations, 7–13 per class, plus a README stating the rules its guards enforce), AC demo: demos/eval-2-extraction.sh (**the gate failing on a real product change, and the attribution column saying why**: three fresh tenants differing in exactly one thing — a one-day `episode` retention horizon applied as the default pack's *own* source with the horizon added, so not one permit differs — where the clean tenants report `committed 10 → served 10, nothing withheld` and the horizoned one reports `committed 10 → served 8, 2 withheld by the read path, not missed by the extractor`, `extraction_recall_episode` 1.0 → 0.0, and the gate fails naming the axis, the baseline, the measurement and the delta: `extraction_recall_macro fell to 0.747 against a floor of 0.894`, delta −0.147; a tenant per phase because ADR-0028 decision 7's "a fresh tenant per run is what makes two runs comparable" turns out to be load-bearing rather than tidy — see the notes), AC measurement over the real observe→extract→serve path: macro precision **0.983**, macro recall **0.914**, per class decision 1.000/0.900, entity 1.000/1.000, episode 1.000/1.000, fact 0.900/0.692, preference 1.000/0.889, procedure 1.000/1.000, `hallucination_rate` 0.000 against a zero-tolerance ceiling, AC tests: crates/synveda-ingest/tests/extraction_precision.rs (the same corpus with no stack at all — the registered ≥0.90 precision floor, the bait assertion that a span-copying extractor cannot invent, and four corpus guards: an expected token absent from its own source, bait present in its own source, a duplicate session id, a duplicate fixture name), crates/synveda-eval (39 unit tests, up from 20: the corpus format refusing an unknown field and every corpus guard again at load time so `make eval-check` catches them with no database; per-class axes reducing over the whole corpus rather than per group; a class produced-but-never-expected scoring precision and no recall; the hallucination axis absent rather than 0.0 when nothing asked; `slack` writing a floor that far below a measurement, never below zero, carried forward across rewrites, and never read by the gate; and a scenario category refused when it collides with a built-in axis or the `extraction_` namespace)
 - [ ] [EVAL-4: Retrieval & injection quality](EVAL-4.md)
 - [ ] [EVAL-5: Security evals](EVAL-5.md)
 - [ ] [PRMT-1: Prompt templates as assets](PRMT-1.md)
@@ -1906,6 +1913,102 @@ share of the trail, and it is why the pages are cursor-paginated. AUD-3's
 WORM export and AUD-4's SIEM stream consume the same reads; CNSL-3
 surfaces "what did the agent know at T" over this API rather than over
 the store._
+
+_EVAL-2 (2026-07-30, ADR-0046): the extraction quality suite. The
+feature's own text named a dashboard and a threshold but no axis, no
+path, and no artefact, so the ACs were written first — the EVAL-1
+precedent, for the EVAL-1 reason. **The lens was the load-bearing
+decision**: extraction quality is a property of a record *set*, and an
+inject block cannot express one, because it is budget-bounded and
+relevance-ranked and CTX-4 elides what it demotes — absence there means
+"did not fit, did not rank, or was summarised away", never "was not
+extracted". `POST /v1/recall`'s sweep does express it: `class`,
+untruncated `content` and `provenance` per record, over `/v1`, under the
+PDP, adding no route and no action type and leaving the harness's empty
+dependency set untouched. **Two lenses, because they answer two
+questions**: the sweep says what a *reader is served*, and
+`GET /v1/audit/events?action=memory.extracted` says what the *pipeline
+committed*. The gated axes come from the sweep because that is the
+product claim; the committed counts ride the report as an attribution
+column, which is what stops a withheld record reading as a missed
+extraction. That column is the demo's whole point, and this is also the
+first consumer of AUD-2's query surface outside AUD-2's own tests.
+
+**One corpus, two readers** (`evals/fixtures/extraction/`): this harness
+over HTTP, and MEM-3's `extraction_precision.rs` with no stack at all,
+both deserialising the full format with `deny_unknown_fields` so a field
+added for one cannot be silently dropped by the other. A data dependency,
+never a crate one. The corpus is deliberately labelled as ground truth
+rather than to flatter the ruleset — `beta-preference-tabs-implicit`
+carries none of the rules' marker phrases and is labelled `preference`
+anyway, which costs a point of `fact` precision and a point of
+`preference` recall and is the measurement working. Six fixtures carry a
+`note` saying in advance why they will miss, and the report prints those
+separately from unanticipated misses, because a known structural limit
+and a regression are the same number without it. Four guards run at load
+time so `make eval-check` catches a corpus bug with no database: a
+mislabelled fixture would otherwise move a gated number forever, in both
+readers at once.
+
+**Two findings, both from running it rather than reasoning about it, and
+both worth knowing beyond this feature.** (1) **The sweep's `as_of` is a
+rewind switch.** `recall.rs` sets `tx_at = as_of.filter(|at| *at < now)`,
+and a `Some` there moves the body fetches to `records_versions` where —
+by ADR-0042 decision 11, stated on `ComposeRequest::tx_at` — **no
+retention horizon is applied**. Sending `Utc::now()` therefore measures
+the *historical* read, because the client's instant is already behind the
+gateway's by the time the gateway evaluates its own. It gives the right
+answer on a fresh tenant, where nothing has been superseded or expired,
+and it would have hollowed out the attribution column permanently: a
+horizon withholds nothing from a rewind, so committed and served could
+never have differed for that reason. The suite now sweeps at `now + 60s`
+so the read stays on the live tables, and the demo's horizon step is what
+caught it — it degraded nothing at all until this was fixed. Any other
+consumer wanting the live enumeration needs the same care; there is no
+present-tense sweep, because ADR-0042 decision 14 defines the shape as
+the historical read. (2) **`tokens_mean` is order-dependent.** EVAL-1's
+`wait_for_seed` waits only for the material a scenario is graded on, so a
+first run against a fresh tenant composes over a partly-populated corpus
+and a second over a complete one: two byte-identical runs measure 129.8
+then 157, breaching the 150 ceiling, with **no product change and no new
+records admitted** — the observe buffer dedups them and `observe_events`
+stays flat, which is how it was pinned down. Pre-existing, exposed by a
+demo that reused one tenant across phases, and the answer was already
+written down as ADR-0028 decision 7 ("a fresh tenant per run is what
+makes two runs comparable"): the demo now takes a tenant per phase, which
+also makes the horizoned phase differ from the clean ones in exactly one
+thing.
+
+Deferrals and forward obligations. **The record-level truncation gap in
+CTX-5 is recorded, not fixed**: `RecallResponse.truncated` reports the
+scope cap and not the record cap, so a sweep returning exactly `limit`
+records is indistinguishable from a truncated one — every consumer has
+this, not just this eval. The suite refuses to score such a page rather
+than mis-scoring it, and the corpus is partitioned one actor per group at
+ten events each to stay clear of it (30 records at a pessimistic three
+per event against a cap of 32); **grow the corpus by adding groups and
+actors, never by adding fixtures past that arithmetic**. Fixing the
+surface is ADR-0046 reversal trigger (c). **`evals/baseline-live.json` is
+deliberately unbounded**: nothing has been measured on the live path, and
+a floor invented before a measurement is a wish — `make
+eval-extraction-live` runs the same corpus through a real model and the
+first run writes them, keyed to the model the API *served* rather than
+the alias asked for. It is not on the nightly, for ADR-0028 decision 6's
+reason plus cost. **The two precision numbers are not one number**: the
+eval floor (0.963, measured minus 2 points of declared `slack`) is a
+regression gate, and the ingest test's registered ≥0.90 is the floor
+below which the product is unshippable — decision 8, and why the eval
+floor sitting above the ship floor is correct rather than redundant.
+**Do not run `--update-baseline` wholesale**: it also pins
+`latency_p95_ms` to whatever the local machine measured, and that ceiling
+is deliberately loose at 250ms against ~17ms because a debug-profile
+gateway on a shared CI runner is nothing like a laptop — the same suite
+read 144ms and 173ms on consecutive local runs. The unmatched-record list
+is the labelled set a model-backed grounding judge would be evaluated
+against, which is MEM-5's and MEM-2's recorded trigger; bait catches only
+invention a fixture author anticipated, and nothing else does. EVAL-4 and
+EVAL-5 inherit the second-suite shape and the `slack` mechanism; EVAL-3's
+benchmark corpora are a third suite of the same kind._
 
 _FLOW-1 (2026-07-25, ADR-0030): the object store — the substrate ADR-0003
 committed to, and only the substrate. Six `vedaflow_*` tables in migration
