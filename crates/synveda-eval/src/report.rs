@@ -10,7 +10,7 @@
 //! which is which. A harness that quietly stops gating something is worse
 //! than one that never gated it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -62,6 +62,87 @@ pub struct Outcome {
     pub failures: Vec<String>,
 }
 
+/// One class's counts over one group. Precision reads `matched/produced`,
+/// recall reads `matched/expected`, and both denominators ride the report
+/// because a ratio without them is unreadable (EVAL-2, ADR-0046
+/// decision 11).
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+pub struct ClassCounts {
+    pub expected: usize,
+    pub produced: usize,
+    pub matched: usize,
+}
+
+/// What one fixture group measured (EVAL-2, ADR-0046 decision 11). This is
+/// the dashboard: per class, what was labelled, what the pipeline produced,
+/// and what matched — plus the review queue and the attribution column that
+/// keeps a withheld record from reading as a missed extraction.
+#[derive(Debug, Default, Serialize)]
+pub struct ExtractionOutcome {
+    pub group: String,
+    pub actor: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub note: String,
+    pub fixtures: usize,
+    pub passed: bool,
+    pub per_class: BTreeMap<String, ClassCounts>,
+    /// How many fixtures declared bait, so `hallucination_rate` has a
+    /// visible denominator.
+    pub bait_fixtures: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub bait_hits: Vec<String>,
+    /// Records that matched no expectation — the review queue for
+    /// invention the fixture author did not anticipate (decision 6). A
+    /// list, deliberately not a score.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unmatched: Vec<String>,
+    /// Misses whose fixture said in advance why they would happen. A known
+    /// structural limit and a regression are the same number without this.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub noted_misses: Vec<String>,
+    /// What the pipeline committed, from the chain (decision 4).
+    pub committed_records: usize,
+    /// What the sweep served. The gap between the two is admission doing
+    /// its job — a horizon, a tier, a shut valid window — and naming it
+    /// here is what stops it reading as an extraction miss.
+    pub served_records: usize,
+    /// Restatements MEM-5 absorbed into records that already asserted
+    /// them: the part of that gap with a specific cause.
+    pub merged_records: usize,
+    /// The models that actually served this group, as the pipeline recorded
+    /// them — not the alias the config asked for (decision 12).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub model_versions: Vec<String>,
+    pub scopes_considered: usize,
+    pub scopes_decided: usize,
+    /// The chain range the committed counts were read from, so the
+    /// attribution names its source rather than floating free.
+    pub chain_from: i64,
+    pub chain_to: i64,
+    /// How long the pipeline took to finish with every seeded event.
+    /// Reported, never gated: it is MEM-3's lag and EVAL-6's to bound.
+    pub seed_wait_ms: f64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failures: Vec<String>,
+}
+
+impl ExtractionOutcome {
+    #[must_use]
+    pub fn new(group: &crate::fixtures::Group) -> Self {
+        Self {
+            group: group.group.clone(),
+            actor: group.actor.clone(),
+            note: group.note.clone(),
+            fixtures: group.fixtures.len(),
+            ..Self::default()
+        }
+    }
+
+    pub fn class_mut(&mut self, class: &str) -> &mut ClassCounts {
+        self.per_class.entry(class.to_owned()).or_default()
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub suite: String,
@@ -72,6 +153,9 @@ pub struct Report {
     /// sentence nobody can check.
     pub actors: BTreeMap<String, String>,
     pub scenarios: Vec<Outcome>,
+    /// The extraction suite's groups (EVAL-2). Absent when no corpus ran.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extraction: Vec<ExtractionOutcome>,
     pub metrics: BTreeMap<String, f64>,
     pub gate: Gate,
 }
@@ -119,6 +203,18 @@ pub struct Bound {
     pub min: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max: Option<f64>,
+    /// How far below a measured value `--update-baseline` writes a floor —
+    /// EVAL-2's "gate on regression >2pts" as `slack: 0.02` (ADR-0046
+    /// decision 9).
+    ///
+    /// It affects only how a floor is *written*, never how the gate
+    /// compares: the tolerance lands in the committed number where a
+    /// reviewer sees it, rather than in a comparison nobody reads. A metric
+    /// that declares no slack keeps EVAL-1's zero-tolerance behaviour
+    /// exactly, which is why every axis that predates this field is
+    /// unaffected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slack: Option<f64>,
 }
 
 impl Baseline {
@@ -133,10 +229,11 @@ impl Baseline {
     /// direction. Deliberate, and a diff someone has to look at.
     ///
     /// A quality floor becomes exactly what was measured — the suite just
-    /// achieved it, so it is achievable. A cost ceiling gets
-    /// [`CEILING_HEADROOM`] on top, because a ceiling pinned to the last
-    /// measurement fails on the next run's jitter, and a gate that cries
-    /// wolf nightly is a gate someone turns off.
+    /// achieved it, so it is achievable — unless it declares `slack`, in
+    /// which case it lands that far below (ADR-0046 decision 9). A cost
+    /// ceiling gets [`CEILING_HEADROOM`] on top, because a ceiling pinned
+    /// to the last measurement fails on the next run's jitter, and a gate
+    /// that cries wolf nightly is a gate someone turns off.
     pub fn updated(&self, metrics: &BTreeMap<String, f64>) -> Self {
         let mut updated = Baseline {
             note: self.note.clone(),
@@ -148,12 +245,16 @@ impl Baseline {
                 metric.clone(),
                 match (measured, bound.min, bound.max) {
                     (Some(value), Some(_), None) => Bound {
-                        min: Some(round(value)),
+                        // Never below zero: a slack wider than the
+                        // measurement would write a floor no run can fail.
+                        min: Some(round((value - bound.slack.unwrap_or(0.0)).max(0.0))),
                         max: None,
+                        slack: bound.slack,
                     },
                     (Some(value), None, Some(_)) => Bound {
                         min: None,
                         max: Some(round(value * CEILING_HEADROOM)),
+                        slack: bound.slack,
                     },
                     // Two-sided or unmeasured: leave it exactly as it was
                     // rather than guess which side moved.
@@ -364,7 +465,10 @@ pub fn summarise(report: &Report) -> String {
             ));
         }
     }
-    out.push_str("\n  axis                 measured   gate\n");
+    if !report.extraction.is_empty() {
+        out.push_str(&extraction_summary(&report.extraction));
+    }
+    out.push_str("\n  axis                       measured   gate\n");
     for (metric, value) in &report.metrics {
         let bound = if report.gate.gated.contains(metric) {
             report
@@ -379,7 +483,7 @@ pub fn summarise(report: &Report) -> String {
         } else {
             "reported only".to_owned()
         };
-        out.push_str(&format!("  {metric:<20} {value:>8.3}   {bound}\n"));
+        out.push_str(&format!("  {metric:<26} {value:>8.3}   {bound}\n"));
     }
     for breach in &report.gate.breaches {
         out.push_str(&format!("\n  gate: {}\n", breach.reason));
@@ -392,6 +496,108 @@ pub fn summarise(report: &Report) -> String {
             format!("gate FAILED on {} metric(s)", report.gate.breaches.len())
         }
     ));
+    out
+}
+
+/// The per-class table EVAL-2's AC calls a dashboard (ADR-0046
+/// decision 11): what was labelled, what the pipeline produced, what
+/// matched, and the attribution column that keeps a withheld record from
+/// reading as a missed extraction.
+fn extraction_summary(groups: &[ExtractionOutcome]) -> String {
+    let mut out = String::new();
+    let fixtures: usize = groups.iter().map(|group| group.fixtures).sum();
+    out.push_str(&format!(
+        "\n  extraction: {fixtures} fixtures across {} group(s)\n",
+        groups.len()
+    ));
+    for group in groups {
+        out.push_str(&format!(
+            "  {} {} ({}): {} committed → {} served",
+            if group.passed { "✓" } else { "✗" },
+            group.group,
+            group.actor,
+            group.committed_records,
+            group.served_records
+        ));
+        if group.merged_records > 0 {
+            out.push_str(&format!(", {} merged", group.merged_records));
+        }
+        if group.chain_to > 0 {
+            out.push_str(&format!(
+                " (chain {}..{})",
+                group.chain_from, group.chain_to
+            ));
+        }
+        out.push('\n');
+        for failure in &group.failures {
+            out.push_str(&format!("      {failure}\n"));
+        }
+        for hit in &group.bait_hits {
+            out.push_str(&format!("      {hit}\n"));
+        }
+    }
+
+    let mut totals: BTreeMap<&str, ClassCounts> = BTreeMap::new();
+    for group in groups {
+        for (class, counts) in &group.per_class {
+            let slot = totals.entry(class.as_str()).or_default();
+            slot.expected += counts.expected;
+            slot.produced += counts.produced;
+            slot.matched += counts.matched;
+        }
+    }
+    out.push_str("\n  class        precision          recall\n");
+    for (class, counts) in &totals {
+        let ratio = |hit: usize, total: usize| {
+            if total == 0 {
+                "     —".to_owned()
+            } else {
+                format!("{hit}/{total} = {:.3}", hit as f64 / total as f64)
+            }
+        };
+        out.push_str(&format!(
+            "  {:<12} {:<18} {}\n",
+            class,
+            ratio(counts.matched, counts.produced),
+            ratio(counts.matched, counts.expected)
+        ));
+    }
+
+    // Misses the corpus predicted, before the ones it did not: a reader
+    // scanning this table needs to know which numbers are already
+    // explained.
+    let noted: Vec<&str> = groups
+        .iter()
+        .flat_map(|group| group.noted_misses.iter().map(String::as_str))
+        .collect();
+    if !noted.is_empty() {
+        out.push_str("\n  misses the corpus predicted, with the reason it gave:\n");
+        for entry in noted {
+            out.push_str(&format!("    {entry}\n"));
+        }
+    }
+
+    let unmatched: usize = groups.iter().map(|group| group.unmatched.len()).sum();
+    if unmatched > 0 {
+        out.push_str(&format!(
+            "\n  {unmatched} record(s) matched no expectation — the review queue for \
+             unanticipated invention:\n"
+        ));
+        for group in groups {
+            for entry in &group.unmatched {
+                out.push_str(&format!("    {entry}\n"));
+            }
+        }
+    }
+    let models: Vec<&str> = groups
+        .iter()
+        .flat_map(|group| group.model_versions.iter().map(String::as_str))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if !models.is_empty() {
+        out.push_str(&format!("\n  extracted by: {}\n", models.join(", ")));
+    }
     out
 }
 
@@ -444,6 +650,7 @@ mod tests {
         Bound {
             min: Some(value),
             max: None,
+            slack: None,
         }
     }
 
@@ -451,6 +658,15 @@ mod tests {
         Bound {
             min: None,
             max: Some(value),
+            slack: None,
+        }
+    }
+
+    fn min_with_slack(value: f64, slack: f64) -> Bound {
+        Bound {
+            min: Some(value),
+            max: None,
+            slack: Some(slack),
         }
     }
 
@@ -583,5 +799,57 @@ mod tests {
         // jitter fails a gate that measured nothing new.
         assert_eq!(after.metrics["tokens_mean"].max, Some(750.0));
         assert_eq!(after.metrics["tokens_mean"].min, None);
+    }
+
+    /// EVAL-2's "gate on regression >2pts" (ADR-0046 decision 9): slack
+    /// changes how a floor is *written* and nothing about how it is
+    /// compared, and it carries forward so the tolerance stays declared.
+    #[test]
+    fn a_declared_slack_writes_the_floor_that_far_below_the_measurement() {
+        let before = baseline(&[
+            ("extraction_precision_macro", min_with_slack(0.9, 0.02)),
+            ("recall", min(1.0)),
+        ]);
+        let measured: BTreeMap<String, f64> = [
+            ("extraction_precision_macro".to_owned(), 0.983),
+            ("recall".to_owned(), 1.0),
+        ]
+        .into_iter()
+        .collect();
+        let after = before.updated(&measured);
+        assert_eq!(after.metrics["extraction_precision_macro"].min, Some(0.963));
+        assert_eq!(
+            after.metrics["extraction_precision_macro"].slack,
+            Some(0.02),
+            "the tolerance has to survive the rewrite or the next update loses it"
+        );
+        // An axis that declares no slack is untouched by the feature.
+        assert_eq!(after.metrics["recall"].min, Some(1.0));
+        assert_eq!(after.metrics["recall"].slack, None);
+    }
+
+    #[test]
+    fn a_slack_wider_than_the_measurement_writes_a_floor_of_zero() {
+        // Never a negative floor: that would be a gate no run can fail,
+        // which is worse than a gate nobody set.
+        let before = baseline(&[("hallucination_rate", min_with_slack(0.5, 0.9))]);
+        let measured: BTreeMap<String, f64> = [("hallucination_rate".to_owned(), 0.1)]
+            .into_iter()
+            .collect();
+        let after = before.updated(&measured);
+        assert_eq!(after.metrics["hallucination_rate"].min, Some(0.0));
+    }
+
+    /// The gate is unchanged by slack: it compares against `min` exactly as
+    /// committed, so a run that dips below the written floor still fails.
+    #[test]
+    fn the_gate_reads_the_written_floor_and_not_the_slack() {
+        let bounded = baseline(&[("extraction_recall_macro", min_with_slack(0.9, 0.02))]);
+        let measured: BTreeMap<String, f64> = [("extraction_recall_macro".to_owned(), 0.89)]
+            .into_iter()
+            .collect();
+        let gate = gate(&bounded, &measured);
+        assert!(!gate.passed, "0.89 is under the written floor of 0.9");
+        assert_eq!(gate.breaches[0].measured, Some(0.89));
     }
 }

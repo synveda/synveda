@@ -1,10 +1,16 @@
 //! The `/v1` client (EVAL-1, ADR-0028 decision 1).
 //!
-//! Two endpoints, an actor's own bearer, and no other way in. The wire
+//! Four endpoints, an actor's own bearer, and no other way in. The wire
 //! structs are declared here rather than imported because this crate
 //! depends on no Synveda crate at all — the same price the TypeScript
 //! adapter pays, for the same reason: what an outside caller can see is
 //! exactly what an eval should measure.
+//!
+//! EVAL-2 added the last two (ADR-0046 decisions 1 and 4): the recall
+//! sweep, which is how a caller enumerates what it may read, and the
+//! audit search, which is how an auditor sees what the pipeline
+//! committed. They answer different questions and the extraction
+//! measurement needs both.
 
 use std::time::{Duration, Instant};
 
@@ -66,6 +72,104 @@ pub struct ObserveResponse {
     pub duplicates: usize,
     pub quarantined: usize,
     pub denied: usize,
+    /// Per-event outcomes, which is what makes the extraction measurement
+    /// attributable: the buffered `event_id` acked here is the same id the
+    /// served record's `provenance` carries and the same id the
+    /// `memory.extracted` payload names, so one key joins the seed, the
+    /// sweep, and the chain.
+    #[serde(default)]
+    pub events: Vec<ObserveEventOutcome>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ObserveEventOutcome {
+    pub idempotency_key: String,
+    /// Absent for a denied event: nothing was persisted for it.
+    pub event_id: Option<String>,
+}
+
+/// `POST /v1/recall` in its **sweep** shape (CTX-5, ADR-0042 decision 14):
+/// no ids and no query, just an instant — "everything I may read, as it
+/// stood then". The one shape that enumerates a corpus rather than ranking
+/// one (ADR-0046 decision 1).
+#[derive(Debug, Serialize)]
+pub struct RecallSweepRequest<'a> {
+    pub as_of: &'a str,
+    pub session_id: &'a str,
+    /// Asked for explicitly rather than left to the surface's default, so
+    /// "I asked for N and got N" is a fact this caller can state without
+    /// knowing the product's cap (ADR-0046 decision 3).
+    pub limit: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecallResponse {
+    pub entries: Vec<RecallEntry>,
+    /// Which shape the surface decided it was asked (ADR-0042 decision 1).
+    /// Checked rather than assumed: a request the surface read as `ids` or
+    /// `query` would answer a different question, and a measurement of the
+    /// wrong question is worse than no measurement.
+    pub mode: String,
+    /// The *scope* cap, not the record cap — which is exactly why a caller
+    /// cannot read `false` here as "this page is complete" (ADR-0046
+    /// decision 3).
+    pub truncated: bool,
+    pub scopes_considered: usize,
+    pub scopes_decided: usize,
+}
+
+/// One served record, as the extraction measurement reads it.
+#[derive(Debug, Deserialize)]
+pub struct RecallEntry {
+    pub record_id: String,
+    pub class: String,
+    /// Untruncated: recall does not elide what the caller named
+    /// (ADR-0041 decision 7).
+    pub content: String,
+    /// Source session, extraction method, model version, confidence
+    /// (seed §4.2). The attribution key and the model identity both live
+    /// here.
+    pub provenance: serde_json::Value,
+}
+
+impl RecallEntry {
+    /// The observe event this record was extracted from, when provenance
+    /// names one. Absent is a fact about the record, never a default:
+    /// material written by a path that did not record it would be
+    /// attributed to nothing rather than to the wrong fixture.
+    pub fn source_event_id(&self) -> Option<&str> {
+        self.provenance.get("event_id")?.as_str()
+    }
+
+    pub fn source_session_id(&self) -> Option<&str> {
+        self.provenance.get("session_id")?.as_str()
+    }
+
+    /// The model the API actually served, as the pipeline recorded it —
+    /// not the alias the request asked for (ADR-0046 decision 12).
+    pub fn model_version(&self) -> Option<&str> {
+        self.provenance.get("model_version")?.as_str()
+    }
+}
+
+/// `GET /v1/audit/events` (AUD-2, ADR-0045 decision 3).
+#[derive(Debug, Deserialize)]
+pub struct AuditEventsResponse {
+    pub events: Vec<AuditEvent>,
+    pub truncated: bool,
+    pub next_cursor: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuditEvent {
+    /// The chain position this fact was read at, so an attribution number
+    /// names the range it came from rather than floating free.
+    pub seq: i64,
+    /// `success` or `failure`. A failed `memory.extracted` is a
+    /// dead-lettered event — a different fact from "extracted no records",
+    /// and one that must not read as the latter.
+    pub outcome: String,
+    pub payload: serde_json::Value,
 }
 
 /// A call's result and what it cost, because the cost is a measurement.
@@ -105,6 +209,63 @@ impl Client {
         request: &ObserveRequest<'_>,
     ) -> Result<Timed<ObserveResponse>, String> {
         self.post("/v1/observe", bearer, request).await
+    }
+
+    pub async fn recall_sweep(
+        &self,
+        bearer: &str,
+        request: &RecallSweepRequest<'_>,
+    ) -> Result<Timed<RecallResponse>, String> {
+        self.post("/v1/recall", bearer, request).await
+    }
+
+    /// One page of the chain, filtered to a single action. Paging is the
+    /// caller's — `next_cursor` back in as `after` — because a helper that
+    /// swallowed the pages would also swallow `truncated`, and a truncation
+    /// nobody sees is the failure this whole surface refuses (ADR-0045
+    /// decision 9).
+    pub async fn audit_events(
+        &self,
+        bearer: &str,
+        action: &str,
+        after: Option<i64>,
+        limit: usize,
+    ) -> Result<AuditEventsResponse, String> {
+        let mut query = vec![
+            ("action".to_owned(), action.to_owned()),
+            ("limit".to_owned(), limit.to_string()),
+        ];
+        if let Some(after) = after {
+            query.push(("after".to_owned(), after.to_string()));
+        }
+        self.get("/v1/audit/events", bearer, &query).await
+    }
+
+    async fn get<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        bearer: &str,
+        query: &[(String, String)],
+    ) -> Result<T, String> {
+        let response = self
+            .http
+            .get(format!("{}{path}", self.gateway_url))
+            .query(query)
+            .bearer_auth(bearer)
+            .header(
+                "x-synveda-client",
+                concat!("synveda-eval/", env!("CARGO_PKG_VERSION")),
+            )
+            .send()
+            .await
+            .map_err(|err| format!("GET {path}: {err}"))?;
+        let status = response.status();
+        let raw = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(format!("GET {path} returned {status}: {}", detail(&raw)));
+        }
+        serde_json::from_str(&raw)
+            .map_err(|err| format!("GET {path} returned an unreadable body: {err}"))
     }
 
     async fn post<B: Serialize, T: serde::de::DeserializeOwned>(
