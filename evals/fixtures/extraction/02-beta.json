@@ -1,0 +1,112 @@
+{
+  "group": "beta",
+  "actor": "extract-beta",
+  "note": "The same six classes again, plus the two cases that make recall a real number: an implicit preference none of the ruleset's marker phrases reach, and a procedure stated together with the fact that explains it.",
+  "fixtures": [
+    {
+      "name": "beta-decision-temporal",
+      "input": {
+        "kind": "decision",
+        "session_id": "beta-1",
+        "occurred_at": "2026-07-21T09:00:00Z",
+        "payload": { "text": "Cut the Temporal SDK from scope for phase one; the licence graph refuses ring and aws-lc." }
+      },
+      "expected": [{ "class": "decision", "content_contains": "Temporal" }]
+    },
+    {
+      "name": "beta-episode-compose",
+      "input": {
+        "kind": "tool_result",
+        "session_id": "beta-2",
+        "occurred_at": "2026-07-21T09:01:00Z",
+        "payload": { "tool": "docker", "output": "docker compose up: postgres healthy after 6.2 seconds." }
+      },
+      "expected": [{ "class": "episode", "content_contains": "postgres" }]
+    },
+    {
+      "name": "beta-episode-tei",
+      "input": {
+        "kind": "tool_result",
+        "session_id": "beta-3",
+        "occurred_at": "2026-07-21T09:02:00Z",
+        "payload": { "tool": "curl", "output": "TEI health check returned 200; BGE-M3 loaded with 1024 dimensions." }
+      },
+      "expected": [{ "class": "episode", "content_contains": "BGE-M3" }]
+    },
+    {
+      "name": "beta-preference-tenant-tx",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "beta-4",
+        "occurred_at": "2026-07-21T09:03:00Z",
+        "payload": { "text": "We always use begin_tenant_tx for tenant-scoped table access." }
+      },
+      "expected": [{ "class": "preference", "content_contains": "begin_tenant_tx" }]
+    },
+    {
+      "name": "beta-preference-tabs-implicit",
+      "note": "An implicit preference carrying none of the ruleset's marker phrases. The label is the ground truth a reader would give it, not what the rules can reach — the deterministic path routes it to `fact` and loses a point of precision there and a point of recall here.",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "beta-5",
+        "occurred_at": "2026-07-21T09:04:00Z",
+        "payload": { "text": "Tabs over spaces for this repository, please." }
+      },
+      "expected": [{ "class": "preference", "content_contains": "Tabs" }]
+    },
+    {
+      "name": "beta-procedure-adr-first",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "beta-6",
+        "occurred_at": "2026-07-21T09:05:00Z",
+        "payload": { "text": "Step 1 create the feature branch, step 2 write the ADR before any code." }
+      },
+      "expected": [{ "class": "procedure", "content_contains": "ADR" }]
+    },
+    {
+      "name": "beta-entity-pgmq",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "beta-7",
+        "occurred_at": "2026-07-21T09:06:00Z",
+        "payload": { "text": "PGMQ is a queue extension living inside Postgres itself." }
+      },
+      "expected": [{ "class": "entity", "content_contains": "PGMQ" }]
+    },
+    {
+      "name": "beta-fact-dev-image",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "beta-8",
+        "occurred_at": "2026-07-21T09:07:00Z",
+        "payload": { "text": "The dev compose image ships Postgres 17 with pgvector and AGE preloaded." }
+      },
+      "expected": [{ "class": "fact", "content_contains": "Postgres 17" }]
+    },
+    {
+      "name": "beta-decision-trunk",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "beta-9",
+        "occurred_at": "2026-07-21T09:08:00Z",
+        "payload": { "text": "The team settled on trunk-based development for this repo." }
+      },
+      "expected": [{ "class": "decision", "content_contains": "trunk-based" }]
+    },
+    {
+      "name": "beta-procedure-and-fact-windows",
+      "note": "A procedure and the fact that explains why it exists. One record per event means at most one of the two lands.",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "beta-10",
+        "occurred_at": "2026-07-21T09:09:00Z",
+        "payload": { "text": "First, kill the gateway process; only afterwards start cargo test. Windows holds a lock on the binary while it runs." }
+      },
+      "expected": [
+        { "class": "procedure", "content_contains": "gateway" },
+        { "class": "fact", "content_contains": "lock on the binary" }
+      ]
+    }
+  ]
+}

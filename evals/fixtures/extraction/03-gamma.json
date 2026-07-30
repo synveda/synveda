@@ -1,0 +1,111 @@
+{
+  "group": "gamma",
+  "actor": "extract-gamma",
+  "note": "Weighted towards entity and procedure, the two classes the pre-EVAL-2 corpus measured with two and three examples. Every entity here is stated in the shape a reader would call a definition; whether the ruleset's pattern reaches it is what the measurement is for.",
+  "fixtures": [
+    {
+      "name": "gamma-entity-tei",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "gamma-1",
+        "occurred_at": "2026-07-22T11:00:00Z",
+        "payload": { "text": "TEI is the text-embeddings-inference server we run for BGE-M3." }
+      },
+      "expected": [{ "class": "entity", "content_contains": "TEI" }]
+    },
+    {
+      "name": "gamma-entity-jaeger",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "gamma-2",
+        "occurred_at": "2026-07-22T11:01:00Z",
+        "payload": { "text": "Jaeger is our trace collector, reachable on port 16686." }
+      },
+      "expected": [{ "class": "entity", "content_contains": "Jaeger" }]
+    },
+    {
+      "name": "gamma-entity-tantivy",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "gamma-3",
+        "occurred_at": "2026-07-22T11:02:00Z",
+        "payload": { "text": "Tantivy is the per-tenant lexical sidecar behind the sparse retrieval leg." }
+      },
+      "expected": [{ "class": "entity", "content_contains": "Tantivy" }]
+    },
+    {
+      "name": "gamma-procedure-pack-apply",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "gamma-4",
+        "occurred_at": "2026-07-22T11:03:00Z",
+        "payload": { "text": "How to change a tenant default: run synveda policy apply, then confirm the next request reads the new pack." }
+      },
+      "expected": [{ "class": "procedure", "content_contains": "policy apply" }]
+    },
+    {
+      "name": "gamma-procedure-verify-chain",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "gamma-5",
+        "occurred_at": "2026-07-22T11:04:00Z",
+        "payload": { "text": "To check the audit trail, run the following: synveda audit verify, and read the seq it names on a break." }
+      },
+      "expected": [{ "class": "procedure", "content_contains": "audit verify" }]
+    },
+    {
+      "name": "gamma-preference-review",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "gamma-6",
+        "occurred_at": "2026-07-22T11:05:00Z",
+        "payload": { "text": "I like review comments that name the failing case rather than the style rule." }
+      },
+      "expected": [{ "class": "preference", "content_contains": "failing case" }]
+    },
+    {
+      "name": "gamma-decision-cedar",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "gamma-7",
+        "occurred_at": "2026-07-22T11:06:00Z",
+        "payload": { "text": "We chose Cedar over OpenFGA because the policy engine has to be embedded in the gateway." }
+      },
+      "expected": [{ "class": "decision", "content_contains": "Cedar" }]
+    },
+    {
+      "name": "gamma-episode-eval-run",
+      "input": {
+        "kind": "tool_result",
+        "session_id": "gamma-8",
+        "occurred_at": "2026-07-22T11:07:00Z",
+        "payload": { "tool": "make", "output": "make eval: 4 scenarios, gate held, recall 1.0 and abstention 1.0." }
+      },
+      "expected": [{ "class": "episode", "content_contains": "gate held" }]
+    },
+    {
+      "name": "gamma-fact-rls",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "gamma-9",
+        "occurred_at": "2026-07-22T11:08:00Z",
+        "payload": { "text": "Row-level security is forced on every tenant-scoped table, and the app role holds no BYPASSRLS." }
+      },
+      "expected": [{ "class": "fact", "content_contains": "BYPASSRLS" }]
+    },
+    {
+      "name": "gamma-entity-and-fact-pgmq",
+      "note": "A definition and a property of the thing defined. Both are true of the utterance; one record per event reaches one.",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "gamma-10",
+        "occurred_at": "2026-07-22T11:09:00Z",
+        "payload": { "text": "PGMQ is our queue substrate; the observe queue carries content-free signals and never a payload." }
+      },
+      "expected": [
+        { "class": "entity", "content_contains": "PGMQ" },
+        { "class": "fact", "content_contains": "content-free" }
+      ]
+    }
+  ]
+}

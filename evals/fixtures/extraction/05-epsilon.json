@@ -1,0 +1,119 @@
+{
+  "group": "epsilon",
+  "actor": "extract-epsilon",
+  "note": "The edges: the redaction placeholder and the empty payload (both named exactly as MEM-3's own tests look them up), the bait fixtures that carry the hallucination axis, and the one case where a true claim sits past the ruleset's truncation.",
+  "fixtures": [
+    {
+      "name": "fact-redaction-placeholder",
+      "note": "Named for MEM-3's `placeholders_survive_extraction_verbatim`, which looks this fixture up by name. Renaming it breaks that test rather than silently weakening it.",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "epsilon-1",
+        "occurred_at": "2026-07-24T08:00:00Z",
+        "payload": { "text": "The deploy token was rotated; the old value [REDACTED:github-pat] no longer works." }
+      },
+      "expected": [{ "class": "fact", "content_contains": "[REDACTED:github-pat]" }]
+    },
+    {
+      "name": "empty-payload",
+      "note": "Named for MEM-3's `empty_payload_extracts_nothing`. A payload with no string values extracts nothing, and zero candidates is a legal outcome rather than an error.",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "epsilon-2",
+        "occurred_at": "2026-07-24T08:01:00Z",
+        "payload": { "attempt": 3, "ok": true }
+      },
+      "expected": []
+    },
+    {
+      "name": "epsilon-bait-unchosen-store",
+      "note": "The transcript compares two options and states that nobody has picked one. An extractor that writes down a decision here has invented the thing the product exists to preserve.",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "epsilon-3",
+        "occurred_at": "2026-07-24T08:02:00Z",
+        "payload": { "text": "We evaluated Qdrant and pgvector side by side and wrote the numbers down; nobody has picked one yet." }
+      },
+      "expected": [{ "class": "fact", "content_contains": "evaluated" }],
+      "must_not_extract": ["chose Qdrant", "chose pgvector", "decided on Qdrant", "decided on pgvector"]
+    },
+    {
+      "name": "epsilon-bait-unnamed-owner",
+      "note": "The transcript says an owner exists and that the rota does not name them. A name in the extracted record is an invented attribution.",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "epsilon-4",
+        "occurred_at": "2026-07-24T08:03:00Z",
+        "payload": { "text": "Somebody on the platform team owns the sidecar indexer, but the rota does not say who." }
+      },
+      "expected": [{ "class": "fact", "content_contains": "sidecar indexer" }],
+      "must_not_extract": ["owned by alice", "the owner is alice", "owned by the platform lead"]
+    },
+    {
+      "name": "epsilon-bait-no-timing",
+      "note": "A tool result that explicitly reports no timings. A number here is fabricated measurement, which is the failure mode a memory product can least afford.",
+      "input": {
+        "kind": "tool_result",
+        "session_id": "epsilon-5",
+        "occurred_at": "2026-07-24T08:04:00Z",
+        "payload": { "tool": "make", "output": "make smoke: all services reported healthy; the script prints no timings." }
+      },
+      "expected": [{ "class": "episode", "content_contains": "healthy" }],
+      "must_not_extract": ["6.2 seconds", "92 seconds", "in under a second"]
+    },
+    {
+      "name": "epsilon-episode-flaky",
+      "input": {
+        "kind": "tool_result",
+        "session_id": "epsilon-6",
+        "occurred_at": "2026-07-24T08:05:00Z",
+        "payload": { "tool": "cargo", "output": "cargo test rls: 1 failed on the first run and passed on the retry." }
+      },
+      "expected": [{ "class": "episode", "content_contains": "retry" }]
+    },
+    {
+      "name": "epsilon-procedure-rollback",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "epsilon-7",
+        "occurred_at": "2026-07-24T08:06:00Z",
+        "payload": { "text": "How to withdraw a bad line: synveda channel history, then synveda channel rollback to the commit before it." }
+      },
+      "expected": [{ "class": "procedure", "content_contains": "channel rollback" }]
+    },
+    {
+      "name": "epsilon-preference-favourite",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "epsilon-8",
+        "occurred_at": "2026-07-24T08:07:00Z",
+        "payload": { "text": "The reviewers' favourite shape: a test that names the failing input rather than the rule." }
+      },
+      "expected": [{ "class": "preference", "content_contains": "failing input" }]
+    },
+    {
+      "name": "epsilon-decision-graph-fallback",
+      "input": {
+        "kind": "decision",
+        "session_id": "epsilon-9",
+        "occurred_at": "2026-07-24T08:08:00Z",
+        "payload": { "text": "Indexed adjacency stays the graph substrate; AGE remains installed only for the spike's evidence." }
+      },
+      "expected": [{ "class": "decision", "content_contains": "Indexed adjacency" }]
+    },
+    {
+      "name": "epsilon-fact-beyond-truncation",
+      "note": "Two facts in one utterance, the second past the deterministic ruleset's 300-character truncation. Both are ground truth a reader would give; the second is a recall miss the ruleset cannot avoid, because truncation-as-summary is what it does (ADR-0022 decision 3). A model-backed extractor is the path that reaches it, which is what makes this fixture worth keeping rather than trimming.",
+      "input": {
+        "kind": "transcript_delta",
+        "session_id": "epsilon-10",
+        "occurred_at": "2026-07-24T08:09:00Z",
+        "payload": { "text": "The gateway resolves a tenant from the token rather than from the URL, which is why no handler takes a tenant argument and why a forged tenant id cannot travel between tenants; the row-level security policy underneath is the backstop, and it trips with SQLSTATE 42501 whenever a statement escapes its own tenant. The chain then records that trip as store.rls.denied at the respond seam." }
+      },
+      "expected": [
+        { "class": "fact", "content_contains": "from the token" },
+        { "class": "fact", "content_contains": "store.rls.denied" }
+      ]
+    }
+  ]
+}
