@@ -14,6 +14,8 @@
 #![forbid(unsafe_code)]
 
 mod client;
+mod extraction;
+mod fixtures;
 mod report;
 mod runner;
 mod scenario;
@@ -51,6 +53,13 @@ enum Command {
         /// Directory of `*.json` scenarios.
         #[arg(long, default_value = "evals/scenarios")]
         suite: PathBuf,
+        /// Directory of `*.json` extraction fixture groups (EVAL-2). A
+        /// second suite rather than a stretched scenario format: the two
+        /// shapes measure different things and would each be worse for
+        /// carrying the other's fields (ADR-0046 decision 10). Both reduce
+        /// into one metrics map and gate against one baseline.
+        #[arg(long, default_value = "evals/fixtures/extraction")]
+        fixtures: PathBuf,
         /// The committed gate.
         #[arg(long, default_value = "evals/baseline.json")]
         baseline: PathBuf,
@@ -71,6 +80,8 @@ enum Command {
     Check {
         #[arg(long, default_value = "evals/scenarios")]
         suite: PathBuf,
+        #[arg(long, default_value = "evals/fixtures/extraction")]
+        fixtures: PathBuf,
         #[arg(long, default_value = "evals/baseline.json")]
         baseline: PathBuf,
     },
@@ -91,12 +102,27 @@ fn main() -> ExitCode {
 #[tokio::main(flavor = "current_thread")]
 async fn run(cli: Cli) -> Result<bool, String> {
     match cli.command {
-        Command::Check { suite, baseline } => {
+        Command::Check {
+            suite,
+            fixtures: fixtures_dir,
+            baseline,
+        } => {
             let scenarios = scenario::load_suite(&suite)?;
+            // Corpus validation runs here too, with no database and no
+            // gateway: a mislabelled fixture would move a gated number
+            // forever and silently, and in both of the corpus's readers
+            // (ADR-0046 decision 7).
+            let groups = fixtures::load_corpus(&fixtures_dir)?;
             let baseline = Baseline::load(&baseline)?;
             eprintln!(
-                "synveda-eval: {} scenario(s) parse; the baseline bounds {}",
+                "synveda-eval: {} scenario(s) and {} fixture(s) across {} group(s) parse; the \
+                 baseline bounds {}",
                 scenarios.len(),
+                groups
+                    .iter()
+                    .map(|group| group.fixtures.len())
+                    .sum::<usize>(),
+                groups.len(),
                 baseline
                     .metrics
                     .keys()
@@ -109,6 +135,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
         Command::Run {
             env,
             suite,
+            fixtures: fixtures_dir,
             baseline,
             report: report_path,
             update_baseline,
@@ -116,12 +143,12 @@ async fn run(cli: Cli) -> Result<bool, String> {
         } => {
             let environment = Environment::load(&env)?;
             let scenarios = scenario::load_suite(&suite)?;
+            let groups = fixtures::load_corpus(&fixtures_dir)?;
             let baseline_file = baseline;
             let baseline = Baseline::load(&baseline_file)?;
             let client = Client::new(&environment.gateway_url)?;
-            let options = Options {
-                seed_timeout: Duration::from_secs(seed_timeout_secs),
-            };
+            let seed_timeout = Duration::from_secs(seed_timeout_secs);
+            let options = Options { seed_timeout };
 
             let started_at = chrono::Utc::now().to_rfc3339();
             let mut outcomes = Vec::with_capacity(scenarios.len());
@@ -131,7 +158,21 @@ async fn run(cli: Cli) -> Result<bool, String> {
                     .push(runner::run_scenario(&client, &environment, scenario, &options).await?);
             }
 
-            let metrics = report::metrics(&outcomes);
+            let extraction_options = extraction::Options { seed_timeout };
+            let mut extraction_outcomes = Vec::with_capacity(groups.len());
+            for group in &groups {
+                eprintln!("synveda-eval: extraction/{}", group.group);
+                extraction_outcomes.push(
+                    extraction::run_group(&client, &environment, group, &extraction_options)
+                        .await?,
+                );
+            }
+
+            // One metrics map and one gate over both suites (ADR-0046
+            // decision 10): the formats differ because they measure
+            // different things, the gate vocabulary does not.
+            let mut metrics = report::metrics(&outcomes);
+            metrics.extend(extraction::metrics(&extraction_outcomes));
             let gate = report::gate(&baseline, &metrics);
             let report = Report {
                 suite: suite.display().to_string(),
@@ -149,6 +190,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
                     })
                     .collect(),
                 scenarios: outcomes,
+                extraction: extraction_outcomes,
                 metrics,
                 gate,
             };

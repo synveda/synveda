@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check
+.PHONY: fmt lint test build deny check-deps ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-extraction-live
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -30,14 +30,27 @@ dev-down:
 smoke:
 	bash scripts/smoke.sh
 
-# The eval harness (EVAL-1, ADR-0028): a scenario suite against a live
-# stack on a scratch database, five axes, gated by evals/baseline.json.
-# Needs the dev compose (postgres) and node. Exit status is the gate's.
+# The eval harness (EVAL-1, ADR-0028; EVAL-2, ADR-0046): the scenario
+# suite and the labelled extraction corpus against a live stack on a
+# scratch database, gated by evals/baseline.json. Needs the dev compose
+# (postgres) and node. Exit status is the gate's.
 eval:
 	sh evals/run.sh
 
-# Parses the suite and the baseline with no stack at all — what `ci`
-# can run, and what catches a scenario that would measure nothing.
+# The same corpus through a real model instead of the rule-based
+# extractor (EVAL-2, ADR-0046 decision 12), gated by its own baseline
+# because the two sets of numbers are not comparable. Deliberately not on
+# the nightly: it costs money per run, it needs a key CI does not hold,
+# and a gate that pages on model drift is the one ADR-0028 decision 6
+# already refused. Needs ANTHROPIC_API_KEY, or SYNVEDA_EXTRACTOR=vllm
+# plus SYNVEDA_VLLM_BASE_URL for the air-gapped path.
+eval-extraction-live:
+	SYNVEDA_EXTRACTOR=$${SYNVEDA_EXTRACTOR:-claude} \
+	EVAL_BASELINE=evals/baseline-live.json sh evals/run.sh
+
+# Parses the suite, the corpus and the baseline with no stack at all —
+# what `ci` can run, and what catches a scenario that would measure
+# nothing or a fixture whose label can never match.
 eval-check:
 	cargo run -q -p synveda-eval -- check
 

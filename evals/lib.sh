@@ -79,7 +79,10 @@ eval_up() {
   export SYNVEDA_SEARCH_INDEX_DIR
   # The deterministic extractor and embedder are the default and stay it:
   # a nightly failure should mean someone changed the code, not that a
-  # model drifted (ADR-0028 decision 6).
+  # model drifted (ADR-0028 decision 6). Deliberately not exported here —
+  # `SYNVEDA_EXTRACTOR` and its credentials pass through from the caller,
+  # which is what `make eval-extraction-live` uses to run the same corpus
+  # through a real model against its own baseline (ADR-0046 decision 12).
   SYNVEDA_EXTRACTION_POLL_MS=300
   export SYNVEDA_EXTRACTION_POLL_MS
   SYNVEDA_SEARCH_POLL_MS=300
@@ -124,10 +127,28 @@ eval_up() {
   # The actors. Registration writes hierarchy the gateway caches
   # out-of-process, so it happens between the two gateways rather than
   # under the one that will serve the run.
-  for actor in curator:$platform newcomer:$platform outsider:$payments; do
+  #
+  # One actor per extraction fixture group (EVAL-2, ADR-0046 decision 2).
+  # The partition is load-bearing rather than tidy: observe writes land at
+  # the caller's home scope, so a group's corpus is its own, and a recall
+  # sweep is capped at 32 records — which is why the corpus grows by
+  # adding actors here and never by adding fixtures past that arithmetic.
+  for actor in curator:$platform newcomer:$platform outsider:$payments \
+    extract-alpha:$platform extract-beta:$platform extract-gamma:$platform \
+    extract-delta:$platform extract-epsilon:$platform; do
     ./target/debug/synveda service register --tenant "$EVAL_TENANT" \
       --subject "${actor%%:*}" --scope "${actor##*:}" >/dev/null
   done
+
+  # The auditor the extraction suite reads the chain as (ADR-0046
+  # decision 4). Deliberately NOT a service identity: AUTH-3's confinement
+  # forbid denies the tenant plane to those however they are bound, and
+  # `AuditRead` declares `resource: [Tenant]` and admits nothing narrower
+  # (ADR-0045 decision 2). It is also placed nowhere and registered as
+  # nothing — an auditor is a member of nothing, and every byte it sees
+  # comes from `AuditRead` rather than from the membership floor.
+  ./target/debug/synveda role bind --tenant "$EVAL_TENANT" \
+    --subject eval-auditor --role auditor >/dev/null
 
   # Phase 2: the gateway under measurement.
   SYNVEDA_LISTEN_ADDR=${EVAL_GATEWAY_URL#http://}
@@ -142,6 +163,12 @@ eval_up() {
   curator=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT" --subject curator)
   newcomer=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT" --subject newcomer)
   outsider=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT" --subject outsider)
+  eval_auditor=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT" --subject eval-auditor)
+  for group in alpha beta gamma delta epsilon; do
+    eval "extract_$group=\$(./target/debug/synveda token issue \
+      --tenant \"\$EVAL_TENANT\" --subject \"extract-$group\")"
+  done
+  # The auditor carries no scope, because it sits at none.
   cat >"$EVAL_ENV" <<EOF
 {
   "gateway_url": "$EVAL_GATEWAY_URL",
@@ -149,7 +176,13 @@ eval_up() {
   "actors": {
     "curator":  { "token": "$curator",  "scope": "acme/eng/platform" },
     "newcomer": { "token": "$newcomer", "scope": "acme/eng/platform" },
-    "outsider": { "token": "$outsider", "scope": "acme/eng/payments" }
+    "outsider": { "token": "$outsider", "scope": "acme/eng/payments" },
+    "auditor":  { "token": "$eval_auditor" },
+    "extract-alpha":   { "token": "$extract_alpha",   "scope": "acme/eng/platform" },
+    "extract-beta":    { "token": "$extract_beta",    "scope": "acme/eng/platform" },
+    "extract-gamma":   { "token": "$extract_gamma",   "scope": "acme/eng/platform" },
+    "extract-delta":   { "token": "$extract_delta",   "scope": "acme/eng/platform" },
+    "extract-epsilon": { "token": "$extract_epsilon", "scope": "acme/eng/platform" }
   }
 }
 EOF
@@ -158,11 +191,16 @@ EOF
 # eval_run [extra args…] — the harness against the stack eval_up made.
 # $EVAL_REPORT names where the JSON report lands; the default goes with
 # the run's scratch state, and CI points it somewhere it can keep.
+# $EVAL_BASELINE picks the gate: the default is the deterministic one, and
+# `make eval-extraction-live` points it at evals/baseline-live.json,
+# because a live model's numbers and a ruleset's are not comparable
+# (EVAL-2, ADR-0046 decision 12).
 eval_run() {
   ./target/debug/synveda-eval run \
     --env "$EVAL_ENV" \
     --suite evals/scenarios \
-    --baseline evals/baseline.json \
+    --fixtures evals/fixtures/extraction \
+    --baseline "${EVAL_BASELINE:-evals/baseline.json}" \
     --report "${EVAL_REPORT:-$EVAL_STATE/report.json}" \
     "$@"
 }

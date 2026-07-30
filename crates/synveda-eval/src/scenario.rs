@@ -201,7 +201,7 @@ pub fn load_suite(dir: &Path) -> Result<Vec<Scenario>, String> {
 /// Metric names the reduction always produces. A category may not take one
 /// of them: the category's mean would overwrite the suite's axis, and the
 /// gate would then bound something other than what its name says.
-const RESERVED_METRICS: [&str; 7] = [
+const RESERVED_METRICS: [&str; 8] = [
     "accuracy",
     "recall",
     "abstention",
@@ -209,7 +209,19 @@ const RESERVED_METRICS: [&str; 7] = [
     "tokens_max",
     "latency_p50_ms",
     "latency_p95_ms",
+    "hallucination_rate",
 ];
+
+/// The extraction suite owns a whole namespace rather than a fixed list,
+/// because its axes are per class and a class can be added (EVAL-2,
+/// ADR-0046). A prefix rule covers the names that do not exist yet.
+const RESERVED_PREFIX: &str = "extraction_";
+
+/// Whether a folded metric name belongs to something other than a
+/// scenario category.
+fn is_reserved(metric: &str) -> bool {
+    RESERVED_METRICS.contains(&metric) || metric.starts_with(RESERVED_PREFIX)
+}
 
 /// The checks serde cannot make: that expectations refer to keys the
 /// scenario actually seeds, and that it asks for something.
@@ -221,9 +233,9 @@ fn validate(scenario: &Scenario) -> Result<(), String> {
         if category.trim().is_empty() {
             return Err("category is present but empty".to_owned());
         }
-        if RESERVED_METRICS.contains(&metric_name(category).as_str()) {
+        if is_reserved(&metric_name(category)) {
             return Err(format!(
-                "category `{category}` collides with the built-in axis of the same name"
+                "category `{category}` collides with a built-in axis of the same name"
             ));
         }
     }
@@ -324,6 +336,34 @@ mod tests {
         )
         .expect_err("an empty expectation measures nothing");
         assert!(err.contains("measures nothing"), "unhelpful error: {err}");
+    }
+
+    /// A category that folds onto a built-in axis would have its mean
+    /// silently overwrite that axis, and the gate would then bound
+    /// something other than what its name says. The extraction namespace is
+    /// reserved by prefix so the classes EVAL-2 has not added yet are
+    /// covered too.
+    #[test]
+    fn a_category_cannot_take_a_built_in_axis_name() {
+        for category in [
+            "accuracy",
+            "hallucination rate",
+            "extraction precision macro",
+            "extraction-recall-fact",
+        ] {
+            let json = MINIMAL.replace(
+                r#""probe""#,
+                &format!(r#""category": "{category}", "probe""#),
+            );
+            let err = parse(&json).expect_err(&format!("category {category:?} must not validate"));
+            assert!(err.contains("collides"), "unhelpful error: {err}");
+        }
+        // A category that merely mentions a class is still fine.
+        let json = MINIMAL.replace(r#""probe""#, r#""category": "fact recall", "probe""#);
+        assert!(
+            parse(&json).is_ok(),
+            "an ordinary category must still parse"
+        );
     }
 
     #[test]
