@@ -6,6 +6,13 @@ name: Eval
 # and fast. `workflow_dispatch` is there for the day you want it before a
 # merge; EVAL-4's composition scenarios are the trigger to move it onto
 # the pull-request path for good.
+#
+# `make eval` covers both suites: the scenario suite and EVAL-2's labelled
+# extraction corpus (ADR-0046), which needs no wiring here because the
+# runner defaults to evals/fixtures/extraction. Deliberately absent is the
+# live-model measurement — `make eval-extraction-live` needs a key this
+# workflow does not hold, and a nightly that pages on model drift is the
+# thing ADR-0028 decision 6 refused.
 on:
   schedule:
     # 03:00 UTC, after the day's merges and before anyone reads it.
@@ -30,8 +37,11 @@ jobs:
         run: docker compose -f deploy/compose/docker-compose.yml up --detach --wait postgres
 
       # The report is the artefact: axis by axis, scenario by scenario,
-      # with each block's watermark. A failed gate still uploads it —
-      # that is the run someone needs to read.
+      # and class by class, with each block's watermark and — for the
+      # extraction half — what the pipeline committed beside what a reader
+      # was served, so a withheld record does not read as a missed
+      # extraction. A failed gate still uploads it: that is the run
+      # someone needs to read.
       - name: Run the suite against the gate
         run: mkdir -p eval-report && make eval
         env:
