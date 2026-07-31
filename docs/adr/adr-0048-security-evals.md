@@ -115,6 +115,18 @@ Decisions, specifically:
    decision 11) — promoted from visible to gated, because here the gate is
    one-sided and there is no other side to catch it.
 
+   **Amended 2026-07-31, first green run.** The slice's selection had to be
+   fixed before a floor was worth committing, and the bug is the decision
+   arriving from inside the harness. "Every k-th of the tail" with
+   `k = ceil(tail / room)` collapses the moment `k` rounds up to 2: a nightly
+   asking for 10,000 variants over an 11,680-strong space would have asked
+   **5,840** and reported a green gate on a floor of 10,000 — the exact
+   "passes by measuring less" failure these floors exist to catch, committed
+   by the code that was supposed to prevent it. The selection is a Bresenham
+   even spread instead, which returns the budget on the nose. Measured:
+   `security_variants` 400 asked of 11,680 generated, `security_probes`
+   1,276, both exactly the arithmetic the baseline predicted.
+
 4. **`security_controls` at 1.0: the positive control that makes the zeros mean
    something.** Every (record, reader) pair the corpus declares **readable** must
    actually reach that reader. Without it a run of zeros is indistinguishable
@@ -181,6 +193,20 @@ Decisions, specifically:
    there. TEN-6 therefore shrinks to those two plus whatever surfaces Phase 3
    adds, and inherits this suite's nightly wiring rather than building a second.
 
+   **Amended 2026-07-31, first run: a cross-tenant corpus needs one auditor
+   per tenant, and that is AUD-2's contract showing up in an eval.** The
+   suite waits for the pipeline by asking the chain — "every seeded event
+   appears in a `memory.extracted` payload", which is exact where "enough
+   records showed up" is not (ADR-0046). But `AuditRead` declares
+   `resource: [Tenant]` and an audit answer covers one chain or is refused
+   (ADR-0045 decision 2), so the first run asked the *primary* tenant's
+   auditor about the foreign tenant's record and reported "the pipeline
+   never finished with 1 record" for material that had extracted perfectly
+   well. `Environment::auditor_for` resolves one per tenant now. Worth
+   recording rather than just fixing: the wait was correct, the auditor was
+   correct, and the composition of the two was not — which is what a
+   tenant-scoped answer does to a cross-tenant question.
+
 9. **The prompt-injection half is an invariant about lines, and the renderer is
    changed so it can hold.** `security_unattributed_lines` is gated at zero:
    every non-empty line of a composed block is exactly one of the preamble, a
@@ -241,6 +267,23 @@ Decisions, specifically:
     a forged ` [confidential]` over-warns; and ` [unreviewed]` cannot be removed
     by content, only added.
 
+    **Amended 2026-07-31, first green run, twice.** The axis counted
+    *occurrences* and read **159** for one record, because the same line
+    echoes in every block that carries it — so it measured how many probes a
+    run issued rather than how much of the corpus renders indistinguishably
+    from a marker. Distinct lines now, and it reads **1**. And the probe
+    itself was not testing what it claimed: MEM-2's `payment-card` rule
+    (`\b(?:\d[ \-]?){12,18}\d\b` plus a Luhn check) matched the digit-and-
+    hyphen run of the fixture's all-zero UUID — all zeros pass Luhn — so the
+    handle reached the block as `(recall [REDACTED:payment-card]` and the
+    probe measured the redactor. **That false positive is a real MEM-2
+    finding and it is left alone here**: the fixture now uses a UUID with hex
+    letters in every group, and changing a shipped scanner's ruleset because
+    an eval tripped it is the shape of change ADR-0046 option 7 refused. It
+    belongs with the ruleset precision work ADR-0021 parked, and the
+    exposure is narrow — a UUID whose segments are digits only *and* whose
+    run passes Luhn.
+
 12. **A fourth suite, a fourth file kind, and the `security_` namespace
     reserved.** `evals/fixtures/security/*.json`: one corpus of material with
     declared boundaries, plus the forgery probes, plus the variant budget. Same
@@ -290,6 +333,19 @@ Decisions, specifically:
     disclosure is the mechanism working as designed or a disclosure nobody
     costed is a judgement, and the gate's job is to force somebody to make it
     before merging rather than after an audit.
+
+    **Amended 2026-07-31: the first attempt granted a 150-second lapse and
+    the gate held, which was the demo measuring a window rather than a
+    boundary.** The security corpus runs last — after the scenarios, five
+    extraction groups and the Q&A corpus, each of which seeds and waits on
+    the pipeline — so the grant had already expired by the time anything
+    probed it. That is AUTHZ-4's expiry working exactly as built, and it is
+    the third instance in this feature of the same mistake: a number chosen
+    for one part of a run and spent by another. The window is 30 minutes
+    now, and phase 4 is a third fresh tenant with no grant on it rather
+    than a wait — proving that a lapse expires on its own timer is
+    AUTHZ-4's own acceptance criterion and re-proving it here is what
+    broke the demo.
 
     **Written first as an `open-collaboration` pack flip, which does not work,
     and the reason is worth more than the demo.** A pack cannot put a sibling
@@ -373,9 +429,11 @@ Decisions, specifically:
    Rejected for now, and the reason is a property rather than a preference: a
    sequential run makes a leak found at probe N reproducible by re-running the
    first N probes, and a security finding nobody can reproduce is a security
-   finding nobody acts on. The wall clock is measured and recorded below; if it
-   becomes the thing that stops the suite from running, bounded concurrency with
-   an ordered result set is the recorded upgrade.
+   finding nobody acts on. **Measured on the first green run: 1,276 probes in
+   23.6s — 18.5ms each, which puts the nightly's ~10,876 at about 3.4 minutes.**
+   That is comfortably inside a nightly and inside the pull-request job's
+   headroom, so the trade stands and this stays the recorded upgrade rather than
+   a pending one.
 9. **Put the whole suite on the nightly only, as the AC's one word says** —
    cheapest, and literally what "AC: nightly" asks for. Rejected per
    decision 14: the merge path already gates on composition quality, and a
