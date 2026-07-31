@@ -90,3 +90,49 @@ jobs:
           name: eval-report-retrieval
           path: retrieval-report/
           if-no-files-found: warn
+
+  # EVAL-5's security suite at the full variant budget (ADR-0048). The
+  # pull-request job in ci.yml already runs the same corpus at a
+  # deterministic 400-variant slice; this is the run the acceptance
+  # criterion's 10,000 belongs to, and it takes minutes rather than
+  # seconds because ten thousand phrasings over four surfaces is what
+  # "under 10k generated query variants" asks for.
+  #
+  # A separate job for the reason the retrieval one is separate: its
+  # failure modes are its own. A slow pipeline here reads as a corpus that
+  # never became retrievable, and folding that into the job above would
+  # let it mask a composition result someone needs.
+  #
+  # Postgres only. Both admitted tenants live in the one scratch database
+  # the harness creates, so the cross-tenant half needs no extra service —
+  # what makes a foreign probe real is that the token carries the tenant,
+  # not that the storage is somewhere else.
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Start Postgres
+        run: docker compose -f deploy/compose/docker-compose.yml up --detach --wait postgres
+
+      - name: Run the security corpus at the full variant budget
+        run: mkdir -p security-report && make eval-security
+        env:
+          EVAL_REPORT: security-report/report.json
+
+      # A failed gate still uploads it, and here that matters more than
+      # anywhere else: the report names the record, the reader, the
+      # surface, the phrasing and the probe index, which are the five
+      # things needed to reproduce a disclosure.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report-security
+          path: security-report/
+          if-no-files-found: warn

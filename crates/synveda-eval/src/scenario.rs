@@ -40,6 +40,14 @@ pub struct Actor {
     /// Where the actor sits, for the report to be readable.
     #[serde(default)]
     pub scope: Option<String>,
+    /// Which admitted tenant this actor belongs to, when it is not the
+    /// environment's own (EVAL-5, ADR-0048 decision 8). The runner still
+    /// never *sends* a tenant — the token carries one, which is exactly
+    /// what makes a foreign probe a real probe — but the security suite
+    /// has to know which side of the boundary a reader is on to say which
+    /// boundary a leak crossed.
+    #[serde(default)]
+    pub tenant: Option<String>,
 }
 
 impl Environment {
@@ -58,6 +66,16 @@ impl Environment {
         self.actors
             .get(name)
             .ok_or_else(|| format!("no actor `{name}` in this environment"))
+    }
+
+    /// The tenant an actor's bearer carries, defaulting to this
+    /// environment's own.
+    pub fn tenant_of(&self, name: &str) -> Result<&str, String> {
+        Ok(self
+            .actor(name)?
+            .tenant
+            .as_deref()
+            .unwrap_or(&self.tenant_id))
     }
 
     pub fn scope(&self, name: &str) -> Result<&str, String> {
@@ -236,7 +254,7 @@ const RESERVED_METRICS: [&str; 12] = [
 /// their axes are per class (EVAL-2, ADR-0046) or per scope tier (EVAL-4,
 /// ADR-0047) and either can be added. A prefix rule covers the names that
 /// do not exist yet.
-const RESERVED_PREFIXES: [&str; 2] = ["extraction_", "qa_"];
+const RESERVED_PREFIXES: [&str; 3] = ["extraction_", "qa_", "security_"];
 
 /// Whether a folded metric name belongs to something other than a
 /// scenario category.
@@ -379,6 +397,9 @@ mod tests {
             "qa-scope-department",
             "tokens per answer",
             "retrieval precision",
+            // EVAL-5's namespace (ADR-0048).
+            "security probes",
+            "security-leaks-tenant",
         ] {
             let json = MINIMAL.replace(
                 r#""probe""#,

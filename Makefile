@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-extraction-live eval-retrieval
+.PHONY: fmt lint test build deny check-deps ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -54,6 +54,23 @@ eval-retrieval:
 	SYNVEDA_TEI_URL=$${SYNVEDA_TEI_URL:-http://localhost:8110} \
 	EVAL_DENSE_RETRIEVAL=1 \
 	EVAL_BASELINE=evals/baseline-retrieval.json sh evals/run.sh
+
+# EVAL-5's nightly (ADR-0048): the security corpus at the full variant
+# budget, gated by evals/baseline-security.json. `make eval` already runs
+# the same suite on every pull request at a deterministic 400-variant
+# slice — a product that blocks a merge on a token count and not on a
+# disclosure has recorded its priorities backwards — and this is the run
+# the acceptance criterion's 10,000 belongs to.
+#
+# Its own baseline for a different reason than EVAL-4's split: there the
+# two paths measure incomparable things, here they measure the same thing
+# at different scale. The leak counts are identical in both files, because
+# zero is zero; only the two coverage floors differ, and those exist
+# because a one-sided gate whose denominator the run chooses passes by
+# measuring less.
+eval-security:
+	EVAL_SECURITY_VARIANTS=10000 \
+	EVAL_BASELINE=evals/baseline-security.json sh evals/run.sh
 
 # The same corpus through a real model instead of the rule-based
 # extractor (EVAL-2, ADR-0046 decision 12), gated by its own baseline

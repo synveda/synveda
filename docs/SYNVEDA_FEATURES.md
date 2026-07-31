@@ -530,11 +530,17 @@ EVAL-5 Security evals (M)
   recorded material and not instructions, labelled in the ADR as a mitigation addressed to the
   guest rather than counted as a control; `security_marker_echoes` (content reproducing
   ` [confidential]` or `(recall <id>)` inline, with no newline needed) is measured and gated by
-  nothing on the first run; a real product change that opens a disclosure — `open-collaboration`
-  applied at the org through the governed path, on a fresh tenant — fails the gate naming the
-  axis, the baseline, the measurement and the delta, while `security_leaks_sensitivity` holds at
-  zero on the same run, because a boundary a pack may open and a tier no pack may is the
-  distinction the suite exists to draw; nightly at the full variant budget against
+  nothing on the first run; a real, governed relaxation that opens a disclosure — a lapse
+  proposed on the disclosing side, approved by two distinct stewards and time-boxed, granting a
+  sibling team read of the vault team's material, on a fresh tenant — fails the gate naming the
+  axis, the baseline, the measurement and the delta, while `security_leaks_sensitivity` and
+  `security_leaks_tenant` hold at zero on the same run and hold for two DIFFERENT reasons: the
+  confidential record is withheld by the grant's own declared tier ceiling, and the `restricted`
+  one by something no grant can reach at all, since it lives at a personal leaf and the base
+  layer's one permit carries `resource.kind != "user"`; a lapse rather than a pack flip because
+  a pack cannot open a sibling team's material into anybody's block — the candidate universe is
+  the caller's placement chain and widens by lapse and by nothing else (ADR-0037 decision 13),
+  which is a good product property and a demo that would have proved nothing; nightly at the full variant budget against
   evals/baseline-security.json, and a deterministic every-k-th slice on the pull-request path
   against evals/baseline.json, because a product that blocks a merge on a token count and not on
   a disclosure has recorded its priorities backwards; demo script. Deferred with a recorded

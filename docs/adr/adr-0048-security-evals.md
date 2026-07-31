@@ -270,19 +270,41 @@ Decisions, specifically:
     recorded backwards. The slice costs the existing `eval` job about a minute;
     no new job, no new service.
 
-15. **The demo is a real, governed policy change, and it fails one axis while the
-    other holds.** `open-collaboration` applied at the org through the governed
-    path — a pack the product ships, whose own text is "org-wide read for
-    non-restricted content". The next run's `security_leaks_scope` rises above
-    zero naming the reader and the record, and `security_leaks_sensitivity`
-    **stays at zero**, because the base-layer forbid is not a pack's to open.
+15. **The demo is a real, governed relaxation, and it moves one axis while two
+    hold for two different reasons.** A **lapse** — proposed on the disclosing
+    side, approved by two distinct stewards, time-boxed and audited (AUTHZ-4,
+    ADR-0037) — granting the settlement desk read of the vault team's material.
+    The next run's `security_leaks_scope` rises above zero naming the record, the
+    reader, the surface and the phrasing; `security_leaks_sensitivity` and
+    `security_leaks_tenant` stay at zero.
 
-    That is the distinction the suite exists to draw, and it is why the demo is
-    not a bug: whether a pack that discloses a team's material department-wide is
-    a policy working as configured or a disclosure nobody costed is a judgement,
-    and the gate's job is to force somebody to make it before merging rather than
-    after an audit. A fresh tenant per phase, ADR-0028 decision 7's rule as
-    EVAL-2 rediscovered it.
+    The two that hold are held by *different* mechanisms, which is why they are
+    separate axes. The confidential record is withheld by the grant's own
+    declared ceiling — a lapse admits only the tier it names (ADR-0038
+    decision 9). The `restricted` record is withheld by something no grant can
+    reach at all: it lives at a personal leaf, and the base layer's one permit
+    carries `resource.kind != "user"`.
+
+    A fresh tenant per phase, ADR-0028 decision 7's rule as EVAL-2 rediscovered
+    it. And the demo is not a bug report: whether a steward's time-boxed
+    disclosure is the mechanism working as designed or a disclosure nobody
+    costed is a judgement, and the gate's job is to force somebody to make it
+    before merging rather than after an audit.
+
+    **Written first as an `open-collaboration` pack flip, which does not work,
+    and the reason is worth more than the demo.** A pack cannot put a sibling
+    team's material into anybody's `inject`: the candidate universe is the
+    caller's *placement chain* and it "widens by lapse and by nothing else"
+    (ADR-0037 decision 13, restated as a correction in ADR-0038's status
+    entry) — so `open-collaboration` at the org changes what a reader may read
+    and not what a block considers. `recall` does widen with the pack, but the
+    material a promotion published never left its author's personal leaf
+    (ADR-0034 decision 3), personal scopes are excluded under every pack
+    including the open one, and a query-shaped recall does not follow published
+    channels (ADR-0047 reversal trigger (g)). The pack flip therefore discloses
+    nothing, which is a good property and a demo that proves nothing. The lapse
+    is the one mechanism in the product that widens a universe, so it is the
+    one change this gate can be shown failing on.
 
 16. **The behavioural half of the injection suite is deferred with a trigger, and
     the reason is not cost.** "Whether a model reading the block obeys an

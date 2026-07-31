@@ -119,7 +119,35 @@ eval_up() {
   eng=$(eval_node "{\"parent_id\":\"$org\",\"kind\":\"department\",\"slug\":\"eng\",\"name\":\"Engineering\"}")
   platform=$(eval_node "{\"parent_id\":\"$eng\",\"kind\":\"team\",\"slug\":\"platform\",\"name\":\"Platform\"}")
   payments=$(eval_node "{\"parent_id\":\"$eng\",\"kind\":\"team\",\"slug\":\"payments\",\"name\":\"Payments\"}")
+  # EVAL-5's own department, so the security corpus and the Q&A corpus do
+  # not share a subtree: a sibling team and a second department are what
+  # make a *scope* boundary distinguishable from a tier one, and a reader
+  # whose sweep also enumerates another suite's promoted material is a
+  # reader whose sweep is closer to the 32-record cap for no reason.
+  sec=$(eval_node "{\"parent_id\":\"$org\",\"kind\":\"department\",\"slug\":\"sec\",\"name\":\"Treasury\"}")
+  vault=$(eval_node "{\"parent_id\":\"$sec\",\"kind\":\"team\",\"slug\":\"vault\",\"name\":\"Vault\"}")
+  desk=$(eval_node "{\"parent_id\":\"$sec\",\"kind\":\"team\",\"slug\":\"desk\",\"name\":\"Settlement desk\"}")
   EVAL_ORG=$org
+
+  # A SECOND ADMITTED TENANT (EVAL-5, ADR-0048 decision 8). The first time
+  # this harness has run more than one, and the point of the cross-tenant
+  # half: the runner never sends a tenant — the token carries one — so a
+  # probe from here to there is the real thing rather than a filter test.
+  # Its estate is deliberately minimal; what is under measurement is the
+  # boundary, not the shape on the far side of it.
+  EVAL_TENANT_B=$(./target/debug/synveda tenant create \
+    --slug "eval-b-$$" --name "EVAL-5 foreign tenant" | eval_json_field id)
+  admin_b=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject eval-admin-b)
+  ./target/debug/synveda role bind --tenant "$EVAL_TENANT_B" \
+    --subject eval-admin-b --role org-admin >/dev/null
+  eval_node_b() {
+    curl -fsS -X POST "$EVAL_SEED_URL/v1/hierarchy/nodes" \
+      -H "Authorization: Bearer $admin_b" -H 'Content-Type: application/json' \
+      -d "$1" | eval_json_field id
+  }
+  org_b=$(eval_node_b '{"parent_id":null,"kind":"org","slug":"northwind","name":"Northwind"}')
+  clearing=$(eval_node_b "{\"parent_id\":\"$org_b\",\"kind\":\"team\",\"slug\":\"clearing\",\"name\":\"Clearing\"}")
+
   kill "$EVAL_SEED_PID" 2>/dev/null || true
   wait "$EVAL_SEED_PID" 2>/dev/null || true
   EVAL_SEED_PID=""
@@ -140,14 +168,21 @@ eval_up() {
   # the author of team material is anchored at the team, the author of
   # department material at the department, and the reviewers at the org,
   # from which roles inherit downward to every level they review.
+  # EVAL-5's readers are placed where the boundary is (ADR-0048): the
+  # owner and a teammate at one team, a sibling team's member at another,
+  # and the compliance approver at the org, from which roles inherit down
+  # to the personal leaf a classification proposal targets.
   for actor in curator:$platform newcomer:$platform outsider:$payments \
     extract-alpha:$platform extract-beta:$platform extract-gamma:$platform \
     extract-delta:$platform extract-epsilon:$platform \
     qa-reader:$payments qa-team:$payments qa-dept:$eng qa-org:$org \
-    qa-curator:$org qa-steward:$org; do
+    qa-curator:$org qa-steward:$org \
+    sec-owner:$vault sec-mate:$vault sec-neighbour:$desk sec-compliance:$org; do
     ./target/debug/synveda service register --tenant "$EVAL_TENANT" \
       --subject "${actor%%:*}" --scope "${actor##*:}" >/dev/null
   done
+  ./target/debug/synveda service register --tenant "$EVAL_TENANT_B" \
+    --subject xt-reader --scope "$clearing" >/dev/null
 
   # The reviewers every Q&A promotion goes through. Which roles a
   # publication needs is the target scope's pack answer and not this
@@ -160,6 +195,19 @@ eval_up() {
     --subject qa-curator --role curator --scope "$org" >/dev/null
   ./target/debug/synveda role bind --tenant "$EVAL_TENANT" \
     --subject qa-steward --role steward --scope "$org" >/dev/null
+
+  # The compliance approver EVAL-5's `restricted` classification needs
+  # (ADR-0048 decision 7). The invariant approval floor asks for this role
+  # plus two distinct approvers on anything at the top tier, under every
+  # pack and unauthorable away (ADR-0032 decision 4) — so without this
+  # binding the security corpus has no way to mint the tier its whole
+  # sensitivity boundary is about. `curator` comes with it for the reason
+  # the AUTHZ-5 leak suite gives: approving a restricted change means
+  # reading it, and the review surface shows content.
+  for role in compliance curator; do
+    ./target/debug/synveda role bind --tenant "$EVAL_TENANT" \
+      --subject sec-compliance --role "$role" --scope "$org" >/dev/null
+  done
 
   # The auditor the extraction suite reads the chain as (ADR-0046
   # decision 4). Deliberately NOT a service identity: AUTH-3's confinement
@@ -193,6 +241,12 @@ eval_up() {
     eval "qa_$who=\$(./target/debug/synveda token issue \
       --tenant \"\$EVAL_TENANT\" --subject \"qa-$who\")"
   done
+  for who in owner mate neighbour compliance; do
+    eval "sec_$who=\$(./target/debug/synveda token issue \
+      --tenant \"\$EVAL_TENANT\" --subject \"sec-$who\")"
+  done
+  # The one bearer in this file that carries a different tenant.
+  xt_reader=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject xt-reader)
   # The auditor carries no scope, because it sits at none. `scopes` is the
   # one thing a Q&A corpus has to say in UUIDs — where a promotion lands
   # (EVAL-4, ADR-0047 decision 3) — so a fixture names `payments` and this
@@ -205,7 +259,10 @@ eval_up() {
     "acme": "$org",
     "eng": "$eng",
     "platform": "$platform",
-    "payments": "$payments"
+    "payments": "$payments",
+    "sec": "$sec",
+    "vault": "$vault",
+    "desk": "$desk"
   },
   "actors": {
     "curator":  { "token": "$curator",  "scope": "acme/eng/platform" },
@@ -222,7 +279,16 @@ eval_up() {
     "qa-dept":    { "token": "$qa_dept",    "scope": "acme/eng" },
     "qa-org":     { "token": "$qa_org",     "scope": "acme" },
     "qa-curator": { "token": "$qa_curator", "scope": "acme" },
-    "qa-steward": { "token": "$qa_steward", "scope": "acme" }
+    "qa-steward": { "token": "$qa_steward", "scope": "acme" },
+    "sec-owner":      { "token": "$sec_owner",      "scope": "acme/sec/vault" },
+    "sec-mate":       { "token": "$sec_mate",       "scope": "acme/sec/vault" },
+    "sec-neighbour":  { "token": "$sec_neighbour",  "scope": "acme/sec/desk" },
+    "sec-compliance": { "token": "$sec_compliance", "scope": "acme" },
+    "xt-reader": {
+      "token": "$xt_reader",
+      "scope": "northwind/clearing",
+      "tenant": "$EVAL_TENANT_B"
+    }
   }
 }
 EOF
@@ -241,6 +307,8 @@ eval_run() {
     --suite evals/scenarios \
     --fixtures evals/fixtures/extraction \
     --qa evals/fixtures/qa \
+    --security evals/fixtures/security \
+    ${EVAL_SECURITY_VARIANTS:+--security-variants "$EVAL_SECURITY_VARIANTS"} \
     --baseline "${EVAL_BASELINE:-evals/baseline.json}" \
     --report "${EVAL_REPORT:-$EVAL_STATE/report.json}" \
     ${EVAL_DENSE_RETRIEVAL:+--dense-retrieval} \
@@ -251,6 +319,8 @@ eval_down() {
   [ -n "${EVAL_PID:-}" ] && kill "$EVAL_PID" 2>/dev/null
   [ -n "${EVAL_SEED_PID:-}" ] && kill "$EVAL_SEED_PID" 2>/dev/null
   wait 2>/dev/null || true
+  # One scratch database holds both admitted tenants, so dropping it
+  # disposes of the foreign one too (EVAL-5, ADR-0048's compliance note).
   if [ -n "${EVAL_DB:-}" ]; then
     $COMPOSE exec -T postgres psql -U synveda -d synveda \
       -c "drop database if exists $EVAL_DB with (force)" >/dev/null 2>&1 || true

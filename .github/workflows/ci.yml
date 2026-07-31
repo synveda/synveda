@@ -52,15 +52,23 @@ jobs:
   # is a request for it in as many words.
   #
   # The whole deterministic suite runs here: EVAL-1's scenarios, EVAL-2's
-  # extraction corpus and EVAL-4's Q&A corpus, against the one baseline that
-  # covers that path. The other four jobs stay database-free and fast, so
-  # the toll is one parallel job rather than a change to how anything else
-  # runs. The retrieval half stays nightly — TEI is a ~2.3 GB model
-  # download, and that cost is exactly what makes a per-PR job the wrong
-  # place for it.
+  # extraction corpus, EVAL-4's Q&A corpus and EVAL-5's security corpus,
+  # against the one baseline that covers that path. The other four jobs
+  # stay database-free and fast, so the toll is one parallel job rather
+  # than a change to how anything else runs. The retrieval half stays
+  # nightly — TEI is a ~2.3 GB model download, and that cost is exactly
+  # what makes a per-PR job the wrong place for it.
+  #
+  # EVAL-5 (ADR-0048 decision 14) runs its corpus here at a deterministic
+  # 400-variant slice — every hand-written probe plus an even spread of the
+  # combinatorial tail — rather than at the nightly's 10,000. The leak
+  # counts are gated at zero on both paths, because zero is zero; only the
+  # coverage floors differ. A product that blocks a merge on
+  # `tokens_per_answer` rising and not on `restricted` material reaching a
+  # reader has recorded its priorities backwards.
   eval:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install
