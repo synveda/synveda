@@ -494,7 +494,59 @@ EVAL-5 Security evals (M)
   Policy-leak suite (restricted content never crosses sensitivity/scope under 10k generated
   query variants); cross-tenant fuzz (TEN-6); prompt-injection-via-memory suite (a memory
   containing instructions must not alter agent behaviour when injected — content is data,
-  wrapped and labelled). AC: nightly; zero-tolerance gate.
+  wrapped and labelled).
+  AC: one security corpus under evals/fixtures/security/ in which every (record, reader) pair
+  declares readable or forbidden, refused at parse time when a pair is undeclared or declared
+  twice, because an undeclared pair is an unmeasured boundary and a security suite that skips
+  one silently is the failure mode it exists to prevent; the corpus is governed into place
+  rather than seeded — material enters at its author's leaf through /v1/observe, climbs through
+  POST /v1/proposals and each level's real approvers, and reaches `restricted` through a
+  classify proposal the author opens at their own home scope and two distinct approvers sign,
+  one of them holding `compliance`, because that is the only mechanism in the product that
+  mints the tier; `make eval-security` asks every reader every generated variant over both
+  query-shaped read surfaces — POST /v1/inject and POST /v1/recall's query form — and asks each
+  reader the sweep form and the ids form naming every record it must not have, since recall's
+  universe is wider than inject's by design (ADR-0024) and the ids form needs no retrieval to
+  succeed and only a refusal to fail; `security_leaks_sensitivity`, `security_leaks_scope` and
+  `security_leaks_tenant` are COUNTS gated at zero and never rates, because a rate divides a
+  leak by a denominator the run chooses and three decimal places then round one leak in ten
+  thousand to zero; `security_probes` and `security_variants` are gated with FLOORS, 10k
+  variants being that floor on the nightly, because a one-sided gate with a free denominator
+  passes by measuring less and nothing in the report would look wrong; `security_controls` is
+  gated at 1.0 — every declared-readable pair actually reaching its reader — so a run of zeros
+  is a measurement rather than an empty corpus, a dead pipeline or an expired bearer; a leak is
+  graded by record identity AND by distinctive phrase and a disagreement between them is
+  reported as its own defect, because a block whose text carries material its watermark does
+  not name is not the same failure as one that served the wrong record; the cross-tenant half
+  runs against a second admitted tenant with its own hierarchy, actors and corpus, and TEN-6's
+  remaining scope — the store seam TEN-2 already fuzzes, and graph traversal, which has no
+  caller-facing surface until GRPH-3 — is recorded rather than left to be rediscovered; the
+  prompt-injection half is `security_unattributed_lines` gated at zero, the invariant that every
+  non-empty line of a composed block is the preamble, a section header, the index legend, the
+  watermark or an entry line and that the entry lines number exactly `record_ids.len()`, so a
+  record's content cannot forge a scope header, an entry no record backs, a marker on a line of
+  its own or a watermark — which takes a renderer that folds whitespace in rendered content
+  rather than an extractor that happens to, plus the preamble line that says the entries are
+  recorded material and not instructions, labelled in the ADR as a mitigation addressed to the
+  guest rather than counted as a control; `security_marker_echoes` (content reproducing
+  ` [confidential]` or `(recall <id>)` inline, with no newline needed) is measured and gated by
+  nothing on the first run; a real product change that opens a disclosure — `open-collaboration`
+  applied at the org through the governed path, on a fresh tenant — fails the gate naming the
+  axis, the baseline, the measurement and the delta, while `security_leaks_sensitivity` holds at
+  zero on the same run, because a boundary a pack may open and a tier no pack may is the
+  distinction the suite exists to draw; nightly at the full variant budget against
+  evals/baseline-security.json, and a deterministic every-k-th slice on the pull-request path
+  against evals/baseline.json, because a product that blocks a merge on a token count and not on
+  a disclosure has recorded its priorities backwards; demo script. Deferred with a recorded
+  trigger: the behavioural half of the injection suite — whether a model reading the block obeys
+  an instruction inside it — because it measures a joint property of the product's framing and
+  one model's susceptibility and would fail when a model changed rather than when the code did;
+  it rides the model-backed judge EVAL-3 must build and ADR-0046 option 6 already deferred.
+  Written 2026-07-31 (EVAL-5, ADR-0048): the feature text named three suites and four words of
+  AC. The load-bearing parts are the shape of the gate — counts and floors, because zero
+  tolerance over a rate is a gate that rounds and over a free denominator is a gate that passes
+  by measuring less — and the finding that the block's structure was forgeable by the content it
+  carries, held back only by one extractor's whitespace handling.
 EVAL-6 Load & latency suite (M)
   k6/vegeta profiles for inject/observe/recall SLOs at SMB and enterprise shapes.
   AC: SLO report per release.
