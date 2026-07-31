@@ -1979,6 +1979,47 @@ makes two runs comparable"): the demo now takes a tenant per phase, which
 also makes the horizoned phase differ from the clean ones in exactly one
 thing.
 
+**The first live run (2026-07-31, `claude-opus-4-8`, the extractor's
+configured default) found a third thing, and it is about this feature's
+own metric rather than about the model.** Macro precision read 0.820 and
+recall 0.783 against the rule-based path's 0.983 and 0.914, and **none of
+that is the model extracting worse** — `content_contains` is a sound
+predicate against a span-copying extractor, where the source text
+survives into the record verbatim, and an unsound one against a model,
+which paraphrases. Read all fifteen unmatched records and **not one is a
+fabrication**: `epsilon-fact-beyond-truncation` produced both facts
+*including* the one past the 300-character truncation that fixture exists
+to predict a model would reach, then scored a double miss for writing
+"acts as the backstop for tenant isolation" where the expectation said
+`store.rls.denied`; `beta-procedure-and-fact-windows` reached its second
+claim and scored zero over "a lock on **its** binary" against "lock on
+**the** binary"; `alpha-episode-cargo-test` wrote "passed all 148 tests"
+against "148 passed"; six are class disagreements on genuinely ambiguous
+ground truth (episode vs fact for a tool result, entity vs fact for a
+definition); and five are additional true records the corpus simply does
+not label, one of them a split into a decision plus the fact that
+enforces it, which is arguably the better extraction and cost precision
+twice and recall once. So the live quality axes stay **unbounded**: a
+floor at 0.820 would gate future runs on lexical agreement with a corpus
+written for a different kind of extractor, would look like diligence, and
+would fail on a model that got *better* at paraphrasing. What the corpus
+needs first is a predicate that accepts paraphrase — several accepted
+phrasings per expectation, a normalised-key match, or ADR-0046 option
+6's judge — and the unmatched list is the labelled set that judge would
+itself be measured against, which is the same seam MEM-5 and MEM-2 are
+waiting on. `hallucination_rate` **is** bounded at zero on the live path,
+because bait is an *absence* predicate and a model rephrasing what the
+transcript does say cannot trip it: `epsilon-bait-unchosen-store` is the
+case that matters, where the transcript says nobody has picked between
+two options and the model wrote "evaluated ... and recorded benchmarks"
+rather than inventing a decision. Read that bound honestly — it fails on
+fabrication this corpus anticipated, and invention in wording no bait
+covers reads as 0.000 too. Two things the live run confirmed and are
+worth keeping: `[REDACTED:github-pat]` survived into the model's own
+output verbatim, so ADR-0021's opacity property holds on the LLM path and
+not only the rule-based one; and committed equalled served on every
+group, so admission withheld nothing.
+
 Deferrals and forward obligations. **The record-level truncation gap in
 CTX-5 is recorded, not fixed**: `RecallResponse.truncated` reports the
 scope cap and not the record cap, so a sweep returning exactly `limit`
@@ -1988,13 +2029,11 @@ than mis-scoring it, and the corpus is partitioned one actor per group at
 ten events each to stay clear of it (30 records at a pessimistic three
 per event against a cap of 32); **grow the corpus by adding groups and
 actors, never by adding fixtures past that arithmetic**. Fixing the
-surface is ADR-0046 reversal trigger (c). **`evals/baseline-live.json` is
-deliberately unbounded**: nothing has been measured on the live path, and
-a floor invented before a measurement is a wish — `make
-eval-extraction-live` runs the same corpus through a real model and the
-first run writes them, keyed to the model the API *served* rather than
-the alias asked for. It is not on the nightly, for ADR-0028 decision 6's
-reason plus cost. **The two precision numbers are not one number**: the
+surface is ADR-0046 reversal trigger (c). **`evals/baseline-live.json` bounds only
+`hallucination_rate`**, for the reason above, and carries the first run's
+numbers in its note as evidence rather than as floors. It is not on the
+nightly, for ADR-0028 decision 6's reason plus cost: a run is ~59 model
+calls, one per observe event. **The two precision numbers are not one number**: the
 eval floor (0.963, measured minus 2 points of declared `slack`) is a
 regression gate, and the ingest test's registered ≥0.90 is the floor
 below which the product is unshippable — decision 8, and why the eval

@@ -129,6 +129,34 @@ Decisions, specifically:
    corpus actually exercises, so a class with no fixtures is absent from the
    report rather than counted as 1.0 or 0.0.
 
+   **Amended 2026-07-31, first live run.** This predicate is sound for the
+   deterministic path and **unsound for the live one**, and the first live
+   measurement is what showed it. `content_contains` works against a
+   span-copying extractor because the source text survives into the record
+   verbatim; a model paraphrases, so the same labels measure lexical
+   agreement rather than semantic correctness. Against `claude-opus-4-8`
+   the corpus reported macro precision 0.820 and recall 0.783, and reading
+   all fifteen unmatched records one by one, **not one is a fabrication**:
+   `epsilon-fact-beyond-truncation` produced both facts *including* the one
+   past the 300-character truncation the fixture exists to predict a model
+   would reach, and scored a double miss for writing "acts as the backstop
+   for tenant isolation" where the expectation said `store.rls.denied`;
+   `beta-procedure-and-fact-windows` reached its second claim and scored
+   zero over "a lock on **its** binary" against "lock on **the** binary";
+   six more are class disagreements on genuinely ambiguous ground truth
+   (episode vs fact for a tool result, entity vs fact for a definition);
+   and five are additional true records the corpus does not label, one of
+   them a split into a decision plus the fact enforcing it that is
+   arguably the better extraction. The live axes are therefore left
+   unbounded (decision 12's "the first live run writes them" is answered
+   with "not these numbers"), and the corpus needs a predicate that
+   accepts paraphrase — several accepted phrasings per expectation, a
+   normalised-key match, or option 6's judge — before they mean anything
+   on that path. `hallucination_rate` is the exception and is bounded at
+   zero, because bait is an *absence* predicate: a model rephrasing what
+   the transcript does say cannot trip it. The deterministic gate is
+   unaffected, because there the predicate is exactly right.
+
 6. **The hallucination axis is fixture-declared bait, gated at zero, and
    honest about what bait cannot catch.** Each fixture may declare
    `must_not_extract` — phrases a hallucinating extractor would plausibly
