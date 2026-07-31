@@ -218,6 +218,15 @@ eval_up() {
   # comes from `AuditRead` rather than from the membership floor.
   ./target/debug/synveda role bind --tenant "$EVAL_TENANT" \
     --subject eval-auditor --role auditor >/dev/null
+  # And one for the foreign tenant. Not a convenience: `AuditRead` declares
+  # `resource: [Tenant]` and an audit answer covers one chain or is refused
+  # (ADR-0045 decision 2), so the security suite's wait — "every seeded
+  # event appears in a memory.extracted payload" — has to ask each record's
+  # OWN chain. The first cross-tenant run reported the pipeline unfinished
+  # for a record that had extracted perfectly well, because it asked the
+  # wrong one (EVAL-5, ADR-0048).
+  ./target/debug/synveda role bind --tenant "$EVAL_TENANT_B" \
+    --subject eval-auditor-b --role auditor >/dev/null
 
   # Phase 2: the gateway under measurement.
   SYNVEDA_LISTEN_ADDR=${EVAL_GATEWAY_URL#http://}
@@ -233,6 +242,7 @@ eval_up() {
   newcomer=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT" --subject newcomer)
   outsider=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT" --subject outsider)
   eval_auditor=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT" --subject eval-auditor)
+  eval_auditor_b=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject eval-auditor-b)
   for group in alpha beta gamma delta epsilon; do
     eval "extract_$group=\$(./target/debug/synveda token issue \
       --tenant \"\$EVAL_TENANT\" --subject \"extract-$group\")"
@@ -269,6 +279,7 @@ eval_up() {
     "newcomer": { "token": "$newcomer", "scope": "acme/eng/platform" },
     "outsider": { "token": "$outsider", "scope": "acme/eng/payments" },
     "auditor":  { "token": "$eval_auditor" },
+    "auditor-northwind": { "token": "$eval_auditor_b", "tenant": "$EVAL_TENANT_B" },
     "extract-alpha":   { "token": "$extract_alpha",   "scope": "acme/eng/platform" },
     "extract-beta":    { "token": "$extract_beta",    "scope": "acme/eng/platform" },
     "extract-gamma":   { "token": "$extract_gamma",   "scope": "acme/eng/platform" },

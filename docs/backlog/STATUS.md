@@ -2255,8 +2255,7 @@ the corpus is one file with one reader; growing it means adding corpora,
 and the sweep's 32-record cap applies here exactly as it does to EVAL-2's —
 `locate` refuses a full page rather than mis-scoring it._
 
-_EVAL-5 IN PROGRESS (2026-07-31, ADR-0048): security evals. **Built, not yet
-run** — see the standing item at the end of this entry. The feature arrived
+_EVAL-5 (2026-07-31, ADR-0048): security evals. The feature arrived
 with four words of acceptance criteria ("nightly; zero-tolerance gate"),
 naming a cadence and a posture and no axis, no surface and no artefact, so
 they were written first for the fourth time (ADR-0028, ADR-0046, ADR-0047).
@@ -2356,44 +2355,85 @@ nothing, because the fix that would close it (moving every marker to a prefix
 position content cannot occupy) is CTX-2/CTX-4's format decision and not an
 eval's to drive.
 
-**STANDING ITEM — nothing here has been run against a live stack.** The
-machine this was built on has a wedged container engine: `orb status` reports
-Running, the `docker` CLI never returns, and port 5432 is bound with nothing
-answering a startup packet. What IS verified: `cargo fmt`, `cargo clippy -D
-warnings`, and 73 unit tests in `synveda-eval` plus 11 in `synveda-retrieval`,
-including the count-versus-rate assertion, the exhaustiveness guard, the
-even-spread slice, the line invariant on a well-formed and a forged block,
-and the marker-echo discriminator; `synveda-eval check` parses the corpus (9
-records, 36 declared boundaries). What is NOT: the four DB-backed things this
-feature turns on. In order of risk —
+**The first run, and the four things it settled.** It was written up as
+unrunnable — the `docker` CLI takes minutes to return in this environment and
+short timeouts read that as a dead engine — which was wrong: every container
+had been healthy for three days and Postgres answers a startup packet in 3ms.
+Read as a finding rather than an apology, it is the AUTHZ-1 lesson again from
+a third side: a slow signal and a dead one look identical to anything that
+gives up early, and the cheap fix both times was to wait for the direct
+evidence instead of inferring from the absence of it.
 
-1. **The classification path.** `POST /v1/proposals` with `effect: classify`
-   at the author's own home scope, approved by `sec-compliance` +
-   `qa-curator`, run by the author. The Cedar reading says this works
-   (`MemoryClassify` at `principal.home`, `ProposalReview` with no
-   personal-scope clause); it has never been exercised from outside the
-   gateway's own tests.
-2. **Publishing `confidential` material to a team.** `supplier-terms` is
-   classified and then climbs. ADR-0031 decision 12 requires the publisher to
-   hold `MemoryRead` on every record, and whether the org curator's read is
-   asked at the target or the source decides whether this climb is possible at
-   all. If it is not, that is a product finding and the record's boundary
-   claim moves rather than the gate loosening.
-3. **The two coverage floors are arithmetic, not measurements** — the one
-   place in this eval suite where that is true. `security_variants` is exactly
-   the budget because the slice is an even spread rather than a stride (a
-   stride collapses to half the budget the moment it rounds to 2, which is the
-   "passes by measuring less" failure arriving from inside the harness);
-   `security_probes` follows from the corpus at 1,276 on the pull-request
-   slice and ~10,876 on the nightly. Both are re-confirmed on the first green
-   run.
-4. **The wall clock**, which decides ADR-0048 option 8: ten thousand variants
-   over four surfaces on one tenant is the first thing in this product to
-   approach the per-tenant chain-head ceiling CTX-3's saturation probe put at
-   ~160/s (ADR-0019 option 2).
+What the run settled, in the order the standing item listed them.
+**(1) The classification path works** — `vault-ceremony classified internal →
+restricted` and `supplier-terms internal → confidential`, each through a
+proposal its own author opened at their own home scope and two distinct
+approvers signed, one of them holding `compliance`. **(2) So does publishing
+`confidential` material to a team** — `supplier-terms → acme/sec/vault` at a
+real commit, so ADR-0031 decision 12's read is asked somewhere the org
+curator can satisfy. **(3) The two floors are measurements now and they
+match the arithmetic exactly**: 400 variants of 11,680 generated, 1,276
+probes (inject 634, recall:query 634, recall:sweep 4, recall:ids 4), controls
+9/9, every leak count zero. **(4) The wall clock is 18.5ms a probe**, so the
+nightly's ~10,876 is about 3.4 minutes and the suite stays sequential —
+ADR-0048 option 8's trade holds with a number under it.
 
-Until those run, this entry is a description of a branch and not of a
-feature, and the checkbox stays unticked._
+**And it found three defects, two of them in this feature's own code.**
+
+*The slice was the "passes by measuring less" bug, committed by the code
+written to prevent it.* "Every k-th of the tail" with `k = ceil(tail / room)`
+collapses the moment `k` rounds up to 2: the nightly asking for 10,000
+variants over an 11,680-strong space would have asked **5,840** and reported
+a green gate against a floor of 10,000. An even spread returns the budget on
+the nose. Nothing about the gate's shape was wrong; the thing filling the
+denominator was.
+
+*A cross-tenant corpus needs one auditor per tenant, and that is AUD-2's
+contract arriving in an eval.* The suite waits on the chain because "every
+seeded event appears in a `memory.extracted` payload" is exact where "enough
+records showed up" is not (ADR-0046) — but `AuditRead` declares
+`resource: [Tenant]` and an answer covers one chain or is refused (ADR-0045
+decision 2), so the first run asked the primary tenant's auditor about the
+foreign record and reported the pipeline unfinished for material that had
+extracted fine. The wait was right, the auditor was right, and the
+composition of the two was not.
+
+*And `security_marker_echoes` measured the wrong thing twice.* It counted
+occurrences and read **159** for one record, because the same line echoes in
+every block that carries it — a function of how many probes ran rather than
+of the corpus. Distinct lines now, and it reads **1**. The probe itself was
+also not testing what it claimed: MEM-2's `payment-card` rule
+(`\b(?:\d[ \-]?){12,18}\d\b` plus Luhn) matched the digit-and-hyphen run of
+the fixture's all-zero UUID — all zeros pass Luhn — so the handle reached the
+block as `(recall [REDACTED:payment-card]` and the probe measured the
+redactor. **That false positive is a real MEM-2 finding and is left alone
+here**: the fixture uses hex-bearing groups now, and changing a shipped
+scanner because an eval tripped it is the shape ADR-0046 option 7 refused. It
+belongs with the ruleset precision work ADR-0021 parked; the exposure is
+narrow — a UUID whose segments are digits only *and* whose run passes Luhn.
+
+**And the demo found the same class of error a third time.** Its first
+attempt granted a 150-second lapse and the gate *held*: the security corpus
+runs last, after the scenarios, five extraction groups and the Q&A corpus,
+each of which seeds and waits on the pipeline, so the grant had expired
+before anything probed it. AUTHZ-4's expiry working exactly as built, and a
+demo measuring a window rather than a boundary. The window is 30 minutes
+now and the last phase is a third fresh tenant with no grant on it rather
+than a wait — re-proving that a lapse expires is AUTHZ-4's own acceptance
+criterion, and doing it here is what broke this one. Three times in one
+feature a number chosen for one part of a run was spent by another: the
+slice's stride, the demo's window, and —
+
+**The fixed overhead showed up in three places, which is the argument for
+`tokens_per_answer` existing.** The 14-token data notice cost EVAL-4's four
+bound questions their entry room (120 → 134) and CTX-4's
+`a_short_record_is_never_demoted` its 80-token budget (→ 94) — where it
+failed loudly rather than quietly, because at 80 the nearest scope's section
+header no longer fitted and first-fit composed the *org* record instead. No
+ceiling moved: `tokens_mean` reads 133.2 against 150 and `tokens_per_answer`
+267.5 against 320.
+
+_
 
 _FLOW-1 (2026-07-25, ADR-0030): the object store — the substrate ADR-0003
 committed to, and only the substrate. Six `vedaflow_*` tables in migration

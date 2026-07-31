@@ -19,8 +19,8 @@
 # changes, no role is bound that widens anything, and one team can now read
 # another's -> the very next run fails the gate, and the leak line names the
 # record, the reader, the surface, the phrasing and the probe index ->
-# the lapse expires and the gate holds again, which is what makes the
-# failure a measurement rather than a broken demo.
+# a third fresh tenant with no grant on it is green again, which is what
+# makes the failure a measurement rather than a broken demo.
 #
 # WHY A LAPSE AND NOT A PACK FLIP. `open-collaboration` at the org would
 # have been the obvious change and it discloses nothing here: a pack cannot
@@ -72,10 +72,15 @@ export EVAL_KEEP_STATE
 EVAL_SECURITY_VARIANTS=${EVAL_SECURITY_VARIANTS:-400}
 export EVAL_SECURITY_VARIANTS
 
-# Long enough to outlast a measured run, short enough to wait out in the
-# last phase. Under `regulated-strict` the ceiling is thirty days, so this
-# is the demo's choice and not the pack's.
-LAPSE_SECS=${LAPSE_SECS:-150}
+# Long enough to outlast a whole measured run, with room to spare. The
+# first attempt used 150s and the gate held in phase 3 — because the
+# security corpus runs LAST, after the scenarios, five extraction groups
+# and the Q&A corpus, so the grant had already expired by the time
+# anything probed it. That is the product's expiry working exactly as
+# AUTHZ-4 built it and a demo measuring the wrong thing; under
+# `regulated-strict` the ceiling is thirty days, so the window is this
+# demo's choice and not the pack's.
+LAPSE_SECS=${LAPSE_SECS:-1800}
 
 trap eval_down EXIT INT TERM
 
@@ -105,8 +110,8 @@ report_security() {
       for (const line of corpus.unattributed ?? []) {
         console.log(`        UNATTRIBUTED LINE for ${line.reader} at probe ${line.probe}: ${JSON.stringify(line.line)}`);
       }
-      if (corpus.marker_echoes) {
-        console.log(`        ${corpus.marker_echoes} marker echo(es) — reported, bounded by nothing (ADR-0048 decision 11)`);
+      if (corpus.marker_echo_lines?.length) {
+        console.log(`        ${corpus.marker_echo_lines.length} distinct marker echo(es) — reported, bounded by nothing (ADR-0048 decision 11)`);
         for (const line of corpus.marker_echo_lines ?? []) console.log(`          ${line}`);
       }
       for (const failure of corpus.failures ?? []) console.log(`        FAILURE: ${failure}`);
@@ -228,9 +233,15 @@ echo "    security_leaks_tenant is zero too: nothing about a relaxation"
 echo "    inside one tenant is visible from another."
 
 echo
-echo "==> [4/4] the grant expires on its own timer and nobody revokes it."
-echo "    Waiting out the ${LAPSE_SECS}s window, then the same suite again:"
-sleep $((LAPSE_SECS + 5))
+echo "==> [4/4] a third fresh tenant pair, with no grant on it at all: the"
+echo "    same suite is green again, which is what makes the failure above"
+echo "    a measurement rather than a broken demo. (That a lapse expires on"
+echo "    its own timer and restores the denial is AUTHZ-4's own"
+echo "    acceptance criterion — demos/authz-4-lapses.sh proves it, and"
+echo "    proving it a second time here is what made the first attempt at"
+echo "    this demo measure a window rather than a boundary.)"
+fresh_stack
+echo "    tenant $EVAL_TENANT"
 eval_run
 echo
 report_security

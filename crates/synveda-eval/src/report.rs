@@ -328,11 +328,15 @@ pub struct SecurityOutcome {
     /// Block lines the renderer's vocabulary does not account for.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unattributed: Vec<Unattributed>,
-    /// Entry lines whose *content* reproduces one of the block's marker
-    /// forms — ` [confidential]`, `(recall <id>)` — inside the region the
-    /// renderer left to content. Reported and gated by nothing on the
-    /// first run (decision 11).
-    pub marker_echoes: usize,
+    /// DISTINCT entry lines whose *content* reproduces one of the block's
+    /// marker forms — ` [confidential]`, `(recall <id>)` — inside the
+    /// region the renderer left to content. Reported and gated by nothing
+    /// on the first run (decision 11).
+    ///
+    /// Distinct, because the same record echoes in every block that
+    /// carries it: the first run counted 159 occurrences of one line,
+    /// which measured how many probes were issued rather than how much of
+    /// the corpus renders indistinguishably from a marker.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub marker_echo_lines: Vec<String>,
     /// How long the corpus took to seed, classify and climb. Reported,
@@ -1000,11 +1004,11 @@ fn security_summary(corpora: &[SecurityOutcome]) -> String {
                 line.line
             ));
         }
-        if corpus.marker_echoes > 0 {
+        if !corpus.marker_echo_lines.is_empty() {
             out.push_str(&format!(
-                "      {} entry line(s) whose content reproduces a marker form — reported, \
-                 bounded by nothing (ADR-0048 decision 11):\n",
-                corpus.marker_echoes
+                "      {} distinct entry line(s) whose content reproduces a marker form — \
+                 reported, bounded by nothing (ADR-0048 decision 11):\n",
+                corpus.marker_echo_lines.len()
             ));
             for line in &corpus.marker_echo_lines {
                 out.push_str(&format!("        {line}\n"));

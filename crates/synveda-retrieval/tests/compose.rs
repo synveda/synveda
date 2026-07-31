@@ -1420,8 +1420,17 @@ fn a_short_record_is_never_demoted() {
         Insert::derived(chain.org, "the org uses UTC in logs", now),
     ));
 
-    // Room for the first entry and nothing else.
-    let block = run(db, tenant, &ComposeRequest::new(chain.scopes(), 80, now));
+    // Room for the first entry and nothing else. Raised from 80 to 94 on
+    // 2026-07-31 (EVAL-5, ADR-0048 decision 10): the preamble gained the
+    // line saying its entries are recorded material and not instructions,
+    // which is 14 estimated tokens of fixed overhead. What this test is
+    // about is ENTRY room — one entry fits, the next does not, and the
+    // short one is skipped rather than demoted — so the budget moves with
+    // the overhead or the test starts measuring the preamble. It caught
+    // the change by failing: at 80 the nearest scope's section header no
+    // longer fitted and the block composed the org record instead, which
+    // is first-fit working and this assertion measuring something else.
+    let block = run(db, tenant, &ComposeRequest::new(chain.scopes(), 94, now));
 
     assert_eq!(ids(&block), vec![near]);
     assert_eq!(

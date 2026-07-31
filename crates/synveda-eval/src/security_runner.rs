@@ -37,7 +37,7 @@ use crate::client::{
     Client, InjectRequest, ObserveEvent, ObserveRequest, ProposalRequest, RecallIdsRequest,
     RecallQueryRequest, RecallResponse, RecallSweepRequest,
 };
-use crate::extraction::{AUDITOR_ACTOR, read_committed};
+use crate::extraction::read_committed;
 use crate::qa_runner::{CURATOR_ACTOR, STEWARD_ACTOR};
 use crate::report::{Leak, SecurityOutcome, Unattributed};
 use crate::scenario::Environment;
@@ -166,16 +166,26 @@ pub async fn run_corpus(
     options: &Options,
 ) -> Result<SecurityOutcome, String> {
     let mut outcome = SecurityOutcome::new(corpus);
-    let auditor = &environment
-        .actors
-        .get(AUDITOR_ACTOR)
-        .ok_or_else(|| {
-            format!(
-                "the environment names no `{AUDITOR_ACTOR}` actor; the security suite waits on \
-                 `GET /v1/audit/events` for the pipeline to be done with every seeded record"
-            )
-        })?
-        .token;
+    // One auditor per tenant the corpus writes into, which the first
+    // cross-tenant run is what taught: `AuditRead` declares
+    // `resource: [Tenant]` and an audit answer covers one chain or is
+    // refused (ADR-0045 decision 2), so asking the primary tenant's
+    // auditor about a foreign record reports the pipeline unfinished for
+    // material that extracted perfectly well.
+    let mut auditors: BTreeMap<&str, &str> = BTreeMap::new();
+    for record in &corpus.material {
+        let tenant = environment.tenant_of(&record.actor)?;
+        if !auditors.contains_key(tenant) {
+            auditors.insert(tenant, &environment.auditor_for(tenant)?.token);
+        }
+    }
+    if auditors.is_empty() {
+        return Err(format!(
+            "corpus `{}` names no auditable tenant; the security suite waits on \
+             `GET /v1/audit/events` for the pipeline to be done with every seeded record",
+            corpus.corpus
+        ));
+    }
 
     // What the corpus deliberately plants, before anything is measured: a
     // structural probe's whole point is that it looks like ordinary
@@ -197,7 +207,7 @@ pub async fn run_corpus(
 
     let started = Instant::now();
     let seeded = seed(client, environment, corpus).await?;
-    wait_for_pipeline(client, auditor, &seeded, options, &mut outcome).await?;
+    wait_for_pipeline(client, &auditors, &seeded, options, &mut outcome).await?;
     let placed = locate(client, environment, corpus, &seeded, &mut outcome).await?;
     wait_for_index(client, environment, corpus, &placed, options, &mut outcome).await?;
     // Classify BEFORE climbing, and the order is forced: a publication
@@ -279,14 +289,20 @@ async fn seed(
 /// produced records or not (the EVAL-2 rule).
 async fn wait_for_pipeline(
     client: &Client,
-    auditor: &str,
+    auditors: &BTreeMap<&str, &str>,
     seeded: &[Seeded],
     options: &Options,
     outcome: &mut SecurityOutcome,
 ) -> Result<(), String> {
     let started = Instant::now();
     loop {
-        let committed = read_committed(client, auditor).await?;
+        // One chain per tenant, merged: event ids are UUIDs, so the union
+        // is unambiguous and a record is found on exactly the chain that
+        // recorded it.
+        let mut committed = BTreeMap::new();
+        for auditor in auditors.values() {
+            committed.extend(read_committed(client, auditor).await?);
+        }
         let missing: Vec<&str> = seeded
             .iter()
             .filter(|entry| !committed.contains_key(entry.event_id.as_str()))
@@ -1010,8 +1026,14 @@ fn audit_lines(
         }
         if line.starts_with(ENTRY_PREFIX) {
             entries += 1;
-            if let Some(echo) = marker_echo(line) {
-                outcome.marker_echoes += 1;
+            // Distinct lines, not occurrences. The same record echoes in
+            // every block that carries it, so counting occurrences would
+            // make this axis a function of how many probes a run issued —
+            // 159 for one record on the first run — rather than of how
+            // much of the corpus renders indistinguishably from a marker.
+            if let Some(echo) = marker_echo(line)
+                && !outcome.marker_echo_lines.contains(&echo)
+            {
                 outcome.marker_echo_lines.push(echo);
             }
             continue;
@@ -1113,7 +1135,7 @@ pub fn metrics(outcomes: &[SecurityOutcome]) -> BTreeMap<String, f64> {
     );
     metrics.insert(
         "security_marker_echoes".to_owned(),
-        sum(|o| o.marker_echoes),
+        sum(|o| o.marker_echo_lines.len()),
     );
     metrics.insert(
         "security_watermark_gaps".to_owned(),

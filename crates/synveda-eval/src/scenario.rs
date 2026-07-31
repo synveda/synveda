@@ -78,6 +78,34 @@ impl Environment {
             .unwrap_or(&self.tenant_id))
     }
 
+    /// The auditor whose bearer can read *that* tenant's chain.
+    ///
+    /// One per tenant, and the first run of EVAL-5's cross-tenant half is
+    /// what made that necessary: `AuditRead` declares `resource: [Tenant]`
+    /// and an audit answer covers one chain or is refused (ADR-0045
+    /// decision 2), so a corpus spanning two admitted tenants asked the
+    /// wrong chain about half its material and reported the pipeline
+    /// unfinished for a record that had extracted fine. The convention is
+    /// the actor name's prefix, stated here rather than guessed at the
+    /// call site.
+    pub fn auditor_for(&self, tenant_id: &str) -> Result<&Actor, String> {
+        self.actors
+            .iter()
+            .find(|(name, actor)| {
+                name.starts_with(crate::extraction::AUDITOR_ACTOR)
+                    && actor.tenant.as_deref().unwrap_or(&self.tenant_id) == tenant_id
+            })
+            .map(|(_, actor)| actor)
+            .ok_or_else(|| {
+                format!(
+                    "no `{}*` actor whose bearer carries tenant {tenant_id}; an audit answer \
+                     covers one tenant's chain and no other, so a corpus that spans tenants needs \
+                     one auditor per tenant",
+                    crate::extraction::AUDITOR_ACTOR
+                )
+            })
+    }
+
     pub fn scope(&self, name: &str) -> Result<&str, String> {
         self.scopes.get(name).map(String::as_str).ok_or_else(|| {
             format!(
