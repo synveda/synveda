@@ -457,7 +457,39 @@ EVAL-3 Public benchmark adapters (L)
   every credible 2026 memory system publishes these.)
 EVAL-4 Retrieval & injection quality (M)
   Fixture Q&A per scope; probe-based compression eval (CTX-6); tokens-per-inject trend.
-  AC: composition changes show measurable quality effect before merge.
+  AC: one Q&A corpus under evals/fixtures/qa/ whose material sits at four scope tiers because
+  the suite promoted it there through the governed path — seeded at an actor's home through
+  /v1/observe, then climbed to a team, a department and the org through POST /v1/proposals
+  and real approvals, because records land at the caller's home scope and a service identity
+  is a leaf under its anchor, so no other arrangement can put material above a leaf; one
+  corpus seeded once and asked many times, so every question in a file measures the same
+  corpus; grading joins seed to block by record identity (observe's event_id → the recall
+  sweep's provenance.event_id → record_id → its position in the block's record_ids and
+  tiers), never by string containment, because an index entry carries a truncated head and
+  "demoted" and "absent" are otherwise the same measurement; `make eval` reports
+  `qa_answer_rate` and `qa_body_rate` per scope tier and over the corpus, and
+  `tokens_per_answer` as the exchange rate a composition change actually moves, with the gap
+  between answer rate and body rate reported as the index tier's displacement; every question
+  declares needs: lexical | semantic, and semantic questions are skipped and counted rather
+  than scored zero on a run whose embedder cannot rank; `retrieval_precision` reads only the
+  blocks something bound, and is gated on both paths at different values because on the
+  deterministic one it is the sparse leg alone; the dense leg is measured against live TEI on
+  the nightly and gated against evals/baseline-retrieval.json, whose floors are measurements
+  of today rather than round numbers; `estimator_bias_p95` (CTX-2's ceil(chars/4) against a real
+  tokenizer, declared model-specific) and `staleness_p50_permille` (MEM-6's unvalidated
+  heuristic) are measured and reported, gated by nothing on the first run; the deterministic
+  gate runs on the pull-request path — a Postgres-backed eval job in ci.yml that fails the
+  merge on a breach, with the other jobs left database-free; a real composition change that
+  degrades quality (a department's budget_tokens narrowed through the governed pack path, on
+  a fresh tenant per phase) fails the gate naming the axis, the baseline, the measurement and
+  the delta, and the scope tier that fell says which end of the gradient paid for it; nightly
+  workflow; demo script. Deferred with a recorded trigger: the probe-based compression eval,
+  because CTX-6 is Phase 3 and unbuilt — an axis for it would be permanently absent, which
+  the harness treats as a coverage breach, or permanently zero, which reads as coverage.
+  Written 2026-07-31 (EVAL-4, ADR-0047): the feature text named three clauses, one of which
+  has no product to measure, and an AC with no axis in it. The load-bearing parts are the
+  lens — the block, which EVAL-2 rejected for exactly the properties that make it right
+  here — and the discovery that a per-scope corpus has to be promoted rather than placed.
 EVAL-5 Security evals (M)
   Policy-leak suite (restricted content never crosses sensitivity/scope under 10k generated
   query variants); cross-tenant fuzz (TEN-6); prompt-injection-via-memory suite (a memory
