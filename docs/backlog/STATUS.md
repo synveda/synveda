@@ -34,7 +34,7 @@ _Phase demo goal: SSO login → auto-scoped → live Claude Code session writes 
 - [x] [TEN-2: Postgres row-level security as backstop](TEN-2.md) — done 2026-07-18, AC test: crates/synveda-store/tests/rls.rs, demo: demos/ten-2-rls.sh
 - [x] [AUTH-1: OIDC login (code+PKCE)](AUTH-1.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/oidc_login.rs (mock Entra), demo: demos/auth-1-oidc-login.sh (live Rauthy)
 - [x] [HIER-1: Hierarchy store](HIER-1.md) — done 2026-07-18, AC test: crates/synveda-store/tests/hierarchy.rs (10k nodes; ancestors/descendants medians 57µs/691µs over baseline), demo: demos/hier-1-hierarchy.sh
-- [x] [AUTHZ-1: Cedar PDP embedded](AUTHZ-1.md) — done 2026-07-18, AC tests: crates/synveda-policy/tests/decision_benchmark.rs (facade incl. entity materialisation, 4-level chain: median 109µs, p99 177µs), crates/synveda-policy/tests/pdp.rs (decision + pack version on every call), crates/synveda-gateway/tests/authz_hierarchy.rs (route gate + hot reload), demo: demos/authz-1-cedar-pdp.sh
+- [x] [AUTHZ-1: Cedar PDP embedded](AUTHZ-1.md) — done 2026-07-18, AC tests: crates/synveda-policy/tests/decision_benchmark.rs (facade incl. entity materialisation, 4-level chain: median 33µs, p99 46µs in release — the profile the µs-level claim is about — and 141µs/164µs in debug; the recorded 109µs/177µs was a debug measurement, corrected 2026-07-31), crates/synveda-policy/tests/pdp.rs (decision + pack version on every call), crates/synveda-gateway/tests/authz_hierarchy.rs (route gate + hot reload), demo: demos/authz-1-cedar-pdp.sh
 - [x] [AUTH-2: JIT user provisioning from claims](AUTH-2.md) — done 2026-07-18, AC test: crates/synveda-gateway/tests/jit_provisioning.rs (mock IdP: team mapping, quarantine + PDP denial, override precedence, fail-closed bearer), demo: demos/auth-2-jit-provisioning.sh (live Rauthy)
 - [x] [AUTHZ-2: Policy packs](AUTHZ-2.md) — done 2026-07-19, AC tests: crates/synveda-policy/tests/packs.rs (golden matrix per pack; composition switch at the MemoryRead seam), crates/synveda-gateway/tests/policy_routes.rs (per-node assignment governs the next request; inheritance, origin display, self-rescue), demo: demos/authz-2-policy-packs.sh
 - [x] [AUTHZ-3: Roles & role bindings](AUTHZ-3.md) — done 2026-07-19, AC tests: crates/synveda-policy/tests/roles.rs (full role×action matrix per pack; escalation guard; subtree boundaries; privacy floor), crates/synveda-gateway/tests/roles_routes.rs (bindings govern the next request; delegation; uniform 404), crates/synveda-gateway/tests/jit_provisioning.rs (admin-group bootstrap), demo: demos/authz-3-roles.sh
@@ -102,6 +102,69 @@ full-fidelity record of every individual PDP call. The `bootstrap` pack was reti
 AUTHZ-3). Stored-pack propagation lags up to
 `SYNVEDA_POLICY_REFRESH_SECS` (default 5s, poll-based) until VedaFlow
 policy commits drive event-based reload._
+
+_AUTHZ-1 benchmark recalibration (2026-07-31): the µs-level bound was a
+single absolute number, and it had never once passed in CI. Eleven `ci.yml`
+runs since the workflow was created, ten completed, **all ten red**, every
+one of them on `cargo test --workspace` and every one of them on this test
+alone — 49 binaries green, this one failing, and because cargo fail-fasts
+at the binary level roughly eighteen further test binaries had never
+executed in CI at all. `cargo build --workspace` never ran either; it is
+the step after.
+
+The cause is a profile conflation baked in at AUTHZ-1. The docstring
+described release ("single-digit to low tens of µs") while the bound
+(250µs) and the measurement recorded above as evidence (109µs) were both
+debug builds, so the number certifying a µs-level claim was taken from the
+profile the product does not ship. Same logic, three readings: **~33µs
+release, ~141µs debug locally, ~362µs debug on a shared runner** — a 10x
+spread with no code change in it. Debug is ~4x, borrowed hardware another
+~2.6x. The bound sat between the second and third, which is why it passed
+on the machine that wrote it and could never pass in CI.
+
+Five features thickened the facade after the bound was set — packs
+(ADR-0014), roles (ADR-0015), confinement (ADR-0018), lapses (ADR-0037),
+ABAC conditions (ADR-0038) — taking debug from 109µs to 141µs, so the
+"order of magnitude above expected cost" the docstring claimed had eroded
+to 1.8x against local debug without anyone re-reading the sentence.
+
+The bound now follows the profile: release carries the µs-level assertion
+at 100_000ns (~3x measured), debug carries the millisecond-scale backstop
+at 1_000_000ns, which is the regression this test was actually written to
+catch — a network hop or a per-call re-parse reaching the decision path,
+visible at any optimisation level. The printed line and the assertion
+message both name the profile now, because a bare median in a CI log
+cannot be compared to one from a dev machine without it.
+
+**Two ADRs reason from the debug figure, and one of them does not survive
+the correction.** ADR-0024 refused a tenant-wide PDP sweep for `inject`
+because "at the AUTHZ-1 measured ~109µs/decision, a 1 000-scope tenant
+costs ~100ms: over the CTX-1 latency budget on its own" — and CTX-1's AC
+is p99 <80ms. At the release figure the same sweep is ~33µs × 1 000 ≈
+**33ms, which is inside that budget**, so the sentence justifying the
+refusal is false as written. The decision may still be the right one —
+33ms is 41% of the whole p99 budget before any retrieval, ranking or
+composition work is paid for, and ADR-0024 has independent grounds
+(existence leakage via rank displacement, the sidecar's staleness) — but
+it is no longer refused *by arithmetic*, and it is now refused for reasons
+the ADR states in other bullets rather than that one. ADR-0042's version
+survives: it asks per `(scope, tier)`, so 1 000 scopes × 4 tiers × ~33µs ≈
+**132ms**, still over budget, and its actual decision — that a sweep
+materialising once and evaluating many is a different cost curve, which
+recall can afford — never depended on the per-decision figure at all.
+Neither ADR is amended here: re-opening an architectural refusal is not a
+side effect a test-calibration commit gets to have, and the correct figure
+is now recorded in one place for whoever does.
+
+**The AC is not verified in CI by this change** and that is the standing
+obligation: `cargo test --workspace` is a debug build, so the 100_000ns
+assertion only runs where someone runs release tests. Closing it means a
+release step for this one target, whose cost is a release compile of Cedar
+on every run — weighed and not paid here. What the record should say
+meanwhile is that a gate red on every run carries exactly as much
+information as one that never fails, which is EVAL-1's own objection
+("a harness that reports without failing is a dashboard") arriving from
+the other side: nobody read a red that had always been red._
 
 _AUTH-2 deferrals (ADR-0013): the audit half closed 2026-07-19 —
 `identity.provisioned` chains in the provisioning transaction whenever an
