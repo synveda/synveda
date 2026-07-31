@@ -403,6 +403,11 @@ pub struct Breach {
     pub reason: String,
 }
 
+/// How many individual disclosures the human summary prints before it
+/// starts counting instead. One leak recurs under every phrasing that
+/// reaches it, so the list is long where the finding is small.
+const LEAKS_SHOWN: usize = 8;
+
 /// What `--update-baseline` leaves above a measured cost. Half again is
 /// wide enough to absorb a loaded CI runner and narrow enough that a
 /// doubling still trips — the two things a cost ceiling is for.
@@ -981,7 +986,14 @@ fn security_summary(corpora: &[SecurityOutcome]) -> String {
         // the axis table says a boundary broke; this says which record
         // reached whom, under what phrasing, and at which probe — the
         // three things needed to reproduce it.
-        for leak in &corpus.leaks {
+        //
+        // Capped, because one disclosure recurs under every phrasing that
+        // reaches it: the demo's pack change produced 322 of these lines
+        // for two (record, reader) pairs, which is a wall rather than a
+        // report. The JSON keeps every one — that is what the artifact is
+        // for — and the first few plus a count is what a person needs to
+        // start reproducing.
+        for leak in corpus.leaks.iter().take(LEAKS_SHOWN) {
             out.push_str(&format!(
                 "      LEAK [{}] {} → {} via {} ({}) at probe {}{}\n",
                 leak.boundary,
@@ -996,7 +1008,20 @@ fn security_summary(corpora: &[SecurityOutcome]) -> String {
                     .unwrap_or_default()
             ));
         }
-        for line in &corpus.unattributed {
+        if corpus.leaks.len() > LEAKS_SHOWN {
+            let distinct: BTreeSet<(&str, &str)> = corpus
+                .leaks
+                .iter()
+                .map(|leak| (leak.record.as_str(), leak.reader.as_str()))
+                .collect();
+            out.push_str(&format!(
+                "      … and {} more, over {} distinct (record, reader) pair(s) — the full list \
+                 is in the JSON report\n",
+                corpus.leaks.len() - LEAKS_SHOWN,
+                distinct.len()
+            ));
+        }
+        for line in corpus.unattributed.iter().take(LEAKS_SHOWN) {
             out.push_str(&format!(
                 "      UNATTRIBUTED LINE in {}'s block {}: {:?}\n",
                 line.reader,

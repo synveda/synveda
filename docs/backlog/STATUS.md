@@ -730,7 +730,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [AUD-2: Audit query & auditor role surface](AUD-2.md) — done 2026-07-28, ADR-0045, migration 0028, AC test: crates/synveda-gateway/tests/audit_query.rs (**both questions over the real product path**, and the point is that nothing seeds an audit row: disclosures exist because alice and bob called `POST /v1/inject` and the chain recorded what they got. **Q1** — one `GET /v1/audit/disclosures` names exactly the readers the chain records being *served* the record, with the version, channel, tier and seq each of them actually got, and never the payments reader. **Q2** — one `GET /v1/audit/knowledge` folds to one row per record with the version last delivered and the number of occasions behind it, and the AC's "uses bitemporal + refs" is asserted rather than described: every id in the answer is resolved through `records::as_of` at the instant asked at, so the audit answer and the corpus agree; a companion test pins the instant as load-bearing by asking the same call before her first session and getting nothing. Plus the two lists proven separate with the reason carried *in the response body*; the refusals — a subtree-bound auditor denied on all four routes while the same role held tenant-wide passes, and the subject of the answers denied herself; no record content in any response, swept for whole bodies *and* distinctive fragments; the uniform empty answer that keeps the surface from being an existence oracle; a truncated page reporting itself with a cursor that advances; and dana's own query appearing in the next query's results. The suite runs under the real `regulated-strict` default and installs no permissive pack — a blanket pack would grant `AuditRead` to everyone and make every refusal in the file vacuous), crates/synveda-policy/tests/roles.rs (`the_audit_plane_admits_exactly_the_read_only_admin_roles_and_only_tenant_wide`: all 8 roles × 3 packs, allowed tenant-wide for steward/org-admin/auditor and denied for the same role bound at a subtree), crates/synveda-policy/tests/service_scope.rs (`AuditRead` joins the tenant-plane denial list, so no service identity reads the trail however it is bound), crates/synveda-audit (11 unit tests: the fold's last-wins-by-seq, absence reported as absence across three payload generations, the action taxonomy's uniqueness and column bounds), crates/synveda-gateway/src/audit_query.rs (4 unit tests: the vocabulary round-trips, a typo is refused, a limit over the cap is refused rather than trimmed), demo: demos/aud-2-audit-query.sh (the auditor's whole half with **DATABASE_URL unset**, so every answer can only have come through the gateway under the PDP: both questions, the two lists with the break-glass bootstrap bind and the two governed ones side by side in the authority half, the three refusals in the product's own words, a content sweep returning zero, dana's seven own audit reads on the chain she is reading, and `valid=true over 30 events`)
 - [x] [EVAL-2: Extraction quality suite](EVAL-2.md) — done 2026-07-30, ADR-0046, corpus: evals/fixtures/extraction/ (5 groups, 50 labelled transcripts, 54 expectations, 7–13 per class, plus a README stating the rules its guards enforce), AC demo: demos/eval-2-extraction.sh (**the gate failing on a real product change, and the attribution column saying why**: three fresh tenants differing in exactly one thing — a one-day `episode` retention horizon applied as the default pack's *own* source with the horizon added, so not one permit differs — where the clean tenants report `committed 10 → served 10, nothing withheld` and the horizoned one reports `committed 10 → served 8, 2 withheld by the read path, not missed by the extractor`, `extraction_recall_episode` 1.0 → 0.0, and the gate fails naming the axis, the baseline, the measurement and the delta: `extraction_recall_macro fell to 0.747 against a floor of 0.894`, delta −0.147; a tenant per phase because ADR-0028 decision 7's "a fresh tenant per run is what makes two runs comparable" turns out to be load-bearing rather than tidy — see the notes), AC measurement over the real observe→extract→serve path: macro precision **0.983**, macro recall **0.914**, per class decision 1.000/0.900, entity 1.000/1.000, episode 1.000/1.000, fact 0.900/0.692, preference 1.000/0.889, procedure 1.000/1.000, `hallucination_rate` 0.000 against a zero-tolerance ceiling, AC tests: crates/synveda-ingest/tests/extraction_precision.rs (the same corpus with no stack at all — the registered ≥0.90 precision floor, the bait assertion that a span-copying extractor cannot invent, and four corpus guards: an expected token absent from its own source, bait present in its own source, a duplicate session id, a duplicate fixture name), crates/synveda-eval (39 unit tests, up from 20: the corpus format refusing an unknown field and every corpus guard again at load time so `make eval-check` catches them with no database; per-class axes reducing over the whole corpus rather than per group; a class produced-but-never-expected scoring precision and no recall; the hallucination axis absent rather than 0.0 when nothing asked; `slack` writing a floor that far below a measurement, never below zero, carried forward across rewrites, and never read by the gate; and a scenario category refused when it collides with a built-in axis or the `extraction_` namespace)
 - [x] [EVAL-4: Retrieval & injection quality](EVAL-4.md) — done 2026-07-31, ADR-0047, corpus: evals/fixtures/qa/ (one corpus, 12 records across four scope tiers, 10 questions), AC demo: demos/eval-4-qa.sh (**the gate failing on a real composition change, and the per-tier table naming which end of the gradient paid**: the composition budget narrowed to 320 estimated tokens through the governed pack path — the default pack's own source with one number changed, so not one permit differs, nothing is deleted and `/v1/recall` still serves all twelve records — on a fresh tenant per phase, where `qa_scope_user` and `qa_scope_team` hold at 1.000 while `qa_scope_department` and `qa_scope_org` fall to 0.000, `qa_answer_rate` 1.000 → 0.545 and `tokens_per_answer` 257.9 → 343.8, the gate failing on six axes at once and naming each with its baseline, measurement and delta; then the budget restored and the suite green again, which is what makes the failure a measurement rather than a broken demo), AC measurement over the real observe→promote→compose path: `qa_answer_rate` **1.000**, `qa_body_rate` **1.000**, all four `qa_scope_*` **1.000**, `retrieval_precision` **0.500** (the sparse leg alone — the deterministic hash embedder ranks by nothing by construction, ADR-0023 decision 6), `tokens_per_answer` **257.9**, plus `estimator_bias_p95` 0.692 and `staleness_p50_permille` 1000 reported and gated by nothing; against live BGE-M3 (`make eval-retrieval`, gated on evals/baseline-retrieval.json, **on the nightly** because a locally-served pinned model changes when someone edits docker-compose.yml): `qa_answer_rate` **0.923**, `qa_scope_user` **0.800**, team/department/org 1.000, `retrieval_precision` **0.286** over the fused result, nothing skipped; **the deterministic gate now blocks a merge** — a Postgres-backed `eval` job in .github/workflows/ci.yml running the whole deterministic suite, which is ADR-0028 option 5's own reversal trigger fired by name; AC tests: crates/synveda-eval (58 unit tests, up from 39: the corpus format refusing an unknown field, the tier/promotion equivalence in both directions, both `needs` guards — a `semantic` question that shares a content word with its own answer and a `lexical` one that shares none — the record-identity join including a `tiers` array shorter than its `record_ids`, per-tier reduction over records rather than questions, a demotion moving the body rate while the answer rate holds, a skipped question staying out of every denominator, `tokens_per_answer` absent rather than dividing by zero, and precision reading only the blocks something bound)
-- [ ] [EVAL-5: Security evals](EVAL-5.md)
+- [x] [EVAL-5: Security evals](EVAL-5.md) — done 2026-07-31, ADR-0048, corpus: evals/fixtures/security/ (9 records, 36 declared (record, reader) boundaries across 4 readers in 2 admitted tenants), AC demo: demos/eval-5-security.sh (four phases on fresh tenant pairs: the suite green with every zero sitting on a printed denominator, then `open-collaboration` applied unmodified at the security department and the very next run failing with `security_leaks_sensitivity` rose to 161 against a ceiling of 0` while `security_leaks_scope` and `security_leaks_tenant` hold — the axis that does NOT move being held by base.cedar's confinement forbid and not by the policy the operator changed — then green again at the default), measurement over the real observe -> classify -> climb -> probe path: 400 variants of 11,680 generated over 1,276 probes (inject 634, recall:query 634, recall:sweep 4, recall:ids 4) at 18.5ms each, controls 9/9, every leak count and security_unattributed_lines zero, security_marker_echoes 1 distinct line reported and ungated, AC tests: crates/synveda-eval (73 unit tests incl. the count-versus-rate assertion that a single leak in ten thousand probes fails as a count and passes as a rate, the exhaustiveness guard refusing an undeclared (record, reader) pair, the even-spread slice that fills its budget exactly, and the line invariant over a well-formed and a forged block), crates/synveda-retrieval/src/compose.rs (the fold that makes 'one entry, one line' a property of the renderer rather than of one extractor, with the forgery it closes as its test), `make eval` (the 400-variant slice, on the pull-request path in ci.yml), `make eval-security` (the full 10,000, nightly in eval.yml)
 - [ ] [PRMT-1: Prompt templates as assets](PRMT-1.md)
 - [ ] [PRMT-2: Context packs](PRMT-2.md)
 
@@ -2412,17 +2412,58 @@ scanner because an eval tripped it is the shape ADR-0046 option 7 refused. It
 belongs with the ruleset precision work ADR-0021 parked; the exposure is
 narrow — a UUID whose segments are digits only *and* whose run passes Luhn.
 
-**And the demo found the same class of error a third time.** Its first
-attempt granted a 150-second lapse and the gate *held*: the security corpus
-runs last, after the scenarios, five extraction groups and the Q&A corpus,
-each of which seeds and waits on the pipeline, so the grant had expired
-before anything probed it. AUTHZ-4's expiry working exactly as built, and a
-demo measuring a window rather than a boundary. The window is 30 minutes
-now and the last phase is a third fresh tenant with no grant on it rather
-than a wait — re-proving that a lapse expires is AUTHZ-4's own acceptance
-criterion, and doing it here is what broke this one. Three times in one
-feature a number chosen for one part of a run was spent by another: the
-slice's stride, the demo's window, and —
+**And then the demo produced the sharpest finding in the feature, by
+failing three times.** It was written around a **lapse** — the one mechanism
+that widens a candidate universe (ADR-0037 decision 13), so it looked like
+the only lever there was. A granted, approved, standing lapse from the vault
+team to the settlement desk **disclosed nothing**, twice, on a clean machine.
+
+The reason is one line of `base.cedar` and it is worth stating as a product
+property rather than as a debugging note: the confinement forbid denies a
+service identity every resource outside its anchor subtree "regardless of
+bound roles", carving out only own-chain `MemoryRead` (ADR-0018) — and
+**Cedar forbids beat permits, including the base layer's own lapse permit.**
+A token confined to an anchor cannot be widened by policy, by a grant, or by
+anybody. Every actor in `evals/lib.sh` is a service identity, so this also
+bounds what the suite can ever observe with these readers: a scope leak here
+would be a bug and never a policy change, which is worth knowing about the
+corpus rather than discovering later.
+
+The lever is a **pack** instead, on the reader's own chain where confinement
+does not bite. `supplier-terms` is `confidential` and published at the vault
+team, so sec-mate is a member of the scope that names it and is withheld
+only by the tier set — `regulated-strict` admits the working tiers at a
+team, and `open-collaboration` (shipped, applied unmodified at the security
+department) admits `confidential`. One assignment, one record crosses, and
+the three axes then say three different things: `sensitivity` moves for
+confidential and not for `restricted`, because the base layer forbids the
+top tier where no pack can author it away; `scope` holds because that same
+pack permits sec-neighbour vault's material outright and the confinement
+forbid still refuses. **The axis that does not move is not held by the
+policy the operator changed** — which is the distinction separate axes were
+bought for.
+
+Before that, the same demo hit the run-length error twice more: a
+150-second lapse expired before the security corpus (which runs last, after
+the scenarios, five extraction groups and the Q&A corpus) was probed, and a
+later attempt died on a 30-second gateway health window because a leftover
+gateway from an aborted run was squatting on the port and answering
+`/healthz` while pointed at a dead scratch database — arriving as a 401 that
+reads like a broken token. `eval_up` refuses a bound port by name now. Four
+times in one feature a number chosen for one part of a run was spent by
+another: the slice's stride, the lapse window, the health window, and —
+
+**The demo, once it had the right lever, says what the AC asks it to.**
+`security_leaks_sensitivity` rose to **161 against a ceiling of 0** — the
+gate naming the axis, the baseline, the measurement and the delta — with
+`security_leaks_scope` and `security_leaks_tenant` at zero on the same run
+and `security_controls` at 9/9, and a third fresh tenant at the product
+default green again. The leak lines name the record, the reader, the
+surface, the predicate and the probe index, which are the five things
+needed to reproduce a disclosure; the human summary caps at eight of them
+now, because one crossing recurs under every phrasing that reaches it and
+322 identical lines is a wall rather than a report. The JSON keeps all of
+them.
 
 **The fixed overhead showed up in three places, which is the argument for
 `tokens_per_answer` existing.** The 14-token data notice cost EVAL-4's four

@@ -334,7 +334,36 @@ Decisions, specifically:
     costed is a judgement, and the gate's job is to force somebody to make it
     before merging rather than after an audit.
 
-    **Amended 2026-07-31: the first attempt granted a 150-second lapse and
+    **Amended 2026-07-31, and the lever changed: a lapse cannot be it,
+    because every actor in this harness is a service identity.**
+    base.cedar's confinement forbid denies a service identity every
+    resource outside its anchor subtree "regardless of bound roles",
+    carving out only own-chain `MemoryRead` (ADR-0018) — and Cedar forbids
+    beat permits, *including the base layer's own lapse permit*. So a
+    granted, approved, standing lapse from the vault team to the settlement
+    desk disclosed nothing, twice, on a clean machine. That is a strong
+    product property stated nowhere as a consequence until now: **a token
+    confined to an anchor cannot be widened by policy, by a grant, or by
+    anybody.** It also bounds what this suite can ever observe with these
+    actors — a leak here is a bug, never a policy change — which is worth
+    knowing about the corpus.
+
+    The lever is a **pack** instead, on the reader's own chain, where
+    confinement does not bite. `supplier-terms` is `confidential` and
+    published at the vault team, so sec-mate is a member of the scope that
+    names it and is withheld only by the tier set; `regulated-strict`
+    admits the working tiers at a team and `open-collaboration` — a pack
+    the product ships, applied unmodified at the security department —
+    admits `confidential`. One assignment, one record crosses, and the
+    three axes then say three different things: `sensitivity` moves for
+    `confidential` and not for `restricted`, because the base layer forbids
+    the top tier where no pack can author it away; and `scope` holds
+    because the same pack permits sec-neighbour vault's material outright
+    and the confinement forbid still refuses. **The axis that does not move
+    is not held by the policy the operator changed**, which is exactly the
+    distinction a security review needs and exactly what separate axes buy.
+
+    **Also amended: the first attempt granted a 150-second lapse and
     the gate held, which was the demo measuring a window rather than a
     boundary.** The security corpus runs last — after the scenarios, five
     extraction groups and the Q&A corpus, each of which seeds and waits on

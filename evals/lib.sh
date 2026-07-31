@@ -32,6 +32,23 @@ eval_json_field() {
   ' "$@"
 }
 
+# Refuses to start a gateway on a port something else is already serving.
+#
+# Without this, a leftover gateway from an aborted run is *healthy* on the
+# port the new one wants, `eval_wait_gateway` succeeds against it, and every
+# request then goes to a process pointed at a scratch database that no
+# longer exists — which arrives as a 401 on the first hierarchy call and
+# reads like a broken token. It cost two demo runs to diagnose, so the
+# collision names itself now (EVAL-5).
+eval_port_free() {
+  if curl -fsS "$1/healthz" >/dev/null 2>&1; then
+    echo "eval: something is already serving $1 — most likely a gateway left" >&2
+    echo "      behind by an aborted run. Clear it with:" >&2
+    echo "        pkill -f target/debug/synveda-gateway" >&2
+    return 1
+  fi
+}
+
 eval_wait_gateway() {
   tries=0
   until curl -fsS "$1/healthz" >/dev/null 2>&1; do
@@ -104,6 +121,7 @@ eval_up() {
   # Phase 1: the hierarchy, through the governed admin API.
   SYNVEDA_LISTEN_ADDR=${EVAL_SEED_URL#http://}
   export SYNVEDA_LISTEN_ADDR
+  eval_port_free "$EVAL_SEED_URL"
   ./target/debug/synveda-gateway >"$EVAL_STATE/seed-gateway.log" 2>&1 &
   EVAL_SEED_PID=$!
   eval_wait_gateway "$EVAL_SEED_URL"
@@ -231,6 +249,7 @@ eval_up() {
   # Phase 2: the gateway under measurement.
   SYNVEDA_LISTEN_ADDR=${EVAL_GATEWAY_URL#http://}
   export SYNVEDA_LISTEN_ADDR
+  eval_port_free "$EVAL_GATEWAY_URL"
   ./target/debug/synveda-gateway >"$EVAL_STATE/gateway.log" 2>&1 &
   EVAL_PID=$!
   eval_wait_gateway "$EVAL_GATEWAY_URL"
