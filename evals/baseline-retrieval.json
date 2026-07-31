@@ -1,0 +1,42 @@
+{
+  "note": "EVAL-4's retrieval gate (ADR-0047 decision 6). The same Q&A corpus as evals/baseline.json, run with SYNVEDA_EMBEDDER=tei so the dense leg means something — `make eval-retrieval`. A separate file because the two sets of numbers are not comparable and one file holding both invites exactly the comparison the split exists to prevent: the deterministic run's hash embedder has no meaningful geometry by construction (ADR-0023 decision 6), so its `semantic` questions are skipped and its retrieval_precision is the sparse leg alone. Here every question is measured and precision is over the fused result.\n\nUnlike EVAL-2's live-model half this one IS on the nightly, and the reason ADR-0028 decision 6 kept models off it does not hold: BGE-M3 is served locally from an image tag and a model id written in deploy/compose/docker-compose.yml, so it changes when someone edits that file — which is someone changing the code, and exactly what a nightly failure is supposed to mean. A hosted alias is the thing that drifts underneath you; a pinned local embedding model is not.\n\nThe floors are the first green run's measurements minus 2 points of declared slack, not round numbers, and one of them is below 1.0 on purpose. `semantic-personal-tooling` misses: BGE-M3 does not rank \"what starts my services locally\" against \"I bring the local stack up with make dev-up in a split terminal pane\" highly enough to survive a block holding two of the leaf's six records. The corpus keeps that question rather than loosening it — it is labelled as the ground truth a reader would give, not as what the current embedder can reach — so qa_scope_user sits at 0.78 against 0.800 measured and qa_answer_rate at 0.903 against 0.923. A run that reaches 1.0 is the dense leg getting better and is re-baselined deliberately, with the diff reviewed.\n\nretrieval_precision is 0.286 measured and floored at 0.256. It reads only the blocks something bound — the budget ran out, or retrieval offered fewer candidates than the reader is served — because a block that carried everything made no ranking decision to measure. Read it knowing what the scope gradient does to it: scopes are placed nearest-first and totally ordered (ADR-0025 decision 5), so ranking is only observable inside the nearest scope, and a bound block asked about further material measures distance rather than relevance. That is why every ranking question in the corpus asks about the reader's own leaf.\n\nThe scenario and extraction axes are measured on this run too and deliberately bounded by nothing here: the extractor did not change, so gating them twice would duplicate a gate whose input is identical, and the nightly deterministic run is where they belong. hallucination_rate is the exception and stays zero-tolerance on every path. latency_p95_ms is a shape detector and emphatically not an SLO — real embedding round-trips put it an order of magnitude above the deterministic path (measured ~187ms), and EVAL-6 owns percentile SLOs under load.",
+  "metrics": {
+    "qa_answer_rate": {
+      "min": 0.903,
+      "slack": 0.02
+    },
+    "qa_body_rate": {
+      "min": 0.903,
+      "slack": 0.02
+    },
+    "qa_scope_user": {
+      "min": 0.78,
+      "slack": 0.02
+    },
+    "qa_scope_team": {
+      "min": 0.98,
+      "slack": 0.02
+    },
+    "qa_scope_department": {
+      "min": 0.98,
+      "slack": 0.02
+    },
+    "qa_scope_org": {
+      "min": 0.98,
+      "slack": 0.02
+    },
+    "retrieval_precision": {
+      "min": 0.256,
+      "slack": 0.03
+    },
+    "hallucination_rate": {
+      "max": 0.0
+    },
+    "tokens_per_answer": {
+      "max": 360.0
+    },
+    "latency_p95_ms": {
+      "max": 800.0
+    }
+  }
+}

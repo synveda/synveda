@@ -673,7 +673,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [GRPH-4: AGE performance spike / graph fallback assessment](GRPH-4.md) — done 2026-07-25, report: docs/spikes/grph-4-age-traversal.md, criteria + verdict: ADR-0029, harness: crates/synveda-store/tests/graph_spike.rs (`--ignored`), demo: demos/grph-4-graph-spike.sh
 - [x] [AUD-2: Audit query & auditor role surface](AUD-2.md) — done 2026-07-28, ADR-0045, migration 0028, AC test: crates/synveda-gateway/tests/audit_query.rs (**both questions over the real product path**, and the point is that nothing seeds an audit row: disclosures exist because alice and bob called `POST /v1/inject` and the chain recorded what they got. **Q1** — one `GET /v1/audit/disclosures` names exactly the readers the chain records being *served* the record, with the version, channel, tier and seq each of them actually got, and never the payments reader. **Q2** — one `GET /v1/audit/knowledge` folds to one row per record with the version last delivered and the number of occasions behind it, and the AC's "uses bitemporal + refs" is asserted rather than described: every id in the answer is resolved through `records::as_of` at the instant asked at, so the audit answer and the corpus agree; a companion test pins the instant as load-bearing by asking the same call before her first session and getting nothing. Plus the two lists proven separate with the reason carried *in the response body*; the refusals — a subtree-bound auditor denied on all four routes while the same role held tenant-wide passes, and the subject of the answers denied herself; no record content in any response, swept for whole bodies *and* distinctive fragments; the uniform empty answer that keeps the surface from being an existence oracle; a truncated page reporting itself with a cursor that advances; and dana's own query appearing in the next query's results. The suite runs under the real `regulated-strict` default and installs no permissive pack — a blanket pack would grant `AuditRead` to everyone and make every refusal in the file vacuous), crates/synveda-policy/tests/roles.rs (`the_audit_plane_admits_exactly_the_read_only_admin_roles_and_only_tenant_wide`: all 8 roles × 3 packs, allowed tenant-wide for steward/org-admin/auditor and denied for the same role bound at a subtree), crates/synveda-policy/tests/service_scope.rs (`AuditRead` joins the tenant-plane denial list, so no service identity reads the trail however it is bound), crates/synveda-audit (11 unit tests: the fold's last-wins-by-seq, absence reported as absence across three payload generations, the action taxonomy's uniqueness and column bounds), crates/synveda-gateway/src/audit_query.rs (4 unit tests: the vocabulary round-trips, a typo is refused, a limit over the cap is refused rather than trimmed), demo: demos/aud-2-audit-query.sh (the auditor's whole half with **DATABASE_URL unset**, so every answer can only have come through the gateway under the PDP: both questions, the two lists with the break-glass bootstrap bind and the two governed ones side by side in the authority half, the three refusals in the product's own words, a content sweep returning zero, dana's seven own audit reads on the chain she is reading, and `valid=true over 30 events`)
 - [x] [EVAL-2: Extraction quality suite](EVAL-2.md) — done 2026-07-30, ADR-0046, corpus: evals/fixtures/extraction/ (5 groups, 50 labelled transcripts, 54 expectations, 7–13 per class, plus a README stating the rules its guards enforce), AC demo: demos/eval-2-extraction.sh (**the gate failing on a real product change, and the attribution column saying why**: three fresh tenants differing in exactly one thing — a one-day `episode` retention horizon applied as the default pack's *own* source with the horizon added, so not one permit differs — where the clean tenants report `committed 10 → served 10, nothing withheld` and the horizoned one reports `committed 10 → served 8, 2 withheld by the read path, not missed by the extractor`, `extraction_recall_episode` 1.0 → 0.0, and the gate fails naming the axis, the baseline, the measurement and the delta: `extraction_recall_macro fell to 0.747 against a floor of 0.894`, delta −0.147; a tenant per phase because ADR-0028 decision 7's "a fresh tenant per run is what makes two runs comparable" turns out to be load-bearing rather than tidy — see the notes), AC measurement over the real observe→extract→serve path: macro precision **0.983**, macro recall **0.914**, per class decision 1.000/0.900, entity 1.000/1.000, episode 1.000/1.000, fact 0.900/0.692, preference 1.000/0.889, procedure 1.000/1.000, `hallucination_rate` 0.000 against a zero-tolerance ceiling, AC tests: crates/synveda-ingest/tests/extraction_precision.rs (the same corpus with no stack at all — the registered ≥0.90 precision floor, the bait assertion that a span-copying extractor cannot invent, and four corpus guards: an expected token absent from its own source, bait present in its own source, a duplicate session id, a duplicate fixture name), crates/synveda-eval (39 unit tests, up from 20: the corpus format refusing an unknown field and every corpus guard again at load time so `make eval-check` catches them with no database; per-class axes reducing over the whole corpus rather than per group; a class produced-but-never-expected scoring precision and no recall; the hallucination axis absent rather than 0.0 when nothing asked; `slack` writing a floor that far below a measurement, never below zero, carried forward across rewrites, and never read by the gate; and a scenario category refused when it collides with a built-in axis or the `extraction_` namespace)
-- [ ] [EVAL-4: Retrieval & injection quality](EVAL-4.md)
+- [x] [EVAL-4: Retrieval & injection quality](EVAL-4.md) — done 2026-07-31, ADR-0047, corpus: evals/fixtures/qa/ (one corpus, 12 records across four scope tiers, 10 questions), AC demo: demos/eval-4-qa.sh (**the gate failing on a real composition change, and the per-tier table naming which end of the gradient paid**: the composition budget narrowed to 320 estimated tokens through the governed pack path — the default pack's own source with one number changed, so not one permit differs, nothing is deleted and `/v1/recall` still serves all twelve records — on a fresh tenant per phase, where `qa_scope_user` and `qa_scope_team` hold at 1.000 while `qa_scope_department` and `qa_scope_org` fall to 0.000, `qa_answer_rate` 1.000 → 0.545 and `tokens_per_answer` 257.9 → 343.8, the gate failing on six axes at once and naming each with its baseline, measurement and delta; then the budget restored and the suite green again, which is what makes the failure a measurement rather than a broken demo), AC measurement over the real observe→promote→compose path: `qa_answer_rate` **1.000**, `qa_body_rate` **1.000**, all four `qa_scope_*` **1.000**, `retrieval_precision` **0.500** (the sparse leg alone — the deterministic hash embedder ranks by nothing by construction, ADR-0023 decision 6), `tokens_per_answer` **257.9**, plus `estimator_bias_p95` 0.692 and `staleness_p50_permille` 1000 reported and gated by nothing; against live BGE-M3 (`make eval-retrieval`, gated on evals/baseline-retrieval.json, **on the nightly** because a locally-served pinned model changes when someone edits docker-compose.yml): `qa_answer_rate` **0.923**, `qa_scope_user` **0.800**, team/department/org 1.000, `retrieval_precision` **0.286** over the fused result, nothing skipped; **the deterministic gate now blocks a merge** — a Postgres-backed `eval` job in .github/workflows/ci.yml running the whole deterministic suite, which is ADR-0028 option 5's own reversal trigger fired by name; AC tests: crates/synveda-eval (58 unit tests, up from 39: the corpus format refusing an unknown field, the tier/promotion equivalence in both directions, both `needs` guards — a `semantic` question that shares a content word with its own answer and a `lexical` one that shares none — the record-identity join including a `tiers` array shorter than its `record_ids`, per-tier reduction over records rather than questions, a demotion moving the body rate while the answer rate holds, a skipped question staying out of every denominator, `tokens_per_answer` absent rather than dividing by zero, and precision reading only the blocks something bound)
 - [ ] [EVAL-5: Security evals](EVAL-5.md)
 - [ ] [PRMT-1: Prompt templates as assets](PRMT-1.md)
 - [ ] [PRMT-2: Context packs](PRMT-2.md)
@@ -2048,6 +2048,156 @@ against, which is MEM-5's and MEM-2's recorded trigger; bait catches only
 invention a fixture author anticipated, and nothing else does. EVAL-4 and
 EVAL-5 inherit the second-suite shape and the `slack` mechanism; EVAL-3's
 benchmark corpora are a third suite of the same kind._
+
+_EVAL-4 (2026-07-31, ADR-0047): retrieval & injection quality. The
+feature text named three clauses, one of which has no product to measure,
+and an AC with no axis in it — so the ACs were written first, the EVAL-1
+precedent for the third time. **The lens is the inject block, which is the
+exact surface EVAL-2 rejected.** ADR-0046 option 1 threw the block out
+because it is budget-bounded, relevance-ranked and elides what CTX-4
+demotes; those three properties are what this feature measures, so here
+absence *is* the signal. `POST /v1/inject` already carried everything
+needed — `record_ids`, `tiers`, `index_entries`, `index_tokens`,
+`staleness_permille`, `budget_tokens` — so EVAL-4 adds no route, no action
+type and no PDP surface, and the harness's empty dependency set is
+untouched. **Grading joins seed to block by record identity, never by
+containment**: observe's `event_id` → the sweep's `provenance.event_id` →
+`record_id` → its position in `record_ids` → `tiers[i]`. Containment could
+not do this job at all, because an index entry carries the body truncated
+at `index_entry_chars` and "demoted" and "absent" would be one number —
+and it is also the predicate EVAL-2's first live run broke.
+
+**A per-scope corpus has to be promoted, not placed, and that was the
+design's load-bearing discovery.** Observe lands records at the caller's
+home scope (ADR-0020) and a service identity's home is a `ScopeKind::User`
+leaf under its anchor (ADR-0018 decision 2), so registering an author "at
+Engineering" puts its writes on a leaf *under* Engineering — which no
+sibling's chain contains and the privacy floor excludes anyway. It is the
+same mechanism ADR-0046 decision 2 relies on to *isolate* extraction
+groups, read the other way round. So the corpus climbs: `POST
+/v1/proposals` from the author's own leaf to the target scope, this level's
+own approvers (one curator at a team; a curator **and** a steward, two
+distinct people, at a department or the org, per the FLOW-3 matrix golden),
+then the curator runs the effect because publishing takes `MemoryRead` and
+nobody publishes what they cannot read. The runner approves until the
+surface says nothing is outstanding rather than restating the matrix, so a
+pack that asks for a different set is followed. A second consequence fell
+out of the same forbid: the authors are anchored where they must
+*propose*, not where their material ends up, because AUTH-3's confinement
+denies a service identity every resource outside its anchor subtree. That
+makes a per-scope answer rate an assertion about FLOW-5 as much as about
+CTX-2, and it makes EVAL-4 the first eval whose corpus is governed rather
+than personal.
+
+**Two paths, because only one of them can rank.** The nightly's
+deterministic hash embedder has no meaningful geometry by construction
+(ADR-0023 decision 6), so the dense leg ranks by nothing — `evals/scenarios
+/02` has said so in its own `description` since EVAL-1, having been
+rewritten once for exactly this reason. The sparse leg is unaffected:
+Tantivy BM25 over content is real on any stack. So every question declares
+`needs: lexical | semantic`, the guards refuse a question whose declaration
+does not match its own text (a `semantic` question sharing a content word
+with its answer, a `lexical` one sharing none), and a `semantic` question
+is **skipped and counted** where the embedder cannot rank rather than
+scored zero. The retrieval half runs against real BGE-M3 under
+`make eval-retrieval` and gates on `evals/baseline-retrieval.json` — and
+unlike EVAL-2's live-*extraction* half it **is** on the nightly, because
+ADR-0028 decision 6's objection does not hold here: BGE-M3 is served
+locally from an image tag and a model id written in
+`deploy/compose/docker-compose.yml`, so it changes when someone edits that
+file, which is someone changing the code. **The gate also moved onto the
+pull-request path** — ADR-0028 option 5's own reversal trigger fired by
+name — as a Postgres-backed `eval` job in `ci.yml` running the whole
+deterministic suite; the other four jobs stay database-free, so the toll is
+one parallel job.
+
+**Four findings, all from running it.** (1) **The scope gradient means
+ranking is only observable inside the nearest scope.** Scopes are placed
+nearest-first and totally ordered (seed §4.4, ADR-0025 decision 5), so a
+budget that binds spends itself on the near end and never reaches the far
+one: a narrow-budget question about team material failed with the reader's
+own six records filling the block, which is the product working exactly as
+designed. Every question in the corpus that measures ranking therefore asks
+about the reader's own leaf, and that is forced rather than chosen. (2)
+**An unbound paraphrase question tests nothing.** The first version of the
+two `semantic` questions carried no budget, so the block held the whole
+12-record corpus and their answers arrived whether the dense leg had ranked
+them or not — a reachability check wearing a retrieval question's name, and
+it *passed*, which is worse. Bound at 120 tokens, one of them fails: BGE-M3
+does not rank "what starts my services locally" against "I bring the local
+stack up with make dev-up in a split terminal pane" highly enough to
+survive a block holding two of the leaf's six records. The question is kept
+rather than loosened, and `evals/baseline-retrieval.json`'s floors are
+measurements of that rather than round numbers. (3) **The index-readiness
+wait took three tries, and the last one is a fact about the product worth
+knowing.** Asking "is this record retrievable" with the record's own text
+as an *inject* task became unsatisfiable the moment the demo narrowed the
+budget below what the far end of the chain needs: the wait burned its full
+90s timeout and reported an indexing failure for what was a composition
+change. Moving it to `POST /v1/recall`'s query form — which ranks with no
+budget and no gradient — then failed for *every promoted record*, and that
+is the finding: **a promotion publishes a channel that names a record at
+its current address (ADR-0034 decision 3), and the record itself never
+leaves its author's leaf.** So a reader composes promoted material through
+the published channel, and a query-shaped recall, which searches the scopes
+the caller may read, does not reach it. The check now runs before any climb
+and asks each record's own author, whose leaf it is; the sparse index is
+one per tenant (ADR-0024 decision 3), so readiness established there is
+readiness full stop. The asymmetry itself is recorded below rather than
+fixed here. (4) **CTX-2's token estimator under-counts by about
+thirty per cent.** `estimator_bias_p95` reads 0.69–0.73: `ceil(chars/4)`
+is roughly seven tenths of what a real BPE vocabulary counts for the same
+block. ADR-0025 parked "EVAL-4 measures the bias" and this is it, with the
+consequence stated plainly — a block sized to a harness's budget can
+overrun it by something like forty per cent.
+
+The measurements. Deterministic, over the 12-record corpus and 10
+questions: `qa_answer_rate` **1.000**, `qa_body_rate` **1.000**, all four
+`qa_scope_*` **1.000**, `retrieval_precision` **0.500** (the sparse leg
+alone), `tokens_per_answer` **257.9**, `estimator_bias_p95` 0.692,
+`staleness_p50_permille` 1000, two `semantic` questions skipped. Against
+live TEI: `qa_answer_rate` **0.923**, `qa_body_rate` 0.923, `qa_scope_user`
+**0.800** (finding 2), team/department/org 1.000, `retrieval_precision`
+**0.286** over the fused result, `tokens_per_answer` 238.4,
+`latency_p95_ms` ~187 against ~13 deterministic — nothing skipped. The AC
+demo narrows the composition budget to 320 estimated tokens through the
+governed pack path, on a fresh tenant per phase, and the gate fails on six
+axes at once with the per-tier table saying which end paid: `qa_scope_user`
+and `qa_scope_team` hold at 1.000 while `qa_scope_department` and
+`qa_scope_org` fall to **0.000**, `qa_answer_rate` 1.000 → **0.545**, and
+`tokens_per_answer` 257.9 → **343.8** against its 320 ceiling. Nothing was
+deleted, no permit changed, and `/v1/recall` still serves all twelve
+records — there was simply less room in the block.
+
+Deferrals and forward obligations. **The compression clause is not built**:
+"probe-based compression eval (CTX-6)" names a Phase 3 feature, and an axis
+for it would be permanently absent — which EVAL-1's coverage guard makes a
+breach on every run — or permanently zero, which reads as coverage. It
+lands as `compression_fidelity` when CTX-6 does. **`estimator_bias_p95` and
+`staleness_p50_permille` are reported and bounded by nothing**, on
+ADR-0046 decision 13's rule that a target invented before a measurement is
+a wish; the bias number is also model-specific by construction, which is
+ADR-0025 option 2's objection kept rather than argued with, and a floor
+arrives with a decision about which harness the product owes token accuracy
+to. **`retrieval_precision` is gated on both baselines at different
+values** (0.45 sparse-only, 0.256 fused) and they are not one number.
+**MEM-6's staleness heuristic is still unvalidated**: every record in this
+corpus is fresh, so `staleness_p50_permille` reads 1000 and says nothing
+about decay — validating it needs a corpus with age in it, which is
+ADR-0040 reversal trigger (b)'s real precondition. **The `bound` predicate
+is "the block carried less than the reader is served"**, which is ranking
+*or* budget and deliberately does not distinguish them: either way a
+choice was made. **A promoted record is composable to a reader and not
+query-recallable by them** (finding 3): the record stays at its author's
+leaf and the published channel names it there, so `POST /v1/inject` serves
+it and a query-shaped `POST /v1/recall` does not. Whether that asymmetry is
+a CTX-5 gap — a reader shown material in a block cannot then ask for more
+like it — or the universe rule working as intended is a question for CTX-5
+and CNSL-4, and changing a shipped read surface to suit an eval is the
+shape of change ADR-0046 option 7 already refused. Recorded, not fixed. And
+the corpus is one file with one reader; growing it means adding corpora,
+and the sweep's 32-record cap applies here exactly as it does to EVAL-2's —
+`locate` refuses a full page rather than mis-scoring it._
 
 _FLOW-1 (2026-07-25, ADR-0030): the object store — the substrate ADR-0003
 committed to, and only the substrate. Six `vedaflow_*` tables in migration
