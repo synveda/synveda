@@ -352,6 +352,10 @@ mod tests {
             text: text.to_owned(),
             block_hash: "b3-test".to_owned(),
             record_ids: (0..records).map(|index| index.to_string()).collect(),
+            tiers: vec!["body".to_owned(); records],
+            index_entries: 0,
+            index_tokens: 0,
+            staleness_permille: vec![1000; records],
             tokens,
             budget_tokens: 1500,
         }

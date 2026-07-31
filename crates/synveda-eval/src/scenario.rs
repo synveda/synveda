@@ -24,6 +24,12 @@ pub struct Environment {
     /// carries one (ADR-0008).
     pub tenant_id: String,
     pub actors: BTreeMap<String, Actor>,
+    /// Hierarchy nodes by name, for the one thing a corpus has to say in
+    /// UUIDs: where a promotion lands (EVAL-4, ADR-0047 decision 3). A
+    /// fixture names `payments`; the bootstrap knows what that is. Empty
+    /// for an environment that runs no Q&A corpus.
+    #[serde(default)]
+    pub scopes: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,6 +58,15 @@ impl Environment {
         self.actors
             .get(name)
             .ok_or_else(|| format!("no actor `{name}` in this environment"))
+    }
+
+    pub fn scope(&self, name: &str) -> Result<&str, String> {
+        self.scopes.get(name).map(String::as_str).ok_or_else(|| {
+            format!(
+                "no scope `{name}` in this environment; the Q&A corpus promotes into named \
+                 hierarchy nodes and `evals/lib.sh` is what names them"
+            )
+        })
     }
 }
 
@@ -201,7 +216,7 @@ pub fn load_suite(dir: &Path) -> Result<Vec<Scenario>, String> {
 /// Metric names the reduction always produces. A category may not take one
 /// of them: the category's mean would overwrite the suite's axis, and the
 /// gate would then bound something other than what its name says.
-const RESERVED_METRICS: [&str; 8] = [
+const RESERVED_METRICS: [&str; 12] = [
     "accuracy",
     "recall",
     "abstention",
@@ -210,17 +225,26 @@ const RESERVED_METRICS: [&str; 8] = [
     "latency_p50_ms",
     "latency_p95_ms",
     "hallucination_rate",
+    // EVAL-4's axes that sit outside the `qa_` namespace (ADR-0047).
+    "tokens_per_answer",
+    "retrieval_precision",
+    "estimator_bias_p95",
+    "staleness_p50_permille",
 ];
 
-/// The extraction suite owns a whole namespace rather than a fixed list,
-/// because its axes are per class and a class can be added (EVAL-2,
-/// ADR-0046). A prefix rule covers the names that do not exist yet.
-const RESERVED_PREFIX: &str = "extraction_";
+/// Suites that own a whole namespace rather than a fixed list, because
+/// their axes are per class (EVAL-2, ADR-0046) or per scope tier (EVAL-4,
+/// ADR-0047) and either can be added. A prefix rule covers the names that
+/// do not exist yet.
+const RESERVED_PREFIXES: [&str; 2] = ["extraction_", "qa_"];
 
 /// Whether a folded metric name belongs to something other than a
 /// scenario category.
 fn is_reserved(metric: &str) -> bool {
-    RESERVED_METRICS.contains(&metric) || metric.starts_with(RESERVED_PREFIX)
+    RESERVED_METRICS.contains(&metric)
+        || RESERVED_PREFIXES
+            .iter()
+            .any(|prefix| metric.starts_with(prefix))
 }
 
 /// The checks serde cannot make: that expectations refer to keys the
@@ -350,6 +374,11 @@ mod tests {
             "hallucination rate",
             "extraction precision macro",
             "extraction-recall-fact",
+            // EVAL-4's namespace and its axes outside it (ADR-0047).
+            "qa answer rate",
+            "qa-scope-department",
+            "tokens per answer",
+            "retrieval precision",
         ] {
             let json = MINIMAL.replace(
                 r#""probe""#,

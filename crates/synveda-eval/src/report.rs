@@ -143,6 +143,121 @@ impl ExtractionOutcome {
     }
 }
 
+/// One scope tier's counts over one corpus (EVAL-4, ADR-0047 decision 9).
+/// `reached` counts an expected record that arrived at any tier and `body`
+/// the ones that arrived whole, so `body <= reached` always — the index
+/// tier names what it could not carry (ADR-0041 decision 13) and the gap
+/// between the two is the displacement CTX-4 parked here.
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+pub struct TierCounts {
+    pub expected: usize,
+    pub reached: usize,
+    pub body: usize,
+}
+
+/// What one question measured.
+#[derive(Debug, Serialize)]
+pub struct QuestionOutcome {
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub note: String,
+    /// `lexical` or `semantic` (decision 5).
+    pub needs: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
+    /// Not measured on this run because the configured embedder cannot
+    /// rank. Counted rather than scored zero, and named in the report:
+    /// a question the path structurally cannot answer is not a
+    /// regression.
+    pub skipped: bool,
+    pub passed: bool,
+    pub per_tier: BTreeMap<String, TierCounts>,
+    /// Expected records that arrived at the index tier — named, not
+    /// carried. Not a failure on its own: the block still says they
+    /// exist and recall fetches them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub demoted: Vec<String>,
+    /// Expected records the block did not carry at all.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub missing: Vec<String>,
+    /// Every record the block carried, and how many of them this question
+    /// judges relevant — the two halves of `retrieval_precision`.
+    pub block_records: usize,
+    pub relevant_records: usize,
+    /// What the index tier cost this block, as the product counts it
+    /// (ADR-0041 decision 14). Reported beside the displacement so the
+    /// two halves of CTX-4's trade — what was named, what it cost — sit
+    /// together.
+    pub index_entries: usize,
+    pub index_tokens: u32,
+    /// Whether something bound this block: it carried fewer records than
+    /// the reader is served, because the budget ran out or because
+    /// retrieval offered fewer candidates. Either way a choice was made,
+    /// which is the condition under which what the block *did* carry is a
+    /// ranking decision rather than a restatement of the corpus size —
+    /// and it is what `retrieval_precision` reads (ADR-0047 decision 8).
+    /// Exact rather than declared, so a corpus cannot opt a question into
+    /// or out of the axis by mistake.
+    pub bound: bool,
+    pub tokens: u32,
+    pub budget_tokens: u32,
+    /// What a real BPE tokenizer counts for the same text. CTX-2 ships
+    /// `ceil(chars/4)` and ADR-0025 parked the bias here; this is the
+    /// denominator that measures it.
+    pub reference_tokens: usize,
+    pub block_hash: String,
+    pub latency_ms: f64,
+    /// Freshness of what the block carried, in block order (MEM-6).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub staleness_permille: Vec<u16>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub degraded: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failures: Vec<String>,
+}
+
+/// What one Q&A corpus measured (EVAL-4, ADR-0047).
+#[derive(Debug, Default, Serialize)]
+pub struct QaOutcome {
+    pub corpus: String,
+    pub reader: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub note: String,
+    pub passed: bool,
+    /// The climbs this corpus made to exist at all, each naming the tier
+    /// it reached and the commit that carried it. A per-scope answer rate
+    /// is an assertion about FLOW-5 as much as about CTX-2, and this is
+    /// where that shows.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub promotions: Vec<String>,
+    pub questions: Vec<QuestionOutcome>,
+    /// Questions this run could not measure, because the configured
+    /// embedder cannot rank a paraphrase.
+    pub skipped_semantic: usize,
+    /// How many records the reader is served in total, from its own
+    /// sweep. The denominator that says whether a block was bound, and
+    /// the number that makes a block's record count readable: 8 of 12 is
+    /// a ranking decision, 12 of 12 is the whole corpus fitting.
+    pub served_records: usize,
+    /// How long the whole corpus took to become composable. Reported,
+    /// never gated: MEM-3's lag and EVAL-6's to bound.
+    pub seed_wait_ms: f64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failures: Vec<String>,
+}
+
+impl QaOutcome {
+    #[must_use]
+    pub fn new(corpus: &crate::qa::Corpus) -> Self {
+        Self {
+            corpus: corpus.corpus.clone(),
+            reader: corpus.reader.clone(),
+            note: corpus.note.clone(),
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub suite: String,
@@ -156,6 +271,9 @@ pub struct Report {
     /// The extraction suite's groups (EVAL-2). Absent when no corpus ran.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub extraction: Vec<ExtractionOutcome>,
+    /// The Q&A suite's corpora (EVAL-4). Absent when none ran.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub qa: Vec<QaOutcome>,
     pub metrics: BTreeMap<String, f64>,
     pub gate: Gate,
 }
@@ -468,6 +586,9 @@ pub fn summarise(report: &Report) -> String {
     if !report.extraction.is_empty() {
         out.push_str(&extraction_summary(&report.extraction));
     }
+    if !report.qa.is_empty() {
+        out.push_str(&qa_summary(&report.qa));
+    }
     out.push_str("\n  axis                       measured   gate\n");
     for (metric, value) in &report.metrics {
         let bound = if report.gate.gated.contains(metric) {
@@ -597,6 +718,111 @@ fn extraction_summary(groups: &[ExtractionOutcome]) -> String {
         .collect();
     if !models.is_empty() {
         out.push_str(&format!("\n  extracted by: {}\n", models.join(", ")));
+    }
+    out
+}
+
+/// The per-tier table EVAL-4's AC asks for (ADR-0047 decisions 8 and 9):
+/// what each scope tier was asked for, what reached the reader, and what
+/// reached it whole — plus the climbs that put the material there, because
+/// a per-scope answer rate is an assertion about FLOW-5 as much as about
+/// composition.
+fn qa_summary(corpora: &[QaOutcome]) -> String {
+    let mut out = String::new();
+    let questions: usize = corpora.iter().map(|corpus| corpus.questions.len()).sum();
+    out.push_str(&format!(
+        "\n  qa: {questions} question(s) across {} corpus/corpora\n",
+        corpora.len()
+    ));
+    for corpus in corpora {
+        out.push_str(&format!(
+            "  {} {} (read by {}): {} record(s) served",
+            if corpus.passed { "✓" } else { "✗" },
+            corpus.corpus,
+            corpus.reader,
+            corpus.served_records
+        ));
+        if corpus.skipped_semantic > 0 {
+            out.push_str(&format!(
+                ", {} semantic question(s) skipped — this run's embedder cannot rank a paraphrase",
+                corpus.skipped_semantic
+            ));
+        }
+        out.push('\n');
+        for promotion in &corpus.promotions {
+            out.push_str(&format!("      climbed: {promotion}\n"));
+        }
+        for failure in &corpus.failures {
+            out.push_str(&format!("      {failure}\n"));
+        }
+        for question in &corpus.questions {
+            for failure in &question.failures {
+                out.push_str(&format!("      {}: {failure}\n", question.name));
+            }
+        }
+    }
+
+    let mut totals: BTreeMap<&str, TierCounts> = BTreeMap::new();
+    for question in corpora
+        .iter()
+        .flat_map(|corpus| corpus.questions.iter())
+        .filter(|question| !question.skipped)
+    {
+        for (tier, counts) in &question.per_tier {
+            let slot = totals.entry(tier.as_str()).or_default();
+            slot.expected += counts.expected;
+            slot.reached += counts.reached;
+            slot.body += counts.body;
+        }
+    }
+    out.push_str("\n  scope tier   reached            whole\n");
+    for (tier, counts) in &totals {
+        let ratio = |hit: usize| {
+            if counts.expected == 0 {
+                "     —".to_owned()
+            } else {
+                format!(
+                    "{hit}/{} = {:.3}",
+                    counts.expected,
+                    hit as f64 / counts.expected as f64
+                )
+            }
+        };
+        out.push_str(&format!(
+            "  {:<12} {:<18} {}\n",
+            tier,
+            ratio(counts.reached),
+            ratio(counts.body)
+        ));
+    }
+
+    // Demotions before misses: a record the index tier named is a
+    // different fact from one the block never carried, and a reader
+    // scanning this needs to know which is which.
+    let demoted: Vec<&str> = corpora
+        .iter()
+        .flat_map(|corpus| corpus.questions.iter())
+        .flat_map(|question| question.demoted.iter().map(String::as_str))
+        .collect();
+    if !demoted.is_empty() {
+        out.push_str(&format!(
+            "\n  {} expected record(s) reached the reader as index lines rather than bodies — \
+             named, not carried:\n    {}\n",
+            demoted.len(),
+            demoted.join(", ")
+        ));
+    }
+    let noted: Vec<String> = corpora
+        .iter()
+        .flat_map(|corpus| corpus.questions.iter())
+        .filter(|question| !question.note.is_empty() && !question.passed && !question.skipped)
+        .map(|question| format!("{} — {}", question.name, question.note))
+        .collect();
+    if !noted.is_empty() {
+        out.push_str("\n  misses the corpus predicted, with the reason it gave:\n");
+        for entry in noted {
+            out.push_str(&format!("    {entry}\n"));
+        }
     }
     out
 }
