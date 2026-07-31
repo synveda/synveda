@@ -13,35 +13,41 @@
 #
 # Flow: a stack with TWO admitted tenants -> the corpus climbs and gets
 # classified through real review, and the suite runs green with every zero
-# sitting on a denominator the report prints -> a LAPSE is granted for real,
-# proposed on the disclosing side and approved by two distinct stewards,
-# which is the change this demo exists for: nothing is deleted, no pack
-# changes, no role is bound that widens anything, and one team can now read
-# another's -> the very next run fails the gate, and the leak line names the
+# sitting on a denominator the report prints -> `open-collaboration`, a pack
+# this product ships, is applied unmodified at the security department,
+# which is the change this demo exists for: nothing is deleted, no record
+# moves, no role is bound, and one tier's worth of material stops being
+# withheld -> the very next run fails the gate, and the leak line names the
 # record, the reader, the surface, the phrasing and the probe index ->
-# a third fresh tenant with no grant on it is green again, which is what
+# a third fresh tenant at the product default is green again, which is what
 # makes the failure a measurement rather than a broken demo.
 #
-# WHY A LAPSE AND NOT A PACK FLIP. `open-collaboration` at the org would
-# have been the obvious change and it discloses nothing here: a pack cannot
-# put a sibling team's material into anybody's block, because the candidate
-# universe is the caller's placement chain and "widens by lapse and by
-# nothing else" (ADR-0037 decision 13). `recall` does widen with the pack,
-# but promoted material never left its author's personal leaf (ADR-0034
-# decision 3), personal scopes are excluded under every pack including the
-# open one, and a query-shaped recall does not follow published channels
-# (ADR-0047 reversal trigger (g)). That is a good product property and a
-# demo that proves nothing. The lapse is the one mechanism that widens a
-# universe, so it is the one change this gate can be shown failing on.
+# WHY THE PACK AND NOT A LAPSE, which is where this demo was written first
+# and the finding is worth more than the demo. A lapse is the one mechanism
+# that widens a candidate universe (ADR-0037 decision 13), so it looked like
+# the only lever — and it discloses NOTHING here, twice over. Every actor in
+# `evals/lib.sh` is a service identity, and base.cedar's confinement forbid
+# denies one every resource outside its anchor subtree "regardless of bound
+# roles", carving out only own-chain MemoryRead (ADR-0018). Cedar forbids
+# beat permits, including the base layer's own lapse permit. So a token
+# confined to an anchor cannot be widened by any grant, by anybody, ever —
+# which is a strong product property and a demo that proves nothing.
+#
+# What CAN change what a confined reader composes is its own chain's pack.
+# `supplier-terms` is `confidential` and published at the vault team, so
+# sec-mate is a member of the scope that names it and is withheld only by
+# the tier set: `regulated-strict` admits the working tiers at a team and
+# `open-collaboration` admits `confidential` (personal scopes still
+# excluded). One pack assignment, and the record crosses.
 #
 # WHAT DOES NOT MOVE, AND WHY THEY ARE SEPARATE AXES. On the failing run
-# `security_leaks_sensitivity` and `security_leaks_tenant` stay at zero, and
-# they stay there for two different reasons. `supplier-terms` is
-# `confidential` and the grant declares only the working tier, so the
-# lapse's own ceiling withholds it (ADR-0038 decision 9). `vault-ceremony`
-# is `restricted` at a personal leaf, and NO grant can reach it at all:
-# base.cedar's forbid has no owner carve-out and the one base-layer permit
-# that could lift it carries `resource.kind != "user"`.
+# `security_leaks_scope` and `security_leaks_tenant` stay at zero, held by
+# two mechanisms that are not the pack's. sec-neighbour is at the sibling
+# team and the same pack permits it vault's material outright — the
+# CONFINEMENT FORBID is what still refuses, not the policy the operator just
+# changed. And `vault-ceremony` is `restricted`: base.cedar forbids it to
+# every reader without a tier-declaring grant, and no pack can author that
+# away.
 #
 # The harness holds no Synveda crate dependency: it reaches the stack
 # through /v1 only — observe to seed, the recall sweep to find where the
@@ -72,15 +78,10 @@ export EVAL_KEEP_STATE
 EVAL_SECURITY_VARIANTS=${EVAL_SECURITY_VARIANTS:-400}
 export EVAL_SECURITY_VARIANTS
 
-# Long enough to outlast a whole measured run, with room to spare. The
-# first attempt used 150s and the gate held in phase 3 — because the
-# security corpus runs LAST, after the scenarios, five extraction groups
-# and the Q&A corpus, so the grant had already expired by the time
-# anything probed it. That is the product's expiry working exactly as
-# AUTHZ-4 built it and a demo measuring the wrong thing; under
-# `regulated-strict` the ceiling is thirty days, so the window is this
-# demo's choice and not the pack's.
-LAPSE_SECS=${LAPSE_SECS:-1800}
+# The pack this product ships, applied unmodified. Not a variant of it and
+# not a hand-written permit: what makes this demo a claim about the product
+# is that an operator could make exactly this change by name.
+OPEN_PACK=crates/synveda-policy/src/packs/open-collaboration.cedar
 
 trap eval_down EXIT INT TERM
 
@@ -104,8 +105,15 @@ report_security() {
       const surfaces = Object.entries(corpus.probes_by_surface).map(([s, n]) => `${s} ${n}`).join(", ");
       if (surfaces) console.log(`        surfaces: ${surfaces}`);
       for (const missed of corpus.controls_missed ?? []) console.log(`        MISSED CONTROL: ${missed}`);
-      for (const leak of corpus.leaks ?? []) {
+      // Capped for the same reason the harness caps its own: one
+      // disclosure recurs under every phrasing that reaches it.
+      const leaks = corpus.leaks ?? [];
+      for (const leak of leaks.slice(0, 8)) {
         console.log(`        LEAK [${leak.boundary}] ${leak.record} → ${leak.reader} via ${leak.surface} (${leak.predicate}) at probe ${leak.probe}${leak.query ? ` asking ${JSON.stringify(leak.query)}` : ""}`);
+      }
+      if (leaks.length > 8) {
+        const pairs = new Set(leaks.map((l) => `${l.record}→${l.reader}`));
+        console.log(`        … and ${leaks.length - 8} more, over ${pairs.size} distinct (record, reader) pair(s): ${[...pairs].join(", ")}`);
       }
       for (const line of corpus.unattributed ?? []) {
         console.log(`        UNATTRIBUTED LINE for ${line.reader} at probe ${line.probe}: ${JSON.stringify(line.line)}`);
@@ -166,49 +174,45 @@ echo "    measuring less, so the probe and variant counts are FLOORS and the"
 echo "    controls line is what separates this from an empty corpus."
 
 echo
-echo "==> [2/4] now a real, governed relaxation on a fresh tenant pair: a"
-echo "    LAPSE granting the settlement desk read of the vault team's"
-echo "    material — proposed on the disclosing side, approved by two"
-echo "    distinct stewards, time-boxed to ${LAPSE_SECS}s and audited."
+echo "==> [2/4] now a real, governed policy change on a fresh tenant pair:"
+echo "    open-collaboration — a pack this product SHIPS, applied"
+echo "    unmodified at the security department. Nothing is deleted, no"
+echo "    record moves, no role is bound. One tier stops being withheld."
 fresh_stack
 echo "    tenant $EVAL_TENANT"
-vault=$(node -e '
+sec=$(node -e '
   const { readFileSync } = require("node:fs");
-  console.log(JSON.parse(readFileSync(process.argv[1], "utf8")).scopes.vault);
+  console.log(JSON.parse(readFileSync(process.argv[1], "utf8")).scopes.sec);
 ' "$EVAL_ENV")
-desk=$(node -e '
-  const { readFileSync } = require("node:fs");
-  console.log(JSON.parse(readFileSync(process.argv[1], "utf8")).scopes.desk);
-' "$EVAL_ENV")
-# Two distinct stewards with authority over the disclosing scope. Binding a
-# role is NOT the change under demonstration and cannot be: a content-role
-# binding at another team does not bring that team's material into anybody's
-# block, because the candidate universe is the caller's chain (ADR-0038's
-# own correction). It is here so the matrix has two people to ask.
-./target/debug/synveda role bind --tenant "$EVAL_TENANT" \
-  --subject sec-compliance --role steward --scope "$EVAL_ORG" >/dev/null
-sec_steward=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT" --subject sec-compliance)
-qa_steward=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT" --subject qa-steward)
+# At the DEPARTMENT, not the org: the security estate is the blast radius,
+# so EVAL-1's scenarios, EVAL-2's corpus and EVAL-4's Q&A corpus — all of
+# them under acme/eng — are measuring the same product they measured in
+# phase 1. A demo that also moved those would have several reasons to fail
+# and would prove none of them.
+./target/debug/synveda policy apply --tenant "$EVAL_TENANT" \
+  --name eval-open \
+  --composition-budget 1500 \
+  --composition-channels published-and-derived \
+  "$OPEN_PACK" >/dev/null
+curl -fsS -X PUT "$EVAL_GATEWAY_URL/v1/hierarchy/nodes/$sec/policy" \
+  -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
+  -d '{"name":"eval-open"}' >/dev/null
+# The gateway polls for stored-pack changes (SYNVEDA_POLICY_REFRESH_SECS,
+# default 5s); wait for it to be in force before measuring.
+sleep 8
+echo "    open-collaboration in force at acme/sec and everything under it"
+echo "    Read what it changed: seed §6 calls it \"org-wide read for"
+echo "    non-restricted content\", and the half that matters here is the"
+echo "    tier — regulated-strict admits the working tiers at a team,"
+echo "    this admits confidential too (personal scopes still excluded)."
 
-proposal=$(api "$qa_steward" POST /v1/lapses \
-  "{\"scope_id\":\"$vault\",\"grantee_scope_id\":\"$desk\",
-    \"action\":\"memory.read\",\"duration_secs\":$LAPSE_SECS,
-    \"reason\":\"joint reconciliation review: the desk is on the bridge\"}" |
-  eval_json_field proposal_id)
-echo "    lapse proposal $proposal opened against acme/sec/vault"
-api "$qa_steward" POST "/v1/proposals/$proposal/approve" '{}' >/dev/null
-api "$sec_steward" POST "/v1/proposals/$proposal/approve" '{}' >/dev/null
-lapse=$(api "$sec_steward" POST "/v1/proposals/$proposal/lapse" '{}' | eval_json_field id)
-echo "    granted: lapse $lapse — two distinct stewards, a reason on the record,"
-echo "    and an expiry the product enforces without anybody remembering to"
-
-echo
-echo "==> [3/4] the same suite against the same product, relaxed. The AC's"
+echo "==> [3/4] the same suite against the same product, opened. The AC's"
 echo "    claim is that this fails, and that it says exactly what crossed:"
 if eval_run; then
-  echo "demo FAILED: the gate held while a standing grant disclosed one" >&2
-  echo "             team's material to another — a zero-tolerance gate" >&2
-  echo "             that cannot fail is a dashboard" >&2
+  echo "demo FAILED: the gate held while a pack change disclosed" >&2
+  echo "             confidential material to a reader the corpus says" >&2
+  echo "             must not have it — a zero-tolerance gate that cannot" >&2
+  echo "             fail is a dashboard" >&2
   exit 1
 fi
 echo
@@ -221,25 +225,25 @@ echo "    the reader, the surface, the predicate that fired and the probe"
 echo "    index — the five things needed to reproduce a disclosure, which is"
 echo "    why this suite is sequential."
 echo
-echo "    And read what did NOT move. security_leaks_sensitivity is still"
-echo "    zero, and it is held there by two different mechanisms:"
-echo "      · supplier-terms is \`confidential\` and this grant declared only"
-echo "        the working tier, so the lapse's OWN ceiling withholds it."
-echo "      · vault-ceremony is \`restricted\` at a personal leaf, and no"
-echo "        grant can reach it at all — base.cedar's forbid has no owner"
-echo "        carve-out and the base layer's one permit carries"
-echo "        \`resource.kind != \"user\"\`."
-echo "    security_leaks_tenant is zero too: nothing about a relaxation"
-echo "    inside one tenant is visible from another."
+echo "    And read what did NOT move, because neither is held by the pack:"
+echo "      · security_leaks_scope is zero. This same pack permits"
+echo "        sec-neighbour vault's material outright — what still refuses"
+echo "        is base.cedar's CONFINEMENT FORBID, which denies a service"
+echo "        identity every resource outside its anchor subtree regardless"
+echo "        of bound roles (ADR-0018). A token confined to an anchor"
+echo "        cannot be widened by policy, by a grant, or by anybody."
+echo "      · security_leaks_sensitivity moved for confidential and NOT for"
+echo "        restricted: vault-ceremony is forbidden to every reader"
+echo "        without a tier-declaring grant, in the base layer, where no"
+echo "        pack can author it away. One tier a pack may open, one it may"
+echo "        not, on the same run and the same corpus."
+echo "      · security_leaks_tenant is zero: nothing about a policy change"
+echo "        inside one tenant is visible from another."
 
 echo
-echo "==> [4/4] a third fresh tenant pair, with no grant on it at all: the"
+echo "==> [4/4] a third fresh tenant pair, at the product default: the"
 echo "    same suite is green again, which is what makes the failure above"
-echo "    a measurement rather than a broken demo. (That a lapse expires on"
-echo "    its own timer and restores the denial is AUTHZ-4's own"
-echo "    acceptance criterion — demos/authz-4-lapses.sh proves it, and"
-echo "    proving it a second time here is what made the first attempt at"
-echo "    this demo measure a window rather than a boundary.)"
+echo "    a measurement rather than a broken demo."
 fresh_stack
 echo "    tenant $EVAL_TENANT"
 eval_run
