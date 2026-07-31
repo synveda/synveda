@@ -39,6 +39,12 @@ pub struct InjectRequest<'a> {
 /// Only what a measurement needs. The body also carries its own
 /// `degraded` list; the header is the one this reads, because the header
 /// is what ADR-0026 decision 4 makes the warning.
+///
+/// EVAL-4 stopped ignoring four fields the gateway was already sending
+/// (ADR-0047 decision 1): the per-entry tier and the index counters, which
+/// are how a demotion is told from an absence, and the staleness scores,
+/// which are MEM-6's unvalidated heuristic (ADR-0040) measured for the
+/// first time.
 #[derive(Debug, Deserialize)]
 pub struct InjectResponse {
     pub text: String,
@@ -47,8 +53,38 @@ pub struct InjectResponse {
     /// it, months later, from the audit chain.
     pub block_hash: String,
     pub record_ids: Vec<String>,
+    /// How much of each composed record the block carried, in block order:
+    /// `body` or `index` (CTX-4, ADR-0041 decision 9). Parallel to
+    /// `record_ids`, which is what makes a per-record tier readable.
+    #[serde(default)]
+    pub tiers: Vec<String>,
+    #[serde(default)]
+    pub index_entries: usize,
+    #[serde(default)]
+    pub index_tokens: u32,
+    /// Per mille freshness at `as_of`, in block order (MEM-6, ADR-0040
+    /// decision 12).
+    #[serde(default)]
+    pub staleness_permille: Vec<u16>,
     pub tokens: u32,
     pub budget_tokens: u32,
+}
+
+impl InjectResponse {
+    /// The tier a record composed at, or `None` when the block does not
+    /// carry it. Absent rather than defaulted: "not in the block" and
+    /// "in the block at the body tier" are the two answers this whole
+    /// suite turns on, and a default would merge them. A response whose
+    /// `tiers` array is shorter than its `record_ids` reads as `None`
+    /// too, which grades as a miss — conservative, and the right way
+    /// round for a contract violation nobody has seen.
+    #[must_use]
+    pub fn tier_of(&self, record_id: &str) -> Option<&str> {
+        let position = self.record_ids.iter().position(|id| id == record_id)?;
+        // A gateway that sent fewer tiers than records would otherwise
+        // read as "this record was not carried"; say so instead.
+        self.tiers.get(position).map(String::as_str)
+    }
 }
 
 /// `POST /v1/observe` (MEM-1, ADR-0020).
@@ -102,6 +138,21 @@ pub struct RecallSweepRequest<'a> {
     pub limit: usize,
 }
 
+/// `POST /v1/recall` in its **query** shape (CTX-5, ADR-0042 decision 1):
+/// ranked retrieval over the widened universe, with no composition budget
+/// and no scope gradient in the way.
+///
+/// EVAL-4 uses it for one thing only — asking whether a record is
+/// retrievable at all, which is a different question from whether it fits
+/// in a block, and the only honest way to wait for the sparse sidecar
+/// without waiting for the measurement (ADR-0047 decision 5).
+#[derive(Debug, Serialize)]
+pub struct RecallQueryRequest<'a> {
+    pub query: &'a str,
+    pub session_id: &'a str,
+    pub limit: usize,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RecallResponse {
     pub entries: Vec<RecallEntry>,
@@ -122,6 +173,11 @@ pub struct RecallResponse {
 #[derive(Debug, Deserialize)]
 pub struct RecallEntry {
     pub record_id: String,
+    /// Where the record lives. EVAL-4 needs it as a promotion's
+    /// `source_scope_id`: material sits at its author's personal leaf, and
+    /// naming that leaf is how a climb says where it is coming from
+    /// (ADR-0034 decision 2).
+    pub scope_id: String,
     pub class: String,
     /// Untruncated: recall does not elide what the caller named
     /// (ADR-0041 decision 7).
@@ -150,6 +206,48 @@ impl RecallEntry {
     pub fn model_version(&self) -> Option<&str> {
         self.provenance.get("model_version")?.as_str()
     }
+}
+
+/// `POST /v1/proposals` (FLOW-3/FLOW-5, ADR-0032/ADR-0034) — a climb.
+///
+/// EVAL-4 needs this because nothing else can put material above a leaf:
+/// observe writes land at the caller's home scope (ADR-0020) and a service
+/// identity's home is a `ScopeKind::User` leaf under its anchor (ADR-0018
+/// decision 2), so a corpus that spans scope tiers is a corpus that was
+/// promoted through review (ADR-0047 decision 3).
+#[derive(Debug, Serialize)]
+pub struct ProposalRequest<'a> {
+    /// The scope whose published channel would move. Requirements resolve
+    /// here and only here.
+    pub scope_id: &'a str,
+    /// Where the material is now — the author's own leaf. Must be the
+    /// target or a descendant of it.
+    pub source_scope_id: &'a str,
+    pub record_ids: Vec<String>,
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Proposal {
+    pub id: String,
+    /// `open` | `approved` | `rejected` | `withdrawn` | `published`.
+    pub state: String,
+    /// What the proposal still lacks, in the pack's own words. The runner
+    /// approves until this says `nothing` rather than hard-coding the
+    /// approval matrix, so a pack that asks for a different set is
+    /// followed rather than fought (ADR-0032).
+    #[serde(default)]
+    pub outstanding: String,
+    #[serde(default)]
+    pub target_scope_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Published {
+    pub scope_id: String,
+    pub commit: String,
+    /// How many records the publication added to the channel.
+    pub added: usize,
 }
 
 /// `GET /v1/audit/events` (AUD-2, ADR-0045 decision 3).
@@ -217,6 +315,47 @@ impl Client {
         request: &RecallSweepRequest<'_>,
     ) -> Result<Timed<RecallResponse>, String> {
         self.post("/v1/recall", bearer, request).await
+    }
+
+    pub async fn recall_query(
+        &self,
+        bearer: &str,
+        request: &RecallQueryRequest<'_>,
+    ) -> Result<Timed<RecallResponse>, String> {
+        self.post("/v1/recall", bearer, request).await
+    }
+
+    pub async fn propose(
+        &self,
+        bearer: &str,
+        request: &ProposalRequest<'_>,
+    ) -> Result<Timed<Proposal>, String> {
+        self.post("/v1/proposals", bearer, request).await
+    }
+
+    /// One approver's verdict. The caller repeats this with a different
+    /// bearer until the proposal leaves `open`, because how many distinct
+    /// approvers and which roles is the pack's answer, not the harness's.
+    pub async fn approve(&self, bearer: &str, proposal: &str) -> Result<Timed<Proposal>, String> {
+        self.post(
+            &format!("/v1/proposals/{proposal}/approve"),
+            bearer,
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    /// Runs the approved proposal's effect. Takes `MemoryRead` as well as
+    /// the review authority — nobody publishes what they cannot read
+    /// (ADR-0031 decision 12) — so it is the curator's call and never the
+    /// steward's.
+    pub async fn publish(&self, bearer: &str, proposal: &str) -> Result<Timed<Published>, String> {
+        self.post(
+            &format!("/v1/proposals/{proposal}/publish"),
+            bearer,
+            &serde_json::json!({}),
+        )
+        .await
     }
 
     /// One page of the chain, filtered to a single action. Paging is the
@@ -346,6 +485,34 @@ mod tests {
         };
         let json = serde_json::to_string(&request).expect("serialises");
         assert_eq!(json, r#"{"session_id":"s1"}"#);
+    }
+
+    /// The join EVAL-4 grades on (ADR-0047 decision 2). Containment
+    /// cannot do this: an index entry carries a truncated head, so
+    /// "demoted" and "absent" would be one answer, and they are the two
+    /// the whole suite turns on.
+    #[test]
+    fn a_records_tier_reads_by_position_and_absence_is_its_own_answer() {
+        let block: InjectResponse = serde_json::from_str(
+            r#"{"text":"…","block_hash":"b3","record_ids":["r1","r2"],
+                "tiers":["body","index"],"index_entries":1,"index_tokens":40,
+                "staleness_permille":[1000,820],"tokens":120,"budget_tokens":1500}"#,
+        )
+        .expect("parses");
+        assert_eq!(block.tier_of("r1"), Some("body"));
+        assert_eq!(block.tier_of("r2"), Some("index"));
+        assert_eq!(block.tier_of("r3"), None, "not carried at all");
+
+        // A gateway that sent fewer tiers than records must not default
+        // one, or a truncated array would silently become a body and a
+        // demotion would read as a whole record.
+        let ragged: InjectResponse = serde_json::from_str(
+            r#"{"text":"…","block_hash":"b3","record_ids":["r1","r2"],"tiers":["body"],
+                "tokens":10,"budget_tokens":100}"#,
+        )
+        .expect("parses");
+        assert_eq!(ragged.tier_of("r1"), Some("body"));
+        assert_eq!(ragged.tier_of("r2"), None);
     }
 
     #[test]

@@ -16,6 +16,8 @@
 mod client;
 mod extraction;
 mod fixtures;
+mod qa;
+mod qa_runner;
 mod report;
 mod runner;
 mod scenario;
@@ -60,6 +62,18 @@ enum Command {
         /// into one metrics map and gate against one baseline.
         #[arg(long, default_value = "evals/fixtures/extraction")]
         fixtures: PathBuf,
+        /// Directory of `*.json` Q&A corpora (EVAL-4). A third suite, and
+        /// for a measured reason: a Q&A corpus is seeded once and asked
+        /// many times, which the scenario format cannot say (ADR-0047
+        /// decision 4).
+        #[arg(long, default_value = "evals/fixtures/qa")]
+        qa: PathBuf,
+        /// Whether this run's embedder ranks by meaning. The harness is a
+        /// client and cannot see the gateway's configuration, so whoever
+        /// brought TEI up says so — and `semantic` questions are skipped
+        /// and counted without it (ADR-0047 decision 5).
+        #[arg(long)]
+        dense_retrieval: bool,
         /// The committed gate.
         #[arg(long, default_value = "evals/baseline.json")]
         baseline: PathBuf,
@@ -82,6 +96,8 @@ enum Command {
         suite: PathBuf,
         #[arg(long, default_value = "evals/fixtures/extraction")]
         fixtures: PathBuf,
+        #[arg(long, default_value = "evals/fixtures/qa")]
+        qa: PathBuf,
         #[arg(long, default_value = "evals/baseline.json")]
         baseline: PathBuf,
     },
@@ -105,6 +121,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
         Command::Check {
             suite,
             fixtures: fixtures_dir,
+            qa: qa_dir,
             baseline,
         } => {
             let scenarios = scenario::load_suite(&suite)?;
@@ -113,16 +130,27 @@ async fn run(cli: Cli) -> Result<bool, String> {
             // forever and silently, and in both of the corpus's readers
             // (ADR-0046 decision 7).
             let groups = fixtures::load_corpus(&fixtures_dir)?;
+            // The Q&A guards run here too, and two of them are the reason
+            // this command exists: a question that declared the wrong
+            // retrieval leg would fail on the wrong path forever, for a
+            // corpus reason rather than a product one (ADR-0047
+            // decision 5).
+            let corpora = qa::load_corpora(&qa_dir)?;
             let baseline = Baseline::load(&baseline)?;
             eprintln!(
-                "synveda-eval: {} scenario(s) and {} fixture(s) across {} group(s) parse; the \
-                 baseline bounds {}",
+                "synveda-eval: {} scenario(s), {} fixture(s) across {} group(s), and {} \
+                 question(s) across {} corpus/corpora parse; the baseline bounds {}",
                 scenarios.len(),
                 groups
                     .iter()
                     .map(|group| group.fixtures.len())
                     .sum::<usize>(),
                 groups.len(),
+                corpora
+                    .iter()
+                    .map(|corpus| corpus.questions.len())
+                    .sum::<usize>(),
+                corpora.len(),
                 baseline
                     .metrics
                     .keys()
@@ -136,6 +164,8 @@ async fn run(cli: Cli) -> Result<bool, String> {
             env,
             suite,
             fixtures: fixtures_dir,
+            qa: qa_dir,
+            dense_retrieval,
             baseline,
             report: report_path,
             update_baseline,
@@ -144,6 +174,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
             let environment = Environment::load(&env)?;
             let scenarios = scenario::load_suite(&suite)?;
             let groups = fixtures::load_corpus(&fixtures_dir)?;
+            let corpora = qa::load_corpora(&qa_dir)?;
             let baseline_file = baseline;
             let baseline = Baseline::load(&baseline_file)?;
             let client = Client::new(&environment.gateway_url)?;
@@ -168,11 +199,23 @@ async fn run(cli: Cli) -> Result<bool, String> {
                 );
             }
 
-            // One metrics map and one gate over both suites (ADR-0046
-            // decision 10): the formats differ because they measure
-            // different things, the gate vocabulary does not.
+            let qa_options = qa_runner::Options {
+                seed_timeout,
+                dense_retrieval,
+            };
+            let mut qa_outcomes = Vec::with_capacity(corpora.len());
+            for corpus in &corpora {
+                eprintln!("synveda-eval: qa/{}", corpus.corpus);
+                qa_outcomes
+                    .push(qa_runner::run_corpus(&client, &environment, corpus, &qa_options).await?);
+            }
+
+            // One metrics map and one gate over all three suites (ADR-0046
+            // decision 10, ADR-0047 decision 4): the formats differ because
+            // they measure different things, the gate vocabulary does not.
             let mut metrics = report::metrics(&outcomes);
             metrics.extend(extraction::metrics(&extraction_outcomes));
+            metrics.extend(qa_runner::metrics(&qa_outcomes));
             let gate = report::gate(&baseline, &metrics);
             let report = Report {
                 suite: suite.display().to_string(),
@@ -191,6 +234,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
                     .collect(),
                 scenarios: outcomes,
                 extraction: extraction_outcomes,
+                qa: qa_outcomes,
                 metrics,
                 gate,
             };

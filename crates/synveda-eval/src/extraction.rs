@@ -317,18 +317,18 @@ pub async fn run_group(
 
 /// What one `memory.extracted` payload says about one observe event.
 #[derive(Clone, Copy, Default)]
-struct Committed {
-    records: usize,
-    merged: usize,
+pub struct Committed {
+    pub records: usize,
+    pub merged: usize,
     /// The event reached a `failure` outcome — retries exhausted, and the
     /// pipeline gave up on it. Deliberately distinct from "committed zero
     /// records": one is a legal outcome and the other is a lost event, and
     /// a suite that conflated them would grade a broken pipeline as a
     /// corpus the extractor found nothing in.
-    dead_lettered: bool,
+    pub dead_lettered: bool,
     /// Where on the chain this was read, so the attribution names its
     /// source (ADR-0045 decision 9's discipline, from the consumer's side).
-    seq: i64,
+    pub seq: i64,
 }
 
 /// Polls the chain until every seeded event has been extracted — or the
@@ -371,7 +371,7 @@ async fn wait_for_pipeline(
 /// Every `memory.extracted` entry on the chain, keyed by observe event.
 /// Pages explicitly: a helper that swallowed `truncated` would report a
 /// partial chain as a complete one.
-async fn read_committed(
+pub async fn read_committed(
     client: &Client,
     auditor: &str,
 ) -> Result<BTreeMap<String, Committed>, String> {

@@ -133,12 +133,33 @@ eval_up() {
   # the caller's home scope, so a group's corpus is its own, and a recall
   # sweep is capped at 32 records — which is why the corpus grows by
   # adding actors here and never by adding fixtures past that arithmetic.
+  # EVAL-4's actors are anchored where they must *propose*, not where their
+  # material ends up (ADR-0047 decision 3). A climb names a target scope,
+  # and the base-layer confinement forbids a service identity every
+  # resource outside its anchor subtree (AUTH-3, ADR-0018 decision 4) — so
+  # the author of team material is anchored at the team, the author of
+  # department material at the department, and the reviewers at the org,
+  # from which roles inherit downward to every level they review.
   for actor in curator:$platform newcomer:$platform outsider:$payments \
     extract-alpha:$platform extract-beta:$platform extract-gamma:$platform \
-    extract-delta:$platform extract-epsilon:$platform; do
+    extract-delta:$platform extract-epsilon:$platform \
+    qa-reader:$payments qa-team:$payments qa-dept:$eng qa-org:$org \
+    qa-curator:$org qa-steward:$org; do
     ./target/debug/synveda service register --tenant "$EVAL_TENANT" \
       --subject "${actor%%:*}" --scope "${actor##*:}" >/dev/null
   done
+
+  # The reviewers every Q&A promotion goes through. Which roles a
+  # publication needs is the target scope's pack answer and not this
+  # script's: under the zero-config `regulated-strict` a team publication
+  # takes one curator and a department or org publication takes a curator
+  # *and* a steward, two distinct people (the FLOW-3 matrix golden). The
+  # runner approves until the surface says nothing is outstanding, so a
+  # pack that asks for a different set is followed rather than fought.
+  ./target/debug/synveda role bind --tenant "$EVAL_TENANT" \
+    --subject qa-curator --role curator --scope "$org" >/dev/null
+  ./target/debug/synveda role bind --tenant "$EVAL_TENANT" \
+    --subject qa-steward --role steward --scope "$org" >/dev/null
 
   # The auditor the extraction suite reads the chain as (ADR-0046
   # decision 4). Deliberately NOT a service identity: AUTH-3's confinement
@@ -168,11 +189,24 @@ eval_up() {
     eval "extract_$group=\$(./target/debug/synveda token issue \
       --tenant \"\$EVAL_TENANT\" --subject \"extract-$group\")"
   done
-  # The auditor carries no scope, because it sits at none.
+  for who in reader team dept org curator steward; do
+    eval "qa_$who=\$(./target/debug/synveda token issue \
+      --tenant \"\$EVAL_TENANT\" --subject \"qa-$who\")"
+  done
+  # The auditor carries no scope, because it sits at none. `scopes` is the
+  # one thing a Q&A corpus has to say in UUIDs — where a promotion lands
+  # (EVAL-4, ADR-0047 decision 3) — so a fixture names `payments` and this
+  # script says what that is.
   cat >"$EVAL_ENV" <<EOF
 {
   "gateway_url": "$EVAL_GATEWAY_URL",
   "tenant_id": "$EVAL_TENANT",
+  "scopes": {
+    "acme": "$org",
+    "eng": "$eng",
+    "platform": "$platform",
+    "payments": "$payments"
+  },
   "actors": {
     "curator":  { "token": "$curator",  "scope": "acme/eng/platform" },
     "newcomer": { "token": "$newcomer", "scope": "acme/eng/platform" },
@@ -182,7 +216,13 @@ eval_up() {
     "extract-beta":    { "token": "$extract_beta",    "scope": "acme/eng/platform" },
     "extract-gamma":   { "token": "$extract_gamma",   "scope": "acme/eng/platform" },
     "extract-delta":   { "token": "$extract_delta",   "scope": "acme/eng/platform" },
-    "extract-epsilon": { "token": "$extract_epsilon", "scope": "acme/eng/platform" }
+    "extract-epsilon": { "token": "$extract_epsilon", "scope": "acme/eng/platform" },
+    "qa-reader":  { "token": "$qa_reader",  "scope": "acme/eng/payments" },
+    "qa-team":    { "token": "$qa_team",    "scope": "acme/eng/payments" },
+    "qa-dept":    { "token": "$qa_dept",    "scope": "acme/eng" },
+    "qa-org":     { "token": "$qa_org",     "scope": "acme" },
+    "qa-curator": { "token": "$qa_curator", "scope": "acme" },
+    "qa-steward": { "token": "$qa_steward", "scope": "acme" }
   }
 }
 EOF
@@ -200,8 +240,10 @@ eval_run() {
     --env "$EVAL_ENV" \
     --suite evals/scenarios \
     --fixtures evals/fixtures/extraction \
+    --qa evals/fixtures/qa \
     --baseline "${EVAL_BASELINE:-evals/baseline.json}" \
     --report "${EVAL_REPORT:-$EVAL_STATE/report.json}" \
+    ${EVAL_DENSE_RETRIEVAL:+--dense-retrieval} \
     "$@"
 }
 
