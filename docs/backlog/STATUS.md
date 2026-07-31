@@ -612,6 +612,62 @@ TEI, which is CTX-3's demo; subagent (sidechain) turns still go
 unobserved (decision 8); and the demo runs the deterministic embedder and
 rule-based extractor, so the real-TEI path stays CTX-1/CTX-3's to prove._
 
+_ADPT-1 / CI bounds (2026-07-31): **the `typescript` job has never
+finished.** Not "has been failing" — never finished, on any run since the
+workflow was created. It stalls and is killed six hours later by GitHub's
+default job ceiling. **The cause is not known, and this entry does not
+claim one.**
+
+**The timeout named it on its first run: `dist/log.test.mjs`.** It fails
+`testTimeoutFailure` at 60001ms with `location: 'dist/log.test.mjs:1:1'`
+and **no case output at all**, so the stall is in *module evaluation*,
+before either of its two cases runs — and everything queued behind it
+(mcp, spool, transcript) then completes normally, which is why the whole
+suite used to freeze at that point. 71 of 73 pass; the two missing are
+exactly log's.
+
+It does not reproduce off Linux: the full suite passes in under five
+seconds on CI's pinned Node 22, at CI's own `--test-concurrency=1`. That
+module scope is three lines — `mkdtempSync` into `tmpdir()`, an
+`XDG_STATE_HOME` assignment, and a top-level `await import("./log.mjs")` —
+and `log.mts` and `paths.mts` are both synchronous throughout with every
+path wrapped in a swallowing `catch`. Why any of that blocks on Linux and
+nowhere else is the open question, now narrowed to one file and cheap to
+iterate on at ~74s per run.
+
+**A second wrong inference, recorded because it was published.** Before
+the timeout existed, the hung log's last line was `ok 39`, and
+credentials(8) + driver(1) + events(11) + hook(19) = 39 exactly — so the
+stall was written up as `hook.test.mts`'s last case. The arithmetic was a
+coincidence: that reporter numbered individual cases and the new one
+numbers files, where log is file 5. `hook.test.mts` alone exits in 271ms
+and all eighteen of its mock gateways are closed. Indirect evidence read
+plausibly and wrongly twice here; the direct evidence took 74 seconds.
+
+**One wrong diagnosis is recorded here because it was believed and
+acted on.** `mock-gateway.mts`'s `close()` awaits the server's `close`
+event, which fires only once the last established connection ends, and an
+undici-pooled keep-alive socket would hold it open forever. That is a real
+hazard and it explains the symptom well, which is why it was written up as
+the cause. It is not the cause: the suite exits cleanly without the change
+on the exact Node and concurrency CI uses. `closeAllConnections()` stays as
+hardening, labelled in the source as hardening.
+
+So this commit bought information rather than a fix, and the information
+arrived immediately. `timeout-minutes` on all five jobs bounds any stall
+at ten minutes instead of a runner-day, and `--test-timeout=60000` turned
+six hours of silence into a 74-second failure naming a file. **The job is
+still red and this does not fix it** — it makes it legible, and narrows an
+unfindable stall to one file's module evaluation.
+
+**A hang is not a failure, and that is the transferable finding.** The
+job's conclusion is `cancelled`, so every survey of "what is failing in
+CI" that filters on `failure` has returned a clean answer about a job that
+has never once completed — which is how this survived a week alongside a
+`rust` job that was red on every run. It was found only because the
+AUTHZ-1 recalibration made someone read the job list instead of the
+failure list._
+
 _EVAL-1 (2026-07-25, ADR-0028): the feature arrived with no acceptance
 criteria, so they were written first (SYNVEDA_FEATURES.md and
 docs/backlog/EVAL-1.md) and the gate is the load-bearing half — a harness

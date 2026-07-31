@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node --test \"dist/*.test.mjs\""
+    "test": "tsc -p tsconfig.json && node --test --test-timeout=60000 \"dist/*.test.mjs\""
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

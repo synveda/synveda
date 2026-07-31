@@ -8,6 +8,7 @@ on:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       # sqlx macros compile against the committed .sqlx query cache; CI has no
       # database. Regenerate with `cargo sqlx prepare --workspace -- --all-targets`
@@ -25,6 +26,7 @@ jobs:
 
   licences:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -33,6 +35,7 @@ jobs:
 
   layering:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install
@@ -57,6 +60,7 @@ jobs:
   # place for it.
   eval:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install
@@ -85,6 +89,14 @@ jobs:
 
   typescript:
     runs-on: ubuntu-latest
+    # This job used to never finish: it stalled and was killed six hours
+    # later by GitHub's default ceiling, which is why it read `cancelled`
+    # rather than `failed` and went unseen by every survey of what was
+    # failing. --test-timeout in the adapter's own script named it —
+    # `dist/log.test.mjs`, timing out at module evaluation (location 1:1,
+    # no case output) and only on Linux. Ten minutes here bounds any
+    # future stall the same way, whatever its cause.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

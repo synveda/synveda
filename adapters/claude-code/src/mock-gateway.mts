@@ -65,6 +65,14 @@ export async function startGateway(respond: Responder): Promise<MockGateway> {
     url: `http://127.0.0.1:${String(port)}`,
     requests,
     close: async () => {
+      // `close()` refuses new connections and then waits for established
+      // ones to end, and the "close" event fires only after the last of
+      // them does — so a pooled keep-alive socket would hold this await
+      // open forever. Dropping the sockets first makes the teardown
+      // unconditional. This is hardening and not a fix for anything
+      // observed: the suite exits cleanly here without it, on CI's own
+      // Node and at CI's own concurrency.
+      server.closeAllConnections();
       server.close();
       await once(server, "close");
     },
