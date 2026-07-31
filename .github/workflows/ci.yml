@@ -41,6 +41,48 @@ jobs:
           node-version: 22
       - run: node scripts/check-crate-deps.mjs
 
+  # The gate that can block a merge (EVAL-4, ADR-0047 decision 7), which is
+  # ADR-0028 option 5's own reversal trigger fired by name: it declined this
+  # toll for EVAL-1's thin suite and recorded "EVAL-4 lands with
+  # composition-quality scenarios" as the condition for paying it. EVAL-4's
+  # AC — "composition changes show measurable quality effect before merge" —
+  # is a request for it in as many words.
+  #
+  # The whole deterministic suite runs here: EVAL-1's scenarios, EVAL-2's
+  # extraction corpus and EVAL-4's Q&A corpus, against the one baseline that
+  # covers that path. The other four jobs stay database-free and fast, so
+  # the toll is one parallel job rather than a change to how anything else
+  # runs. The retrieval half stays nightly — TEI is a ~2.3 GB model
+  # download, and that cost is exactly what makes a per-PR job the wrong
+  # place for it.
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Postgres only; no IdP and no model server (ADR-0028 decision 6).
+      - name: Start Postgres
+        run: docker compose -f deploy/compose/docker-compose.yml up --detach --wait postgres
+
+      - name: Run the suite against the gate
+        run: mkdir -p eval-report && make eval
+        env:
+          EVAL_REPORT: eval-report/report.json
+
+      # A failed gate still uploads it: that is the run someone needs to
+      # read, axis by axis and scope tier by scope tier.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report-pr
+          path: eval-report/
+          if-no-files-found: warn
+
   typescript:
     runs-on: ubuntu-latest
     steps:

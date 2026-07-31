@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-extraction-live
+.PHONY: fmt lint test build deny check-deps ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-extraction-live eval-retrieval
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -30,12 +30,30 @@ dev-down:
 smoke:
 	bash scripts/smoke.sh
 
-# The eval harness (EVAL-1, ADR-0028; EVAL-2, ADR-0046): the scenario
-# suite and the labelled extraction corpus against a live stack on a
-# scratch database, gated by evals/baseline.json. Needs the dev compose
-# (postgres) and node. Exit status is the gate's.
+# The eval harness (EVAL-1, ADR-0028; EVAL-2, ADR-0046; EVAL-4, ADR-0047):
+# the scenario suite, the labelled extraction corpus and the Q&A corpus
+# against a live stack on a scratch database, gated by
+# evals/baseline.json. Needs the dev compose (postgres) and node. Exit
+# status is the gate's, and since EVAL-4 this is what `ci.yml` runs on
+# every pull request.
 eval:
 	sh evals/run.sh
+
+# EVAL-4's retrieval half (ADR-0047 decision 6): the same Q&A corpus with
+# real embeddings, so the dense leg means something and the `semantic`
+# questions are measured rather than skipped. Its own baseline, because a
+# hash embedder's geometry carries none by construction and the two sets
+# of numbers are not comparable. Unlike the live-*extraction* half this
+# one **is** on the nightly: BGE-M3 is served locally from an image and a
+# model id written in deploy/compose/docker-compose.yml, so it changes
+# when someone edits that file — which is someone changing the code, and
+# the thing ADR-0028 decision 6 asked a nightly failure to mean.
+eval-retrieval:
+	$(COMPOSE) up --detach --wait tei
+	SYNVEDA_EMBEDDER=tei \
+	SYNVEDA_TEI_URL=$${SYNVEDA_TEI_URL:-http://localhost:8110} \
+	EVAL_DENSE_RETRIEVAL=1 \
+	EVAL_BASELINE=evals/baseline-retrieval.json sh evals/run.sh
 
 # The same corpus through a real model instead of the rule-based
 # extractor (EVAL-2, ADR-0046 decision 12), gated by its own baseline

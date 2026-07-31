@@ -53,3 +53,40 @@ jobs:
           name: eval-report
           path: eval-report/
           if-no-files-found: warn
+
+  # EVAL-4's retrieval half (ADR-0047 decision 6): the same Q&A corpus with
+  # real BGE-M3 embeddings, so the dense leg means something and the
+  # `semantic` questions are measured rather than skipped. Its own baseline,
+  # because a hash embedder's geometry carries none by construction.
+  #
+  # A separate job on purpose: TEI downloading a 2.3 GB model is a failure
+  # mode that is not a product regression, and folding it into the job above
+  # would let it mask a composition result someone needs. It is also why
+  # this half is not on the pull-request path — `ci.yml` runs the
+  # deterministic suite, which needs Postgres and nothing else.
+  retrieval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Start Postgres and TEI
+        run: |
+          docker compose -f deploy/compose/docker-compose.yml \
+            up --detach --wait postgres tei
+
+      - name: Run the Q&A corpus with real embeddings
+        run: mkdir -p retrieval-report && make eval-retrieval
+        env:
+          EVAL_REPORT: retrieval-report/report.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report-retrieval
+          path: retrieval-report/
+          if-no-files-found: warn
