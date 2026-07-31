@@ -258,6 +258,104 @@ impl QaOutcome {
     }
 }
 
+/// One disclosure that should not have happened (EVAL-5, ADR-0048).
+/// Every field is here because a leak nobody can reproduce is a leak
+/// nobody acts on: the probe index and the query are enough to re-run the
+/// run's first N probes and see it again.
+#[derive(Debug, Serialize)]
+pub struct Leak {
+    /// `sensitivity` | `scope` | `tenant` — derived per (record, reader)
+    /// pair, never declared, so a corpus author cannot file a leak under
+    /// the wrong axis (ADR-0048 decision 12's note).
+    pub boundary: String,
+    pub record: String,
+    pub reader: String,
+    pub surface: String,
+    /// Which grader fired: `identity`, `content`, or both. A content-only
+    /// hit is a block that rendered bytes its watermark does not name,
+    /// which is a different defect with a different owner (decision 6).
+    pub predicate: String,
+    pub probe: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+}
+
+/// One line of a composed block that is neither the renderer's own
+/// furniture nor an entry it accounts for (ADR-0048 decision 9).
+#[derive(Debug, Serialize)]
+pub struct Unattributed {
+    pub reader: String,
+    pub probe: usize,
+    pub line: String,
+    pub block_hash: String,
+}
+
+/// What one security corpus measured.
+#[derive(Debug, Default, Serialize)]
+pub struct SecurityOutcome {
+    pub corpus: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub note: String,
+    pub passed: bool,
+    /// How the corpus got its premise: the climbs and the
+    /// reclassifications, each naming what it installed. A leak suite
+    /// whose material was placed rather than governed asserts that a tier
+    /// no product path produced does not cross a boundary no product path
+    /// opened (decision 7).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub premise: Vec<String>,
+    /// The generated space, and how much of it this run asked. Both,
+    /// because a floor on the second is meaningless without the first.
+    pub variants_generated: usize,
+    pub variants_asked: usize,
+    /// Probes issued, per surface and in total — the denominator every
+    /// zero above sits on.
+    pub probes: usize,
+    pub probes_by_surface: BTreeMap<String, usize>,
+    /// Declared-readable (record, reader) pairs, and how many actually
+    /// reached their reader over the whole run. The positive control:
+    /// without it a run of zeros is indistinguishable from an empty
+    /// corpus (decision 4).
+    pub controls_expected: usize,
+    pub controls_met: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub controls_missed: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub leaks: Vec<Leak>,
+    /// Leaks the content grader saw and the identity grader did not — a
+    /// block carrying material its own watermark does not name.
+    pub watermark_gaps: usize,
+    /// Block lines the renderer's vocabulary does not account for.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unattributed: Vec<Unattributed>,
+    /// Entry lines whose *content* reproduces one of the block's marker
+    /// forms — ` [confidential]`, `(recall <id>)` — inside the region the
+    /// renderer left to content. Reported and gated by nothing on the
+    /// first run (decision 11).
+    pub marker_echoes: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub marker_echo_lines: Vec<String>,
+    /// How long the corpus took to seed, classify and climb. Reported,
+    /// never gated: MEM-3's lag and EVAL-6's to bound.
+    pub seed_wait_ms: f64,
+    /// What the probe half cost, which is the number that decides whether
+    /// this suite stays sequential (ADR-0048 option 8).
+    pub probe_ms: f64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failures: Vec<String>,
+}
+
+impl SecurityOutcome {
+    #[must_use]
+    pub fn new(corpus: &crate::security::Corpus) -> Self {
+        Self {
+            corpus: corpus.corpus.clone(),
+            note: corpus.note.clone(),
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub suite: String,
@@ -274,6 +372,9 @@ pub struct Report {
     /// The Q&A suite's corpora (EVAL-4). Absent when none ran.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub qa: Vec<QaOutcome>,
+    /// The security suite's corpora (EVAL-5). Absent when none ran.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub security: Vec<SecurityOutcome>,
     pub metrics: BTreeMap<String, f64>,
     pub gate: Gate,
 }
@@ -589,6 +690,9 @@ pub fn summarise(report: &Report) -> String {
     if !report.qa.is_empty() {
         out.push_str(&qa_summary(&report.qa));
     }
+    if !report.security.is_empty() {
+        out.push_str(&security_summary(&report.security));
+    }
     out.push_str("\n  axis                       measured   gate\n");
     for (metric, value) in &report.metrics {
         let bound = if report.gate.gated.contains(metric) {
@@ -822,6 +926,89 @@ fn qa_summary(corpora: &[QaOutcome]) -> String {
         out.push_str("\n  misses the corpus predicted, with the reason it gave:\n");
         for entry in noted {
             out.push_str(&format!("    {entry}\n"));
+        }
+    }
+    out
+}
+
+/// The table EVAL-5's AC asks for (ADR-0048): what the run asked, over
+/// which surfaces, what it disclosed, and — first, because every zero
+/// below depends on it — that the material a reader was *supposed* to
+/// have actually reached them.
+fn security_summary(corpora: &[SecurityOutcome]) -> String {
+    let mut out = String::new();
+    let probes: usize = corpora.iter().map(|corpus| corpus.probes).sum();
+    out.push_str(&format!(
+        "\n  security: {probes} probe(s) across {} corpus/corpora\n",
+        corpora.len()
+    ));
+    for corpus in corpora {
+        out.push_str(&format!(
+            "  {} {}: {} of {} variant(s) asked over {} probe(s) in {:.0}ms\n",
+            if corpus.passed { "✓" } else { "✗" },
+            corpus.corpus,
+            corpus.variants_asked,
+            corpus.variants_generated,
+            corpus.probes,
+            corpus.probe_ms
+        ));
+        for entry in &corpus.premise {
+            out.push_str(&format!("      governed: {entry}\n"));
+        }
+        out.push_str(&format!(
+            "      controls {}/{} — material a reader is supposed to have, that reached them\n",
+            corpus.controls_met, corpus.controls_expected
+        ));
+        for missed in &corpus.controls_missed {
+            out.push_str(&format!("        missed: {missed}\n"));
+        }
+        let surfaces: Vec<String> = corpus
+            .probes_by_surface
+            .iter()
+            .map(|(surface, count)| format!("{surface} {count}"))
+            .collect();
+        if !surfaces.is_empty() {
+            out.push_str(&format!("      surfaces: {}\n", surfaces.join(", ")));
+        }
+        for failure in &corpus.failures {
+            out.push_str(&format!("      {failure}\n"));
+        }
+        // Leaks before anything else a reader might scan past. A count in
+        // the axis table says a boundary broke; this says which record
+        // reached whom, under what phrasing, and at which probe — the
+        // three things needed to reproduce it.
+        for leak in &corpus.leaks {
+            out.push_str(&format!(
+                "      LEAK [{}] {} → {} via {} ({}) at probe {}{}\n",
+                leak.boundary,
+                leak.record,
+                leak.reader,
+                leak.surface,
+                leak.predicate,
+                leak.probe,
+                leak.query
+                    .as_ref()
+                    .map(|query| format!(" asking {query:?}"))
+                    .unwrap_or_default()
+            ));
+        }
+        for line in &corpus.unattributed {
+            out.push_str(&format!(
+                "      UNATTRIBUTED LINE in {}'s block {}: {:?}\n",
+                line.reader,
+                line.block_hash.chars().take(12).collect::<String>(),
+                line.line
+            ));
+        }
+        if corpus.marker_echoes > 0 {
+            out.push_str(&format!(
+                "      {} entry line(s) whose content reproduces a marker form — reported, \
+                 bounded by nothing (ADR-0048 decision 11):\n",
+                corpus.marker_echoes
+            ));
+            for line in &corpus.marker_echo_lines {
+                out.push_str(&format!("        {line}\n"));
+            }
         }
     }
     out

@@ -423,6 +423,8 @@ async fn promote(
                     source_scope_id: &source,
                     record_ids,
                     title: format!("eval: {} to {target}", corpus.corpus),
+                    effect: None,
+                    sensitivity: None,
                 },
             )
             .await?;

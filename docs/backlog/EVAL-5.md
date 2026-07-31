@@ -70,12 +70,23 @@ EVAL-4/ADR-0047), same precedent.
 - **`security_marker_echoes`** — content reproducing ` [confidential]` or
   `(recall <id>)` inline, which needs no newline — is measured and gated by
   nothing on the first run.
-- **A real product change fails it by name.** `open-collaboration` applied at
-  the org through the governed path, on a fresh tenant, fails the gate naming
-  the axis, the baseline, the measurement and the delta — while
-  `security_leaks_sensitivity` holds at zero on the same run, because a boundary
-  a pack may open and a tier no pack may is the distinction the suite exists to
-  draw.
+- **A real, governed relaxation fails it by name.** A lapse — proposed on the
+  disclosing side, approved by two distinct stewards, time-boxed and audited
+  (AUTHZ-4) — granting a sibling team read of the vault team's material, on a
+  fresh tenant. It fails the gate naming the axis, the baseline, the measurement
+  and the delta, while `security_leaks_sensitivity` and `security_leaks_tenant`
+  hold at zero on the same run — and they hold for two *different* reasons,
+  which is why they are separate axes: the confidential record is withheld by
+  the grant's own declared tier ceiling, and the `restricted` one by something
+  no grant can reach at all, since it lives at a personal leaf and the base
+  layer's one permit carries `resource.kind != "user"`.
+
+  A lapse rather than a pack flip, and the reason is worth more than the demo: a
+  pack cannot put a sibling team's material into anybody's block, because the
+  candidate universe is the caller's placement chain and "widens by lapse and by
+  nothing else" (ADR-0037 decision 13). `open-collaboration` at the org
+  discloses nothing here — which is a good product property and a demo that
+  would have proved nothing.
 - **Nightly at the full variant budget** against `evals/baseline-security.json`,
   and a deterministic every-k-th slice on the **pull-request** path against
   `evals/baseline.json`: a product that blocks a merge on a token count and not

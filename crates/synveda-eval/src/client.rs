@@ -153,6 +153,21 @@ pub struct RecallQueryRequest<'a> {
     pub limit: usize,
 }
 
+/// `POST /v1/recall` in its **ids** shape (CTX-4, ADR-0041): the handles an
+/// index line rendered, re-decided by the current plan on the way in.
+///
+/// EVAL-5's sharpest probe (ADR-0048 decision 1). It removes retrieval
+/// from the question entirely — no ranking, no index, no phrasing — and
+/// asks the product to refuse a record by name. Refusals are uniform and
+/// silent (ADR-0041), so a request naming ten inadmissible ids answers
+/// with nothing rather than with an error, and "nothing" is exactly the
+/// measurement.
+#[derive(Debug, Serialize)]
+pub struct RecallIdsRequest<'a> {
+    pub ids: Vec<String>,
+    pub session_id: &'a str,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RecallResponse {
     pub entries: Vec<RecallEntry>,
@@ -225,6 +240,34 @@ pub struct ProposalRequest<'a> {
     pub source_scope_id: &'a str,
     pub record_ids: Vec<String>,
     pub title: String,
+    /// What running this proposal would do. Absent is `published`, which
+    /// is what a climb is. `classify` is EVAL-5's (ADR-0048 decision 7):
+    /// the only mechanism in the product that installs a tier above the
+    /// working one, and therefore the only way a leak suite can have
+    /// `restricted` material whose premise is real.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect: Option<&'a str>,
+    /// The tier a `classify` proposal installs. Required for that effect
+    /// and refused for any other — a publication does not move a tier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sensitivity: Option<&'a str>,
+}
+
+/// What `POST /v1/proposals/{id}/classify` reports back (AUTHZ-5,
+/// ADR-0038 decision 9).
+#[derive(Debug, Deserialize)]
+pub struct Classified {
+    pub scope_id: String,
+    pub sensitivity: String,
+    pub records: Vec<ClassifiedRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ClassifiedRecord {
+    pub record_id: String,
+    /// The tier it left, so a report can say what a reclassification cost
+    /// rather than only what it installed.
+    pub was: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -325,6 +368,14 @@ impl Client {
         self.post("/v1/recall", bearer, request).await
     }
 
+    pub async fn recall_ids(
+        &self,
+        bearer: &str,
+        request: &RecallIdsRequest<'_>,
+    ) -> Result<Timed<RecallResponse>, String> {
+        self.post("/v1/recall", bearer, request).await
+    }
+
     pub async fn propose(
         &self,
         bearer: &str,
@@ -352,6 +403,26 @@ impl Client {
     pub async fn publish(&self, bearer: &str, proposal: &str) -> Result<Timed<Published>, String> {
         self.post(
             &format!("/v1/proposals/{proposal}/publish"),
+            bearer,
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    /// Runs an approved classification. The **author's** call, not a
+    /// reviewer's, and that is forced rather than chosen (ADR-0048
+    /// decision 7): `MemoryClassify` is permitted role-free at
+    /// `principal.home`, the effect asks a `MemoryRead` at the working
+    /// tier at the same scope, and the privacy floor closes another
+    /// principal's personal leaf to every content role — so the one
+    /// identity that can run this is the one whose leaf it is.
+    pub async fn classify(
+        &self,
+        bearer: &str,
+        proposal: &str,
+    ) -> Result<Timed<Classified>, String> {
+        self.post(
+            &format!("/v1/proposals/{proposal}/classify"),
             bearer,
             &serde_json::json!({}),
         )

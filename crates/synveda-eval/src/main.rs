@@ -21,6 +21,8 @@ mod qa_runner;
 mod report;
 mod runner;
 mod scenario;
+mod security;
+mod security_runner;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -68,6 +70,18 @@ enum Command {
         /// decision 4).
         #[arg(long, default_value = "evals/fixtures/qa")]
         qa: PathBuf,
+        /// Directory of `*.json` security corpora (EVAL-5). A fourth
+        /// suite: a boundary declaration and a Q&A question are half
+        /// inert in each other (ADR-0048 decision 12).
+        #[arg(long, default_value = "evals/fixtures/security")]
+        security: PathBuf,
+        /// How many distinct generated variants the security suite asks.
+        /// The nightly's full budget, or the deterministic slice the
+        /// pull-request job runs (ADR-0048 decision 13) — and a gated
+        /// floor either way, because a one-sided gate whose denominator
+        /// the run chooses passes by measuring less.
+        #[arg(long, default_value_t = security_runner::DEFAULT_VARIANTS)]
+        security_variants: usize,
         /// Whether this run's embedder ranks by meaning. The harness is a
         /// client and cannot see the gateway's configuration, so whoever
         /// brought TEI up says so — and `semantic` questions are skipped
@@ -98,6 +112,8 @@ enum Command {
         fixtures: PathBuf,
         #[arg(long, default_value = "evals/fixtures/qa")]
         qa: PathBuf,
+        #[arg(long, default_value = "evals/fixtures/security")]
+        security: PathBuf,
         #[arg(long, default_value = "evals/baseline.json")]
         baseline: PathBuf,
     },
@@ -122,6 +138,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
             suite,
             fixtures: fixtures_dir,
             qa: qa_dir,
+            security: security_dir,
             baseline,
         } => {
             let scenarios = scenario::load_suite(&suite)?;
@@ -136,10 +153,17 @@ async fn run(cli: Cli) -> Result<bool, String> {
             // corpus reason rather than a product one (ADR-0047
             // decision 5).
             let corpora = qa::load_corpora(&qa_dir)?;
+            // The exhaustiveness guard is the reason this command matters
+            // most for the security corpus: an undeclared (record, reader)
+            // pair is a boundary nothing asserts, and it would still
+            // report zero leaks (ADR-0048 decision 5).
+            let boundaries = security::load_corpora(&security_dir)?;
             let baseline = Baseline::load(&baseline)?;
             eprintln!(
-                "synveda-eval: {} scenario(s), {} fixture(s) across {} group(s), and {} \
-                 question(s) across {} corpus/corpora parse; the baseline bounds {}",
+                "synveda-eval: {} scenario(s), {} fixture(s) across {} group(s), {} \
+                 question(s) across {} corpus/corpora, and {} record(s) with {} declared \
+                 boundary/boundaries across {} security corpus/corpora parse; the baseline \
+                 bounds {}",
                 scenarios.len(),
                 groups
                     .iter()
@@ -151,6 +175,16 @@ async fn run(cli: Cli) -> Result<bool, String> {
                     .map(|corpus| corpus.questions.len())
                     .sum::<usize>(),
                 corpora.len(),
+                boundaries
+                    .iter()
+                    .map(|corpus| corpus.material.len())
+                    .sum::<usize>(),
+                boundaries
+                    .iter()
+                    .flat_map(|corpus| corpus.material.iter())
+                    .map(|record| record.readable_by.len() + record.forbidden_to.len())
+                    .sum::<usize>(),
+                boundaries.len(),
                 baseline
                     .metrics
                     .keys()
@@ -165,6 +199,8 @@ async fn run(cli: Cli) -> Result<bool, String> {
             suite,
             fixtures: fixtures_dir,
             qa: qa_dir,
+            security: security_dir,
+            security_variants,
             dense_retrieval,
             baseline,
             report: report_path,
@@ -175,6 +211,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
             let scenarios = scenario::load_suite(&suite)?;
             let groups = fixtures::load_corpus(&fixtures_dir)?;
             let corpora = qa::load_corpora(&qa_dir)?;
+            let boundaries = security::load_corpora(&security_dir)?;
             let baseline_file = baseline;
             let baseline = Baseline::load(&baseline_file)?;
             let client = Client::new(&environment.gateway_url)?;
@@ -210,12 +247,27 @@ async fn run(cli: Cli) -> Result<bool, String> {
                     .push(qa_runner::run_corpus(&client, &environment, corpus, &qa_options).await?);
             }
 
-            // One metrics map and one gate over all three suites (ADR-0046
-            // decision 10, ADR-0047 decision 4): the formats differ because
-            // they measure different things, the gate vocabulary does not.
+            let security_options = security_runner::Options {
+                seed_timeout,
+                variants: security_variants,
+            };
+            let mut security_outcomes = Vec::with_capacity(boundaries.len());
+            for corpus in &boundaries {
+                eprintln!("synveda-eval: security/{}", corpus.corpus);
+                security_outcomes.push(
+                    security_runner::run_corpus(&client, &environment, corpus, &security_options)
+                        .await?,
+                );
+            }
+
+            // One metrics map and one gate over all four suites (ADR-0046
+            // decision 10, ADR-0047 decision 4, ADR-0048 decision 12): the
+            // formats differ because they measure different things, the
+            // gate vocabulary does not.
             let mut metrics = report::metrics(&outcomes);
             metrics.extend(extraction::metrics(&extraction_outcomes));
             metrics.extend(qa_runner::metrics(&qa_outcomes));
+            metrics.extend(security_runner::metrics(&security_outcomes));
             let gate = report::gate(&baseline, &metrics);
             let report = Report {
                 suite: suite.display().to_string(),
@@ -235,6 +287,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
                 scenarios: outcomes,
                 extraction: extraction_outcomes,
                 qa: qa_outcomes,
+                security: security_outcomes,
                 metrics,
                 gate,
             };

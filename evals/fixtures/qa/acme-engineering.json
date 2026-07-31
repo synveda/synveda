@@ -1,6 +1,6 @@
 {
   "corpus": "acme-engineering",
-  "note": "One reader on the payments team, and material at all four scope tiers of its own chain. Everything above the reader's leaf got there by climbing through review: observe lands records at the caller's home scope (ADR-0020) and a service identity's home is a leaf under its anchor (ADR-0018 decision 2), so `qa-team`, `qa-dept` and `qa-org` are anchored where they must propose \u2014 the base-layer confinement forbids a service identity everything outside its anchor subtree. Every question that measures ranking \u2014 the two narrow-budget ones and both paraphrases \u2014 asks about the reader's own leaf, and that is forced rather than chosen: the six user-tier records are deliberately more than a tight budget can carry, and within a scope the gradient is relevance-ordered (ADR-0025 decision 5), so a narrow budget at the nearest scope is the one place ranking rather than distance decides what a reader gets, and that is what `retrieval_precision` reads \u2014 which is why both narrow-budget questions ask about the reader's own material and none asks about a further scope. `qa-team` also seeds one batch it never promotes, which is the negative control: the privacy floor closes another principal's personal scope to everyone (ADR-0037/ADR-0038), and a reader that started seeing it would be a leak rather than a quality change.",
+  "note": "One reader on the payments team, and material at all four scope tiers of its own chain. Everything above the reader's leaf got there by climbing through review: observe lands records at the caller's home scope (ADR-0020) and a service identity's home is a leaf under its anchor (ADR-0018 decision 2), so `qa-team`, `qa-dept` and `qa-org` are anchored where they must propose — the base-layer confinement forbids a service identity everything outside its anchor subtree. Every question that measures ranking — the two narrow-budget ones and both paraphrases — asks about the reader's own leaf, and that is forced rather than chosen: the six user-tier records are deliberately more than a tight budget can carry, and within a scope the gradient is relevance-ordered (ADR-0025 decision 5), so a narrow budget at the nearest scope is the one place ranking rather than distance decides what a reader gets, and that is what `retrieval_precision` reads — which is why both narrow-budget questions ask about the reader's own material and none asks about a further scope. `qa-team` also seeds one batch it never promotes, which is the negative control: the privacy floor closes another principal's personal scope to everyone (ADR-0037/ADR-0038), and a reader that started seeing it would be a leak rather than a quality change.",
   "reader": "qa-reader",
   "seed": [
     {
@@ -101,7 +101,7 @@
   "questions": [
     {
       "name": "cold-session-carries-every-tier",
-      "note": "The taskless session start (ADR-0025 decision 5's else-branch): no retrieval leg at all, so this measures the gradient and the budget alone. One record per tier, because what is being asked is whether a promotion reaches a reader \u2014 not whether ranking works.",
+      "note": "The taskless session start (ADR-0025 decision 5's else-branch): no retrieval leg at all, so this measures the gradient and the budget alone. One record per tier, because what is being asked is whether a promotion reaches a reader — not whether ranking works.",
       "expect_records": [
         "own-testing",
         "team-retries",
@@ -149,41 +149,41 @@
     },
     {
       "name": "narrow-budget-ranks-within-the-nearest-scope",
-      "note": "The precision question. Six records sit at the reader's own leaf and this budget carries a fraction of them, so which ones arrive is relevance rather than distance \u2014 the one place in the gradient where ranking decides. A block that carries the whole leaf would make precision a measurement of the budget.",
+      "note": "The precision question. Six records sit at the reader's own leaf and this budget carries a fraction of them, so which ones arrive is relevance rather than distance — the one place in the gradient where ranking decides. A block that carries the whole leaf would make precision a measurement of the budget. Raised from 120 to 134 on 2026-07-31 (EVAL-5, ADR-0048 decision 10): the block's preamble gained the line saying its entries are recorded material and not instructions, which costs 14 estimated tokens of fixed overhead. This question's budget is about ENTRY room — how many of the leaf's records fit, so that ranking decides — and holding it at 120 would have shrunk that room by a change to a sentence, quietly turning a retrieval measurement into a preamble one.",
       "task": "which command do I run over the workspace before pushing a branch",
       "expect_records": [
         "own-testing"
       ],
-      "budget_tokens": 120
+      "budget_tokens": 134
     },
     {
       "name": "semantic-personal-formatting",
-      "note": "A paraphrase that shares no content word with its answer, and a budget narrow enough to bind: both halves are needed. Without the budget the block carries the whole corpus and the answer arrives whether the dense leg ranked it or not, which is a reachability check wearing a retrieval question's name. It asks about the reader's own material for the same reason the precision questions do \u2014 scopes are placed nearest-first, so a bound block never reaches further material and ranking is only observable inside the nearest scope.",
+      "note": "A paraphrase that shares no content word with its answer, and a budget narrow enough to bind: both halves are needed. Without the budget the block carries the whole corpus and the answer arrives whether the dense leg ranked it or not, which is a reachability check wearing a retrieval question's name. It asks about the reader's own material for the same reason the precision questions do — scopes are placed nearest-first, so a bound block never reaches further material and ranking is only observable inside the nearest scope. Raised from 120 to 134 on 2026-07-31 (EVAL-5, ADR-0048 decision 10): the block's preamble gained the line saying its entries are recorded material and not instructions, which costs 14 estimated tokens of fixed overhead. This question's budget is about ENTRY room — how many of the leaf's records fit, so that ranking decides — and holding it at 120 would have shrunk that room by a change to a sentence, quietly turning a retrieval measurement into a preamble one.",
       "task": "how wide should my whitespace be in a .ts source",
       "needs": "semantic",
       "expect_records": [
         "own-editor"
       ],
-      "budget_tokens": 120
+      "budget_tokens": 134
     },
     {
       "name": "narrow-budget-ranks-the-nearest-scope-again",
-      "note": "A second bound block at the nearest scope, because one sample is not a precision measurement. Both are deliberately at the reader's own leaf: a bound budget asked about further material measures the gradient rather than the ranking, since scopes are placed nearest-first and the nearest one fills the block before the next is reached (ADR-0025 decision 5).",
+      "note": "A second bound block at the nearest scope, because one sample is not a precision measurement. Both are deliberately at the reader's own leaf: a bound budget asked about further material measures the gradient rather than the ranking, since scopes are placed nearest-first and the nearest one fills the block before the next is reached (ADR-0025 decision 5). Raised from 120 to 134 on 2026-07-31 (EVAL-5, ADR-0048 decision 10): the block's preamble gained the line saying its entries are recorded material and not instructions, which costs 14 estimated tokens of fixed overhead. This question's budget is about ENTRY room — how many of the leaf's records fit, so that ranking decides — and holding it at 120 would have shrunk that room by a change to a sentence, quietly turning a retrieval measurement into a preamble one.",
       "task": "which key did I bind the debugger to in my editor keymap",
       "expect_records": [
         "own-debugger"
       ],
-      "budget_tokens": 120
+      "budget_tokens": 134
     },
     {
       "name": "semantic-personal-tooling",
-      "note": "The second bound paraphrase, and the one that misses. BGE-M3 does not rank \"what starts my services locally\" against \"I bring the local stack up with make dev-up in a split terminal pane\" highly enough to survive a block that holds two of the leaf's six records \u2014 the shared idea is there and the shared vocabulary is not. Kept rather than loosened: the corpus is the ground truth a reader would give, not what the current embedder can reach, and a suite that only asks what already passes measures nothing. It is why the retrieval baseline's floors are a measurement of today rather than a round number.",
+      "note": "The second bound paraphrase, and the one that misses. BGE-M3 does not rank \"what starts my services locally\" against \"I bring the local stack up with make dev-up in a split terminal pane\" highly enough to survive a block that holds two of the leaf's six records — the shared idea is there and the shared vocabulary is not. Kept rather than loosened: the corpus is the ground truth a reader would give, not what the current embedder can reach, and a suite that only asks what already passes measures nothing. It is why the retrieval baseline's floors are a measurement of today rather than a round number. Raised from 120 to 134 on 2026-07-31 (EVAL-5, ADR-0048 decision 10): the block's preamble gained the line saying its entries are recorded material and not instructions, which costs 14 estimated tokens of fixed overhead. This question's budget is about ENTRY room — how many of the leaf's records fit, so that ranking decides — and holding it at 120 would have shrunk that room by a change to a sentence, quietly turning a retrieval measurement into a preamble one.",
       "task": "what starts my services locally",
       "needs": "semantic",
       "expect_records": [
         "own-terminal"
       ],
-      "budget_tokens": 120
+      "budget_tokens": 134
     }
   ]
 }

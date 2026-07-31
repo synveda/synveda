@@ -1,0 +1,29 @@
+{
+  "note": "EVAL-5's nightly gate (ADR-0048). The same security corpus as evals/baseline.json runs against, at the full variant budget — `make eval-security`, which passes --security-variants 10000 to reach the acceptance criterion's headline number. A separate file for a different reason than EVAL-4's split: there the two paths measure incomparable things, here they measure the SAME thing at different scale, so the leak counts below are identical to the ones in evals/baseline.json and only the two coverage floors differ. Zero is zero on both paths.\n\nThe leak axes are COUNTS, not rates, and that is the load-bearing decision. report::round keeps three decimals, so one leak in ten thousand probes expressed as a rate is 0.0001 -> 0.0 and passes a `max: 0.0` gate — at exactly the scale this suite's own headline number sets. As counts, one leak is 1.0 and the gate fails naming the boundary. crates/synveda-eval/src/security_runner.rs asserts both halves of that sentence.\n\nsecurity_probes and security_variants are FLOORS because a one-sided gate with a free denominator passes by measuring less: halve the variants and every zero above still reads zero, and nothing in the report looks wrong. security_controls at 1.0 is the other half of the same problem — every (record, reader) pair the corpus declares readable must actually reach that reader, or a run of zeros is an empty corpus, a dead pipeline or an expired bearer rather than a boundary holding.\n\nsecurity_unattributed_lines is the prompt-injection half: every non-empty line of a composed block is the preamble, the data notice, a section header, the index legend, the watermark or an entry, and the entries number exactly as many as the watermark names. A record's content cannot produce a line, so it cannot forge a scope header, an entry no record backs, a marker on a line of its own, or a watermark. security_watermark_gaps is the neighbouring defect and is bounded too: a block whose text carries forbidden material its record_ids do not name is not the same failure as one that served the wrong record, and neither is tolerable.\n\nsecurity_marker_echoes is deliberately UNBOUNDED. Content can still reproduce ` [confidential]` or `(recall <id>)` inline, needing no newline, and the fix that would make it impossible — moving every marker to a prefix position content cannot occupy — is CTX-2/CTX-4's format decision and not an eval's to drive (ADR-0046 option 7). It is measured, reported, and it is the input a decision about that would need. Read the blast radius rather than the count: a forged handle is re-decided by the plan on the way in (ADR-0041) so it can mislabel what an agent fetches and cannot widen what it may fetch, a forged tier marker over-warns, and [unreviewed] can be added by content but never removed.\n\nTHE TWO FLOORS ARE ARITHMETIC, NOT MEASUREMENTS, and this is the one place in the eval suite where that is true. security_variants is what `slice` returns for a 10000 budget over a generated space larger than it, which is exactly 10000 because the selection is an even spread rather than a stride (a stride collapses to half the budget the moment it rounds up to 2 — the same 'passes by measuring less' failure arriving from inside the harness). security_probes follows from the corpus: every core variant is asked by every reader over both query surfaces, the tail rotates one probe each, and the sweep and ids forms run once per reader. Both are re-confirmed against the first green run and re-baselined with the diff reviewed if the corpus grows; a corpus that shrinks breaches them, which is the coverage-loss guard doing its job.\n\nThe scenario, extraction and Q&A axes are measured on this run too and bounded by nothing here: they are evals/baseline.json's and gating them twice would duplicate a gate whose input is identical.",
+  "metrics": {
+    "security_leaks_sensitivity": {
+      "max": 0.0
+    },
+    "security_leaks_scope": {
+      "max": 0.0
+    },
+    "security_leaks_tenant": {
+      "max": 0.0
+    },
+    "security_unattributed_lines": {
+      "max": 0.0
+    },
+    "security_watermark_gaps": {
+      "max": 0.0
+    },
+    "security_controls": {
+      "min": 1.0
+    },
+    "security_variants": {
+      "min": 10000.0
+    },
+    "security_probes": {
+      "min": 10500.0
+    }
+  }
+}
