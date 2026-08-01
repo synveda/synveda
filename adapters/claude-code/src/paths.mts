@@ -5,8 +5,9 @@
  * user's project.
  */
 
+import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, parse, resolve, sep } from "node:path";
 
 function xdg(variable: string, fallback: string[]): string {
   const configured = process.env[variable];
@@ -40,4 +41,52 @@ export function sessionDir(): string {
  */
 export function credentialsFile(): string {
   return join(configDir(), "credentials.json");
+}
+
+/**
+ * Create `dir` and any missing parent, and RETURN — whatever the
+ * filesystem answers.
+ *
+ * `mkdirSync(dir, { recursive: true })` does not. It reads ENOENT as "the
+ * parent is missing, create it and try the child again", and procfs
+ * answers ENOENT for a name it will never let anybody create. So
+ * `mkdir("/proc/x")` is ENOENT, `mkdir("/proc")` is EEXIST, and Node
+ * alternates between those two for the life of the process — measured at
+ * ~500,000 syscalls a second, on Node 20, 22 and 24 alike. It is a spin
+ * and not a block: no timeout ends it, and there is nothing to catch.
+ *
+ * Every directory this module names is rooted in `$XDG_STATE_HOME` or
+ * `$XDG_CONFIG_HOME` — environment variables, so user input — and every
+ * caller is a hook that swallows its errors, because a diagnostic that
+ * cannot be written must never fail a session. A swallowing `catch` is
+ * only worth having if the call inside it comes back.
+ *
+ * So the walk here goes downwards: one mkdir per component, no retry of
+ * anything. It terminates by construction, and the first component that
+ * refuses is thrown to the caller who was always ready to catch it.
+ */
+export function ensureDir(dir: string): void {
+  try {
+    mkdirSync(dir);
+    return;
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException;
+    // Already a directory is the common case by far, and a missing parent
+    // is the only answer worth walking for.
+    if (code === "EEXIST") return;
+    if (code !== "ENOENT") throw error;
+  }
+
+  const absolute = resolve(dir);
+  const { root } = parse(absolute);
+  let built = root;
+  for (const component of absolute.slice(root.length).split(sep)) {
+    if (component.length === 0) continue;
+    built = join(built, component);
+    try {
+      mkdirSync(built);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
 }

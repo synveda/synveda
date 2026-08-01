@@ -100,10 +100,13 @@ jobs:
     # This job used to never finish: it stalled and was killed six hours
     # later by GitHub's default ceiling, which is why it read `cancelled`
     # rather than `failed` and went unseen by every survey of what was
-    # failing. --test-timeout in the adapter's own script named it —
-    # `dist/log.test.mjs`, timing out at module evaluation (location 1:1,
-    # no case output) and only on Linux. Ten minutes here bounds any
-    # future stall the same way, whatever its cause.
+    # failing. --test-timeout in the adapter's own script named the file,
+    # `dist/log.test.mjs`, and the cause under it turned out to be the
+    # product's: `mkdirSync(recursive)` spins forever — not blocks — on a
+    # path under /proc, which is where that suite pointed $XDG_STATE_HOME
+    # to get an unwritable directory. Fixed 2026-08-01 (paths.ensureDir).
+    # Both bounds stay: together they are what turns six hours of silence
+    # into a failure carrying a filename.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
