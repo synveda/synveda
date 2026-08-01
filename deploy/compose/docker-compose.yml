@@ -97,6 +97,27 @@ services:
       - "8110:80"
     volumes:
       - tei-cache:/data
+    # Without this, `up --wait tei` returns the moment the container is
+    # *started* — Docker calls a container with no healthcheck healthy —
+    # and on a cold `tei-cache` that is ~2.3 GB of model download before it
+    # will answer anything. `make eval-retrieval` believed that wait.
+    #
+    # It is *not* why the 2026-08-01 nightly committed zero records across
+    # every corpus. That run gave TEI 4m14s before it seeded and a cold
+    # load measures 2m01s, so the embedder was there; the failure did not
+    # reproduce on the same commit and remains unexplained. This is fixed
+    # because a wait that waits for nothing is wrong on its own terms.
+    #
+    # `/health` answers once the model is loaded, which is exactly what
+    # scripts/smoke.sh has always waited on. 180 × 10s is the same 1800s
+    # budget that file allows a first start, written as retries because
+    # `start_period` semantics have varied across Compose versions and this
+    # number should not.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 180
 
   jaeger:
     image: jaegertracing/jaeger:2.19.0

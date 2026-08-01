@@ -356,6 +356,18 @@ eval_down() {
       -c "drop database if exists $EVAL_DB with (force)" >/dev/null 2>&1 || true
   fi
   [ -n "${EVAL_INDEX_DIR:-}" ] && rm -rf "$EVAL_INDEX_DIR"
+  # The gateway's log is the only place a run that committed nothing says
+  # why, and until now it lived in scratch state this function deletes —
+  # so the nightly of 2026-08-01 reported zero records across every corpus
+  # and threw away the one file that knew the reason. When the report has a
+  # home outside the scratch state, which is what CI gives it, the logs go
+  # with it: the run that needs them is by definition one that already
+  # failed.
+  if [ -n "${EVAL_REPORT:-}" ] && [ -n "${EVAL_STATE:-}" ]; then
+    eval_report_dir=$(dirname "$EVAL_REPORT")
+    [ -d "$eval_report_dir" ] &&
+      cp "$EVAL_STATE"/*.log "$eval_report_dir" 2>/dev/null
+  fi
   if [ -n "${EVAL_KEEP_STATE:-}" ]; then
     echo "eval: state kept at ${EVAL_STATE:-}" >&2
   else
