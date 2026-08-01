@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -36,7 +36,17 @@ test("a field cannot rename the event it is logged under", () => {
 });
 
 test("logging never throws, whatever the state directory is doing", () => {
-  process.env.XDG_STATE_HOME = "/proc/nonexistent-and-unwritable";
+  // A regular file standing where the state directory has to go: hostile
+  // the same way on every platform, and ENOTDIR on the first syscall.
+  // `/proc/nonexistent-and-unwritable` stood here until 2026-08-01, and it
+  // was worse than unwritable — on Linux it made this case spin inside
+  // `mkdirSync(recursive)` and never return, which is the stall that hung
+  // the `typescript` job. `paths.test.mts` owns that regression now, in a
+  // child process with a deadline, because a spin cannot be asserted on
+  // from the thread that is spinning.
+  const blocked = join(stateHome, "a-file-and-not-a-directory");
+  writeFileSync(blocked, "");
+  process.env.XDG_STATE_HOME = blocked;
   assert.doesNotThrow(() => {
     log("inject.failed", { reason: "deadline expired" });
   });

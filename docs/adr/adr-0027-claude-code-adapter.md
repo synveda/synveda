@@ -274,6 +274,22 @@ Decisions, specifically:
   path is Rust and tested once. Observe is effectively exactly-once
   with no moving parts. The adapter cannot break a session by
   construction, and cannot see anything the caller's own bearer cannot.
+
+  *Corrected 2026-08-01: "cannot break a session by construction" was
+  false in one specific way, and it took the `typescript` job's six-hour
+  stall to find it. Every hook path does swallow its errors — but three of
+  them reached `mkdirSync(dir, { recursive: true })` on a directory named
+  by `$XDG_STATE_HOME`, and Node's recursive mkdir does not return when a
+  missing component sits on procfs: `mkdir("/proc/x")` answers ENOENT,
+  `mkdir("/proc")` answers EEXIST, and Node alternates between the two at
+  ~500,000 syscalls a second for the life of the process (Node 20, 22 and
+  24 alike; the trace is in this feature's STATUS entry). A hook that
+  spins holds the session that called it, and a swallowing `catch` never
+  runs — the construction has to make the call return before the catch is
+  worth anything. `paths.ensureDir` now walks a path downwards, one mkdir
+  per component and no retry of anything, so it terminates whatever a
+  filesystem answers, and it is the adapter's only way to make a
+  directory.*
 - Negative / accepted trade-offs: `Stop` races the transcript writer —
   measured against a live session, the turn's assistant message is not
   yet on disk when the hook fires, so it rides the *next* flush (the

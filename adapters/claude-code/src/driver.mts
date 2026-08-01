@@ -31,7 +31,6 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import {
   copyFileSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -43,6 +42,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { startGateway, type RecordedRequest, type Reply, type Responder } from "./mock-gateway.mjs";
+import { ensureDir } from "./paths.mjs";
 import { qualifiedSessionId } from "./session-start.mjs";
 import type { SessionState } from "./spool.mjs";
 
@@ -590,7 +590,10 @@ function makeCase(root: string, index: number, setup: CaseSetup): Case {
   const stateHome = join(scratch, "state");
   const project = join(scratch, "project");
   const transcripts = join(scratch, "transcripts");
-  for (const dir of [stateHome, project, transcripts]) mkdirSync(dir, { recursive: true });
+  // These are all under a scratch root this driver made itself, so none of
+  // them can reach the hazard in `ensureDir`'s docstring. It is used anyway
+  // so the adapter has exactly one way to make a directory.
+  for (const dir of [stateHome, project, transcripts]) ensureDir(dir);
 
   const sessions = join(stateHome, "synveda", "sessions");
 

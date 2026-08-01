@@ -616,7 +616,9 @@ _ADPT-1 / CI bounds (2026-07-31): **the `typescript` job has never
 finished.** Not "has been failing" — never finished, on any run since the
 workflow was created. It stalls and is killed six hours later by GitHub's
 default job ceiling. **The cause is not known, and this entry does not
-claim one.**
+claim one.** *(Found and fixed 2026-08-01 — it is `mkdirSync(recursive)`
+spinning on a `/proc` path. The close of this entry has it, and corrects
+the paragraph below.)*
 
 **The timeout named it on its first run: `dist/log.test.mjs`.** It fails
 `testTimeoutFailure` at 60001ms with `location: 'dist/log.test.mjs:1:1'`
@@ -625,6 +627,17 @@ before either of its two cases runs — and everything queued behind it
 (mcp, spool, transcript) then completes normally, which is why the whole
 suite used to freeze at that point. 71 of 73 pass; the two missing are
 exactly log's.
+
+*Corrected 2026-08-01: module evaluation was the wrong half of the file,
+and it is the third inference in this hunt that read plausibly and
+wrongly. Both signals are artefacts of the reporter. A file-level
+`testTimeoutFailure` is anchored at `1:1` because that is where the file
+begins, not because that is where it stopped; and node:test streams a
+case's result when the case **finishes**, so a child killed mid-case
+reports nothing at all — including for the cases that already passed.
+Marks appended to a file from inside the suite put it beyond inference:
+module scope completes, case one runs and asserts, case two enters and
+never leaves.*
 
 It does not reproduce off Linux: the full suite passes in under five
 seconds on CI's pinned Node 22, at CI's own `--test-concurrency=1`. That
@@ -667,6 +680,64 @@ has never once completed — which is how this survived a week alongside a
 `rust` job that was red on every run. It was found only because the
 AUTHZ-1 recalibration made someone read the job list instead of the
 failure list._
+
+_ADPT-1 / the stall's cause (2026-08-01): **`mkdirSync(dir, { recursive:
+true })` never returns on a path under `/proc`, and it spins rather than
+blocks.** Under strace: `mkdirat("/proc/x")` → ENOENT, `mkdirat("/proc")`
+→ EEXIST, and those two alternate — **499,663 syscalls in three seconds**,
+for as long as the process lives, on Node 20, 22 and 24 alike, so no
+version bump was waiting to fix it. The invariant Node's recursion rests
+on is that ENOENT means *the parent is missing, create it and the child
+will make progress*; procfs breaks it by answering ENOENT for a name it
+will never permit anybody to create, so Node walks up to a parent that
+already exists and comes straight back down. It is Linux-only for the dull
+reason: off Linux there is no `/proc`, the walk refuses at the root, and
+control returns.
+
+**The test met it because it went looking for an unwritable directory.**
+`log.test.mts`'s second case — "logging never throws, whatever the state
+directory is doing" — pointed `$XDG_STATE_HOME` at
+`/proc/nonexistent-and-unwritable`, which is not unwritable so much as
+pathological, and the subject of the case is the one function whose entire
+contract is that it swallows whatever happens. It swallows nothing, because
+nothing is thrown.
+
+**The product finding is larger than the test, and it invalidated a claim
+in ADR-0027.** Three hook paths — `log`, `saveSession`, `claimDisclosure` —
+called the recursive form on a directory named by `$XDG_STATE_HOME`, an
+environment variable, which is user input. A hook that spins holds the
+session that called it, forever, and "the adapter cannot break a session by
+construction" (ADR-0027 Consequences, now corrected there) was false for
+exactly that path. A swallowing `catch` is only worth having if the call
+inside it comes back.
+
+**The fix is `paths.ensureDir`**: try the plain `mkdirSync` first, so the
+common case — the directory is already there — stays one syscall on a path
+that runs on every hook; and on ENOENT walk the components downwards,
+one mkdir each, retrying nothing, which terminates by construction whatever
+a filesystem answers. It is now the adapter's *only* way to make a
+directory, `driver.mts` included even though its scratch paths were never
+at risk, because "the adapter does not use the recursive flag" is checkable
+where "uses it only where the path is safe" is an argument.
+`scripts/generate-backlog.mjs` still uses it and is left alone: it names a
+path inside the repository rather than one from the environment.
+
+**The regression test runs in a child process with a five-second deadline
+and SIGKILL**, because an assertion written in a spinning thread is an
+assertion that is never reached, and the loop is inside a synchronous
+native call where no JavaScript handler can run. It was verified against
+the old implementation rather than assumed: the parent throws ETIMEDOUT at
+5011ms, so a reintroduction fails by name in five seconds instead of
+hanging a job. `log.test.mts`'s hostile directory is a regular file in the
+way now — ENOTDIR on the first syscall, the same on every platform.
+
+Verified where it failed: the whole adapter suite, **76 of 76 in 3.1
+seconds under Linux and Node 22**, on a runtime where it had never once
+finished. And the repro cost was a container and marks appended to a file
+— minutes, after three inferences. The EVAL-5 lesson recorded above
+generalises one step further: a slow signal and a dead one look identical
+to anything that gives up early, and a silent reporter looks exactly like
+a statement about where the code stopped._
 
 _EVAL-1 (2026-07-25, ADR-0028): the feature arrived with no acceptance
 criteria, so they were written first (SYNVEDA_FEATURES.md and

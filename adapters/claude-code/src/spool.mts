@@ -12,7 +12,6 @@
 
 import { createHash } from "node:crypto";
 import {
-  mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -23,7 +22,7 @@ import {
 import { join } from "node:path";
 
 import { log } from "./log.mjs";
-import { sessionDir, stateDir } from "./paths.mjs";
+import { ensureDir, sessionDir, stateDir } from "./paths.mjs";
 
 /** Session state is worthless once the session is long gone. */
 const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
@@ -68,7 +67,7 @@ export function saveSession(sessionId: string, facts: SessionFacts): void {
   if (facts.cursor !== undefined) state.cursor = facts.cursor;
   if (facts.model !== undefined) state.model = facts.model;
   try {
-    mkdirSync(sessionDir(), { recursive: true });
+    ensureDir(sessionDir());
     const file = sessionFile(sessionId);
     // Write-then-rename: a hook killed mid-write must never leave a
     // half-written cursor behind.
@@ -108,7 +107,7 @@ export function claimDisclosure(cwd: string | undefined): boolean {
   if (cwd === undefined || cwd.length === 0) return false;
   try {
     const dir = join(stateDir(), "disclosed");
-    mkdirSync(dir, { recursive: true });
+    ensureDir(dir);
     writeFileSync(join(dir, digest(cwd, 16)), cwd, { flag: "wx" });
     return true;
   } catch {
