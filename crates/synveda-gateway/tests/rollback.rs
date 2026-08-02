@@ -809,6 +809,11 @@ fn only_set_channels_of_readable_assets_rewind() {
             "the refusal names the shape: {refused}"
         );
 
+        // PRMT-1 (ADR-0049 decision 4) supplied the read action this
+        // route deferred to it by name, so a prompt channel is now
+        // *decidable*: the refusal below is the ordinary one for a channel
+        // that was never written, not the "this asset kind has no reader"
+        // one it used to be.
         let (status, refused) = post(
             app,
             &fx.tara,
@@ -823,12 +828,42 @@ fn only_set_channels_of_readable_assets_rewind() {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "prompt rewind: {refused}");
         assert!(
+            !refused.to_string().contains("no read action yet"),
+            "PromptRead exists now; the deferral is discharged: {refused}"
+        );
+        assert!(
             refused["message"]
                 .as_str()
                 .unwrap_or_default()
-                .contains("no read action yet"),
-            "an asset kind without a reader is refused by name: {refused}"
+                .contains("already points at"),
+            "the request gets as far as the rewind's own rules — from == to \
+             is a malformed rewind rather than an ungoverned asset kind: {refused}"
         );
+
+        // The two kinds that still have no reader are still refused by
+        // name — the deferral shrank rather than closing.
+        for asset in ["skill", "context-pack"] {
+            let (status, refused) = post(
+                app,
+                &fx.tara,
+                &format!("/v1/channels/{}/rollback", fx.estate.platform.id),
+                json!({
+                    "asset": asset,
+                    "from_commit": head,
+                    "to_commit": head,
+                    "message": "rewind something with no reader",
+                }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{asset} rewind: {refused}");
+            assert!(
+                refused["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("no read action yet"),
+                "an asset kind without a reader is refused by name: {refused}"
+            );
+        }
     });
 }
 

@@ -119,6 +119,16 @@ pub const CHANNEL_OPERATIONS_TOTAL: &str = "synveda_channel_operations_total";
 /// same governed act as a direct publish (ADR-0032 decision 18).
 pub const PROPOSAL_OPERATIONS_TOTAL: &str = "synveda_proposal_operations_total";
 
+/// Prompt registry operations (PRMT-1, ADR-0049), labelled by `op`
+/// (`author`/`resolve`/`list`) and `outcome` (`ok`, `rejected`, `error`).
+///
+/// `author` chains `prompt.authored` and `resolve` chains
+/// `prompt.resolved`; the listing chains its allowed decision like every
+/// other read (ADR-0019 decision 4). A publication is counted by
+/// `CHANNEL_OPERATIONS_TOTAL` and chains `vedaflow.channel.published`,
+/// because it is the same governed act a memory publication is.
+pub const PROMPT_OPERATIONS_TOTAL: &str = "synveda_prompt_operations_total";
+
 /// Lapse API operations (AUTHZ-4, ADR-0037), labelled by `op`
 /// (`propose`/`grant`/`revoke`/`list`) and `outcome` (`ok`, `rejected`,
 /// `error`).
@@ -539,6 +549,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         PROPOSAL_OPERATIONS_TOTAL,
         "Proposal API operations by op and outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        PROMPT_OPERATIONS_TOTAL,
+        "Prompt registry operations by op (author/resolve/list) and \
+         outcome (ok/rejected/error)"
     );
     metrics::describe_counter!(
         AUDIT_QUERY_OPERATIONS_TOTAL,

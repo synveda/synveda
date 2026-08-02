@@ -31,6 +31,7 @@ use crate::hierarchy;
 use crate::inject;
 use crate::observe;
 use crate::policy;
+use crate::prompts;
 use crate::proposals;
 use crate::quarantine;
 use crate::recall;
@@ -205,6 +206,14 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/proposals/{id}/withdraw", post(proposals::withdraw))
         .route("/v1/proposals/{id}/publish", post(proposals::publish))
         .route("/v1/proposals/{id}/classify", post(proposals::classify))
+        // The prompt registry (PRMT-1, ADR-0049). Authoring writes a draft
+        // and moves nothing a consumer reads; resolution walks the caller's
+        // own placement chain nearest-first, or serves a named scope's
+        // draft or a commit the caller pins. The wildcard is the path
+        // shape of a prompt name (decision 3), and it sits *after* the
+        // collection route so `GET /v1/prompts?scope_id=…` still lists.
+        .route("/v1/prompts", get(prompts::list).post(prompts::author))
+        .route("/v1/prompts/{*name}", get(prompts::resolve))
         // The lapse plane (AUTHZ-4, ADR-0037). `POST /v1/lapses` opens a
         // *proposal* and grants nothing; the grant is that proposal's
         // effect, beside `/publish` and taking the same shape.

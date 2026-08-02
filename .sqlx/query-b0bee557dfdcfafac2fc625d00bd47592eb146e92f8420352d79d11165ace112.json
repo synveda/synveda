@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into prompts\n                 (tenant_id, scope_id, name, description, template, variables,\n                  sensitivity, object_hash, created_by, updated_by)\n             values ($1, $2, 'support/forged', 'forged', 'x',\n                     '[]'::jsonb, 'internal', $3, $4, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b0bee557dfdcfafac2fc625d00bd47592eb146e92f8420352d79d11165ace112"
+}

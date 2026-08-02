@@ -20,6 +20,7 @@ mod lapse;
 mod observe;
 mod policy;
 mod promotion;
+mod prompt;
 mod proposal;
 mod record;
 mod redaction;
@@ -55,6 +56,10 @@ pub use policy::{PackConfig, PolicyAssignment};
 pub use promotion::{
     MAX_PROMOTION_RULES, MAX_RULE_NAME, MemberEvidence, PromotionConfig, PromotionEvidence,
     PromotionRule, UsageFacts,
+};
+pub use prompt::{
+    MAX_DEFAULT_CHARS, MAX_DESCRIPTION_CHARS, MAX_NAME_CHARS, MAX_NAME_SEGMENTS, MAX_SEGMENT_CHARS,
+    MAX_TEMPLATE_CHARS, MAX_VARIABLES, PromptChannel, PromptName, PromptTemplate, PromptVariable,
 };
 pub use proposal::{ProposalEffect, ProposalState, ProposalView, Verdict};
 pub use record::{RecordClass, RecordKind};

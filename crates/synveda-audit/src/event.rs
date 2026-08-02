@@ -286,6 +286,25 @@ pub enum AuditAction {
     /// did we stop using" and "what did we destroy" are different
     /// questions, and only the second has a legal answer.
     MemoryDisposed,
+    /// A prompt draft was written — created or replaced (PRMT-1, ADR-0049
+    /// decision 14).
+    ///
+    /// The authoring act, not a publication: what it records is that a
+    /// scope's working copy moved, with the name, the tier and the new
+    /// object address. Nothing here crosses the trust boundary, and a
+    /// consumer asking for the published channel is unaffected by it —
+    /// which is exactly what "prompt change behind review" means when it is
+    /// read from the reader's side.
+    PromptAuthored,
+    /// A prompt was served to a consumer (ADR-0049 decision 14).
+    ///
+    /// A data-plane read, so it chains its own event rather than an
+    /// `authz.decision`: what left the system is content, and "who was
+    /// served which version of which prompt, when" is a question an auditor
+    /// asks about prompts exactly as AUD-2 asks it about memory. The
+    /// payload carries the name, the scope it resolved at, the channel or
+    /// the pinned commit, and the object address — never the template.
+    PromptResolved,
     /// A grant reached the end of its window. Emitted by the sweep under
     /// `actor_kind=system`, and **bookkeeping only** — the grant stopped
     /// deciding anything at `expires_at` whether or not this was ever
@@ -306,7 +325,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 40] = [
+    pub const ALL: [AuditAction; 42] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -347,6 +366,8 @@ impl AuditAction {
         AuditAction::LapseExpired,
         AuditAction::MemoryExpired,
         AuditAction::MemoryDisposed,
+        AuditAction::PromptAuthored,
+        AuditAction::PromptResolved,
     ];
 
     /// The stable dotted name stored in the `action` column. Renaming an
@@ -394,6 +415,8 @@ impl AuditAction {
             AuditAction::LapseExpired => "policy.lapse.expired",
             AuditAction::MemoryExpired => "memory.expired",
             AuditAction::MemoryDisposed => "memory.disposed",
+            AuditAction::PromptAuthored => "prompt.authored",
+            AuditAction::PromptResolved => "prompt.resolved",
         }
     }
 }

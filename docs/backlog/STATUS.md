@@ -802,7 +802,7 @@ _Phase demo goal: promotion pipeline, lapse lifecycle, as-of inject, bank-mode s
 - [x] [EVAL-2: Extraction quality suite](EVAL-2.md) — done 2026-07-30, ADR-0046, corpus: evals/fixtures/extraction/ (5 groups, 50 labelled transcripts, 54 expectations, 7–13 per class, plus a README stating the rules its guards enforce), AC demo: demos/eval-2-extraction.sh (**the gate failing on a real product change, and the attribution column saying why**: three fresh tenants differing in exactly one thing — a one-day `episode` retention horizon applied as the default pack's *own* source with the horizon added, so not one permit differs — where the clean tenants report `committed 10 → served 10, nothing withheld` and the horizoned one reports `committed 10 → served 8, 2 withheld by the read path, not missed by the extractor`, `extraction_recall_episode` 1.0 → 0.0, and the gate fails naming the axis, the baseline, the measurement and the delta: `extraction_recall_macro fell to 0.747 against a floor of 0.894`, delta −0.147; a tenant per phase because ADR-0028 decision 7's "a fresh tenant per run is what makes two runs comparable" turns out to be load-bearing rather than tidy — see the notes), AC measurement over the real observe→extract→serve path: macro precision **0.983**, macro recall **0.914**, per class decision 1.000/0.900, entity 1.000/1.000, episode 1.000/1.000, fact 0.900/0.692, preference 1.000/0.889, procedure 1.000/1.000, `hallucination_rate` 0.000 against a zero-tolerance ceiling, AC tests: crates/synveda-ingest/tests/extraction_precision.rs (the same corpus with no stack at all — the registered ≥0.90 precision floor, the bait assertion that a span-copying extractor cannot invent, and four corpus guards: an expected token absent from its own source, bait present in its own source, a duplicate session id, a duplicate fixture name), crates/synveda-eval (39 unit tests, up from 20: the corpus format refusing an unknown field and every corpus guard again at load time so `make eval-check` catches them with no database; per-class axes reducing over the whole corpus rather than per group; a class produced-but-never-expected scoring precision and no recall; the hallucination axis absent rather than 0.0 when nothing asked; `slack` writing a floor that far below a measurement, never below zero, carried forward across rewrites, and never read by the gate; and a scenario category refused when it collides with a built-in axis or the `extraction_` namespace)
 - [x] [EVAL-4: Retrieval & injection quality](EVAL-4.md) — done 2026-07-31, ADR-0047, corpus: evals/fixtures/qa/ (one corpus, 12 records across four scope tiers, 10 questions), AC demo: demos/eval-4-qa.sh (**the gate failing on a real composition change, and the per-tier table naming which end of the gradient paid**: the composition budget narrowed to 320 estimated tokens through the governed pack path — the default pack's own source with one number changed, so not one permit differs, nothing is deleted and `/v1/recall` still serves all twelve records — on a fresh tenant per phase, where `qa_scope_user` and `qa_scope_team` hold at 1.000 while `qa_scope_department` and `qa_scope_org` fall to 0.000, `qa_answer_rate` 1.000 → 0.545 and `tokens_per_answer` 257.9 → 343.8, the gate failing on six axes at once and naming each with its baseline, measurement and delta; then the budget restored and the suite green again, which is what makes the failure a measurement rather than a broken demo), AC measurement over the real observe→promote→compose path: `qa_answer_rate` **1.000**, `qa_body_rate` **1.000**, all four `qa_scope_*` **1.000**, `retrieval_precision` **0.500** (the sparse leg alone — the deterministic hash embedder ranks by nothing by construction, ADR-0023 decision 6), `tokens_per_answer` **257.9**, plus `estimator_bias_p95` 0.692 and `staleness_p50_permille` 1000 reported and gated by nothing; against live BGE-M3 (`make eval-retrieval`, gated on evals/baseline-retrieval.json, **on the nightly** because a locally-served pinned model changes when someone edits docker-compose.yml): `qa_answer_rate` **0.923**, `qa_scope_user` **0.800**, team/department/org 1.000, `retrieval_precision` **0.286** over the fused result, nothing skipped; **the deterministic gate now blocks a merge** — a Postgres-backed `eval` job in .github/workflows/ci.yml running the whole deterministic suite, which is ADR-0028 option 5's own reversal trigger fired by name; AC tests: crates/synveda-eval (58 unit tests, up from 39: the corpus format refusing an unknown field, the tier/promotion equivalence in both directions, both `needs` guards — a `semantic` question that shares a content word with its own answer and a `lexical` one that shares none — the record-identity join including a `tiers` array shorter than its `record_ids`, per-tier reduction over records rather than questions, a demotion moving the body rate while the answer rate holds, a skipped question staying out of every denominator, `tokens_per_answer` absent rather than dividing by zero, and precision reading only the blocks something bound)
 - [x] [EVAL-5: Security evals](EVAL-5.md) — done 2026-07-31, ADR-0048, corpus: evals/fixtures/security/ (9 records, 36 declared (record, reader) boundaries across 4 readers in 2 admitted tenants), AC demo: demos/eval-5-security.sh (four phases on fresh tenant pairs: the suite green with every zero sitting on a printed denominator, then `open-collaboration` applied unmodified at the security department and the very next run failing with `security_leaks_sensitivity` rose to 161 against a ceiling of 0` while `security_leaks_scope` and `security_leaks_tenant` hold — the axis that does NOT move being held by base.cedar's confinement forbid and not by the policy the operator changed — then green again at the default), measurement over the real observe -> classify -> climb -> probe path: 400 variants of 11,680 generated over 1,276 probes (inject 634, recall:query 634, recall:sweep 4, recall:ids 4) at 18.5ms each, controls 9/9, every leak count and security_unattributed_lines zero, security_marker_echoes 1 distinct line reported and ungated, AC tests: crates/synveda-eval (73 unit tests incl. the count-versus-rate assertion that a single leak in ten thousand probes fails as a count and passes as a rate, the exhaustiveness guard refusing an undeclared (record, reader) pair, the even-spread slice that fills its budget exactly, and the line invariant over a well-formed and a forged block), crates/synveda-retrieval/src/compose.rs (the fold that makes 'one entry, one line' a property of the renderer rather than of one extractor, with the forgery it closes as its test), `make eval` (the 400-variant slice, on the pull-request path in ci.yml), `make eval-security` (the full 10,000, nightly in eval.yml)
-- [ ] [PRMT-1: Prompt templates as assets](PRMT-1.md)
+- [x] [PRMT-1: Prompt templates as assets](PRMT-1.md) — done 2026-08-02, ADR-0049, migration 0029, AC tests: crates/synveda-gateway/tests/prompts.rs (**both halves from the consumer's side**: a curator's direct publish refused under the default pack naming the steward it is short of, the same two approvals through `POST /v1/proposals` carrying it, the approving steward unable to run the effect, and then the AC — an edit under the published version moves the author's draft read and leaves the consumer on the reviewed bytes at the reviewed commit until a second review lands; the pin holding while the channel moves, a rewind refusing it by name with both commits in the message, and the same pinned read ceasing to resolve when the pack behind it is replaced, because a commit hash is a name rather than a capability; the gradient walk where a team's version overrides the org's and a nearer `confidential` copy nobody may read does not shadow the readable one above it; the schema refusals and the tier nothing can mint; and the chain, swept for template text), crates/synveda-policy/tests/{packs,roles,sensitivity,service_scope}.rs (PromptRead/PromptWrite in the role×action golden at pack `@12`, the prompt plane asserted to mirror each pack's own memory plane tier for tier, and the base layer's confinement carve-out widened to PromptRead — an agent reads prompts up its own chain and nothing else, and no role widens it), crates/synveda-store/tests/rls.rs (`a_draft_cannot_be_forged_moved_renamed_or_raised_to_restricted`), crates/synveda-types + crates/synveda-vedaflow (26 unit tests on the name, the schema, the substitution rule and the object address), demo: demos/prmt-1-prompts.sh (the whole arc from a terminal with `DATABASE_URL` unset from the first authoring call, the trail printed, and `chain valid (37 events)`)
 - [ ] [PRMT-2: Context packs](PRMT-2.md)
 
 _FLOW-4 (2026-07-25, ADR-0033) landed with a finding that constrains
@@ -2741,6 +2741,93 @@ which is the packing/GC question ADR-0030 left open and does not worsen
 in kind. `PackConfig` replaced the three positional config arguments
 `policy_packs::apply` and `Pdp::install_source` were growing. Signing
 stays `Unsigned`; key management is still TEN-4's._
+
+_PRMT-1 (2026-08-02, ADR-0049): the prompt registry — **the first asset a
+human writes rather than one the pipeline derives**, and most of what
+shipped is the discovery that FLOW-1 through FLOW-7 had already built it.
+`regulated-strict` has priced the `prompt` cell at a steward *and* a
+curator, two distinct people, straight off tech plan §2.4's peer review,
+since FLOW-3 wrote the matrix — and not one of those cells had ever
+resolved, because nothing could open a prompt proposal. So a publication
+is an ordinary proposal whose asset is `prompt`: no new channel shape, no
+new proposal effect, no new approval rule, no new publication event, and
+FLOW-6's review CLI works on the day this lands.
+
+**The draft is a row, and that re-answers ADR-0032 decision 2 rather than
+dodging it.** `staged` stays unwritten because a set channel cannot
+express withdrawal; an author replacing a draft is exactly that
+withdrawal, which is the concrete instance the general argument was
+missing. So there is no `prompt/staged` ref, nothing writes one, and the
+wire vocabulary gains one word that is not a `Channel` — `channel=draft`
+names a row. Version history is not duplicated: every authoring write
+puts a content-addressed object, and the versions a channel has *served*
+are its first-parent line, which is the history FLOW-7 rewinds and
+`synveda channel history` already renders.
+
+**`PromptRead` brings the read action ADR-0036 decision 3 deferred here
+by name**, so rewinding and pinning `prompt/published` is decidable and
+the channel plane's refusal-by-name shrinks to the kinds with no feature
+yet. It carries the tier (the AUTHZ-5 shape) and no `lapsed` attribute:
+the lapse vocabulary is closed over `memory.read`, and widening it is a
+lapse feature's decision taken in two reviewed places. `restricted` is
+unrepresentable for an authored asset — the only mechanism that mints the
+tier is a classification proposal over *records* (ADR-0038 decision 8),
+so migration 0029's CHECK refuses a row nothing could read back.
+
+**The base layer changed, which is not a thing to do quietly.** The
+confinement carve-out (AUTH-3, ADR-0018 decision 4) now names `PromptRead`
+beside `MemoryRead`: a headless agent is the consumer prompts exist for
+and the org's `house-style` is two levels above its anchor, so without it
+the registry would be unreadable by exactly the callers it is for. What
+the carve-out stays is the *membership* floor — own chain,
+`principal in resource`, reads only — and `service_scope.rs` asserts the
+four things it did not widen, because a carve-out is the kind of thing
+that is widened once and then assumed to be narrow.
+
+**The consumer's pin is a parameter, and a rewind refuses it.** ADR-0036
+decision 12 had already turned down reader-side pinning, naming this
+feature's phrasing as the thing it was refusing — but that pin was a
+*stored* decision by one scope about what an ancestor's channel serves
+its members, which would make a scope's channel resolve differently per
+caller. This one is a query parameter on one read, stored nowhere,
+governing nobody else. The question it forced is what a rewind does to
+one: serving the withdrawn bytes makes FLOW-7's "<60s to fleet-wide
+effect" a lie, and serving the head instead makes the pin one, so the
+pinned read is refused with both commits named and the consumer learns on
+its next call rather than its next session. A pin freezes bytes and never
+authority — the decision is taken at request time, which is CTX-4's rule
+for handles restated for commits. And the ancestry is measured against
+what the scope **serves** rather than its head, which matters exactly when
+a standing FLOW-7 pin holds the two apart: a scope's hold is the ceiling a
+consumer pin may reach at or below and never over, or ADR-0036 decision
+7's "exactly one thing decides what readers see" would be undone by a
+query string.
+
+Two findings worth naming. **A *placed* steward can run a publication's
+effect**: the membership floor every placed principal holds supplies the
+`PromptRead` that steward's own roles do not, so FLOW-5's "the steward
+cannot run the effect because steward reads no content in any pack" is
+true of a steward whose authority is a *binding* rather than a placement.
+Both the suite and the demo now anchor him a level above the team he
+reviews for, and say why. And **the proposal detail's member field
+became `member` with `record_id` beside it as an optional** — the CLI
+parsed the old shape and refused a prompt proposal outright with a serde
+error, which is FLOW-6's own "full review possible without console"
+quietly becoming false for the first asset type that needed the
+per-asset-kind renderer ADR-0035 predicted.
+
+Deferrals, all recorded in ADR-0049: there is **no draft deletion** (no
+DELETE grant on `prompts`) — retracting a published prompt is FLOW-7's
+rewind, which now works, and replacing a draft is an overwrite; a
+template cannot contain a literal `{{`, because every one opens a
+placeholder and the lenient reading ships a typo to a fleet; there is no
+server-side render route (the substitution rule lives in `synveda-types`
+so the CLI and the future SDKs share one implementation); and prompts do
+not appear in `inject`'s index tier, which is SKIL-4's shape rather than
+CTX-4's. A prompt **climb** works — the two senses of "the source holds
+it" are the draft row and the published tree, exactly as for memory — and
+is exercised by the gradient test's org and department publications
+rather than by a dedicated one._
 
 ## Phase 3 — Enterprise (wk 11–16)
 

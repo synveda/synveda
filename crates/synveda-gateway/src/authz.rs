@@ -606,6 +606,43 @@ pub(crate) fn decide_read(
     decide_read_from(state, input, 0, resource, sensitivity)
 }
 
+/// [`decide_read`] for `PromptRead` (PRMT-1, ADR-0049 decision 4).
+///
+/// The second action that names a tier, and the reason [`decide_inner`]
+/// takes one rather than [`Action::MemoryRead`] assuming it. It is a
+/// separate wrapper rather than a parameter on [`decide_read`] for that
+/// function's own stated reason: which seam is being asked is not something
+/// a call site should be able to get wrong by passing the wrong constant.
+pub(crate) fn decide_prompt_read(
+    state: &AppState,
+    input: &DecisionInput,
+    resource: Resource,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    decide_prompt_read_from(state, input, 0, resource, sensitivity)
+}
+
+/// [`decide_prompt_read`] for a resource whose chain starts at `position` —
+/// what the registry's gradient walk asks once per scope on the caller's
+/// own chain.
+pub(crate) fn decide_prompt_read_from(
+    state: &AppState,
+    input: &DecisionInput,
+    position: usize,
+    resource: Resource,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    decide_inner(
+        state,
+        input,
+        position,
+        Action::PromptRead,
+        resource,
+        None,
+        Some(sensitivity),
+    )
+}
+
 /// [`decide_read`] for a resource whose chain starts at `position` — the
 /// [`decide_from`] shape, for the cross-scope decisions FLOW-5 takes.
 pub(crate) fn decide_read_from(

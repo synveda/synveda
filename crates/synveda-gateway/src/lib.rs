@@ -47,6 +47,7 @@ mod inject;
 pub mod lapses;
 pub mod observe;
 pub mod policy;
+pub mod prompts;
 pub mod proposals;
 mod provision;
 pub mod quarantine;

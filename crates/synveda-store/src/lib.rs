@@ -33,6 +33,7 @@ pub mod observe;
 pub mod policy_assignments;
 pub mod policy_packs;
 pub mod promotion;
+pub mod prompts;
 pub mod quarantine;
 pub mod records;
 pub mod retention;

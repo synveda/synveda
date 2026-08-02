@@ -21,6 +21,7 @@ mod channel;
 mod credentials;
 mod diff;
 mod login;
+mod prompt;
 mod proposal;
 mod recall;
 
@@ -125,6 +126,17 @@ enum Command {
     /// identity — never a row a laptop wrote.
     #[command(subcommand)]
     Channel(ChannelCommand),
+    /// The prompt registry (PRMT-1, ADR-0049): author a draft, resolve the
+    /// version a consumer would be served, and open the review that carries
+    /// one across the trust boundary.
+    ///
+    /// Gateway calls under the bearer `synveda login` stored, like every
+    /// other governed verb: authoring is a `PromptWrite` decision and
+    /// resolution a `PromptRead` at the tier the served version carries.
+    /// Reviewing and publishing stay `synveda proposal`'s — a prompt
+    /// proposal is an ordinary proposal.
+    #[command(subcommand)]
+    Prompt(PromptCommand),
     /// Fetch records in full by id (CTX-4, ADR-0041) — the other half of
     /// tiered injection.
     ///
@@ -174,6 +186,99 @@ enum Command {
         /// bodies straight into a session.
         #[arg(long)]
         quiet: bool,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PromptCommand {
+    /// The registry at one scope: what is drafted, what is published, and
+    /// whether they are the same bytes.
+    List {
+        /// The scope UUID.
+        scope: ScopeId,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Resolve a prompt the way a consumer would: by name, walking your own
+    /// placement chain nearest-first, unless you name a scope.
+    ///
+    /// `--commit` is the consumer's pin — the version you were built
+    /// against — and it is refused, naming both commits, if a rewind has
+    /// since taken it off the channel (ADR-0049 decision 10).
+    Show {
+        /// The prompt's name, e.g. `support/triage-reply`.
+        name: String,
+        /// Resolve at this scope instead of walking your chain. Required
+        /// with --draft and with --commit.
+        #[arg(long)]
+        scope: Option<ScopeId>,
+        /// Read the authoring copy at --scope rather than the reviewed
+        /// version. Unreviewed by construction.
+        #[arg(long)]
+        draft: bool,
+        /// Pin to a commit that scope's channel has held.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Render with these values, `name=value`. A missing required
+        /// variable and an undeclared value are both refusals.
+        #[arg(long = "var", value_name = "NAME=VALUE")]
+        values: Vec<String>,
+        /// Print the gateway's answer verbatim.
+        #[arg(long)]
+        json: bool,
+        /// Print only the prompt (or the render) — for piping.
+        #[arg(long)]
+        quiet: bool,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Write a draft: create it, or replace the content of the one that is
+    /// there. This moves nothing a consumer reads.
+    Author {
+        /// The prompt's name, e.g. `support/triage-reply`.
+        name: String,
+        /// The scope that will stand behind it.
+        #[arg(long)]
+        scope: ScopeId,
+        /// The template, read from a file. `-` reads standard input.
+        #[arg(long)]
+        file: String,
+        /// One line, read in a listing and at review.
+        #[arg(long, default_value = "")]
+        description: String,
+        /// Declare a variable: `name` (required) or `name=default`
+        /// (optional). The schema must agree with the template exactly.
+        #[arg(long = "var", value_name = "NAME[=DEFAULT]")]
+        variables: Vec<String>,
+        /// public | internal | confidential. Defaults to internal;
+        /// `restricted` is refused — nothing in the product mints that tier
+        /// for an authored asset.
+        #[arg(long)]
+        sensitivity: Option<String>,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Open the review that can carry a draft onto a scope's published
+    /// channel. Everything after this is `synveda proposal`.
+    Propose {
+        /// The prompt's name.
+        name: String,
+        /// The scope whose channel would move. Requirements resolve here.
+        #[arg(long)]
+        scope: ScopeId,
+        /// What this proposes, in one line. Defaults to the name.
+        #[arg(long)]
+        title: Option<String>,
         /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
         /// `default`.
         #[arg(long)]
@@ -656,6 +761,23 @@ fn main() -> ExitCode {
 
 /// The credential profile a command acts on: `--profile`, then
 /// `SYNVEDA_PROFILE`, then `default`.
+/// Reads a template from a file, or from standard input for `-`.
+///
+/// A flag rather than an inline argument: a prompt is a document, and a
+/// shell that had to quote one would mangle exactly the `{{ }}` the schema
+/// is about.
+fn read_template(path: &str) -> Result<String, String> {
+    if path == "-" {
+        use std::io::Read;
+        let mut text = String::new();
+        std::io::stdin()
+            .read_to_string(&mut text)
+            .map_err(|err| format!("read the template from stdin: {err}"))?;
+        return Ok(text);
+    }
+    std::fs::read_to_string(path).map_err(|err| format!("read {path}: {err}"))
+}
+
 fn profile_name(flag: Option<String>) -> String {
     flag.or_else(|| std::env::var("SYNVEDA_PROFILE").ok())
         .filter(|name| !name.is_empty())
@@ -1185,6 +1307,69 @@ async fn run(cli: Cli) -> Result<(), String> {
             ProposalCommand::Classify { id, profile } => {
                 proposal::classify(&profile_name(profile), id).await
             }
+        },
+        Command::Prompt(command) => match command {
+            PromptCommand::List { scope, profile } => {
+                prompt::list(&profile_name(profile), scope).await
+            }
+            PromptCommand::Show {
+                name,
+                scope,
+                draft,
+                commit,
+                values,
+                json,
+                quiet,
+                profile,
+            } => {
+                prompt::show(
+                    &profile_name(profile),
+                    prompt::Ask {
+                        name: &name,
+                        scope,
+                        draft,
+                        commit: commit.as_deref(),
+                        values: &values,
+                    },
+                    json,
+                    quiet,
+                )
+                .await
+            }
+            PromptCommand::Author {
+                name,
+                scope,
+                file,
+                description,
+                variables,
+                sensitivity,
+                profile,
+            } => {
+                let template = read_template(&file)?;
+                let sensitivity = sensitivity
+                    .as_deref()
+                    .map(str::parse::<synveda_types::Sensitivity>)
+                    .transpose()
+                    .map_err(|err| err.to_string())?;
+                prompt::author(
+                    &profile_name(profile),
+                    prompt::Draft {
+                        name: &name,
+                        scope,
+                        description: &description,
+                        template,
+                        variables: &variables,
+                        sensitivity,
+                    },
+                )
+                .await
+            }
+            PromptCommand::Propose {
+                name,
+                scope,
+                title,
+                profile,
+            } => prompt::propose(&profile_name(profile), &name, scope, title.as_deref()).await,
         },
         Command::Recall {
             ids,

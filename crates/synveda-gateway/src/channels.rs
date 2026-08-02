@@ -210,7 +210,21 @@ pub(crate) struct PublishBody {
     /// `source_scope_id`, because it needs a recorded proposer, a
     /// disclosure decision, and a review that other people can read —
     /// none of which a single call has.
+    #[serde(default)]
     record_ids: Vec<RecordId>,
+    /// The prompts to admit, by name (PRMT-1, ADR-0049 decision 7). Must be
+    /// drafts of **this** scope, for the reason `record_ids` must be its
+    /// records: the direct route stays same-scope.
+    ///
+    /// Exactly one of the two lists may be present. Under the default pack
+    /// a prompt publication refuses here on its own arithmetic — the matrix
+    /// asks for a steward *and* a curator, two distinct people — and names
+    /// the proposal route; under `standard` a single curator may publish,
+    /// which is that pack saying what that pack exists to say. That is
+    /// ADR-0032 decision 8's invariant kept rather than a second rule for
+    /// authored assets.
+    #[serde(default)]
+    prompt_names: Vec<synveda_types::PromptName>,
     /// Why — an auditor and a reviewer both read this. Required: a
     /// publication with nothing to say is one nobody can review after
     /// the fact.
@@ -254,7 +268,12 @@ struct PublishResponse {
 
 #[derive(Serialize)]
 struct PublishedRecord {
-    record_id: RecordId,
+    /// The tree entry name — a record id, or a prompt's path (PRMT-1,
+    /// ADR-0049 decision 3).
+    member: String,
+    /// The record id, for a memory publication.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    record_id: Option<RecordId>,
     object_hash: String,
 }
 
@@ -305,6 +324,17 @@ async fn publish_inner(
             message: "publishing requires a provisioned identity".to_owned(),
         })?;
 
+    // What is being published, per asset kind (PRMT-1, ADR-0049
+    // decision 7). Both readers answer the same question — the current
+    // versions this scope holds, refusing the whole request rather than a
+    // subset — and both stop there: everything below this point is shared,
+    // because one matrix governs every path across the trust boundary
+    // (ADR-0032 decision 8).
+    let asset_kind = if body.prompt_names.is_empty() {
+        AssetKind::Memory
+    } else {
+        AssetKind::Prompt
+    };
     let mut requested = body.record_ids.clone();
     requested.sort_unstable();
     requested.dedup();
@@ -327,6 +357,24 @@ async fn publish_inner(
             ),
         });
     }
+    let mut names = body.prompt_names.clone();
+    names.sort();
+    names.dedup();
+    let drafts = synveda_store::prompts::read_many(&mut *tx, tenant_id, scope_id, &names).await?;
+    if drafts.len() != names.len() {
+        let missing: Vec<String> = names
+            .iter()
+            .filter(|name| !drafts.iter().any(|draft| &&draft.template.name == name))
+            .map(ToString::to_string)
+            .collect();
+        return Err(Error::Invalid {
+            message: format!(
+                "not drafts of this scope: {} — promote from a child scope with \
+                 POST /v1/proposals and a source_scope_id (FLOW-5)",
+                missing.join(", ")
+            ),
+        });
+    }
 
     // The approval matrix, resolved at this scope from this pack, this
     // asset kind, the *maximum* sensitivity over the set (a set is
@@ -337,6 +385,7 @@ async fn publish_inner(
     let sensitivity = versions
         .iter()
         .map(|version| version.state.sensitivity)
+        .chain(drafts.iter().map(|draft| draft.sensitivity))
         .max()
         .unwrap_or(Sensitivity::Public);
     // The second decision (ADR-0031 decision 12): may this principal *read*
@@ -355,15 +404,11 @@ async fn publish_inner(
     // tier instead would make `restricted` material unpublishable by
     // anyone, which would leave the invariant floor's own cell unreachable
     // and a restricted lapse with nothing to disclose.
-    authz::decide_read(
-        state,
-        &input,
-        Resource::Scope(scope_id),
-        Sensitivity::WORKING,
-    )?;
+    decide_asset_read(state, &input, asset_kind, scope_id)?;
     let entries: Vec<String> = versions
         .iter()
         .map(|version| version.id.as_uuid().to_string())
+        .chain(drafts.iter().map(|draft| draft.template.name.to_string()))
         .collect();
     let requirement = approvals::resolve(
         state,
@@ -372,7 +417,7 @@ async fn publish_inner(
         &input,
         &approvals::Requested {
             target: &node,
-            asset: AssetKind::Memory,
+            asset: asset_kind,
             sensitivity,
             entries: &entries,
         },
@@ -385,22 +430,39 @@ async fn publish_inner(
     };
     approvals::require_single_actor(&requirement, &actor, "channel")?;
 
-    // Objects first: each record's content address, computed from the
+    // Objects first: each member's content address, computed from the
     // version being published, then stored. Content-addressed, so
-    // re-publishing unchanged content stores nothing new.
-    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> = Vec::with_capacity(versions.len());
-    let mut published: Vec<PublishedRecord> = Vec::with_capacity(versions.len());
+    // re-publishing unchanged content stores nothing new — and a prompt's
+    // object was already written at authoring time, so that write dedups.
+    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> =
+        Vec::with_capacity(versions.len() + drafts.len());
+    let mut published: Vec<PublishedRecord> = Vec::with_capacity(members.capacity());
     for version in &versions {
         let asset = memory_asset(version.id, &version.state);
         let object = vedaflow::put_memory(&mut tx, tenant_id, &asset).await?;
         members.push((asset.entry_name(), object.hash));
         published.push(PublishedRecord {
-            record_id: version.id,
+            member: asset.entry_name(),
+            record_id: Some(version.id),
+            object_hash: object.hash.to_hex(),
+        });
+    }
+    for draft in &drafts {
+        let asset = vedaflow::PromptAsset {
+            scope_id,
+            sensitivity: draft.sensitivity,
+            template: draft.template.clone(),
+        };
+        let object = vedaflow::put_prompt(&mut tx, tenant_id, &asset).await?;
+        members.push((asset.entry_name(), object.hash));
+        published.push(PublishedRecord {
+            member: asset.entry_name(),
+            record_id: None,
             object_hash: object.hash.to_hex(),
         });
     }
 
-    let channel = ChannelRef::memory(Channel::Published);
+    let channel = ChannelRef::new(asset_kind, Channel::Published);
     let snapshot = PolicySnapshot::new(
         authorized.decision.pack_name.clone(),
         authorized.decision.pack_version,
@@ -433,9 +495,10 @@ async fn publish_inner(
             "channel": channel.name(),
             "asset": channel.asset.as_str(),
             "message": body.message,
-            // Ids and addresses, never content — the record text stays in
-            // `records`, and the address is what an auditor rechecks.
+            // Names and addresses, never content — the text stays in its own
+            // table, and the address is what an auditor rechecks.
             "records": published.iter().map(|record| json!({
+                "member": record.member,
                 "record_id": record.record_id,
                 "object_hash": record.object_hash,
             })).collect::<Vec<_>>(),
@@ -511,21 +574,42 @@ fn channel_of(asset: Option<AssetKind>, channel: Option<Channel>) -> ChannelRef 
     )
 }
 
-/// The read action that governs an asset kind's content.
+/// Decides the asset kind's own read action at the scope, at the working
+/// tier.
 ///
 /// A rewind and a pin both take it in addition to their own action, on
 /// ADR-0031 decision 12's rule: nobody governs material they cannot read.
 /// That is what keeps a curator out of a teammate's personal published
 /// channel, through the privacy floor, with no clause about personal
 /// scopes anywhere here.
-fn read_action(asset: AssetKind) -> Result<Action> {
+///
+/// The working tier, deliberately: moving a ref discloses no content to the
+/// actor (the response carries ids and addresses, never text), so this is a
+/// *whose-material* question, which the privacy floor answers identically at
+/// every tier (ADR-0038 decision 10).
+///
+/// PRMT-1 (ADR-0049 decision 4) supplies the second answer here, which is
+/// what makes a rewind or a pin of `prompt/published` decidable and
+/// discharges ADR-0036 decision 3's deferral. `skill` and `context-pack`
+/// are still refused by name, and `policy` has no channel at all — a lapse
+/// writes a row (ADR-0037 decision 16).
+fn decide_asset_read(
+    state: &AppState,
+    input: &crate::authz::DecisionInput,
+    asset: AssetKind,
+    scope_id: ScopeId,
+) -> Result<crate::authz::Authorized> {
+    let resource = Resource::Scope(scope_id);
     match asset {
-        AssetKind::Memory => Ok(Action::MemoryRead),
+        AssetKind::Memory => authz::decide_read(state, input, resource, Sensitivity::WORKING),
+        AssetKind::Prompt => {
+            authz::decide_prompt_read(state, input, resource, Sensitivity::WORKING)
+        }
         other => Err(Error::Invalid {
             message: format!(
                 "{} channels have no read action yet, so this route cannot decide who \
-                 may govern them; it arrives with that asset kind's feature (PRMT-1, \
-                 SKIL-1)",
+                 may govern them; it arrives with that asset kind's feature (SKIL-1, \
+                 PRMT-2)",
                 other.as_str()
             ),
         }),
@@ -745,19 +829,12 @@ async fn rollback_inner(
     )?;
     // The second decision, as for publishing: nobody governs material they
     // cannot read (ADR-0031 decision 12, ADR-0036 decision 3).
-    // At the working tier, deliberately: moving a ref discloses no content
-    // to the actor (the response carries ids and addresses, never record
-    // text), so this guard is a *whose-material* question, which the privacy
-    // floor answers identically at every tier (ADR-0038 decision 4). The
-    // asset kind is still validated, which is what refuses a prompt or a
-    // skill by name until PRMT-1 and SKIL-1 bring their own read actions.
-    read_action(channel.asset)?;
-    authz::decide_read(
-        state,
-        &input,
-        Resource::Scope(scope_id),
-        Sensitivity::WORKING,
-    )?;
+    // Decided with the *asset kind's* own read action (ADR-0049
+    // decision 4), at the working tier: moving a ref discloses no content
+    // to the actor, so this guard is a *whose-material* question, which the
+    // privacy floor answers identically at every tier (ADR-0038
+    // decision 10). Asset kinds with no read action are refused by name.
+    decide_asset_read(state, &input, channel.asset, scope_id)?;
     let author = acting_identity(&input, "rewinding")?;
 
     let rolled_back = vedaflow::rollback(
@@ -809,14 +886,14 @@ async fn rollback_inner(
         restored: rolled_back
             .restored
             .into_iter()
-            .filter_map(|member| {
-                // A memory channel names entries by record id; anything
-                // else is another asset kind's path and is rendered by
-                // name alone rather than misparsed into one.
-                member.name.parse().ok().map(|id| PublishedRecord {
-                    record_id: RecordId::from_uuid(id),
-                    object_hash: member.object.to_hex(),
-                })
+            .map(|member| PublishedRecord {
+                // A memory channel names entries by record id; a prompt
+                // channel names them by path (PRMT-1, ADR-0049 decision 3),
+                // so the id is the parse that may fail and the name is the
+                // one field every kind carries.
+                record_id: member.name.parse().ok().map(RecordId::from_uuid),
+                member: member.name,
+                object_hash: member.object.to_hex(),
             })
             .collect(),
     }))
@@ -906,19 +983,12 @@ async fn pin_inner(
         Resource::Scope(scope_id),
         None,
     )?;
-    // At the working tier, deliberately: moving a ref discloses no content
-    // to the actor (the response carries ids and addresses, never record
-    // text), so this guard is a *whose-material* question, which the privacy
-    // floor answers identically at every tier (ADR-0038 decision 4). The
-    // asset kind is still validated, which is what refuses a prompt or a
-    // skill by name until PRMT-1 and SKIL-1 bring their own read actions.
-    read_action(channel.asset)?;
-    authz::decide_read(
-        state,
-        &input,
-        Resource::Scope(scope_id),
-        Sensitivity::WORKING,
-    )?;
+    // Decided with the *asset kind's* own read action (ADR-0049
+    // decision 4), at the working tier: moving a ref discloses no content
+    // to the actor, so this guard is a *whose-material* question, which the
+    // privacy floor answers identically at every tier (ADR-0038
+    // decision 10). Asset kinds with no read action are refused by name.
+    decide_asset_read(state, &input, channel.asset, scope_id)?;
     let author = acting_identity(&input, "pinning")?;
 
     let previous =
@@ -992,19 +1062,12 @@ async fn unpin_inner(
         Resource::Scope(scope_id),
         None,
     )?;
-    // At the working tier, deliberately: moving a ref discloses no content
-    // to the actor (the response carries ids and addresses, never record
-    // text), so this guard is a *whose-material* question, which the privacy
-    // floor answers identically at every tier (ADR-0038 decision 4). The
-    // asset kind is still validated, which is what refuses a prompt or a
-    // skill by name until PRMT-1 and SKIL-1 bring their own read actions.
-    read_action(channel.asset)?;
-    authz::decide_read(
-        state,
-        &input,
-        Resource::Scope(scope_id),
-        Sensitivity::WORKING,
-    )?;
+    // Decided with the *asset kind's* own read action (ADR-0049
+    // decision 4), at the working tier: moving a ref discloses no content
+    // to the actor, so this guard is a *whose-material* question, which the
+    // privacy floor answers identically at every tier (ADR-0038
+    // decision 10). Asset kinds with no read action are refused by name.
+    decide_asset_read(state, &input, channel.asset, scope_id)?;
 
     let released = vedaflow::unpin(&mut tx, tenant_id, scope_id, channel).await?;
     let head = vedaflow::read_ref(&mut tx, tenant_id, scope_id, &channel.name())
@@ -1072,12 +1135,28 @@ fn validate_message(message: &str) -> Result<()> {
 
 fn validate(body: &PublishBody) -> Result<()> {
     let invalid = |message: String| Err(Error::Invalid { message });
-    if body.record_ids.is_empty() {
-        return invalid("record_ids must name at least one record".to_owned());
+    // One asset kind per publication, for the reason a proposal carries one
+    // (ADR-0049 decision 6): the approval matrix resolves from it.
+    match (body.record_ids.is_empty(), body.prompt_names.is_empty()) {
+        (true, true) => {
+            return invalid(
+                "name at least one member: record_ids for memories, prompt_names for \
+                 prompts"
+                    .to_owned(),
+            );
+        }
+        (false, false) => {
+            return invalid(
+                "a publication carries one asset kind: name record_ids or prompt_names, \
+                 never both"
+                    .to_owned(),
+            );
+        }
+        _ => {}
     }
-    if body.record_ids.len() > MAX_PUBLISH_RECORDS {
+    if body.record_ids.len().max(body.prompt_names.len()) > MAX_PUBLISH_RECORDS {
         return invalid(format!(
-            "record_ids must name at most {MAX_PUBLISH_RECORDS} records"
+            "a publication may name at most {MAX_PUBLISH_RECORDS} members"
         ));
     }
     let chars = body.message.chars().count();

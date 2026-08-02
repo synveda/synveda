@@ -80,6 +80,7 @@ pub mod hash;
 pub mod lapses;
 pub mod objects;
 pub mod policy;
+pub mod prompts;
 pub mod proposals;
 pub mod refs;
 pub mod signer;
@@ -105,6 +106,7 @@ pub use hash::{CommitHash, ObjectHash, PolicySnapshotHash, TreeHash};
 pub use lapses::{LapseAsset, put_lapse, read_lapse};
 pub use objects::{MAX_OBJECT_BYTES, StoredObject, put_object, read_object, read_objects};
 pub use policy::PolicySnapshot;
+pub use prompts::{PromptAsset, PromptChannelState, put_prompt, read_prompt_members};
 pub use proposals::{
     MAX_OPEN_PROPOSALS, MAX_PROPOSAL_MEMBERS, NewApproval, NewProposal, ProposalFilter,
     StoredApproval, StoredProposal,
