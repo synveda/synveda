@@ -175,15 +175,22 @@ Decisions, specifically:
 10. **A pinned commit must still be a state the channel has held, and a
     rewind refuses the pinned read.** The pin is checked with
     `is_first_parent_ancestor` — FLOW-7's own rule, the states the ref has
-    actually been in — against the head at request time. A publication
-    leaves earlier pins resolving, which is the pin working. A rewind that
-    takes the pinned commit off the line makes the read a `Conflict`
-    naming both commits and the channel, because the two alternatives are
-    both false statements: serving it anyway makes FLOW-7's sixty seconds
-    a lie, and silently serving the head makes the pin a lie. A refusal is
-    the only answer that keeps a rewind meaning what FLOW-7 says it means,
-    and it reaches the consumer at their next call rather than at their
-    next session.
+    actually been in — against what the scope **serves** at request time. A
+    publication leaves earlier pins resolving, which is the pin working. A
+    rewind that takes the pinned commit off the line makes the read a
+    `Conflict` naming both commits and the channel, because the two
+    alternatives are both false statements: serving it anyway makes
+    FLOW-7's sixty seconds a lie, and silently serving the head makes the
+    pin a lie. A refusal is the only answer that keeps a rewind meaning
+    what FLOW-7 says it means, and it reaches the consumer at their next
+    call rather than at their next session.
+
+    **Served, not head**, and the difference is a standing FLOW-7 pin: a
+    scope holding its readers at an earlier state is the ceiling a consumer
+    pin may reach at or below and never over. Measuring against the head
+    instead would let a query parameter hand a caller exactly the version
+    the scope is deliberately withholding, which is ADR-0036 decision 7's
+    "exactly one thing decides what readers see" undone by a query string.
 
 11. **A pin freezes bytes, never authority.** The PDP decision is taken at
     request time against the live pack, at the tier the *pinned* version
@@ -280,7 +287,16 @@ Decisions, specifically:
 
 ## What the acceptance work turned up
 
-Two things, recorded because they are behaviour rather than notes.
+Three things, recorded because they are behaviour rather than notes.
+
+**A consumer pin measured against the head would reach over a scope's own
+hold.** The first implementation checked the pinned commit's ancestry
+against the channel's head, which is correct until a standing FLOW-7 pin
+makes head and served differ — and then a team holding its fleet at an
+earlier version could be walked around by any caller that named the newer
+commit. Decision 10 now says *served*, and the suite asserts the ceiling
+in both directions: at or below the hold resolves, above it is the same
+`Conflict` a rewind produces.
 
 **A *placed* steward can run a publication's effect.** FLOW-5's status
 note says "the steward cannot run the effect because steward reads no

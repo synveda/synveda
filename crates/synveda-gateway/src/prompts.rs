@@ -555,22 +555,32 @@ async fn at_scope(
     let head = vedaflow::read_ref(&mut *tx, tenant_id, scope_id, &channel_ref.name())
         .await?
         .ok_or_else(|| not_found(name))?;
+    // What this scope actually serves: its head, unless a standing FLOW-7
+    // pin is holding its readers at an earlier state (ADR-0036 decision 6).
+    let standing = vedaflow::read_pin(&mut *tx, tenant_id, scope_id, channel_ref).await?;
+    let served = standing.as_ref().map_or(head.commit_hash, |pin| pin.commit);
 
     let (commit_hash, origin) = match pinned {
-        None => {
-            // A standing FLOW-7 pin decides what the scope serves.
-            match vedaflow::read_pin(&mut *tx, tenant_id, scope_id, channel_ref).await? {
-                Some(pin) => (pin.commit, Origin::ChannelPin),
-                None => (head.commit_hash, Origin::Head),
-            }
-        }
+        None => (
+            served,
+            standing
+                .as_ref()
+                .map_or(Origin::Head, |_| Origin::ChannelPin),
+        ),
         Some(wanted) => {
             // The pin may only name a state the channel has held — FLOW-7's
             // own first-parent rule (ADR-0036 decision 1), which is what
             // makes a rewind reach a pinned consumer.
-            if !vedaflow::is_first_parent_ancestor(&mut *tx, tenant_id, wanted, head.commit_hash)
-                .await?
-            {
+            //
+            // Measured against what the scope **serves**, not against its
+            // head: under a standing FLOW-7 pin those differ, and taking the
+            // head would let a request parameter hand a consumer a version
+            // the scope is deliberately holding its readers back from.
+            // "Exactly one thing decides what readers see" (ADR-0036
+            // decision 7) survives a consumer pin only if the scope's hold is
+            // the ceiling — a consumer may pin at or below what the scope
+            // serves, never above it.
+            if !vedaflow::is_first_parent_ancestor(&mut *tx, tenant_id, wanted, served).await? {
                 return Err(Error::Conflict {
                     message: format!(
                         "{} is not a state {} at this scope has held; it now serves {}. \
@@ -579,7 +589,7 @@ async fn at_scope(
                          deliberately",
                         wanted.to_hex(),
                         channel_ref,
-                        head.commit_hash.to_hex(),
+                        served.to_hex(),
                     ),
                 });
             }

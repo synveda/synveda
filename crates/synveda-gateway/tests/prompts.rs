@@ -734,6 +734,95 @@ async fn a_pinned_commit_holds_while_the_channel_moves_and_a_rewind_refuses_it()
     assert_eq!(older["template"], json!(V1), "{older}");
 }
 
+/// A standing FLOW-7 pin is the **ceiling** on what a consumer's pin can
+/// reach (ADR-0049 decision 10, ADR-0036 decision 7).
+///
+/// "Exactly one thing decides what readers see" survives a request
+/// parameter only if the scope's hold bounds it: a consumer may pin at or
+/// below what the scope serves, never above. Otherwise a team holding its
+/// fleet at an earlier version could be walked around by any caller that
+/// names the newer commit — which is the pin's whole purpose, undone by a
+/// query string.
+#[tokio::test]
+async fn a_scope_pin_is_the_ceiling_a_consumer_pin_cannot_reach_over() {
+    let Some(w) = world().await else { return };
+    author(&w, &w.alice, w.platform, "support/triage", V1).await;
+    let first = review_and_publish(&w, "support/triage", "v1").await;
+    author(&w, &w.alice, w.platform, "support/triage", V2).await;
+    let second = review_and_publish(&w, "support/triage", "v2").await;
+
+    // Both versions are reachable while the channel serves its head.
+    let (status, newer) = get(
+        &w.app,
+        &format!(
+            "/v1/prompts/support/triage?scope_id={}&commit={second}",
+            w.platform
+        ),
+        &w.bea,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{newer}");
+
+    // The team holds its readers at the earlier version.
+    let (status, pinned) = post(
+        &w.app,
+        &format!("/v1/channels/{}/pin", w.platform),
+        &w.cora,
+        json!({
+            "asset": "prompt",
+            "commit": first,
+            "reason": "the refund line is under review by legal",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pinned}");
+
+    // The floating consumer composes the held version, and says so.
+    let (status, held) = resolve(&w, &w.bea, "support/triage").await;
+    assert_eq!(status, StatusCode::OK, "{held}");
+    assert_eq!(held["template"], json!(V1), "{held}");
+    assert_eq!(
+        held["origin"],
+        json!("channel-pin"),
+        "a response that cites a frozen commit says so: {held}"
+    );
+
+    // And the consumer naming the newer commit is refused — the hold is a
+    // ceiling, not a default.
+    let (status, over) = get(
+        &w.app,
+        &format!(
+            "/v1/prompts/support/triage?scope_id={}&commit={second}",
+            w.platform
+        ),
+        &w.bea,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a request parameter must not reach over the scope's own hold: {over}"
+    );
+    assert!(
+        detail(&over).contains(&first),
+        "and the refusal names what the scope does serve: {}",
+        detail(&over)
+    );
+
+    // Pinning at the held commit itself still works.
+    let (status, at_hold) = get(
+        &w.app,
+        &format!(
+            "/v1/prompts/support/triage?scope_id={}&commit={first}",
+            w.platform
+        ),
+        &w.bea,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{at_hold}");
+    assert_eq!(at_hold["origin"], json!("pinned-commit"), "{at_hold}");
+}
+
 /// A pin freezes bytes and never authority (ADR-0049 decision 11) — CTX-4's
 /// rule for handles, restated for commits.
 ///

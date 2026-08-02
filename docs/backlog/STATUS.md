@@ -2796,7 +2796,12 @@ effect" a lie, and serving the head instead makes the pin one, so the
 pinned read is refused with both commits named and the consumer learns on
 its next call rather than its next session. A pin freezes bytes and never
 authority — the decision is taken at request time, which is CTX-4's rule
-for handles restated for commits.
+for handles restated for commits. And the ancestry is measured against
+what the scope **serves** rather than its head, which matters exactly when
+a standing FLOW-7 pin holds the two apart: a scope's hold is the ceiling a
+consumer pin may reach at or below and never over, or ADR-0036 decision
+7's "exactly one thing decides what readers see" would be undone by a
+query string.
 
 Two findings worth naming. **A *placed* steward can run a publication's
 effect**: the membership floor every placed principal holds supplies the
