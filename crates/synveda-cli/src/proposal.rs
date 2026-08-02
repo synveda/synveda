@@ -774,10 +774,11 @@ mod tests {
 
     fn member(effect: Effect, before: Option<&str>, after: &str) -> Member {
         Member {
-            record_id: "0198f000-0000-7000-8000-000000000001".to_owned(),
+            member: "0198f000-0000-7000-8000-000000000001".to_owned(),
+            asset: "memory".to_owned(),
             object_hash: "b".repeat(64),
             unchanged: true,
-            class: "procedure".to_owned(),
+            class: Some("procedure".to_owned()),
             sensitivity: Sensitivity::Internal,
             effect,
             proposed: after.to_owned(),
@@ -788,9 +789,71 @@ mod tests {
         }
     }
 
+    /// A prompt member: named by path, with no class (PRMT-1, ADR-0049
+    /// decision 3).
+    fn prompt_member(effect: Effect, before: Option<&str>, after: &str) -> Member {
+        Member {
+            member: "support/triage-reply".to_owned(),
+            asset: "prompt".to_owned(),
+            class: None,
+            ..member(effect, before, after)
+        }
+    }
+
     fn asset(content: &str) -> String {
         serde_json::json!({"class": "procedure", "content": content, "sensitivity": "internal"})
             .to_string()
+    }
+
+    /// The per-asset-kind renderer ADR-0035 predicted, as a rendering
+    /// rather than a paragraph: a record id is abbreviated the way a
+    /// commit is, a prompt's path is shown whole because it is a name a
+    /// person typed, and a member with no class says what it is instead.
+    #[test]
+    fn a_prompt_member_is_named_by_path_and_labelled_by_its_asset_kind() {
+        let detail = Detail {
+            summary: summary(ProposalView::Open, "acme/eng/platform", "acme/eng/platform"),
+            members: vec![prompt_member(
+                Effect::Update,
+                Some("be brief"),
+                "be brief, and link the runbook",
+            )],
+            approvals: Vec::new(),
+        };
+        let rendered = render_detail(&detail, false);
+        assert!(
+            rendered.contains("support/triage-reply  prompt · internal"),
+            "a prompt member is named whole and labelled by its kind:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("support/triag "),
+            "and never abbreviated like an id:\n{rendered}"
+        );
+        // The review still shows both sides — the disclosure ADR-0035
+        // decision 8 admits, unchanged by the asset kind.
+        assert!(rendered.contains("- be brief"), "{rendered}");
+        assert!(
+            rendered.contains("+ be brief, and link the runbook"),
+            "{rendered}"
+        );
+    }
+
+    /// A memory member keeps the abbreviation, so the two kinds are
+    /// distinguishable at a glance in one queue.
+    #[test]
+    fn a_record_id_is_still_abbreviated() {
+        let detail = Detail {
+            summary: summary(ProposalView::Open, "acme", "acme"),
+            members: vec![member(Effect::Add, None, &asset("brand new"))],
+            approvals: Vec::new(),
+        };
+        let rendered = render_detail(&detail, false);
+        assert!(rendered.contains("0198f000-000"), "{rendered}");
+        assert!(
+            !rendered.contains("0198f000-0000-7000-8000-000000000001"),
+            "a uuid-shaped member is shortened:\n{rendered}"
+        );
+        assert!(rendered.contains("procedure · internal"), "{rendered}");
     }
 
     #[test]

@@ -1179,12 +1179,10 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
     let proposed = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
     if proposal.asset == AssetKind::Prompt {
         return publish_prompts(
-            state,
             tx,
             tenant_id,
             id,
             &proposal,
-            &node,
             publisher,
             &authorized,
             &requirement,
@@ -1350,12 +1348,10 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
 /// (ADR-0019 decision 4).
 #[allow(clippy::too_many_arguments)]
 async fn publish_prompts(
-    _state: &AppState,
     mut tx: sqlx::Transaction<'static, sqlx::Postgres>,
     tenant_id: TenantId,
     id: ProposalId,
     proposal: &vedaflow::StoredProposal,
-    node: &HierarchyNode,
     publisher: IdentityId,
     authorized: &crate::authz::Authorized,
     requirement: &ApprovalRequirement,
@@ -1485,7 +1481,6 @@ async fn publish_prompts(
         }),
     )
     .await?;
-    let _ = node;
     commit(tx).await?;
 
     Ok(Json(PublishResponse {

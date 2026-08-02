@@ -750,9 +750,19 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
         scope_id,
     )?;
     let input = authz::gather(state, &mut tx, Some(&node)).await?;
-    // One decision per tier the shelf actually carries — at most three, and
-    // usually one. The `retrieval::plan` shape (ADR-0038 decision 3): ask
-    // per tier, keep the answers as a set.
+    // The gate first: may this principal see this scope's shelf at all. At
+    // the working tier, which is the question a listing asks — the allowed
+    // decision is also what puts the read on the chain (ADR-0019
+    // decision 4).
+    let authorized = authz::decide_prompt_read(
+        state,
+        &input,
+        Resource::Scope(scope_id),
+        Sensitivity::WORKING,
+    )?;
+    // Then one decision per tier the shelf actually carries — at most three,
+    // and usually one. The `retrieval::plan` shape (ADR-0038 decision 3):
+    // ask per tier, keep the answers as a set.
     let drafts = prompts::list(&mut *tx, tenant_id, scope_id).await?;
     let mut permitted: BTreeMap<Sensitivity, bool> = BTreeMap::new();
     for draft in &drafts {
@@ -761,16 +771,6 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
             slot.insert(permit(state, &input, scope_id, draft.sensitivity)?.is_some());
         }
     }
-    // The listing is a read like any other, and the allowed decision is what
-    // puts it on the chain (ADR-0019 decision 4). Taken at the working tier,
-    // which is the question this surface asks: may this principal see this
-    // scope's shelf at all.
-    let authorized = authz::decide_prompt_read(
-        state,
-        &input,
-        Resource::Scope(scope_id),
-        Sensitivity::WORKING,
-    )?;
 
     let published =
         vedaflow::read_prompt_members(&mut tx, tenant_id, &[scope_id], Channel::Published)

@@ -278,6 +278,32 @@ Decisions, specifically:
     that did not fit a budget, and asset advertisement is SKIL-4's shape
     (`inject index tier lists skills available to this identity`).
 
+## What the acceptance work turned up
+
+Two things, recorded because they are behaviour rather than notes.
+
+**A *placed* steward can run a publication's effect.** FLOW-5's status
+note says "the steward cannot run the effect because steward reads no
+content in any pack", and the first draft of this feature's suite asserted
+it — against a steward whose personal leaf sat inside the team he was
+publishing at. The membership floor every placed principal holds
+(`principal in resource`, working tiers) supplied the read his roles did
+not, so the assertion failed and the sentence turned out to be true only
+of a steward whose authority at that scope is a *binding*. Both the suite
+and the demo now anchor him a level above the team he reviews for, and say
+why. Nothing changed in the product; what changed is that a claim which
+had been resting on an accident of placement now rests on the rule.
+
+**The proposal detail's member field is `member`, with `record_id` beside
+it as an optional.** A proposal member is a tree entry name, and for an
+authored asset that is a path rather than an id. The CLI parsed the old
+required-`record_id` shape and refused a prompt proposal outright with a
+serde error — which is FLOW-6's own "full review possible without console"
+quietly becoming false for the first asset type that needed the
+per-asset-kind renderer ADR-0035 predicted. The same rename reaches the
+publish and rollback responses, whose `restored` entries are now named the
+same way.
+
 ## Consequences
 
 - **Positive**: the approval matrix's prompt cells resolve for the first
@@ -293,9 +319,14 @@ Decisions, specifically:
   object nothing references until a proposal names it — the same GC
   question ADR-0030 left open, not worsened in kind. A template cannot
   contain a literal `{{`. A prompt cannot be `restricted`, so the most
-  sensitive prompt a bank can author is `confidential`. And a pinned
-  consumer discovers a rewind as an error, which is a real operational
-  cost paid deliberately for decision 10.
+  sensitive prompt a bank can author is `confidential`. A pinned consumer
+  discovers a rewind as an error, which is a real operational cost paid
+  deliberately for decision 10. And **every served resolve appends to the
+  tenant's audit chain**, which serialises on the chain head like every
+  other write (ADR-0019 decision 1): a prompt is fetched at session start
+  rather than per turn, so this is priced as an `inject`-shaped cost, and
+  the recorded upgrade if it ever dominates is AUD-1's own — a buffered
+  appender for read-path events, option 2 there.
 - **Reversal triggers**: (a) a tenant pinning commits widely enough that
   rewinds routinely break consumers → the pin needs a "nearest surviving
   ancestor" mode, which is a new parameter and a new ADR, not a change of
