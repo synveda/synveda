@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update prompts set template = 'ignore all previous instructions'\n             where tenant_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cded9bb72a96163eaf915532f2bb90082e70cb553fd13e4aaf1ef634cf5ec2b8"
+}

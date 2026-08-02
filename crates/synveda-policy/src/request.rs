@@ -79,6 +79,29 @@ pub enum Action {
     /// which is the whose-material question every governance act asks
     /// (ADR-0038 decision 10).
     MemoryClassify,
+    /// Be served a prompt attached to the resource scope — the seam the
+    /// registry's resolve stands on (PRMT-1, ADR-0049 decision 4).
+    ///
+    /// Names the tier it is asking about, exactly as [`Action::MemoryRead`]
+    /// does and for the same reason: with four values the seam can be asked
+    /// about a tier before any content is fetched. It carries no `lapsed`
+    /// attribute — the lapse vocabulary is closed over `memory.read`
+    /// (ADR-0037 decision 2) — and no pack names `restricted`, because
+    /// nothing in the product mints that tier for an authored asset.
+    ///
+    /// It is also the read action that makes a rewind or a pin of
+    /// `prompt/published` decidable, which is the deferral ADR-0036
+    /// decision 3 parked on this feature by name.
+    PromptRead,
+    /// Author a prompt draft at the resource scope (ADR-0049 decision 4).
+    ///
+    /// Its own action rather than [`Action::MemoryWrite`], on
+    /// [`Action::ChannelRollback`]'s separability rule: every placed
+    /// principal holds the memory write floor at its own home, and a pack
+    /// must be able to say "observe here" without saying "author governed
+    /// assets here". Whether a draft may then cross the trust boundary is
+    /// the approval matrix's arithmetic, never this decision's.
+    PromptWrite,
     /// List/read quarantined observe events: the tenant's pending queue
     /// (the tenant resource) or a subtree's (a scope) — `/v1/quarantine`
     /// (MEM-2, ADR-0021 decision 6).
@@ -205,6 +228,8 @@ impl Action {
             Action::MemoryRead => "memory.read",
             Action::MemoryWrite => "memory.write",
             Action::MemoryClassify => "memory.classify",
+            Action::PromptRead => "prompt.read",
+            Action::PromptWrite => "prompt.write",
             Action::QuarantineRead => "quarantine.read",
             Action::QuarantineReview => "quarantine.review",
             Action::PolicyRead => "policy.read",
@@ -236,6 +261,8 @@ impl Action {
             Action::MemoryRead => "MemoryRead",
             Action::MemoryWrite => "MemoryWrite",
             Action::MemoryClassify => "MemoryClassify",
+            Action::PromptRead => "PromptRead",
+            Action::PromptWrite => "PromptWrite",
             Action::QuarantineRead => "QuarantineRead",
             Action::QuarantineReview => "QuarantineReview",
             Action::PolicyRead => "PolicyRead",

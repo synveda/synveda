@@ -46,13 +46,15 @@ const ALL_SCOPES: [&str; 8] = [
 /// The decision columns: the action vocabulary, with `RoleAssign` split
 /// by what is being granted — the base layer decides those differently
 /// (ADR-0015 decision 5).
-const COLUMNS: [(Action, Option<Role>); 24] = [
+const COLUMNS: [(Action, Option<Role>); 26] = [
     (Action::HierarchyCreate, None),
     (Action::HierarchyRead, None),
     (Action::HierarchyUpdate, None),
     (Action::HierarchyDelete, None),
     (Action::MemoryRead, None),
     (Action::MemoryWrite, None),
+    (Action::PromptRead, None),
+    (Action::PromptWrite, None),
     (Action::QuarantineRead, None),
     (Action::QuarantineReview, None),
     (Action::PolicyRead, None),
@@ -221,13 +223,24 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
     match role {
         // Viewer: composition read only — read-only by name (ADR-0020
         // decision 3).
-        Role::Viewer => vec![(Action::MemoryRead, None), (Action::ProposalRead, None)],
+        Role::Viewer => vec![
+            (Action::MemoryRead, None),
+            (Action::PromptRead, None),
+            (Action::ProposalRead, None),
+        ],
         // Contributing content roles: read plus the shared-scope write
         // grant (MEM-1, ADR-0020 decision 3 — ADR-0015's
         // contributor-writes marker discharged).
         Role::Contributor => vec![
             (Action::MemoryRead, None),
             (Action::MemoryWrite, None),
+            // The prompt registry's two seams follow the content roles
+            // exactly (PRMT-1, ADR-0049 decision 4): a contributor who may
+            // write memory at a scope may author a draft there, and
+            // whether that draft ever reaches a reader is the approval
+            // matrix's arithmetic rather than this binding's.
+            (Action::PromptRead, None),
+            (Action::PromptWrite, None),
             (Action::ProposalRead, None),
             (Action::ProposalOpen, None),
         ],
@@ -239,6 +252,8 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
         Role::Curator => vec![
             (Action::MemoryRead, None),
             (Action::MemoryWrite, None),
+            (Action::PromptRead, None),
+            (Action::PromptWrite, None),
             (Action::ChannelRead, None),
             (Action::ChannelPublish, None),
             (Action::ChannelRollback, None),
@@ -391,6 +406,8 @@ fn assert_matrix(pack: &str, version: i64) {
                     action,
                     Action::MemoryRead
                         | Action::MemoryWrite
+                        | Action::PromptRead
+                        | Action::PromptWrite
                         | Action::QuarantineReview
                         | Action::ServiceIdentityManage
                         | Action::ChannelRead
@@ -440,20 +457,20 @@ fn assert_matrix(pack: &str, version: i64) {
 /// regulated-strict: the golden matrix (the AC).
 #[test]
 fn matrix_regulated_strict() {
-    assert_matrix(REGULATED_STRICT, 11);
+    assert_matrix(REGULATED_STRICT, 12);
 }
 
 /// standard: identical role matrix — packs differ on composition
 /// membership, never on who administers (ADR-0015 decision 4).
 #[test]
 fn matrix_standard() {
-    assert_matrix(STANDARD, 11);
+    assert_matrix(STANDARD, 12);
 }
 
 /// open-collaboration: identical role matrix.
 #[test]
 fn matrix_open_collaboration() {
-    assert_matrix(OPEN_COLLABORATION, 11);
+    assert_matrix(OPEN_COLLABORATION, 12);
 }
 
 /// A tenant-wide binding is in force everywhere, the tenant plane

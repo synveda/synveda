@@ -59,11 +59,16 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// added `AuditRead` to the read-only admin permit every pack has carried
 /// since AUTHZ-2 — the line whose comment named this feature — which makes
 /// `auditor` a role with a live action rather than a marker row in the
-/// golden matrix (ADR-0045 decision 1).
+/// golden matrix (ADR-0045 decision 1). `@12`: PRMT-1 added the prompt
+/// registry's two seams — `PromptRead`, mirroring each pack's own MemoryRead
+/// shape tier for tier, and `PromptWrite`, mirroring its write floor — and
+/// the base layer's confinement carve-out gained `PromptRead` beside
+/// `MemoryRead`, because a team-anchored agent is the consumer prompts exist
+/// for and the org's are on its own chain (ADR-0049 decision 4).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 11),
-    (STANDARD, 11),
-    (OPEN_COLLABORATION, 11),
+    (REGULATED_STRICT, 12),
+    (STANDARD, 12),
+    (OPEN_COLLABORATION, 12),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -995,8 +1000,13 @@ impl Pdp {
             // errors (ADR-0015 decision 5's shape, ADR-0037 decision 9,
             // ADR-0038 decision 2).
             pairs.push(("lapsed".to_owned(), RestrictedExpression::new_bool(lapsed)));
+        }
+        if matches!(action, Action::MemoryRead | Action::PromptRead) {
+            // The tier both read seams name (ADR-0038 decision 2; ADR-0049
+            // decision 4). `PromptRead` takes no `lapsed`: a lapse relaxes a
+            // closed vocabulary, and `memory.read` is all of it.
             let sensitivity = sensitivity.ok_or_else(|| Error::Internal {
-                message: "MemoryRead decided without a sensitivity tier in context".to_owned(),
+                message: format!("{action} decided without a sensitivity tier in context"),
             })?;
             pairs.push((
                 "sensitivity".to_owned(),

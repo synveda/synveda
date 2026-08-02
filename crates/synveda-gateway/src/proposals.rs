@@ -69,8 +69,8 @@ use synveda_store::records::RecordState;
 use synveda_store::{hierarchy, records, rls};
 use synveda_types::{
     ApprovalRequirement, AssetKind, CastApproval, Channel, Error, HierarchyNode, IdentityId,
-    PromotionEvidence, ProposalEffect, ProposalId, ProposalState, ProposalView, RecordId, Result,
-    Role, ScopeId, Sensitivity, TenantId, Verdict,
+    PromotionEvidence, PromptName, ProposalEffect, ProposalId, ProposalState, ProposalView,
+    RecordId, Result, Role, ScopeId, Sensitivity, TenantId, Verdict,
 };
 use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
 
@@ -236,17 +236,31 @@ struct BaselineView {
 /// bytes they would replace, and the record's current content.
 #[derive(Serialize)]
 struct MemberView {
-    record_id: RecordId,
+    /// The tree entry name: a record id for a memory, a path for a prompt
+    /// (PRMT-1, ADR-0049 decision 3). The one field both asset kinds carry,
+    /// and the one a review surface displays.
+    member: String,
+    /// The record id, for a memory proposal. Absent for an authored asset,
+    /// whose members are named rather than identified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    record_id: Option<RecordId>,
+    /// What kind of asset this proposal carries — one word, so a reviewer's
+    /// first line says what they are looking at.
+    asset: String,
     /// The address the proposal named.
     object_hash: String,
-    /// Whether the record still hashes to that address. `false` means the
+    /// Whether the member still hashes to that address. `false` means the
     /// content moved after the proposal opened, and publishing will
     /// refuse (ADR-0032 decision 6).
     unchanged: bool,
-    class: String,
+    /// A memory's class. Absent for a prompt, which has none — `asset`
+    /// says what it is instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    class: Option<String>,
     sensitivity: Sensitivity,
-    /// The record's text **as it stands now**. Beside `unchanged` this is
-    /// what makes drift legible; it is not what the approvals bind.
+    /// The member's text **as it stands now**: a record's content, or a
+    /// prompt draft's template. Beside `unchanged` this is what makes drift
+    /// legible; it is not what the approvals bind.
     content: String,
     /// What publication would do to the target's channel for this member.
     effect: MemberEffect,
@@ -448,7 +462,23 @@ pub(crate) struct OpenBody {
     /// The records to propose. Must be material the source scope holds —
     /// records living there, or records its published channel names at
     /// their current address (ADR-0034 decision 3).
+    #[serde(default)]
     record_ids: Vec<RecordId>,
+    /// The prompts to propose, by name (PRMT-1, ADR-0049 decision 6).
+    ///
+    /// Exactly one of `record_ids` and `prompt_names` may be present: a
+    /// proposal has one asset kind, because the approval matrix resolves
+    /// from it and `regulated-strict` prices a prompt at two distinct
+    /// people where it prices a team's memory at one. A mixed set would
+    /// have to be priced at the maximum, which is a rule nobody wrote and
+    /// a review nobody asked for.
+    ///
+    /// The same two senses of "the source holds it" apply: the draft lives
+    /// there, or the source's published channel names it at that address —
+    /// which is what lets a department propose onward what a team climbed
+    /// into it, with no draft row at the department at all.
+    #[serde(default)]
+    prompt_names: Vec<PromptName>,
     /// What this proposes, in one line. A reviewer reads it in a list.
     title: String,
     /// What running this proposal would *do*. Absent means `published` —
@@ -547,8 +577,28 @@ async fn open_inner(
         });
     }
 
-    let versions = held_versions(&mut tx, tenant_id, source_scope_id, &body.record_ids).await?;
-    let held = max_sensitivity(&versions);
+    let asset = if body.prompt_names.is_empty() {
+        AssetKind::Memory
+    } else {
+        AssetKind::Prompt
+    };
+    // The members, as the asset kind's own reader sees them: the two senses
+    // of "the source holds it" (ADR-0034 decision 3) are the same two for
+    // both kinds — it lives there, or the source's published channel names
+    // it at its current address — read from different tables.
+    let members_now: Vec<Proposed> = match asset {
+        AssetKind::Memory => held_versions(&mut tx, tenant_id, source_scope_id, &body.record_ids)
+            .await?
+            .into_iter()
+            .map(Proposed::Memory)
+            .collect(),
+        _ => held_prompts(&mut tx, tenant_id, source_scope_id, &body.prompt_names)
+            .await?
+            .into_iter()
+            .map(Proposed::Prompt)
+            .collect(),
+    };
+    let held = max_sensitivity(&members_now);
     // A classification's requirement resolves at the **maximum of the
     // current and proposed tiers** (ADR-0038 decision 9). Taking only the
     // proposed side would price a declassification at the tier it is
@@ -570,30 +620,47 @@ async fn open_inner(
     // every tier. How sensitive it is prices the *review* — the matrix
     // resolves at the set's maximum, and `restricted` there means compliance
     // and two distinct approvers before anything moves.
-    let disclosed = authz::decide_read(
-        state,
-        &input,
-        Resource::Scope(source_scope_id),
-        Sensitivity::WORKING,
-    )?;
+    //
+    // Taken with the *asset kind's* own read action (PRMT-1, ADR-0049
+    // decision 4): a prompt proposal's disclosure is a `PromptRead`, and
+    // deciding it as a memory read would ask a question about a different
+    // corpus — in a pack that shares prompts more widely than memory, or
+    // less, the two answers differ.
+    let disclosed = decide_asset_read(state, &input, asset, source_scope_id)?;
     // Objects first: each member's address, computed from the version
     // being proposed. This is what binds the review to bytes — approvals
     // name this commit, and publishing recomputes these addresses from the
     // records as they stand then (ADR-0032 decision 6).
-    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> = Vec::with_capacity(versions.len());
-    for version in &versions {
-        let mut asset = memory_asset(version.id, &version.state);
-        if effect == ProposalEffect::Classify {
-            // The proposed version differs from the live record in exactly
-            // one field, and it lives in the object store rather than in
-            // the row: writing the row first would put the change live
-            // before anyone reviewed it (ADR-0038 decision 9). The tier is
-            // inside the memory object's address, so the approvals bind it
-            // the way they bind bytes, with no recheck.
-            asset.sensitivity = proposed_tier;
-        }
-        let object = vedaflow::put_memory(&mut tx, tenant_id, &asset).await?;
-        members.push((asset.entry_name(), object.hash));
+    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> =
+        Vec::with_capacity(members_now.len());
+    for proposed in &members_now {
+        let (entry, hash) = match proposed {
+            Proposed::Memory(version) => {
+                let mut asset = memory_asset(version.id, &version.state);
+                if effect == ProposalEffect::Classify {
+                    // The proposed version differs from the live record in
+                    // exactly one field, and it lives in the object store
+                    // rather than in the row: writing the row first would put
+                    // the change live before anyone reviewed it (ADR-0038
+                    // decision 9). The tier is inside the memory object's
+                    // address, so the approvals bind it the way they bind
+                    // bytes, with no recheck.
+                    asset.sensitivity = proposed_tier;
+                }
+                let object = vedaflow::put_memory(&mut tx, tenant_id, &asset).await?;
+                (asset.entry_name(), object.hash)
+            }
+            // A prompt's object is already stored — the draft row's foreign
+            // key required it at authoring time — so this write dedups and
+            // stores nothing. It runs anyway, because a member reached
+            // through the *published* sense of "the source holds it" has no
+            // draft row here and this is the one line that does not care.
+            Proposed::Prompt(asset) => {
+                let object = vedaflow::put_prompt(&mut tx, tenant_id, asset).await?;
+                (asset.entry_name(), object.hash)
+            }
+        };
+        members.push((entry, hash));
     }
     let snapshot = PolicySnapshot::new(
         authorized.decision.pack_name.clone(),
@@ -609,7 +676,7 @@ async fn open_inner(
             // 0019's transition trigger already makes both immutable, so
             // the climb needed no schema (ADR-0034 decision 8).
             source_scope: source_scope_id,
-            asset: AssetKind::Memory,
+            asset,
             effect,
             members: &members,
             sensitivity,
@@ -650,7 +717,7 @@ async fn open_inner(
         &input,
         &approvals::Requested {
             target: &node,
-            asset: AssetKind::Memory,
+            asset,
             sensitivity,
             entries: &entries,
         },
@@ -666,7 +733,7 @@ async fn open_inner(
         json!({
             "authz": audit::decision_context(Action::ProposalOpen, &authorized),
             "proposal_id": proposal.id,
-            "asset": AssetKind::Memory.as_str(),
+            "asset": asset.as_str(),
             "channel": Channel::Published.as_str(),
             "title": body.title,
             "sensitivity": sensitivity.as_str(),
@@ -681,9 +748,13 @@ async fn open_inner(
                 "levels": target_position,
                 "source_read": audit::decision_context(Action::MemoryRead, &disclosed),
             })),
-            // Ids and addresses, never content.
+            // Names and addresses, never content. `record_id` is kept for
+            // a memory proposal because AUD-2's disclosure query reads it;
+            // an authored asset is named rather than identified, and the
+            // `member` key is the one both kinds carry.
             "records": members.iter().map(|(name, hash)| json!({
-                "record_id": name,
+                "member": name,
+                "record_id": (asset == AssetKind::Memory).then(|| name.clone()),
                 "object_hash": hash.to_hex(),
             })).collect::<Vec<_>>(),
             "approvals": approvals::audit_context(&requirement, &outstanding),
@@ -1074,13 +1145,12 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
     )?;
     // At the working tier, like the direct route (ADR-0038 decision 10):
     // running an approved effect governs material, it does not compose it,
-    // and the tier was priced by the matrix these approvals satisfied.
-    authz::decide_read(
-        state,
-        &input,
-        Resource::Scope(node.id),
-        Sensitivity::WORKING,
-    )?;
+    // and the tier was priced by the matrix these approvals satisfied. With
+    // the asset kind's own read action since PRMT-1 (ADR-0049 decision 4) —
+    // which is what keeps a steward, who reads no content in any pack, from
+    // running a prompt publication's effect exactly as it keeps them from
+    // running a memory one's.
+    decide_asset_read(state, &input, proposal.asset, node.id)?;
     require_open(&proposal)?;
     require_effect(&proposal, ProposalEffect::Published, "publish")?;
     let publisher = identity_of(&input)?;
@@ -1107,6 +1177,23 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
     // holds the material, which is the same check one scope over
     // (ADR-0034 decision 7).
     let proposed = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
+    if proposal.asset == AssetKind::Prompt {
+        return publish_prompts(
+            state,
+            tx,
+            tenant_id,
+            id,
+            &proposal,
+            &node,
+            publisher,
+            &authorized,
+            &requirement,
+            &cast,
+            &outstanding,
+            &proposed,
+        )
+        .await;
+    }
     let ids = member_ids(&proposed)?;
     let versions = records::current_many(&mut *tx, tenant_id, &ids).await?;
     let published = published_at(&mut tx, tenant_id, proposal.source_scope_id).await?;
@@ -1233,6 +1320,172 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
         }),
     )
     .await?;
+    commit(tx).await?;
+
+    Ok(Json(PublishResponse {
+        proposal_id: id,
+        scope_id: proposal.target_scope_id,
+        channel: channel.name(),
+        commit: committed.commit.to_hex(),
+        parent: committed.parent.map(|parent| parent.to_hex()),
+        proposal_commit: proposal.commit.to_hex(),
+        members: committed.entries,
+        added: committed.added,
+    }))
+}
+
+/// The publish effect for a prompt proposal (PRMT-1, ADR-0049 decision 6).
+///
+/// The same act as its memory sibling, line for line — approvals bind
+/// bytes, so every member's address is recomputed from the version as it
+/// stands *now* and required to equal what the approved commit named, and
+/// the source must still hold it. What differs is only where "as it stands
+/// now" is read from: a draft row at the source scope, or, for a climb of
+/// something already published there, the source's own tree.
+///
+/// It writes `prompt/published` rather than `memory/published`, and it
+/// chains the same `vedaflow.channel.published` event with `asset` reading
+/// `prompt` — the same governed act with the same consequence, so a second
+/// action asserting it would be a fact an auditor has to reconcile
+/// (ADR-0019 decision 4).
+#[allow(clippy::too_many_arguments)]
+async fn publish_prompts(
+    _state: &AppState,
+    mut tx: sqlx::Transaction<'static, sqlx::Postgres>,
+    tenant_id: TenantId,
+    id: ProposalId,
+    proposal: &vedaflow::StoredProposal,
+    node: &HierarchyNode,
+    publisher: IdentityId,
+    authorized: &crate::authz::Authorized,
+    requirement: &ApprovalRequirement,
+    cast: &[CastApproval],
+    outstanding: &synveda_types::Outstanding,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Json<PublishResponse>> {
+    let source = proposal.source_scope_id;
+    let names: Vec<PromptName> = proposed
+        .iter()
+        .map(|member| {
+            member
+                .name
+                .parse::<PromptName>()
+                .map_err(|err| Error::Internal {
+                    message: format!(
+                        "proposal member {:?} is not a prompt name: {err}",
+                        member.name
+                    ),
+                })
+        })
+        .collect::<Result<_>>()?;
+    let drafts: std::collections::HashMap<PromptName, [u8; 32]> =
+        synveda_store::prompts::read_many(&mut *tx, tenant_id, source, &names)
+            .await?
+            .into_iter()
+            .map(|draft| (draft.template.name.clone(), draft.object_hash))
+            .collect();
+    let published_at_source = published_prompts_at(&mut tx, tenant_id, source).await?;
+
+    // Every refusal here is a `Conflict`, never an `Invalid`: the request
+    // was well formed when it was approved — what moved is the world,
+    // between the review and its effect (ADR-0034 decision 7).
+    let moved = |what: &str, name: &PromptName| Error::Conflict {
+        message: format!(
+            "prompt {name} {what} after this proposal was approved; withdraw it and \
+             open a new one so the change is reviewed"
+        ),
+    };
+    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> = Vec::with_capacity(names.len());
+    for (member, name) in proposed.iter().zip(&names) {
+        match drafts.get(name) {
+            // The draft lives at the source: its current address must be the
+            // one the approvals bound.
+            Some(address) if member.object.as_bytes() == address => {}
+            Some(_) => return Err(moved("changed", name)),
+            // No draft: the source must still publish exactly these bytes.
+            // A rewind at the source (FLOW-7) or a republication at a
+            // different address takes the member out of both senses at once.
+            None => {
+                if published_at_source.get(name) != Some(&member.object) {
+                    return Err(Error::Conflict {
+                        message: format!(
+                            "scope {source} no longer holds prompt {name}; the climb was \
+                             approved against material its source has since given up"
+                        ),
+                    });
+                }
+            }
+        }
+        members.push((member.name.clone(), member.object));
+    }
+
+    let channel = vedaflow::ChannelRef::prompt(Channel::Published);
+    let snapshot = PolicySnapshot::new(
+        authorized.decision.pack_name.clone(),
+        authorized.decision.pack_version,
+    );
+    let committed = vedaflow::publish(
+        &mut tx,
+        tenant_id,
+        &vedaflow::ChannelWrite {
+            scope: proposal.target_scope_id,
+            channel,
+            members: &members,
+            merge_parents: &[proposal.commit],
+            author: publisher,
+            message: &proposal.title,
+            committed_at: Utc::now(),
+            policy_snapshot: &snapshot,
+        },
+        &Signer::Unsigned,
+    )
+    .await?;
+    close(
+        &mut tx,
+        tenant_id,
+        id,
+        ProposalState::Published,
+        publisher,
+        None,
+    )
+    .await?;
+    vedaflow::proposals::act("published", proposal.asset);
+
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::ChannelPublished,
+        Resource::Scope(proposal.target_scope_id).to_string(),
+        Outcome::Success,
+        json!({
+            "authz": audit::decision_context(Action::ChannelPublish, authorized),
+            "channel": channel.name(),
+            "asset": channel.asset.as_str(),
+            "message": proposal.title,
+            "proposal_id": id,
+            "proposal_commit": proposal.commit.to_hex(),
+            "sensitivity": proposal.sensitivity.as_str(),
+            "source_scope_id": source,
+            "target_scope_id": proposal.target_scope_id,
+            // Names and addresses, never template text.
+            "records": members.iter().map(|(name, hash)| json!({
+                "member": name,
+                "object_hash": hash.to_hex(),
+            })).collect::<Vec<_>>(),
+            "commit": committed.commit.to_hex(),
+            "parent": committed.parent.map(|parent| parent.to_hex()),
+            "members": committed.entries,
+            "added": committed.added,
+            "approvals": approvals::audit_context(requirement, outstanding),
+            "approved_by": cast.iter().map(|approval| json!({
+                "identity_id": approval.identity,
+                "subject": approval.subject,
+                "roles": approval.roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        }),
+    )
+    .await?;
+    let _ = node;
     commit(tx).await?;
 
     Ok(Json(PublishResponse {
@@ -1656,6 +1909,9 @@ async fn member_views(
     proposal: &vedaflow::StoredProposal,
 ) -> Result<Vec<MemberView>> {
     let proposed = vedaflow::proposals::members(tx, tenant_id, proposal.commit).await?;
+    if proposal.asset == AssetKind::Prompt {
+        return prompt_member_views(tx, tenant_id, proposal, &proposed).await;
+    }
     let ids = member_ids(&proposed)?;
     // Read wherever the records live, not at the target: a climb's members
     // live below it, and rendering them as "changed, no content" would
@@ -1715,11 +1971,111 @@ async fn member_views(
                 ),
             };
             MemberView {
-                record_id,
+                member: record_id.to_string(),
+                record_id: Some(record_id),
+                asset: AssetKind::Memory.as_str().to_owned(),
                 object_hash: member.object.to_hex(),
                 unchanged,
-                class,
+                class: Some(class),
                 sensitivity,
+                content,
+                effect,
+                proposed: text_at(&member.object),
+                baseline,
+            }
+        })
+        .collect())
+}
+
+/// [`member_views`] for a prompt proposal (PRMT-1, ADR-0049 decision 6).
+///
+/// The same three questions FLOW-6 asks of a memory member — what the
+/// approvals bind, what publication would replace, and whether the source
+/// has moved since — read one table over. The baseline is still the
+/// **target's** tree, which for a climb is the ancestor's, and the "as it
+/// stands now" side is the draft at the source scope, absent when the
+/// member is one the source holds by publishing it.
+async fn prompt_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let names: Vec<PromptName> = proposed
+        .iter()
+        .map(|member| {
+            member
+                .name
+                .parse::<PromptName>()
+                .map_err(|err| Error::Internal {
+                    message: format!(
+                        "proposal member {:?} is not a prompt name: {err}",
+                        member.name
+                    ),
+                })
+        })
+        .collect::<Result<_>>()?;
+    let drafts: std::collections::HashMap<PromptName, synveda_store::prompts::StoredPrompt> =
+        synveda_store::prompts::read_many(&mut *tx, tenant_id, proposal.source_scope_id, &names)
+            .await?
+            .into_iter()
+            .map(|draft| (draft.template.name.clone(), draft))
+            .collect();
+    let published = published_prompts_at(tx, tenant_id, proposal.target_scope_id).await?;
+
+    let mut wanted: Vec<vedaflow::hash::ObjectHash> =
+        proposed.iter().map(|member| member.object).collect();
+    wanted.extend(names.iter().filter_map(|name| published.get(name).copied()));
+    let objects = vedaflow::read_objects(tx, tenant_id, &wanted).await?;
+    let text_at = |hash: &vedaflow::hash::ObjectHash| -> String {
+        objects
+            .get(hash)
+            .map(|object| String::from_utf8_lossy(&object.content).into_owned())
+            .unwrap_or_default()
+    };
+
+    Ok(proposed
+        .iter()
+        .zip(&names)
+        .map(|(member, name)| {
+            // The tier under review is the *proposed version's*, read from
+            // the object the approvals bind rather than from a draft that
+            // may have moved since.
+            let reviewed = objects
+                .get(&member.object)
+                .and_then(|object| vedaflow::PromptAsset::from_bytes(&object.content).ok());
+            let (unchanged, content) = match drafts.get(name) {
+                Some(draft) => (
+                    member.object.as_bytes() == &draft.object_hash,
+                    draft.template.template.clone(),
+                ),
+                // No draft at the source: the member is one the source holds
+                // by publishing it, so what it "stands at now" is that
+                // publication — unchanged exactly while the source still
+                // names these bytes, which is what publishing re-checks.
+                None => (true, String::new()),
+            };
+            let (effect, baseline) = match published.get(name) {
+                None => (MemberEffect::Add, None),
+                Some(held) if *held == member.object => (MemberEffect::None, None),
+                Some(held) => (
+                    MemberEffect::Update,
+                    Some(BaselineView {
+                        object_hash: held.to_hex(),
+                        text: text_at(held),
+                    }),
+                ),
+            };
+            MemberView {
+                member: name.to_string(),
+                record_id: None,
+                asset: AssetKind::Prompt.as_str().to_owned(),
+                object_hash: member.object.to_hex(),
+                unchanged,
+                class: None,
+                sensitivity: reviewed
+                    .as_ref()
+                    .map_or(proposal.sensitivity, |asset| asset.sensitivity),
                 content,
                 effect,
                 proposed: text_at(&member.object),
@@ -1749,6 +2105,152 @@ fn member_ids(members: &[vedaflow::ChannelMember]) -> Result<Vec<RecordId>> {
                 })
         })
         .collect()
+}
+
+/// Decides the asset kind's own read action at `scope_id`, at the working
+/// tier — the *whose-material* question every governance act asks
+/// (ADR-0031 decision 12, ADR-0038 decision 10, ADR-0049 decision 4).
+///
+/// The twin of `channels::decide_asset_read`, spelled here because the two
+/// routes are in different modules and neither is the other's helper; the
+/// suites pin them to the same behaviour.
+fn decide_asset_read(
+    state: &AppState,
+    input: &DecisionInput,
+    asset: AssetKind,
+    scope_id: ScopeId,
+) -> Result<crate::authz::Authorized> {
+    let resource = Resource::Scope(scope_id);
+    match asset {
+        AssetKind::Memory => authz::decide_read(state, input, resource, Sensitivity::WORKING),
+        AssetKind::Prompt => {
+            authz::decide_prompt_read(state, input, resource, Sensitivity::WORKING)
+        }
+        other => Err(Error::Invalid {
+            message: format!(
+                "{} has no read action yet, so this route cannot decide who may govern \
+                 it; it arrives with that asset kind's feature (SKIL-1, PRMT-2)",
+                other.as_str()
+            ),
+        }),
+    }
+}
+
+/// One member of a proposal-to-be, as the asset kind's own reader sees it.
+///
+/// The per-asset-kind seam ADR-0035 predicted, arriving on the write side
+/// first: everything a proposal does with a member — price it, address it,
+/// name it in a tree — is one of these three questions, and the two kinds
+/// answer them from different tables.
+enum Proposed {
+    /// A memory record's current version.
+    Memory(synveda_store::records::RecordVersion),
+    /// A prompt, as it will be addressed. Either the draft that lives at
+    /// the source scope, or — for the second sense of "the source holds
+    /// it" — the object the source's published tree already names.
+    Prompt(vedaflow::PromptAsset),
+}
+
+impl Proposed {
+    /// The tier the approval matrix prices this member at.
+    fn sensitivity(&self) -> Sensitivity {
+        match self {
+            Proposed::Memory(version) => version.state.sensitivity,
+            Proposed::Prompt(asset) => asset.sensitivity,
+        }
+    }
+}
+
+/// The prompts `scope` **holds**, refusing the whole request if any is not
+/// held there — [`held_versions`]'s two senses, one table over.
+///
+/// - the draft **lives** there (`prompts.scope_id`), which is every
+///   same-scope proposal and the first hop of any climb; or
+/// - the scope **published** it — its `prompt/published` tree names the
+///   name, and the object at that address is what climbs onward. There is
+///   deliberately no draft row involved in that case: a department that
+///   admitted a team's prompt holds the bytes through its own channel, not
+///   through an authoring copy nobody edited.
+async fn held_prompts(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+    names: &[PromptName],
+) -> Result<Vec<vedaflow::PromptAsset>> {
+    let mut requested: Vec<PromptName> = names.to_vec();
+    requested.sort();
+    requested.dedup();
+    let drafts = synveda_store::prompts::read_many(&mut *tx, tenant_id, scope_id, &requested)
+        .await?
+        .into_iter()
+        .map(|draft| {
+            (
+                draft.template.name.clone(),
+                vedaflow::PromptAsset {
+                    scope_id,
+                    sensitivity: draft.sensitivity,
+                    template: draft.template,
+                },
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let published = published_prompts_at(tx, tenant_id, scope_id).await?;
+
+    let mut held = Vec::with_capacity(requested.len());
+    let mut missing: Vec<String> = Vec::new();
+    for name in &requested {
+        if let Some(asset) = drafts.get(name) {
+            held.push(asset.clone());
+            continue;
+        }
+        // No draft here: the source may still hold it through its own
+        // published channel, which is how a second hop starts from where
+        // the first one landed.
+        let Some(address) = published.get(name).copied() else {
+            missing.push(name.to_string());
+            continue;
+        };
+        let object = vedaflow::read_object(&mut *tx, tenant_id, address)
+            .await?
+            .ok_or_else(|| Error::Internal {
+                message: format!(
+                    "published prompt {name} names object {} which the append-only \
+                     store does not hold",
+                    address.to_hex()
+                ),
+            })?;
+        held.push(vedaflow::PromptAsset::from_bytes(&object.content)?);
+    }
+    if !missing.is_empty() {
+        // Named rather than silently dropped: proposing a subset of what an
+        // author asked for is the one outcome a review surface must never
+        // produce quietly.
+        return Err(Error::Invalid {
+            message: format!(
+                "scope {scope_id} neither drafts nor publishes: {} — name the scope \
+                 that does with source_scope_id, which must be {scope_id} or a scope \
+                 beneath it (FLOW-5 climbs the hierarchy, it does not cross it)",
+                missing.join(", ")
+            ),
+        });
+    }
+    Ok(held)
+}
+
+/// What `scope`'s published prompt channel names, prompt name → address.
+async fn published_prompts_at(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+) -> Result<std::collections::HashMap<PromptName, vedaflow::hash::ObjectHash>> {
+    Ok(
+        vedaflow::read_prompt_members(tx, tenant_id, &[scope_id], Channel::Published)
+            .await?
+            .into_iter()
+            .next()
+            .map(|state| state.members)
+            .unwrap_or_default(),
+    )
 }
 
 /// The current versions of `ids` that `scope` **holds**, refusing the
@@ -1827,10 +2329,12 @@ async fn published_at(
     )
 }
 
-fn max_sensitivity(versions: &[synveda_store::records::RecordVersion]) -> Sensitivity {
-    versions
+/// A set is reviewed as a set and is governed by its most sensitive
+/// element (ADR-0032 decision 3), whichever kind of asset it holds.
+fn max_sensitivity(members: &[Proposed]) -> Sensitivity {
+    members
         .iter()
-        .map(|version| version.state.sensitivity)
+        .map(Proposed::sensitivity)
         .max()
         .unwrap_or(Sensitivity::Public)
 }
@@ -1848,14 +2352,44 @@ fn role_list(roles: &[Role]) -> String {
 
 fn validate_open(body: &OpenBody) -> Result<()> {
     let invalid = |message: String| Err(Error::Invalid { message });
-    if body.record_ids.is_empty() {
-        return invalid("record_ids must name at least one record".to_owned());
+    // One asset kind per proposal (ADR-0049 decision 6): the approval
+    // matrix resolves from it, and a mixed set would have to be priced at
+    // the maximum by a rule nobody wrote.
+    match (body.record_ids.is_empty(), body.prompt_names.is_empty()) {
+        (true, true) => {
+            return invalid(
+                "name at least one member: record_ids for memories, prompt_names for \
+                 prompts"
+                    .to_owned(),
+            );
+        }
+        (false, false) => {
+            return invalid(
+                "a proposal carries one asset kind: name record_ids or prompt_names, \
+                 never both — the approval matrix resolves from the asset, and \
+                 regulated-strict prices a prompt at two distinct people where it \
+                 prices a team's memory at one"
+                    .to_owned(),
+            );
+        }
+        _ => {}
     }
-    if body.record_ids.len() > vedaflow::MAX_PROPOSAL_MEMBERS {
+    let members = body.record_ids.len().max(body.prompt_names.len());
+    if members > vedaflow::MAX_PROPOSAL_MEMBERS {
         return invalid(format!(
-            "record_ids must name at most {} records",
+            "a proposal may name at most {} members",
             vedaflow::MAX_PROPOSAL_MEMBERS
         ));
+    }
+    if !body.prompt_names.is_empty()
+        && body.effect.unwrap_or(ProposalEffect::Published) != ProposalEffect::Published
+    {
+        return invalid(
+            "a prompt proposal publishes: reclassification is a records effect \
+             (ADR-0038 decision 9), and a prompt's tier is a field of the version \
+             under review"
+                .to_owned(),
+        );
     }
     let chars = body.title.chars().count();
     if chars == 0 || chars > MAX_TITLE_CHARS {

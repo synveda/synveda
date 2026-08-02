@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into prompts\n               (tenant_id, scope_id, name, description, template, variables,\n                sensitivity, object_hash, created_by, updated_by)\n           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)\n           on conflict (tenant_id, scope_id, name) do update\n               set description = excluded.description,\n                   template    = excluded.template,\n                   variables   = excluded.variables,\n                   sensitivity = excluded.sensitivity,\n                   object_hash = excluded.object_hash,\n                   updated_at  = now(),\n                   updated_by  = excluded.updated_by\n           returning scope_id, name, description, template, variables,\n                     sensitivity, object_hash, created_at, created_by,\n                     updated_at, updated_by",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "template",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "variables",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "object_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text",
+        "Bytea",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "87659fa4f704b64e1b237f8191d62c16a826c50f9e5f5a1465fbf34232a68504"
+}

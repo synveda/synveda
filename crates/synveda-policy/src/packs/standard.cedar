@@ -126,6 +126,75 @@ permit (
         && resource.kind != "user"
 };
 
+// The prompt registry (PRMT-1, ADR-0049 decision 4). Reading mirrors this
+// pack's MemoryRead shape, department sharing included: under `standard` a
+// department's prompts are its members' prompts, which is the same default
+// this pack applies to memory and for the same reason. `confidential` stays
+// with the explicit grant; `restricted` is named by nothing, because no path
+// in the product mints it for an authored asset (decision 5).
+permit (
+    principal,
+    action == Synveda::Action::"PromptRead",
+    resource
+) when {
+    principal in resource
+        && ["public", "internal"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"PromptRead",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"PromptRead",
+    resource
+) when {
+    principal has department
+        && resource in principal.department
+        && resource.kind != "user"
+        && ["public", "internal"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"PromptRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "contributor", "curator"])
+        && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+// Authoring is pack-uniform, like writing: own home role-free, the bound
+// subtree with a content role. Sharing defaults differ on the read side; a
+// governed asset authored beyond home always takes an explicit grant.
+permit (
+    principal,
+    action == Synveda::Action::"PromptWrite",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"PromptWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["contributor", "curator"])
+        && resource.kind != "user"
+};
+
 // The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform —
 // see regulated-strict for the full rationale.
 permit (

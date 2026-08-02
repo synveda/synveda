@@ -85,15 +85,46 @@ struct Detail {
 
 #[derive(Deserialize)]
 struct Member {
-    record_id: String,
+    /// The tree entry name: a record id for a memory, a path for a prompt
+    /// (PRMT-1, ADR-0049 decision 3). The one field both asset kinds
+    /// carry, and the one this surface displays.
+    member: String,
+    /// What kind of asset this proposal carries.
+    asset: String,
     object_hash: String,
     unchanged: bool,
-    class: String,
+    /// A memory's class. Absent for an authored asset, which has none —
+    /// `asset` is what the line says instead.
+    #[serde(default)]
+    class: Option<String>,
     sensitivity: Sensitivity,
     effect: Effect,
     proposed: String,
     #[serde(default)]
     baseline: Option<Baseline>,
+}
+
+impl Member {
+    /// How the member is named on its line: a uuid is abbreviated the way
+    /// `channel history` abbreviates a commit, and a path is not — a name
+    /// a person typed is the whole point of the name.
+    fn label(&self) -> String {
+        let uuid_shaped = self.member.len() == 36
+            && self
+                .member
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() || c == '-');
+        if uuid_shaped {
+            short(&self.member)
+        } else {
+            self.member.clone()
+        }
+    }
+
+    /// What it is, in one word: a record's class, or the asset kind.
+    fn kind(&self) -> &str {
+        self.class.as_deref().unwrap_or(&self.asset)
+    }
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -504,8 +535,8 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
             mark,
             &format!(
                 "    {label}  {}  {} · {}",
-                short(&member.record_id),
-                member.class,
+                member.label(),
+                member.kind(),
                 member.sensitivity.as_str()
             ),
         ));
@@ -513,7 +544,7 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
         if !member.unchanged {
             out.push_str(&paint(
                 Mark::Removed,
-                "              the record has changed since this was proposed; \
+                "              this has changed since it was proposed; \
                  publishing will refuse",
             ));
             out.push('\n');

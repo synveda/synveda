@@ -82,7 +82,9 @@ struct RollbackResponse {
 
 #[derive(Deserialize)]
 struct RestoredRecord {
-    record_id: String,
+    /// The tree entry name: a record id for a memory channel, a path for
+    /// a prompt one (PRMT-1, ADR-0049 decision 3).
+    member: String,
 }
 
 #[derive(Deserialize)]
@@ -243,10 +245,7 @@ pub async fn rollback(
         println!("  - {record} is no longer published material");
     }
     for record in &response.restored {
-        println!(
-            "  ~ {} is published at an earlier version",
-            record.record_id
-        );
+        println!("  ~ {} is published at an earlier version", record.member);
     }
     // The FLOW-7 sentence, said out loud: nothing else has to happen.
     println!("  every session that starts from now composes the state above");

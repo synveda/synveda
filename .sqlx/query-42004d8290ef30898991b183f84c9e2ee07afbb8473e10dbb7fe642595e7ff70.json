@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update prompts set name = 'support/triage-2'\n             where tenant_id = $1 and scope_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "42004d8290ef30898991b183f84c9e2ee07afbb8473e10dbb7fe642595e7ff70"
+}

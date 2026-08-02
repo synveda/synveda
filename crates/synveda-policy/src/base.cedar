@@ -36,9 +36,18 @@ unless { context.roles.contains("org-admin") };
 // over-privileged agent credential cannot escape, and tenant-plane
 // resources (never inside any scope subtree) are unreachable outright.
 // The one carve-out is the role-free membership floor every placed
-// principal holds: MemoryRead up the principal's own chain, so a team
+// principal holds: reading up the principal's own chain, so a team
 // agent still composes team → department → org on inject. Users carry
 // no token_scope; the `has` guard makes this a no-op for them.
+//
+// PRMT-1 (ADR-0049 decision 4) puts `PromptRead` in that carve-out, and it
+// is the same decision rather than a second one: a headless agent is the
+// consumer prompts exist for, and the org's `house-style` is exactly the
+// material an anchored token must still resolve. The carve-out stays what
+// it was — the *membership* floor, `principal in resource`, reads only —
+// so nothing outside the agent's own chain is reachable, no role widens it,
+// and every write, every admin plane and every tenant-plane action remains
+// forbidden outside the anchor.
 forbid (
     principal,
     action,
@@ -46,7 +55,10 @@ forbid (
 ) when {
     principal has token_scope &&
     !(resource is Synveda::Scope && resource in principal.token_scope) &&
-    !(action == Synveda::Action::"MemoryRead" && principal in resource)
+    !([
+        Synveda::Action::"MemoryRead",
+        Synveda::Action::"PromptRead"
+    ].contains(action) && principal in resource)
 };
 
 // The read side of the `restricted` floor (AUTHZ-5, ADR-0038 decision 5).

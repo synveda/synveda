@@ -236,6 +236,55 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         assert_eq!(decision.pack_version, version);
     }
 
+    // The prompt registry reads exactly where memory does (PRMT-1,
+    // ADR-0049 decision 4). Asserted rather than stated: each pack's
+    // PromptRead permits are a transcription of its own MemoryRead permits,
+    // and a transcription is the kind of thing that drifts silently — a
+    // department clause copied into two packs and forgotten in the third
+    // would leave a consumer resolving prompts their pack does not share.
+    for target in ALL_SCOPES {
+        let decision = memory(
+            &pdp,
+            &fx,
+            &alice,
+            Action::PromptRead,
+            Some("alice-user"),
+            target,
+            &assignments,
+        );
+        assert_eq!(
+            decision.allowed,
+            expected_for_alice.contains(&target),
+            "{pack}: alice reading prompts at {target} decided {} — the prompt \
+             plane must mirror this pack's memory plane, tier for tier",
+            decision.allowed,
+        );
+    }
+
+    // Authoring mirrors the write floor, which is pack-uniform: own home
+    // and nowhere else without a content role.
+    let authorable: Vec<&str> = ALL_SCOPES
+        .into_iter()
+        .filter(|target| {
+            memory(
+                &pdp,
+                &fx,
+                &alice,
+                Action::PromptWrite,
+                Some("alice-user"),
+                target,
+                &assignments,
+            )
+            .allowed
+        })
+        .collect();
+    assert_eq!(
+        authorable,
+        vec!["alice-user"],
+        "{pack}: an unbound principal authors prompts at its own home and \
+         nowhere else"
+    );
+
     // Since AUTHZ-3 the admin planes require roles (ADR-0015 decision 4):
     // an unbound principal — placed or not — holds no administrative
     // power under any pack. The role×action matrix lives in
@@ -348,7 +397,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 fn golden_regulated_strict() {
     assert_pack_golden(
         REGULATED_STRICT,
-        11,
+        12,
         &["org", "eng", "team-a", "alice-user"],
     );
 }
@@ -359,7 +408,7 @@ fn golden_regulated_strict() {
 fn golden_standard() {
     assert_pack_golden(
         STANDARD,
-        11,
+        12,
         &["org", "eng", "team-a", "team-b", "alice-user"],
     );
 }
@@ -371,7 +420,7 @@ fn golden_standard() {
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        11,
+        12,
         &[
             "org",
             "eng",

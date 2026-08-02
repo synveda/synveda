@@ -557,3 +557,102 @@ fn a_read_decided_without_a_tier_fails_closed_rather_than_defaulting() {
         "the refusal names what was missing: {err}"
     );
 }
+
+/// The prompt plane grades the tiers exactly as the memory plane does, and
+/// the top one is reachable by nothing (PRMT-1, ADR-0049 decisions 4 and 5).
+///
+/// The first half is a transcription check with teeth: each pack's
+/// `PromptRead` permits were written by copying its own `MemoryRead`
+/// permits, and this asks both seams the same four questions at the same
+/// scopes and requires identical answers.
+///
+/// The second half is the difference. `restricted` is denied here the way it
+/// is denied for memory, but for a different reason and with a different
+/// consequence: memory's is the base layer's forbid, liftable by a lapse
+/// whose approvers included compliance; a prompt's is that **no pack names
+/// the tier at all**, and no lapse can name it either, because the lapse
+/// vocabulary is closed over `memory.read`. So a `restricted` prompt would
+/// be unreadable by everyone, forever — which is why migration 0029 refuses
+/// to store one.
+#[test]
+fn the_prompt_plane_mirrors_the_memory_plane_and_stops_below_restricted() {
+    let pdp = Pdp::new().expect("build pdp");
+    let fx = fixture();
+    let alice = fx.placed("alice", "alice-user");
+
+    let prompt_tiers = |ask: &Ask<'_>| -> Vec<Sensitivity> {
+        Sensitivity::ALL
+            .into_iter()
+            .filter(|tier| {
+                let scopes = fx.chain(ask.target);
+                let principal_scopes = fx.chain(ask.placement);
+                pdp.authorize(
+                    ask.principal,
+                    Action::PromptRead,
+                    Resource::Scope(fx.node(ask.target).id),
+                    &AuthzContext {
+                        scopes: &scopes,
+                        principal_scopes: &principal_scopes,
+                        assignments: ask.assignments,
+                        role_bindings: ask.bindings,
+                        lapses: ask.lapses,
+                        sensitivity: Some(*tier),
+                        ..Default::default()
+                    },
+                )
+                .expect("authorize")
+                .allowed
+            })
+            .collect()
+    };
+
+    for pack in [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION] {
+        let assignments = [fx.assignment("org", pack)];
+        let binding = [fx.binding("alice", "eng", Role::Viewer)];
+        for target in ["alice-user", "team-a", "eng", "org", "team-b", "team-c"] {
+            for bindings in [&[][..], &binding[..]] {
+                let asking = Ask {
+                    bindings,
+                    ..ask(&alice, "alice-user", target, &assignments)
+                };
+                assert_eq!(
+                    prompt_tiers(&asking),
+                    tiers(&pdp, &fx, &asking),
+                    "{pack}: the prompt and memory planes disagree at {target} \
+                     (bindings: {})",
+                    bindings.len()
+                );
+            }
+        }
+    }
+
+    // And the top tier is named by nothing, under every pack, at every
+    // scope, for a principal holding every content role — including her own
+    // home, which is the one place a prompt's author might expect an
+    // exception and does not get one.
+    let every_role: Vec<RoleBinding> = [
+        Role::Viewer,
+        Role::Contributor,
+        Role::Curator,
+        Role::Steward,
+        Role::OrgAdmin,
+        Role::Compliance,
+    ]
+    .into_iter()
+    .map(|role| fx.binding("alice", "org", role))
+    .collect();
+    for pack in [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION] {
+        let assignments = [fx.assignment("org", pack)];
+        for target in ["alice-user", "team-a", "eng", "org"] {
+            let asking = Ask {
+                bindings: &every_role,
+                sensitivity: Sensitivity::Restricted,
+                ..ask(&alice, "alice-user", target, &assignments)
+            };
+            assert!(
+                !prompt_tiers(&asking).contains(&Sensitivity::Restricted),
+                "{pack}: nothing may read a restricted prompt at {target}"
+            );
+        }
+    }
+}

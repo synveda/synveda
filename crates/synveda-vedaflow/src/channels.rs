@@ -91,11 +91,17 @@ impl ChannelRef {
         ChannelRef { asset, channel }
     }
 
-    /// The `memory/{channel}` ref — the only asset type with a writer
-    /// today (PRMT-1/2 and SKIL-1 bring the rest).
+    /// The `memory/{channel}` ref.
     #[must_use]
     pub const fn memory(channel: Channel) -> Self {
         ChannelRef::new(AssetKind::Memory, channel)
+    }
+
+    /// The `prompt/{channel}` ref (PRMT-1, ADR-0049) — the second asset
+    /// type with a writer, and the first whose entries are paths.
+    #[must_use]
+    pub const fn prompt(channel: Channel) -> Self {
+        ChannelRef::new(AssetKind::Prompt, channel)
     }
 
     /// The ref name this channel is stored under.
