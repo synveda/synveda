@@ -388,7 +388,38 @@ EPIC PRMT — Prompt & context-pack registry
 ──────────────────────────────────────────────
 PRMT-1 Prompt templates as assets (M)
   Versioned, variable-schema'd templates; draft→review→publish; consumed via API/SDK by id +
-  channel. AC: prompt change behind review; consumer pins channel or commit.
+  channel. AC: a prompt authored at a scope through POST /v1/prompts reaches a consumer only
+  through the review the pack in force asks for — under the default pack the direct publish route
+  refuses it by name, short of the steward and the curator the `prompt` cell has priced at two
+  distinct people since FLOW-3, and the same two approvals through POST /v1/proposals carry it;
+  "prompt change behind review" is measured from the reader's side and never at the writing
+  surface — the draft is edited under its own published version, the author's own draft read
+  returns the edit, and the consumer keeps being served the reviewed bytes at the reviewed commit
+  until a second proposal lands; a consumer names a channel and follows publications, or names a
+  commit and keeps the version it was built against while the channel moves on, and when a FLOW-7
+  rewind takes that commit off the channel's first-parent line the pinned read is refused naming
+  both commits rather than served or silently upgraded, because "<60s to fleet-wide effect"
+  (FLOW-7) and a pin that outlives a withdrawal cannot both be true; a pin freezes bytes and never
+  authority, so the same pinned read stops resolving when the pack behind it changes (CTX-4's
+  handle rule); resolution walks the caller's own placement chain nearest-first and skips the
+  scopes the PDP refuses, so a team's version overrides the org's, a nearer copy nobody may read
+  does not shadow the further one that is readable, and a name nothing publishes is the uniform
+  404 rather than an existence oracle; the variable schema is enforced where it can fail — a
+  template whose placeholders and declared variables disagree is refused at authoring naming the
+  offender, and rendering refuses a missing required value and an undeclared one — rather than
+  returned beside the template and checked by nobody; PromptRead and PromptWrite join the
+  role×action golden matrix under all three packs and the service-identity confinement list, which
+  is what makes a rewind of `prompt/published` decidable and discharges ADR-0036 decision 3's
+  "refused by name until PRMT-1 brings their read action"; every act is on the chain —
+  `prompt.authored`, `prompt.resolved`, and the same `vedaflow.channel.published` a memory
+  publication emits with `asset` reading `prompt` — with no template text in any payload, swept
+  for; demo script.
+  Written 2026-08-02 (PRMT-1, ADR-0049): the feature text named two clauses of AC, one of which
+  ("consumer pins channel or commit") ADR-0036 decision 12 had already refused in the only reading
+  it had then. The load-bearing parts are the pin's shape — a request parameter rather than a
+  stored decision, which a rewind refuses rather than outlives — and the discovery that the first
+  authored asset needed no channel shape, no proposal effect and no approval rule, because FLOW-3
+  priced prompts two features before anything could open one.
 PRMT-2 Context packs (M)
   Curated doc bundles (conventions, glossaries) pinned to scopes; chunked+embedded on
   publish; composed by CTX-2 as pinned material. AC: pack update re-embeds atomically;
