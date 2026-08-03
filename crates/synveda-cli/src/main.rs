@@ -39,7 +39,8 @@ use synveda_identity::{Hs256Verifier, personal_slug};
 use synveda_types::{
     CompositionConfig, DedupConfig, DedupMode, IdentityId, IdentityKind, IndexTier, InjectChannels,
     PackConfig, PromotionConfig, ProposalId, ProposalState, RecordId, RedactionConfig,
-    RedactionMode, RetentionConfig, Role, ScopeId, ScopeKind, TenantId, TenantStatus,
+    RedactionMode, RetentionConfig, Role, ScanSeverity, ScopeId, ScopeKind, SkillScanConfig,
+    TenantId, TenantStatus,
 };
 
 #[derive(Parser)]
@@ -820,6 +821,15 @@ enum PolicyCommand {
         /// tier off in practice.
         #[arg(long, requires = "composition_budget")]
         composition_index_chars: Option<u32>,
+        /// The severity at which a skill bundle's security scan refuses
+        /// rather than reports (notice/high/critical — SKIL-2, ADR-0052).
+        /// Omitted keeps the invariant floor, which is what an
+        /// unconfigured pack gets: `critical` always refuses and the rest
+        /// is a reviewer's to weigh. `high` is `regulated-strict`'s
+        /// reading. There is deliberately no value that permits
+        /// `critical` — that band is not a pack's to move.
+        #[arg(long)]
+        scan_block_at: Option<ScanSeverity>,
         /// Path to a JSON file of auto-promotion rules (FLOW-4,
         /// ADR-0033): `{"rules":[{"name":..., "min_recalls":...,
         /// "min_distinct_members":..., "max_sensitivity":...}]}`. A file
@@ -1094,6 +1104,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             composition_channels,
             composition_index_tier,
             composition_index_chars,
+            scan_block_at,
             promotion,
             dedup_mode,
             dedup_config,
@@ -1126,6 +1137,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                         index_entry_chars: composition_index_chars
                             .unwrap_or(CompositionConfig::DEFAULT.index_entry_chars),
                     });
+            let scan = scan_block_at.map(|block_at| SkillScanConfig { block_at });
             // Validated here as well as at install: a rule that asks for
             // zero recalls, or names an asset with no usage signal, is
             // refused when it is written rather than discovered when a
@@ -1192,6 +1204,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     promotion,
                     dedup,
                     retention,
+                    scan,
                     ..Default::default()
                 },
             )
@@ -1207,6 +1220,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     "version": pack.version,
                     "redaction": pack.config.redaction,
                     "composition": pack.config.composition,
+                    "scan": pack.config.scan,
                     "promotion": pack.config.promotion,
                     "retention": pack.config.retention,
                 }),

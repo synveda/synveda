@@ -81,6 +81,60 @@ struct Detail {
     summary: Summary,
     members: Vec<Member>,
     approvals: Vec<Approval>,
+    /// The security scan of the bytes this proposal would publish
+    /// (SKIL-2, ADR-0052). Present for `skill` proposals only, which is
+    /// why it is defaulted rather than required: this struct is the same
+    /// one four asset kinds come back in.
+    #[serde(default)]
+    scan: Option<ScanReport>,
+}
+
+/// A bundle's security scan, as `synveda proposal review` renders it.
+///
+/// FLOW-6's claim is that a full review is possible without the console,
+/// and for a skill that claim is now partly this block: a reviewer who
+/// cannot see what the scanner found is a reviewer being asked to
+/// approve executable code on the strength of a diff.
+#[derive(Deserialize)]
+struct ScanReport {
+    ruleset_version: u32,
+    #[serde(default)]
+    worst: Option<String>,
+    blocks_at: String,
+    blocked: bool,
+    findings: Vec<ScanFinding>,
+}
+
+#[derive(Deserialize)]
+struct ScanFinding {
+    path: String,
+    rule: String,
+    severity: String,
+    title: String,
+    line: usize,
+    count: usize,
+}
+
+impl ScanReport {
+    /// Whether a finding of this severity is one the pack in force
+    /// refuses.
+    ///
+    /// Compared by **rank rather than by string**: `critical` under a
+    /// `high` threshold blocks, and equality would have said it did not.
+    /// An unknown name — a gateway newer than this CLI — ranks above
+    /// everything, so a severity this binary has never heard of is
+    /// treated as blocking rather than as decoration.
+    fn blocks(&self, severity: &str) -> bool {
+        fn rank(severity: &str) -> u8 {
+            match severity {
+                "notice" => 0,
+                "high" => 1,
+                "critical" => 2,
+                _ => u8::MAX,
+            }
+        }
+        rank(severity) >= rank(&self.blocks_at)
+    }
 }
 
 #[derive(Deserialize)]
@@ -516,6 +570,62 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
         }
     }
 
+    // The scan goes *before* the diff, because it is what a reviewer has
+    // to weigh first: the diff says what changed, and this says what the
+    // change can do.
+    if let Some(scan) = &detail.scan {
+        out.push_str(&format!(
+            "\n  security scan  (ruleset v{}, this pack refuses at {})\n",
+            scan.ruleset_version, scan.blocks_at,
+        ));
+        if scan.findings.is_empty() {
+            out.push_str(&paint(Mark::Plain, "    nothing found"));
+            out.push('\n');
+        }
+        for finding in &scan.findings {
+            // Only a blocking finding is painted as a removal: the rest
+            // are things to weigh, and colouring them all red would make
+            // the one that stops publication indistinguishable from a
+            // `pip install`.
+            let blocking = scan.blocks(&finding.severity);
+            let mark = if blocking { Mark::Removed } else { Mark::Meta };
+            let times = if finding.count > 1 {
+                format!(" ×{}", finding.count)
+            } else {
+                String::new()
+            };
+            out.push_str(&paint(
+                mark,
+                &format!(
+                    "    {:<8} {}:{}  {}{}",
+                    finding.severity, finding.path, finding.line, finding.rule, times,
+                ),
+            ));
+            out.push('\n');
+            out.push_str(&format!("             {}\n", finding.title));
+        }
+        if scan.blocked {
+            out.push_str(&paint(
+                Mark::Removed,
+                &format!(
+                    "    this bundle will be REFUSED at publication ({} findings at {} \
+                     or above); approving it cannot make it publishable",
+                    scan.findings
+                        .iter()
+                        .filter(|finding| scan.blocks(&finding.severity))
+                        .count(),
+                    scan.blocks_at,
+                ),
+            ));
+            out.push('\n');
+        } else if let Some(worst) = &scan.worst {
+            out.push_str(&format!(
+                "    worst is {worst}; the pack in force reports it rather than refusing it, \
+                 so this is yours to weigh\n"
+            ));
+        }
+    }
+
     out.push_str(&format!(
         "\n  effect on {} {}/{}\n",
         summary
@@ -819,6 +929,7 @@ mod tests {
                 "be brief, and link the runbook",
             )],
             approvals: Vec::new(),
+            scan: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(
@@ -846,6 +957,7 @@ mod tests {
             summary: summary(ProposalView::Open, "acme", "acme"),
             members: vec![member(Effect::Add, None, &asset("brand new"))],
             approvals: Vec::new(),
+            scan: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(rendered.contains("0198f000-000"), "{rendered}");
@@ -887,6 +999,7 @@ mod tests {
                 ),
             ],
             approvals: Vec::new(),
+            scan: None,
         };
 
         let rendered = render_detail(&detail, false);
@@ -906,6 +1019,7 @@ mod tests {
             summary: summary(ProposalView::Approved, "acme", "acme"),
             members: vec![member(Effect::None, None, &asset("already published"))],
             approvals: Vec::new(),
+            scan: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(rendered.contains("same  "), "{rendered}");
@@ -921,6 +1035,7 @@ mod tests {
             summary: summary(ProposalView::Open, "acme", "acme"),
             members: vec![member(Effect::Add, None, &asset("as proposed"))],
             approvals: Vec::new(),
+            scan: None,
         };
         detail.members[0].unchanged = false;
         let rendered = render_detail(&detail, false);
@@ -953,10 +1068,113 @@ mod tests {
                     created_at: Utc::now(),
                 },
             ],
+            scan: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(rendered.contains("matches the runbook"), "{rendered}");
         assert!(rendered.contains("does not count"), "{rendered}");
+    }
+
+    /// SKIL-2's half of FLOW-6's "a full review is possible without the
+    /// console": a reviewer of executable code has to be able to see what
+    /// the scanner found, and — when the pack in force will refuse it —
+    /// that approving cannot make it publishable.
+    #[test]
+    fn a_blocking_scan_says_so_before_the_diff() {
+        let detail = Detail {
+            summary: summary(ProposalView::Open, "acme/eng", "acme/eng"),
+            members: Vec::new(),
+            approvals: Vec::new(),
+            scan: Some(ScanReport {
+                ruleset_version: 1,
+                worst: Some("critical".to_owned()),
+                blocks_at: "critical".to_owned(),
+                blocked: true,
+                findings: vec![
+                    ScanFinding {
+                        path: "helper/scripts/setup.sh".to_owned(),
+                        rule: "fetch-and-execute".to_owned(),
+                        severity: "critical".to_owned(),
+                        title: "downloads a remote script and pipes it straight into an \
+                                interpreter"
+                            .to_owned(),
+                        line: 4,
+                        count: 1,
+                    },
+                    ScanFinding {
+                        path: "helper/SKILL.md".to_owned(),
+                        rule: "package-install".to_owned(),
+                        severity: "notice".to_owned(),
+                        title: "installs packages at run time".to_owned(),
+                        line: 9,
+                        count: 2,
+                    },
+                ],
+            }),
+        };
+        let rendered = render_detail(&detail, false);
+        assert!(rendered.contains("security scan"), "{rendered}");
+        assert!(rendered.contains("ruleset v1"), "{rendered}");
+        assert!(
+            rendered.contains("helper/scripts/setup.sh:4"),
+            "the file and the line a reviewer opens: {rendered}"
+        );
+        assert!(rendered.contains("fetch-and-execute"), "{rendered}");
+        assert!(rendered.contains("×2"), "counts render: {rendered}");
+        assert!(
+            rendered.contains("will be REFUSED at publication"),
+            "{rendered}"
+        );
+        // The scan comes before the diff, because it says what the change
+        // can do and the diff only says what it is.
+        let scan_at = rendered.find("security scan").unwrap();
+        let effect_at = rendered.find("effect on").unwrap();
+        assert!(scan_at < effect_at, "{rendered}");
+    }
+
+    #[test]
+    fn a_reported_scan_hands_the_judgement_to_the_reviewer() {
+        let detail = Detail {
+            summary: summary(ProposalView::Open, "acme/eng", "acme/eng"),
+            members: Vec::new(),
+            approvals: Vec::new(),
+            scan: Some(ScanReport {
+                ruleset_version: 1,
+                worst: Some("high".to_owned()),
+                blocks_at: "critical".to_owned(),
+                blocked: false,
+                findings: vec![ScanFinding {
+                    path: "helper/scripts/build.sh".to_owned(),
+                    rule: "privilege-change".to_owned(),
+                    severity: "high".to_owned(),
+                    title: "escalates privileges or makes a file executable".to_owned(),
+                    line: 2,
+                    count: 1,
+                }],
+            }),
+        };
+        let rendered = render_detail(&detail, false);
+        assert!(rendered.contains("yours to weigh"), "{rendered}");
+        assert!(!rendered.contains("REFUSED"), "{rendered}");
+    }
+
+    /// The rank comparison, not the string one: `critical` under a `high`
+    /// threshold blocks, and equality would have said it did not.
+    #[test]
+    fn a_severity_above_the_threshold_blocks() {
+        let report = ScanReport {
+            ruleset_version: 1,
+            worst: Some("critical".to_owned()),
+            blocks_at: "high".to_owned(),
+            blocked: true,
+            findings: Vec::new(),
+        };
+        assert!(report.blocks("critical"));
+        assert!(report.blocks("high"));
+        assert!(!report.blocks("notice"));
+        // A severity a newer gateway grew is treated as blocking rather
+        // than as decoration.
+        assert!(report.blocks("catastrophic"));
     }
 
     #[test]

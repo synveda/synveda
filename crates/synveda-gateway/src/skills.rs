@@ -723,15 +723,36 @@ pub(crate) async fn refuse_scan<T>(
         .map_or("critical".to_owned(), |(_, finding)| {
             finding.severity.to_string()
         });
+    let title = blocking
+        .first()
+        .map_or_else(String::new, |(_, finding)| finding.title.to_owned());
+    let head = format!(
+        "skill {skill} was refused by the security scanning gate at {worst}: {named}. {title}."
+    );
+    // The two seams refuse for different reasons and must not answer alike.
+    //
+    // At authoring the request itself is wrong and the author can fix it, so
+    // it is an `Invalid` telling them how. At publication the request was
+    // well formed and was well formed when it was approved — what changed is
+    // the rule table, which is a state the caller did not control, so it is a
+    // `Conflict` like every other publish-time refusal in this product
+    // (ADR-0052 decision 5).
+    if stage == "publication" {
+        return Err(Error::Conflict {
+            message: format!(
+                "{head} The bundle stays unpublished: approvals bind bytes, and the rules \
+                 that decide whether those bytes may ship are checked again here because \
+                 they move independently of them. Withdraw the proposal, fix the finding, \
+                 and open a new one so the change is reviewed"
+            ),
+        });
+    }
     Err(Error::Invalid {
         message: format!(
-            "skill {skill} was refused by the security scanning gate at {worst}: {named}. \
-             {}. The bundle was not stored — a skill becomes files a client executes, so a \
-             finding this severe is refused before anything is written rather than left for \
-             a reviewer to catch (SKIL-2, ADR-0052). Remove the finding and author again",
-            blocking
-                .first()
-                .map_or_else(String::new, |(_, finding)| finding.title.to_owned()),
+            "{head} The bundle was not stored — a skill becomes files a client executes, and \
+             a draft is installable, so a finding this severe is refused before anything is \
+             written rather than left for a reviewer to catch (SKIL-2, ADR-0052). Remove the \
+             finding and author again"
         ),
     })
 }
