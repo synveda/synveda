@@ -34,9 +34,10 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 5. docs/backlog/STATUS.md updated
 
 ## Current phase
-Phase 3 — Enterprise (wk 11–16). Phases 0, 1 and 2 are complete; SKIL-1 and
-SKIL-2 are the Phase 3 features done so far. 51 of 86 features delivered — see
-docs/backlog/STATUS.md for what each one proved and what it left standing.
+Phase 3 — Enterprise (wk 11–16). Phases 0, 1 and 2 are complete; SKIL-1,
+SKIL-2 and SKIL-3 are the Phase 3 features done so far. 52 of 86 features
+delivered — see docs/backlog/STATUS.md for what each one proved and what it
+left standing.
 
 Phase demo goal: Entra/Okta live, spec-compliant governed skills into Claude
 Code + Cursor, LoCoMo/LongMemEval scores published, Helm install.

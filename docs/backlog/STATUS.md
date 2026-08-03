@@ -3053,7 +3053,106 @@ deliberately, because a convenience arriving in the same commit as the gate is
 one that gets confused for it. A rule landing in a release can block a bundle
 that published cleanly last week, which is correct and will be surprising._
 
-- [ ] [SKIL-3: Skill quality scoring](SKIL-3.md)
+- [x] [SKIL-3: Skill quality scoring](SKIL-3.md) — done 2026-08-03, ADR-0053, migration 0033, AC tests: crates/synveda-gateway/tests/skills.rs (**the two surfaces asserted against one bundle, and the deadlock the roles found**: `the_score_is_displayed_at_review_and_in_the_registry` requires the registry's *cached* score and the review's *recomputed* one to be the same number about the same bytes — the property a cache has to have to be worth keeping — and is what caught the review recomputing from proposal member **names** (`<skill>/<path>`), so the rubric could not find the manifest and scored 30 where the registry said 70, which is harmless for SKIL-2's scanner and fatal for a rubric; `a_low_score_publish_requires_an_override_from_a_second_authority`, where the first design died — the override rode the publish request, and `curator` holds the `SkillRead`+`ChannelPublish` that publishing a skill takes while `steward` holds the override and no content read at all, so **no principal under any pack could publish a below-bar bundle**; `a_checklist_does_not_survive_an_edit_beneath_it`, the digest key proved by an edit finding nothing rather than inheriting answers; `a_reviewers_objection_refuses_the_publication_and_the_override_records_it`, a written-down `no` refusing under a pack with no bar at all; and the leak sweep extended to both new events), crates/synveda-store/tests/rls.rs (two new adversarial cases: a checklist forged, read across tenants with a **deliberately identical digest**, and proved un-erasable; and the override one grant narrower still — no UPDATE, because a reason that can be rewritten explains nothing), crates/synveda-ingest/tests/skill_corpus_rubric.rs (`--ignored`: the rubric over the same 37 installed bundles SKIL-1 left as a standing corpus, asserting it discriminates rather than judges), crates/synveda-ingest + crates/synveda-types + crates/synveda-policy + crates/synveda-cli (16 unit tests on the rule table and its calibration, 10 on the checklist vocabulary and the three shortfalls, the pack test for the fail-safe **inversion**, and 4 on the review block), demo: demos/skil-3-quality.sh (a thin bundle scored and not refused, the same number from cache and recompute, a reviewer's `no` refusing a publication that had both approvals, and `chain valid (38 events)` with a leak sweep at 0 rows)
+
+_SKIL-3 notes (ADR-0053): a skill's quality score is **two halves that are
+never averaged** (decision 1). An automated rubric over the bundle's bytes,
+and a reviewer's checklist that no machine can supply. Summing them buys one
+number to sort a registry by and pays for it by letting each half hide the
+other: a well-formatted bundle nobody worked through would read the same as
+one a reviewer worked through, and a reviewer's "these instructions are
+wrong" would become fifteen points rather than the thing it is. A human's
+judgement summed into an average is a human's judgement laundered into
+arithmetic.
+
+The halves have **opposite durability**, which is what ADR-0052 option 7
+predicted and this feature discharges. The rubric is a pure function of
+(bytes, rubric version), recomputed wherever it renders and stored nowhere a
+decision reads; the checklist is a person's judgement on an afternoon and
+must be stored. The one cache is the registry listing's column, and it is
+kept honest by two rules: a score whose rubric version is not the compiled-in
+one renders as **stale**, and **no gate reads those columns** — the publish
+seam recomputes, always.
+
+The checklist's key is the feature's first real decision (decision 4). It is
+a digest of the bundle's own **object addresses**, not a proposal id and not a
+skill name, because a checklist bound to anything but the bytes is one an edit
+launders: a reviewer answers "yes, somebody ran it", the author pushes a new
+script, and the answer sits there describing a bundle that no longer exists.
+That is ADR-0032 decision 6's "approvals bind bytes" applied to the one review
+artefact with no address check of its own — and it means there is **no
+invalidation logic anywhere**, no `stale` column and no sweep, because an
+edited bundle simply has a different digest and finds nothing. Over addresses
+rather than raw content, deliberately: ADR-0051 decision 2 put scope, skill,
+sensitivity and path inside each address, so reclassifying a bundle re-keys
+its checklist, which is right — a reviewer who signed off on an `internal`
+skill did not sign off on a `confidential` one.
+
+**Two things the work found, and both changed the design rather than the
+tests.** The rubric's first draft put its heaviest weight, 20, on
+`references-resolve`, reasoning that a path either is in a bundle or is not.
+Pointed at the 37 installed bundles SKIL-1 left as a corpus it fired on **29
+of them** and almost none were broken: real manifests name files in the
+*user's* project (`CLAUDE.md`, `package.json`), illustrative paths inside
+examples, and files the skill tells the agent to create — none of which are
+claims about the bundle. It also read `Node.js` as a filename, because `.js`
+is an extension. A manifest mentioning a path is not a claim that the bundle
+contains it, and separating the readings is not lexically decidable, which is
+ADR-0052 decision 10's line arriving one plane over. The claim narrowed to
+where it *is* decidable — a path counts only if its first segment is a
+directory the bundle ships — and the weight moved to 10, because a check less
+certain than it looked should get cheaper in the same commit rather than keep
+a weight its accuracy does not earn. `MANIFEST_BUDGET_CHARS` was wrong the
+same way: drafted at 8,000 it failed 21 of 37, the corpus median being 8.4K,
+so it fired on the *typical* skill. It is now 16,000, near the corpus's 75th
+percentile, and the rubric runs 50–100 with a mean of 85 across the corpus.
+
+The second is sharper and is why the acceptance test is written against the
+roles the packs actually grant. The override was first a field on the publish
+request — take `SkillQualityOverride` beside the `ChannelPublish` the
+publication already takes, and a publisher who may ship a good skill cannot
+necessarily ship a bad one. It deadlocked. Under every product pack `curator`
+holds the `SkillRead` and `ChannelPublish` that publishing a skill takes, and
+`steward` holds the override and **no content read at all**, so no principal
+anywhere could publish a below-bar bundle: a wall rather than a gate. The
+override is now a **separate governed act** (`POST
+/v1/proposals/{id}/quality-override`) that the publish seam looks up rather
+than being told about — which is ADR-0032 decision 9's own separation of the
+approval that decides from the act that runs the effect, arriving one seam
+later. The authority records it, the publisher spends it, and it binds bytes
+like everything else here: an override does not follow the author's next
+edit, because nobody agreed to ship whatever it became.
+
+The gate has three bars and names which one it refused on, because the
+remedies differ absolutely: an edit for a low score, a reviewer for a missing
+checklist, a conversation for a concern. The third is what makes the second
+worth having — a reviewer's written-down `no` refuses under **every** pack,
+configured bar or not, because a pack may decide whether the checklist is
+mandatory and no pack decides that a recorded objection counts for nothing.
+
+`SkillQualityConfig`'s fail-safe is the **opposite** of every other config on
+`PackConfig` (decision 9), and the inversion is the whole distinction between
+this gate and the security one beside it. There the unconfigured reading is
+the invariant floor, because a pack that says nothing must still not ship a
+credential stealer. Here an unconfigured pack gates nothing, because quality
+is not an invariant: a pack that has said nothing about quality has not asked
+for a quality gate, and a product that began refusing publications on a rubric
+nobody opted into would break every tenant on an upgrade.
+
+Deferrals, all recorded in ADR-0053 with triggers: an **LLM-judged rubric** is
+the fullest reading of "SkillsBench-style" and is deferred on three grounds —
+a model call on the authoring path, non-determinism where every other number
+here is reproducible from bytes, and a score that moves when the judge is
+upgraded is one no reviewer can compare across two months; the shape is a
+`SkillJudge` trait and the trigger is EVAL-3 showing it predicts something the
+lexical rubric does not. A **configurable rubric** is refused rather than
+deferred: weights a tenant can tune are weights somebody tunes until their
+existing skills pass, and if it arrives it should be *named alternative
+rubrics*, versioned. The rubric is advisory about a document and never becomes
+a metric about a person — the first time it does is the last time anybody
+writes an honest checklist. And a rubric change moves every score at once, so
+a skill that scored 75 last week can need an override this week, which is
+correct and will be surprising._
 - [ ] [SKIL-4: Scope-targeted distribution](SKIL-4.md)
 - [ ] [GRPH-3: Graph-augmented recall](GRPH-3.md)
 - [ ] [AUD-3: WORM export](AUD-3.md)
