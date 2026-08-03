@@ -53,8 +53,8 @@ use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::{hierarchy, identities, policy_assignments, role_bindings, tenants};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, Role, ScopeId, ScopeKind, Sensitivity,
-    SkillFile, TenantId, TenantStatus,
+    CompositionConfig, HierarchyNode, Identity, IdentityId, IdentityKind, PackConfig, Role,
+    ScopeId, ScopeKind, Sensitivity, SkillFile, SkillIndex, TenantId, TenantStatus,
 };
 use synveda_vedaflow::SkillAsset;
 use tower::ServiceExt;
@@ -127,9 +127,16 @@ struct World {
     pool: PgPool,
     tenant: TenantId,
     app: Router,
+    /// The live PDP the router decides against — held so a test can install
+    /// a stored pack and have the very next request decide under it
+    /// (SKIL-4's measurement needs two composition configs over one corpus).
+    pdp: Arc<Pdp>,
     org: ScopeId,
     eng: ScopeId,
     platform: ScopeId,
+    /// The other team — team B in SKIL-4's acceptance criterion, and the
+    /// scope whose skills must never reach a platform reader.
+    payments: ScopeId,
     /// The author: a contributor at the platform team.
     alice: String,
     /// The curator who runs the effect. Placed at the platform team, so the
@@ -212,6 +219,14 @@ async fn world() -> Option<World> {
     bind(&pool, tenant, "cora", org.id, Role::Curator).await;
     bind(&pool, tenant, "sam", org.id, Role::Steward).await;
     bind(&pool, tenant, "sec", org.id, Role::SecurityReviewer).await;
+    // And the other team, so SKIL-4 can publish something there that a
+    // platform reader must never see. The same cast, because the point of
+    // the criterion is that team B's skills are absent for reasons of
+    // *placement* rather than because nobody could publish them.
+    bind(&pool, tenant, "alice", payments.id, Role::Contributor).await;
+    bind(&pool, tenant, "cora", payments.id, Role::Curator).await;
+    bind(&pool, tenant, "sam", payments.id, Role::Steward).await;
+    bind(&pool, tenant, "sec", payments.id, Role::SecurityReviewer).await;
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
     let app = router(state(&url, pdp.clone()));
@@ -219,9 +234,11 @@ async fn world() -> Option<World> {
         pool,
         tenant,
         app,
+        pdp,
         org: org.id,
         eng: eng.id,
         platform: platform.id,
+        payments: payments.id,
         alice: issue("alice", tenant),
         cora: issue("cora", tenant),
         sam: issue("sam", tenant),
@@ -370,6 +387,71 @@ async fn author_files(
 /// The client's call: resolve by name, walking the caller's own chain.
 async fn resolve(w: &World, token: &str, name: &str) -> (StatusCode, Value) {
     get(&w.app, &format!("/v1/skills/{name}"), token).await
+}
+
+/// A one-file bundle under any name (SKIL-4 needs several at once).
+///
+/// It carries a section and a worked example because SKIL-3's rubric asks
+/// for both and `regulated-strict` gates on the score. That is not
+/// scaffolding: a distribution feature whose fixtures could only ship past
+/// the quality gate with an override would be demonstrating the wrong
+/// thing — what a fleet installs is what a review passed.
+fn bundle(name: &str, description: &str, body: &str) -> Vec<(&'static str, String)> {
+    let manifest = format!(
+        "---\n\
+         name: {name}\n\
+         description: {description}\n\
+         ---\n\
+         \n\
+         # {name}\n\
+         \n\
+         {body}\n\
+         \n\
+         ## Steps\n\
+         \n\
+         1. Read what is in front of you.\n\
+         2. Do the thing this skill is for.\n\
+         3. Report what changed.\n\
+         \n\
+         ## Example\n\
+         \n\
+         ```sh\n\
+         echo 'ran {name}'\n\
+         ```\n"
+    );
+    vec![("SKILL.md", manifest)]
+}
+
+/// Authors and publishes one named skill at a scope, and returns its commit.
+async fn publish_named(
+    w: &World,
+    token: &str,
+    scope: ScopeId,
+    name: &'static str,
+    description: &str,
+    body: &str,
+) -> String {
+    let (status, authored) =
+        author_files(w, token, scope, name, &bundle(name, description, body)).await;
+    assert_eq!(status, StatusCode::OK, "author {name}: {authored}");
+    review_and_publish(w, scope, name, &format!("{name} at {scope}")).await
+}
+
+/// `GET /v1/skills` with no scope: what this identity may install
+/// (SKIL-4, ADR-0054 decision 1).
+async fn available(w: &World, token: &str) -> (StatusCode, Value) {
+    get(&w.app, "/v1/skills", token).await
+}
+
+/// The names in an available set or an inject response, in order.
+fn skill_names(body: &Value) -> Vec<String> {
+    body["skills"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap_or_default().to_owned())
+        .collect()
 }
 
 /// Carries a bundle from a draft to a published version through the review
@@ -697,20 +779,34 @@ async fn a_published_skill_composes_into_nothing() {
         "a skill's content must not reach a block — the client's own \
          progressive disclosure is the loader: {text}"
     );
-    // Not even as an unreviewed derived entry, which is the failure mode the
-    // pack feature had to exclude in SQL.
+    // Its **name** is another matter, and since SKIL-4 it is advertised —
+    // which is what this assertion was written to wait for. The line the
+    // feature draws is exactly here: an agent is told the capability
+    // exists and told nothing of what it says, because the client's own
+    // progressive disclosure is the loader (ADR-0051 decision 9,
+    // ADR-0054 decision 5).
     assert!(
-        !text.contains("code-review"),
-        "and its name is not advertised either — that is SKIL-4's feature, \
-         and shipping half of it here would make that AC untestable: {text}"
+        text.contains("code-review"),
+        "the name is advertised (SKIL-4, ADR-0054): {text}"
     );
-    // The watermark cites no skill channel: composition never read one.
+    assert_eq!(
+        block["skills"]
+            .as_array()
+            .and_then(|skills| skills.first())
+            .map(|skill| skill["name"].clone()),
+        Some(json!("code-review")),
+        "and cited in the response rather than only in the text: {block}"
+    );
+    // The block's channel citations still name no skill channel: those are
+    // the channels *composition* read for material it carried, and the
+    // advertisement's provenance is per skill rather than per scope,
+    // because a name is what a client installs (ADR-0054 decision 8).
     let channels = block["channels"].as_array().cloned().unwrap_or_default();
     assert!(
         !channels
             .iter()
             .any(|channel| channel["ref"] == json!("skill/published")),
-        "composition read no skill channel: {:?}",
+        "no skill channel among the composed channels: {:?}",
         block["channels"]
     );
 
@@ -2372,4 +2468,452 @@ async fn the_new_events_leak_nothing_and_a_note_carrying_a_secret_is_refused() {
         assert!(!body.contains("import subprocess"), "{body}");
         assert!(!body.contains("# Code Review"), "{body}");
     }
+}
+
+// ── SKIL-4: scope-targeted distribution (ADR-0054) ─────────────────────
+
+/// **The acceptance criterion, on both surfaces that carry it.**
+///
+/// "User in team A sees team A's skills; team B's are absent; org skills
+/// present for both" — three clauses, and the reason they are asserted
+/// together is that they are *three different mechanisms* and only one of
+/// them is a policy decision (ADR-0054's last force). The org's skills
+/// arrive because the org is on both chains; team A's arrive because it is
+/// on one; team B's are absent because team B is on no chain the reader
+/// has. A suite that asserted all three the same way would pass for a
+/// build that decided nothing.
+///
+/// Both surfaces, because SKIL-4 has two: the set a client installs from
+/// (`GET /v1/skills`) and the block a session is given. They must agree —
+/// a block that advertised a capability the registry will not serve is a
+/// worse failure than either alone.
+#[tokio::test]
+async fn a_reader_sees_their_own_teams_skills_and_the_orgs_and_never_another_teams() {
+    let Some(w) = world().await else { return };
+
+    publish_named(
+        &w,
+        &w.cora,
+        w.org,
+        "house-style",
+        "The house code style. Use when writing or reviewing any code here.",
+        "Two spaces, no tabs.",
+    )
+    .await;
+    publish_named(
+        &w,
+        &w.alice,
+        w.platform,
+        "deploy-platform",
+        "Deploy the platform service. Use when shipping a platform change.",
+        "Run the platform pipeline.",
+    )
+    .await;
+    publish_named(
+        &w,
+        &w.alice,
+        w.payments,
+        "settle-ledger",
+        "Settle the payments ledger. Use at close of business.",
+        "Reconcile the acquirer statement.",
+    )
+    .await;
+
+    // ── Team A's reader ────────────────────────────────────────────────
+    let (status, for_bea) = available(&w, &w.bea).await;
+    assert_eq!(status, StatusCode::OK, "{for_bea}");
+    let names = skill_names(&for_bea);
+    assert!(
+        names.contains(&"deploy-platform".to_owned()),
+        "team A's own skill is available to a team A reader: {for_bea}"
+    );
+    assert!(
+        names.contains(&"house-style".to_owned()),
+        "and so is the org's: {for_bea}"
+    );
+    assert!(
+        !names.contains(&"settle-ledger".to_owned()),
+        "team B's is not — team B is on no chain bea has: {for_bea}"
+    );
+    // Nearest first, which is also install order and shadowing order.
+    assert_eq!(
+        names,
+        vec!["deploy-platform".to_owned(), "house-style".to_owned()],
+        "the gradient orders the set: {for_bea}"
+    );
+    // And the reason is on the response rather than inferred: team B is
+    // simply not in the chain the walk ran over.
+    let chain: Vec<String> = for_bea["chain"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|path| path.as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert!(
+        chain.iter().any(|path| path.ends_with("platform"))
+            && !chain.iter().any(|path| path.ends_with("payments")),
+        "the chain is the answer to why: {chain:?}"
+    );
+
+    // ── Team B's reader, the mirror image ──────────────────────────────
+    let (status, for_dave) = available(&w, &w.dave).await;
+    assert_eq!(status, StatusCode::OK, "{for_dave}");
+    let names = skill_names(&for_dave);
+    assert_eq!(
+        names,
+        vec!["settle-ledger".to_owned(), "house-style".to_owned()],
+        "team B's reader gets team B's and the org's, and nothing of team A's: {for_dave}"
+    );
+
+    // ── The same three clauses in a composed block ─────────────────────
+    let (status, block) = post(
+        &w.app,
+        "/v1/inject",
+        &w.bea,
+        json!({"session_id": "sess-skil4"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{block}");
+    let text = block["text"].as_str().unwrap_or_default();
+    assert!(
+        text.contains("deploy-platform") && text.contains("house-style"),
+        "the block names what this identity may install: {text}"
+    );
+    assert!(
+        !text.contains("settle-ledger"),
+        "and never another team's: {text}"
+    );
+    // The description is what a client loads at ~80 tokens, and it is what
+    // the line carries — the name alone would not tell an agent when to
+    // reach for it (ADR-0053 decision 5's reason for pricing that line
+    // heaviest).
+    assert!(
+        text.contains("Use when shipping a platform change"),
+        "the line carries the authored description: {text}"
+    );
+    // The body does not compose, exactly as it did not before this feature
+    // (ADR-0051 decision 9): what SKIL-4 adds is the advertisement.
+    assert!(
+        !text.contains("Run the platform pipeline"),
+        "a skill's body still never composes: {text}"
+    );
+
+    // The citation rides the response rather than the token budget, so an
+    // adapter can materialise exactly what was advertised without asking
+    // twice (ADR-0054 decision 8).
+    let advertised = block["skills"].as_array().cloned().unwrap_or_default();
+    assert_eq!(advertised.len(), 2, "{block}");
+    for entry in &advertised {
+        assert!(
+            entry["commit"].as_str().is_some_and(|c| c.len() == 64),
+            "{entry}"
+        );
+        assert!(
+            entry["object_hash"].as_str().is_some_and(|h| h.len() == 64),
+            "{entry}"
+        );
+        assert!(entry["scope_id"].as_str().is_some(), "{entry}");
+    }
+    assert!(
+        block["skill_tokens"].as_u64().unwrap_or(0) > 0,
+        "the section's cost is the product's own number: {block}"
+    );
+
+    // The chain carries the same citation and never the description.
+    let injected = events(&w.pool, w.tenant)
+        .await
+        .into_iter()
+        .rfind(|event| event.action.as_str() == "context.injected")
+        .expect("an inject event");
+    let payload = injected.payload.to_string();
+    assert!(
+        payload.contains("deploy-platform") && payload.contains("house-style"),
+        "what the agent was told it could install is on the chain: {payload}"
+    );
+    assert!(
+        !payload.contains("Use when shipping a platform change"),
+        "and the description is not — no plane has carried authored text \
+         into a payload since AUD-1: {payload}"
+    );
+}
+
+/// **The set and the by-name resolve are the same walk** (ADR-0054
+/// decision 2), including the case they could most easily disagree about.
+///
+/// A client's skills namespace is flat, so when a team and the org publish
+/// the same name only one of them can exist on disk (ADR-0051 decision 6).
+/// If the listing and the resolve chose differently, a caller would install
+/// something other than what they were shown — and the shadowing rule would
+/// be a coincidence rather than a decision.
+#[tokio::test]
+async fn the_available_set_and_the_by_name_resolve_agree_about_shadowing() {
+    let Some(w) = world().await else { return };
+    publish_named(
+        &w,
+        &w.cora,
+        w.org,
+        "code-review",
+        "Review a diff. Use when asked to review changes.",
+        "the org's own review procedure",
+    )
+    .await;
+    let team_commit = publish_named(
+        &w,
+        &w.alice,
+        w.platform,
+        "code-review",
+        "Review a diff strictly. Use when asked to review platform changes.",
+        "the platform team's stricter one",
+    )
+    .await;
+
+    let (status, listing) = available(&w, &w.bea).await;
+    assert_eq!(status, StatusCode::OK, "{listing}");
+    assert_eq!(
+        skill_names(&listing),
+        vec!["code-review".to_owned()],
+        "one name, one entry — the shelf is what a disk can hold: {listing}"
+    );
+    let entry = &listing["skills"][0];
+    assert_eq!(entry["commit"], json!(team_commit), "{entry}");
+    assert!(
+        entry["scope_path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("platform")),
+        "the nearer copy won: {entry}"
+    );
+    // The gradient is otherwise invisible: a reader whose team overrode the
+    // org's copy sees one skill and no sign a decision was taken.
+    let shadows: Vec<String> = entry["shadows"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|path| path.as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(
+        shadows.len(),
+        1,
+        "the org's copy is named as shadowed: {entry}"
+    );
+    assert!(shadows[0].ends_with("acme"), "{entry}");
+
+    // The resolve agrees, byte for byte and commit for commit.
+    let (status, resolved) = resolve(&w, &w.bea, "code-review").await;
+    assert_eq!(status, StatusCode::OK, "{resolved}");
+    assert_eq!(resolved["commit"], json!(team_commit), "{resolved}");
+    assert!(
+        files(&resolved)["SKILL.md"].contains("stricter"),
+        "what the listing described is what the install writes: {resolved}"
+    );
+
+    // And a reader off that chain sees the org's, from both surfaces.
+    let (_, for_dave) = available(&w, &w.dave).await;
+    let dave_entry = &for_dave["skills"][0];
+    assert!(
+        dave_entry["scope_path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("acme")),
+        "{for_dave}"
+    );
+    assert!(
+        dave_entry["shadows"].is_null(),
+        "nothing shadowed it for dave: {for_dave}"
+    );
+}
+
+/// **A nearer copy nobody may read does not shadow the further readable
+/// one** (ADR-0054 decision 3) — the rule SKIL-1's own criterion stated and
+/// nothing could exercise until there was a set to walk.
+///
+/// The failure this prevents is the worst kind a governed read surface has:
+/// a policy denial that presents as a *missing capability*. Filtering after
+/// shadowing rather than before would leave a platform reader with no
+/// `house-style` at all, because their team publishes one they may not see.
+#[tokio::test]
+async fn a_nearer_copy_nobody_may_read_does_not_shadow_the_readable_one() {
+    let Some(w) = world().await else { return };
+    publish_named(
+        &w,
+        &w.cora,
+        w.org,
+        "house-style",
+        "The house code style. Use when writing any code here.",
+        "the org's readable one",
+    )
+    .await;
+
+    // The team publishes the same name at a tier bea cannot read: she holds
+    // no role at all, so the membership floor gives her the working tiers
+    // and nothing above them.
+    let (status, authored) = post(
+        &w.app,
+        "/v1/skills",
+        &w.alice,
+        json!({
+            "scope_id": w.platform,
+            "name": "house-style",
+            "sensitivity": "confidential",
+            "files": bundle("house-style", "The platform team's confidential style.", "secret")
+                .iter()
+                .map(|(path, content)| json!({"path": path, "content": content}))
+                .collect::<Vec<_>>(),
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{authored}");
+    review_and_publish(&w, w.platform, "house-style", "confidential style").await;
+
+    // cora, a curator at the platform team, reads the nearer one.
+    let (status, for_cora) = available(&w, &w.cora).await;
+    assert_eq!(status, StatusCode::OK, "{for_cora}");
+    assert!(
+        for_cora["skills"][0]["scope_path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("platform")),
+        "a reader who may read it gets the nearer copy: {for_cora}"
+    );
+
+    // bea may not, and gets the org's — not nothing.
+    let (status, for_bea) = available(&w, &w.bea).await;
+    assert_eq!(status, StatusCode::OK, "{for_bea}");
+    assert_eq!(
+        skill_names(&for_bea),
+        vec!["house-style".to_owned()],
+        "the readable copy is served rather than shadowed away: {for_bea}"
+    );
+    let entry = &for_bea["skills"][0];
+    assert!(
+        entry["scope_path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("acme")),
+        "{entry}"
+    );
+    assert!(
+        entry["shadows"].is_null(),
+        "a copy she cannot read shadowed nothing, and saying it did would \
+         leak that it exists: {entry}"
+    );
+    // The resolve agrees, which is the same-walk property under a denial.
+    let (status, resolved) = resolve(&w, &w.bea, "house-style").await;
+    assert_eq!(status, StatusCode::OK, "{resolved}");
+    assert!(
+        files(&resolved)["SKILL.md"].contains("the org's readable one"),
+        "{resolved}"
+    );
+}
+
+/// **The measurement** (ADR-0054 decision 14): what the advertisement costs
+/// a block, taken rather than estimated.
+///
+/// The A/B is the one ADR-0041 decision 14 took for the index tier, on the
+/// switch beside it: the same corpus, the same reader, composed with
+/// `skill_index: off` and then with it on. `off` must restore the previous
+/// product exactly — same text, same block hash — because a pack that
+/// predates a feature has to keep composing what it composed.
+#[tokio::test]
+async fn the_skill_index_tiers_token_cost_is_measured() {
+    let Some(w) = world().await else { return };
+    for (name, description) in [
+        (
+            "house-style",
+            "The house code style. Use when writing or reviewing any code in this org.",
+        ),
+        (
+            "incident-drill",
+            "Run the incident drill. Use when an alert fires and nobody has taken the page.",
+        ),
+    ] {
+        publish_named(&w, &w.cora, w.org, name, description, "body").await;
+    }
+
+    // A stored pack per arm, differing in exactly one field. Permissive on
+    // purpose: the measurement is about width, not about who may read.
+    install_composition(&w, "skil4-off", 1, SkillIndex::Off).await;
+    let (status, without) = post(&w.app, "/v1/inject", &w.bea, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{without}");
+
+    install_composition(&w, "skil4-names", 2, SkillIndex::Names).await;
+    let (status, with) = post(&w.app, "/v1/inject", &w.bea, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{with}");
+
+    let named = with["skills"].as_array().map_or(0, Vec::len);
+    let cost = with["skill_tokens"].as_u64().unwrap_or_default();
+    let base = without["tokens"].as_u64().unwrap_or_default();
+    let total = with["tokens"].as_u64().unwrap_or_default();
+    // The number this feature owes ADR-0041's precedent, printed rather
+    // than only asserted: the comparison between the two read-path tiers
+    // is the point of taking it.
+    eprintln!(
+        "SKIL-4 measurement: off={base} tokens / {} skills named; \
+         names={total} tokens / {named} skills named; section={cost} tokens; \
+         block overhead {} tokens",
+        without["skills"].as_array().map_or(0, Vec::len),
+        total - cost,
+    );
+
+    assert_eq!(
+        without["skills"].as_array().map_or(0, Vec::len),
+        0,
+        "`off` advertises nothing: {without}"
+    );
+    assert_eq!(
+        without["skill_tokens"].as_u64().unwrap_or_default(),
+        0,
+        "and spends nothing: {without}"
+    );
+    assert!(
+        !without["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("house-style"),
+        "a pack that predates this feature composes what it always did: {without}"
+    );
+    assert_eq!(named, 2, "both skills named under `names`: {with}");
+    assert!(
+        cost > 0 && total > base,
+        "the section costs something: {with}"
+    );
+    // No body is displaced: the advertisement is charged last and competes
+    // with nothing (ADR-0054 decision 5).
+    assert_eq!(
+        without["record_ids"], with["record_ids"],
+        "an advertisement displaces no body: {without} vs {with}"
+    );
+    // And the honest half of the number, which taking the measurement is
+    // what found. This reader's whole corpus is skills, so `off` composes
+    // the **empty block** — no preamble, no watermark, zero tokens — and
+    // turning the section on makes the block exist at all. The section's
+    // own cost therefore arrives with the block's fixed overhead behind it,
+    // and "the advertisement costs N" is only true for a reader who was
+    // already being given something.
+    assert_eq!(base, 0, "the `off` arm composes the empty block: {without}");
+    assert!(
+        total > cost,
+        "and a block that exists pays its preamble and watermark too: {with}"
+    );
+}
+
+/// Installs a permissive stored pack whose composition config differs only
+/// in `skill_index`, and makes it the tenant default.
+async fn install_composition(w: &World, name: &str, version: i64, skill_index: SkillIndex) {
+    w.pdp
+        .install_source(
+            w.tenant,
+            name,
+            version,
+            "permit (principal, action, resource) when { resource in principal.tenant };",
+            PackConfig {
+                composition: Some(CompositionConfig {
+                    skill_index,
+                    ..CompositionConfig::DEFAULT
+                }),
+                ..Default::default()
+            },
+        )
+        .expect("install pack");
+    policy_assignments::set_default(&w.pool, w.tenant, name)
+        .await
+        .expect("set default pack");
 }
