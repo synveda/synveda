@@ -164,7 +164,11 @@ mod tests {
         assert!(ScanSeverity::High < ScanSeverity::Critical);
         // The property every caller relies on: the worst finding in a
         // bundle is the max of its findings.
-        let found = [ScanSeverity::Notice, ScanSeverity::Critical, ScanSeverity::High];
+        let found = [
+            ScanSeverity::Notice,
+            ScanSeverity::Critical,
+            ScanSeverity::High,
+        ];
         assert_eq!(found.into_iter().max(), Some(ScanSeverity::Critical));
     }
 

@@ -6,9 +6,9 @@
 //! registry's, because a skill **is** fetched by name:
 //!
 //! - **author** (`POST /v1/skills`) — validates the bundle against the open
-//!   spec, runs MEM-2's scanner over every file, writes the objects and the
-//!   draft rows, and prunes the files the request dropped. It moves nothing
-//!   a consumer installs.
+//!   spec, runs MEM-2's scanner and then SKIL-2's security scanner over every
+//!   file, writes the objects and the draft rows, and prunes the files the
+//!   request dropped. It moves nothing a consumer installs.
 //! - **resolve** (`GET /v1/skills/{name}`) — the consumer's call, and the
 //!   one the CLI's `install` is built on. It returns the **whole bundle**
 //!   from one commit, which is the difference from a prompt resolve: a
@@ -32,6 +32,17 @@
 //! is ranked by relevance — was inverted by PRMT-2 for packs and is restored
 //! here (decision 9): the client's own progressive disclosure is the loader.
 //!
+//! # The security gate
+//!
+//! SKIL-2 (ADR-0052) puts a second scanner at the same authoring seam, and
+//! the reason it is *here* rather than only at publication is that a draft is
+//! installable: `at_scope`'s draft branch decides `SkillRead` at the scope
+//! and not authorship, so anyone the pack lets read skills there could
+//! materialise an unreviewed bundle. A gate at the publish seam alone is one
+//! a malicious author walks around by never opening a proposal. A refused
+//! bundle is therefore never stored at all, which is what makes "cannot reach
+//! published" structural rather than procedural.
+//!
 //! # The consumer's pin
 //!
 //! `?commit=` is PRMT-1's, inherited whole (ADR-0049 decisions 9–11): a
@@ -51,12 +62,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
-use synveda_ingest::ScanOutcome;
+use synveda_ingest::{BundleScan, ScanOutcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::{hierarchy, rls, skills};
 use synveda_types::{
-    Channel, Error, Frontmatter, HierarchyNode, IdentityId, RedactionMode, Result, ScopeId,
-    Sensitivity, SkillBundle, SkillChannel, SkillFile, SkillFilePath, SkillName, SkillPath,
+    Channel, Error, Frontmatter, HierarchyNode, IdentityId, RedactionMode, Result, ScanSeverity,
+    ScopeId, Sensitivity, SkillBundle, SkillChannel, SkillFile, SkillFilePath, SkillName,
+    SkillPath, SkillScanConfig,
 };
 use synveda_vedaflow::{self as vedaflow, ChannelRef, SkillAsset};
 
@@ -131,6 +143,87 @@ pub(crate) struct AuthorBody {
     files: Vec<FileBody>,
 }
 
+/// One security-scan finding, rendered for an API response (SKIL-2,
+/// ADR-0052 decision 7).
+///
+/// The `title` is here and not only the rule id because the reader is a
+/// reviewer rather than a machine, and "downloads a remote script and
+/// pipes it straight into an interpreter" is what they need to weigh.
+/// What is deliberately absent is the matched text.
+#[derive(Serialize)]
+pub(crate) struct ScanFindingView {
+    path: String,
+    rule: &'static str,
+    /// Typed rather than a string, because these are ordered and
+    /// `"critical" < "high" < "notice"` being the right order
+    /// alphabetically is a coincidence nothing should depend on.
+    severity: ScanSeverity,
+    title: &'static str,
+    /// 1-based, so it matches what an editor shows.
+    line: usize,
+    count: usize,
+}
+
+/// A bundle's scan as a reviewer or an author reads it.
+#[derive(Serialize)]
+pub(crate) struct ScanReport {
+    /// Which rule table produced this. It moves, and a report that did
+    /// not say which one produced it could not be compared with one
+    /// taken at review time (ADR-0052 force 4).
+    ruleset_version: u32,
+    /// The worst severity found, absent when clean.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    worst: Option<ScanSeverity>,
+    /// The severity the pack in force refuses at.
+    blocks_at: ScanSeverity,
+    /// Whether the pack in force would refuse this bundle. Always
+    /// `false` in an author response — a blocked bundle is a refusal,
+    /// not a view — and the field that matters in a review, where an
+    /// approved-but-blocking bundle is exactly what the publish gate
+    /// will stop.
+    blocked: bool,
+    /// How many findings at each severity.
+    counts: BTreeMap<ScanSeverity, usize>,
+    /// Every finding, worst first.
+    findings: Vec<ScanFindingView>,
+}
+
+impl ScanReport {
+    pub(crate) fn new(scan: &BundleScan, config: &SkillScanConfig) -> Self {
+        let mut findings: Vec<ScanFindingView> = scan
+            .files
+            .iter()
+            .flat_map(|file| {
+                file.findings.iter().map(move |finding| ScanFindingView {
+                    path: file.path.clone(),
+                    rule: finding.rule,
+                    severity: finding.severity,
+                    title: finding.title,
+                    line: finding.line,
+                    count: finding.count,
+                })
+            })
+            .collect();
+        // Worst first, then a total order so two renders of the same
+        // bundle read identically.
+        findings.sort_by(|a, b| {
+            b.severity
+                .cmp(&a.severity)
+                .then_with(|| a.path.cmp(&b.path))
+                .then_with(|| a.line.cmp(&b.line))
+                .then_with(|| a.rule.cmp(b.rule))
+        });
+        ScanReport {
+            ruleset_version: scan.ruleset_version,
+            worst: scan.worst(),
+            blocks_at: config.threshold(),
+            blocked: scan.blocked_by(config),
+            counts: scan.counts(),
+            findings,
+        }
+    }
+}
+
 /// What a scope's published channel holds for one file right now.
 #[derive(Serialize)]
 struct PublishedFile {
@@ -171,6 +264,13 @@ struct SkillView {
     /// How many draft files this request removed, because the bundle it
     /// named did not include them (decision 17).
     removed: u64,
+    /// What SKIL-2's security scanner found and admitted (ADR-0052).
+    ///
+    /// Present on every author, empty findings included, because "the
+    /// scan ran and found nothing" and "no scan is reported here" must
+    /// not look the same to an author. A blocking finding never reaches
+    /// this struct — it is a refusal.
+    scan: ScanReport,
     /// The commit the scope's skill channel serves, if any. Authoring never
     /// moves it, which is the whole of "reaches a client only through
     /// review".
@@ -234,7 +334,7 @@ async fn author_inner(
     // A read-only transaction: it writes nothing, so dropping it costs
     // nothing, and the scanner below is CPU that should not hold a
     // connection.
-    let (node, author, authorized, redaction) = {
+    let (node, author, authorized, redaction, scan_config, pack) = {
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let node = found(
             hierarchy::node(&mut *tx, body.scope_id).await?,
@@ -250,11 +350,19 @@ async fn author_inner(
             None,
         )?;
         let author = identity_of(&input)?;
-        let redaction = state
-            .pdp
-            .effective(tenant_id, Resource::Scope(body.scope_id), &input.context())
-            .redaction;
-        (node, author, authorized, redaction)
+        let effective =
+            state
+                .pdp
+                .effective(tenant_id, Resource::Scope(body.scope_id), &input.context());
+        let pack = format!("{}@{}", effective.name, effective.version);
+        (
+            node,
+            author,
+            authorized,
+            effective.redaction,
+            effective.scan,
+            pack,
+        )
     };
 
     // ── Scan, outside any transaction ──────────────────────────────────
@@ -307,6 +415,31 @@ async fn author_inner(
     } else {
         frontmatter
     };
+
+    // ── The security gate, over exactly what would be stored ───────────
+    //
+    // SKIL-2, ADR-0052 decisions 4 and 5. It runs *after* the redaction
+    // pass rather than beside it, on the same discipline that made the
+    // spec check run twice: the bundle that matters is the one that will
+    // be written, and a scrub can change it. It also runs after MEM-2's
+    // ladder, so a bundle carrying both a live credential and a
+    // fetch-and-execute is refused for the credential — which is the
+    // right order, because the credential is live now and the code is
+    // not yet.
+    let security = scan_security(&scrubbed_bundle.files).await?;
+    if security.blocked_by(&scan_config) {
+        return refuse_scan(
+            state,
+            tenant_id,
+            body.scope_id,
+            body.name.as_str(),
+            &security,
+            &scan_config,
+            &pack,
+            "authoring",
+        )
+        .await;
+    }
 
     // ── Write, in one transaction ──────────────────────────────────────
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
@@ -371,6 +504,13 @@ async fn author_inner(
                 .collect::<Vec<_>>(),
             "removed": removed,
             "redacted": redacted,
+            // What the security scan found and let through (SKIL-2).
+            // A clean scan gets no event of its own — ADR-0052
+            // decision 8 — but a bundle that was *reported on* and
+            // admitted anyway is exactly what an auditor asking "what
+            // did we let past" needs, and it rides the event the
+            // authoring already chains.
+            "scan": scan_payload(&security, &scan_config),
             // What a client would be served *now*, which is the point of the
             // whole surface: authoring moved nothing.
             "published_commit": published.as_ref().map(|(commit, _)| commit.to_hex()),
@@ -386,6 +526,7 @@ async fn author_inner(
         written,
         removed,
         published.as_ref(),
+        ScanReport::new(&security, &scan_config),
     )))
 }
 
@@ -482,6 +623,115 @@ async fn refuse_scanned<T>(
             file.path,
             mode.as_str(),
             rules.join(", "),
+        ),
+    })
+}
+
+/// Runs SKIL-2's security scanner over the bundle (ADR-0052 decision 2:
+/// every file, `SKILL.md` included).
+///
+/// CPU work bounded by ADR-0051's own bundle limits, so it goes off the
+/// reactor exactly as MEM-2's sibling does.
+pub(crate) async fn scan_security(files: &[SkillFile]) -> Result<BundleScan> {
+    let files = files.to_vec();
+    let span = tracing::Span::current();
+    tokio::task::spawn_blocking(move || {
+        let _entered = span.enter();
+        synveda_ingest::scan_bundle(&files)
+    })
+    .await
+    .map_err(|err| Error::Internal {
+        message: format!("skill security scan task failed: {err}"),
+    })
+}
+
+/// A scan rendered for an audit payload or a response.
+///
+/// Rule ids, severities, counts and 1-based lines — **never file content
+/// and never the matched span**, which for a credential rule is a path to
+/// a credential (ADR-0052 decision 7).
+fn scan_payload(scan: &BundleScan, config: &SkillScanConfig) -> serde_json::Value {
+    json!({
+        "ruleset_version": scan.ruleset_version,
+        "worst": scan.worst().map(|worst| worst.as_str()),
+        "blocks_at": config.threshold().as_str(),
+        "findings": scan
+            .files
+            .iter()
+            .flat_map(|file| file.findings.iter().map(move |finding| json!({
+                "path": file.path,
+                "rule": finding.rule,
+                "severity": finding.severity.as_str(),
+                "line": finding.line,
+                "count": finding.count,
+            })))
+            .collect::<Vec<_>>(),
+    })
+}
+
+/// The refusal a scanned bundle gets, and the event that chains it.
+///
+/// One helper for both seams (ADR-0052 decisions 4 and 5) because the
+/// refusal is the same act at either: `stage` is the only thing that
+/// differs, and it is on the event so an auditor can tell an author who
+/// was stopped from a proposal that was.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn refuse_scan<T>(
+    state: &AppState,
+    tenant_id: synveda_types::TenantId,
+    scope_id: ScopeId,
+    skill: &str,
+    scan: &BundleScan,
+    config: &SkillScanConfig,
+    pack: &str,
+    stage: &'static str,
+) -> Result<T> {
+    let blocking = scan.blocking(config);
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::SkillScanRejected,
+        Resource::Scope(scope_id).to_string(),
+        // The scan stopped the write; no PDP denied anything, so
+        // `failure` rather than `deny` — MEM-2's distinction at the
+        // sibling seam, unchanged.
+        Outcome::Failure,
+        json!({
+            "asset": synveda_types::AssetKind::Skill.as_str(),
+            "skill": skill,
+            "stage": stage,
+            "policy_pack": pack,
+            "scan": scan_payload(scan, config),
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+
+    let named = blocking
+        .iter()
+        .map(|(path, finding)| {
+            format!(
+                "{path}:{} {} ({})",
+                finding.line, finding.rule, finding.severity
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let worst = blocking
+        .first()
+        .map_or("critical".to_owned(), |(_, finding)| {
+            finding.severity.to_string()
+        });
+    Err(Error::Invalid {
+        message: format!(
+            "skill {skill} was refused by the security scanning gate at {worst}: {named}. \
+             {}. The bundle was not stored — a skill becomes files a client executes, so a \
+             finding this severe is refused before anything is written rather than left for \
+             a reviewer to catch (SKIL-2, ADR-0052). Remove the finding and author again",
+            blocking
+                .first()
+                .map_or_else(String::new, |(_, finding)| finding.title.to_owned()),
         ),
     })
 }
@@ -1160,6 +1410,7 @@ fn view(
     written: Vec<(skills::StoredFile, usize)>,
     removed: u64,
     published: Option<&PublishedState>,
+    scan: ScanReport,
 ) -> SkillView {
     SkillView {
         name: skill.name.to_string(),
@@ -1173,6 +1424,7 @@ fn view(
             .map(|(file, chars)| file_view(file, *chars, published))
             .collect(),
         removed,
+        scan,
         published_commit: published.map(|(commit_hash, _)| commit_hash.to_hex()),
         created_at: skill.created_at,
         created_by: skill.created_by,

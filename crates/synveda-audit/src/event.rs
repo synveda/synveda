@@ -361,6 +361,27 @@ pub enum AuditAction {
     /// stronger here for having a different destination: a pack's secret
     /// would have reached vector space, and a skill's reaches a laptop.
     SkillQuarantined,
+    /// A skill bundle was refused by the security scanning gate, at
+    /// authoring or at publication (SKIL-2, ADR-0052 decision 8).
+    ///
+    /// ADR-0051 decision 16 said "two new audit actions, and no third".
+    /// This is the third, and it earns the place by being a governed
+    /// refusal rather than a fact already on the chain: nothing else
+    /// records that the product stopped a bundle, and an auditor
+    /// filtering for what the security gate caught should not have to
+    /// disambiguate two different scanners inside one action's payload.
+    ///
+    /// Carries rule ids, severities, counts, line numbers, the ruleset
+    /// version and the pack that decided — never file content and never
+    /// the matched span, which for a credential rule *is* the credential
+    /// path.
+    ///
+    /// There is deliberately no event for a clean scan (every authored
+    /// bundle already chains [`AuditAction::SkillAuthored`], and a scan
+    /// that found nothing is not an act) and none for rendering a report
+    /// to a reviewer (the proposal read already chains, and the report is
+    /// recomputable from what it names).
+    SkillScanRejected,
     /// A grant reached the end of its window. Emitted by the sweep under
     /// `actor_kind=system`, and **bookkeeping only** — the grant stopped
     /// deciding anything at `expires_at` whether or not this was ever
@@ -381,7 +402,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 47] = [
+    pub const ALL: [AuditAction; 48] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -429,6 +450,7 @@ impl AuditAction {
         AuditAction::SkillAuthored,
         AuditAction::SkillResolved,
         AuditAction::SkillQuarantined,
+        AuditAction::SkillScanRejected,
     ];
 
     /// The stable dotted name stored in the `action` column. Renaming an
@@ -483,6 +505,7 @@ impl AuditAction {
             AuditAction::SkillAuthored => "skill.authored",
             AuditAction::SkillResolved => "skill.resolved",
             AuditAction::SkillQuarantined => "skill.quarantined",
+            AuditAction::SkillScanRejected => "skill.scan.rejected",
         }
     }
 }

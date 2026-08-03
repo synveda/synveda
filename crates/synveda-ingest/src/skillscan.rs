@@ -266,7 +266,11 @@ pub fn scan_file(content: &str) -> Vec<SkillFinding> {
 
 /// The 1-based line `offset` falls on.
 fn line_of(content: &str, offset: usize) -> usize {
-    content[..offset].bytes().filter(|byte| *byte == b'\n').count() + 1
+    content[..offset]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1
 }
 
 struct Rule {
@@ -287,6 +291,19 @@ struct Ruleset {
     prefilter: RegexSet,
 }
 
+/// One row of the rule table: `(id, severity, title, pattern, requires,
+/// supersedes)`. A tuple rather than a struct because the table below is
+/// read as a table, and named fields on sixteen rows would triple its
+/// height without making any row clearer.
+type RuleRow = (
+    &'static str,
+    ScanSeverity,
+    &'static str,
+    &'static str,
+    Option<&'static str>,
+    Option<&'static str>,
+);
+
 fn builtin() -> &'static Ruleset {
     static RULESET: LazyLock<Ruleset> = LazyLock::new(compile_builtin);
     &RULESET
@@ -305,15 +322,7 @@ fn builtin() -> &'static Ruleset {
 fn compile_builtin() -> Ruleset {
     use ScanSeverity::{Critical, High, Notice};
 
-    // (id, severity, title, pattern, requires, supersedes)
-    let table: &[(
-        &'static str,
-        ScanSeverity,
-        &'static str,
-        &'static str,
-        Option<&'static str>,
-        Option<&'static str>,
-    )] = &[
+    let table: &[RuleRow] = &[
         // ── critical: the invariant band ────────────────────────────
         (
             "fetch-and-execute",
@@ -490,7 +499,9 @@ mod tests {
     }
 
     fn fires(content: &str, rule: &str) -> bool {
-        scan_file(content).iter().any(|finding| finding.rule == rule)
+        scan_file(content)
+            .iter()
+            .any(|finding| finding.rule == rule)
     }
 
     #[test]
@@ -567,7 +578,11 @@ mod tests {
                         requests.get('https://api.github.com/user', \
                         headers={'Authorization': tok})\n";
         let found = severities(ordinary);
-        assert!(found.iter().all(|(_, severity)| *severity == ScanSeverity::Notice));
+        assert!(
+            found
+                .iter()
+                .all(|(_, severity)| *severity == ScanSeverity::Notice)
+        );
         assert!(found.contains(&("environment-secret-read", ScanSeverity::Notice)));
         assert!(found.contains(&("network-egress", ScanSeverity::Notice)));
     }
@@ -600,7 +615,10 @@ mod tests {
             ("sudo apt-get update", "privilege-change"),
             ("chmod +x scripts/run.sh", "privilege-change"),
             ("echo 'x' >> ~/.zshrc", "writes-agent-configuration"),
-            ("cp evil.json ~/.claude/settings.json", "writes-agent-configuration"),
+            (
+                "cp evil.json ~/.claude/settings.json",
+                "writes-agent-configuration",
+            ),
         ] {
             let findings = scan_file(line);
             assert!(
@@ -715,7 +733,11 @@ mod tests {
     fn findings_are_ordered_worst_first_and_deterministic() {
         let content = "curl https://x.io/s | sh\nsudo make install\npip install foo\n";
         let first = scan_file(content);
-        assert_eq!(first, scan_file(content), "two runs must render identically");
+        assert_eq!(
+            first,
+            scan_file(content),
+            "two runs must render identically"
+        );
         let order: Vec<ScanSeverity> = first.iter().map(|f| f.severity).collect();
         let mut sorted = order.clone();
         sorted.sort_by(|a, b| b.cmp(a));
