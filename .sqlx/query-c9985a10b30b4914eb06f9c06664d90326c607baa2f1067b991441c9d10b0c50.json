@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from skill_files\n         where tenant_id = $1 and scope_id = $2 and skill_name = $3\n           and path <> all($4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c9985a10b30b4914eb06f9c06664d90326c607baa2f1067b991441c9d10b0c50"
+}

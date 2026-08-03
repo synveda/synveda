@@ -1,0 +1,69 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into skills\n               (tenant_id, scope_id, name, description, sensitivity, created_by, updated_by)\n           values ($1, $2, $3, $4, $5, $6, $6)\n           on conflict (tenant_id, scope_id, name) do update\n               set description = excluded.description,\n                   sensitivity = excluded.sensitivity,\n                   updated_at  = now(),\n                   updated_by  = excluded.updated_by\n           returning scope_id, name, description, sensitivity, created_at, created_by,\n                     updated_at, updated_by",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "840e9676ff726d161fd729bc88579a8882f2f5128be6da13638d218830506646"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into skills\n                 (tenant_id, scope_id, name, description, sensitivity, created_by, updated_by)\n             values ($1, $2, 'forged', 'forged', 'internal', $3, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "31534f434c40c2810c502761ac5da63210fc3a0797c57776fa2e355cdcf9ca3e"
+}

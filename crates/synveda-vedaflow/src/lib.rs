@@ -85,6 +85,7 @@ pub mod prompts;
 pub mod proposals;
 pub mod refs;
 pub mod signer;
+pub mod skills;
 pub mod trees;
 pub mod verify;
 
@@ -119,6 +120,7 @@ pub use refs::{
     RefUpdate, StoredRef, create_ref, force_update_ref, list_refs, read_ref, update_ref,
 };
 pub use signer::{CommitSignature, CommitSigner, Ed25519Signer, Signer, verify_ed25519};
+pub use skills::{SkillAsset, SkillChannelState, put_skill, read_skill_members};
 pub use trees::{TreeEntry, TreeTarget, put_tree, read_tree};
 pub use verify::{ObjectClass, StoreVerification, verify};
 

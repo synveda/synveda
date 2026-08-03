@@ -295,7 +295,21 @@ Decisions, specifically:
     the server cannot verify is a fact an auditor has to reconcile
     (ADR-0019 decision 4).
 
-17. **The invariant floor's skill rule gains a second distinct approver.**
+17. **A skill is authored whole, and the request is the bundle.** ADR-0050
+    decision 1 inherited PRMT-1's authoring semantics and PRMT-2 added one of
+    its own: documents not named in a pack request are left alone, because
+    "a bundle is edited a file at a time and a request that dropped the rest
+    would make every save a full re-upload". A skill is the one authored
+    asset where that is wrong, for decision 11's root reason — a client loads
+    the bundle **whole**. A file the author deleted that stayed in the draft
+    would be published back onto a laptop by the next proposal, so an
+    authoring request replaces the file set and `skill_files` carries the
+    only DELETE grant in the three registries. It cannot reach a published
+    version: a tree names object addresses, objects are append-only, and what
+    a channel serves does not depend on which draft rows exist. Removing the
+    *skill* is still FLOW-7's rewind.
+
+18. **The invariant floor's skill rule gains a second distinct approver.**
     `distinct_approvers: 1` → `2`, on the floor rather than in a pack,
     because that is where "not a pack's to opt out of" lives. It is
     satisfiable in every pack (a security reviewer and a steward are two
