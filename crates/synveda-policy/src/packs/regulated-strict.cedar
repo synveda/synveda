@@ -204,6 +204,69 @@ permit (
         && resource.kind != "user"
 };
 
+// The context-pack registry (PRMT-2, ADR-0050 decision 7). The prompt
+// plane's shape above, mirrored tier for tier onto this pack's own
+// MemoryRead — a pack's documents are content the same people are trusted
+// with, classified on the same four-tier scale, and `restricted` is named
+// by nothing for decision 12's reason.
+//
+// The membership floor matters more here than it did for prompts, and that
+// is the case the feature exists for (decision 8): a reader who holds no
+// readable *memory* at a scope still receives that scope's conventions,
+// because this action admits pack chunks and `MemoryRead` never does.
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackRead",
+    resource
+) when {
+    principal in resource
+        && ["public", "internal"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackRead",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "contributor", "curator"])
+        && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+// Authoring mirrors PromptWrite, which mirrors the write floor. A draft is
+// not published material — the approval matrix decides that, and for a pack
+// under this pack it now decides it at two distinct people above a leaf
+// (ADR-0050 decision 15).
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackWrite",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["contributor", "curator"])
+        && resource.kind != "user"
+};
+
 // The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform,
 // like the channel, quarantine and proposal planes and for the same reason
 // — what a tier *means* cannot loosen per pack, or `restricted` stops

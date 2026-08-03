@@ -169,6 +169,34 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
+    // The context-pack registry (/v1/context-packs, PRMT-2, ADR-0050
+    // decision 7): may this principal be served a pack attached to this
+    // scope, and may it author one there?
+    //
+    // The prompt plane's shape, tier for tier, and for its reasons — with
+    // one difference that is the whole of ADR-0050 decision 8:
+    // `ContextPackRead` is taken per scope inside the *composition* plan
+    // walk, so it is the action that admits pack chunks into a block.
+    // `MemoryRead` never admits one and this never admits a memory, which
+    // is what lets a scope distribute conventions to readers holding no
+    // readable memory there.
+    //
+    // No pack names `restricted` here either — migration 0030's CHECK is
+    // where that is structural (ADR-0050 decision 12).
+    action ContextPackRead
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String>, sensitivity: String },
+        };
+
+    action ContextPackWrite
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String> },
+        };
+
     // The policy admin plane (/v1/policy/*, ADR-0014 decision 8): reading
     // packs and effective assignments, and assigning packs to nodes (or
     // the tenant default — the Tenant resource).

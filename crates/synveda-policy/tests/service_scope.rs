@@ -396,136 +396,106 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
     ));
 }
 
-/// The carve-out PRMT-1 widened, and the four things it did **not** widen
-/// (ADR-0049 decision 4).
+/// The carve-out PRMT-1 widened and PRMT-2 widened again, and the four
+/// things neither widened (ADR-0049 decision 4; ADR-0050 decision 8).
 ///
 /// A headless agent is the consumer prompts exist for, and the org's
 /// `house-style` sits two levels above the anchor — so without `PromptRead`
 /// beside `MemoryRead` in the base layer's confinement forbid, the registry
-/// would be unreadable by exactly the callers it is for. What the carve-out
-/// stays is the *membership* floor: own chain, reads only. This test is the
-/// evidence for that sentence, because a carve-out is the kind of thing that
-/// is widened once and then assumed to be narrow.
+/// would be unreadable by exactly the callers it is for. `ContextPackRead`
+/// is there for a stronger version of the same reason: pack material
+/// composes through `inject`, off the same plan walk that already reaches
+/// the agent's own chain for memory, so leaving it out would mean an agent
+/// composed the org's memory and not the org's conventions in one block.
+///
+/// What the carve-out stays is the *membership* floor: own chain, reads
+/// only. This test is the evidence for that sentence, because a carve-out
+/// is the kind of thing that is widened once and then assumed to be narrow
+/// — and it now runs over both authored asset types, so widening a third
+/// cannot quietly skip it.
 #[test]
-fn an_agent_reads_prompts_up_its_own_chain_and_nothing_else() {
+fn an_agent_reads_authored_assets_up_its_own_chain_and_nothing_else() {
     let pdp = Pdp::new().expect("build pdp");
     let fx = fixture();
     let agent = fx.agent();
 
-    // 1. Up the chain, role-free: the anchor, its department, the org, and
-    //    the agent's own leaf. This is the zero-config resolution.
-    for target in ["agent-user", "team-a", "eng", "org"] {
-        assert!(
-            decide(
-                &pdp,
-                &fx,
-                &agent,
-                Action::PromptRead,
-                Some(target),
-                &[],
-                None
-            ),
-            "a team-anchored agent must resolve prompts at {target}"
-        );
-    }
-
-    // 2. Off the chain: outside the anchor and not an ancestor of it. The
-    //    carve-out is `principal in resource`, so a sibling team and
-    //    another department are refused exactly as they are for memory.
-    for target in ["team-b", "team-c", "sales", "carol-user"] {
-        assert!(
-            !decide(
-                &pdp,
-                &fx,
-                &agent,
-                Action::PromptRead,
-                Some(target),
-                &[],
-                None
-            ),
-            "{target} is off the agent's chain and must stay unreadable"
-        );
-    }
-
-    // 3. A role cannot widen it. The whole point of the confinement forbid
-    //    is that it beats every permit a pack adds, and a viewer binding at
-    //    the department is the widest content grant a pack offers.
-    let bindings = [fx.binding("ci-agent", Some("eng"), Role::Viewer)];
-    for target in ["team-b", "carol-user"] {
-        assert!(
-            !decide(
-                &pdp,
-                &fx,
-                &agent,
-                Action::PromptRead,
-                Some(target),
-                &bindings,
-                None,
-            ),
-            "a role must not widen PromptRead past the token scope ({target})"
-        );
-    }
-
-    // 4. Writes are not in the carve-out. The agent authors at its own leaf
-    //    — inside the anchor, so no carve-out is needed — and nowhere above
-    //    it, however it is bound.
-    assert!(
-        decide(
-            &pdp,
-            &fx,
-            &agent,
-            Action::PromptWrite,
-            Some("agent-user"),
-            &[],
-            None
+    for (read, write, what) in [
+        (Action::PromptRead, Action::PromptWrite, "prompts"),
+        (
+            Action::ContextPackRead,
+            Action::ContextPackWrite,
+            "context packs",
         ),
-        "the agent's own leaf is inside its anchor"
-    );
-    let bindings = [fx.binding("ci-agent", Some("eng"), Role::Contributor)];
-    for target in ["eng", "org", "team-b"] {
+    ] {
+        // 1. Up the chain, role-free: the anchor, its department, the org,
+        //    and the agent's own leaf. This is the zero-config resolution.
+        for target in ["agent-user", "team-a", "eng", "org"] {
+            assert!(
+                decide(&pdp, &fx, &agent, read, Some(target), &[], None),
+                "a team-anchored agent must resolve {what} at {target}"
+            );
+        }
+
+        // 2. Off the chain: outside the anchor and not an ancestor of it.
+        //    The carve-out is `principal in resource`, so a sibling team and
+        //    another department are refused exactly as they are for memory.
+        for target in ["team-b", "team-c", "sales", "carol-user"] {
+            assert!(
+                !decide(&pdp, &fx, &agent, read, Some(target), &[], None),
+                "{target} is off the agent's chain and its {what} must stay \
+                 unreadable"
+            );
+        }
+
+        // 3. A role cannot widen it. The whole point of the confinement
+        //    forbid is that it beats every permit a pack adds, and a viewer
+        //    binding at the department is the widest content grant a pack
+        //    offers.
+        let bindings = [fx.binding("ci-agent", Some("eng"), Role::Viewer)];
+        for target in ["team-b", "carol-user"] {
+            assert!(
+                !decide(&pdp, &fx, &agent, read, Some(target), &bindings, None),
+                "a role must not widen {read} past the token scope ({target})"
+            );
+        }
+
+        // 4. Writes are not in the carve-out. The agent authors at its own
+        //    leaf — inside the anchor, so no carve-out is needed — and
+        //    nowhere above it, however it is bound.
         assert!(
-            !decide(
-                &pdp,
-                &fx,
-                &agent,
-                Action::PromptWrite,
-                Some(target),
-                &bindings,
-                None,
-            ),
-            "PromptWrite at {target} is outside the anchor and is not a read"
+            decide(&pdp, &fx, &agent, write, Some("agent-user"), &[], None),
+            "the agent's own leaf is inside its anchor"
         );
-    }
-    // Inside the anchor a content role still works, exactly as it does for
-    // memory: confinement clamps the grant rather than removing it.
-    assert!(
-        decide(
+        let bindings = [fx.binding("ci-agent", Some("eng"), Role::Contributor)];
+        for target in ["eng", "org", "team-b"] {
+            assert!(
+                !decide(&pdp, &fx, &agent, write, Some(target), &bindings, None),
+                "{write} at {target} is outside the anchor and is not a read"
+            );
+        }
+        // Inside the anchor a content role still works, exactly as it does
+        // for memory: confinement clamps the grant rather than removing it.
+        assert!(
+            decide(&pdp, &fx, &agent, write, Some("team-a"), &bindings, None),
+            "the contributor grant works where the token reaches"
+        );
+
+        // 5. And a user with the same bindings is untouched by any of it —
+        //    the `has token_scope` guard makes the forbid a no-op for people.
+        let user = Principal {
+            token_scope: None,
+            subject: "carol".to_owned(),
+            ..fx.agent()
+        };
+        let bindings = [fx.binding("carol", Some("eng"), Role::Viewer)];
+        assert!(decide(
             &pdp,
             &fx,
-            &agent,
-            Action::PromptWrite,
-            Some("team-a"),
+            &user,
+            read,
+            Some("team-b"),
             &bindings,
             None,
-        ),
-        "the contributor grant works where the token reaches"
-    );
-
-    // 5. And a user with the same bindings is untouched by any of it — the
-    //    `has token_scope` guard makes the forbid a no-op for people.
-    let user = Principal {
-        token_scope: None,
-        subject: "carol".to_owned(),
-        ..fx.agent()
-    };
-    let bindings = [fx.binding("carol", Some("eng"), Role::Viewer)];
-    assert!(decide(
-        &pdp,
-        &fx,
-        &user,
-        Action::PromptRead,
-        Some("team-b"),
-        &bindings,
-        None,
-    ));
+        ));
+    }
 }

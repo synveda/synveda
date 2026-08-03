@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update context_pack_chunks set document_hash = $2 where tenant_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "563ed86cb57d42be11d1ee421a53df71b1ae7177063654ca08e0fd3148b89a03"
+}

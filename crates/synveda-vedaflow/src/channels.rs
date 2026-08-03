@@ -104,6 +104,18 @@ impl ChannelRef {
         ChannelRef::new(AssetKind::Prompt, channel)
     }
 
+    /// The `context-pack/{channel}` ref (PRMT-2, ADR-0050 decision 3) —
+    /// the third asset type with a writer, and the first whose entries are
+    /// *bundles*: one entry per document, named `pack/document`.
+    ///
+    /// Published-ness for pack content comes from here and never from the
+    /// memory channel, which is what keeps `synveda channel show
+    /// memory/published` meaning what it says (option 3, rejected).
+    #[must_use]
+    pub const fn context_pack(channel: Channel) -> Self {
+        ChannelRef::new(AssetKind::ContextPack, channel)
+    }
+
     /// The ref name this channel is stored under.
     #[must_use]
     pub fn name(&self) -> String {

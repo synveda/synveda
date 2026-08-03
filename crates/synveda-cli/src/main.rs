@@ -21,6 +21,7 @@ mod channel;
 mod credentials;
 mod diff;
 mod login;
+mod pack;
 mod prompt;
 mod proposal;
 mod recall;
@@ -137,6 +138,20 @@ enum Command {
     /// proposal is an ordinary proposal.
     #[command(subcommand)]
     Prompt(PromptCommand),
+    /// The context-pack registry (PRMT-2, ADR-0050): author a bundle of
+    /// documents, list what a scope drafts and publishes, and open the
+    /// review that carries it across the trust boundary.
+    ///
+    /// There is deliberately **no `show`**: a prompt is fetched by name,
+    /// and a pack's content reaches a session through `synveda inject`, as
+    /// pinned records ranked against everything else the reader may see.
+    ///
+    /// Gateway calls under the bearer `synveda login` stored, like every
+    /// other governed verb: authoring is a `ContextPackWrite` decision, and
+    /// the server does the chunking, the secret scan and the embedding, so
+    /// a terminal can never disagree with it about a document's address.
+    #[command(subcommand, name = "context-pack")]
+    ContextPack(ContextPackCommand),
     /// Fetch records in full by id (CTX-4, ADR-0041) — the other half of
     /// tiered injection.
     ///
@@ -274,6 +289,70 @@ enum PromptCommand {
         /// The prompt's name.
         name: String,
         /// The scope whose channel would move. Requirements resolve here.
+        #[arg(long)]
+        scope: ScopeId,
+        /// What this proposes, in one line. Defaults to the name.
+        #[arg(long)]
+        title: Option<String>,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ContextPackCommand {
+    /// The registry at one scope: every pack, its documents, and whether
+    /// what a session composes is what was last written.
+    List {
+        /// The scope UUID.
+        scope: ScopeId,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Write a bundle: create it, or replace the documents named here.
+    /// This moves nothing a session composes.
+    ///
+    /// The server chunks, scans for secrets and embeds every document
+    /// whose bytes moved — so a re-run over an unchanged bundle costs one
+    /// address lookup per file and no vectors at all.
+    Author {
+        /// The pack's name — one segment, e.g. `payments`.
+        name: String,
+        /// The scope that will stand behind it.
+        #[arg(long)]
+        scope: ScopeId,
+        /// A document to put in it. Repeatable.
+        #[arg(long = "file", value_name = "PATH", required = true)]
+        files: Vec<std::path::PathBuf>,
+        /// Name documents by their path relative to this directory, so a
+        /// bundle keeps the shape it has on disk.
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
+        /// One line, read in a listing and at review.
+        #[arg(long, default_value = "")]
+        description: String,
+        /// public | internal | confidential. Defaults to internal;
+        /// `restricted` is refused — nothing in the product mints that tier
+        /// for an authored asset.
+        #[arg(long)]
+        sensitivity: Option<String>,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Open the review that can carry a bundle onto a scope's published
+    /// channel. Everything after this is `synveda proposal`.
+    Propose {
+        /// The pack's name.
+        name: String,
+        /// The scope whose channel would move. Requirements resolve here —
+        /// and under `regulated-strict` above a team that is a curator and
+        /// a steward, two distinct people (ADR-0050 decision 15).
         #[arg(long)]
         scope: ScopeId,
         /// What this proposes, in one line. Defaults to the name.
@@ -1370,6 +1449,44 @@ async fn run(cli: Cli) -> Result<(), String> {
                 title,
                 profile,
             } => prompt::propose(&profile_name(profile), &name, scope, title.as_deref()).await,
+        },
+        Command::ContextPack(command) => match command {
+            ContextPackCommand::List { scope, profile } => {
+                pack::list(&profile_name(profile), scope).await
+            }
+            ContextPackCommand::Author {
+                name,
+                scope,
+                files,
+                root,
+                description,
+                sensitivity,
+                profile,
+            } => {
+                let sensitivity = sensitivity
+                    .as_deref()
+                    .map(str::parse::<synveda_types::Sensitivity>)
+                    .transpose()
+                    .map_err(|err| err.to_string())?;
+                pack::author(
+                    &profile_name(profile),
+                    pack::Bundle {
+                        name: &name,
+                        scope,
+                        description: &description,
+                        files: &files,
+                        root: root.as_ref(),
+                        sensitivity,
+                    },
+                )
+                .await
+            }
+            ContextPackCommand::Propose {
+                name,
+                scope,
+                title,
+                profile,
+            } => pack::propose(&profile_name(profile), &name, scope, title.as_deref()).await,
         },
         Command::Recall {
             ids,

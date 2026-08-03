@@ -129,6 +129,18 @@ pub const PROPOSAL_OPERATIONS_TOTAL: &str = "synveda_proposal_operations_total";
 /// because it is the same governed act a memory publication is.
 pub const PROMPT_OPERATIONS_TOTAL: &str = "synveda_prompt_operations_total";
 
+/// Context-pack registry operations (PRMT-2, ADR-0050), labelled by `op`
+/// (`author`/`list`) and `outcome` (`ok`, `rejected`, `error`).
+///
+/// Two ops rather than three, and the missing one is the point: a pack is
+/// not *fetched*. `author` chains `context_pack.authored` (or
+/// `context_pack.quarantined` when the scanner stops a document), the
+/// listing chains its allowed decision like every other read, and a
+/// pack's content reaches a session through `inject` — where it is counted
+/// by `synveda_composed_entries_total` and watermarked inside
+/// `context.injected` like every other entry (ADR-0050 decision 13).
+pub const CONTEXT_PACK_OPERATIONS_TOTAL: &str = "synveda_context_pack_operations_total";
+
 /// Lapse API operations (AUTHZ-4, ADR-0037), labelled by `op`
 /// (`propose`/`grant`/`revoke`/`list`) and `outcome` (`ok`, `rejected`,
 /// `error`).
@@ -553,6 +565,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         PROMPT_OPERATIONS_TOTAL,
         "Prompt registry operations by op (author/resolve/list) and \
+         outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        CONTEXT_PACK_OPERATIONS_TOTAL,
+        "Context pack registry operations by op (author/list) and \
          outcome (ok/rejected/error)"
     );
     metrics::describe_counter!(

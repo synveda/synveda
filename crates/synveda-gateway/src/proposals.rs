@@ -68,9 +68,9 @@ use synveda_policy::{Action, Resource};
 use synveda_store::records::RecordState;
 use synveda_store::{hierarchy, records, rls};
 use synveda_types::{
-    ApprovalRequirement, AssetKind, CastApproval, Channel, Error, HierarchyNode, IdentityId,
-    PromotionEvidence, PromptName, ProposalEffect, ProposalId, ProposalState, ProposalView,
-    RecordId, Result, Role, ScopeId, Sensitivity, TenantId, Verdict,
+    ApprovalRequirement, AssetKind, CastApproval, Channel, DocumentPath, Error, HierarchyNode,
+    IdentityId, PromotionEvidence, PromptName, ProposalEffect, ProposalId, ProposalState,
+    ProposalView, RecordId, Result, Role, ScopeId, Sensitivity, TenantId, Verdict,
 };
 use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
 
@@ -479,6 +479,19 @@ pub(crate) struct OpenBody {
     /// into it, with no draft row at the department at all.
     #[serde(default)]
     prompt_names: Vec<PromptName>,
+    /// The context-pack documents to propose, by path (PRMT-2, ADR-0050
+    /// decision 1).
+    ///
+    /// One entry per **document**, named `pack/document`: the pack channel
+    /// names documents rather than bundles (decision 3), so a proposal that
+    /// publishes half a pack is a thing the vocabulary can express and a
+    /// curator can decide on. Exactly one of the three member lists may be
+    /// present, for `prompt_names`' reason — a proposal has one asset kind,
+    /// because the approval matrix resolves from it and, since decision 15,
+    /// `regulated-strict` prices a pack at a department at two distinct
+    /// people where it prices a team's memory at one.
+    #[serde(default)]
+    document_paths: Vec<DocumentPath>,
     /// What this proposes, in one line. A reviewer reads it in a list.
     title: String,
     /// What running this proposal would *do*. Absent means `published` —
@@ -577,10 +590,19 @@ async fn open_inner(
         });
     }
 
-    let asset = if body.prompt_names.is_empty() {
-        AssetKind::Memory
-    } else {
-        AssetKind::Prompt
+    let asset = match (body.prompt_names.is_empty(), body.document_paths.is_empty()) {
+        (true, true) => AssetKind::Memory,
+        (false, true) => AssetKind::Prompt,
+        (true, false) => AssetKind::ContextPack,
+        (false, false) => {
+            return Err(Error::Invalid {
+                message: "a proposal has one asset kind: name prompts or context pack \
+                          documents, never both. The approval matrix resolves from the \
+                          kind, and a mixed set would have to be priced at the maximum \
+                          — a rule nobody wrote and a review nobody asked for"
+                    .to_owned(),
+            });
+        }
     };
     // The members, as the asset kind's own reader sees them: the two senses
     // of "the source holds it" (ADR-0034 decision 3) are the same two for
@@ -592,6 +614,13 @@ async fn open_inner(
             .into_iter()
             .map(Proposed::Memory)
             .collect(),
+        AssetKind::ContextPack => {
+            held_documents(&mut tx, tenant_id, source_scope_id, &body.document_paths)
+                .await?
+                .into_iter()
+                .map(Proposed::ContextPack)
+                .collect()
+        }
         _ => held_prompts(&mut tx, tenant_id, source_scope_id, &body.prompt_names)
             .await?
             .into_iter()
@@ -657,6 +686,21 @@ async fn open_inner(
             // draft row here and this is the one line that does not care.
             Proposed::Prompt(asset) => {
                 let object = vedaflow::put_prompt(&mut tx, tenant_id, asset).await?;
+                (asset.entry_name(), object.hash)
+            }
+            // Same story as a prompt's, and for the same reason: the
+            // document's object was stored at authoring — the draft row's
+            // foreign key required it — so this write dedups. It runs anyway
+            // because a member reached through the *published* sense of "the
+            // source holds it" has no draft row here.
+            //
+            // What it deliberately does **not** touch is the chunks. They
+            // were cut and embedded at authoring (ADR-0050 decision 4), and
+            // a proposal is a ref move waiting to happen: no approval in
+            // this product has ever made a network call, and this is the
+            // line where that stays true.
+            Proposed::ContextPack(asset) => {
+                let object = vedaflow::put_context_pack(&mut tx, tenant_id, asset).await?;
                 (asset.entry_name(), object.hash)
             }
         };
@@ -1177,6 +1221,21 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
     // holds the material, which is the same check one scope over
     // (ADR-0034 decision 7).
     let proposed = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
+    if proposal.asset == AssetKind::ContextPack {
+        return publish_documents(
+            tx,
+            tenant_id,
+            id,
+            &proposal,
+            publisher,
+            &authorized,
+            &requirement,
+            &cast,
+            &outstanding,
+            &proposed,
+        )
+        .await;
+    }
     if proposal.asset == AssetKind::Prompt {
         return publish_prompts(
             tx,
@@ -1315,6 +1374,174 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
                 "subject": approval.subject,
                 "roles": approval.roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+
+    Ok(Json(PublishResponse {
+        proposal_id: id,
+        scope_id: proposal.target_scope_id,
+        channel: channel.name(),
+        commit: committed.commit.to_hex(),
+        parent: committed.parent.map(|parent| parent.to_hex()),
+        proposal_commit: proposal.commit.to_hex(),
+        members: committed.entries,
+        added: committed.added,
+    }))
+}
+
+/// The publish effect for a context-pack proposal (PRMT-2, ADR-0050
+/// decision 1).
+///
+/// [`publish_prompts`] one table over, and the same three properties:
+/// approvals bind bytes, so every member's address is recomputed from the
+/// document as it stands *now* and required to equal what the approved
+/// commit named; the source must still hold it; and every refusal is a
+/// `Conflict`, because the request was well formed when it was approved and
+/// what moved is the world.
+///
+/// It writes `context-pack/published` rather than `memory/published`, and it
+/// chains the same `vedaflow.channel.published` event with `asset` reading
+/// `context-pack` — the same governed act with the same consequence
+/// (ADR-0019 decision 4).
+///
+/// **What it does not do is touch a chunk.** Publication is a ref move; the
+/// chunk rows were written with their embeddings at authoring, and this
+/// commit names addresses that only exist because that transaction
+/// committed. That is why there is no window in which half a pack is live,
+/// and why a FLOW-7 rewind of this channel restores a previous version with
+/// no re-embedding at all (decisions 5 and 6).
+#[allow(clippy::too_many_arguments)]
+async fn publish_documents(
+    mut tx: sqlx::Transaction<'static, sqlx::Postgres>,
+    tenant_id: TenantId,
+    id: ProposalId,
+    proposal: &vedaflow::StoredProposal,
+    publisher: IdentityId,
+    authorized: &crate::authz::Authorized,
+    requirement: &ApprovalRequirement,
+    cast: &[CastApproval],
+    outstanding: &synveda_types::Outstanding,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Json<PublishResponse>> {
+    let source = proposal.source_scope_id;
+    let paths: Vec<DocumentPath> = proposed
+        .iter()
+        .map(|member| {
+            member
+                .name
+                .parse::<DocumentPath>()
+                .map_err(|err| Error::Internal {
+                    message: format!(
+                        "proposal member {:?} is not a document path: {err}",
+                        member.name
+                    ),
+                })
+        })
+        .collect::<Result<_>>()?;
+    let drafts: std::collections::HashMap<DocumentPath, [u8; 32]> =
+        synveda_store::packs::list_all_documents(&mut *tx, tenant_id, source)
+            .await?
+            .into_iter()
+            .map(|document| {
+                (
+                    DocumentPath::new(document.pack_name.clone(), document.document_name.clone()),
+                    document.object_hash,
+                )
+            })
+            .collect();
+    let published_at_source = published_documents_at(&mut tx, tenant_id, source).await?;
+
+    let moved = |what: &str, path: &DocumentPath| Error::Conflict {
+        message: format!(
+            "context pack document {path} {what} after this proposal was approved; \
+             withdraw it and open a new one so the change is reviewed"
+        ),
+    };
+    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> = Vec::with_capacity(paths.len());
+    for (member, path) in proposed.iter().zip(&paths) {
+        match drafts.get(path) {
+            // The draft lives at the source: its current address must be the
+            // one the approvals bound. An edit since the review moved it —
+            // and moved its chunks off the published set with it, which is
+            // the same fact seen from the read side (ADR-0050 decision 3).
+            Some(address) if member.object.as_bytes() == address => {}
+            Some(_) => return Err(moved("changed", path)),
+            None => {
+                if published_at_source.get(path) != Some(&member.object) {
+                    return Err(Error::Conflict {
+                        message: format!(
+                            "scope {source} no longer holds context pack document {path}; \
+                             the climb was approved against material its source has since \
+                             given up"
+                        ),
+                    });
+                }
+            }
+        }
+        members.push((member.name.clone(), member.object));
+    }
+
+    let channel = vedaflow::ChannelRef::context_pack(Channel::Published);
+    let snapshot = PolicySnapshot::new(
+        authorized.decision.pack_name.clone(),
+        authorized.decision.pack_version,
+    );
+    let committed = vedaflow::publish(
+        &mut tx,
+        tenant_id,
+        &vedaflow::ChannelWrite {
+            scope: proposal.target_scope_id,
+            channel,
+            members: &members,
+            merge_parents: &[proposal.commit],
+            author: publisher,
+            message: &proposal.title,
+            committed_at: Utc::now(),
+            policy_snapshot: &snapshot,
+        },
+        &Signer::Unsigned,
+    )
+    .await?;
+    close(
+        &mut tx,
+        tenant_id,
+        id,
+        ProposalState::Published,
+        publisher,
+        None,
+    )
+    .await?;
+    vedaflow::proposals::act("published", proposal.asset);
+
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::ChannelPublished,
+        Resource::Scope(proposal.target_scope_id).to_string(),
+        Outcome::Success,
+        json!({
+            "authz": audit::decision_context(Action::ChannelPublish, authorized),
+            "channel": channel.name(),
+            "asset": channel.asset.as_str(),
+            "message": proposal.title,
+            "proposal_id": id,
+            "proposal_commit": proposal.commit.to_hex(),
+            "sensitivity": proposal.sensitivity.as_str(),
+            "source_scope_id": source,
+            "target_scope_id": proposal.target_scope_id,
+            // Paths and addresses, never document text.
+            "records": members.iter().map(|(name, hash)| json!({
+                "member": name,
+                "object_hash": hash.to_hex(),
+            })).collect::<Vec<_>>(),
+            "commit": committed.commit.to_hex(),
+            "parent": committed.parent.map(|parent| parent.to_hex()),
+            "members": committed.entries,
+            "added": committed.added,
+            "approvals": approvals::audit_context(requirement, outstanding),
+            "approvers": cast.len(),
         }),
     )
     .await?;
@@ -1904,6 +2131,9 @@ async fn member_views(
     proposal: &vedaflow::StoredProposal,
 ) -> Result<Vec<MemberView>> {
     let proposed = vedaflow::proposals::members(tx, tenant_id, proposal.commit).await?;
+    if proposal.asset == AssetKind::ContextPack {
+        return document_member_views(tx, tenant_id, proposal, &proposed).await;
+    }
     if proposal.asset == AssetKind::Prompt {
         return prompt_member_views(tx, tenant_id, proposal, &proposed).await;
     }
@@ -1973,6 +2203,111 @@ async fn member_views(
                 unchanged,
                 class: Some(class),
                 sensitivity,
+                content,
+                effect,
+                proposed: text_at(&member.object),
+                baseline,
+            }
+        })
+        .collect())
+}
+
+/// [`member_views`] for a context-pack proposal (PRMT-2, ADR-0050).
+///
+/// [`prompt_member_views`] one table over, with one difference that is
+/// worth its own sentence: the diff a reviewer reads is the **document**,
+/// not its chunks. A pack is reviewed as the prose somebody wrote, and the
+/// chunk boundaries are a deterministic function of that prose — showing
+/// them would be showing the reviewer an implementation detail of the read
+/// path (ADR-0050 reversal trigger (c) is where that changes, and it is
+/// ADR-0035's seam doing its job when it does).
+async fn document_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let paths: Vec<DocumentPath> = proposed
+        .iter()
+        .map(|member| {
+            member
+                .name
+                .parse::<DocumentPath>()
+                .map_err(|err| Error::Internal {
+                    message: format!(
+                        "proposal member {:?} is not a document path: {err}",
+                        member.name
+                    ),
+                })
+        })
+        .collect::<Result<_>>()?;
+    let drafts: std::collections::HashMap<DocumentPath, synveda_store::packs::StoredDocument> =
+        synveda_store::packs::list_all_documents(&mut *tx, tenant_id, proposal.source_scope_id)
+            .await?
+            .into_iter()
+            .map(|document| {
+                (
+                    DocumentPath::new(document.pack_name.clone(), document.document_name.clone()),
+                    document,
+                )
+            })
+            .collect();
+    let published = published_documents_at(tx, tenant_id, proposal.target_scope_id).await?;
+
+    let mut wanted: Vec<vedaflow::hash::ObjectHash> =
+        proposed.iter().map(|member| member.object).collect();
+    wanted.extend(paths.iter().filter_map(|path| published.get(path).copied()));
+    let objects = vedaflow::read_objects(tx, tenant_id, &wanted).await?;
+    let text_at = |hash: &vedaflow::hash::ObjectHash| -> String {
+        objects
+            .get(hash)
+            .and_then(|object| vedaflow::ContextPackAsset::from_bytes(&object.content).ok())
+            .map(|asset| asset.document.content)
+            .unwrap_or_default()
+    };
+
+    Ok(proposed
+        .iter()
+        .zip(&paths)
+        .map(|(member, path)| {
+            // The tier under review is the *proposed version's*, read from
+            // the object the approvals bind rather than from a draft that
+            // may have moved since.
+            let reviewed = objects
+                .get(&member.object)
+                .and_then(|object| vedaflow::ContextPackAsset::from_bytes(&object.content).ok());
+            let (unchanged, content) = match drafts.get(path) {
+                Some(draft) => (
+                    member.object.as_bytes() == &draft.object_hash,
+                    text_at(&member.object),
+                ),
+                // No draft at the source: the member is one the source holds
+                // by publishing it, so what it "stands at now" is that
+                // publication — unchanged exactly while the source still
+                // names these bytes, which is what publishing re-checks.
+                None => (true, String::new()),
+            };
+            let (effect, baseline) = match published.get(path) {
+                None => (MemberEffect::Add, None),
+                Some(held) if *held == member.object => (MemberEffect::None, None),
+                Some(held) => (
+                    MemberEffect::Update,
+                    Some(BaselineView {
+                        object_hash: held.to_hex(),
+                        text: text_at(held),
+                    }),
+                ),
+            };
+            MemberView {
+                member: path.to_string(),
+                record_id: None,
+                asset: AssetKind::ContextPack.as_str().to_owned(),
+                object_hash: member.object.to_hex(),
+                unchanged,
+                class: None,
+                sensitivity: reviewed
+                    .as_ref()
+                    .map_or(proposal.sensitivity, |asset| asset.sensitivity),
                 content,
                 effect,
                 proposed: text_at(&member.object),
@@ -2121,10 +2456,13 @@ fn decide_asset_read(
         AssetKind::Prompt => {
             authz::decide_prompt_read(state, input, resource, Sensitivity::WORKING)
         }
+        AssetKind::ContextPack => {
+            authz::decide_context_pack_read(state, input, resource, Sensitivity::WORKING)
+        }
         other => Err(Error::Invalid {
             message: format!(
                 "{} has no read action yet, so this route cannot decide who may govern \
-                 it; it arrives with that asset kind's feature (SKIL-1, PRMT-2)",
+                 it; it arrives with that asset kind's feature (SKIL-1)",
                 other.as_str()
             ),
         }),
@@ -2144,6 +2482,11 @@ enum Proposed {
     /// the source scope, or — for the second sense of "the source holds
     /// it" — the object the source's published tree already names.
     Prompt(vedaflow::PromptAsset),
+    /// One **document** of a context pack, as it will be addressed
+    /// (PRMT-2, ADR-0050 decision 3). The same two senses as a prompt, one
+    /// table over — and a bundle is several of these rather than one
+    /// member, because the channel names documents.
+    ContextPack(vedaflow::ContextPackAsset),
 }
 
 impl Proposed {
@@ -2152,6 +2495,11 @@ impl Proposed {
         match self {
             Proposed::Memory(version) => version.state.sensitivity,
             Proposed::Prompt(asset) => asset.sensitivity,
+            // Per document, never per pack (ADR-0050 decision 12) — so a
+            // bundle mixing a public glossary and a confidential runbook is
+            // priced at the runbook, which is `max_sensitivity`'s existing
+            // rule doing exactly what it was written for.
+            Proposed::ContextPack(asset) => asset.sensitivity,
         }
     }
 }
@@ -2246,6 +2594,93 @@ async fn published_prompts_at(
             .map(|state| state.members)
             .unwrap_or_default(),
     )
+}
+
+/// What `scope`'s published context-pack channel names, by document path.
+async fn published_documents_at(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+) -> Result<std::collections::HashMap<DocumentPath, vedaflow::hash::ObjectHash>> {
+    Ok(
+        vedaflow::read_context_pack_members(tx, tenant_id, &[scope_id], Channel::Published)
+            .await?
+            .into_iter()
+            .next()
+            .map(|state| state.members)
+            .unwrap_or_default(),
+    )
+}
+
+/// The context-pack documents `scope` **holds**, refusing the whole
+/// request if any is not held there — [`held_prompts`]'s two senses, one
+/// table over.
+///
+/// - the document **lives** there (`context_pack_documents.scope_id`),
+///   which is every same-scope proposal and the first hop of any climb; or
+/// - the scope **published** it — its `context-pack/published` tree names
+///   the path, and the object at that address is what climbs onward.
+async fn held_documents(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+    paths: &[DocumentPath],
+) -> Result<Vec<vedaflow::ContextPackAsset>> {
+    let mut requested: Vec<DocumentPath> = paths.to_vec();
+    requested.sort();
+    requested.dedup();
+    let drafts: std::collections::HashMap<DocumentPath, synveda_store::packs::StoredDocument> =
+        synveda_store::packs::list_all_documents(&mut *tx, tenant_id, scope_id)
+            .await?
+            .into_iter()
+            .map(|document| {
+                (
+                    DocumentPath::new(document.pack_name.clone(), document.document_name.clone()),
+                    document,
+                )
+            })
+            .collect();
+    let published = published_documents_at(tx, tenant_id, scope_id).await?;
+
+    let mut held = Vec::with_capacity(requested.len());
+    let mut missing: Vec<String> = Vec::new();
+    for path in &requested {
+        // The draft's *object* rather than its row: the row holds a title
+        // and a tier, and the asset a proposal binds is the bytes at the
+        // address the draft names — which is the same object either sense
+        // reaches.
+        let address = match drafts.get(path) {
+            Some(document) => vedaflow::hash::ObjectHash::from_bytes(document.object_hash),
+            None => match published.get(path).copied() {
+                Some(address) => address,
+                None => {
+                    missing.push(path.to_string());
+                    continue;
+                }
+            },
+        };
+        let object = vedaflow::read_object(&mut *tx, tenant_id, address)
+            .await?
+            .ok_or_else(|| Error::Internal {
+                message: format!(
+                    "context pack document {path} names object {} which the append-only \
+                     store does not hold",
+                    address.to_hex()
+                ),
+            })?;
+        held.push(vedaflow::ContextPackAsset::from_bytes(&object.content)?);
+    }
+    if !missing.is_empty() {
+        return Err(Error::Invalid {
+            message: format!(
+                "scope {scope_id} neither drafts nor publishes: {} — name the scope \
+                 that does with source_scope_id, which must be {scope_id} or a scope \
+                 beneath it (FLOW-5 climbs the hierarchy, it does not cross it)",
+                missing.join(", ")
+            ),
+        });
+    }
+    Ok(held)
 }
 
 /// The current versions of `ids` that `scope` **holds**, refusing the
@@ -2350,26 +2785,33 @@ fn validate_open(body: &OpenBody) -> Result<()> {
     // One asset kind per proposal (ADR-0049 decision 6): the approval
     // matrix resolves from it, and a mixed set would have to be priced at
     // the maximum by a rule nobody wrote.
-    match (body.record_ids.is_empty(), body.prompt_names.is_empty()) {
-        (true, true) => {
+    let named = usize::from(!body.record_ids.is_empty())
+        + usize::from(!body.prompt_names.is_empty())
+        + usize::from(!body.document_paths.is_empty());
+    match named {
+        0 => {
             return invalid(
                 "name at least one member: record_ids for memories, prompt_names for \
-                 prompts"
+                 prompts, document_paths for context pack documents"
                     .to_owned(),
             );
         }
-        (false, false) => {
+        1 => {}
+        _ => {
             return invalid(
-                "a proposal carries one asset kind: name record_ids or prompt_names, \
-                 never both — the approval matrix resolves from the asset, and \
-                 regulated-strict prices a prompt at two distinct people where it \
-                 prices a team's memory at one"
+                "a proposal carries one asset kind: name record_ids, prompt_names or \
+                 document_paths, never more than one — the approval matrix resolves \
+                 from the asset, and regulated-strict prices a prompt at two distinct \
+                 people where it prices a team's memory at one"
                     .to_owned(),
             );
         }
-        _ => {}
     }
-    let members = body.record_ids.len().max(body.prompt_names.len());
+    let members = body
+        .record_ids
+        .len()
+        .max(body.prompt_names.len())
+        .max(body.document_paths.len());
     if members > vedaflow::MAX_PROPOSAL_MEMBERS {
         return invalid(format!(
             "a proposal may name at most {} members",

@@ -422,8 +422,42 @@ PRMT-1 Prompt templates as assets (M)
   priced prompts two features before anything could open one.
 PRMT-2 Context packs (M)
   Curated doc bundles (conventions, glossaries) pinned to scopes; chunked+embedded on
-  publish; composed by CTX-2 as pinned material. AC: pack update re-embeds atomically;
-  inject reflects new pack next session.
+  publish; composed by CTX-2 as pinned material. AC: a pack authored at a scope reaches a
+  session only through the review the pack in force asks for — and under `regulated-strict`
+  at a department, division or org that is a curator *and* a steward, two distinct people,
+  where FLOW-3 had left the cell at one curator, because publishing a bundle into every
+  session must not be cheaper than publishing one memory record at the same scope;
+  "re-embeds atomically" is measured from the reader's side — no inject ever composes half a
+  pack, the previous version composes in full until the new one is entirely embedded *and*
+  published, and the new one in full thereafter; "next session" is satisfied as "next call",
+  because the pack channel is read live on the composition path; pack content composes as
+  pinned material, **ranked**, and what does not fit is named in the index tier rather than
+  dropped — a block that cannot hold the runbook says the runbook exists, names it, and
+  hands back a recall handle that resolves; `ContextPackRead` admits pack chunks and
+  `MemoryRead` never does, so a reader who holds no readable memory at a scope still
+  receives that scope's conventions, decided per scope inside the plan walk composition
+  already runs; a published document that is edited demotes its own chunks, ADR-0031
+  decision 5 reaching chunks through the document address the channel names; a rewind
+  restores the previous version by moving a ref with no re-embedding, and a pin freezes what
+  the pack channel serves, which is what discharges ADR-0036 decision 3 for the second of
+  the three kinds it refused by name and leaves `skill`; a document carrying a live
+  credential is stopped at authoring by MEM-2's scanner running ahead of the embedder, so no
+  secret reaches vector space; `ContextPackRead` and `ContextPackWrite` join the role×action
+  golden matrix under all three packs and the service-identity confinement list; every act
+  is on the chain — `context_pack.authored`, `context_pack.quarantined`, and the same
+  `vedaflow.channel.published` a memory publication emits with `asset` reading
+  `context-pack` — with served chunks watermarked inside `context.injected` and no document
+  text in any payload, swept for; demo script.
+  Written 2026-08-02 (PRMT-2, ADR-0050): the feature text named two clauses of AC, and both
+  turned out to be about the *read* half rather than the write half — which is what makes
+  this feature unlike PRMT-1. A prompt is fetched by name and composes into nothing; a
+  context pack is the first authored asset whose content has to enter the corpus CTX-1 ranks
+  and CTX-2 assembles, so ADR-0049 option 4's third reason for refusing "prompts as memory
+  records" inverts here and its published chunks *are* pinned records. The load-bearing
+  parts are that decision — which inherits both retrieval legs, the tier check, recall, the
+  retention exemption and the supersession exemption rather than re-earning them — and the
+  discovery that FLOW-3 had priced `context-pack` at one curator at every scope kind, in a
+  cell tech plan §2.4 left empty and nothing could reach until this feature.
 PRMT-3 A/B channels for prompts (S)
   Staged rollout: % of sessions on candidate version; metrics comparison feeding promotion.
   AC: two-version experiment with automatic report.

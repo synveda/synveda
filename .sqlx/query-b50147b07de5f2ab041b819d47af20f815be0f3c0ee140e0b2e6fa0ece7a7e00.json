@@ -1,0 +1,84 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select scope_id, pack_name, document_name, title, sensitivity,\n                  object_hash, chunks, created_at, created_by, updated_at, updated_by\n           from context_pack_documents\n           where tenant_id = $1 and scope_id = $2 and pack_name = $3\n           order by document_name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "pack_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "document_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "object_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 6,
+        "name": "chunks",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b50147b07de5f2ab041b819d47af20f815be0f3c0ee140e0b2e6fa0ece7a7e00"
+}

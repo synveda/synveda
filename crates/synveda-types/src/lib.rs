@@ -18,6 +18,7 @@ mod id;
 mod identity;
 mod lapse;
 mod observe;
+mod pack;
 mod policy;
 mod promotion;
 mod prompt;
@@ -52,6 +53,12 @@ pub use lapse::{
     PRODUCT_MAX_DURATION_SECS, STRICT_MAX_DURATION_SECS,
 };
 pub use observe::{ObserveKind, QuarantineState};
+pub use pack::{
+    CHUNK_CHARS, ContextPackChannel, ContextPackName, DocumentChunk, DocumentName, DocumentPath,
+    MAX_DOCUMENT_CHARS, MAX_DOCUMENT_CHUNKS, MAX_DOCUMENT_NAME_CHARS, MAX_DOCUMENT_NAME_SEGMENTS,
+    MAX_DOCUMENT_TITLE_CHARS, MAX_PACK_DESCRIPTION_CHARS, MAX_PACK_DOCUMENTS, MAX_PACK_NAME_CHARS,
+    MAX_PACK_SEGMENT_CHARS, PackDocument, chunk,
+};
 pub use policy::{PackConfig, PolicyAssignment};
 pub use promotion::{
     MAX_PROMOTION_RULES, MAX_RULE_NAME, MemberEvidence, PromotionConfig, PromotionEvidence,

@@ -1,6 +1,6 @@
 # ADR-0050: context packs — the pack is an authored asset whose published chunks are pinned records, chunking and embedding happen at authoring so review stays network-free, and relevance ranks what the index tier then refuses to let vanish
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-08-02
 - **Feature(s)**: PRMT-2
 - **Deciders**: sujitn
@@ -211,6 +211,18 @@ Decisions, specifically:
    the knob it fires through — `index_entry_chars` — is already a pack
    field.
 
+    Composing both memory and pack material at one scope needs one more
+    ordering key than seed §4.4 supplies — both are published and both are
+    pinned, so its list runs out before it separates them. **Memory sorts
+    first.** That is the direction that keeps option 7's deferred risk
+    smallest: a pack is orders of magnitude larger than a record, so
+    putting bundles first would spend the budget on reference material
+    before the reader's own curated facts, which is exactly the
+    displacement option 7 left to EVAL-4 to measure. Within one document,
+    chunks keep their own order — prose read out of sequence is worse
+    prose, and the ranker has no opinion about which half of a paragraph
+    comes first.
+
 10. **The index line renders the pack's authored name and the document's
     title, which is what ADR-0041 decision 4 reserved the seam for.** A
     memory record has no name, so its index line truncates a body; a pack
@@ -225,6 +237,19 @@ Decisions, specifically:
     pack carrying a live credential is quarantined for review under the
     machinery that already reviews quarantined observe events, rather than
     under a second review queue.
+
+    One departure inside that, found in the writing and recorded as a
+    departure: **a synchronous authoring request reviews by refusing to
+    its author**, rather than staging a row in `observe_quarantine`. That
+    table's rows are observe events, and minting a synthetic one for a pack
+    document would put a lie on the observe chain. The observe path stages
+    because it is asynchronous and there is nobody to tell; here there is
+    an author on the other end of the request who can fix the document. So
+    `quarantine` and `deny` both refuse, `quarantine` additionally chains
+    `context_pack.quarantined`, and `redact` scrubs and continues exactly
+    as it does on the observe path. What is *not* a departure is the
+    guarantee: the document is not stored, not chunked and not embedded, so
+    no secret reaches vector space.
 
 12. **`restricted` packs are unrepresentable, exactly as `restricted`
     prompts are** (ADR-0049 decision 5): the only mechanism that mints the
@@ -352,7 +377,13 @@ Decisions, specifically:
   than it asks.
 - **Negative / accepted trade-offs**: `records` now holds rows that are not
   memories, and every memory-shaped sweep is a place that must say so
-  deliberately. Chunk rows accumulate per published version (ADR-0030's GC
+  deliberately — the derived sweep in `synveda_store::search` is the one
+  that matters, and it says so in SQL. Without that clause a pack's chunks
+  compose as ordinary *derived memory* the moment they are authored,
+  marked `[unreviewed]`, which would make "a pack reaches a session only
+  through review" false in the most direct way available; the exclusion is
+  in the query rather than in a caller that could forget it, and the AC
+  suite fails loudly if it is removed. Chunk rows accumulate per published version (ADR-0030's GC
   question). A pack cannot be `restricted`. A published pack's chunks are
   ranked rather than composed whole, which is a real departure from
   ADR-0025 option 5 and is written down as one rather than folded in.

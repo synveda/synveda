@@ -87,3 +87,33 @@ the chunker is **structural and deterministic**, since a model-driven splitter
 would give the same bytes different content addresses on different days; a
 pack cannot be `restricted`, for ADR-0049 decision 5's unchanged reason; and
 there is no draft deletion — retraction is FLOW-7's rewind.
+
+## Landed
+
+2026-08-03. Migration 0030 (`context_packs`, `context_pack_documents`,
+`context_pack_chunks`), `POST /v1/context-packs`, the `context-pack` asset
+through both publication routes, `ContextPackRead`/`ContextPackWrite` at
+pack version `@13`, and the composition engine's second channel read.
+
+Three things the implementation turned up, all recorded in ADR-0050:
+
+- **The acceptance suite caught the feature's own central claim.** A
+  pack's chunks are `records` rows at the authoring scope, so composition's
+  *derived sweep* returned them: an unpublished bundle composed into a
+  session the moment it was authored, marked `[unreviewed]`. Decision 8
+  says a chunk is never admitted by `MemoryRead`; only the other half of
+  that sentence had been built. The exclusion now lives in the sweep's own
+  SQL rather than in a caller that could forget it.
+- **A synchronous authoring surface reviews by refusing to its author.**
+  Decision 11's literal wording puts a quarantined document under "the
+  machinery that already reviews quarantined observe events", but that
+  table's rows are observe events and minting a synthetic one would put a
+  lie on the observe chain. `quarantine` and `deny` refuse and chain
+  `context_pack.quarantined`; `redact` scrubs and continues exactly as the
+  observe path does. The guarantee is unchanged: nothing is stored,
+  chunked or embedded, so no secret reaches vector space.
+- **Memory sorts before pack material among equals.** Both are published
+  and both are pinned, so seed §4.4's list runs out before it separates
+  them and a total order needs one more key. Memory first is the direction
+  that keeps ADR-0050 option 7's deferred displacement risk smallest,
+  without inventing the separate budget lane that option left to EVAL-4.

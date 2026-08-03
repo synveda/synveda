@@ -30,6 +30,7 @@ use crate::error::ApiError;
 use crate::hierarchy;
 use crate::inject;
 use crate::observe;
+use crate::packs;
 use crate::policy;
 use crate::prompts;
 use crate::proposals;
@@ -214,6 +215,12 @@ pub fn router(state: AppState) -> Router {
         // collection route so `GET /v1/prompts?scope_id=…` still lists.
         .route("/v1/prompts", get(prompts::list).post(prompts::author))
         .route("/v1/prompts/{*name}", get(prompts::resolve))
+        // The context-pack registry (PRMT-2, ADR-0050). There is no
+        // `GET /v1/context-packs/{name}` resolve route, and that is the
+        // difference between the two authored asset types rather than an
+        // omission: a prompt is fetched by name, and a pack's content
+        // arrives through `/v1/inject` as ranked pinned material.
+        .route("/v1/context-packs", get(packs::list).post(packs::author))
         // The lapse plane (AUTHZ-4, ADR-0037). `POST /v1/lapses` opens a
         // *proposal* and grants nothing; the grant is that proposal's
         // effect, beside `/publish` and taking the same shape.

@@ -463,6 +463,19 @@ pub async fn compose_candidates(
               and (scope_id, sensitivity)
                   in (select * from unnest($2::uuid[], $3::text[]))
               and valid_from <= $4 and (valid_to is null or valid_to > $4)
+              -- PRMT-2 (ADR-0050 decision 8): a context pack's chunk is
+              -- never admitted by `MemoryRead`. Chunk rows are `records`
+              -- rows at the authoring scope, so without this they would be
+              -- ordinary memory — an unpublished bundle composing into
+              -- somebody's session marked `[unreviewed]`, which is the one
+              -- thing "a pack reaches a session only through review" says
+              -- cannot happen. The exclusion is here, in the query, rather
+              -- than in a caller that could forget it.
+              and not exists (
+                  select 1 from context_pack_chunks c
+                  where c.tenant_id = records.tenant_id and c.record_id = records.id
+              )
+
               -- The named-id restriction (CTX-4, ADR-0041 decision 5).
               -- Null means "sweep", which is what every inject passes.
               and ($9::uuid[] is null or id = any($9))
@@ -556,6 +569,19 @@ pub async fn compose_candidates_as_of(
             where tenant_id = $1
               and tx_from <= $4 and (tx_to is null or tx_to > $4)
               and valid_from <= $5 and (valid_to is null or valid_to > $5)
+              -- PRMT-2 (ADR-0050 decision 8): a context pack's chunk is
+              -- never admitted by `MemoryRead`. Chunk rows are `records`
+              -- rows at the authoring scope, so without this they would be
+              -- ordinary memory — an unpublished bundle composing into
+              -- somebody's session marked `[unreviewed]`, which is the one
+              -- thing "a pack reaches a session only through review" says
+              -- cannot happen. The exclusion is here, in the query, rather
+              -- than in a caller that could forget it.
+              and not exists (
+                  select 1 from context_pack_chunks c
+                  where c.tenant_id = records_versions.tenant_id and c.record_id = records_versions.id
+              )
+
               and ($7::uuid[] is null or id = any($7))
         ),
         -- The strictest tier each record has carried at or since `tx_at`

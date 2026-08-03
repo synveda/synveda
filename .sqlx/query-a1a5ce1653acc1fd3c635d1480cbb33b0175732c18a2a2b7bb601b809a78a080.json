@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into context_pack_documents\n             (tenant_id, scope_id, pack_name, document_name, title, sensitivity,\n              object_hash, chunks, created_by, updated_by)\n         values ($1, $2, 'payments', 'runbooks/refunds.md', 'Refunds runbook',\n                 'internal', $3, 1, $4, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a1a5ce1653acc1fd3c635d1480cbb33b0175732c18a2a2b7bb601b809a78a080"
+}

@@ -195,6 +195,75 @@ permit (
         && resource.kind != "user"
 };
 
+// The context-pack registry (PRMT-2, ADR-0050 decision 7). The prompt
+// plane's shape above, mirrored tier for tier onto this pack's own
+// MemoryRead — department sharing included, because under `standard` a
+// department's conventions are its members' conventions, which is this
+// pack's default for memory and holds at least as strongly for a glossary.
+//
+// This is the action that admits pack chunks into a block; `MemoryRead`
+// never does (ADR-0050 decision 8).
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackRead",
+    resource
+) when {
+    principal in resource
+        && ["public", "internal"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackRead",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackRead",
+    resource
+) when {
+    principal has department
+        && resource in principal.department
+        && resource.kind != "user"
+        && ["public", "internal"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "contributor", "curator"])
+        && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+// Authoring is pack-uniform, like writing and like PromptWrite above.
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackWrite",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["contributor", "curator"])
+        && resource.kind != "user"
+};
+
 // The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform —
 // see regulated-strict for the full rationale.
 permit (

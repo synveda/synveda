@@ -46,6 +46,7 @@ pub mod hierarchy;
 mod inject;
 pub mod lapses;
 pub mod observe;
+pub mod packs;
 pub mod policy;
 pub mod prompts;
 pub mod proposals;

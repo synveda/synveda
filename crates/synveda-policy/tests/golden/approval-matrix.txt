@@ -58,24 +58,24 @@ regulated-strict   skill restricted division   steward×1 + security-reviewer×1
 regulated-strict   skill restricted department steward×1 + security-reviewer×1 + compliance×1 + 2distinct
 regulated-strict   skill restricted team       steward×1 + security-reviewer×1 + compliance×1 + 2distinct
 regulated-strict   skill restricted user       steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-regulated-strict   context-pack public org        curator×1 + 1distinct
-regulated-strict   context-pack public division   curator×1 + 1distinct
-regulated-strict   context-pack public department curator×1 + 1distinct
+regulated-strict   context-pack public org        curator×1 + steward×1 + 2distinct
+regulated-strict   context-pack public division   curator×1 + steward×1 + 2distinct
+regulated-strict   context-pack public department curator×1 + steward×1 + 2distinct
 regulated-strict   context-pack public team       curator×1 + 1distinct
 regulated-strict   context-pack public user       curator×1 + 1distinct
-regulated-strict   context-pack internal org        curator×1 + 1distinct
-regulated-strict   context-pack internal division   curator×1 + 1distinct
-regulated-strict   context-pack internal department curator×1 + 1distinct
+regulated-strict   context-pack internal org        curator×1 + steward×1 + 2distinct
+regulated-strict   context-pack internal division   curator×1 + steward×1 + 2distinct
+regulated-strict   context-pack internal department curator×1 + steward×1 + 2distinct
 regulated-strict   context-pack internal team       curator×1 + 1distinct
 regulated-strict   context-pack internal user       curator×1 + 1distinct
-regulated-strict   context-pack confidential org        curator×1 + 1distinct
-regulated-strict   context-pack confidential division   curator×1 + 1distinct
-regulated-strict   context-pack confidential department curator×1 + 1distinct
+regulated-strict   context-pack confidential org        curator×1 + steward×1 + 2distinct
+regulated-strict   context-pack confidential division   curator×1 + steward×1 + 2distinct
+regulated-strict   context-pack confidential department curator×1 + steward×1 + 2distinct
 regulated-strict   context-pack confidential team       curator×1 + 1distinct
 regulated-strict   context-pack confidential user       curator×1 + 1distinct
-regulated-strict   context-pack restricted org        curator×1 + compliance×1 + 2distinct
-regulated-strict   context-pack restricted division   curator×1 + compliance×1 + 2distinct
-regulated-strict   context-pack restricted department curator×1 + compliance×1 + 2distinct
+regulated-strict   context-pack restricted org        curator×1 + steward×1 + compliance×1 + 2distinct
+regulated-strict   context-pack restricted division   curator×1 + steward×1 + compliance×1 + 2distinct
+regulated-strict   context-pack restricted department curator×1 + steward×1 + compliance×1 + 2distinct
 regulated-strict   context-pack restricted team       curator×1 + compliance×1 + 2distinct
 regulated-strict   context-pack restricted user       curator×1 + compliance×1 + 2distinct
 regulated-strict   policy public org        steward×2 + 2distinct
