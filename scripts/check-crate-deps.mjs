@@ -33,6 +33,12 @@ const ALLOWED = {
   // a pack against the same schema the gateway's reloader enforces.
   // Audit added with AUD-1 (ADR-0019): the break-glass audits itself, and
   // `synveda audit verify` is the operator's chain check.
+  // VedaFlow added with SKIL-1 (ADR-0051 decision 12): `synveda skill install`
+  // recomputes each written file's content address and compares it to the one
+  // the published commit named. That is what makes "installs unmodified" a
+  // measurement rather than a claim, and it is worth more computed by the
+  // client than trusted from the server — a materialised bundle carries no
+  // watermark of its own (force 2), so this hash is its whole provenance.
   // The eval harness depends on no Synveda crate at all, and this empty
   // set is the enforcement (EVAL-1, ADR-0028 decision 1). An eval that can
   // link the store can seed and read around the PDP and would then report
@@ -46,6 +52,7 @@ const ALLOWED = {
     "synveda-identity",
     "synveda-policy",
     "synveda-audit",
+    "synveda-vedaflow",
   ],
 };
 

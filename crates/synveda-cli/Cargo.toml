@@ -22,6 +22,9 @@ synveda-identity = { workspace = true }
 synveda-policy = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }
+# `synveda skill install` recomputes what it wrote against the address the
+# published commit named (SKIL-1, ADR-0051 decision 12).
+synveda-vedaflow = { workspace = true }
 
 base64 = { workspace = true }
 chrono = { workspace = true }
