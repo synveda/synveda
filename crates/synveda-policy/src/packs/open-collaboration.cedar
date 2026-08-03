@@ -268,6 +268,79 @@ permit (
         && resource.kind != "user"
 };
 
+// The skills registry (SKIL-1, ADR-0051 decision 10). The context-pack
+// plane's shape above, mirrored tier for tier onto this pack's own
+// MemoryRead — org-wide, personal scopes excluded, which is this pack's
+// whole content.
+//
+// A skill composes into no block (decision 9); this decides whether an
+// install may write the bundle onto this caller's disk. Authoring is
+// separate from ContextPackWrite because a skill is executable, and the
+// approval matrix still asks for a steward and a security reviewer, two
+// distinct people, under this pack as under every other (ADR-0051
+// decision 17).
+permit (
+    principal,
+    action == Synveda::Action::"SkillRead",
+    resource
+) when {
+    principal in resource
+        && ["public", "internal"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SkillRead",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SkillRead",
+    resource
+) when {
+    principal has home
+        && resource in principal.tenant
+        && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SkillRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "contributor", "curator"])
+        && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+// Authoring is pack-uniform, like writing and like PromptWrite above:
+// openness is a read-side property.
+permit (
+    principal,
+    action == Synveda::Action::"SkillWrite",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SkillWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["contributor", "curator"])
+        && resource.kind != "user"
+};
+
 // The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform —
 // see regulated-strict for the full rationale. Openness is a read-side
 // property; what a tier *means* is uniform, or `restricted` would mean

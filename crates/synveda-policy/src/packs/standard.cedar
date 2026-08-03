@@ -264,6 +264,75 @@ permit (
         && resource.kind != "user"
 };
 
+// The skills registry (SKIL-1, ADR-0051 decision 10). The context-pack
+// plane's shape above, mirrored tier for tier onto this pack's own
+// MemoryRead — department sharing included, because under `standard` a
+// department's skills are its members' skills.
+//
+// A skill composes into no block (decision 9); this decides whether an
+// install may write the bundle onto this caller's disk. Authoring is
+// separate from ContextPackWrite because a skill is executable.
+permit (
+    principal,
+    action == Synveda::Action::"SkillRead",
+    resource
+) when {
+    principal in resource
+        && ["public", "internal"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SkillRead",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SkillRead",
+    resource
+) when {
+    principal has department
+        && resource in principal.department
+        && resource.kind != "user"
+        && ["public", "internal"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SkillRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "contributor", "curator"])
+        && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+// Authoring is pack-uniform, like writing and like PromptWrite above.
+permit (
+    principal,
+    action == Synveda::Action::"SkillWrite",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SkillWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["contributor", "curator"])
+        && resource.kind != "user"
+};
+
 // The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform —
 // see regulated-strict for the full rationale.
 permit (

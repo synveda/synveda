@@ -46,7 +46,7 @@ const ALL_SCOPES: [&str; 8] = [
 /// The decision columns: the action vocabulary, with `RoleAssign` split
 /// by what is being granted — the base layer decides those differently
 /// (ADR-0015 decision 5).
-const COLUMNS: [(Action, Option<Role>); 28] = [
+const COLUMNS: [(Action, Option<Role>); 30] = [
     (Action::HierarchyCreate, None),
     (Action::HierarchyRead, None),
     (Action::HierarchyUpdate, None),
@@ -57,6 +57,8 @@ const COLUMNS: [(Action, Option<Role>); 28] = [
     (Action::PromptWrite, None),
     (Action::ContextPackRead, None),
     (Action::ContextPackWrite, None),
+    (Action::SkillRead, None),
+    (Action::SkillWrite, None),
     (Action::QuarantineRead, None),
     (Action::QuarantineReview, None),
     (Action::PolicyRead, None),
@@ -229,6 +231,7 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::MemoryRead, None),
             (Action::PromptRead, None),
             (Action::ContextPackRead, None),
+            (Action::SkillRead, None),
             (Action::ProposalRead, None),
         ],
         // Contributing content roles: read plus the shared-scope write
@@ -252,6 +255,13 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             // business.
             (Action::ContextPackRead, None),
             (Action::ContextPackWrite, None),
+            // And the skills registry's two, on the same rule again
+            // (SKIL-1, ADR-0051 decision 10). `SkillWrite` is separate
+            // from `ContextPackWrite` because a skill is executable, and
+            // that separability is a *pack's* to use: the embedded three
+            // grant them together, and a custom pack may not.
+            (Action::SkillRead, None),
+            (Action::SkillWrite, None),
             (Action::ProposalRead, None),
             (Action::ProposalOpen, None),
         ],
@@ -267,6 +277,8 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::PromptWrite, None),
             (Action::ContextPackRead, None),
             (Action::ContextPackWrite, None),
+            (Action::SkillRead, None),
+            (Action::SkillWrite, None),
             (Action::ChannelRead, None),
             (Action::ChannelPublish, None),
             (Action::ChannelRollback, None),
@@ -342,13 +354,15 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::ChannelRead, None),
             (Action::ProposalRead, None),
         ],
-        // Security-reviewer's first live actions (MEM-2, ADR-0021
-        // decision 6): adjudicating quarantined observe events. SKIL-2
-        // adds skill approval.
         // Security-reviewer's live actions: adjudicating quarantined
         // observe events (MEM-2, ADR-0021 decision 6) and, since FLOW-3,
-        // reviewing proposals — the floor requires one on every skill,
-        // and SKIL-2 is what makes skills exist to review.
+        // reviewing proposals. The floor requires one on every skill, and
+        // SKIL-1 is what makes skills exist to review — which closes the
+        // last marker row AUTHZ-3's status note left open. It holds no
+        // `SkillRead`: reviewing is `ProposalReview`, and a proposal
+        // carries the bytes to its reviewer without granting them the
+        // registry (ADR-0032 decision 16's separation, arriving where it
+        // matters most).
         Role::SecurityReviewer => vec![
             (Action::QuarantineRead, None),
             (Action::QuarantineReview, None),
@@ -423,6 +437,8 @@ fn assert_matrix(pack: &str, version: i64) {
                         | Action::PromptWrite
                         | Action::ContextPackRead
                         | Action::ContextPackWrite
+                        | Action::SkillRead
+                        | Action::SkillWrite
                         | Action::QuarantineReview
                         | Action::ServiceIdentityManage
                         | Action::ChannelRead
@@ -435,8 +451,8 @@ fn assert_matrix(pack: &str, version: i64) {
                         | Action::LapseRevoke
                 ) && target.is_none()
                 {
-                    // The schema scopes the memory plane, both authored
-                    // asset planes, QuarantineReview,
+                    // The schema scopes the memory plane, all three
+                    // authored asset planes, QuarantineReview,
                     // ServiceIdentityManage, the channel plane, and
                     // proposal open/review to Scope resources; a tenant-resource request is
                     // unrepresentable (ADR-0018 decision 3, ADR-0020
@@ -472,20 +488,20 @@ fn assert_matrix(pack: &str, version: i64) {
 /// regulated-strict: the golden matrix (the AC).
 #[test]
 fn matrix_regulated_strict() {
-    assert_matrix(REGULATED_STRICT, 13);
+    assert_matrix(REGULATED_STRICT, 14);
 }
 
 /// standard: identical role matrix — packs differ on composition
 /// membership, never on who administers (ADR-0015 decision 4).
 #[test]
 fn matrix_standard() {
-    assert_matrix(STANDARD, 13);
+    assert_matrix(STANDARD, 14);
 }
 
 /// open-collaboration: identical role matrix.
 #[test]
 fn matrix_open_collaboration() {
-    assert_matrix(OPEN_COLLABORATION, 13);
+    assert_matrix(OPEN_COLLABORATION, 14);
 }
 
 /// A tenant-wide binding is in force everywhere, the tenant plane

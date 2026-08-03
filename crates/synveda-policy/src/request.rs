@@ -127,6 +127,28 @@ pub enum Action {
     /// documents are not hand-written templates, and a pack must be able to
     /// price the two differently.
     ContextPackWrite,
+    /// Be served a skill bundle attached to the resource scope (SKIL-1,
+    /// ADR-0051 decision 10).
+    ///
+    /// [`Action::PromptRead`]'s shape and none of
+    /// [`Action::ContextPackRead`]'s: a skill is fetched by name and
+    /// materialised into a client, never ranked into a composed block
+    /// (decision 9), so this action is taken on its own route and appears
+    /// nowhere in the composition plan walk.
+    ///
+    /// Carries the tier for [`Action::PromptRead`]'s reason and carries no
+    /// `lapsed` for the same one. It is also the read action that makes a
+    /// rewind or a pin of `skill/published` decidable, which discharges
+    /// ADR-0036 decision 3 for the **last** of the three kinds it refused by
+    /// name — after this, every asset kind with a channel has a read action.
+    SkillRead,
+    /// Author a skill draft at the resource scope (ADR-0051 decision 10).
+    ///
+    /// Its own action rather than [`Action::ContextPackWrite`] on
+    /// [`Action::ChannelRollback`]'s separability rule, and here the reason
+    /// is sharpest: a skill is executable, so a pack must be able to say
+    /// "curate conventions here" without saying "author code here".
+    SkillWrite,
     /// List/read quarantined observe events: the tenant's pending queue
     /// (the tenant resource) or a subtree's (a scope) — `/v1/quarantine`
     /// (MEM-2, ADR-0021 decision 6).
@@ -257,6 +279,8 @@ impl Action {
             Action::PromptWrite => "prompt.write",
             Action::ContextPackRead => "context_pack.read",
             Action::ContextPackWrite => "context_pack.write",
+            Action::SkillRead => "skill.read",
+            Action::SkillWrite => "skill.write",
             Action::QuarantineRead => "quarantine.read",
             Action::QuarantineReview => "quarantine.review",
             Action::PolicyRead => "policy.read",
@@ -292,6 +316,8 @@ impl Action {
             Action::PromptWrite => "PromptWrite",
             Action::ContextPackRead => "ContextPackRead",
             Action::ContextPackWrite => "ContextPackWrite",
+            Action::SkillRead => "SkillRead",
+            Action::SkillWrite => "SkillWrite",
             Action::QuarantineRead => "QuarantineRead",
             Action::QuarantineReview => "QuarantineReview",
             Action::PolicyRead => "PolicyRead",

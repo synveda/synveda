@@ -267,6 +267,77 @@ permit (
         && resource.kind != "user"
 };
 
+// The skills registry (SKIL-1, ADR-0051 decision 10). The context-pack
+// plane's shape above, mirrored tier for tier onto this pack's own
+// MemoryRead — a skill is content the same people are trusted with,
+// classified on the same four-tier scale, and `restricted` is named by
+// nothing for decision 11's reason.
+//
+// It is a *read* seam only in the sense of being served the bundle: a skill
+// composes into no block (decision 9). What it does is decide whether an
+// install may write these bytes onto this caller's disk, which is why the
+// membership floor is the whole of zero-config here — a team member, and
+// through the base layer's carve-out a team-anchored agent, installs the
+// org's skills with no binding at all.
+//
+// Authoring is separate from ContextPackWrite because a skill is
+// executable: this pack must be able to say "curate conventions here"
+// without saying "author code here". Whether a draft then crosses the trust
+// boundary is the approval matrix, which under every pack asks for a
+// security reviewer and — since ADR-0051 decision 17 — a second signature.
+permit (
+    principal,
+    action == Synveda::Action::"SkillRead",
+    resource
+) when {
+    principal in resource
+        && ["public", "internal"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SkillRead",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SkillRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "contributor", "curator"])
+        && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+// Authoring mirrors PromptWrite, which mirrors the write floor. A draft is
+// not published material — the approval matrix decides that, and for a pack
+// under this pack it now decides it at two distinct people above a leaf
+// (ADR-0050 decision 15).
+permit (
+    principal,
+    action == Synveda::Action::"SkillWrite",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SkillWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["contributor", "curator"])
+        && resource.kind != "user"
+};
+
 // The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform,
 // like the channel, quarantine and proposal planes and for the same reason
 // — what a tier *means* cannot loosen per pack, or `restricted` stops

@@ -48,7 +48,10 @@ unless { context.roles.contains("org-admin") };
 // the same reason: pack material composes through `inject`, which a
 // team-anchored agent already reaches its own chain with — leaving it out
 // would mean an agent composed the org's memory and not the org's
-// conventions, in the same block, off the same walk.
+// conventions, in the same block, off the same walk. SKIL-1 (ADR-0051
+// decision 10) puts `SkillRead` beside them on the plainest version of it:
+// a headless agent that cannot resolve the org's skills is an agent that
+// cannot do the work the skills were published for.
 //
 // The carve-out stays what it was — the *membership* floor, `principal in
 // resource`, reads only — so nothing outside the agent's own chain is
@@ -64,7 +67,8 @@ forbid (
     !([
         Synveda::Action::"MemoryRead",
         Synveda::Action::"PromptRead",
-        Synveda::Action::"ContextPackRead"
+        Synveda::Action::"ContextPackRead",
+        Synveda::Action::"SkillRead"
     ].contains(action) && principal in resource)
 };
 

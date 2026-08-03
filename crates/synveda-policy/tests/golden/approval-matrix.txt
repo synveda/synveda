@@ -138,21 +138,21 @@ standard           prompt restricted division   curator×1 + compliance×1 + 2di
 standard           prompt restricted department curator×1 + compliance×1 + 2distinct
 standard           prompt restricted team       curator×1 + compliance×1 + 2distinct
 standard           prompt restricted user       curator×1 + compliance×1 + 2distinct
-standard           skill public org        steward×1 + security-reviewer×1 + 1distinct
-standard           skill public division   steward×1 + security-reviewer×1 + 1distinct
-standard           skill public department steward×1 + security-reviewer×1 + 1distinct
-standard           skill public team       steward×1 + security-reviewer×1 + 1distinct
-standard           skill public user       steward×1 + security-reviewer×1 + 1distinct
-standard           skill internal org        steward×1 + security-reviewer×1 + 1distinct
-standard           skill internal division   steward×1 + security-reviewer×1 + 1distinct
-standard           skill internal department steward×1 + security-reviewer×1 + 1distinct
-standard           skill internal team       steward×1 + security-reviewer×1 + 1distinct
-standard           skill internal user       steward×1 + security-reviewer×1 + 1distinct
-standard           skill confidential org        steward×1 + security-reviewer×1 + 1distinct
-standard           skill confidential division   steward×1 + security-reviewer×1 + 1distinct
-standard           skill confidential department steward×1 + security-reviewer×1 + 1distinct
-standard           skill confidential team       steward×1 + security-reviewer×1 + 1distinct
-standard           skill confidential user       steward×1 + security-reviewer×1 + 1distinct
+standard           skill public org        steward×1 + security-reviewer×1 + 2distinct
+standard           skill public division   steward×1 + security-reviewer×1 + 2distinct
+standard           skill public department steward×1 + security-reviewer×1 + 2distinct
+standard           skill public team       steward×1 + security-reviewer×1 + 2distinct
+standard           skill public user       steward×1 + security-reviewer×1 + 2distinct
+standard           skill internal org        steward×1 + security-reviewer×1 + 2distinct
+standard           skill internal division   steward×1 + security-reviewer×1 + 2distinct
+standard           skill internal department steward×1 + security-reviewer×1 + 2distinct
+standard           skill internal team       steward×1 + security-reviewer×1 + 2distinct
+standard           skill internal user       steward×1 + security-reviewer×1 + 2distinct
+standard           skill confidential org        steward×1 + security-reviewer×1 + 2distinct
+standard           skill confidential division   steward×1 + security-reviewer×1 + 2distinct
+standard           skill confidential department steward×1 + security-reviewer×1 + 2distinct
+standard           skill confidential team       steward×1 + security-reviewer×1 + 2distinct
+standard           skill confidential user       steward×1 + security-reviewer×1 + 2distinct
 standard           skill restricted org        steward×1 + security-reviewer×1 + compliance×1 + 2distinct
 standard           skill restricted division   steward×1 + security-reviewer×1 + compliance×1 + 2distinct
 standard           skill restricted department steward×1 + security-reviewer×1 + compliance×1 + 2distinct
@@ -238,21 +238,21 @@ open-collaboration prompt restricted division   curator×1 + compliance×1 + 2di
 open-collaboration prompt restricted department curator×1 + compliance×1 + 2distinct
 open-collaboration prompt restricted team       curator×1 + compliance×1 + 2distinct
 open-collaboration prompt restricted user       curator×1 + compliance×1 + 2distinct
-open-collaboration skill public org        steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill public division   steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill public department steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill public team       steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill public user       steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill internal org        steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill internal division   steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill internal department steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill internal team       steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill internal user       steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill confidential org        steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill confidential division   steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill confidential department steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill confidential team       steward×1 + security-reviewer×1 + 1distinct
-open-collaboration skill confidential user       steward×1 + security-reviewer×1 + 1distinct
+open-collaboration skill public org        steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill public division   steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill public department steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill public team       steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill public user       steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill internal org        steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill internal division   steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill internal department steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill internal team       steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill internal user       steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill confidential org        steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill confidential division   steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill confidential department steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill confidential team       steward×1 + security-reviewer×1 + 2distinct
+open-collaboration skill confidential user       steward×1 + security-reviewer×1 + 2distinct
 open-collaboration skill restricted org        steward×1 + security-reviewer×1 + compliance×1 + 2distinct
 open-collaboration skill restricted division   steward×1 + security-reviewer×1 + compliance×1 + 2distinct
 open-collaboration skill restricted department steward×1 + security-reviewer×1 + compliance×1 + 2distinct

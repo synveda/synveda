@@ -70,11 +70,19 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// the confinement carve-out gained it too — and re-priced
 /// `regulated-strict`'s `context-pack` approval cell, which FLOW-3 had left
 /// at one curator at every scope kind and nothing could reach until now
-/// (ADR-0050 decisions 7, 8 and 15).
+/// (ADR-0050 decisions 7, 8 and 15). `@14`: SKIL-1 added the skills
+/// registry's two seams — `SkillRead`, on the context-pack plane's shape
+/// and in the confinement carve-out beside it, because an agent that cannot
+/// resolve the org's skills cannot do the work they were published for, and
+/// `SkillWrite`, separate because a skill is executable — and corrected the
+/// **invariant floor's** skill rule, which had required the
+/// `security-reviewer` role at one distinct approver, so under `standard`
+/// and `open-collaboration` one person holding both roles published
+/// executable code alone (ADR-0051 decisions 10 and 17).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 13),
-    (STANDARD, 13),
-    (OPEN_COLLABORATION, 13),
+    (REGULATED_STRICT, 14),
+    (STANDARD, 14),
+    (OPEN_COLLABORATION, 14),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -1055,12 +1063,12 @@ impl Pdp {
         }
         if matches!(
             action,
-            Action::MemoryRead | Action::PromptRead | Action::ContextPackRead
+            Action::MemoryRead | Action::PromptRead | Action::ContextPackRead | Action::SkillRead
         ) {
             // The tier every read seam names (ADR-0038 decision 2; ADR-0049
-            // decision 4; ADR-0050 decision 7). Neither authored-asset read
-            // takes `lapsed`: a lapse relaxes a closed vocabulary, and
-            // `memory.read` is all of it.
+            // decision 4; ADR-0050 decision 7; ADR-0051 decision 10). No
+            // authored-asset read takes `lapsed`: a lapse relaxes a closed
+            // vocabulary, and `memory.read` is all of it.
             let sensitivity = sensitivity.ok_or_else(|| Error::Internal {
                 message: format!("{action} decided without a sensitivity tier in context"),
             })?;
