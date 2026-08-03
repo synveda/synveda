@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select count(*) as \"count!\" from skill_reviews\n               where tenant_id = $1 and scope_id = $2 and skill_name = 'code-review'\n                 and bundle_digest = $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "536c2605fa3d5e09cbf989d4fd43a180660c02df50d05055a73573ffe3d6294a"
+}

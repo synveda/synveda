@@ -21,6 +21,32 @@ use synveda_types::{
     Error, IdentityId, Result, ScopeId, Sensitivity, SkillFilePath, SkillName, TenantId,
 };
 
+/// The automated score a listing renders, and the rubric that produced it.
+///
+/// The pair travels together because neither means anything alone: a score
+/// whose rubric is unknown cannot be told stale from current, and a
+/// version without a score names nothing. Migration 0033's
+/// `skills_quality_pair_check` says the same thing to the database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CachedScore {
+    /// 0..=100, as of the last authoring.
+    pub score: u8,
+    /// The rubric that produced it.
+    pub rubric_version: u32,
+}
+
+impl CachedScore {
+    /// Whether this was produced by the rubric this binary carries.
+    ///
+    /// The one question a caller must ask before rendering the number: a
+    /// score from an older table is a fact about a rubric nobody is using,
+    /// and showing it as current is how a cache becomes a lie.
+    #[must_use]
+    pub fn is_current(&self, rubric_version: u32) -> bool {
+        self.rubric_version == rubric_version
+    }
+}
+
 /// A skill's draft row: the bundle's identity and its registry metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredSkill {
@@ -35,6 +61,15 @@ pub struct StoredSkill {
     /// Its classification. Per skill rather than per file, because a client
     /// loads a bundle whole (ADR-0051 decision 11).
     pub sensitivity: Sensitivity,
+    /// The automated rubric's score as of the last authoring, and which
+    /// rubric produced it (SKIL-3, ADR-0053 decision 3).
+    ///
+    /// **A cache, for the registry listing and nothing else.** No gate
+    /// reads it — the publish seam recomputes from the bytes it is about
+    /// to publish — and a pair whose version is not the compiled-in one is
+    /// rendered stale rather than current. `None` is a skill authored
+    /// before the rubric existed, which re-authoring fills in.
+    pub quality: Option<CachedScore>,
     /// When it was first authored.
     pub created_at: DateTime<Utc>,
     /// Who first authored it.
@@ -76,6 +111,11 @@ pub struct NewSkill<'a> {
     pub description: &'a str,
     /// Its tier.
     pub sensitivity: Sensitivity,
+    /// The rubric's verdict on the bundle being written, cached for the
+    /// registry listing (ADR-0053 decision 3). Recomputed by the caller
+    /// from exactly the bytes it is about to store, so the cache is never
+    /// written from another cache.
+    pub quality: CachedScore,
     /// Who is authoring.
     pub author: IdentityId,
 }
@@ -132,6 +172,8 @@ struct SkillRow {
     name: String,
     description: String,
     sensitivity: String,
+    quality_score: Option<i16>,
+    rubric_version: Option<i32>,
     created_at: DateTime<Utc>,
     created_by: uuid::Uuid,
     updated_at: DateTime<Utc>,
@@ -145,11 +187,24 @@ impl TryFrom<SkillRow> for StoredSkill {
         // Every column's CHECK mirrors a vocabulary this crate can parse, so
         // a value outside one means code and schema have drifted. Say so
         // rather than shrug — the role_bindings discipline (ADR-0015).
+        //
+        // The score pair is `zip`ped rather than matched arm by arm because
+        // migration 0033's CHECK already refuses a half-populated pair; a
+        // half-populated one here would be schema drift, and dropping it is
+        // the reading that cannot render a number nobody computed.
+        let quality = row
+            .quality_score
+            .zip(row.rubric_version)
+            .map(|(score, version)| CachedScore {
+                score: score.clamp(0, i16::from(u8::MAX)) as u8,
+                rubric_version: version.max(0).unsigned_abs(),
+            });
         Ok(StoredSkill {
             scope_id: ScopeId::from_uuid(row.scope_id),
             name: row.name.parse()?,
             description: row.description,
             sensitivity: row.sensitivity.parse()?,
+            quality,
             created_at: row.created_at,
             created_by: IdentityId::from_uuid(row.created_by),
             updated_at: row.updated_at,
@@ -222,20 +277,25 @@ pub async fn upsert_skill<'e, E: PgExecutor<'e>>(
     let row = sqlx::query_as!(
         SkillRow,
         r#"insert into skills
-               (tenant_id, scope_id, name, description, sensitivity, created_by, updated_by)
-           values ($1, $2, $3, $4, $5, $6, $6)
+               (tenant_id, scope_id, name, description, sensitivity, quality_score,
+                rubric_version, created_by, updated_by)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $8)
            on conflict (tenant_id, scope_id, name) do update
-               set description = excluded.description,
-                   sensitivity = excluded.sensitivity,
-                   updated_at  = now(),
-                   updated_by  = excluded.updated_by
-           returning scope_id, name, description, sensitivity, created_at, created_by,
-                     updated_at, updated_by"#,
+               set description    = excluded.description,
+                   sensitivity    = excluded.sensitivity,
+                   quality_score  = excluded.quality_score,
+                   rubric_version = excluded.rubric_version,
+                   updated_at     = now(),
+                   updated_by     = excluded.updated_by
+           returning scope_id, name, description, sensitivity, quality_score, rubric_version,
+                     created_at, created_by, updated_at, updated_by"#,
         tenant.as_uuid(),
         new.scope_id.as_uuid(),
         new.name.as_str(),
         new.description,
         new.sensitivity.as_str(),
+        i16::from(new.quality.score),
+        i32::try_from(new.quality.rubric_version).unwrap_or(i32::MAX),
         new.author.as_uuid(),
     )
     .fetch_one(executor)
@@ -348,8 +408,8 @@ pub async fn skill<'e, E: PgExecutor<'e>>(
 ) -> Result<Option<StoredSkill>> {
     let row = sqlx::query_as!(
         SkillRow,
-        r#"select scope_id, name, description, sensitivity, created_at, created_by,
-                  updated_at, updated_by
+        r#"select scope_id, name, description, sensitivity, quality_score, rubric_version,
+                  created_at, created_by, updated_at, updated_by
            from skills
            where tenant_id = $1 and scope_id = $2 and name = $3"#,
         tenant.as_uuid(),
@@ -380,8 +440,8 @@ pub async fn list_skills<'e, E: PgExecutor<'e>>(
 ) -> Result<Vec<StoredSkill>> {
     let rows = sqlx::query_as!(
         SkillRow,
-        r#"select scope_id, name, description, sensitivity, created_at, created_by,
-                  updated_at, updated_by
+        r#"select scope_id, name, description, sensitivity, quality_score, rubric_version,
+                  created_at, created_by, updated_at, updated_by
            from skills
            where tenant_id = $1 and scope_id = $2
            order by name"#,

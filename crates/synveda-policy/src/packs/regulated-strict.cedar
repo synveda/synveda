@@ -338,6 +338,28 @@ permit (
         && resource.kind != "user"
 };
 
+// The quality override (SKIL-3, ADR-0053 decision 8): who may publish a
+// skill the rubric or the checklist says is below this pack's bar.
+//
+// `steward` and `org-admin` only, and the exclusion of `curator` is the
+// point rather than an omission. A curator is exactly the role that
+// approves and publishes skills here, so granting it the override would
+// make the gate self-service: the same person who decided the bundle was
+// good enough would be the person recording that it was not. Under this
+// pack the two authorities are two people, which is ADR-0051 decision 18's
+// finding applied one seam later.
+//
+// This grants nothing about the *security* scan, which has no override at
+// any tier and must not acquire one (ADR-0052 decision 3).
+permit (
+    principal,
+    action == Synveda::Action::"SkillQualityOverride",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["steward", "org-admin"])
+};
+
 // The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform,
 // like the channel, quarantine and proposal planes and for the same reason
 // — what a tier *means* cannot loosen per pack, or `restricted` stops

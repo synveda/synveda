@@ -22,7 +22,7 @@ use cedar_policy::{
 use synveda_types::{
     ApprovalMatrix, CompositionConfig, DedupConfig, Error, HierarchyNode, Lapse, LapseAction,
     LapseConfig, PackConfig, PromotionConfig, RedactionConfig, Result, RetentionConfig, Role,
-    ScopeId, ScopeKind, Sensitivity, SkillScanConfig, TenantId,
+    ScopeId, ScopeKind, Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId,
 };
 
 use crate::entity_store::EntityStore;
@@ -136,6 +136,9 @@ struct LoadedPack {
     /// rather than reports (SKIL-2, ADR-0052 decision 9). `Copy`, so no
     /// `Arc`.
     scan: SkillScanConfig,
+    /// The bar a skill bundle's quality must clear to publish without an
+    /// override (SKIL-3, ADR-0053 decision 9). `Copy`, so no `Arc`.
+    quality: SkillQualityConfig,
 }
 
 /// Where the effective pack came from — logged with every decision so the
@@ -226,6 +229,16 @@ pub struct EffectivePack {
     /// never to decide *whether* to scan, which is not a pack's to say,
     /// only where its threshold sits above the invariant floor.
     pub scan: SkillScanConfig,
+    /// The pack's skill-quality configuration (SKIL-3, ADR-0053
+    /// decision 9): the automated score a bundle must reach and whether a
+    /// reviewer checklist is mandatory, both read at the publish seam to
+    /// decide whether the publication needs an override.
+    ///
+    /// Its fail-safe is the **opposite** of `scan`'s and deliberately so:
+    /// an unconfigured pack gates nothing here, because quality is not an
+    /// invariant and a product that began refusing publications on a
+    /// rubric nobody opted into would break every tenant on an upgrade.
+    pub quality: SkillQualityConfig,
 }
 
 impl fmt::Display for PackOrigin {
@@ -307,6 +320,7 @@ impl Pdp {
                 LapseConfig::STRICT,
                 RetentionConfig::STRICT,
                 SkillScanConfig::STRICT,
+                SkillQualityConfig::STRICT,
             ),
             (
                 STANDARD,
@@ -315,6 +329,7 @@ impl Pdp {
                 LapseConfig::RELAXED,
                 RetentionConfig::DEFAULT,
                 SkillScanConfig::FLOOR,
+                SkillQualityConfig::MODERATE,
             ),
             (
                 OPEN_COLLABORATION,
@@ -323,10 +338,11 @@ impl Pdp {
                 LapseConfig::RELAXED,
                 RetentionConfig::DEFAULT,
                 SkillScanConfig::FLOOR,
+                SkillQualityConfig::OPEN,
             ),
         ];
         let mut embedded = HashMap::new();
-        for ((name, version), (_, source, redaction, lapse, retention, scan)) in
+        for ((name, version), (_, source, redaction, lapse, retention, scan, quality)) in
             EMBEDDED_PACKS.iter().zip(sources)
         {
             let pack = compile(
@@ -357,6 +373,7 @@ impl Pdp {
                     // whose disposal ADR-0020/0021 already promised.
                     retention: Some(retention),
                     scan: Some(scan),
+                    quality: Some(quality),
                 },
             )
             .map_err(|err| Error::Internal {
@@ -411,6 +428,7 @@ impl Pdp {
                 dedup: None,
                 retention: None,
                 scan: None,
+                quality: None,
             },
         )
         .map(|_| ())
@@ -795,6 +813,7 @@ impl Pdp {
             dedup: pack.dedup,
             retention: pack.retention,
             scan: pack.scan,
+            quality: pack.quality,
         }
     }
 
@@ -1362,6 +1381,12 @@ fn compile(
     // configuration must not be able to say is clamped on every read
     // rather than checked once here.
     let scan = config.scan.unwrap_or_default();
+    // Same shape, opposite fail-safe: an unconfigured pack gets
+    // `SkillQualityConfig::OPEN`, which gates nothing. ADR-0053 decision 9
+    // — a pack that has said nothing about quality has not asked for a
+    // quality gate, and there is no floor here to hold, because quality is
+    // not an invariant.
+    let quality = config.quality.unwrap_or_default();
     // A matrix asking more of one role than it asks of people is
     // unsatisfiable at every cell it governs, and it would fail silently
     // at review time rather than loudly at install time (ADR-0032).
@@ -1422,5 +1447,6 @@ fn compile(
         dedup,
         retention,
         scan,
+        quality,
     })
 }

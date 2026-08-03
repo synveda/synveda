@@ -42,6 +42,7 @@ pub mod rls;
 pub mod role_bindings;
 pub mod scope_chain;
 pub mod search;
+pub mod skill_reviews;
 pub mod skills;
 pub mod tenants;
 
