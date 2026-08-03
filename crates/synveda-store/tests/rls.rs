@@ -197,6 +197,9 @@ async fn visible_rows(
 const COVERED: &[&str] = &[
     "audit_chain_heads",
     "audit_log",
+    "context_pack_chunks",
+    "context_pack_documents",
+    "context_packs",
     "graph_edges",
     "graph_edges_history",
     "graph_vertices",
@@ -4024,5 +4027,268 @@ fn a_draft_cannot_be_forged_moved_renamed_or_raised_to_restricted() {
             deleted.is_err(),
             "the app role must hold no DELETE on prompts"
         );
+    });
+}
+
+// ── PRMT-2: the context-pack registry and its chunk mapping ─────────────────
+
+/// A tenant with one pack, one document, one pinned record, and the chunk
+/// row that ties the record to the document address it was cut from.
+///
+/// The object is `seed_vedaflow`'s for migration 0029's reason, and the
+/// record is a real `records::insert` — a fixture that faked either would be
+/// testing a table the product cannot produce.
+async fn seed_context_pack(pool: &PgPool) -> (TenantId, ScopeId, RecordId) {
+    let (tenant, scope) = seed_vedaflow(pool).await;
+    let author = IdentityId::new();
+    sqlx::query!(
+        "insert into context_packs
+             (tenant_id, scope_id, name, description, created_by, updated_by)
+         values ($1, $2, 'payments', 'payment conventions', $3, $3)",
+        tenant.as_uuid(),
+        scope.as_uuid(),
+        author.as_uuid(),
+    )
+    .execute(pool)
+    .await
+    .expect("seed pack");
+    sqlx::query!(
+        "insert into context_pack_documents
+             (tenant_id, scope_id, pack_name, document_name, title, sensitivity,
+              object_hash, chunks, created_by, updated_by)
+         values ($1, $2, 'payments', 'runbooks/refunds.md', 'Refunds runbook',
+                 'internal', $3, 1, $4, $4)",
+        tenant.as_uuid(),
+        scope.as_uuid(),
+        &[1u8; 32][..],
+        author.as_uuid(),
+    )
+    .execute(pool)
+    .await
+    .expect("seed document");
+
+    let record = RecordId::new();
+    let mut chunk = state("Escalate refunds over £500.");
+    chunk.scope_id = scope;
+    // A pack chunk is a pinned record — that is the decision the whole
+    // feature hangs on (ADR-0050 decision 2), and it is also what makes the
+    // FK below safe: the retention sweep's own SQL exempts `pinned`.
+    chunk.kind = RecordKind::Pinned;
+    insert(pool, record, tenant, &chunk)
+        .await
+        .expect("seed chunk record");
+    sqlx::query!(
+        "insert into context_pack_chunks
+             (tenant_id, record_id, scope_id, pack_name, document_name, title,
+              document_hash, ordinal, heading)
+         values ($1, $2, $3, 'payments', 'runbooks/refunds.md', 'Refunds runbook',
+                 $4, 0, 'Refunds')",
+        tenant.as_uuid(),
+        record.as_uuid(),
+        scope.as_uuid(),
+        &[1u8; 32][..],
+    )
+    .execute(pool)
+    .await
+    .expect("seed chunk mapping");
+    (tenant, scope, record)
+}
+
+/// The attacks a pack invites, which are the prompt registry's plus one
+/// that is entirely new: **the chunk mapping decides what composes as
+/// published**, so a forged or edited chunk row is a way to put unreviewed
+/// text into somebody's session under a reviewed document's name
+/// (ADR-0050 decision 3).
+#[test]
+fn a_pack_cannot_be_forged_moved_renamed_raised_or_have_its_chunks_relabelled() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_scope, victim_record) = seed_context_pack(&db.pool).await;
+        let (adversary, adversary_scope, _) = seed_context_pack(&db.pool).await;
+
+        // 1. Isolation across all three tables.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        for table in [
+            "context_packs",
+            "context_pack_documents",
+            "context_pack_chunks",
+        ] {
+            let seen: i64 = sqlx::query_scalar(&format!(
+                "select count(*) from {table} where tenant_id = $1"
+            ))
+            .bind(victim.as_uuid())
+            .fetch_one(&mut *tx)
+            .await
+            .expect("count another tenant's rows");
+            assert_eq!(seen, 0, "another tenant's {table} rows must be invisible");
+        }
+
+        let forged = sqlx::query!(
+            "insert into context_packs
+                 (tenant_id, scope_id, name, description, created_by, updated_by)
+             values ($1, $2, 'forged', 'forged', $3, $3)",
+            victim.as_uuid(),
+            victim_scope.as_uuid(),
+            IdentityId::new().as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant pack must be rejected: it would author content \
+             into a tenant no ContextPackWrite decision was taken in"
+        );
+        drop(tx);
+
+        // 2. Identity is immutable, content is not.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        sqlx::query!(
+            "update context_pack_documents set title = 'Refunds runbook (v2)'
+             where tenant_id = $1 and scope_id = $2",
+            adversary.as_uuid(),
+            adversary_scope.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("editing your own document is the authoring act");
+
+        let moved = sqlx::query!(
+            "update context_packs set scope_id = $3 where tenant_id = $1 and scope_id = $2",
+            adversary.as_uuid(),
+            adversary_scope.as_uuid(),
+            ScopeId::new().as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            moved.is_err(),
+            "a pack cannot change scope: ContextPackWrite was decided at the \
+             one it was authored in"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let renamed = sqlx::query!(
+            "update context_pack_documents set document_name = 'runbooks/other.md'
+             where tenant_id = $1 and scope_id = $2",
+            adversary.as_uuid(),
+            adversary_scope.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            renamed.is_err(),
+            "a rename is a different document, not an edit: a published entry \
+             would otherwise name content nobody reviewed under that name"
+        );
+        drop(tx);
+
+        // 3. The tier nothing can mint (ADR-0050 decision 12).
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let raised = sqlx::query!(
+            "update context_pack_documents set sensitivity = 'restricted'
+             where tenant_id = $1 and scope_id = $2",
+            adversary.as_uuid(),
+            adversary_scope.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            raised.is_err(),
+            "no path in the product mints `restricted` for an authored asset"
+        );
+        drop(tx);
+
+        // 4. **The new attack.** A chunk row's `document_hash` is what
+        //    decides whether its record composes as published, so relabelling
+        //    one would move unreviewed text under a reviewed document's
+        //    address. There is no UPDATE grant and a trigger behind it, which
+        //    is one step stricter than the draft tables because nothing about
+        //    a chunk mapping can legitimately change.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let relabelled = sqlx::query!(
+            "update context_pack_chunks set document_hash = $2 where tenant_id = $1",
+            adversary.as_uuid(),
+            &[3u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            relabelled.is_err(),
+            "a chunk cannot be re-pointed at another document version: that is \
+             how unreviewed text would compose under a reviewed address"
+        );
+        drop(tx);
+
+        // 5. A chunk pointed at another tenant's record composes nothing.
+        //    `records_pk` is the id alone, so the FK does not carry a tenant
+        //    and the insert is accepted — the mapping is a claim, and what
+        //    makes the claim worthless is that composition resolves it
+        //    against `records` inside this tenant's transaction, where the
+        //    victim's row is invisible (ADR-0009). The chunk is a name for a
+        //    record, never a capability over one; this is that sentence
+        //    tested rather than asserted.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        sqlx::query!(
+            "insert into context_pack_chunks
+                 (tenant_id, record_id, scope_id, pack_name, document_name, title,
+                  document_hash, ordinal)
+             values ($1, $2, $3, 'payments', 'runbooks/forged.md', 'f', $4, 7)",
+            adversary.as_uuid(),
+            victim_record.as_uuid(),
+            adversary_scope.as_uuid(),
+            &[1u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("the mapping table cannot check another tenant's records");
+        assert!(
+            records::current(&mut *tx, victim_record)
+                .await
+                .expect("resolve the pointed-at record")
+                .is_none(),
+            "the record a forged chunk names must stay unreadable, so the \
+             chunk resolves to nothing"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let dangling = sqlx::query!(
+            "insert into context_pack_chunks
+                 (tenant_id, record_id, scope_id, pack_name, document_name, title,
+                  document_hash, ordinal)
+             values ($1, $2, $3, 'payments', 'runbooks/dangling.md', 'd', $4, 9)",
+            adversary.as_uuid(),
+            RecordId::new().as_uuid(),
+            adversary_scope.as_uuid(),
+            &[9u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            dangling.is_err(),
+            "a chunk naming a record or an address the store does not hold \
+             must be rejected"
+        );
+        drop(tx);
+
+        // 6. The app role holds no DELETE on any of the three (ADR-0050
+        //    decision 14): retracting a published pack is FLOW-7's rewind,
+        //    and replacing a draft is an overwrite.
+        for table in [
+            "context_packs",
+            "context_pack_documents",
+            "context_pack_chunks",
+        ] {
+            let mut tx = app_tx(&db.pool, Some(adversary)).await;
+            let deleted = sqlx::query(&format!("delete from {table} where tenant_id = $1"))
+                .bind(adversary.as_uuid())
+                .execute(&mut *tx)
+                .await;
+            assert!(
+                deleted.is_err(),
+                "the app role must hold no DELETE on {table}"
+            );
+        }
     });
 }

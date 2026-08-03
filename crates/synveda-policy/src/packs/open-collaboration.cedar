@@ -200,6 +200,74 @@ permit (
         && resource.kind != "user"
 };
 
+// The context-pack registry (PRMT-2, ADR-0050 decision 7). The prompt
+// plane's shape above, mirrored tier for tier onto this pack's own
+// MemoryRead — the org-wide permit included, for the reason the prompt
+// plane gives and more so: a pack whose whole content is org-wide read,
+// withholding the org's own conventions from a session, would be this pack
+// disagreeing with itself.
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackRead",
+    resource
+) when {
+    principal in resource
+        && ["public", "internal"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackRead",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackRead",
+    resource
+) when {
+    principal has home
+        && resource in principal.tenant
+        && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "contributor", "curator"])
+        && resource.kind != "user"
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+
+// Authoring is pack-uniform, like writing and like PromptWrite above:
+// openness is a read-side property.
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackWrite",
+    resource
+) when {
+    principal has home
+        && resource == principal.home
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ContextPackWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["contributor", "curator"])
+        && resource.kind != "user"
+};
+
 // The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform —
 // see regulated-strict for the full rationale. Openness is a read-side
 // property; what a tier *means* is uniform, or `restricted` would mean

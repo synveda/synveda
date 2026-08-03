@@ -30,6 +30,7 @@ pub mod hierarchy;
 pub mod identities;
 pub mod lapses;
 pub mod observe;
+pub mod packs;
 pub mod policy_assignments;
 pub mod policy_packs;
 pub mod promotion;

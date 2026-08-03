@@ -64,11 +64,17 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// shape tier for tier, and `PromptWrite`, mirroring its write floor — and
 /// the base layer's confinement carve-out gained `PromptRead` beside
 /// `MemoryRead`, because a team-anchored agent is the consumer prompts exist
-/// for and the org's are on its own chain (ADR-0049 decision 4).
+/// for and the org's are on its own chain (ADR-0049 decision 4). `@13`:
+/// PRMT-2 added the context-pack registry's two seams on the same shape —
+/// `ContextPackRead` is what admits pack chunks into a composed block, so
+/// the confinement carve-out gained it too — and re-priced
+/// `regulated-strict`'s `context-pack` approval cell, which FLOW-3 had left
+/// at one curator at every scope kind and nothing could reach until now
+/// (ADR-0050 decisions 7, 8 and 15).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 12),
-    (STANDARD, 12),
-    (OPEN_COLLABORATION, 12),
+    (REGULATED_STRICT, 13),
+    (STANDARD, 13),
+    (OPEN_COLLABORATION, 13),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -134,6 +140,32 @@ pub enum PackOrigin {
     /// An assigned name had no compiled pack; fell back to the embedded
     /// default (ADR-0014 decision 7).
     Fallback,
+}
+
+/// What one scope permits this principal to read, as
+/// [`Pdp::permitted_read_tiers`] decided it in one pack resolution.
+///
+/// The two tier sets are independent answers to independent questions, and
+/// that independence is the point (PRMT-2, ADR-0050 decision 8): a scope
+/// may distribute conventions and glossaries to readers who hold no
+/// readable memory there at all, so `context_pack` being non-empty while
+/// `memory` is empty is a supported state and the composition plan must
+/// keep such a scope rather than skip it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermittedTiers {
+    /// The tiers `MemoryRead` permits here, ascending. Empty means no
+    /// memory composes from this scope.
+    pub memory: Vec<Sensitivity>,
+    /// The tiers `ContextPackRead` permits here, ascending. Empty means no
+    /// pack chunk composes from this scope.
+    pub context_pack: Vec<Sensitivity>,
+    /// The `MemoryRead` decision — what the plan records and the audit
+    /// event carries. The pack identity is the same for every ask, one
+    /// resource, one resolution.
+    pub decision: AuthzDecision,
+    /// The pack's own configuration, so a caller planning a scope needs no
+    /// second resolution to read its channel rule.
+    pub effective: EffectivePack,
 }
 
 /// The pack in force for a resource, as [`Pdp::effective`] resolves it.
@@ -491,60 +523,80 @@ impl Pdp {
         self.decide(Some(batch), principal, action, resource, context)
     }
 
-    /// Every `MemoryRead` tier at one scope, as one call (CTX-5, ADR-0042
-    /// decision 6).
+    /// What one scope permits this principal to *read*, as one call
+    /// (CTX-5, ADR-0042 decision 6; PRMT-2, ADR-0050 decision 8).
     ///
-    /// The four asks at a scope differ in exactly one context attribute,
-    /// and everything else about them is identical: the same effective
-    /// pack, the same effective roles, the same entity store. Asking them
-    /// separately re-resolved the pack and re-derived the roles four times
-    /// per scope, which at a widened universe's scale is most of the plan
-    /// stage. This resolves once and evaluates four times.
+    /// The asks at a scope differ in exactly two context attributes — the
+    /// action and the tier — and everything else about them is identical:
+    /// the same effective pack, the same effective roles, the same entity
+    /// store. Asking them separately re-resolved the pack and re-derived
+    /// the roles per ask, which at a widened universe's scale is most of the
+    /// plan stage. This resolves once and evaluates eight times.
     ///
     /// It is the *same* decision either way — `authorize_with` in a loop
     /// produces identical verdicts, which the AUTHZ-5 golden matrix keeps
     /// honest — so this is a shape, not a semantics.
     ///
-    /// Returns the permitted tiers ascending, plus the last decision (the
-    /// pack identity is the same for all four, one resource, one
-    /// resolution) and the pack's own configuration, so a caller planning
-    /// a scope needs no second resolution to read its channel rule.
+    /// Both read actions are decided here rather than one, because ADR-0050
+    /// decision 8 puts `ContextPackRead` *inside* the composition plan walk:
+    /// a scope may distribute conventions to readers holding no readable
+    /// memory there, so the two answers are genuinely independent and a
+    /// second walk to get the other one would be a second authorization
+    /// path.
     pub fn permitted_read_tiers(
         &self,
         batch: &EntityBatch,
         principal: &Principal,
         scope_id: ScopeId,
         context: &AuthzContext<'_>,
-    ) -> Result<(Vec<Sensitivity>, AuthzDecision, EffectivePack)> {
+    ) -> Result<PermittedTiers> {
         let resource = Resource::Scope(scope_id);
         let (pack, origin) = self.resolve_pack(principal.tenant_id, resource, context, false);
         let roles = effective_roles(principal, resource, context);
-        let mut tiers = Vec::with_capacity(Sensitivity::ALL.len());
+        let mut memory = Vec::with_capacity(Sensitivity::ALL.len());
+        let mut context_pack = Vec::with_capacity(Sensitivity::ALL.len());
         let mut last: Option<AuthzDecision> = None;
-        for tier in Sensitivity::ALL {
-            let scoped = AuthzContext {
-                sensitivity: Some(tier),
-                ..*context
-            };
-            let decision = self.evaluate(
-                &pack,
-                origin,
-                &batch.entities,
-                principal,
-                Action::MemoryRead,
-                resource,
-                &roles,
-                &scoped,
-            )?;
-            if decision.allowed {
-                tiers.push(tier);
+        for (action, tiers) in [
+            (Action::MemoryRead, &mut memory),
+            (Action::ContextPackRead, &mut context_pack),
+        ] {
+            for tier in Sensitivity::ALL {
+                let scoped = AuthzContext {
+                    sensitivity: Some(tier),
+                    ..*context
+                };
+                let decision = self.evaluate(
+                    &pack,
+                    origin,
+                    &batch.entities,
+                    principal,
+                    action,
+                    resource,
+                    &roles,
+                    &scoped,
+                )?;
+                if decision.allowed {
+                    tiers.push(tier);
+                }
+                // The `MemoryRead` decision is the one the plan records and
+                // the audit event carries — it is the question "may this
+                // reader compose here" has always meant, and widening it to
+                // whichever ask happened to run last would change what a
+                // stored decision means.
+                if action == Action::MemoryRead {
+                    last = Some(decision);
+                }
             }
-            last = Some(decision);
         }
         let decision = last.ok_or_else(|| Error::Internal {
             message: "the sensitivity vocabulary is empty".to_owned(),
         })?;
-        Ok((tiers, decision, self.effective_from(&pack, origin)))
+        Ok(PermittedTiers {
+            memory,
+            context_pack,
+            decision,
+            effective: self.effective_from(&pack, origin),
+        })
     }
 
     fn decide(
@@ -1001,10 +1053,14 @@ impl Pdp {
             // ADR-0038 decision 2).
             pairs.push(("lapsed".to_owned(), RestrictedExpression::new_bool(lapsed)));
         }
-        if matches!(action, Action::MemoryRead | Action::PromptRead) {
-            // The tier both read seams name (ADR-0038 decision 2; ADR-0049
-            // decision 4). `PromptRead` takes no `lapsed`: a lapse relaxes a
-            // closed vocabulary, and `memory.read` is all of it.
+        if matches!(
+            action,
+            Action::MemoryRead | Action::PromptRead | Action::ContextPackRead
+        ) {
+            // The tier every read seam names (ADR-0038 decision 2; ADR-0049
+            // decision 4; ADR-0050 decision 7). Neither authored-asset read
+            // takes `lapsed`: a lapse relaxes a closed vocabulary, and
+            // `memory.read` is all of it.
             let sensitivity = sensitivity.ok_or_else(|| Error::Internal {
                 message: format!("{action} decided without a sensitivity tier in context"),
             })?;

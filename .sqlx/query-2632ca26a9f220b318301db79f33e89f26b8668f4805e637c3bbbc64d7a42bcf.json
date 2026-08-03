@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into context_pack_chunks\n               (tenant_id, record_id, scope_id, pack_name, document_name, title,\n                document_hash, ordinal, heading)\n           values ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n           on conflict (tenant_id, document_hash, ordinal) do nothing\n           returning record_id as \"record_id!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "record_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Bytea",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2632ca26a9f220b318301db79f33e89f26b8668f4805e637c3bbbc64d7a42bcf"
+}

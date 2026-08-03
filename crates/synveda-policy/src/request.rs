@@ -102,6 +102,31 @@ pub enum Action {
     /// assets here". Whether a draft may then cross the trust boundary is
     /// the approval matrix's arithmetic, never this decision's.
     PromptWrite,
+    /// Be served a context pack attached to the resource scope — the seam
+    /// composition stands on for pack material (PRMT-2, ADR-0050
+    /// decision 7).
+    ///
+    /// Taken per scope inside the plan walk composition already runs, never
+    /// as a second authorization path (decision 8), and it is what *admits*
+    /// pack chunks: [`Action::MemoryRead`] never does, and this action never
+    /// admits a memory. That separation is the case packs exist for — a
+    /// scope may distribute conventions and glossaries to readers who hold
+    /// no readable memory there at all.
+    ///
+    /// Carries the tier for [`Action::PromptRead`]'s reason and carries no
+    /// `lapsed` for the same one. It is also the read action that makes a
+    /// rewind or a pin of `context-pack/published` decidable, which
+    /// discharges ADR-0036 decision 3 for the second of the three kinds it
+    /// refused by name, leaving `skill`.
+    ContextPackRead,
+    /// Author a context pack draft at the resource scope (ADR-0050
+    /// decision 7).
+    ///
+    /// Its own action rather than [`Action::PromptWrite`] on
+    /// [`Action::ChannelRollback`]'s separability rule: bulk external
+    /// documents are not hand-written templates, and a pack must be able to
+    /// price the two differently.
+    ContextPackWrite,
     /// List/read quarantined observe events: the tenant's pending queue
     /// (the tenant resource) or a subtree's (a scope) — `/v1/quarantine`
     /// (MEM-2, ADR-0021 decision 6).
@@ -230,6 +255,8 @@ impl Action {
             Action::MemoryClassify => "memory.classify",
             Action::PromptRead => "prompt.read",
             Action::PromptWrite => "prompt.write",
+            Action::ContextPackRead => "context_pack.read",
+            Action::ContextPackWrite => "context_pack.write",
             Action::QuarantineRead => "quarantine.read",
             Action::QuarantineReview => "quarantine.review",
             Action::PolicyRead => "policy.read",
@@ -263,6 +290,8 @@ impl Action {
             Action::MemoryClassify => "MemoryClassify",
             Action::PromptRead => "PromptRead",
             Action::PromptWrite => "PromptWrite",
+            Action::ContextPackRead => "ContextPackRead",
+            Action::ContextPackWrite => "ContextPackWrite",
             Action::QuarantineRead => "QuarantineRead",
             Action::QuarantineReview => "QuarantineReview",
             Action::PolicyRead => "PolicyRead",

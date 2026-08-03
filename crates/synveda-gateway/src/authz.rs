@@ -643,6 +643,42 @@ pub(crate) fn decide_prompt_read_from(
     )
 }
 
+/// [`decide_read`] for `ContextPackRead` (PRMT-2, ADR-0050 decision 7).
+///
+/// The third action that names a tier, and a separate wrapper for
+/// [`decide_prompt_read`]'s reason. What makes it different from the other
+/// two is what it *admits*: this is the only decision that lets a context
+/// pack's chunks into a composed block, and it never lets a memory in
+/// (decision 8).
+pub(crate) fn decide_context_pack_read(
+    state: &AppState,
+    input: &DecisionInput,
+    resource: Resource,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    decide_context_pack_read_from(state, input, 0, resource, sensitivity)
+}
+
+/// [`decide_context_pack_read`] for a resource whose chain starts at
+/// `position`.
+pub(crate) fn decide_context_pack_read_from(
+    state: &AppState,
+    input: &DecisionInput,
+    position: usize,
+    resource: Resource,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    decide_inner(
+        state,
+        input,
+        position,
+        Action::ContextPackRead,
+        resource,
+        None,
+        Some(sensitivity),
+    )
+}
+
 /// [`decide_read`] for a resource whose chain starts at `position` — the
 /// [`decide_from`] shape, for the cross-scope decisions FLOW-5 takes.
 pub(crate) fn decide_read_from(

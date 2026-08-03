@@ -19,9 +19,23 @@
 //! | memory → team/user | 1 × curator | — (auto) | — (auto) |
 //! | memory → dept/org | curator + steward, 2 distinct | 1 × curator | 1 × curator at org |
 //! | prompt | steward + curator, 2 distinct | 1 × curator | 1 × curator |
+//! | context pack → team/user | 1 × curator | 1 × curator | 1 × curator |
+//! | context pack → dept/org | curator + steward, 2 distinct | 1 × curator | 1 × curator |
 //! | skill | steward, 2 distinct (+ floor's reviewer) | 1 × steward (+ floor) | 1 × steward (+ floor) |
 //! | policy | 2 × steward | 1 × steward | 1 × steward |
 //! | anything `restricted` | the floor: compliance, 2 distinct | same | same |
+//!
+//! The context-pack rows are **not** in tech plan §2.4's table — it has no
+//! row for them at all. FLOW-3 filled the cell at one curator everywhere,
+//! nothing could open a `context-pack` proposal until PRMT-2, and reading
+//! the matrix this feature makes resolvable turned up what that had done:
+//! under `regulated-strict` a *memory* published at a department took two
+//! distinct people while a whole *bundle* published at the org took one, so
+//! the cheapest thing to publish into every session in the company was the
+//! largest one. ADR-0050 decision 15 re-prices it to match memory's own
+//! shared-scope rule, before any tenant has published under it, and
+//! deliberately leaves `standard` and `open-collaboration` alone — the
+//! whole content of those packs is that the same publication is cheaper.
 
 use synveda_types::{
     ApprovalMatrix, ApprovalRule, AssetKind, Role, RoleRequirement, ScopeKind, Sensitivity,
@@ -60,7 +74,24 @@ pub fn regulated_strict() -> ApprovalMatrix {
                 &[(Role::Steward, 1), (Role::Curator, 1)],
                 2,
             ),
-            rule(Some(AssetKind::ContextPack), None, &[(Role::Curator, 1)], 1),
+            // The `SHARED`/`LOCAL` split memory has had since FLOW-3, given
+            // to context packs by ADR-0050 decision 15. Its blast radius is
+            // strictly wider than the memory row above it: a published pack
+            // composes into *every* session at and below the publishing
+            // scope, so pricing it below a single memory record at the same
+            // scope was an inversion, not a discount.
+            rule(
+                Some(AssetKind::ContextPack),
+                Some(LOCAL.to_vec()),
+                &[(Role::Curator, 1)],
+                1,
+            ),
+            rule(
+                Some(AssetKind::ContextPack),
+                Some(SHARED.to_vec()),
+                &[(Role::Curator, 1), (Role::Steward, 1)],
+                2,
+            ),
             // The floor already requires a security-reviewer; this adds
             // the steward tech plan §2.4 names and forces them to be two
             // different people.

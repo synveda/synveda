@@ -225,6 +225,21 @@ pub(crate) struct PublishBody {
     /// authored assets.
     #[serde(default)]
     prompt_names: Vec<synveda_types::PromptName>,
+    /// The context-pack documents to admit, by path (PRMT-2, ADR-0050
+    /// decision 1). Must be documents of **this** scope, for the reason
+    /// the other two lists must be its material: the direct route stays
+    /// same-scope.
+    ///
+    /// Exactly one of the three lists may be present. Under the default
+    /// pack a pack publication above a team now refuses here on its own
+    /// arithmetic — since ADR-0050 decision 15 the matrix asks for a
+    /// curator *and* a steward, two distinct people — and names the
+    /// proposal route; at a team or a leaf one curator still publishes
+    /// directly, which is the `SHARED`/`LOCAL` split memory has had since
+    /// FLOW-3, given to packs because their blast radius is wider than a
+    /// single record's.
+    #[serde(default)]
+    document_paths: Vec<synveda_types::DocumentPath>,
     /// Why — an auditor and a reviewer both read this. Required: a
     /// publication with nothing to say is one nobody can review after
     /// the fact.
@@ -330,10 +345,12 @@ async fn publish_inner(
     // subset — and both stop there: everything below this point is shared,
     // because one matrix governs every path across the trust boundary
     // (ADR-0032 decision 8).
-    let asset_kind = if body.prompt_names.is_empty() {
+    let asset_kind = if !body.prompt_names.is_empty() {
+        AssetKind::Prompt
+    } else if body.document_paths.is_empty() {
         AssetKind::Memory
     } else {
-        AssetKind::Prompt
+        AssetKind::ContextPack
     };
     let mut requested = body.record_ids.clone();
     requested.sort_unstable();
@@ -357,6 +374,42 @@ async fn publish_inner(
             ),
         });
     }
+    let mut paths = body.document_paths.clone();
+    paths.sort();
+    paths.dedup();
+    let documents: Vec<synveda_store::packs::StoredDocument> = if paths.is_empty() {
+        Vec::new()
+    } else {
+        let held: Vec<synveda_store::packs::StoredDocument> =
+            synveda_store::packs::list_all_documents(&mut *tx, tenant_id, scope_id)
+                .await?
+                .into_iter()
+                .filter(|document| {
+                    paths.iter().any(|path| {
+                        path.pack == document.pack_name && path.document == document.document_name
+                    })
+                })
+                .collect();
+        if held.len() != paths.len() {
+            let missing: Vec<String> = paths
+                .iter()
+                .filter(|path| {
+                    !held.iter().any(|document| {
+                        path.pack == document.pack_name && path.document == document.document_name
+                    })
+                })
+                .map(ToString::to_string)
+                .collect();
+            return Err(Error::Invalid {
+                message: format!(
+                    "not documents of this scope: {} — promote from a child scope with \
+                     POST /v1/proposals and a source_scope_id (FLOW-5)",
+                    missing.join(", ")
+                ),
+            });
+        }
+        held
+    };
     let mut names = body.prompt_names.clone();
     names.sort();
     names.dedup();
@@ -435,7 +488,7 @@ async fn publish_inner(
     // re-publishing unchanged content stores nothing new — and a prompt's
     // object was already written at authoring time, so that write dedups.
     let mut members: Vec<(String, vedaflow::hash::ObjectHash)> =
-        Vec::with_capacity(versions.len() + drafts.len());
+        Vec::with_capacity(versions.len() + drafts.len() + documents.len());
     let mut published: Vec<PublishedRecord> = Vec::with_capacity(members.capacity());
     for version in &versions {
         let asset = memory_asset(version.id, &version.state);
@@ -459,6 +512,24 @@ async fn publish_inner(
             member: asset.entry_name(),
             record_id: None,
             object_hash: object.hash.to_hex(),
+        });
+    }
+    // A pack document's object is already stored — the draft row's foreign
+    // key required it at authoring — so this read is the *object*, not a
+    // rebuild from the row. Rebuilding would re-derive the bytes a
+    // reviewer would have read, and the address is what the channel names
+    // (ADR-0050 decision 3).
+    for document in &documents {
+        let address = vedaflow::hash::ObjectHash::from_bytes(document.object_hash);
+        let path = synveda_types::DocumentPath::new(
+            document.pack_name.clone(),
+            document.document_name.clone(),
+        );
+        members.push((path.to_string(), address));
+        published.push(PublishedRecord {
+            member: path.to_string(),
+            record_id: None,
+            object_hash: address.to_hex(),
         });
     }
 
@@ -605,11 +676,13 @@ fn decide_asset_read(
         AssetKind::Prompt => {
             authz::decide_prompt_read(state, input, resource, Sensitivity::WORKING)
         }
+        AssetKind::ContextPack => {
+            authz::decide_context_pack_read(state, input, resource, Sensitivity::WORKING)
+        }
         other => Err(Error::Invalid {
             message: format!(
                 "{} channels have no read action yet, so this route cannot decide who \
-                 may govern them; it arrives with that asset kind's feature (SKIL-1, \
-                 PRMT-2)",
+                 may govern them; it arrives with that asset kind's feature (SKIL-1)",
                 other.as_str()
             ),
         }),
@@ -1137,24 +1210,33 @@ fn validate(body: &PublishBody) -> Result<()> {
     let invalid = |message: String| Err(Error::Invalid { message });
     // One asset kind per publication, for the reason a proposal carries one
     // (ADR-0049 decision 6): the approval matrix resolves from it.
-    match (body.record_ids.is_empty(), body.prompt_names.is_empty()) {
-        (true, true) => {
+    let named = usize::from(!body.record_ids.is_empty())
+        + usize::from(!body.prompt_names.is_empty())
+        + usize::from(!body.document_paths.is_empty());
+    match named {
+        0 => {
             return invalid(
                 "name at least one member: record_ids for memories, prompt_names for \
-                 prompts"
+                 prompts, document_paths for context pack documents"
                     .to_owned(),
             );
         }
-        (false, false) => {
+        1 => {}
+        _ => {
             return invalid(
-                "a publication carries one asset kind: name record_ids or prompt_names, \
-                 never both"
+                "a publication carries one asset kind: name record_ids, prompt_names or \
+                 document_paths, never more than one"
                     .to_owned(),
             );
         }
-        _ => {}
     }
-    if body.record_ids.len().max(body.prompt_names.len()) > MAX_PUBLISH_RECORDS {
+    if body
+        .record_ids
+        .len()
+        .max(body.prompt_names.len())
+        .max(body.document_paths.len())
+        > MAX_PUBLISH_RECORDS
+    {
         return invalid(format!(
             "a publication may name at most {MAX_PUBLISH_RECORDS} members"
         ));

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update context_pack_documents set document_name = 'runbooks/other.md'\n             where tenant_id = $1 and scope_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ff1e0b7be467863bbef7f02d9c3b76bf2c579b4f91968b02d146b822377475dd"
+}

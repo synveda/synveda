@@ -18,9 +18,7 @@
 //! way to decide would be a second answer to "may this caller see this
 //! record" (seed §2.2).
 
-use synveda_policy::{
-    AuthzContext, AuthzDecision, EffectivePack, EntityBatch, Pdp, Principal, Resource,
-};
+use synveda_policy::{AuthzContext, EntityBatch, Pdp, PermittedTiers, Principal, Resource};
 use synveda_types::{
     CompositionConfig, HierarchyNode, Lapse, LapseId, PolicyAssignment, Result, RoleBinding,
     ScopeId, ScopeTier, Sensitivity,
@@ -154,7 +152,10 @@ pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Resul
             // Named per tier inside the sweep (ADR-0038 decision 2).
             sensitivity: None,
         };
-        let tiers = permitted_tiers(pdp, &batch, inputs.principal, node.id, &context)?.0;
+        // `permitted_chain_scopes` answers the memory question only: it is
+        // the sweep the search legs and the recall gate stand on, and a
+        // pack chunk reaches neither of those by this route.
+        let tiers = permitted_tiers(pdp, &batch, inputs.principal, node.id, &context)?.memory;
         if !tiers.is_empty() {
             scopes += 1;
         }
@@ -243,19 +244,19 @@ fn plan_off_chain(
     // only at tiers at or below what the grant declared (ADR-0038
     // decision 6), so a working-tier grant plans the working tiers and a
     // restricted one plans all four.
-    let (sensitivities, decision, effective) =
-        permitted_tiers(pdp, batch, inputs.principal, target, &context)?;
+    let permitted = permitted_tiers(pdp, batch, inputs.principal, target, &context)?;
     decisions.push(ScopeDecision {
         scope_id: target,
-        allowed: !sensitivities.is_empty(),
-        sensitivities: sensitivities.clone(),
-        pack_name: decision.pack_name,
-        pack_version: decision.pack_version,
+        allowed: !permitted.memory.is_empty(),
+        sensitivities: permitted.memory.clone(),
+        pack_name: permitted.decision.pack_name,
+        pack_version: permitted.decision.pack_version,
         lapse: scope.lapse,
     });
-    if sensitivities.is_empty() {
+    if permitted.memory.is_empty() {
         return Ok(());
     }
+    let effective = permitted.effective;
     // The *target's* effective pack, not the reader's: what that scope
     // stands behind, under that scope's schedule (ADR-0040 decision 10) and
     // rendered by that scope's rules (ADR-0041 decision 11). It comes back
@@ -275,7 +276,23 @@ fn plan_off_chain(
         // pack's own permit, asked at last — so it composes under that
         // scope's channel rule exactly as a chain scope does.
         include_derived: scope.lapse.is_none() && effective.composition.channels.includes_derived(),
-        sensitivities,
+        sensitivities: permitted.memory,
+        // A **lapse** admits what its target published as memory and
+        // nothing else: ADR-0037 decision 11 bounded a grant to what its
+        // approvers could inspect, and a lapse names a scope rather than a
+        // bundle. A reader who should have another scope's conventions gets
+        // them by being placed or bound, which is the decision
+        // `ContextPackRead` already takes on the chain.
+        //
+        // A **widened candidate** is not a grant anybody approved — it is
+        // the pack's own permit, asked at last — so its pack material
+        // composes exactly as a chain scope's does. Same distinction
+        // `include_derived` makes one line up, for the same reason.
+        pack_sensitivities: if scope.lapse.is_some() {
+            Vec::new()
+        } else {
+            permitted.context_pack
+        },
         index_tier: effective.composition.index_tier,
         index_entry_chars: effective.composition.index_entry_chars,
         lapse: scope.lapse,
@@ -284,7 +301,7 @@ fn plan_off_chain(
     Ok(())
 }
 
-/// One scope's allowed tier set, ascending, the decision the pack
+/// One scope's allowed tier sets, ascending, the decision the pack
 /// identity is read from, and that pack's configuration.
 ///
 /// Every ask is a real PDP call: there is no short-circuit on the first
@@ -292,18 +309,20 @@ fn plan_off_chain(
 /// `confidential` while denying `internal` gets exactly what it said rather
 /// than what it probably meant (ADR-0038 decision 3).
 ///
-/// All four go through `permitted_read_tiers`, which resolves the pack and
-/// the roles once and evaluates four times against a shared entity store
-/// (CTX-5, ADR-0042 decision 6). Same verdicts, a fraction of the work —
-/// which is what a universe wider than the chain costs when it is not
-/// done this way.
+/// All of them go through `permitted_read_tiers`, which resolves the pack
+/// and the roles once and evaluates against a shared entity store (CTX-5,
+/// ADR-0042 decision 6). Same verdicts, a fraction of the work — which is
+/// what a universe wider than the chain costs when it is not done this way.
+/// Since PRMT-2 that one resolution answers `ContextPackRead` too, which is
+/// what keeps ADR-0050 decision 8's "the same walk, never a second
+/// authorization path" true rather than aspirational.
 fn permitted_tiers(
     pdp: &Pdp,
     batch: &EntityBatch,
     principal: &Principal,
     scope_id: ScopeId,
     context: &AuthzContext<'_>,
-) -> Result<(Vec<Sensitivity>, AuthzDecision, EffectivePack)> {
+) -> Result<PermittedTiers> {
     pdp.permitted_read_tiers(batch, principal, scope_id, context)
 }
 
@@ -400,7 +419,7 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
     let mut scopes = Vec::with_capacity(inputs.chain.len());
     let mut decisions = Vec::with_capacity(inputs.chain.len());
     for (position, node) in inputs.chain.iter().enumerate() {
-        let (sensitivities, decision, effective) = permitted_tiers(
+        let permitted = permitted_tiers(
             pdp,
             &batch,
             inputs.principal,
@@ -409,15 +428,22 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
         )?;
         decisions.push(ScopeDecision {
             scope_id: node.id,
-            allowed: !sensitivities.is_empty(),
-            sensitivities: sensitivities.clone(),
-            pack_name: decision.pack_name,
-            pack_version: decision.pack_version,
+            allowed: !permitted.memory.is_empty(),
+            sensitivities: permitted.memory.clone(),
+            pack_name: permitted.decision.pack_name,
+            pack_version: permitted.decision.pack_version,
             lapse: None,
         });
-        if sensitivities.is_empty() {
+        // A scope is planned when it admits *either* kind of material.
+        // `ContextPackRead` non-empty while `MemoryRead` is empty is the
+        // case packs exist for (ADR-0050 decision 8): a reader who holds no
+        // readable memory at a scope still receives that scope's
+        // conventions, and skipping the scope here would be the one place
+        // that could quietly stop being true.
+        if permitted.memory.is_empty() && permitted.context_pack.is_empty() {
             continue;
         }
+        let effective = permitted.effective;
         // The channel rule comes from the same effective-pack resolution
         // that just decided the scope (ADR-0025 decision 2) — literally the
         // same one now, returned by the sweep rather than walked again.
@@ -426,7 +452,11 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             kind: node.kind,
             path: node.path.clone(),
             include_derived: effective.composition.channels.includes_derived(),
-            sensitivities,
+            sensitivities: permitted.memory,
+            // The tiers `ContextPackRead` permitted here — what admits this
+            // scope's pack chunks, and nothing else does (ADR-0050
+            // decision 8).
+            pack_sensitivities: permitted.context_pack,
             // What this scope does with material that does not fit, from
             // the same resolution (CTX-4, ADR-0041 decision 11).
             index_tier: effective.composition.index_tier,

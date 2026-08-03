@@ -305,6 +305,30 @@ pub enum AuditAction {
     /// payload carries the name, the scope it resolved at, the channel or
     /// the pinned commit, and the object address — never the template.
     PromptResolved,
+    /// A context pack's draft was written at a scope (PRMT-2, ADR-0050
+    /// decision 13).
+    ///
+    /// The authoring act, not a publication, exactly as
+    /// [`AuditAction::PromptAuthored`] is — and here it is also where the
+    /// *expensive* half happens: chunking, the MEM-2 scan and the embedding
+    /// all run before this event, so the payload can say how many chunks
+    /// landed and how many were already there. Nothing here crosses the
+    /// trust boundary. No document text: the addresses, the counts and the
+    /// tiers only.
+    ContextPackAuthored,
+    /// A pack document carrying a live credential was quarantined at
+    /// authoring (ADR-0050 decision 11).
+    ///
+    /// This is the first surface where bulk external text enters the
+    /// product — a prompt is short and hand-written, and PRMT-1 does not
+    /// scan one — so MEM-2's scanner runs here with the authoring scope's
+    /// effective redaction config, ahead of the embedder, and a document it
+    /// stops never reaches vector space.
+    ///
+    /// A *served* chunk chains nothing of its own: it composes inside
+    /// `context.injected` with its object address like every other entry,
+    /// which is why there is no third action here.
+    ContextPackQuarantined,
     /// A grant reached the end of its window. Emitted by the sweep under
     /// `actor_kind=system`, and **bookkeeping only** — the grant stopped
     /// deciding anything at `expires_at` whether or not this was ever
@@ -325,7 +349,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 42] = [
+    pub const ALL: [AuditAction; 44] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -368,6 +392,8 @@ impl AuditAction {
         AuditAction::MemoryDisposed,
         AuditAction::PromptAuthored,
         AuditAction::PromptResolved,
+        AuditAction::ContextPackAuthored,
+        AuditAction::ContextPackQuarantined,
     ];
 
     /// The stable dotted name stored in the `action` column. Renaming an
@@ -417,6 +443,8 @@ impl AuditAction {
             AuditAction::MemoryDisposed => "memory.disposed",
             AuditAction::PromptAuthored => "prompt.authored",
             AuditAction::PromptResolved => "prompt.resolved",
+            AuditAction::ContextPackAuthored => "context_pack.authored",
+            AuditAction::ContextPackQuarantined => "context_pack.quarantined",
         }
     }
 }

@@ -43,11 +43,17 @@ unless { context.roles.contains("org-admin") };
 // PRMT-1 (ADR-0049 decision 4) puts `PromptRead` in that carve-out, and it
 // is the same decision rather than a second one: a headless agent is the
 // consumer prompts exist for, and the org's `house-style` is exactly the
-// material an anchored token must still resolve. The carve-out stays what
-// it was — the *membership* floor, `principal in resource`, reads only —
-// so nothing outside the agent's own chain is reachable, no role widens it,
-// and every write, every admin plane and every tenant-plane action remains
-// forbidden outside the anchor.
+// material an anchored token must still resolve. PRMT-2 (ADR-0050
+// decision 8) puts `ContextPackRead` beside it for a stronger version of
+// the same reason: pack material composes through `inject`, which a
+// team-anchored agent already reaches its own chain with — leaving it out
+// would mean an agent composed the org's memory and not the org's
+// conventions, in the same block, off the same walk.
+//
+// The carve-out stays what it was — the *membership* floor, `principal in
+// resource`, reads only — so nothing outside the agent's own chain is
+// reachable, no role widens it, and every write, every admin plane and
+// every tenant-plane action remains forbidden outside the anchor.
 forbid (
     principal,
     action,
@@ -57,7 +63,8 @@ forbid (
     !(resource is Synveda::Scope && resource in principal.token_scope) &&
     !([
         Synveda::Action::"MemoryRead",
-        Synveda::Action::"PromptRead"
+        Synveda::Action::"PromptRead",
+        Synveda::Action::"ContextPackRead"
     ].contains(action) && principal in resource)
 };
 

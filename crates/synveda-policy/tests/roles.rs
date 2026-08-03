@@ -46,7 +46,7 @@ const ALL_SCOPES: [&str; 8] = [
 /// The decision columns: the action vocabulary, with `RoleAssign` split
 /// by what is being granted — the base layer decides those differently
 /// (ADR-0015 decision 5).
-const COLUMNS: [(Action, Option<Role>); 26] = [
+const COLUMNS: [(Action, Option<Role>); 28] = [
     (Action::HierarchyCreate, None),
     (Action::HierarchyRead, None),
     (Action::HierarchyUpdate, None),
@@ -55,6 +55,8 @@ const COLUMNS: [(Action, Option<Role>); 26] = [
     (Action::MemoryWrite, None),
     (Action::PromptRead, None),
     (Action::PromptWrite, None),
+    (Action::ContextPackRead, None),
+    (Action::ContextPackWrite, None),
     (Action::QuarantineRead, None),
     (Action::QuarantineReview, None),
     (Action::PolicyRead, None),
@@ -226,6 +228,7 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
         Role::Viewer => vec![
             (Action::MemoryRead, None),
             (Action::PromptRead, None),
+            (Action::ContextPackRead, None),
             (Action::ProposalRead, None),
         ],
         // Contributing content roles: read plus the shared-scope write
@@ -241,6 +244,14 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             // matrix's arithmetic rather than this binding's.
             (Action::PromptRead, None),
             (Action::PromptWrite, None),
+            // And the context-pack registry's two, on the same rule
+            // (PRMT-2, ADR-0050 decision 7). What a pack *publication*
+            // costs is the matrix's arithmetic, and under
+            // `regulated-strict` above a team that is now two distinct
+            // people (decision 15) — none of which is this binding's
+            // business.
+            (Action::ContextPackRead, None),
+            (Action::ContextPackWrite, None),
             (Action::ProposalRead, None),
             (Action::ProposalOpen, None),
         ],
@@ -254,6 +265,8 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::MemoryWrite, None),
             (Action::PromptRead, None),
             (Action::PromptWrite, None),
+            (Action::ContextPackRead, None),
+            (Action::ContextPackWrite, None),
             (Action::ChannelRead, None),
             (Action::ChannelPublish, None),
             (Action::ChannelRollback, None),
@@ -408,6 +421,8 @@ fn assert_matrix(pack: &str, version: i64) {
                         | Action::MemoryWrite
                         | Action::PromptRead
                         | Action::PromptWrite
+                        | Action::ContextPackRead
+                        | Action::ContextPackWrite
                         | Action::QuarantineReview
                         | Action::ServiceIdentityManage
                         | Action::ChannelRead
@@ -420,10 +435,10 @@ fn assert_matrix(pack: &str, version: i64) {
                         | Action::LapseRevoke
                 ) && target.is_none()
                 {
-                    // The schema scopes the memory plane,
-                    // QuarantineReview, ServiceIdentityManage, the
-                    // channel plane, and proposal open/review to Scope
-                    // resources; a tenant-resource request is
+                    // The schema scopes the memory plane, both authored
+                    // asset planes, QuarantineReview,
+                    // ServiceIdentityManage, the channel plane, and
+                    // proposal open/review to Scope resources; a tenant-resource request is
                     // unrepresentable (ADR-0018 decision 3, ADR-0020
                     // decision 3, ADR-0021 decision 6, ADR-0031
                     // decision 12, ADR-0032 decision 16). ProposalRead is
@@ -457,20 +472,20 @@ fn assert_matrix(pack: &str, version: i64) {
 /// regulated-strict: the golden matrix (the AC).
 #[test]
 fn matrix_regulated_strict() {
-    assert_matrix(REGULATED_STRICT, 12);
+    assert_matrix(REGULATED_STRICT, 13);
 }
 
 /// standard: identical role matrix — packs differ on composition
 /// membership, never on who administers (ADR-0015 decision 4).
 #[test]
 fn matrix_standard() {
-    assert_matrix(STANDARD, 12);
+    assert_matrix(STANDARD, 13);
 }
 
 /// open-collaboration: identical role matrix.
 #[test]
 fn matrix_open_collaboration() {
-    assert_matrix(OPEN_COLLABORATION, 12);
+    assert_matrix(OPEN_COLLABORATION, 13);
 }
 
 /// A tenant-wide binding is in force everywhere, the tenant plane

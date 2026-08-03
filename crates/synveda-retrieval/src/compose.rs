@@ -44,13 +44,14 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use sqlx::PgConnection;
+use synveda_store::packs;
 use synveda_store::records::{RecordState, RecordVersion};
 use synveda_store::search::{self, ScopeClassCutoff};
 use synveda_types::{
-    Channel, EntryTier, IndexTier, LapseId, RecordClass, RecordId, RecordKind, Result,
-    RetentionConfig, ScopeId, ScopeKind, ScopeTier, Sensitivity, TenantId,
+    Channel, ContextPackName, DocumentName, EntryTier, IndexTier, LapseId, RecordClass, RecordId,
+    RecordKind, Result, RetentionConfig, ScopeId, ScopeKind, ScopeTier, Sensitivity, TenantId,
 };
-use synveda_vedaflow::{ChannelRef, MemoryAsset, read_memory_members};
+use synveda_vedaflow::{ChannelRef, MemoryAsset, read_context_pack_members, read_memory_members};
 
 use crate::TOKENS_PER_INJECT;
 use crate::hybrid::union_sensitivities;
@@ -90,9 +91,25 @@ pub struct ComposeScope {
     /// Per scope, never one ceiling for the plan: a chain can permit
     /// `confidential` at the reader's own home and only the working tiers
     /// one level up, and a single ceiling could express neither without
-    /// widening or losing something. Empty never reaches here — a scope
-    /// that permits no tier is not planned at all.
+    /// widening or losing something.
+    ///
+    /// It **may** be empty since PRMT-2: a scope that permits no memory
+    /// tier is still planned when it permits a pack tier, which is the case
+    /// context packs exist for (ADR-0050 decision 8). A scope that permits
+    /// neither is not planned at all.
     pub sensitivities: Vec<Sensitivity>,
+    /// The tiers `ContextPackRead` permitted at this scope, ascending
+    /// (PRMT-2, ADR-0050 decisions 7 and 8) — from the same plan walk, and
+    /// **the only thing that admits a pack chunk**.
+    ///
+    /// Independent of [`ComposeScope::sensitivities`] in both directions,
+    /// and that is the point rather than an accident: a scope may
+    /// distribute conventions and glossaries to readers who hold no
+    /// readable memory there, and a reader with every memory tier at a
+    /// scope whose pack denies `ContextPackRead` composes none of its
+    /// bundles. A memory is never admitted by `ContextPackRead`, and a
+    /// chunk is never admitted by `MemoryRead`.
+    pub pack_sensitivities: Vec<Sensitivity>,
     /// The horizons this scope serves material under, and the half-life it
     /// ranks by (MEM-6, ADR-0040 decisions 2 and 12) — from the same
     /// effective-pack resolution that decided the scope.
@@ -399,6 +416,41 @@ pub fn estimated_tokens(text: &str) -> u32 {
     u32::try_from(chars.div_ceil(4)).unwrap_or(u32::MAX)
 }
 
+/// Where a composed entry came from, when it is a context pack's chunk
+/// rather than a memory record (PRMT-2, ADR-0050).
+///
+/// It rides the candidate because it is what the index tier renders
+/// (decision 10): a memory record has no name, so its index line truncates
+/// a body, and a pack chunk has `pack/document § heading — title`, which is
+/// a better description than any truncation. That is the reason ADR-0041
+/// decision 4 made the index slot a per-`AssetKind` seam rather than a
+/// memory special case, and this is the second kind through it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChunkSource {
+    /// The bundle.
+    pub pack: ContextPackName,
+    /// The document inside it.
+    pub document: DocumentName,
+    /// The document's authored title.
+    pub title: String,
+    /// The nearest enclosing heading, when the document had one.
+    pub heading: Option<String>,
+    /// Its position in the document, from zero — the order the index tier
+    /// names a document's pieces in.
+    pub ordinal: u32,
+}
+
+impl ChunkSource {
+    /// `pack/document § heading` — the description decision 10 names.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match &self.heading {
+            Some(heading) => format!("{}/{} § {heading}", self.pack, self.document),
+            None => format!("{}/{}", self.pack, self.document),
+        }
+    }
+}
+
 /// One candidate as composition sees it: a record version, the scope it
 /// composed from and that scope's position in the gradient, and the
 /// channel it is on there.
@@ -424,6 +476,9 @@ pub struct Candidate<'a> {
     /// ADR-0040 decision 12). `1.0` for pinned material and wherever a
     /// pack configures no half-life.
     pub staleness: f64,
+    /// The document this entry is a chunk of, when it is pack material
+    /// rather than a memory record (PRMT-2, ADR-0050 decision 2).
+    pub pack: Option<&'a ChunkSource>,
 }
 
 /// The conflict resolution order (ADR-0025 decision 6, with ADR-0031
@@ -455,10 +510,25 @@ pub fn conflict_precedence(a: Candidate<'_>, b: Candidate<'_>) -> Ordering {
     channel_rank(a.channel)
         .cmp(&channel_rank(b.channel))
         .then_with(|| kind_rank(a.version).cmp(&kind_rank(b.version)))
+        .then_with(|| asset_rank(a).cmp(&asset_rank(b)))
         .then_with(|| a.position.cmp(&b.position))
         .then_with(|| b.version.state.valid_from.cmp(&a.version.state.valid_from))
         .then_with(|| b.version.tx_from.cmp(&a.version.tx_from))
         .then_with(|| a.version.id.cmp(&b.version.id))
+}
+
+/// Memory before pack material among otherwise-equal candidates (PRMT-2).
+///
+/// Both are published and both are pinned, so seed §4.4's list runs out
+/// before it separates them and a total order needs one more key. The
+/// direction is the one that keeps ADR-0050 option 7's deferred risk
+/// smallest: a pack is orders of magnitude larger than a record, so putting
+/// bundles first would spend the budget on reference material before the
+/// reader's own curated facts, which is exactly the displacement option 7
+/// left to EVAL-4 to measure. Ordering memory first mitigates it without
+/// inventing the separate budget lane that option deferred.
+fn asset_rank(candidate: Candidate<'_>) -> u8 {
+    u8::from(candidate.pack.is_some())
 }
 
 /// When a record was last *asserted* — the staleness clock, which is
@@ -628,6 +698,10 @@ pub struct Admitted {
     pub channel: Channel,
     /// Freshness at the instant, `0.0..=1.0` (MEM-6, ADR-0040 decision 12).
     pub staleness: f64,
+    /// The document this record is a chunk of, when it is a context pack's
+    /// content (PRMT-2, ADR-0050 decision 2). `None` for every memory
+    /// record, which is almost all of them.
+    pub pack: Option<ChunkSource>,
 }
 
 impl Admitted {
@@ -640,6 +714,7 @@ impl Admitted {
             position: self.position,
             channel: self.channel,
             staleness: self.staleness,
+            pack: self.pack.as_ref(),
         }
     }
 }
@@ -944,6 +1019,10 @@ pub async fn admit(
             scope_id,
             position,
             channel,
+            // A memory record is never pack material: the two are admitted
+            // by different actions off different channels (ADR-0050
+            // decision 8), and this is that separation in the type.
+            pack: None,
             // Scored under the pack of the scope it composed *from*: the
             // block is that scope's material as far as this reader is
             // concerned, so it is that scope's half-life that ages it.
@@ -963,6 +1042,17 @@ pub async fn admit(
             }
         }
     }
+    // ── Context-pack chunks (PRMT-2, ADR-0050) ─────────────────────────
+    //
+    // The second channel read, and the only thing that admits pack
+    // material. It is deliberately a separate pass over a separate channel
+    // with a separate PDP answer: `MemoryRead` never admits a chunk and
+    // `ContextPackRead` never admits a memory (decision 8), and option 3 —
+    // naming chunks on `memory/published` — was rejected precisely because
+    // it would have collapsed the two.
+    let pack_channels =
+        admit_pack_chunks(conn, tenant_id, request, &chain_position, &mut by_id).await?;
+
     let mut records: Vec<Admitted> = by_id.into_values().collect();
 
     // Conflict resolution (ADR-0025 decision 6, ADR-0031 decision 8): one
@@ -988,11 +1078,17 @@ pub async fn admit(
 
     // The channels this plan read, in scope order — kept whether or not
     // they contributed a record.
+    //
+    // Two per scope since PRMT-2, and that is the shape `ChannelWatermark`
+    // was always a `Vec` for (ADR-0050 decision 3): a block that composed a
+    // scope's conventions has to cite the commit they came from exactly as
+    // it cites the memory commit, or "recomputable by an auditor from this
+    // response alone" stops being true for half the block.
     let channels: Vec<ChannelWatermark> = request
         .scopes
         .iter()
-        .filter_map(|scope| {
-            published
+        .flat_map(|scope| {
+            let memory = published
                 .iter()
                 .find(|channel| channel.scope_id == scope.scope_id)
                 .map(|channel| ChannelWatermark {
@@ -1000,7 +1096,17 @@ pub async fn admit(
                     channel: ChannelRef::memory(Channel::Published).name(),
                     commit: channel.commit.to_hex(),
                     pinned: channel.pinned,
-                })
+                });
+            let pack = pack_channels
+                .iter()
+                .find(|channel| channel.scope_id == scope.scope_id)
+                .map(|channel| ChannelWatermark {
+                    scope_id: channel.scope_id,
+                    channel: ChannelRef::context_pack(Channel::Published).name(),
+                    commit: channel.commit.to_hex(),
+                    pinned: channel.pinned,
+                });
+            memory.into_iter().chain(pack)
         })
         .collect();
 
@@ -1010,6 +1116,161 @@ pub async fn admit(
         channels,
         dropped_conflicts,
     })
+}
+
+/// Admits the context-pack chunks the plan's scopes publish, adding them to
+/// `by_id`, and returns the pack channels it read (PRMT-2, ADR-0050).
+///
+/// Three reads, in the order the decisions come:
+///
+/// 1. **The pack channel** per scope whose `ContextPackRead` permitted any
+///    tier — one indexed read for the whole plan, the shape
+///    [`read_memory_members`] already uses.
+/// 2. **The chunk mapping** for exactly the document addresses those trees
+///    name. This is decision 3 in one line: a document edited since
+///    publication has a *different* address, so its chunks are not asked
+///    for at all. An edit demotes its own chunks rather than riding a
+///    published path, and there is no code here that could forget to check
+///    — the check is the query's own predicate.
+/// 3. **The records**, at the tiers the pack decision permitted. Each chunk
+///    inherits its document's tier (decision 12), so the record's own
+///    sensitivity *is* the document's, and the exact `(scope, tier)` pair
+///    is enforced below where the tree that named it is known.
+///
+/// A lapsed scope contributes nothing: a lapse admits what its target
+/// published as *memory*, and widening it to bundles is a lapse feature's
+/// decision taken in two reviewed places rather than a side effect here
+/// (ADR-0037 decision 11).
+async fn admit_pack_chunks(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    request: &ComposeRequest,
+    chain_position: &HashMap<ScopeId, usize>,
+    by_id: &mut HashMap<RecordId, Admitted>,
+) -> Result<Vec<synveda_vedaflow::ContextPackChannelState>> {
+    let pack_scopes: Vec<&ComposeScope> = request
+        .scopes
+        .iter()
+        .filter(|scope| scope.lapse.is_none() && !scope.pack_sensitivities.is_empty())
+        .collect();
+    if pack_scopes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let scope_ids: Vec<ScopeId> = pack_scopes.iter().map(|scope| scope.scope_id).collect();
+    let channels =
+        read_context_pack_members(conn, tenant_id, &scope_ids, Channel::Published).await?;
+
+    // Which scope named which document address. A tree may name only its own
+    // scope's documents — the pack asset's address covers the scope it was
+    // authored at — so unlike ADR-0034 decision 6's climbed memory this is a
+    // one-to-one map, and a collision would mean two scopes published byte-
+    // identical documents, in which case the nearer one wins by the same
+    // gradient rule everything else obeys.
+    let mut naming: HashMap<[u8; 32], ScopeId> = HashMap::new();
+    for scope in &pack_scopes {
+        let Some(channel) = channels
+            .iter()
+            .find(|channel| channel.scope_id == scope.scope_id)
+        else {
+            continue;
+        };
+        for address in channel.members.values() {
+            naming.entry(*address.as_bytes()).or_insert(scope.scope_id);
+        }
+    }
+    if naming.is_empty() {
+        return Ok(channels);
+    }
+    let addresses: Vec<[u8; 32]> = naming.keys().copied().collect();
+    let chunks = packs::published_chunks(&mut *conn, tenant_id, &addresses).await?;
+    // Named ids narrow this read exactly as they narrow the other two: a
+    // recall handle for a pack chunk is a name, and every rule below runs
+    // unchanged over what it leaves (ADR-0041 decision 5).
+    let wanted: Vec<RecordId> = chunks
+        .iter()
+        .map(|chunk| chunk.record_id)
+        .filter(|id| request.only.as_ref().is_none_or(|ids| ids.contains(id)))
+        .collect();
+    if wanted.is_empty() {
+        return Ok(channels);
+    }
+    let tiers = union_sensitivities(
+        &pack_scopes
+            .iter()
+            .flat_map(|scope| ScopeTier::expand(scope.scope_id, &scope.pack_sensitivities))
+            .collect::<Vec<_>>(),
+    );
+    let versions = match request.tx_at {
+        Some(tx_at) => {
+            search::compose_members_as_of(conn, tenant_id, &wanted, &tiers, tx_at, request.at)
+                .await?
+        }
+        None => search::compose_members(conn, tenant_id, &wanted, &tiers, request.at).await?,
+    };
+
+    let pack_tier_at: HashMap<ScopeId, &[Sensitivity]> = pack_scopes
+        .iter()
+        .map(|scope| (scope.scope_id, scope.pack_sensitivities.as_slice()))
+        .collect();
+    let by_record: HashMap<RecordId, &packs::PackChunk> = chunks
+        .iter()
+        .map(|chunk| (chunk.record_id, chunk))
+        .collect();
+
+    for version in versions {
+        let Some(chunk) = by_record.get(&version.id) else {
+            continue;
+        };
+        let Some(scope_id) = naming.get(&chunk.document_hash).copied() else {
+            continue;
+        };
+        let Some(position) = chain_position.get(&scope_id).copied() else {
+            continue;
+        };
+        // The exact pair, at the scope whose tree named the document — the
+        // union above bounded the SQL, and this is where the per-scope tier
+        // set is actually applied (ADR-0038 decision 3).
+        if !pack_tier_at
+            .get(&scope_id)
+            .is_some_and(|tiers| tiers.contains(&version.state.sensitivity))
+        {
+            continue;
+        }
+        let admitted = Admitted {
+            version,
+            scope_id,
+            position,
+            // Published, and not by courtesy: the scope's own
+            // `context-pack/published` tree names this document at this
+            // address, which is the same statement `memory/published` makes
+            // about a record.
+            channel: Channel::Published,
+            // Pinned material cannot be decayed (seed §4.2), and every chunk
+            // is pinned — so a glossary published two years ago ranks
+            // exactly as it did the day it landed.
+            staleness: 1.0,
+            pack: Some(ChunkSource {
+                pack: chunk.pack_name.clone(),
+                document: chunk.document_name.clone(),
+                title: chunk.title.clone(),
+                heading: chunk.heading.clone(),
+                ordinal: chunk.ordinal,
+            }),
+        };
+        match by_id.entry(admitted.version.id) {
+            Entry::Occupied(mut slot) => {
+                if conflict_precedence(admitted.candidate(), slot.get().candidate())
+                    == Ordering::Less
+                {
+                    slot.insert(admitted);
+                }
+            }
+            Entry::Vacant(slot) => {
+                slot.insert(admitted);
+            }
+        }
+    }
+    Ok(channels)
 }
 
 /// Orders the admitted set by the seed §4.4 gradient and assembles it
@@ -1043,6 +1304,10 @@ fn assemble(
             RecordKind::Pinned => 0_u8,
             RecordKind::Derived => 1,
         };
+        // Within one document, a chunk's own order. Prose read out of
+        // sequence is worse prose, and the ranker has no opinion about which
+        // half of a paragraph comes first.
+        let ordinal = |candidate: &Candidate<'_>| candidate.pack.map(|source| source.ordinal);
         // Relevance, decayed by freshness (MEM-6, ADR-0040 decision 12):
         // a record that has halved in freshness sorts as though it ranked
         // twice as far down. Total and deterministic — the score is a
@@ -1064,12 +1329,14 @@ fn assemble(
             .cmp(&b.position)
             .then_with(|| channel(a).cmp(&channel(b)))
             .then_with(|| kind(a).cmp(&kind(b)))
+            .then_with(|| asset_rank(*a).cmp(&asset_rank(*b)))
             .then_with(|| match (rank(a), rank(b)) {
                 (Some(x), Some(y)) => x.total_cmp(&y),
                 (Some(_), None) => Ordering::Less,
                 (None, Some(_)) => Ordering::Greater,
                 (None, None) => Ordering::Equal,
             })
+            .then_with(|| ordinal(a).cmp(&ordinal(b)))
             .then_with(|| b.version.state.valid_from.cmp(&a.version.state.valid_from))
             .then_with(|| a.version.id.cmp(&b.version.id))
     });
@@ -1359,11 +1626,34 @@ fn one_line(content: &str) -> String {
 /// spending it to say what the line already says. Decision 2 keeps that
 /// honest: a record short enough not to elide is never demoted here, so
 /// every index line in a block is genuinely truncated.
+/// A memory record's index entry elides its body, because a memory record
+/// has no name. A **context pack's chunk has one**, and rendering it is
+/// what ADR-0041 decision 4 built this seam per-`AssetKind` for (ADR-0050
+/// decision 10): `pack/document#ordinal § heading — title` describes the
+/// piece better than any truncation of its prose could, and costs a
+/// fraction of what the truncation would.
+///
+/// The ordinal is in it so that a long document's pieces are distinguishable
+/// lines rather than the same sentence repeated: an agent deciding which
+/// handle to spend a recall on needs to see that there are seven of them.
 fn index_line(candidate: Candidate<'_>, entry_chars: u32) -> String {
+    let handle = format!(" (recall {})", candidate.version.id);
+    if let Some(source) = candidate.pack {
+        let heading = match &source.heading {
+            Some(heading) => format!(" § {heading}"),
+            None => String::new(),
+        };
+        let described = format!(
+            "{}/{}#{}{heading} — {}",
+            source.pack, source.document, source.ordinal, source.title
+        );
+        // Bounded by the same knob a memory entry is, so a pack that
+        // narrows `index_entry_chars` narrows both (ADR-0041 decision 11).
+        return render_line(candidate, &elide(&described, entry_chars), &handle);
+    }
     // Folded before eliding, so `index_entry_chars` bounds the text that
     // is actually shown rather than a width the fold would then shrink.
     let head = elide(&one_line(&candidate.version.state.content), entry_chars);
-    let handle = format!(" (recall {})", candidate.version.id);
     render_line(candidate, &head, &handle)
 }
 
@@ -1504,6 +1794,7 @@ mod tests {
             // These unit tests are about seed §4.4's order, which
             // freshness never reorders across (ADR-0040 decision 12).
             staleness: 1.0,
+            pack: None,
         }
     }
 

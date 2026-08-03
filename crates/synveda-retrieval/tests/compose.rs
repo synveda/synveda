@@ -123,6 +123,11 @@ impl Chain {
             path: path.to_owned(),
             include_derived: true,
             sensitivities: sensitivities.to_vec(),
+            // The same tiers for pack material: these fixtures are about
+            // memory, and a plan that permitted packs nowhere would leave
+            // the pack path untested by construction rather than by
+            // intent (PRMT-2, ADR-0050 decision 8).
+            pack_sensitivities: sensitivities.to_vec(),
             // The product config: the index tier on, so these fixtures
             // exercise what a real chain composes under (ADR-0041
             // decision 11). Nothing here is long enough to demote, which
