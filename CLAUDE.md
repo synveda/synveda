@@ -7,6 +7,7 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 1. docs/SYNVEDA_SEED.md        — product principles & invariants (§2 is law)
 2. docs/SYNVEDA_TECH_PLAN.md   — stack decisions & VedaFlow design
 3. docs/SYNVEDA_FEATURES.md    — feature backlog; ALL work maps to a feature ID
+4. docs/backlog/STATUS.md      — what is done, what each feature found, what it left standing
 
 ## Working rules
 - Every task references a feature ID (e.g. FND-1). Branch: feat/<ID>.
@@ -33,10 +34,20 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 5. docs/backlog/STATUS.md updated
 
 ## Current phase
-Phase 0 — Foundation (FND-1 .. FND-6). Do not start Phase 1 features until
-FND is complete and `make dev-up && make smoke` passes.
+Phase 3 — Enterprise (wk 11–16). Phases 0, 1 and 2 are complete; SKIL-1 is the
+only Phase 3 feature done so far. 50 of 86 features delivered — see
+docs/backlog/STATUS.md for what each one proved and what it left standing.
 
-## Commands (once FND-2 lands)
-- make dev-up      — start Postgres(+pgvector+AGE+PGMQ), Rauthy, Temporal, TEI, Jaeger
+Phase demo goal: Entra/Okta live, spec-compliant governed skills into Claude
+Code + Cursor, LoCoMo/LongMemEval scores published, Helm install.
+
+## Commands
+- make dev-up      — start Postgres(+pgvector+PGMQ), Rauthy, Temporal, TEI, Jaeger
 - make smoke       — end-to-end health check
-- make eval        — run the eval harness (EVAL-1+)
+- make dev-down    — stop; state persists in named volumes
+- make ci          — exactly what .github/workflows/ci.yml runs; green here == green there
+- make db-test     — the full suite against DATABASE_URL (tests needing Postgres skip without it)
+- make eval        — the eval harness against a live stack, gated by evals/baseline.json
+- make eval-check  — parse suite + corpora + baseline with no stack (part of `make ci`)
+- make eval-retrieval / eval-security / eval-extraction-live — the nightly and
+  live-model gates, each with its own baseline
