@@ -3153,7 +3153,85 @@ a metric about a person — the first time it does is the last time anybody
 writes an honest checklist. And a rubric change moves every score at once, so
 a skill that scored 75 last week can need an override this week, which is
 correct and will be surprising._
-- [ ] [SKIL-4: Scope-targeted distribution](SKIL-4.md)
+- [x] [SKIL-4: Scope-targeted distribution](SKIL-4.md) — done 2026-08-03, ADR-0054, no migration, AC tests: crates/synveda-gateway/tests/skills.rs (**the criterion's three clauses asserted as three mechanisms, on both surfaces that carry it**: `a_reader_sees_their_own_teams_skills_and_the_orgs_and_never_another_teams` — the org's reach both readers because the org is on both chains, team A's reach a team A reader because team A is on that chain, and team B's are absent because team B is on **no chain that reader has**, which the response makes checkable by carrying the walked chain; the same three in a composed block, with the description present and the body still absent; `the_available_set_and_the_by_name_resolve_agree_about_shadowing`, because a listing and a resolve that chose differently would make the flat-namespace rule a coincidence; `a_nearer_copy_nobody_may_read_does_not_shadow_the_readable_one`, SKIL-1's own AC line, exercisable for the first time now there is a set to walk — the failure it prevents is a policy denial presenting as a missing capability; and `the_skill_index_tiers_token_cost_is_measured`, the A/B against `skill_index: off`), crates/synveda-retrieval (5 unit tests: the ceiling narrowing **every** kind of material — the defect this feature found — a scope surviving on pack tiers alone, neither recall shape advertising, and the skill line's elision and tier marker), crates/synveda-cli (5 unit tests on the reconcile's own rule: a bundle at the served commit is current, one at another commit is not, an **edited** governed bundle is not so the next sync heals it, a deleted file is the same answer, and a receipt naming another root is not this sync's to touch), adapters/claude-code (5 tests: the governed root is the plugin's own `skills/`, no plugin root means nothing runs at all rather than a guessed directory to prune, the sync is delegated to the CLI with the argv asserted, and a CLI that fails, prints garbage or is missing costs the session nothing), demo: demos/skil-4-distribution.sh (two teams' shelves from a terminal, the block's section, two governed roots compared file for file, a FLOW-7 rewind **removing** a directory, and `chain valid (61 events)` with a leak sweep at 0 rows)
+
+_SKIL-4 notes (ADR-0054): distribution is a **set** where resolution was a
+name, and the two halves of the feature explain each other.
+
+The sharpest decision is that **an advertisement is not a demotion**
+(decision 5). CTX-4's index tier is safe because of one rule: a candidate is
+named instead of shown only when its body did not fit *and* the line is
+strictly cheaper (ADR-0041 decision 2). That rule has no second operand
+here — a skill has no body in a block and never will (ADR-0051 decision 9) —
+so the section is new content charged against a budget that was fully
+spoken for. It is therefore placed **last**, displaces nothing, is bounded
+at 32 names, counts what it could not name, and can be turned off per scope
+on the pack. The reason it is worth its tokens at all is the other half:
+what a session materialises is loaded by the client at the *next* session,
+because a loader reads its skills folder when it starts — so the block is
+current where the folder is one session behind, and a harness with no skills
+loader at all (ADPT-2's, an SDK caller's) has nothing else.
+
+**The acceptance criterion is three mechanisms, not three assertions.** Org
+skills reach both readers because the org is on both chains; team A's reach a
+team A reader because team A is on that chain; team B's are absent because
+team B is on **no chain that reader has** — the same reason another tenant's
+records are absent, one level down. A suite that asserted all three the same
+way would pass for a build that decided nothing, so the response carries the
+walked chain and the test asserts against it.
+
+Two things make the set trustworthy rather than merely convenient. It is
+**the same walk** the by-name resolve takes (decision 2) — same chain, same
+`SkillRead` per scope and tier, same published-only rule — because a listing
+and an install that disagreed would make the flat-namespace rule a
+coincidence. And the gradient is applied **after** the PDP filter (decision
+3): a nearer scope that publishes a name it will not serve this caller is
+skipped as though it published nothing, so the readable copy behind it still
+arrives. That is SKIL-1's own AC line, exercisable for the first time now,
+and the failure it prevents is the worst kind a governed read surface has —
+a policy denial that presents as a missing capability.
+
+**A materialisation that only writes is not a distribution** (decision 15).
+`synveda skill sync` removes as well as installs, which is what makes
+FLOW-7's "<60s to fleet-wide effect" and a leaver's revoked access mean
+something about a laptop. What it may remove is bounded by **its own
+receipts** — ADR-0051 decision 12's provenance file turning out to be the
+record of what this product wrote, which a `readdir` cannot supply — and the
+root is the adapter's plugin directory rather than `~/.claude/skills`,
+because the only directory this product may prune is one it created. A
+bundle whose files still hash to the receipt is left alone, so a
+session-start sync costs one listing call and no resolves; one whose bytes
+have drifted is rewritten, so an edited governed skill self-heals.
+
+The adapter contributes **one hook entry and no logic** (decisions 17 and
+18): a second `SessionStart` entry, `async: true`, shelling out to the CLI.
+ADR-0027 decision 4 kept OAuth in Rust so there would be one implementation
+of refresh; path safety is the stronger case of the same rule, because a
+TypeScript copy of ADR-0051 decision 7's grammar is the two-parsers-disagreeing
+failure with a filesystem underneath.
+
+**The finding is one seam over, and it is a fix rather than a feature.**
+`ComposeRequest::narrowed_to` — the `max_sensitivity` a caller sends when it
+is about to paste into a pull request — trimmed the memory tiers alone. Since
+PRMT-2 that meant `confidential` pack chunks still composed for a caller who
+had asked for `internal`, and it dropped a scope whose only readable material
+was packs, undoing ADR-0050 decision 8 at the one seam that narrows. Found by
+writing the ceiling into the third tier set and asking what the other two
+did. ADR-0038 decision 12's promise is about a block, not about one asset
+kind in it.
+
+Deferrals, all recorded in ADR-0054 with triggers: **no projection table** —
+the advertised descriptions are read from the published `SKILL.md` objects at
+compose time, bounded per scope, because a table maintained at the publish
+seam has to be rebuilt on a rewind too and SKIL-3's finding was that a cache
+beside a governed number is only safe when nothing gates on it; a
+`SkillList` action weaker than `SkillRead` is refused on ADR-0041 decision
+1's ground, that a description is content; suppressing the advertisement for
+clients that already materialise is refused because the gateway cannot know
+what is on a caller's disk and a client's claim about it would be an
+unverifiable input to a governed read. And a rewind rewrites bundles whose
+bytes never changed, because a receipt is keyed by the commit it pins to,
+which is correct and will look like more writes than expected._
 - [ ] [GRPH-3: Graph-augmented recall](GRPH-3.md)
 - [ ] [AUD-3: WORM export](AUD-3.md)
 - [ ] [AUD-4: SIEM streaming](AUD-4.md)

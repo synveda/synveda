@@ -32,9 +32,10 @@ pub use authz::{
     composition_plan, permitted_chain_scopes,
 };
 pub use compose::{
-    Admission, Admitted, COMPOSED_ENTRIES_TOTAL, Candidate, ChannelWatermark, ComposeRequest,
-    ComposeScope, ComposedBlock, ComposedEntry, INDEX_TIER_TOKENS, admit, compose,
-    conflict_precedence, estimated_tokens,
+    Admission, Admitted, AdvertisedSkill, COMPOSED_ENTRIES_TOTAL, Candidate, ChannelWatermark,
+    ComposeRequest, ComposeScope, ComposedBlock, ComposedEntry, INDEX_TIER_TOKENS,
+    MAX_ADVERTISED_SKILLS, SKILL_INDEX_TOKENS, admit, compose, conflict_precedence,
+    estimated_tokens,
 };
 pub use hybrid::{QueryVector, RetrievedRecord, SearchFilter, SearchRequest, hybrid_search};
 pub use index::{SEARCH_SCHEMA_VERSION, SearchIndex, SparseHit};

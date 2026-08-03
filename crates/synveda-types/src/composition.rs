@@ -131,6 +131,69 @@ impl FromStr for IndexTier {
     }
 }
 
+/// Whether an inject block names the skills this identity may install
+/// (SKIL-4, ADR-0054 decision 11).
+///
+/// Two-valued for [`IndexTier`]'s reason, and separate from it for one this
+/// feature found: a demotion is a *rendering* of material the block was
+/// already going to carry, so it can never cost more than the body it
+/// replaces (ADR-0041 decision 2). An advertisement is **new content** — a
+/// skill has no body in a block and never will (ADR-0051 decision 9) — so
+/// there is nothing to be cheaper than, and the switch that turns it off has
+/// to exist for a reader who is already being told this by their own client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum SkillIndex {
+    /// No skills section. A block is byte-identical to what it was before
+    /// SKIL-4 — the MEM-5/MEM-6/CTX-4 discipline, and a test rather than a
+    /// claim.
+    Off,
+    /// The block names every skill the caller may install, nearest scope
+    /// first, at the pack's own [`CompositionConfig::index_entry_chars`].
+    /// The product default in every embedded pack.
+    #[default]
+    Names,
+}
+
+impl SkillIndex {
+    /// All skill-index modes.
+    pub const ALL: [SkillIndex; 2] = [SkillIndex::Off, SkillIndex::Names];
+
+    /// Stable wire name, identical to the serde form.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            SkillIndex::Off => "off",
+            SkillIndex::Names => "names",
+        }
+    }
+
+    /// Whether a scope's published skills are named in the block.
+    #[must_use]
+    pub const fn advertises(&self) -> bool {
+        matches!(self, SkillIndex::Names)
+    }
+}
+
+impl fmt::Display for SkillIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for SkillIndex {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        SkillIndex::ALL
+            .into_iter()
+            .find(|index| index.as_str() == s)
+            .ok_or_else(|| Error::Invalid {
+                message: format!("unknown skill index: {s:?}"),
+            })
+    }
+}
+
 /// How much of a record a composed entry carried (CTX-4, ADR-0041
 /// decision 9).
 ///
@@ -211,19 +274,31 @@ pub struct CompositionConfig {
     #[serde(default)]
     pub index_tier: IndexTier,
     /// The index line's content width in characters
-    /// ([`DEFAULT_INDEX_ENTRY_CHARS`]).
+    /// ([`DEFAULT_INDEX_ENTRY_CHARS`]) — the width a skill's advertised
+    /// description is elided at too, so a pack that narrowed one narrowed
+    /// both (SKIL-4, ADR-0054 decision 11).
     #[serde(default = "default_index_entry_chars")]
     pub index_entry_chars: u32,
+    /// Whether this scope's published skills are named in a block
+    /// (SKIL-4, ADR-0054 decision 11).
+    ///
+    /// `#[serde(default)]` for the reason `index_tier` carries it: a stored
+    /// pack configured before this feature has a `composition` object
+    /// without the key, and a pack that predates a feature must keep
+    /// resolving to the product config rather than failing to load.
+    #[serde(default)]
+    pub skill_index: SkillIndex,
 }
 
 impl CompositionConfig {
     /// The product config: the seed §4.4 default budget, both channels,
-    /// and the index tier on.
+    /// the index tier on, and skills named.
     pub const DEFAULT: CompositionConfig = CompositionConfig {
         budget_tokens: 1_500,
         channels: InjectChannels::PublishedAndDerived,
         index_tier: IndexTier::Demote,
         index_entry_chars: DEFAULT_INDEX_ENTRY_CHARS,
+        skill_index: SkillIndex::Names,
     };
 }
 

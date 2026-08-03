@@ -39,8 +39,8 @@ use synveda_identity::{Hs256Verifier, personal_slug};
 use synveda_types::{
     CompositionConfig, DedupConfig, DedupMode, IdentityId, IdentityKind, IndexTier, InjectChannels,
     PackConfig, PromotionConfig, ProposalId, ProposalState, RecordId, RedactionConfig,
-    RedactionMode, RetentionConfig, Role, ScanSeverity, ScopeId, ScopeKind, SkillScanConfig,
-    TenantId, TenantStatus,
+    RedactionMode, RetentionConfig, Role, ScanSeverity, ScopeId, ScopeKind, SkillIndex,
+    SkillScanConfig, TenantId, TenantStatus,
 };
 
 #[derive(Parser)]
@@ -409,6 +409,50 @@ enum SkillCommand {
         #[arg(long)]
         commit: Option<String>,
         /// Print the receipt as JSON.
+        #[arg(long)]
+        json: bool,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// What you may install: every published skill on your own placement
+    /// chain, nearest scope first (SKIL-4, ADR-0054).
+    ///
+    /// The plural of `show`, and the same walk — a scope you may not read
+    /// skills at is skipped as though it published nothing, so it cannot
+    /// shadow a copy further up that you can read. Another team's skills
+    /// are absent because that team is not on your chain at all.
+    Available {
+        /// Print the gateway's answer verbatim.
+        #[arg(long)]
+        json: bool,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Make a client's governed skills directory match what you may
+    /// install: write every available skill, remove what is no longer
+    /// available (SKIL-4, ADR-0054 decision 15).
+    ///
+    /// The removal is the half that makes a rollback mean something on a
+    /// laptop. It is bounded to directories this command wrote — the root
+    /// is a directory Synveda owns, never a client's own skills folder —
+    /// and to names the registry no longer serves you.
+    Sync {
+        /// Which client's layout to write. The per-client difference is the
+        /// root and nothing else.
+        #[arg(long, default_value = "claude-code")]
+        client: String,
+        /// Write under this directory instead of the client's own root.
+        /// The adapter passes its plugin's own `skills/` here.
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
+        /// Report what would change and write nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Print the outcome as JSON — what an adapter reads.
         #[arg(long)]
         json: bool,
         /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
@@ -875,6 +919,14 @@ enum PolicyCommand {
         /// tier off in practice.
         #[arg(long, requires = "composition_budget")]
         composition_index_chars: Option<u32>,
+        /// Whether a block names the skills this identity may install
+        /// (off/names — SKIL-4, ADR-0054). Unlike the index tier this is
+        /// new content rather than a rendering of material the block was
+        /// already carrying, so `off` is the switch for a scope whose
+        /// readers are already told this by their own client. Omitted
+        /// keeps the product config, which names them.
+        #[arg(long, requires = "composition_budget")]
+        composition_skill_index: Option<SkillIndex>,
         /// The severity at which a skill bundle's security scan refuses
         /// rather than reports (notice/high/critical — SKIL-2, ADR-0052).
         /// Omitted keeps the invariant floor, which is what an
@@ -1158,6 +1210,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             composition_channels,
             composition_index_tier,
             composition_index_chars,
+            composition_skill_index,
             scan_block_at,
             promotion,
             dedup_mode,
@@ -1190,6 +1243,11 @@ async fn run(cli: Cli) -> Result<(), String> {
                             .unwrap_or(CompositionConfig::DEFAULT.index_tier),
                         index_entry_chars: composition_index_chars
                             .unwrap_or(CompositionConfig::DEFAULT.index_entry_chars),
+                        // Same rule as the tier above, and it matters more
+                        // here: omitting the flag must not silently stop a
+                        // fleet being told which skills it may install.
+                        skill_index: composition_skill_index
+                            .unwrap_or(CompositionConfig::DEFAULT.skill_index),
                     });
             let scan = scan_block_at.map(|block_at| SkillScanConfig { block_at });
             // Validated here as well as at install: a rule that asks for
@@ -1734,6 +1792,25 @@ async fn run(cli: Cli) -> Result<(), String> {
                     },
                     &client,
                     root.as_deref(),
+                    json,
+                )
+                .await
+            }
+            SkillCommand::Available { json, profile } => {
+                skill::available(&profile_name(profile), json).await
+            }
+            SkillCommand::Sync {
+                client,
+                root,
+                dry_run,
+                json,
+                profile,
+            } => {
+                skill::sync(
+                    &profile_name(profile),
+                    &client,
+                    root.as_deref(),
+                    dry_run,
                     json,
                 )
                 .await

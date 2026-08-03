@@ -455,7 +455,26 @@ SKIL-3 Skill quality scoring (M)
 SKIL-4 Scope-targeted distribution (M)
   Skills attach to hierarchy nodes; inject index tier lists skills available to this
   identity; adapter materialises them into the harness (Claude Code plugin dir).
-  AC: user in team A sees team A's skills; team B's are absent; org skills present for both.
+  AC: user in team A sees team A's skills; team B's are absent; org skills present for both
+  — asserted on **both** surfaces the feature adds, because a block that advertised a
+  capability the registry will not serve is a worse failure than either alone; and asserted
+  as three *mechanisms* rather than three absences, since the org's skills arrive because
+  the org is on both chains, team A's because team A is on one, and team B's are absent
+  because team B is on no chain that reader has — a suite that asserted all three the same
+  way would pass for a build that decided nothing. The available set is `GET /v1/skills`
+  with no scope, the plural of the resolve route's own chain walk and the *same* walk, with
+  the gradient applied **after** the PDP filter so a nearer copy nobody may read does not
+  shadow the readable one behind it; the materialisation is a **reconcile** that removes as
+  well as writes, bounded by this product's own install receipts and pointed at a root it
+  created rather than a person's `~/.claude/skills`, because a rollback that stops at the
+  network is not a rollback.
+  Written 2026-08-03 (SKIL-4, ADR-0054): the load-bearing discovery is that **an
+  advertisement is not a demotion** — CTX-4's index tier is safe because a line is taken
+  only when it is strictly cheaper than the body it replaces, and a skill has no body in a
+  block and never will, so this is new content with no second operand and needs its own
+  bound, its own placement (last, displacing nothing) and its own off switch. What makes it
+  worth its tokens is the other half of the feature: what a session materialises is loaded
+  at the *next* one, so the block is current where the folder is behind.
 SKIL-5 Skill usage telemetry (S)
   Trigger counts, success signals per skill version feeding FLOW-4 evidence and EVAL-4.
   AC: usage dashboard per scope.

@@ -26,6 +26,13 @@ export interface AdapterConfig {
   disabled: boolean;
   inject: boolean;
   observe: boolean;
+  /**
+   * Whether this plugin's own `skills/` directory is reconciled with what
+   * the registry serves this identity (SKIL-4, ADR-0054). On by default,
+   * like the other two — a project that wants governed context but not
+   * governed skills sets `"skills": false`.
+   */
+  skills: boolean;
   gatewayUrl: string;
   timeoutMs: number;
   budgetTokens?: number;
@@ -37,6 +44,7 @@ interface ProjectConfig {
   disabled?: unknown;
   inject?: unknown;
   observe?: unknown;
+  skills?: unknown;
   gateway_url?: unknown;
   timeout_ms?: unknown;
   budget_tokens?: unknown;
@@ -49,6 +57,7 @@ export function loadConfig(cwd: string | undefined): AdapterConfig {
     disabled: truthy(process.env.SYNVEDA_DISABLED) || bool(project.disabled) === true,
     inject: bool(project.inject) !== false,
     observe: bool(project.observe) !== false,
+    skills: bool(project.skills) !== false,
     gatewayUrl: trimSlash(
       str(process.env.SYNVEDA_GATEWAY) ?? str(project.gateway_url) ?? DEFAULT_GATEWAY,
     ),

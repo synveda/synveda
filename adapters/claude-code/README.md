@@ -13,6 +13,7 @@ allows that identity (seed §2.2).
 | Hook | Mode | What it does |
 | --- | --- | --- |
 | `SessionStart` | `session-start` | `POST /v1/inject`; returns the block as `additionalContext` |
+| `SessionStart` | `skills` | `synveda skill sync` into this plugin's own `skills/`; async, returns nothing |
 | `Stop` | `observe` | `POST /v1/observe` with the turn's transcript delta |
 | `PreCompact` | `flush` | Resends whatever a previous flush left behind |
 | `SessionEnd` | `flush` | The same retry, plus spool pruning |
@@ -60,6 +61,28 @@ issues this plugin's bearer.
 The MCP recall tool is CTX-5/ADPT-2 and lands in this same manifest as
 `mcpServers`.
 
+### Governed skills
+
+Since SKIL-4 a second `SessionStart` entry reconciles this plugin's own
+`skills/` directory with what the registry publishes to your identity:
+it writes every skill on your placement chain that policy lets you read,
+and **removes** the ones it no longer serves you. That removal is what
+makes a FLOW-7 rollback, or a move between teams, reach a laptop.
+
+It writes into `${CLAUDE_PLUGIN_ROOT}/skills/` and never into
+`~/.claude/skills/` — a reconcile prunes, and the only directory this
+product may prune is one it created. Your own skills folder stays yours;
+`synveda skill install <name>` is still how you put a governed bundle
+there by hand, and a skill installed both ways exists twice, with the
+client's own precedence deciding which loads.
+
+The entry is `async: true` and does no work on the inject path. A client
+reads its skills folder when it starts, so what a session syncs is
+loaded by the *next* one — which is why the composed block names the
+skills available to you as well: the block is current where the folder
+is one session behind. `synveda skill available` is the same list from a
+terminal.
+
 ### Without a login
 
 `SYNVEDA_TOKEN` overrides the CLI entirely — for CI, for demos, and for
@@ -88,6 +111,7 @@ Per project, optional, at `.synveda/config.json`:
   "disabled": false,
   "inject": true,
   "observe": true,
+  "skills": true,
   "gateway_url": "http://127.0.0.1:8120",
   "timeout_ms": 3000,
   "budget_tokens": 4000,
@@ -117,6 +141,13 @@ Nothing inside your project.
   Never stdout: for `SessionStart`, stdout is context the model reads
 - `$XDG_STATE_HOME/synveda/disclosed/` — the one-shot per-project
   disclosure marker
+- `$XDG_CONFIG_HOME/synveda/skills/claude-code/<name>.json` — one install
+  receipt per governed skill, written *outside* the bundle because a file
+  no reviewer approved inside a directory a client walks is a
+  modification (ADR-0051 option 7). It is also the record of what this
+  product wrote, which is what bounds what a sync may remove
+- `${CLAUDE_PLUGIN_ROOT}/skills/<name>/` — the governed bundles
+  themselves, byte-identical to the reviewed commit and non-executable
 
 ## Delivery
 

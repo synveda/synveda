@@ -174,6 +174,14 @@ pub struct PermittedTiers {
     /// The tiers `ContextPackRead` permits here, ascending. Empty means no
     /// pack chunk composes from this scope.
     pub context_pack: Vec<Sensitivity>,
+    /// The tiers `SkillRead` permits here, ascending (SKIL-4, ADR-0054
+    /// decision 10). Empty means this scope's published skills are neither
+    /// advertised in a block nor listed as available.
+    ///
+    /// The same decision the resolve route takes per scope, from the same
+    /// walk — which is what keeps "the set and the by-name resolve are the
+    /// same walk" (decision 2) true rather than parallel.
+    pub skill: Vec<Sensitivity>,
     /// The `MemoryRead` decision — what the plan records and the audit
     /// event carries. The pack identity is the same for every ask, one
     /// resource, one resolution.
@@ -584,12 +592,13 @@ impl Pdp {
     /// produces identical verdicts, which the AUTHZ-5 golden matrix keeps
     /// honest — so this is a shape, not a semantics.
     ///
-    /// Both read actions are decided here rather than one, because ADR-0050
-    /// decision 8 puts `ContextPackRead` *inside* the composition plan walk:
-    /// a scope may distribute conventions to readers holding no readable
-    /// memory there, so the two answers are genuinely independent and a
-    /// second walk to get the other one would be a second authorization
-    /// path.
+    /// All three read actions are decided here rather than one, because
+    /// ADR-0050 decision 8 puts `ContextPackRead` *inside* the composition
+    /// plan walk and ADR-0054 decision 10 puts `SkillRead` there beside it:
+    /// a scope may distribute conventions, or capabilities, to readers
+    /// holding no readable memory there, so the answers are genuinely
+    /// independent and a second walk to get one of them would be a second
+    /// authorization path.
     pub fn permitted_read_tiers(
         &self,
         batch: &EntityBatch,
@@ -602,10 +611,12 @@ impl Pdp {
         let roles = effective_roles(principal, resource, context);
         let mut memory = Vec::with_capacity(Sensitivity::ALL.len());
         let mut context_pack = Vec::with_capacity(Sensitivity::ALL.len());
+        let mut skill = Vec::with_capacity(Sensitivity::ALL.len());
         let mut last: Option<AuthzDecision> = None;
         for (action, tiers) in [
             (Action::MemoryRead, &mut memory),
             (Action::ContextPackRead, &mut context_pack),
+            (Action::SkillRead, &mut skill),
         ] {
             for tier in Sensitivity::ALL {
                 let scoped = AuthzContext {
@@ -641,6 +652,7 @@ impl Pdp {
         Ok(PermittedTiers {
             memory,
             context_pack,
+            skill,
             decision,
             effective: self.effective_from(&pack, origin),
         })

@@ -40,7 +40,7 @@ pub use approval::{
 pub use asset::AssetKind;
 pub use channel::Channel;
 pub use composition::{
-    CompositionConfig, DEFAULT_INDEX_ENTRY_CHARS, EntryTier, IndexTier, InjectChannels,
+    CompositionConfig, DEFAULT_INDEX_ENTRY_CHARS, EntryTier, IndexTier, InjectChannels, SkillIndex,
 };
 pub use dedup::{DedupConfig, DedupMode, MAX_DEDUP_NEIGHBOURS, permille};
 pub use error::{Error, Result};

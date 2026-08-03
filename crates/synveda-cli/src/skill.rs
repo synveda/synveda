@@ -463,13 +463,67 @@ pub async fn install(
     if !json_out {
         announce(&api, &origin);
     }
-    let resolved: Resolved = api.get_as(&ask.path()).await?;
-    let name: SkillName = resolved.name.parse().map_err(|err| format!("{err}"))?;
-
     let root = match root {
         Some(root) => root.to_path_buf(),
         None => client_root(client)?,
     };
+    let (receipt, receipt_path) = materialise(&api, &ask.path(), client, &root).await?;
+    let directory = PathBuf::from(&receipt.directory);
+
+    if json_out {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "skill": receipt.skill,
+                "client": receipt.client,
+                "directory": receipt.directory,
+                "commit": receipt.commit,
+                "scope_path": receipt.scope_path,
+                "files": receipt.files,
+                "receipt": receipt_path.display().to_string(),
+            }))
+            .map_err(|err| err.to_string())?
+        );
+        return Ok(());
+    }
+    println!(
+        "synveda: installed {} into {}",
+        receipt.skill,
+        directory.display()
+    );
+    println!(
+        "         {} file(s) from {} at {}, every address recomputed",
+        receipt.files.len(),
+        receipt.scope_path,
+        receipt
+            .commit
+            .as_deref()
+            .map(short)
+            .unwrap_or_else(|| "no commit".to_owned()),
+    );
+    // The sentence that says why the directory looks like nothing but a
+    // skill: the provenance is here, outside it.
+    println!("         receipt {}", receipt_path.display());
+    Ok(())
+}
+
+/// Resolves one bundle through the ordinary read route and writes it into
+/// `root`, returning the receipt and where the receipt went.
+///
+/// The one place in the product that writes a skill onto a disk. `install`
+/// calls it for a name a person asked for; `sync` calls it for every name
+/// the registry serves them (SKIL-4, ADR-0054 decision 15) — so the
+/// byte-identity check, the non-executable mode and the receipt are the same
+/// code in both, and a reconcile can never be the cheaper cousin of an
+/// install.
+async fn materialise(
+    api: &Api,
+    path: &str,
+    client: &str,
+    root: &Path,
+) -> Result<(Receipt, PathBuf), String> {
+    let resolved: Resolved = api.get_as(path).await?;
+    let name: SkillName = resolved.name.parse().map_err(|err| format!("{err}"))?;
     let directory = root.join(name.as_str());
     // A fresh directory, so a file the bundle no longer names does not
     // survive an upgrade. A client loads what is there, not what a manifest
@@ -536,49 +590,338 @@ pub async fn install(
         files: receipt_files,
     };
     let receipt_path = write_receipt(client, &name, &receipt)?;
+    Ok((receipt, receipt_path))
+}
+
+// ── Available and sync ─────────────────────────────────────────────────
+
+/// One skill this identity may install, as `GET /v1/skills` answers it
+/// without a scope (`crates/synveda-gateway/src/skills.rs`).
+#[derive(Deserialize)]
+struct AvailableEntry {
+    name: String,
+    description: String,
+    sensitivity: Sensitivity,
+    scope_path: String,
+    commit: String,
+    pinned: bool,
+    files: usize,
+    #[serde(default)]
+    shadows: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct AvailableResponse {
+    chain: Vec<String>,
+    skills: Vec<AvailableEntry>,
+}
+
+/// `synveda skill available` — the shelf this identity may install from.
+pub async fn available(profile: &str, json_out: bool) -> Result<(), String> {
+    let (api, origin) = Api::connect(profile).await?;
+    announce(&api, &origin);
+    if json_out {
+        println!("{}", api.get("/v1/skills").await?);
+        return Ok(());
+    }
+    let listing: AvailableResponse = api.get_as("/v1/skills").await?;
+    // The chain first, because it is the answer to the question this
+    // listing is really asked: another team's skills are absent because
+    // that team is not in this line (ADR-0054 decision 2).
+    println!("chain  {}", listing.chain.join("  →  "));
+    if listing.skills.is_empty() {
+        println!("no skills are published to you on it");
+        return Ok(());
+    }
+    println!();
+    for entry in &listing.skills {
+        println!(
+            "  {}  [{}]  {}",
+            entry.name,
+            entry.sensitivity.as_str(),
+            entry.description
+        );
+        println!(
+            "      {}  {}{}  {} file(s)",
+            entry.scope_path,
+            short(&entry.commit),
+            if entry.pinned { " (pinned)" } else { "" },
+            entry.files,
+        );
+        if !entry.shadows.is_empty() {
+            // The gradient made visible: a client's skills namespace is
+            // flat, so only one copy of this name can exist on disk.
+            println!("      overrides the copy at {}", entry.shadows.join(", "));
+        }
+    }
+    Ok(())
+}
+
+/// What one `sync` did, per skill.
+#[derive(Serialize)]
+struct Synced {
+    skill: String,
+    scope_path: String,
+    commit: Option<String>,
+    directory: String,
+    files: usize,
+}
+
+/// `synveda skill sync --client <client>` — make a governed skills root
+/// match what this identity may install (SKIL-4, ADR-0054 decision 15).
+///
+/// Three outcomes per name and the third is the feature: **written** when
+/// the registry serves a version this root does not hold, **unchanged**
+/// when the receipt already records that commit and every file still hashes
+/// to what it recorded, and **removed** when the registry no longer serves
+/// a name this product previously wrote here.
+///
+/// Removal is bounded by the receipts (ADR-0051 decision 12), not by what
+/// is on the disk: a directory this product did not write has no receipt,
+/// so it is never a candidate. That is what makes a reconcile safe to point
+/// at a root a person also uses — and it is the property that lets FLOW-7's
+/// "<60s to fleet-wide effect" mean something about a laptop, because a
+/// rewound skill stops being served and therefore stops being installed.
+pub async fn sync(
+    profile: &str,
+    client: &str,
+    root: Option<&Path>,
+    dry_run: bool,
+    json_out: bool,
+) -> Result<(), String> {
+    let (api, origin) = Api::connect(profile).await?;
+    if !json_out {
+        announce(&api, &origin);
+    }
+    let root = match root {
+        Some(root) => root.to_path_buf(),
+        None => client_root(client)?,
+    };
+    let listing: AvailableResponse = api.get_as("/v1/skills").await?;
+
+    let mut written: Vec<Synced> = Vec::new();
+    let mut unchanged: Vec<String> = Vec::new();
+    let mut removed: Vec<String> = Vec::new();
+
+    for entry in &listing.skills {
+        let name: SkillName = entry.name.parse().map_err(|err| format!("{err}"))?;
+        if current(client, &name, &entry.commit, &root)? {
+            unchanged.push(entry.name.clone());
+            continue;
+        }
+        if dry_run {
+            written.push(Synced {
+                skill: entry.name.clone(),
+                scope_path: entry.scope_path.clone(),
+                commit: Some(entry.commit.clone()),
+                directory: root.join(name.as_str()).display().to_string(),
+                files: entry.files,
+            });
+            continue;
+        }
+        // Through the ordinary resolve route, by name, walking the same
+        // chain the listing walked — never by scope and never by commit, so
+        // a version published between the listing and this call is the one
+        // that lands rather than a stale one the listing happened to see.
+        let ask = Ask {
+            name: &entry.name,
+            scope: None,
+            draft: false,
+            commit: None,
+        };
+        let (receipt, _) = materialise(&api, &ask.path(), client, &root).await?;
+        written.push(Synced {
+            skill: receipt.skill,
+            scope_path: receipt.scope_path,
+            commit: receipt.commit,
+            files: receipt.files.len(),
+            directory: receipt.directory,
+        });
+    }
+
+    // The removals: every receipt this client holds for this root whose
+    // skill the registry no longer serves us.
+    let serves: Vec<&str> = listing
+        .skills
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    for receipt in receipts(client)? {
+        if serves.contains(&receipt.skill.as_str()) {
+            continue;
+        }
+        let directory = PathBuf::from(&receipt.directory);
+        if directory.parent() != Some(root.as_path()) {
+            // Written into a different root — a by-hand `install` into the
+            // client's own folder, say. Not this root's to reconcile.
+            continue;
+        }
+        removed.push(receipt.skill.clone());
+        if dry_run {
+            continue;
+        }
+        if directory.exists() {
+            std::fs::remove_dir_all(&directory)
+                .map_err(|err| format!("remove {}: {err}", directory.display()))?;
+        }
+        let name: SkillName = receipt.skill.parse().map_err(|err| format!("{err}"))?;
+        remove_receipt(client, &name)?;
+    }
 
     if json_out {
         println!(
             "{}",
             serde_json::to_string_pretty(&json!({
-                "skill": receipt.skill,
-                "client": receipt.client,
-                "directory": receipt.directory,
-                "commit": receipt.commit,
-                "scope_path": receipt.scope_path,
-                "files": receipt.files,
-                "receipt": receipt_path.display().to_string(),
+                "client": client,
+                "root": root.display().to_string(),
+                "available": listing.skills.len(),
+                "written": written,
+                "unchanged": unchanged,
+                "removed": removed,
+                "dry_run": dry_run,
             }))
             .map_err(|err| err.to_string())?
         );
         return Ok(());
     }
+    let verb = if dry_run { "would sync" } else { "synced" };
     println!(
-        "synveda: installed {} into {}",
-        receipt.skill,
-        directory.display()
+        "synveda: {verb} {} into {}",
+        match listing.skills.len() {
+            1 => "1 skill".to_owned(),
+            n => format!("{n} skills"),
+        },
+        root.display()
     );
-    println!(
-        "         {} file(s) from {} at {}, every address recomputed",
-        receipt.files.len(),
-        resolved.scope_path,
-        receipt
-            .commit
-            .as_deref()
-            .map(short)
-            .unwrap_or_else(|| "no commit".to_owned()),
-    );
-    // The sentence that says why the directory looks like nothing but a
-    // skill: the provenance is here, outside it.
-    println!("         receipt {}", receipt_path.display());
+    for entry in &written {
+        println!(
+            "         + {}  {}  {} file(s)  from {}",
+            entry.skill,
+            entry.commit.as_deref().map(short).unwrap_or_default(),
+            entry.files,
+            entry.scope_path,
+        );
+    }
+    for skill in &removed {
+        // Named rather than counted: a skill leaving a laptop is the half
+        // of distribution nobody sees coming.
+        println!("         - {skill}  no longer served to you");
+    }
+    if !unchanged.is_empty() {
+        println!(
+            "         = {} unchanged ({})",
+            unchanged.len(),
+            unchanged.join(", ")
+        );
+    }
     Ok(())
+}
+
+/// Whether `root` already holds exactly what `commit` publishes for this
+/// skill, per this client's receipt.
+///
+/// Not "is there a directory": the receipt records every file's content
+/// address, so this re-hashes what is on the disk and says no when
+/// somebody has edited a governed bundle. A sync that trusted the
+/// directory's existence would leave a modified skill in place forever —
+/// and a governed root whose bytes drift is the one thing SKIL-1's
+/// byte-identity check exists to prevent.
+fn current(client: &str, name: &SkillName, commit: &str, root: &Path) -> Result<bool, String> {
+    let Some(receipt) = read_receipt(client, name)? else {
+        return Ok(false);
+    };
+    holds(&receipt, name, commit, root)
+}
+
+/// The half of [`current`] that needs no config directory: whether this
+/// receipt describes exactly what is on the disk under `root`.
+fn holds(receipt: &Receipt, name: &SkillName, commit: &str, root: &Path) -> Result<bool, String> {
+    if receipt.commit.as_deref() != Some(commit) {
+        return Ok(false);
+    }
+    let directory = PathBuf::from(&receipt.directory);
+    if directory.parent() != Some(root) || !directory.is_dir() {
+        return Ok(false);
+    }
+    for (path, address) in &receipt.files {
+        let bundled: SkillFilePath = path.parse().map_err(|err| format!("{err}"))?;
+        let target = directory.join(bundled.as_str());
+        let Ok(content) = std::fs::read_to_string(&target) else {
+            return Ok(false);
+        };
+        let asset = SkillAsset {
+            scope_id: receipt.scope_id,
+            skill: name.clone(),
+            sensitivity: receipt.sensitivity,
+            file: SkillFile {
+                path: bundled,
+                content,
+            },
+        };
+        if &asset.address().to_hex() != address {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Where this client's receipts live.
+fn receipt_dir(client: &str) -> Result<PathBuf, String> {
+    Ok(crate::credentials::config_dir()?
+        .join("skills")
+        .join(client))
+}
+
+/// Every receipt this client holds — what this product knows it wrote.
+fn receipts(client: &str) -> Result<Vec<Receipt>, String> {
+    let dir = receipt_dir(client)?;
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for entry in entries {
+        let path = entry
+            .map_err(|err| format!("read {}: {err}", dir.display()))?
+            .path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let body = std::fs::read_to_string(&path)
+            .map_err(|err| format!("read {}: {err}", path.display()))?;
+        // A receipt this CLI cannot read is one it did not write in a
+        // shape it understands; skipping it means the directory it names
+        // is never removed, which is the safe direction.
+        if let Ok(receipt) = serde_json::from_str::<Receipt>(&body) {
+            out.push(receipt);
+        }
+    }
+    out.sort_by(|a, b| a.skill.cmp(&b.skill));
+    Ok(out)
+}
+
+/// One receipt by name, if this client holds it.
+fn read_receipt(client: &str, name: &SkillName) -> Result<Option<Receipt>, String> {
+    let path = receipt_dir(client)?.join(format!("{name}.json"));
+    let Ok(body) = std::fs::read_to_string(&path) else {
+        return Ok(None);
+    };
+    Ok(serde_json::from_str(&body).ok())
+}
+
+/// Drops a receipt when its bundle leaves the disk, so the two never
+/// disagree about what is installed.
+fn remove_receipt(client: &str, name: &SkillName) -> Result<(), String> {
+    let path = receipt_dir(client)?.join(format!("{name}.json"));
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(format!("remove {}: {err}", path.display())),
+    }
 }
 
 /// Writes the receipt into the CLI's own config directory.
 fn write_receipt(client: &str, name: &SkillName, receipt: &Receipt) -> Result<PathBuf, String> {
-    let dir = crate::credentials::config_dir()?
-        .join("skills")
-        .join(client);
+    let dir = receipt_dir(client)?;
     std::fs::create_dir_all(&dir).map_err(|err| format!("create {}: {err}", dir.display()))?;
     let path = dir.join(format!("{name}.json"));
     let body = serde_json::to_string_pretty(receipt).map_err(|err| err.to_string())?;
@@ -712,6 +1055,107 @@ mod tests {
         let text = serde_json::to_string(&receipt).unwrap();
         assert!(text.contains("\"directory\""));
         assert!(text.contains("code-review"));
+    }
+
+    /// A bundle on disk, with a receipt that describes it exactly.
+    fn installed(root: &Path, name: &str, content: &str) -> (Receipt, SkillName) {
+        let skill: SkillName = name.parse().expect("a legal skill name");
+        let scope_id = ScopeId::new();
+        let directory = root.join(name);
+        std::fs::create_dir_all(&directory).expect("create the bundle directory");
+        std::fs::write(directory.join(SKILL_MANIFEST), content).expect("write the manifest");
+        let asset = SkillAsset {
+            scope_id,
+            skill: skill.clone(),
+            sensitivity: Sensitivity::Internal,
+            file: SkillFile {
+                path: SKILL_MANIFEST.parse().expect("a legal bundled path"),
+                content: content.to_owned(),
+            },
+        };
+        let receipt = Receipt {
+            version: 1,
+            client: "claude-code".to_owned(),
+            directory: directory.display().to_string(),
+            skill: name.to_owned(),
+            scope_id,
+            scope_path: "/acme/eng".to_owned(),
+            commit: Some("c".repeat(64)),
+            sensitivity: Sensitivity::Internal,
+            files: BTreeMap::from([(SKILL_MANIFEST.to_owned(), asset.address().to_hex())]),
+        };
+        (receipt, skill)
+    }
+
+    fn scratch(label: &str) -> PathBuf {
+        let root = std::env::temp_dir()
+            .join("synveda-skil4-cli")
+            .join(format!("{label}-{}", ScopeId::new()));
+        std::fs::create_dir_all(&root).expect("create the scratch root");
+        root
+    }
+
+    /// A sync leaves alone what it already wrote — the check that keeps a
+    /// session-start reconcile from re-resolving every skill every time
+    /// (SKIL-4, ADR-0054 decision 15).
+    #[test]
+    fn a_bundle_at_the_published_commit_is_current() {
+        let root = scratch("current");
+        let (receipt, name) = installed(&root, "code-review", "---\nname: code-review\n---\n");
+        assert!(holds(&receipt, &name, &"c".repeat(64), &root).unwrap());
+    }
+
+    /// A new commit is not current, which is the ordinary upgrade.
+    #[test]
+    fn a_bundle_at_another_commit_is_not_current() {
+        let root = scratch("stale");
+        let (receipt, name) = installed(&root, "code-review", "---\nname: code-review\n---\n");
+        assert!(!holds(&receipt, &name, &"d".repeat(64), &root).unwrap());
+    }
+
+    /// **An edited governed bundle is not current, so the next sync heals
+    /// it.** The receipt records every file's content address, so this is a
+    /// re-hash rather than an existence check — a governed root whose bytes
+    /// have drifted from the reviewed ones is the single thing SKIL-1's
+    /// byte-identity claim exists to prevent, and a reconcile that trusted
+    /// the directory would leave it that way forever.
+    #[test]
+    fn an_edited_bundle_is_not_current() {
+        let root = scratch("edited");
+        let (receipt, name) = installed(&root, "code-review", "---\nname: code-review\n---\n");
+        std::fs::write(
+            root.join("code-review").join(SKILL_MANIFEST),
+            "---\nname: code-review\n---\nrm -rf /\n",
+        )
+        .expect("tamper with the bundle");
+        assert!(!holds(&receipt, &name, &"c".repeat(64), &root).unwrap());
+    }
+
+    /// A missing file is the same answer as an edited one.
+    #[test]
+    fn a_deleted_file_is_not_current() {
+        let root = scratch("deleted");
+        let (receipt, name) = installed(&root, "code-review", "---\nname: code-review\n---\n");
+        std::fs::remove_file(root.join("code-review").join(SKILL_MANIFEST)).expect("remove");
+        assert!(!holds(&receipt, &name, &"c".repeat(64), &root).unwrap());
+    }
+
+    /// **A receipt naming another root is not this sync's to reconcile** —
+    /// the rule that lets `sync` prune at all (ADR-0054 decisions 15 and
+    /// 16). A by-hand `synveda skill install` into a person's own
+    /// `~/.claude/skills` writes a receipt too, and a reconcile of the
+    /// plugin's root must neither treat it as current nor delete it.
+    #[test]
+    fn a_receipt_written_into_another_root_is_not_this_ones() {
+        let mine = scratch("mine");
+        let theirs = scratch("theirs");
+        let (receipt, name) = installed(&theirs, "code-review", "---\nname: code-review\n---\n");
+        assert!(!holds(&receipt, &name, &"c".repeat(64), &mine).unwrap());
+        assert_eq!(
+            PathBuf::from(&receipt.directory).parent(),
+            Some(theirs.as_path()),
+            "and the parent test is what `sync` filters removals by"
+        );
     }
 
     /// The one path shape `collect` normalises before the grammar sees it.
