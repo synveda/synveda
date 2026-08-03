@@ -42,6 +42,10 @@ pub mod linking;
 pub mod promotion;
 mod redaction;
 pub mod retention;
+mod skillscan;
 pub mod worker;
 
 pub use redaction::{Finding, FindingCategory, ScanOutcome, scan};
+pub use skillscan::{
+    BundleScan, FileScan, SKILL_RULESET_VERSION, SkillFinding, scan_bundle, scan_file,
+};

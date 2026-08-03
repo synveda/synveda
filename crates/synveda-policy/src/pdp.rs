@@ -22,7 +22,7 @@ use cedar_policy::{
 use synveda_types::{
     ApprovalMatrix, CompositionConfig, DedupConfig, Error, HierarchyNode, Lapse, LapseAction,
     LapseConfig, PackConfig, PromotionConfig, RedactionConfig, Result, RetentionConfig, Role,
-    ScopeId, ScopeKind, Sensitivity, TenantId,
+    ScopeId, ScopeKind, Sensitivity, SkillScanConfig, TenantId,
 };
 
 use crate::entity_store::EntityStore;
@@ -132,6 +132,10 @@ struct LoadedPack {
     /// destroyed, and how fast it decays in ranking (MEM-6, ADR-0040).
     /// `Copy`, so no `Arc`.
     retention: RetentionConfig,
+    /// The severity at which a skill bundle's security scan refuses
+    /// rather than reports (SKIL-2, ADR-0052 decision 9). `Copy`, so no
+    /// `Arc`.
+    scan: SkillScanConfig,
 }
 
 /// Where the effective pack came from — logged with every decision so the
@@ -216,6 +220,12 @@ pub struct EffectivePack {
     /// every planned scope, and by the sweep at the scope a record lives
     /// at (ADR-0040 decision 10).
     pub retention: RetentionConfig,
+    /// The pack's skill-scan configuration (SKIL-2, ADR-0052 decision 9):
+    /// the severity at which a bundle's security scan refuses rather than
+    /// reports. Read at the authoring seam and again at publication —
+    /// never to decide *whether* to scan, which is not a pack's to say,
+    /// only where its threshold sits above the invariant floor.
+    pub scan: SkillScanConfig,
 }
 
 impl fmt::Display for PackOrigin {
@@ -283,6 +293,12 @@ impl Pdp {
         // tenant expected to keep: no pack sets a record horizon, and
         // `regulated-strict` disposes of the staging plane at a week
         // against the relaxed packs' month.
+        // The skill-scan thresholds are the one axis where the strict
+        // reading is affordable (ADR-0052 decision 3): `regulated-strict`
+        // refuses a bundle that shells out or writes outside itself,
+        // where the relaxed packs report it and let the two approvers the
+        // floor already requires decide. Every pack refuses the critical
+        // band, which is not theirs to move.
         let sources = [
             (
                 REGULATED_STRICT,
@@ -290,6 +306,7 @@ impl Pdp {
                 RedactionConfig::STRICT,
                 LapseConfig::STRICT,
                 RetentionConfig::STRICT,
+                SkillScanConfig::STRICT,
             ),
             (
                 STANDARD,
@@ -297,6 +314,7 @@ impl Pdp {
                 RedactionConfig::REDACT_ALL,
                 LapseConfig::RELAXED,
                 RetentionConfig::DEFAULT,
+                SkillScanConfig::FLOOR,
             ),
             (
                 OPEN_COLLABORATION,
@@ -304,10 +322,11 @@ impl Pdp {
                 RedactionConfig::REDACT_ALL,
                 LapseConfig::RELAXED,
                 RetentionConfig::DEFAULT,
+                SkillScanConfig::FLOOR,
             ),
         ];
         let mut embedded = HashMap::new();
-        for ((name, version), (_, source, redaction, lapse, retention)) in
+        for ((name, version), (_, source, redaction, lapse, retention, scan)) in
             EMBEDDED_PACKS.iter().zip(sources)
         {
             let pack = compile(
@@ -337,6 +356,7 @@ impl Pdp {
                     // decision 13). What differs is the staging plane,
                     // whose disposal ADR-0020/0021 already promised.
                     retention: Some(retention),
+                    scan: Some(scan),
                 },
             )
             .map_err(|err| Error::Internal {
@@ -390,6 +410,7 @@ impl Pdp {
                 lapse: None,
                 dedup: None,
                 retention: None,
+                scan: None,
             },
         )
         .map(|_| ())
@@ -773,6 +794,7 @@ impl Pdp {
             lapse: pack.lapse,
             dedup: pack.dedup,
             retention: pack.retention,
+            scan: pack.scan,
         }
     }
 
@@ -1332,6 +1354,14 @@ fn compile(
     // unset: a stored pack that says nothing about retention must not
     // start destroying a tenant's memory (ADR-0040 decision 13).
     let retention = config.retention.unwrap_or_default();
+    // Unconfigured is the invariant floor rather than the strict pack's
+    // threshold: `critical` refuses either way, and a pack that says
+    // nothing must not start refusing bundles nobody asked it to
+    // (ADR-0052 decision 9). There is no `validate` for it — the type has
+    // one field, every value of it is meaningful, and the one thing a
+    // configuration must not be able to say is clamped on every read
+    // rather than checked once here.
+    let scan = config.scan.unwrap_or_default();
     // A matrix asking more of one role than it asks of people is
     // unsatisfiable at every cell it governs, and it would fail silently
     // at review time rather than loudly at install time (ADR-0032).
@@ -1391,5 +1421,6 @@ fn compile(
         lapse,
         dedup,
         retention,
+        scan,
     })
 }

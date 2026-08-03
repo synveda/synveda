@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ApprovalMatrix, CompositionConfig, DedupConfig, LapseConfig, PromotionConfig, RedactionConfig,
-    RetentionConfig, ScopeId, TenantId,
+    RetentionConfig, ScopeId, SkillScanConfig, TenantId,
 };
 
 /// A per-node policy pack assignment: the node (and its subtree, until a
@@ -41,8 +41,10 @@ pub struct PolicyAssignment {
 /// (FLOW-4, ADR-0033 decision 6), the longest window a lapse may run
 /// for (AUTHZ-4, ADR-0037 decision 5), what the ingestion pipeline
 /// does with a restatement or a contradiction (MEM-5, ADR-0039
-/// decision 12), and how long material is served, kept and destroyed
-/// (MEM-6, ADR-0040).
+/// decision 12), how long material is served, kept and destroyed
+/// (MEM-6, ADR-0040), and the severity at which a skill bundle's
+/// security scan refuses rather than reports (SKIL-2, ADR-0052
+/// decision 9).
 ///
 /// Every field is optional because a stored pack may configure none of
 /// them, and each has its own fail-safe default resolved downstream:
@@ -71,4 +73,12 @@ pub struct PackConfig {
     pub dedup: Option<DedupConfig>,
     /// The pack's retention, disposal and staleness configuration.
     pub retention: Option<RetentionConfig>,
+    /// The severity at which a skill bundle's security scan refuses.
+    ///
+    /// Its fail-safe is the invariant floor (`critical` blocks and
+    /// nothing else does) rather than the strict pack's threshold: a
+    /// pack that says nothing must not start refusing bundles nobody
+    /// asked it to, and the band that matters holds either way
+    /// (ADR-0052 decision 9).
+    pub scan: Option<SkillScanConfig>,
 }

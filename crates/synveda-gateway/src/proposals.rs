@@ -70,8 +70,8 @@ use synveda_store::{hierarchy, records, rls};
 use synveda_types::{
     ApprovalRequirement, AssetKind, CastApproval, Channel, DocumentPath, Error, HierarchyNode,
     IdentityId, PromotionEvidence, PromptName, ProposalEffect, ProposalId, ProposalState,
-    ProposalView, RecordId, Result, Role, ScopeId, Sensitivity, SkillName, SkillPath, TenantId,
-    Verdict,
+    ProposalView, RecordId, Result, Role, ScopeId, Sensitivity, SkillFile, SkillFilePath,
+    SkillName, SkillPath, SkillScanConfig, TenantId, Verdict,
 };
 use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
 
@@ -283,6 +283,21 @@ struct ProposalDetail {
     summary: ProposalSummary,
     members: Vec<MemberView>,
     approvals: Vec<ApprovalView>,
+    /// The security scan of the bytes this proposal would publish
+    /// (SKIL-2, ADR-0052 decision 7).
+    ///
+    /// Present for `skill` proposals and absent for every other asset
+    /// kind, because it is a statement about executable content and a
+    /// field that was always there would be a field that means nothing
+    /// three times out of four.
+    ///
+    /// **Recomputed on this read, not stored** (decision 6): it is a pure
+    /// function of the members' bytes and the rule table, and both are
+    /// already here — the objects were read to draw the diff, and the
+    /// table is compiled in. What is durable is the audit record, because
+    /// a row is mutable and a chained event is not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scan: Option<crate::skills::ScanReport>,
 }
 
 // ── List ───────────────────────────────────────────────────────────────
@@ -404,6 +419,37 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
         )?;
         let summary = summarise(&state, &mut tx, tenant_id, &input, &proposal).await?;
         let members = member_views(&mut tx, tenant_id, &proposal).await?;
+        // The report a reviewer reads, over the same bytes the diff above
+        // renders — recomputed here rather than looked up (ADR-0052
+        // decision 6), and reported against the pack that would decide the
+        // publication, so `blocked` means "this will be refused at publish"
+        // rather than "some pack somewhere would refuse it".
+        let scan = if proposal.asset == AssetKind::Skill {
+            let config = state
+                .pdp
+                .effective(tenant_id, Resource::Scope(node.id), &input.context())
+                .scan;
+            // Labelled by the member name — `<skill>/<file>` — rather than
+            // the bare filename, because a proposal may carry more than one
+            // bundle and "SKILL.md" alone would not say whose.
+            let files: Vec<SkillFile> = members
+                .iter()
+                .filter_map(|member| {
+                    member
+                        .member
+                        .parse::<SkillFilePath>()
+                        .ok()
+                        .map(|path| SkillFile {
+                            path,
+                            content: member.proposed.clone(),
+                        })
+                })
+                .collect();
+            let scanned = crate::skills::scan_security(&files).await?;
+            Some(crate::skills::ScanReport::new(&scanned, &config))
+        } else {
+            None
+        };
         let recorded = vedaflow::proposals::approvals(&mut tx, tenant_id, id).await?;
         audit::record(
             &mut tx,
@@ -421,6 +467,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
         commit(tx).await?;
         Ok(Json(ProposalDetail {
             members,
+            scan,
             approvals: recorded
                 .into_iter()
                 .map(|approval| ApprovalView {
@@ -1255,7 +1302,17 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
         .await;
     }
     if proposal.asset == AssetKind::Skill {
+        // The pack in force at the *target*, resolved here because this is
+        // where the decision input lives. SKIL-2's gate runs inside the
+        // publish seam, so a bundle approved under one threshold and
+        // published under another is decided by the one standing when the
+        // bytes go fleet-wide (ADR-0052 decision 5).
+        let scan_config = state
+            .pdp
+            .effective(tenant_id, Resource::Scope(node.id), &input.context())
+            .scan;
         return publish_skills(
+            state,
             tx,
             tenant_id,
             id,
@@ -1266,6 +1323,7 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
             &cast,
             &outstanding,
             &proposed,
+            scan_config,
         )
         .await;
     }
@@ -1610,6 +1668,7 @@ async fn publish_documents(
 /// (ADR-0051 decision 12).
 #[allow(clippy::too_many_arguments)]
 async fn publish_skills(
+    state: &AppState,
     mut tx: sqlx::Transaction<'static, sqlx::Postgres>,
     tenant_id: TenantId,
     id: ProposalId,
@@ -1620,6 +1679,7 @@ async fn publish_skills(
     cast: &[CastApproval],
     outstanding: &synveda_types::Outstanding,
     proposed: &[vedaflow::ChannelMember],
+    scan_config: SkillScanConfig,
 ) -> Result<Json<PublishResponse>> {
     let source = proposal.source_scope_id;
     let paths: Vec<SkillPath> = proposed
@@ -1679,6 +1739,51 @@ async fn publish_skills(
             }
         }
         members.push((member.name.clone(), member.object));
+    }
+
+    // ── The security gate, on exactly the approved bytes ───────────────
+    //
+    // SKIL-2, ADR-0052 decision 5. The loop above re-verified every
+    // address because approvals bind bytes; this re-verifies what those
+    // bytes *do*, because the rule table is what says whether they are
+    // publishable and it moves independently of them. A rule that landed
+    // between authoring and approval must not be one a proposal outruns.
+    //
+    // Its refusal is a `Conflict` for the same reason every other refusal
+    // in this function is: the request was well formed and was well
+    // formed when it was approved — what changed is the world.
+    let addresses: Vec<vedaflow::hash::ObjectHash> =
+        members.iter().map(|(_, hash)| *hash).collect();
+    let objects = vedaflow::read_objects(&mut tx, tenant_id, &addresses).await?;
+    let files: Vec<SkillFile> = members
+        .iter()
+        .filter_map(|(_, hash)| objects.get(hash))
+        .filter_map(|object| vedaflow::SkillAsset::from_bytes(&object.content).ok())
+        .map(|asset| asset.file)
+        .collect();
+    let security = crate::skills::scan_security(&files).await?;
+    if security.blocked_by(&scan_config) {
+        // The gate's own transaction: this one is about to be dropped, and
+        // the refusal has to chain even though the publication does not.
+        drop(tx);
+        let pack = format!(
+            "{}@{}",
+            authorized.decision.pack_name, authorized.decision.pack_version
+        );
+        let named = paths
+            .first()
+            .map_or_else(|| proposal.title.clone(), |path| path.skill.to_string());
+        return crate::skills::refuse_scan(
+            state,
+            tenant_id,
+            proposal.target_scope_id,
+            &named,
+            &security,
+            &scan_config,
+            &pack,
+            "publication",
+        )
+        .await;
     }
 
     let channel = vedaflow::ChannelRef::skill(Channel::Published);

@@ -29,6 +29,7 @@ mod retention;
 mod role;
 mod sensitivity;
 mod skill;
+mod skillscan;
 mod tenant;
 
 pub use approval::{
@@ -83,4 +84,5 @@ pub use skill::{
     MAX_SKILL_PATH_CHARS, MAX_SKILL_PATH_SEGMENT_CHARS, MAX_SKILL_PATH_SEGMENTS, SKILL_MANIFEST,
     SkillBundle, SkillChannel, SkillFile, SkillFilePath, SkillName, SkillPath,
 };
+pub use skillscan::{ScanSeverity, SkillScanConfig};
 pub use tenant::{Tenant, TenantStatus};
