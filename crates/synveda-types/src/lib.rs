@@ -28,6 +28,7 @@ mod redaction;
 mod retention;
 mod role;
 mod sensitivity;
+mod skill;
 mod tenant;
 
 pub use approval::{
@@ -76,4 +77,10 @@ pub use retention::{
 };
 pub use role::{Role, RoleBinding};
 pub use sensitivity::{ScopeTier, Sensitivity};
+pub use skill::{
+    Frontmatter, MAX_FRONTMATTER_ENTRIES, MAX_FRONTMATTER_VALUE_CHARS, MAX_SKILL_BUNDLE_CHARS,
+    MAX_SKILL_DESCRIPTION_CHARS, MAX_SKILL_FILE_CHARS, MAX_SKILL_FILES, MAX_SKILL_NAME_CHARS,
+    MAX_SKILL_PATH_CHARS, MAX_SKILL_PATH_SEGMENT_CHARS, MAX_SKILL_PATH_SEGMENTS, SKILL_MANIFEST,
+    SkillBundle, SkillChannel, SkillFile, SkillFilePath, SkillName, SkillPath,
+};
 pub use tenant::{Tenant, TenantStatus};

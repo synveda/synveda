@@ -166,8 +166,10 @@ Decisions, specifically:
    rather than guesses.** Plain and quoted scalars, block and flow sequences
    of scalars, one level of nested mapping — the shapes real skills in
    `anthropics/skills` actually use. Refused by name: anchors, aliases, tags,
-   block scalars, a second document, duplicate keys, tabs in indentation, and
-   any key outside the spec's vocabulary. Force 4 is the reason, and the
+   block scalars, merge keys, `%YAML` directives, duplicate keys, tabs in
+   indentation, unquoted values carrying `:` or ` #`, unknown backslash
+   escapes, nesting past one level, and any key outside the spec's
+   vocabulary. Force 4 is the reason, and the
    refusal is safe in a way a permissive parser is not: because the bytes
    ship verbatim, **a construct this parser refuses is a construct nobody can
    author**, so there is no document in the product whose meaning two parsers
