@@ -85,8 +85,9 @@ Four forces bound the design.
 again at the publish seam, over every file in the bundle including the
 manifest, producing findings on three severities whose top band is on the
 invariant floor and whose report is recomputed from the bytes rather than
-stored.** No new table, no new migration, one new audit action, one new
-pack-carried config.
+stored.** No table for the report and no new grant; one nullable column
+(migration 0032) for the pack's threshold, on the table that already carries
+six configs; one new audit action.
 
 Decisions, specifically:
 
@@ -334,10 +335,13 @@ Decisions, specifically:
   resolved for the scope — `EffectivePack`, the same value the redaction
   config rides on — so a lapse or a pack change governs the very next
   authoring call, and the refusal names the pack and version that decided.
-- **Tenancy**: no new table, no new grant, no migration. The scan reads bytes
-  already inside the caller's tenant transaction or already read for the
-  review render; it holds no state and crosses no tenant boundary because it
-  has nowhere to put one.
+- **Tenancy**: no new table and no new grant. Migration 0032 adds one
+  nullable `jsonb` column to `policy_packs`, which has carried its RLS policy,
+  its forced-RLS flag and its grants since AUTHZ-2 — a config column inherits
+  all three and adds no surface, which is why every config since ADR-0025 has
+  arrived the same way. The scan itself reads bytes already inside the
+  caller's tenant transaction or already read for the review render; it holds
+  no state and crosses no tenant boundary because it has nowhere to put one.
 - **Audit**: `skill.scan.rejected` chains in a short dedicated transaction at
   the authoring seam (the bundle is not stored, so there is no operation
   transaction to be atomic with — MEM-2's `skill.quarantined` shape, and
