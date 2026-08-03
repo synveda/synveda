@@ -9,6 +9,14 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "session-start"],
             "timeout": 5,
             "statusMessage": "Synveda: composing context"
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "skills"],
+            "timeout": 10,
+            "async": true,
+            "statusMessage": "Synveda: syncing governed skills"
           }
         ]
       }

@@ -20,6 +20,7 @@ import { loadConfig } from "./config.mjs";
 import { flush } from "./flush.mjs";
 import { log } from "./log.mjs";
 import { sessionStart } from "./session-start.mjs";
+import { syncSkills } from "./skills.mjs";
 import { prune } from "./spool.mjs";
 import type { HookInput, HookOutput } from "./types.mjs";
 
@@ -30,7 +31,7 @@ import type { HookInput, HookOutput } from "./types.mjs";
  */
 const WATCHDOG_MS = 10_000;
 
-type Mode = "inject" | "flush" | "none";
+type Mode = "inject" | "flush" | "skills" | "none";
 
 process.on("uncaughtException", (error: unknown) => {
   log("hook.uncaught", { error: String(error) });
@@ -74,7 +75,17 @@ async function main(): Promise<void> {
   }
 
   try {
-    emit(mode === "inject" ? await sessionStart(input, config) : await flush(input, config));
+    if (mode === "skills") {
+      // Writes a directory and no context. It emits nothing at all, which
+      // is not an omission: this entry is `async` precisely so that the
+      // session never waits on it, and a hook that returned context from
+      // there would be racing the one that does (SKIL-4, ADR-0054
+      // decision 18).
+      if (config.skills) await syncSkills();
+      else log("skills.disabled", {});
+    } else {
+      emit(mode === "inject" ? await sessionStart(input, config) : await flush(input, config));
+    }
   } catch (error) {
     log("hook.failed", { hook: input.hook_event_name, error: String(error) });
   }
@@ -87,8 +98,18 @@ async function main(): Promise<void> {
 /**
  * The payload is ground truth — it says which event actually fired. The
  * argument from `hooks.json` is the fallback and the cross-check.
+ *
+ * Since SKIL-4 there is one exception, and it is the argument's first
+ * load-bearing use: **two entries ride `SessionStart`** — the inject that
+ * returns context and the skills sync that writes a directory — so for
+ * `skills` the argument decides and the event only cross-checks it. Any
+ * other event carrying that argument is a misconfiguration, and doing
+ * nothing is the right answer to one.
  */
 function resolveMode(argument: string | undefined, event: string | undefined): Mode {
+  if (argument === "skills") {
+    return event === undefined || event === "SessionStart" ? "skills" : "none";
+  }
   switch (event) {
     case "SessionStart":
       return "inject";

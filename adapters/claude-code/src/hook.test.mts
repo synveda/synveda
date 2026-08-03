@@ -46,6 +46,7 @@ function config(gatewayUrl: string, overrides: Partial<AdapterConfig> = {}): Ada
     disabled: false,
     inject: true,
     observe: true,
+    skills: true,
     gatewayUrl,
     timeoutMs: 2000,
     ...overrides,
