@@ -123,6 +123,58 @@ alter table skills add constraint skills_quality_score_check
 alter table skills add constraint skills_quality_pair_check
     check ((quality_score is null) = (rubric_version is null));
 
+-- ── The override ────────────────────────────────────────────────────────────
+
+-- Somebody with the authority to say "ship it anyway", saying it about one
+-- bundle (ADR-0053 decision 8).
+--
+-- **It is a separate act from the publication, and it has to be.** The
+-- first design put the override on the publish request, and it deadlocked:
+-- under the product packs `curator` holds `SkillRead` and `ChannelPublish`
+-- and so is the role that publishes a skill, while `steward` holds the
+-- override and no content read at all. Requiring one principal to hold
+-- both meant nobody could publish a below-bar bundle under any pack — a
+-- wall rather than a gate, discovered by the acceptance test.
+--
+-- Splitting it is not a workaround; it is ADR-0032 decision 9's own shape,
+-- the one that already separates "the approval that decides" from "the act
+-- that runs the effect". The authority records the override; the publisher
+-- spends it.
+--
+-- Keyed by the same digest as `skill_reviews`, and for the same reason
+-- (decision 4): an override is a judgement about **these bytes**. If the
+-- author edits a file afterwards, the override is not found — which is
+-- correct, because nobody agreed to ship whatever the bundle became.
+create table skill_quality_overrides (
+    tenant_id     uuid        not null,
+    scope_id      uuid        not null,
+    skill_name    text        not null,
+    bundle_digest bytea       not null,
+    -- Why. Mandatory, and the whole value of the row: it is what an
+    -- auditor reads in a year to find out why the product shipped
+    -- something it had itself marked down. Scanned before it is written,
+    -- like every other author-supplied prose.
+    reason        text        not null,
+    -- What the rubric said at the moment somebody decided to override it,
+    -- so the record does not depend on recomputing against a rubric that
+    -- has since moved.
+    score         smallint    not null,
+    rubric_version integer    not null,
+    granted_at    timestamptz not null default now(),
+    granted_by    uuid        not null,
+
+    constraint skill_quality_overrides_pk
+        primary key (tenant_id, scope_id, skill_name, bundle_digest),
+    constraint skill_quality_overrides_tenant_fk foreign key (tenant_id) references tenants (id),
+    constraint skill_quality_overrides_digest_check check (octet_length(bundle_digest) = 32),
+    constraint skill_quality_overrides_name_check check (length(skill_name) between 1 and 64),
+    constraint skill_quality_overrides_reason_check check (length(reason) between 1 and 2000),
+    constraint skill_quality_overrides_score_check check (score between 0 and 100)
+);
+
+create index skill_quality_overrides_by_scope
+    on skill_quality_overrides (tenant_id, scope_id, granted_at desc);
+
 -- ── The pack's bar ──────────────────────────────────────────────────────────
 
 -- What a pack gets to say about quality: the automated score a bundle must
@@ -166,10 +218,26 @@ alter table policy_packs add column quality jsonb;
 -- why every config column since ADR-0025 has arrived the same way.
 grant select, insert, update on skill_reviews to synveda_app;
 
+-- The override gets **insert and select only** — no UPDATE either, which
+-- is one grant narrower than the checklist beside it. Re-answering a
+-- checklist is an ordinary act (a reviewer looked again); rewriting the
+-- stated reason for shipping something below the bar is not an act
+-- anybody should have, because that sentence is the entire durable
+-- explanation. A different reason is a different decision, and a
+-- different decision needs different bytes.
+grant select, insert on skill_quality_overrides to synveda_app;
+
 alter table skill_reviews enable row level security;
 alter table skill_reviews force row level security;
+alter table skill_quality_overrides enable row level security;
+alter table skill_quality_overrides force row level security;
 
 create policy skill_reviews_tenant_isolation on skill_reviews
+    for all
+    using (tenant_id = synveda_current_tenant())
+    with check (tenant_id = synveda_current_tenant());
+
+create policy skill_quality_overrides_tenant_isolation on skill_quality_overrides
     for all
     using (tenant_id = synveda_current_tenant())
     with check (tenant_id = synveda_current_tenant());

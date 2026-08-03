@@ -691,21 +691,33 @@ enum ProposalCommand {
     Publish {
         /// The proposal UUID.
         id: ProposalId,
-        /// Publish a skill bundle the quality gate would refuse, saying
-        /// why (SKIL-3, ADR-0053 decision 8).
-        ///
-        /// Takes `SkillQualityOverride` at the target scope —
-        /// deliberately a *different* authority from the one that
-        /// publishes, so the person who decided a bundle was good enough
-        /// is not automatically the person who records that it was not.
-        /// Under the product packs that means a steward or an org-admin.
-        ///
-        /// The reason is what an auditor will read in a year to find out
-        /// why the product shipped something it had itself marked down,
-        /// so write it for them. It never waves the *security* scan
-        /// through: that has no override at any tier.
-        #[arg(long, value_name = "REASON")]
-        override_quality: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Record a decision to publish a skill the quality gate refuses
+    /// (SKIL-3, ADR-0053 decision 8).
+    ///
+    /// Takes `SkillQualityOverride` at the target scope — deliberately a
+    /// *different* authority from the one that publishes. Under the
+    /// product packs a `curator` publishes skills and a `steward` grants
+    /// this, so the person who decided a bundle was good enough is never
+    /// the person who records that it was not.
+    ///
+    /// It is its own act rather than a flag on `publish` for a plainer
+    /// reason too: a steward holds no content read, so a steward cannot
+    /// publish a skill at all. Grant the override, then let whoever
+    /// ordinarily publishes publish.
+    ///
+    /// The reason is what an auditor will read in a year to find out why
+    /// the product shipped something it had itself marked down, so write
+    /// it for them. It never waves the *security* scan through: that has
+    /// no override at any tier and must not acquire one.
+    OverrideQuality {
+        /// The proposal UUID.
+        id: ProposalId,
+        /// Why. Mandatory.
+        #[arg(long)]
+        reason: String,
         #[arg(long)]
         profile: Option<String>,
     },
@@ -1575,11 +1587,14 @@ async fn run(cli: Cli) -> Result<(), String> {
             ProposalCommand::Withdraw { id, profile } => {
                 proposal::withdraw(&profile_name(profile), id).await
             }
-            ProposalCommand::Publish {
+            ProposalCommand::Publish { id, profile } => {
+                proposal::publish(&profile_name(profile), id).await
+            }
+            ProposalCommand::OverrideQuality {
                 id,
-                override_quality,
+                reason,
                 profile,
-            } => proposal::publish(&profile_name(profile), id, override_quality).await,
+            } => proposal::override_quality(&profile_name(profile), id, &reason).await,
             ProposalCommand::Checklist {
                 id,
                 items,

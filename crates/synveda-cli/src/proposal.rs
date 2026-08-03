@@ -412,25 +412,12 @@ pub async fn classify(profile: &str, id: ProposalId) -> Result<(), String> {
 /// and `compliance` holds no publish grant in any pack. Reachable from
 /// here because a review flow that cannot conclude is not a review flow
 /// (ADR-0035 decision 3).
-pub async fn publish(
-    profile: &str,
-    id: ProposalId,
-    override_quality: Option<String>,
-) -> Result<(), String> {
+pub async fn publish(profile: &str, id: ProposalId) -> Result<(), String> {
     let (api, origin) = Api::connect(profile).await?;
     announce(&api, &origin);
-    // No flag means no body, which is what every caller before SKIL-3
-    // sent and what the overwhelming majority still send: the override is
-    // an act somebody performs, never a default nobody notices.
-    let body = override_quality
-        .as_ref()
-        .map(|reason| json!({"quality_override": reason}));
     let published = api
-        .post(&format!("/v1/proposals/{id}/publish"), body)
+        .post(&format!("/v1/proposals/{id}/publish"), None)
         .await?;
-    if let Some(reason) = &override_quality {
-        eprintln!("synveda: quality override recorded — \"{reason}\"");
-    }
     let field = |name: &str| {
         published
             .get(name)
@@ -447,6 +434,41 @@ pub async fn publish(
         short(&field("commit")),
         field("members"),
         field("added"),
+    );
+    Ok(())
+}
+
+/// `synveda proposal override-quality` — record a decision to publish a
+/// skill the quality gate refuses (SKIL-3, ADR-0053 decision 8).
+///
+/// Its own verb rather than a flag on `publish`, because it is its own
+/// authority: a steward grants this and cannot publish a skill (no content
+/// read), a curator publishes and cannot grant this. Two acts, two people.
+pub async fn override_quality(profile: &str, id: ProposalId, reason: &str) -> Result<(), String> {
+    let (api, origin) = Api::connect(profile).await?;
+    announce(&api, &origin);
+    let granted = api
+        .post(
+            &format!("/v1/proposals/{id}/quality-override"),
+            Some(json!({"reason": reason})),
+        )
+        .await?;
+    let digest = granted
+        .get("bundle_digest")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    eprintln!(
+        "synveda: override recorded for {} at {}/100 — bound to bundle {}",
+        granted
+            .get("skill")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        granted.get("score").and_then(Value::as_u64).unwrap_or(0),
+        short(digest),
+    );
+    eprintln!(
+        "synveda: it stands over exactly these bytes; an edit needs a new one. \
+         Whoever ordinarily publishes can now run `synveda proposal publish {id}`"
     );
     Ok(())
 }

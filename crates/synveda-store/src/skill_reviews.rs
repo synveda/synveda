@@ -266,3 +266,167 @@ pub async fn history<'e, E: PgExecutor<'e>>(
     .map_err(storage_error)?;
     rows.into_iter().map(StoredReview::try_from).collect()
 }
+
+// ── The override ────────────────────────────────────────────────────────
+
+/// A recorded decision to publish a bundle the quality gate refuses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredOverride {
+    /// The scope the bundle is drafted at.
+    pub scope_id: ScopeId,
+    /// The bundle's name.
+    pub skill_name: SkillName,
+    /// The digest of exactly the bytes it was granted over.
+    pub bundle_digest: [u8; 32],
+    /// Why.
+    pub reason: String,
+    /// What the rubric said when it was granted.
+    pub score: u8,
+    /// Which rubric said it.
+    pub rubric_version: u32,
+    /// When.
+    pub granted_at: DateTime<Utc>,
+    /// Who.
+    pub granted_by: IdentityId,
+}
+
+/// What [`grant_override`] writes.
+pub struct NewOverride<'a> {
+    /// The scope the bundle is drafted at.
+    pub scope_id: ScopeId,
+    /// The bundle's name.
+    pub skill_name: &'a SkillName,
+    /// The digest of exactly the bytes being overridden.
+    pub bundle_digest: [u8; 32],
+    /// Why.
+    pub reason: &'a str,
+    /// What the rubric said.
+    pub score: u8,
+    /// Which rubric said it.
+    pub rubric_version: u32,
+    /// Who is granting.
+    pub granter: IdentityId,
+}
+
+/// The stored override shape, mapped on the way out.
+struct OverrideRow {
+    scope_id: uuid::Uuid,
+    skill_name: String,
+    bundle_digest: Vec<u8>,
+    reason: String,
+    score: i16,
+    rubric_version: i32,
+    granted_at: DateTime<Utc>,
+    granted_by: uuid::Uuid,
+}
+
+impl TryFrom<OverrideRow> for StoredOverride {
+    type Error = Error;
+
+    fn try_from(row: OverrideRow) -> Result<Self> {
+        let bundle_digest =
+            <[u8; 32]>::try_from(row.bundle_digest.as_slice()).map_err(|_| Error::Internal {
+                message: format!(
+                    "quality override for {:?} has a bundle digest that is not 32 bytes",
+                    row.skill_name
+                ),
+            })?;
+        Ok(StoredOverride {
+            scope_id: ScopeId::from_uuid(row.scope_id),
+            skill_name: row.skill_name.parse()?,
+            bundle_digest,
+            reason: row.reason,
+            score: row.score.clamp(0, i16::from(u8::MAX)) as u8,
+            rubric_version: row.rubric_version.max(0).unsigned_abs(),
+            granted_at: row.granted_at,
+            granted_by: IdentityId::from_uuid(row.granted_by),
+        })
+    }
+}
+
+/// Records an override over one bundle.
+///
+/// **First writer wins, and the row cannot be rewritten** (migration 0033
+/// grants no UPDATE). Re-answering a checklist is an ordinary act; editing
+/// the stated reason for shipping something below the bar is not one
+/// anybody should have, because that sentence is the whole durable
+/// explanation. A conflicting second grant returns the first, which is the
+/// honest answer: the override already exists, and it says what it says.
+///
+/// # Errors
+///
+/// [`Error::Invalid`] for an unknown tenant or a value a CHECK refuses;
+/// [`Error::Storage`] otherwise.
+#[tracing::instrument(
+    name = "store.skill_reviews.grant_override",
+    skip_all,
+    fields(tenant.id = %tenant, scope.id = %new.scope_id, skill.name = %new.skill_name),
+    err(Display)
+)]
+pub async fn grant_override<'e, E: PgExecutor<'e>>(
+    executor: E,
+    tenant: TenantId,
+    new: &NewOverride<'_>,
+) -> Result<StoredOverride> {
+    let row = sqlx::query_as!(
+        OverrideRow,
+        r#"insert into skill_quality_overrides
+               (tenant_id, scope_id, skill_name, bundle_digest, reason, score,
+                rubric_version, granted_by)
+           values ($1, $2, $3, $4, $5, $6, $7, $8)
+           on conflict (tenant_id, scope_id, skill_name, bundle_digest) do update
+               set reason = skill_quality_overrides.reason
+           returning scope_id, skill_name, bundle_digest, reason, score, rubric_version,
+                     granted_at, granted_by"#,
+        tenant.as_uuid(),
+        new.scope_id.as_uuid(),
+        new.skill_name.as_str(),
+        &new.bundle_digest[..],
+        new.reason,
+        i16::from(new.score),
+        i32::try_from(new.rubric_version).unwrap_or(i32::MAX),
+        new.granter.as_uuid(),
+    )
+    .fetch_one(executor)
+    .await
+    .map_err(storage_error)?;
+    StoredOverride::try_from(row)
+}
+
+/// The override standing over exactly these bytes, or `None`.
+///
+/// `None` is also the answer for a bundle somebody overrode and then
+/// edited, which is the design: nobody agreed to ship whatever it became.
+///
+/// # Errors
+///
+/// [`Error::Storage`] on a database failure.
+#[tracing::instrument(
+    name = "store.skill_reviews.override_for",
+    skip_all,
+    fields(tenant.id = %tenant, scope.id = %scope_id, skill.name = %name),
+    err(Display)
+)]
+pub async fn override_for<'e, E: PgExecutor<'e>>(
+    executor: E,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    name: &SkillName,
+    bundle_digest: &[u8; 32],
+) -> Result<Option<StoredOverride>> {
+    let row = sqlx::query_as!(
+        OverrideRow,
+        r#"select scope_id, skill_name, bundle_digest, reason, score, rubric_version,
+                  granted_at, granted_by
+           from skill_quality_overrides
+           where tenant_id = $1 and scope_id = $2 and skill_name = $3 and bundle_digest = $4"#,
+        tenant.as_uuid(),
+        scope_id.as_uuid(),
+        name.as_str(),
+        &bundle_digest[..],
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(StoredOverride::try_from).transpose()
+}

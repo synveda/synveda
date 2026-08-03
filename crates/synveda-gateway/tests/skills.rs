@@ -1855,3 +1855,521 @@ async fn an_ordinary_skill_still_authors_and_publishes_with_a_clean_report() {
     // Nothing was refused anywhere on the chain.
     assert!(scan_rejections(&w).await.is_empty());
 }
+
+// ── SKIL-3: quality scoring (ADR-0053) ─────────────────────────────────
+
+/// A bundle that scores badly for reasons the rubric can name: no example,
+/// no sections, a description that says what it is rather than when to
+/// reach for it, and an unfinished marker.
+fn thin_manifest(name: &str) -> String {
+    format!(
+        "---\n\
+         name: {name}\n\
+         description: A generator of formatted output from repository data files.\n\
+         ---\n\
+         \n\
+         # {name}\n\
+         \n\
+         TODO: write this properly.\n"
+    )
+}
+
+/// Answers a whole checklist `yes` on a proposal.
+async fn record_checklist(w: &World, token: &str, id: &str) -> (StatusCode, Value) {
+    post(
+        &w.app,
+        &format!("/v1/proposals/{id}/checklist"),
+        token,
+        json!({"answers": {
+            "instructions-correct": "yes",
+            "scope-appropriate": "yes",
+            "not-duplicate": "yes",
+            "dependencies-available": "yes",
+            "tested": "yes",
+        }}),
+    )
+    .await
+}
+
+/// Opens the proposal and takes both approvals, without publishing.
+async fn approved_proposal(w: &World, scope: ScopeId, name: &str, title: &str) -> String {
+    let (status, opened) = post(
+        &w.app,
+        "/v1/proposals",
+        &w.alice,
+        json!({"scope_id": scope, "skill_names": [name], "title": title}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "open: {opened}");
+    let id = opened["id"].as_str().expect("proposal id").to_owned();
+    for token in [&w.sam, &w.sec] {
+        let (status, cast) = post(
+            &w.app,
+            &format!("/v1/proposals/{id}/approve"),
+            token,
+            json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "approve: {cast}");
+    }
+    id
+}
+
+/// **The AC's first clause**: "score displayed at review and in the
+/// registry".
+///
+/// Both halves are asserted against the *same* bundle, because the claim
+/// that matters is not that two surfaces each print a number — it is that
+/// they print the same number about the same bytes, from two different
+/// derivations. The registry reads a **cache** written at authoring; the
+/// review **recomputes** from the proposal's members (ADR-0053 decisions 2
+/// and 3). If those ever disagreed, the cache would be a lie and this test
+/// is what says so.
+#[tokio::test]
+async fn the_score_is_displayed_at_review_and_in_the_registry() {
+    let Some(w) = world().await else { return };
+
+    let (status, authored) =
+        author(&w, &w.alice, w.platform, "Run the checker, then read it.").await;
+    assert_eq!(status, StatusCode::OK, "{authored}");
+
+    // 1. At authoring, so an author sees it before a reviewer does.
+    let quality = &authored["quality"];
+    let score = quality["score"].as_u64().expect("a score");
+    assert!(quality["rubric_version"].as_u64().is_some(), "{quality}");
+    assert_eq!(
+        quality["checks"].as_array().expect("checks").len(),
+        8,
+        "every check reports, passing ones included: {quality}"
+    );
+
+    // 2. In the registry.
+    let (status, listed) = get(
+        &w.app,
+        &format!("/v1/skills?scope_id={}", w.platform),
+        &w.alice,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let entry = listed["skills"]
+        .as_array()
+        .expect("skills")
+        .iter()
+        .find(|entry| entry["name"] == json!("code-review"))
+        .expect("the skill is listed");
+    assert_eq!(
+        entry["quality"]["score"].as_u64(),
+        Some(score),
+        "the registry's cached score must equal what authoring computed: {entry}"
+    );
+    assert_eq!(
+        entry["quality"]["stale"],
+        json!(false),
+        "a score this binary's own rubric just wrote is not stale: {entry}"
+    );
+
+    // 3. At review — recomputed from the proposal's members, not read from
+    //    the row above.
+    let id = approved_proposal(&w, w.platform, "code-review", "publish code-review").await;
+    let (status, detail) = get(&w.app, &format!("/v1/proposals/{id}"), &w.sam).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let reviewed = &detail["quality"];
+    assert_eq!(
+        reviewed["score"].as_u64(),
+        Some(score),
+        "the recomputed score must equal the cached one, or the cache is a lie: {reviewed}"
+    );
+    assert!(
+        reviewed["bundle_digest"]
+            .as_str()
+            .is_some_and(|d| d.len() == 64),
+        "the review names the digest a checklist binds to: {reviewed}"
+    );
+    // The pack in force is `regulated-strict`, which asks for a checklist —
+    // and none has been recorded, so the review says the publication will
+    // need one. That is the report doing its job at review time rather
+    // than the publisher discovering it at the seam.
+    assert_eq!(reviewed["requires_checklist"], json!(true), "{reviewed}");
+    assert_eq!(reviewed["needs_override"], json!(true), "{reviewed}");
+
+    // And the scan is still its own report: two questions, two blocks
+    // (ADR-0053 decision 1's shape one level up).
+    assert!(detail["scan"].is_object(), "{detail}");
+}
+
+/// **The AC's second clause**: "low-score publish requires override".
+///
+/// Three things are asserted and the third is the one that makes this a
+/// governance feature rather than a warning:
+///
+/// 1. a bundle below the bar is refused at publication, naming the bar;
+/// 2. the same publication succeeds with a reason;
+/// 3. **the override is a different authority from the publication**.
+///    `cora` is the curator who publishes everything else in this file and
+///    cannot override; `sam` is the steward who can. A gate the publisher
+///    can wave through themselves is not a gate (ADR-0053 decision 8).
+#[tokio::test]
+async fn a_low_score_publish_requires_an_override_from_a_second_authority() {
+    let Some(w) = world().await else { return };
+
+    let (status, authored) = author_files(
+        &w,
+        &w.alice,
+        w.platform,
+        "thin",
+        &[("SKILL.md", thin_manifest("thin"))],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "authoring is not gated: {authored}");
+    let score = authored["quality"]["score"].as_u64().expect("a score");
+    assert!(
+        score < 70,
+        "the fixture must actually be below regulated-strict's bar, scored {score}"
+    );
+
+    let id = approved_proposal(&w, w.platform, "thin", "publish thin").await;
+    // A complete checklist, so the *only* bar left is the score itself.
+    let (status, checked) = record_checklist(&w, &w.sam, &id).await;
+    assert_eq!(status, StatusCode::OK, "{checked}");
+
+    // 1. Refused, naming the bar and what it takes to pass it.
+    let (status, refused) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/publish"),
+        &w.cora,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    let message = refused["message"].as_str().expect("a message");
+    assert!(message.contains(&score.to_string()), "{message}");
+    assert!(message.contains("70"), "the bar is named: {message}");
+    assert!(message.contains("SkillQualityOverride"), "{message}");
+    assert!(
+        message.contains("quality-override"),
+        "the refusal names the call that unblocks it: {message}"
+    );
+
+    // 2. The publisher cannot grant the override themselves. `cora` holds
+    //    ChannelPublish and SkillRead — she publishes every other bundle in
+    //    this file — and holds no override.
+    let (status, denied) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/quality-override"),
+        &w.cora,
+        json!({"reason": "we need it for the incident review"}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "the role that publishes must not be the role that overrides: {denied}"
+    );
+
+    // 3. The steward grants it — a separate act, by a separate authority,
+    //    on the chain in its own right. It has to be separate: `sam` holds
+    //    the override and no `SkillRead`, so he could not publish this
+    //    bundle even having decided to, and `cora` can publish but cannot
+    //    excuse. Two people, which is the point (ADR-0053 decision 8).
+    let (status, granted) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/quality-override"),
+        &w.sam,
+        json!({"reason": "needed for Tuesday's incident review; the author is fixing \
+                          the examples this week"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{granted}");
+    assert_eq!(granted["score"].as_u64(), Some(score), "{granted}");
+
+    // 4. And now the ordinary publisher publishes, with no new privilege
+    //    and no flag: the override is a state of the world, not a field on
+    //    her request.
+    let (status, published) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/publish"),
+        &w.cora,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{published}");
+
+    // And the override is on the chain with the reason, the score and the
+    // bar it missed — the question "what did we ship that we knew was
+    // below the bar, and who said so" (ADR-0053 decision 10).
+    let overrides: Vec<Value> = events(&w.pool, w.tenant)
+        .await
+        .into_iter()
+        .filter(|event| event.action == "skill.quality.overridden")
+        .map(|event| event.payload)
+        .collect();
+    assert_eq!(overrides.len(), 1, "{overrides:?}");
+    let recorded = &overrides[0];
+    assert_eq!(recorded["skill"], json!("thin"), "{recorded}");
+    assert_eq!(recorded["score"].as_u64(), Some(score), "{recorded}");
+    assert_eq!(recorded["min_score"], json!(70), "{recorded}");
+    assert!(
+        recorded["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("incident review")),
+        "{recorded}"
+    );
+    assert_eq!(
+        recorded["shortfalls"][0]["kind"],
+        json!("below-threshold"),
+        "which bar was missed, so an auditor can tell a low score from a \
+         reviewer's objection: {recorded}"
+    );
+}
+
+/// **The finding**: a checklist is bound to the bundle's bytes, so an edit
+/// beneath a review does not inherit the answers (ADR-0053 decision 4).
+///
+/// This is ADR-0032 decision 6's "approvals bind bytes" applied to the one
+/// review artefact that had no address check of its own. Without it, a
+/// reviewer answers "yes, somebody ran it", the author pushes a new script,
+/// and the answer is still sitting there describing a bundle that no longer
+/// exists.
+///
+/// Note what is *not* needed to make this work: no invalidation, no
+/// `stale` column, no sweep. The edited bundle simply has a different
+/// digest, so the lookup finds nothing.
+#[tokio::test]
+async fn a_checklist_does_not_survive_an_edit_beneath_it() {
+    let Some(w) = world().await else { return };
+
+    let (status, authored) = author(&w, &w.alice, w.platform, "Run the checker.").await;
+    assert_eq!(status, StatusCode::OK, "{authored}");
+    let id = approved_proposal(&w, w.platform, "code-review", "publish code-review").await;
+
+    let (status, checked) = record_checklist(&w, &w.sam, &id).await;
+    assert_eq!(status, StatusCode::OK, "{checked}");
+    let bound_to = checked["bundle_digest"]
+        .as_str()
+        .expect("a digest")
+        .to_owned();
+
+    // The review shows it.
+    let (_, detail) = get(&w.app, &format!("/v1/proposals/{id}"), &w.sam).await;
+    assert_eq!(detail["quality"]["checklist"]["complete"], json!(true));
+    assert_eq!(detail["quality"]["needs_override"], json!(false));
+
+    // The author edits a file. The proposal still names the old addresses,
+    // so it is the *draft* that has moved — and re-proposing would bind the
+    // new bytes, which is the case that matters.
+    let (status, reauthored) = author(
+        &w,
+        &w.alice,
+        w.platform,
+        "Run the checker, then read the report.",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reauthored}");
+    assert_ne!(
+        reauthored["quality"]["bundle_digest"].as_str(),
+        Some(bound_to.as_str()),
+        "changed bytes must produce a different digest"
+    );
+    assert!(
+        reauthored["quality"]["checklist"].is_null(),
+        "the answers must not follow the edit: {}",
+        reauthored["quality"]
+    );
+
+    // A fresh proposal over the new bytes needs a fresh checklist, and the
+    // publish seam says so rather than reading the old answers.
+    let next = approved_proposal(&w, w.platform, "code-review", "publish the edit").await;
+    let (status, refused) = post(
+        &w.app,
+        &format!("/v1/proposals/{next}/publish"),
+        &w.cora,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .expect("a message")
+            .contains("no reviewer checklist is recorded for exactly these bytes"),
+        "{refused}"
+    );
+
+    // Re-answering against the new bytes publishes.
+    let (status, checked) = record_checklist(&w, &w.sam, &next).await;
+    assert_eq!(status, StatusCode::OK, "{checked}");
+    assert_ne!(
+        checked["bundle_digest"].as_str(),
+        Some(bound_to.as_str()),
+        "a second review of different bytes is a second review"
+    );
+    let (status, published) = post(
+        &w.app,
+        &format!("/v1/proposals/{next}/publish"),
+        &w.cora,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{published}");
+}
+
+/// A reviewer's written-down `no` refuses a publication under **every**
+/// pack, configured bar or not (ADR-0053 decision 7).
+///
+/// This is what makes answering the checklist mean something rather than
+/// fill a form: a pack decides whether the checklist is *mandatory*, and no
+/// pack decides that a recorded objection counts for nothing.
+#[tokio::test]
+async fn a_reviewers_objection_refuses_the_publication_and_the_override_records_it() {
+    let Some(w) = world().await else { return };
+
+    let (status, authored) =
+        author(&w, &w.alice, w.platform, "Run the checker, then read it.").await;
+    assert_eq!(status, StatusCode::OK, "{authored}");
+    assert!(
+        authored["quality"]["score"].as_u64().expect("a score") >= 70,
+        "this fixture must clear the *score* bar, so the checklist is the only thing left"
+    );
+
+    let id = approved_proposal(&w, w.platform, "code-review", "publish code-review").await;
+    let (status, checked) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/checklist"),
+        &w.sam,
+        json!({
+            "answers": {
+                "instructions-correct": "yes",
+                "scope-appropriate": "yes",
+                "not-duplicate": "n/a",
+                "dependencies-available": "yes",
+                "tested": "no",
+            },
+            "note": "nobody has run this against a real diff yet",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{checked}");
+    assert_eq!(
+        checked["complete"],
+        json!(true),
+        "n/a is an answer: {checked}"
+    );
+    assert_eq!(checked["concerns"], json!(["tested"]), "{checked}");
+
+    let (status, refused) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/publish"),
+        &w.cora,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .expect("a message")
+            .contains("a reviewer answered `no` to tested"),
+        "the refusal names the objection rather than a score: {refused}"
+    );
+
+    let (status, granted) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/quality-override"),
+        &w.sam,
+        json!({"reason": "shipping to unblock the audit; testing tracked in SKIL-99"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{granted}");
+    let (status, published) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/publish"),
+        &w.cora,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{published}");
+
+    // Both acts are on the chain, and the checklist event carries the
+    // digest its answers were about.
+    let chained = events(&w.pool, w.tenant).await;
+    let recorded = chained
+        .iter()
+        .find(|event| event.action == "skill.checklist.recorded")
+        .expect("the checklist chains");
+    assert_eq!(recorded.payload["concerns"], json!(["tested"]));
+    assert_eq!(
+        recorded.payload["bundle_digest"].as_str(),
+        checked["bundle_digest"].as_str(),
+        "an auditor can tell exactly which bytes were judged"
+    );
+    let overridden = chained
+        .iter()
+        .find(|event| event.action == "skill.quality.overridden")
+        .expect("the override chains");
+    assert_eq!(
+        overridden.payload["shortfalls"][0]["kind"],
+        json!("checklist-concerns"),
+        "{:?}",
+        overridden.payload
+    );
+}
+
+/// Neither new event carries file content, and the checklist note — the
+/// first author-supplied prose this plane stores that is not a bundled
+/// file — is refused outright when it carries a secret.
+///
+/// SKIL-2's leak sweep, extended to the two acts SKIL-3 adds. The note is
+/// **refused rather than scrubbed** because, unlike a bundled file, there
+/// is nothing a placeholder would preserve: the value of a reason is that
+/// a person wrote it.
+#[tokio::test]
+async fn the_new_events_leak_nothing_and_a_note_carrying_a_secret_is_refused() {
+    let Some(w) = world().await else { return };
+
+    let (status, authored) =
+        author(&w, &w.alice, w.platform, "Run the checker, then read it.").await;
+    assert_eq!(status, StatusCode::OK, "{authored}");
+    let id = approved_proposal(&w, w.platform, "code-review", "publish code-review").await;
+
+    let (status, refused) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/checklist"),
+        &w.sam,
+        json!({
+            "answers": {"tested": "yes"},
+            "note": "ran it with AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .expect("a message")
+            .contains("not stored"),
+        "{refused}"
+    );
+
+    let (status, checked) = record_checklist(&w, &w.sam, &id).await;
+    assert_eq!(status, StatusCode::OK, "{checked}");
+    let (status, published) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/publish"),
+        &w.cora,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{published}");
+
+    // The sweep: no event on the chain carries a line of the bundle.
+    let bodies: Vec<String> = events(&w.pool, w.tenant)
+        .await
+        .into_iter()
+        .map(|event| event.payload.to_string())
+        .collect();
+    for body in &bodies {
+        assert!(!body.contains("wJalrXUtnFEMIK7MDENG"), "{body}");
+        assert!(!body.contains("import subprocess"), "{body}");
+        assert!(!body.contains("# Code Review"), "{body}");
+    }
+}

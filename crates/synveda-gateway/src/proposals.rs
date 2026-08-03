@@ -439,6 +439,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
         )?;
         let summary = summarise(&state, &mut tx, tenant_id, &input, &proposal).await?;
         let members = member_views(&mut tx, tenant_id, &proposal).await?;
+        let members_of = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
         // The report a reviewer reads, over the same bytes the diff above
         // renders — recomputed here rather than looked up (ADR-0052
         // decision 6), and reported against the pack that would decide the
@@ -471,7 +472,21 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
             // `(member name, object address)` pairs, which is what a
             // publication will recompute — so what a reviewer is shown
             // here and what the gate reads there are the same lookup.
-            let scored = crate::skills::score_quality(&files).await?;
+            // **From the objects, not from the member names.** A member
+            // is named `<skill>/<path>`, so reconstructing a `SkillFile`
+            // from that name gives a path of `code-review/SKILL.md` —
+            // and the rubric, which has to know which file is the
+            // manifest, then sees a bundle with no manifest at all and
+            // scores it as garbage. That is harmless for the scanner
+            // above, which reads every file's content regardless of its
+            // name, and fatal here.
+            //
+            // The acceptance test caught it by asserting that the review
+            // and the registry agree about the same bytes, which is the
+            // property a recomputed score has to have to be worth
+            // rendering beside a cached one.
+            let bundle = crate::skills::files_of_members(&mut tx, tenant_id, &members_of).await?;
+            let scored = crate::skills::score_quality(&bundle).await?;
             let digest = crate::skills::digest_of_members(
                 &members
                     .iter()
@@ -1464,27 +1479,207 @@ async fn checklist_inner(
     }))
 }
 
-// ── Publish: the proposal's effect ─────────────────────────────────────
+// ── The quality override ───────────────────────────────────────────────
 
-/// Everything the quality gate needs at the publish seam (SKIL-3,
-/// ADR-0053 decision 7).
-///
-/// One struct rather than three parameters on a function that already
-/// takes twelve, and the grouping says something true: the bar, the reason
-/// somebody gave for stepping over it, and the decision that let them are
-/// one thing — a gate is not a threshold, it is a threshold plus who may
-/// pass it and why.
-struct QualityGate<'a> {
-    /// The bar the pack in force asks for.
-    config: SkillQualityConfig,
-    /// Why this publication should proceed below it. `None` is an
-    /// ordinary publication, which is the overwhelming majority.
-    reason: Option<&'a str>,
-    /// The `SkillQualityOverride` decision, taken only when a reason was
-    /// given — so a caller who never asked for an override is never
-    /// recorded as having been refused one.
-    authorized: Option<crate::authz::Authorized>,
+/// What an override-holder sends (SKIL-3, ADR-0053 decision 8).
+#[derive(Deserialize)]
+pub(crate) struct OverrideBody {
+    /// Why this bundle should ship despite being below the bar.
+    ///
+    /// Mandatory, and it is the whole value of the act: it is what an
+    /// auditor reads in a year to find out why the product shipped
+    /// something it had itself marked down.
+    reason: String,
 }
+
+#[derive(Serialize)]
+struct OverrideResponse {
+    proposal_id: ProposalId,
+    skill: String,
+    /// The digest the override is granted over. An edit produces different
+    /// bytes and this override does not follow them.
+    bundle_digest: String,
+    score: u8,
+    /// The bars it steps over, so the response says what was excused.
+    shortfalls: Vec<QualityShortfall>,
+    granted_by: IdentityId,
+    granted_at: DateTime<Utc>,
+}
+
+/// `POST /v1/proposals/{id}/quality-override` — record a decision to
+/// publish a bundle the quality gate refuses.
+///
+/// **A separate act from the publication, and that is the design rather
+/// than a convenience.** Under the product packs `curator` holds the
+/// `SkillRead` and `ChannelPublish` that publishing a skill takes, and
+/// `steward` holds this action and no content read at all — so putting the
+/// override on the publish request would have meant nobody could publish a
+/// below-bar bundle under any pack. Splitting it is ADR-0032 decision 9's
+/// own shape, the one that already separates the approval that decides
+/// from the act that runs the effect.
+///
+/// It is refused when the bundle needs no override, which keeps the audit
+/// trail honest: an override standing over a bundle that never needed one
+/// is a record of a decision nobody had to make.
+#[tracing::instrument(name = "proposals.quality_override", skip_all)]
+pub(crate) async fn quality_override(
+    State(state): State<AppState>,
+    Path(id): Path<ProposalId>,
+    payload: std::result::Result<Json<OverrideBody>, JsonRejection>,
+) -> Response {
+    let result = async {
+        let body = body(payload)?;
+        quality_override_inner(&state, id, &body.reason).await
+    }
+    .await;
+    respond(&state, "quality_override", result).await
+}
+
+async fn quality_override_inner(
+    state: &AppState,
+    id: ProposalId,
+    reason: &str,
+) -> Result<Json<OverrideResponse>> {
+    check_text("reason", Some(reason))?;
+    if reason.trim().is_empty() {
+        return Err(Error::Invalid {
+            message: "an override must say why: it is the whole of what the audit trail will \
+                      carry about a publication the product itself scored below the bar"
+                .to_owned(),
+        });
+    }
+
+    let tenant_id = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let proposal = load(&mut tx, tenant_id, id).await?;
+    if proposal.asset != AssetKind::Skill {
+        return Err(Error::Invalid {
+            message: format!(
+                "proposal {id} carries {}, and the quality gate is a statement about a skill \
+                 bundle; there is nothing here to override",
+                proposal.asset.as_str()
+            ),
+        });
+    }
+    let node = target_node(&mut tx, tenant_id, &proposal).await?;
+    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let authorized = authz::decide(
+        state,
+        &input,
+        Action::SkillQualityOverride,
+        Resource::Scope(node.id),
+        None,
+    )?;
+    require_open(&proposal)?;
+    let granter = identity_of(&input)?;
+    crate::skills::refuse_if_secret("override reason", reason).await?;
+
+    let members = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
+    let names: Vec<String> = members.iter().map(|member| member.name.clone()).collect();
+    let skill = crate::skills::skill_of(&names).ok_or_else(|| Error::Invalid {
+        message: format!("proposal {id} does not carry exactly one skill bundle"),
+    })?;
+    let pairs: Vec<(&str, vedaflow::hash::ObjectHash)> = members
+        .iter()
+        .map(|member| (member.name.as_str(), member.object))
+        .collect();
+    let digest = vedaflow::bundle_digest(&pairs);
+
+    let files = crate::skills::files_of_members(&mut tx, tenant_id, &members).await?;
+    let scored = crate::skills::score_quality(&files).await?;
+    let review = synveda_store::skill_reviews::for_bundle(
+        &mut *tx,
+        tenant_id,
+        proposal.source_scope_id,
+        &skill,
+        &digest,
+    )
+    .await?;
+    let effective = state
+        .pdp
+        .effective(tenant_id, Resource::Scope(node.id), &input.context());
+    let shortfalls = effective
+        .quality
+        .shortfalls(scored.score, review.as_ref().map(|r| &r.checklist));
+    if shortfalls.is_empty() {
+        return Err(Error::Conflict {
+            message: format!(
+                "skill {skill} already clears this pack's quality bar (rubric v{} scored it \
+                 {}/100); an override standing over a bundle that never needed one is a \
+                 record of a decision nobody had to make",
+                scored.rubric_version, scored.score,
+            ),
+        });
+    }
+
+    let stored = synveda_store::skill_reviews::grant_override(
+        &mut *tx,
+        tenant_id,
+        &synveda_store::skill_reviews::NewOverride {
+            // The source scope, where the bundle is drafted and where the
+            // publish seam will look this up.
+            scope_id: proposal.source_scope_id,
+            skill_name: &skill,
+            bundle_digest: digest,
+            reason,
+            score: scored.score,
+            rubric_version: scored.rubric_version,
+            granter,
+        },
+    )
+    .await?;
+
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::SkillQualityOverridden,
+        Resource::Scope(node.id).to_string(),
+        Outcome::Success,
+        json!({
+            "authz": audit::decision_context(Action::SkillQualityOverride, &authorized),
+            "asset": AssetKind::Skill.as_str(),
+            "proposal_id": id,
+            "skill": skill.as_str(),
+            "rubric_version": scored.rubric_version,
+            "score": scored.score,
+            "min_score": effective.quality.min_score,
+            // Which bars were stepped over, so an auditor filtering for
+            // "what did we ship below the bar" can tell a low-scoring
+            // bundle from one a reviewer objected to.
+            "shortfalls": shortfalls
+                .iter()
+                .map(|shortfall| json!({
+                    "kind": serde_json::to_value(shortfall)
+                        .ok()
+                        .and_then(|value| value.get("kind").cloned())
+                        .unwrap_or(serde_json::Value::Null),
+                    "detail": shortfall.describe(),
+                }))
+                .collect::<Vec<_>>(),
+            "bundle_digest": crate::skills::hex(&digest),
+            "reason": reason,
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+    metrics::counter!(
+        crate::telemetry::SKILL_QUALITY_OVERRIDES_TOTAL,
+        "pack" => authorized.decision.pack_name.clone(),
+    )
+    .increment(1);
+
+    Ok(Json(OverrideResponse {
+        proposal_id: id,
+        skill: skill.to_string(),
+        bundle_digest: crate::skills::hex(&digest),
+        score: stored.score,
+        shortfalls,
+        granted_by: stored.granted_by,
+        granted_at: stored.granted_at,
+    }))
+}
+
+// ── Publish: the proposal's effect ─────────────────────────────────────
 
 #[derive(Serialize)]
 struct PublishResponse {
@@ -1503,78 +1698,14 @@ struct PublishResponse {
     added: usize,
 }
 
-/// What a publisher sends to step over the quality gate (SKIL-3,
-/// ADR-0053 decision 8).
-///
-/// The body is optional and the override inside it is optional again: an
-/// ordinary publication sends nothing, which is what makes the override an
-/// act somebody performs rather than a default nobody notices.
-#[derive(Deserialize, Default)]
-pub(crate) struct PublishBody {
-    /// Why this bundle should ship despite being below the bar.
-    ///
-    /// Mandatory when present at all — a rejection has needed a reason
-    /// since ADR-0032 decision 12, and an override needs one more: it is
-    /// the only field that will explain, to whoever reads the chain in a
-    /// year, why the product shipped something it had marked down.
-    #[serde(default)]
-    quality_override: Option<String>,
-}
-
 /// `POST /v1/proposals/{id}/publish` — run an approved proposal's effect.
 #[tracing::instrument(name = "proposals.publish", skip_all)]
-pub(crate) async fn publish(
-    State(state): State<AppState>,
-    Path(id): Path<ProposalId>,
-    payload: std::result::Result<Json<Option<PublishBody>>, JsonRejection>,
-) -> Response {
-    let result = async {
-        // **A publication with no body is the ordinary case and stays the
-        // easy one.** This route took no body at all until SKIL-3, so
-        // every existing caller sends nothing, an empty body, or a literal
-        // `null` — and all three must keep working exactly as they did.
-        // `Option<PublishBody>` is what makes `null` a body rather than a
-        // parse error; the rejection arms cover no-content-type and
-        // no-bytes. A malformed *object* is still refused, because that is
-        // a caller who meant something and got it wrong.
-        let body = match payload {
-            Ok(Json(body)) => body.unwrap_or_default(),
-            Err(JsonRejection::MissingJsonContentType(_) | JsonRejection::BytesRejection(_)) => {
-                PublishBody::default()
-            }
-            Err(rejection) => {
-                return Err(Error::Invalid {
-                    message: format!("publish body: {rejection}"),
-                });
-            }
-        };
-        let quality_override = match body.quality_override.as_deref() {
-            // An override with an empty reason is not an override. A
-            // rejection has needed a reason since ADR-0032 decision 12,
-            // and this needs one more: it is the only field that will
-            // explain to whoever reads the chain in a year why the
-            // product shipped something it had marked down.
-            Some(reason) if reason.trim().is_empty() => {
-                return Err(Error::Invalid {
-                    message: "quality_override must say why: it is the whole of what the \
-                              audit trail will carry about a publication the product itself \
-                              scored below the bar"
-                        .to_owned(),
-                });
-            }
-            other => other,
-        };
-        publish_inner(&state, id, quality_override).await
-    }
-    .await;
+pub(crate) async fn publish(State(state): State<AppState>, Path(id): Path<ProposalId>) -> Response {
+    let result = publish_inner(&state, id).await;
     respond(&state, "publish", result).await
 }
 
-async fn publish_inner(
-    state: &AppState,
-    id: ProposalId,
-    quality_override: Option<&str>,
-) -> Result<Json<PublishResponse>> {
+async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishResponse>> {
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let proposal = load(&mut tx, tenant_id, id).await?;
@@ -1649,20 +1780,6 @@ async fn publish_inner(
         let effective = state
             .pdp
             .effective(tenant_id, Resource::Scope(node.id), &input.context());
-        // SKIL-3's gate needs a *second* decision, and it is taken here
-        // rather than inside the publish so that a caller who did not ask
-        // for an override is never described as having been denied one
-        // (ADR-0053 decision 8). `None` means they did not ask.
-        let override_authorized = match quality_override {
-            None => None,
-            Some(_) => Some(authz::decide(
-                state,
-                &input,
-                Action::SkillQualityOverride,
-                Resource::Scope(node.id),
-                None,
-            )?),
-        };
         return publish_skills(
             state,
             tx,
@@ -1676,11 +1793,7 @@ async fn publish_inner(
             &outstanding,
             &proposed,
             effective.scan,
-            QualityGate {
-                config: effective.quality,
-                reason: quality_override,
-                authorized: override_authorized,
-            },
+            effective.quality,
         )
         .await;
     }
@@ -2037,7 +2150,7 @@ async fn publish_skills(
     outstanding: &synveda_types::Outstanding,
     proposed: &[vedaflow::ChannelMember],
     scan_config: SkillScanConfig,
-    quality: QualityGate<'_>,
+    quality_config: SkillQualityConfig,
 ) -> Result<Json<PublishResponse>> {
     let source = proposal.source_scope_id;
     let paths: Vec<SkillPath> = proposed
@@ -2183,22 +2296,48 @@ async fn publish_skills(
         }
         None => None,
     };
-    let shortfalls = quality
-        .config
-        .shortfalls(scored.score, review.as_ref().map(|r| &r.checklist));
+    let mut overridden: Option<synveda_store::skill_reviews::StoredOverride> = None;
+    let shortfalls = quality_config.shortfalls(scored.score, review.as_ref().map(|r| &r.checklist));
     if !shortfalls.is_empty() {
-        let Some(reason) = quality.reason else {
-            // No override asked for. A `Conflict` rather than an
-            // `Invalid`, on this function's own rule: the request is well
-            // formed, and what stands in its way is a state — the bytes
-            // scored what they scored, and nobody has recorded a
-            // checklist about them.
+        // **The override is looked up, not sent.** It is a separate
+        // governed act by a separate authority (ADR-0053 decision 8), and
+        // it has to be: under the product packs `curator` holds the
+        // `SkillRead` and `ChannelPublish` that publishing a skill takes,
+        // while `steward` holds the override and no content read at all —
+        // so requiring one principal to hold both would mean nobody could
+        // publish a below-bar bundle under any pack. That is ADR-0032
+        // decision 9's own separation, arriving one seam later: the
+        // authority records the override, the publisher spends it.
+        //
+        // It is looked up by the **same digest** as the checklist, so an
+        // override granted over one bundle does not carry to whatever the
+        // author edits it into. Nobody agreed to ship that.
+        let standing = match crate::skills::skill_of(
+            &members
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>(),
+        ) {
+            Some(skill) => {
+                synveda_store::skill_reviews::override_for(
+                    &mut *tx, tenant_id, source, &skill, &digest,
+                )
+                .await?
+            }
+            None => None,
+        };
+        let Some(standing) = standing else {
+            // A `Conflict` rather than an `Invalid`, on this function's
+            // own rule: the request is well formed, and what stands in
+            // its way is a state — the bytes scored what they scored, and
+            // nobody has recorded an override over them.
             return Err(Error::Conflict {
                 message: format!(
                     "skill {named} is below this pack's quality bar: {}. \
-Publish it anyway by sending `quality_override` with a reason — which takes \
-`SkillQualityOverride` at this scope, deliberately a different authority from the \
-one that publishes (ADR-0053 decision 8) — or fix the bundle and open a new proposal",
+Somebody holding `SkillQualityOverride` at this scope — a steward or an org-admin under \
+the product packs, deliberately not the role that publishes — can record an override with \
+`POST /v1/proposals/{id}/quality-override`, after which this publication proceeds. \
+Or fix the bundle and open a new proposal",
                     shortfalls
                         .iter()
                         .map(QualityShortfall::describe)
@@ -2207,51 +2346,10 @@ one that publishes (ADR-0053 decision 8) — or fix the bundle and open a new pr
                 ),
             });
         };
-        // The override was asked for, authorised above, and is about to
-        // be spent. It chains **inside this transaction**, atomic with
-        // the publication it permits: an override whose event was lost
-        // would be a publication with no explanation, which is the one
-        // outcome this feature must not produce (decision 10).
-        let authorization = quality.authorized.as_ref().ok_or_else(|| Error::Internal {
-            message: "a quality override reached the gate without a decision".to_owned(),
-        })?;
-        audit::record(
-            &mut tx,
-            tenant_id,
-            AuditAction::SkillQualityOverridden,
-            Resource::Scope(proposal.target_scope_id).to_string(),
-            Outcome::Success,
-            json!({
-                "authz": audit::decision_context(Action::SkillQualityOverride, authorization),
-                "asset": AssetKind::Skill.as_str(),
-                "proposal_id": id,
-                "skill": named,
-                "rubric_version": scored.rubric_version,
-                "score": scored.score,
-                "min_score": quality.config.min_score,
-                // Which bars were missed, so an auditor filtering for
-                // "what did we ship below the bar" can tell a
-                // low-scoring bundle from one a reviewer objected to.
-                "shortfalls": shortfalls
-                    .iter()
-                    .map(|shortfall| json!({
-                        "kind": serde_json::to_value(shortfall)
-                            .ok()
-                            .and_then(|value| value.get("kind").cloned())
-                            .unwrap_or(serde_json::Value::Null),
-                        "detail": shortfall.describe(),
-                    }))
-                    .collect::<Vec<_>>(),
-                "bundle_digest": crate::skills::hex(&digest),
-                "reason": reason,
-            }),
-        )
-        .await?;
-        metrics::counter!(
-            crate::telemetry::SKILL_QUALITY_OVERRIDES_TOTAL,
-            "pack" => authorization.decision.pack_name.clone(),
-        )
-        .increment(1);
+        // The publication rides an override somebody else already
+        // recorded and the chain already carries. What is added here is
+        // the join: this commit went out under that decision.
+        overridden = Some(standing);
     }
 
     let channel = vedaflow::ChannelRef::skill(Channel::Published);
@@ -2301,6 +2399,26 @@ one that publishes (ADR-0053 decision 8) — or fix the bundle and open a new pr
             "proposal_commit": proposal.commit.to_hex(),
             "sensitivity": proposal.sensitivity.as_str(),
             "source_scope_id": source,
+            // What the rubric made of the bytes that just went fleet-wide,
+            // and — when they were below the bar — whose override this
+            // publication spent (SKIL-3, ADR-0053).
+            //
+            // The override chained an event of its own when it was
+            // granted, so this is deliberately not a second copy of it: it
+            // is the *join*, the thing that says this commit went out
+            // under that decision. Without it an auditor holding a
+            // published commit would have to go looking for an override by
+            // digest to find out whether one was involved at all.
+            "quality": {
+                "rubric_version": scored.rubric_version,
+                "score": scored.score,
+                "min_score": quality_config.min_score,
+                "overridden_by": overridden.as_ref().map(|granted| json!({
+                    "granted_by": granted.granted_by,
+                    "granted_at": granted.granted_at,
+                    "reason": granted.reason,
+                })),
+            },
             "target_scope_id": proposal.target_scope_id,
             // Paths and addresses, never SKILL.md text and never file
             // content.

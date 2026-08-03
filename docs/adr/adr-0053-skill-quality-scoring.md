@@ -88,9 +88,11 @@ Four forces bound the design.
 recomputed from the bundle wherever it renders, and a reviewer checklist
 stored in one new table keyed by a digest of the bundle's own object
 addresses. A pack sets the threshold and whether a checklist is required;
-below either, publication is refused unless the publisher holds a new PDP
-action and gives a reason.** Migration 0033 adds one table and two cache
-columns; two new audit actions; one new PDP action.
+below either, publication is refused until somebody holding a new PDP
+action records an override with a reason — a separate act, because the roles
+that publish a skill and the roles that may excuse one are disjoint by
+design.** Migration 0033 adds two tables and two cache columns; two new
+audit actions; one new PDP action.
 
 Decisions, specifically:
 
@@ -213,7 +215,7 @@ Decisions, specifically:
    extend is a checklist whose stored answers stop being comparable across
    scopes, and nothing yet needs that.
 
-7. **Three reasons a publication needs an override, and the refusal names
+8. **Three reasons a publication needs an override, and the refusal names
    which.** Publication is refused unless the pack's threshold is met on
    every one of: the recomputed score is at or above `min_score`; a
    checklist exists for exactly these bytes, if the pack requires one; and
@@ -223,23 +225,42 @@ Decisions, specifically:
    unremarked publication is the exact failure the feature exists to
    prevent.
 
-8. **The override is a PDP action, `SkillQualityOverride`, with a mandatory
-   reason** — and this is where force 3 is spent. `POST
-   /v1/proposals/{id}/publish` takes an optional body naming the override
-   and its reason; without it, a publication below the bar is a `Conflict`
-   naming the reason it is below. With it, the gateway takes a *second*
-   decision at the target scope, distinct from the `ChannelPublish` the
-   publication already took, so a publisher who may ship a good skill cannot
-   necessarily ship a bad one and must go and find somebody who can. That
-   separation is ADR-0051 decision 18's argument in its own idiom: the
+9. **The override is a PDP action, `SkillQualityOverride`, spent through a
+   separate governed act with a mandatory reason** — and this is where
+   force 3 is spent. `POST /v1/proposals/{id}/quality-override` records the
+   decision; the publish seam then *looks it up* rather than being told
+   about it. Without one, a publication below the bar is a `Conflict`
+   naming which bar and what would clear it.
+
+   The action is separate from the `ChannelPublish` the publication takes,
+   so a publisher who may ship a good skill cannot necessarily ship a bad
+   one. That is ADR-0051 decision 18's argument in its own idiom: the
    content of separating two authorities is that they can be two people.
+
+   **The first design put the override on the publish request, and it was
+   wrong — not stylistically, but unusable.** Under every product pack
+   `curator` holds the `SkillRead` and `ChannelPublish` that publishing a
+   skill takes, and `steward` holds this action and *no content read at
+   all*. Requiring one principal to hold both meant nobody could publish a
+   below-bar bundle under any pack: a wall rather than a gate. The
+   acceptance test found it, which is the argument for writing the AC test
+   against the roles the packs actually grant rather than against an
+   omnipotent fixture.
+
+   Splitting the act is not a workaround for that; it is ADR-0032
+   decision 9's own shape, the one that already separates "the approval
+   that decides" from "the act that runs the effect" for exactly this
+   reason. The authority records the override, the publisher spends it, and
+   the override binds bytes like everything else here — an override granted
+   over one bundle does not follow the author's next edit, because nobody
+   agreed to ship whatever it became.
 
    A role check written inline in the handler would have been three lines
    and would have been a policy decision made outside the PDP, which seed
    §2.2 forbids and CLAUDE.md restates. The packs decide who may override,
    which is where "relaxable by design" belongs.
 
-9. **A pack-carried `SkillQualityConfig` with two fields, and its fail-safe
+10. **A pack-carried `SkillQualityConfig` with two fields, and its fail-safe
    is no gate at all.** `min_score: u8` and `require_checklist: bool`,
    riding `PackConfig` beside `scan` exactly as ADR-0052 decision 9's
    config rides beside `redaction`. `regulated-strict` ships
@@ -264,7 +285,7 @@ Decisions, specifically:
    rubric nobody opted into would be a product that broke every tenant on an
    upgrade.
 
-10. **Two new audit actions.** `skill.checklist.recorded` chains a
+11. **Two new audit actions.** `skill.checklist.recorded` chains a
     reviewer's answers with the digest they are bound to — the durable
     record of the human half, and the reason the table's mutability costs
     nothing (a row is last-writer-wins, a chained event is every writer).
@@ -275,7 +296,7 @@ Decisions, specifically:
     the bar, and who said so" is a question no other event in the product
     answers.
 
-11. **The score renders in three places, and it is a statement about a
+12. **The score renders in three places, and it is a statement about a
     bundle rather than about its author.** `ProposalDetail` gains a
     `quality` field beside SKIL-2's `scan`, recomputed over the same member
     bytes, with the checklist looked up by the digest of exactly those
@@ -322,7 +343,15 @@ Decisions, specifically:
    refusing an exception costs an author only a wait; a low score always has
    one, so refusing an exception costs the product its registry. The
    acceptance criterion asks for an override, and it is right to.
-6. **The override as an extra required approver** rather than a second
+6. **The override as a field on the publish request** — one call, no new
+   route, and the shape this ADR was first written with. Rejected by
+   measurement rather than by argument (decision 8): the roles that publish
+   skills and the roles that may override are disjoint under every product
+   pack, so a single request needing both is a request nobody can make.
+   Recorded here because the reasoning that produced it was sound and the
+   result was still unusable — the packs, not the prose, decide whether a
+   design is reachable.
+7. **The override as an extra required approver** rather than a second
    action — raise `distinct_approvers` when the score is low, so the price
    is paid in signatures. Genuinely attractive, and rejected on legibility:
    the requirement is resolved and displayed before anyone reads the score,
@@ -330,7 +359,7 @@ Decisions, specifically:
    nobody in the trail ever says "I am shipping this below the bar". An
    override that nobody performs is one an auditor cannot find. Recorded as
    the reversal shape if the override turns out to be too easy to reach.
-7. **A general escape hatch for both gates — a lapse over the skill plane**,
+8. **A general escape hatch for both gates — a lapse over the skill plane**,
    discharging ADR-0052's recorded deferral at the same time. Rejected as
    out of scope and, on reflection, as wrong to want: ADR-0052's missing
    exception is for a rule the product got *wrong*, which is a defect with a
@@ -338,7 +367,7 @@ Decisions, specifically:
    judges good anyway, which is a decision with a person as its remedy.
    Sharing a mechanism would have made the security gate's floor negotiable
    by whoever holds the quality override. They stay separate.
-8. **An LLM-judged rubric** — a model scoring the bundle against a written
+9. **An LLM-judged rubric** — a model scoring the bundle against a written
    standard, which is what "SkillsBench-style" most fully means and would
    answer questions no lexical check can. Deferred with a trigger: it puts a
    model call on the authoring path (latency, cost, and an air-gapped
@@ -349,18 +378,18 @@ Decisions, specifically:
    `SkillJudge` trait with the lexical rubric as the default — and the
    trigger is EVAL-3's harness giving a way to measure whether a judge
    actually predicts anything the lexical rubric does not.
-9. **Storing the automated half on the version too**, so a review is
+10. **Storing the automated half on the version too**, so a review is
    reproducible verbatim. Rejected on decision 2 and ADR-0052 decision 6's
    argument, with decision 3's cache as the concession: the durable record
    of what a reviewer saw is the chained event, and the recompute is what
    keeps a rubric change from having to migrate history.
-10. **A configurable rubric — weights and checks as pack data.** Rejected
+11. **A configurable rubric — weights and checks as pack data.** Rejected
     for this feature: a rubric a tenant can reweight is one where a score of
     72 means nothing across two scopes, and the first thing anybody would do
     with the knob is tune it until their existing skills pass. If it arrives
     it should arrive as *named alternative rubrics* with versions, not as
     free weights.
-11. **Refusing the bundle at authoring on a low score**, symmetrically with
+12. **Refusing the bundle at authoring on a low score**, symmetrically with
     SKIL-2's gate. Rejected: a draft is where a skill is *supposed* to be
     unfinished, and a registry that refuses to hold work in progress is one
     where the work happens in a text editor instead. The score is

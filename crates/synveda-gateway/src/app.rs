@@ -207,6 +207,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/proposals/{id}/reject", post(proposals::reject))
         .route("/v1/proposals/{id}/withdraw", post(proposals::withdraw))
         .route("/v1/proposals/{id}/checklist", post(proposals::checklist))
+        .route(
+            "/v1/proposals/{id}/quality-override",
+            post(proposals::quality_override),
+        )
         .route("/v1/proposals/{id}/publish", post(proposals::publish))
         .route("/v1/proposals/{id}/classify", post(proposals::classify))
         // The prompt registry (PRMT-1, ADR-0049). Authoring writes a draft
