@@ -293,8 +293,20 @@ fn plan_off_chain(
         } else {
             permitted.context_pack
         },
+        // The same distinction one line down, and for skills it is not even
+        // reachable: a lapse admits what its target published as memory
+        // (ADR-0037 decision 11), and skills are advertised on `inject`
+        // only, which is the one path with no widened candidates at all
+        // (ADR-0054 decision 13). Written out rather than left to that
+        // coincidence, because the coincidence is CTX-5's to change.
+        skill_sensitivities: if scope.lapse.is_some() {
+            Vec::new()
+        } else {
+            permitted.skill
+        },
         index_tier: effective.composition.index_tier,
         index_entry_chars: effective.composition.index_entry_chars,
+        skill_index: effective.composition.skill_index,
         lapse: scope.lapse,
         retention: effective.retention,
     });
@@ -434,13 +446,20 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             pack_version: permitted.decision.pack_version,
             lapse: None,
         });
-        // A scope is planned when it admits *either* kind of material.
+        // A scope is planned when it admits *any* kind of material.
         // `ContextPackRead` non-empty while `MemoryRead` is empty is the
         // case packs exist for (ADR-0050 decision 8): a reader who holds no
         // readable memory at a scope still receives that scope's
         // conventions, and skipping the scope here would be the one place
-        // that could quietly stop being true.
-        if permitted.memory.is_empty() && permitted.context_pack.is_empty() {
+        // that could quietly stop being true. Since SKIL-4 the same holds
+        // of `SkillRead`, and more sharply — an org that publishes skills
+        // and nothing else is an ordinary shape, and a reader who could not
+        // see them there would be told about a capability they hold by
+        // nothing at all (ADR-0054 decision 10).
+        if permitted.memory.is_empty()
+            && permitted.context_pack.is_empty()
+            && permitted.skill.is_empty()
+        {
             continue;
         }
         let effective = permitted.effective;
@@ -457,10 +476,18 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             // scope's pack chunks, and nothing else does (ADR-0050
             // decision 8).
             pack_sensitivities: permitted.context_pack,
+            // The tiers `SkillRead` permitted here — what admits this
+            // scope's published skills into the block's advertisement, and
+            // exactly what the resolve route decides when the same caller
+            // asks for one of them by name (SKIL-4, ADR-0054 decision 2).
+            skill_sensitivities: permitted.skill,
             // What this scope does with material that does not fit, from
             // the same resolution (CTX-4, ADR-0041 decision 11).
             index_tier: effective.composition.index_tier,
             index_entry_chars: effective.composition.index_entry_chars,
+            // Whether this scope's skills are named at all (SKIL-4,
+            // ADR-0054 decision 11).
+            skill_index: effective.composition.skill_index,
             lapse: None,
             // The horizons this scope *serves* under, from the same
             // resolution (MEM-6, ADR-0040 decision 10). Nothing is stamped

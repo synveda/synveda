@@ -48,10 +48,14 @@ use synveda_store::packs;
 use synveda_store::records::{RecordState, RecordVersion};
 use synveda_store::search::{self, ScopeClassCutoff};
 use synveda_types::{
-    Channel, ContextPackName, DocumentName, EntryTier, IndexTier, LapseId, RecordClass, RecordId,
-    RecordKind, Result, RetentionConfig, ScopeId, ScopeKind, ScopeTier, Sensitivity, TenantId,
+    Channel, ContextPackName, DocumentName, EntryTier, Frontmatter, IndexTier, LapseId,
+    RecordClass, RecordId, RecordKind, Result, RetentionConfig, ScopeId, ScopeKind, ScopeTier,
+    Sensitivity, SkillIndex, SkillName, TenantId,
 };
-use synveda_vedaflow::{ChannelRef, MemoryAsset, read_context_pack_members, read_memory_members};
+use synveda_vedaflow::{
+    ChannelRef, MemoryAsset, SkillAsset, read_context_pack_members, read_memory_members,
+    read_objects, read_skill_members,
+};
 
 use crate::TOKENS_PER_INJECT;
 use crate::hybrid::union_sensitivities;
@@ -70,6 +74,25 @@ pub const COMPOSED_ENTRIES_TOTAL: &str = "synveda_composed_entries_total";
 /// data, not an omission. This is the acceptance criterion's "token cost
 /// of index tier measured" in production rather than in a test.
 pub const INDEX_TIER_TOKENS: &str = "synveda_index_tier_tokens";
+
+/// Histogram: estimated tokens the skills section spent per composed block
+/// (SKIL-4, ADR-0054 decision 11).
+///
+/// Its own metric rather than a share of [`INDEX_TIER_TOKENS`], because the
+/// two numbers answer different questions: a demotion's tokens are tokens a
+/// *body* would otherwise have spent, and an advertisement's are tokens
+/// nothing else was going to spend at all (ADR-0054 force 1). Summing them
+/// would hide the only one worth watching.
+pub const SKILL_INDEX_TOKENS: &str = "synveda_skill_index_tokens";
+
+/// The most skills one block names (ADR-0054 decision 12).
+///
+/// Recall's id cap and for its reason (ADR-0041 decision 7): comfortably
+/// above any plausible block — at roughly 80 tokens a line the seed §4.4
+/// budget cannot hold twenty — and far below a corpus. The budget is the
+/// real bound; this exists so a scope publishing hundreds cannot make the
+/// read path read hundreds of manifests.
+pub const MAX_ADVERTISED_SKILLS: usize = 32;
 
 /// One scope of a composition plan: a PDP-allowed chain scope plus the
 /// channel rule its effective pack sets (ADR-0025 decisions 1–2).
@@ -110,6 +133,17 @@ pub struct ComposeScope {
     /// bundles. A memory is never admitted by `ContextPackRead`, and a
     /// chunk is never admitted by `MemoryRead`.
     pub pack_sensitivities: Vec<Sensitivity>,
+    /// The tiers `SkillRead` permitted at this scope, ascending (SKIL-4,
+    /// ADR-0054 decision 10) — from the same plan walk, and **the only
+    /// thing that admits a skill into the block's advertisement**.
+    ///
+    /// Independent of the other two in both directions, for the reason
+    /// [`ComposeScope::pack_sensitivities`] gives and one of its own: a
+    /// skill's advertisement is a *disclosure of its description*, so it is
+    /// decided exactly as its bundle would be, at the tier the published
+    /// version carries. There is no weaker "may know it exists" verdict
+    /// (ADR-0054 option 12).
+    pub skill_sensitivities: Vec<Sensitivity>,
     /// The horizons this scope serves material under, and the half-life it
     /// ranks by (MEM-6, ADR-0040 decisions 2 and 12) — from the same
     /// effective-pack resolution that decided the scope.
@@ -131,8 +165,13 @@ pub struct ComposeScope {
     /// plan could express neither.
     pub index_tier: IndexTier,
     /// The index line's content width in characters
-    /// ([`synveda_types::DEFAULT_INDEX_ENTRY_CHARS`]).
+    /// ([`synveda_types::DEFAULT_INDEX_ENTRY_CHARS`]) — and, since SKIL-4,
+    /// the width an advertised skill's description is elided at.
     pub index_entry_chars: u32,
+    /// Whether this scope's published skills are named in the block
+    /// (SKIL-4, ADR-0054 decision 11) — from the same effective-pack
+    /// resolution, per candidate scope like everything else here.
+    pub skill_index: SkillIndex,
     /// The lapse this scope is on the plan by, when it is not on the
     /// caller's own chain (AUTHZ-4, ADR-0037 decisions 10 and 12).
     ///
@@ -241,6 +280,11 @@ impl ComposeRequest {
         let mut request = ComposeRequest::new(scopes, u32::MAX, at);
         for scope in &mut request.scopes {
             scope.index_tier = IndexTier::Off;
+            // Recall names bodies and a skill has none (ADR-0054
+            // decision 13). A recall that answered with an advertisement
+            // would be answering a question nobody asked, out of a
+            // response whose whole contract is "the bodies you named".
+            scope.skill_index = SkillIndex::Off;
         }
         // The per-(scope, kind) cap exists so a flood of derived records
         // cannot crowd out the fetch. Naming ids is already the bound, and
@@ -270,6 +314,12 @@ impl ComposeRequest {
         let mut request = ComposeRequest::new(scopes, u32::MAX, at);
         for scope in &mut request.scopes {
             scope.index_tier = IndexTier::Off;
+            // "What did the agent know on March 3rd" has no honest answer
+            // about a capability: a channel's membership is read at its
+            // current state either way (ADR-0042 decision 10), so a skills
+            // section on an as-of sweep would name today's shelf under
+            // yesterday's heading (ADR-0054 decision 13).
+            scope.skill_index = SkillIndex::Off;
         }
         request
     }
@@ -283,8 +333,20 @@ impl ComposeRequest {
     pub fn narrowed_to(mut self, ceiling: Sensitivity) -> Self {
         for scope in &mut self.scopes {
             scope.sensitivities.retain(|tier| *tier <= ceiling);
+            // The ceiling is one statement about one block — "I am about to
+            // paste this somewhere careless" — so it narrows every kind of
+            // material in it. A `confidential` skill's description is
+            // confidential (ADR-0054 decision 7), and a caller who asked for
+            // an `internal` block and got one anyway would have been given
+            // exactly the thing they asked not to hold.
+            scope.pack_sensitivities.retain(|tier| *tier <= ceiling);
+            scope.skill_sensitivities.retain(|tier| *tier <= ceiling);
         }
-        self.scopes.retain(|scope| !scope.sensitivities.is_empty());
+        self.scopes.retain(|scope| {
+            !scope.sensitivities.is_empty()
+                || !scope.pack_sensitivities.is_empty()
+                || !scope.skill_sensitivities.is_empty()
+        });
         self
     }
 }
@@ -367,6 +429,43 @@ pub struct ChannelWatermark {
     pub pinned: bool,
 }
 
+/// One skill the block advertised: a capability the caller may install,
+/// named rather than carried (SKIL-4, ADR-0054 decisions 5 and 8).
+///
+/// This is not a [`ComposedEntry`] and deliberately cannot become one. An
+/// entry is a record the block *carried*, keyed by a record id that a
+/// recall handle can be exchanged for; a skill has no record and no body
+/// in a block, and never will (ADR-0051 decision 9). What the block
+/// disclosed is that this capability exists and what its author said it is
+/// for — so the citation is here, and the audit event and the response
+/// carry it rather than the token budget.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdvertisedSkill {
+    /// The skill's name — the install argument and the installed directory
+    /// name at once (ADR-0051 decision 6), which is why it needs no
+    /// separate handle.
+    pub name: SkillName,
+    /// The scope whose published channel names it: the nearest one on the
+    /// caller's chain that publishes this name *and* permits the read
+    /// (ADR-0054 decision 3).
+    pub scope_id: ScopeId,
+    /// That scope's position in the gradient, nearest = 0.
+    pub position: usize,
+    /// The commit the scope's skill channel served — what a receipt records
+    /// and what `--commit` reinstalls.
+    pub commit: String,
+    /// The `SKILL.md` object address the description was read from,
+    /// hex-encoded: the block's claim about this skill is recomputable from
+    /// stored bytes, exactly as an entry's is.
+    pub object_hash: String,
+    /// The bundle's tier, which is the tier its advertisement was decided
+    /// at.
+    pub sensitivity: Sensitivity,
+    /// Estimated tokens of its rendered line, including the section header
+    /// when this was the line that opened the section.
+    pub tokens: u32,
+}
+
 /// One composed, watermarked context block.
 #[derive(Debug, Clone)]
 pub struct ComposedBlock {
@@ -404,6 +503,21 @@ pub struct ComposedBlock {
     /// so the number is the product's own rather than a test's
     /// re-derivation.
     pub index_tokens: u32,
+    /// The skills the block named, nearest scope first then by name
+    /// (SKIL-4, ADR-0054 decision 5).
+    pub skills: Vec<AdvertisedSkill>,
+    /// Estimated tokens the skills section spent: every skill line plus the
+    /// header, when one was placed.
+    pub skill_tokens: u32,
+    /// Skills the caller may install that the block did not name, because
+    /// the budget ran out or the cap did.
+    ///
+    /// Counted for CTX-4's own reason (ADR-0041's opening force): an
+    /// omission nobody reports is indistinguishable from an empty corpus,
+    /// and a *distribution* feature that quietly stopped listing half a
+    /// fleet's capabilities would look exactly like a fleet with fewer
+    /// capabilities.
+    pub skills_omitted: usize,
 }
 
 /// Deterministic token estimator (ADR-0025 decision 4):
@@ -645,6 +759,8 @@ fn memory_asset(id: RecordId, state: &RecordState) -> MemoryAsset {
         tokens = tracing::field::Empty,
         index.entries = tracing::field::Empty,
         index.tokens = tracing::field::Empty,
+        skills = tracing::field::Empty,
+        skills.tokens = tracing::field::Empty,
     ),
     err(Display)
 )]
@@ -670,8 +786,197 @@ pub async fn compose(
         channels,
         dropped_conflicts,
     } = admit(conn, tenant_id, request).await?;
+    // The advertisement is decided before assembly and rendered after it:
+    // it is not a candidate, it competes for nothing, and it is charged
+    // last (ADR-0054 decision 5).
+    let advertised = advertise_skills(conn, tenant_id, request).await?;
     let survivors: Vec<Candidate<'_>> = records.iter().map(Admitted::candidate).collect();
-    assemble(request, survivors, channels, dropped_conflicts, &span)
+    assemble(
+        request,
+        survivors,
+        channels,
+        dropped_conflicts,
+        advertised,
+        &span,
+    )
+}
+
+/// One skill the caller may install, as the plan found it — before the
+/// budget decides how many of them the block can name.
+#[derive(Debug, Clone)]
+struct Available {
+    name: SkillName,
+    scope_id: ScopeId,
+    position: usize,
+    commit: String,
+    object_hash: String,
+    sensitivity: Sensitivity,
+    /// The frontmatter's own `description`: what a client loads at ~80
+    /// tokens, and the line SKIL-3's rubric prices heaviest because of it
+    /// (ADR-0053 decision 5).
+    description: String,
+}
+
+/// What the advertisement found: the skills that survived the gradient, and
+/// how many candidates were dropped before the budget was even consulted.
+struct Availability {
+    skills: Vec<Available>,
+    /// Shadowed-out, over the per-scope cap, or unreadable as a bundle —
+    /// counted rather than silent, so `skills_omitted` means "available to
+    /// you and not named here" whatever the reason.
+    omitted: usize,
+}
+
+/// The skills this plan advertises, nearest scope first (SKIL-4, ADR-0054
+/// decisions 2, 3 and 12).
+///
+/// The same walk the resolve route takes for one name, taken for a whole
+/// shelf: each planned scope's `skill/published` channel, the tier each
+/// bundle carries decided against the `SkillRead` tiers the plan already
+/// holds for that scope, and the gradient applied **after** that decision
+/// so a nearer copy nobody may read does not shadow the further readable
+/// one.
+///
+/// Two properties are load-bearing and neither is obvious:
+///
+/// - **The tree alone says what a scope publishes**, because a channel
+///   member is named `<skill>/<path>` (ADR-0031 decision 1), so enumerating
+///   the shelf costs no object read at all. Only the manifests are fetched,
+///   in one batched read, and each carries both the tier the decision needs
+///   and the description the line shows (ADR-0054 decision 14).
+/// - **A bundle that will not parse is omitted rather than fatal.** This is
+///   an advertisement, not a read of material somebody asked for: refusing
+///   the whole inject because one published skill is odd would break the
+///   session over a line nobody needed.
+async fn advertise_skills(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    request: &ComposeRequest,
+) -> Result<Availability> {
+    let scopes: Vec<&ComposeScope> = request
+        .scopes
+        .iter()
+        .filter(|scope| {
+            // A lapse admits what its target published as *memory* and
+            // nothing else (ADR-0037 decision 11): a grant's approvers
+            // consented to a scope's records, and a capability a fleet
+            // installs is not one of them.
+            scope.lapse.is_none()
+                && scope.skill_index.advertises()
+                && !scope.skill_sensitivities.is_empty()
+        })
+        .collect();
+    if scopes.is_empty() {
+        return Ok(Availability {
+            skills: Vec::new(),
+            omitted: 0,
+        });
+    }
+    let scope_ids: Vec<ScopeId> = scopes.iter().map(|scope| scope.scope_id).collect();
+    let channels = read_skill_members(conn, tenant_id, &scope_ids, Channel::Published).await?;
+
+    // Every manifest the plan's scopes publish, in gradient order, capped
+    // per scope so a shelf of hundreds cannot make this read hundreds.
+    let mut candidates: Vec<(
+        usize,
+        &ComposeScope,
+        SkillName,
+        synveda_vedaflow::hash::ObjectHash,
+        String,
+    )> = Vec::new();
+    let mut omitted = 0_usize;
+    for (position, scope) in scopes.iter().enumerate() {
+        let Some(state) = channels
+            .iter()
+            .find(|channel| channel.scope_id == scope.scope_id)
+        else {
+            continue;
+        };
+        let mut shelf: Vec<(SkillName, synveda_vedaflow::hash::ObjectHash)> = state
+            .members
+            .iter()
+            .filter(|(path, _)| path.file.is_manifest())
+            .map(|(path, address)| (path.skill.clone(), *address))
+            .collect();
+        // By name, so the cap cuts the same shelf the same way every time —
+        // CTX-2's byte-identical re-composition holds over this section too.
+        shelf.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        if shelf.len() > MAX_ADVERTISED_SKILLS {
+            omitted += shelf.len() - MAX_ADVERTISED_SKILLS;
+            shelf.truncate(MAX_ADVERTISED_SKILLS);
+        }
+        let commit = state.commit.to_hex();
+        candidates.extend(
+            shelf
+                .into_iter()
+                .map(|(name, address)| (position, *scope, name, address, commit.clone())),
+        );
+    }
+    if candidates.is_empty() {
+        return Ok(Availability {
+            skills: Vec::new(),
+            omitted,
+        });
+    }
+
+    let addresses: Vec<synveda_vedaflow::hash::ObjectHash> = candidates
+        .iter()
+        .map(|(_, _, _, address, _)| *address)
+        .collect();
+    let objects = read_objects(conn, tenant_id, &addresses).await?;
+
+    let mut named: HashSet<SkillName> = HashSet::new();
+    let mut skills: Vec<Available> = Vec::new();
+    for (position, scope, name, address, commit) in candidates {
+        let Some(object) = objects.get(&address) else {
+            omitted += 1;
+            continue;
+        };
+        let Ok(asset) = SkillAsset::from_bytes(&object.content) else {
+            omitted += 1;
+            continue;
+        };
+        // The tier the *published* bundle carries, decided against the
+        // tiers this scope's pack permitted this caller — the same pair the
+        // resolve route decides, at the same seam (ADR-0054 decision 2).
+        if !scope.skill_sensitivities.contains(&asset.sensitivity) {
+            omitted += 1;
+            continue;
+        }
+        // The gradient, applied here and not before: a nearer scope that
+        // publishes this name but denied the read never reached this line,
+        // so it cannot shadow the readable copy behind it (decision 3).
+        if !named.insert(name.clone()) {
+            omitted += 1;
+            continue;
+        }
+        let Ok(frontmatter) = Frontmatter::parse(&asset.file.content) else {
+            omitted += 1;
+            named.remove(&name);
+            continue;
+        };
+        skills.push(Available {
+            name,
+            scope_id: scope.scope_id,
+            position,
+            commit,
+            object_hash: address.to_hex(),
+            sensitivity: asset.sensitivity,
+            description: frontmatter.description,
+        });
+    }
+    // Gradient order, then by name — the order the section renders in and
+    // the order the cap cuts.
+    skills.sort_by(|a, b| {
+        a.position
+            .cmp(&b.position)
+            .then_with(|| a.name.as_str().cmp(b.name.as_str()))
+    });
+    if skills.len() > MAX_ADVERTISED_SKILLS {
+        omitted += skills.len() - MAX_ADVERTISED_SKILLS;
+        skills.truncate(MAX_ADVERTISED_SKILLS);
+    }
+    Ok(Availability { skills, omitted })
 }
 
 /// One record the plan admits, with everything the decision produced:
@@ -1275,13 +1580,15 @@ async fn admit_pack_chunks(
 
 /// Orders the admitted set by the seed §4.4 gradient and assembles it
 /// under the budget, demoting what does not fit to the index tier where
-/// the scope's pack allows (ADR-0041 decision 2), then renders and
-/// watermarks.
+/// the scope's pack allows (ADR-0041 decision 2), then appends whatever of
+/// the advertisement the budget still affords (SKIL-4, ADR-0054 decision
+/// 5), renders and watermarks.
 fn assemble(
     request: &ComposeRequest,
     mut survivors: Vec<Candidate<'_>>,
     channels: Vec<ChannelWatermark>,
     dropped_conflicts: usize,
+    available: Availability,
     span: &tracing::Span,
 ) -> Result<ComposedBlock> {
     let relevance_rank: Option<HashMap<RecordId, usize>> = request.relevance.as_ref().map(|ids| {
@@ -1483,23 +1790,79 @@ fn assemble(
         pieces.insert(1, INDEX_LEGEND.to_owned());
     }
 
-    if entries.is_empty() {
+    // The advertisement, last and out of whatever is left (ADR-0054
+    // decision 5). It is charged here rather than interleaved because it
+    // competes with nothing: a skill has no body to displace, and a block
+    // that spent a runbook to repeat a client's own skills index would be
+    // paying twice for the same sentence.
+    let mut skills: Vec<AdvertisedSkill> = Vec::new();
+    let mut skill_tokens = 0_u32;
+    let mut skills_omitted = available.omitted;
+    let header_tokens = estimated_tokens(SKILLS_HEADER);
+    for skill in available.skills {
+        let entry_chars = index_at
+            .get(&skill.scope_id)
+            .map_or(synveda_types::DEFAULT_INDEX_ENTRY_CHARS, |(_, chars)| {
+                *chars
+            });
+        let line = skill_line(&skill, entry_chars);
+        let line_tokens = estimated_tokens(&line);
+        // The header is charged to the first skill that fits, exactly as
+        // the legend is charged to the first demotion (ADR-0041 decision
+        // 12): a block with no skills section never pays for one, and a
+        // first line that cannot afford both does not happen.
+        let header_cost = if skills.is_empty() { header_tokens } else { 0 };
+        if used.saturating_add(line_tokens + header_cost) > request.budget_tokens {
+            // Counted, never silent — and `continue` rather than `break`,
+            // because a shorter description behind this one may still fit
+            // and first-fit is what the rest of this function does.
+            skills_omitted += 1;
+            continue;
+        }
+        if skills.is_empty() {
+            pieces.push(SKILLS_HEADER.to_owned());
+        }
+        pieces.push(line);
+        used += line_tokens + header_cost;
+        skill_tokens += line_tokens + header_cost;
+        skills.push(AdvertisedSkill {
+            name: skill.name,
+            scope_id: skill.scope_id,
+            position: skill.position,
+            commit: skill.commit,
+            object_hash: skill.object_hash,
+            sensitivity: skill.sensitivity,
+            tokens: line_tokens + header_cost,
+        });
+    }
+
+    // A block is empty when it says nothing at all. Since PRMT-2 a scope
+    // with no readable memory can still contribute, and since SKIL-4 a
+    // reader whose whole corpus is one org skill gets a block naming it —
+    // which is the shape "an org that publishes skills and nothing else"
+    // produces, and the one a `records`-only emptiness test would have
+    // thrown away.
+    if entries.is_empty() && skills.is_empty() {
         let block = ComposedBlock {
             channels,
             dropped_conflicts,
             skipped_over_budget,
+            skills_omitted,
             ..empty_block(request.budget_tokens)
         };
         span.record("entries", 0);
         span.record("tokens", 0);
         span.record("index.entries", 0);
         span.record("index.tokens", 0);
+        span.record("skills", 0);
+        span.record("skills.tokens", 0);
         metrics::histogram!(TOKENS_PER_INJECT).record(0.0);
         metrics::histogram!(INDEX_TIER_TOKENS).record(0.0);
+        metrics::histogram!(SKILL_INDEX_TOKENS).record(0.0);
         return Ok(block);
     }
 
-    let block_hash = block_hash(&entries);
+    let block_hash = block_hash(&entries, &skills);
     let ids: Vec<String> = entries
         .iter()
         .map(|entry| entry.record_id.to_string())
@@ -1511,8 +1874,11 @@ fn assemble(
     span.record("tokens", tokens);
     span.record("index.entries", index_entries);
     span.record("index.tokens", index_tokens);
+    span.record("skills", skills.len());
+    span.record("skills.tokens", skill_tokens);
     metrics::histogram!(TOKENS_PER_INJECT).record(f64::from(tokens));
     metrics::histogram!(INDEX_TIER_TOKENS).record(f64::from(index_tokens));
+    metrics::histogram!(SKILL_INDEX_TOKENS).record(f64::from(skill_tokens));
     Ok(ComposedBlock {
         text,
         entries,
@@ -1524,7 +1890,41 @@ fn assemble(
         skipped_over_budget,
         index_entries,
         index_tokens,
+        skills,
+        skill_tokens,
+        skills_omitted,
     })
+}
+
+/// The skills section's header, which is also its legend (ADR-0054
+/// decision 6).
+///
+/// ADR-0041 decision 12 bought a separate legend line because `(recall
+/// <id>)` is an opaque marker that has to be explained without being one.
+/// A named skill needs no such sentence — the name *is* the install
+/// argument — so the header says what the lines are and what to do with
+/// them, and the section pays for one line instead of two.
+const SKILLS_HEADER: &str = "\n## Skills available (install with `synveda skill install <name>`)\n";
+
+/// One advertised skill's line: the name, the description elided at the
+/// scope's own index width, and the tier marker when there is one
+/// (ADR-0054 decision 7).
+///
+/// No scope path, no commit and no handle. The gradient already chose
+/// which copy of this name the caller gets, so naming its scope is a fact
+/// the reader cannot act on; the citation rides the response and the audit
+/// event instead (decision 8). The description is folded to one line
+/// through the same rule every other line in this block obeys (ADR-0048
+/// decision 9) — a skill's frontmatter can carry a folded description, and
+/// the block's structure is line-delimited.
+fn skill_line(skill: &Available, entry_chars: u32) -> String {
+    let tier = if skill.sensitivity > Sensitivity::WORKING {
+        format!(" [{}]", skill.sensitivity)
+    } else {
+        String::new()
+    };
+    let described = elide(&one_line(&skill.description), entry_chars);
+    format!("- {} — {described}{tier}\n", skill.name)
 }
 
 /// The index line a candidate takes when its body did not fit — or `None`
@@ -1574,6 +1974,9 @@ fn empty_block(budget_tokens: u32) -> ComposedBlock {
         skipped_over_budget: 0,
         index_entries: 0,
         index_tokens: 0,
+        skills: Vec::new(),
+        skill_tokens: 0,
+        skills_omitted: 0,
     }
 }
 
@@ -1727,7 +2130,7 @@ fn watermark_line(block_hash: &str, record_ids: &[String]) -> String {
 }
 
 /// The block's identity: BLAKE3 over the ordered entry addresses.
-fn block_hash(entries: &[ComposedEntry]) -> String {
+fn block_hash(entries: &[ComposedEntry], skills: &[AdvertisedSkill]) -> String {
     let mut hasher = blake3::Hasher::new();
     for entry in entries {
         hasher.update(entry.object_hash.as_bytes());
@@ -1736,6 +2139,14 @@ fn block_hash(entries: &[ComposedEntry]) -> String {
         // marker, and two blocks that read differently must not share
         // one hash.
         hasher.update(entry.channel.as_str().as_bytes());
+    }
+    // The advertisement is in the block's identity for the same reason and
+    // is **appended** rather than interleaved (ADR-0054 decision 9), so a
+    // block with no skills section hashes exactly as it did before SKIL-4 —
+    // the byte-identity discipline `index_tier: off` already keeps for
+    // CTX-4, extended to the switch beside it.
+    for skill in skills {
+        hasher.update(skill.object_hash.as_bytes());
     }
     hasher.finalize().to_hex().to_string()
 }
@@ -1773,6 +2184,131 @@ mod tests {
 
     fn at(seconds: i64) -> DateTime<Utc> {
         Utc.timestamp_opt(seconds, 0).unwrap()
+    }
+
+    fn scope(sensitivities: &[Sensitivity]) -> ComposeScope {
+        ComposeScope {
+            scope_id: ScopeId::from_uuid(uuid::Uuid::from_bytes([7; 16])),
+            kind: ScopeKind::Team,
+            path: "acme/eng/platform".to_owned(),
+            include_derived: true,
+            sensitivities: sensitivities.to_vec(),
+            pack_sensitivities: sensitivities.to_vec(),
+            skill_sensitivities: sensitivities.to_vec(),
+            retention: RetentionConfig::DEFAULT,
+            index_tier: IndexTier::Demote,
+            index_entry_chars: 320,
+            skill_index: SkillIndex::Names,
+            lapse: None,
+        }
+    }
+
+    /// A caller's ceiling is one statement about one block, so it narrows
+    /// every kind of material in it (SKIL-4, ADR-0054 decision 7's
+    /// reasoning applied to `max_sensitivity`).
+    ///
+    /// It did not, before this feature: `narrowed_to` trimmed the memory
+    /// tiers alone, so an agent that asked for an `internal` block because
+    /// it was about to paste into a pull request still received
+    /// `confidential` **pack chunks** from any scope that also had readable
+    /// memory — and would have received `confidential` skill descriptions
+    /// the same way. ADR-0038 decision 12's promise is about the block, not
+    /// about one asset kind in it.
+    #[test]
+    fn a_callers_ceiling_narrows_every_kind_of_material() {
+        let narrowed = ComposeRequest::new(vec![scope(&Sensitivity::ALL)], 1_500, at(0))
+            .narrowed_to(Sensitivity::Internal);
+        let scope = narrowed.scopes.first().expect("the scope survives");
+        for (kind, tiers) in [
+            ("memory", &scope.sensitivities),
+            ("pack", &scope.pack_sensitivities),
+            ("skill", &scope.skill_sensitivities),
+        ] {
+            assert!(
+                tiers.iter().all(|tier| *tier <= Sensitivity::Internal),
+                "{kind} tiers above the ceiling survived: {tiers:?}"
+            );
+            assert!(!tiers.is_empty(), "{kind} keeps what is at or below it");
+        }
+    }
+
+    /// And a scope left with nothing at all stops composing — but a scope
+    /// that keeps *any* kind stays, which is ADR-0050 decision 8's rule
+    /// (a scope may distribute conventions to a reader with no readable
+    /// memory there) surviving the narrowing rather than being undone by
+    /// it.
+    #[test]
+    fn narrowing_keeps_a_scope_that_still_carries_something() {
+        let mut only_packs = scope(&[Sensitivity::Confidential]);
+        only_packs.sensitivities = Vec::new();
+        only_packs.skill_sensitivities = Vec::new();
+        only_packs.pack_sensitivities = vec![Sensitivity::Internal];
+        let kept = ComposeRequest::new(vec![only_packs.clone()], 1_500, at(0))
+            .narrowed_to(Sensitivity::Internal);
+        assert_eq!(kept.scopes.len(), 1, "a pack-only scope survives");
+
+        let dropped = ComposeRequest::new(vec![scope(&[Sensitivity::Confidential])], 1_500, at(0))
+            .narrowed_to(Sensitivity::Internal);
+        assert!(
+            dropped.scopes.is_empty(),
+            "a scope with nothing left composes nothing"
+        );
+    }
+
+    /// Recall names bodies and a skill has none (ADR-0054 decision 13).
+    #[test]
+    fn neither_recall_shape_advertises_a_skill() {
+        let named = ComposeRequest::naming(
+            vec![scope(&[Sensitivity::Internal])],
+            vec![RecordId::from_uuid(uuid::Uuid::from_bytes([1; 16]))],
+            at(0),
+        );
+        let swept = ComposeRequest::sweeping(vec![scope(&[Sensitivity::Internal])], at(0));
+        for request in [named, swept] {
+            for scope in &request.scopes {
+                assert_eq!(scope.skill_index, SkillIndex::Off);
+                assert_eq!(scope.index_tier, IndexTier::Off);
+            }
+        }
+    }
+
+    /// The line a skill gets: the name, the description elided at the
+    /// scope's own width, and a tier marker only above the working tier
+    /// (ADR-0054 decision 7).
+    #[test]
+    fn a_skills_line_is_its_name_and_an_elided_description() {
+        let available = |sensitivity: Sensitivity, description: &str| Available {
+            name: "code-review".parse().expect("a legal skill name"),
+            scope_id: ScopeId::from_uuid(uuid::Uuid::from_bytes([7; 16])),
+            position: 0,
+            commit: "c".repeat(64),
+            object_hash: "o".repeat(64),
+            sensitivity,
+            description: description.to_owned(),
+        };
+        let line = skill_line(
+            &available(Sensitivity::Internal, "Review a diff. Use when asked."),
+            320,
+        );
+        assert_eq!(line, "- code-review — Review a diff. Use when asked.\n");
+
+        // Above the working tier the line says so, exactly as a record's
+        // does: the harness cannot know what it is holding unless the
+        // block tells it (ADR-0038 decision 11).
+        let marked = skill_line(&available(Sensitivity::Confidential, "Review a diff."), 320);
+        assert!(marked.contains("[confidential]"), "{marked}");
+
+        // The description is folded and elided at the pack's own width —
+        // a frontmatter description may be written across several lines,
+        // and one entry is one line (ADR-0048 decision 9).
+        let folded = skill_line(
+            &available(
+                Sensitivity::Internal,
+                "Review\n   a diff, carefully and at length",
+            ),
+            12,
+        );
+        assert_eq!(folded, "- code-review — Review a dif…\n");
     }
 
     #[test]

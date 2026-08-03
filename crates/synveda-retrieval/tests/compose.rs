@@ -128,12 +128,19 @@ impl Chain {
             // the pack path untested by construction rather than by
             // intent (PRMT-2, ADR-0050 decision 8).
             pack_sensitivities: sensitivities.to_vec(),
+            // And for skills, on the same reasoning one feature later
+            // (SKIL-4, ADR-0054 decision 10): these fixtures publish no
+            // skill channel, so the advertisement finds nothing — which is
+            // the state a plan permitting skills nowhere could not tell
+            // apart from a bug.
+            skill_sensitivities: sensitivities.to_vec(),
             // The product config: the index tier on, so these fixtures
             // exercise what a real chain composes under (ADR-0041
             // decision 11). Nothing here is long enough to demote, which
             // is decision 2 doing its job rather than an accident.
             index_tier: CompositionConfig::DEFAULT.index_tier,
             index_entry_chars: CompositionConfig::DEFAULT.index_entry_chars,
+            skill_index: CompositionConfig::DEFAULT.skill_index,
             // The caller's own chain: nothing here arrives by a grant.
             lapse: None,
             // The product config: the machinery on, no record horizon,
