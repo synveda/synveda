@@ -366,8 +366,62 @@ EPIC SKIL — Skills registry (spec-compliant + governed)
 ──────────────────────────────────────────────
 SKIL-1 agentskills.io-compliant model (M)
   SKILL.md + frontmatter + bundled files as a VedaFlow asset type; validate against the open
-  spec; import from anthropics/skills format. AC: a skill authored in Synveda installs and
-  runs unmodified in Claude Code and one other client (Cursor or Codex).
+  spec; import from anthropics/skills format. AC: a skill authored at a scope reaches a client
+  only through the review the pack in force asks for — and under *every* pack that is two
+  distinct people, one of them a security-reviewer, because the invariant floor has priced
+  executable content at a security reviewer since FLOW-3 but never at a second *person*, so the
+  one separation "skills are treated like code because they are" exists to draw collapsed into
+  one signature under `standard`, in a cell nothing could reach until this feature; "installs
+  unmodified" is a hash comparison rather than a claim — one published commit materialises into
+  each client's own skills root, the trees are byte-identical to each other file for file, every
+  file's content address recomputes to the address the commit named, and the bundle directory
+  holds exactly the reviewed files and nothing else, the install receipt living *outside* it
+  because a receipt inside the bundle is the modification the criterion forbids, which is what
+  makes this the first governed read surface that cannot watermark what it serves; the
+  frontmatter is parsed by a **strict subset** of YAML that refuses what it cannot represent —
+  anchors, aliases, tags, a second document, anything outside the spec's key vocabulary — rather
+  than by a general parser, because the reviewed meaning and the loaded meaning must be the same
+  meaning and two YAML parsers disagreeing is exactly how they stop being; the spec's own rules
+  are enforced where they can fail, at authoring, naming the offender: a name that is not one
+  lower-case hyphenated segment (a *stricter* grammar than the product's own, imported from the
+  spec, or the product would admit at the first step what a third-party client refuses at the
+  last), a frontmatter `name` disagreeing with the skill's name, a missing or empty
+  `description`, no SKILL.md at all, and a bundled path that a materialisation would let escape
+  its directory — `..`, absolute, a reserved device name, a trailing dot or space, or a
+  case-fold collision with a sibling, the last being the one a case-preserving filesystem turns
+  into silent overwriting; every materialised file is non-executable, so a governed bundle
+  cannot arrive carrying a mode nobody reviewed; a skill's content never becomes a record —
+  ADR-0049 option 4's "fetched by name where a record is ranked by relevance" holds here where
+  PRMT-2 inverted it for packs, because the client's own progressive disclosure is the loader
+  and ranking a SKILL.md body into a block would spend the budget doing that job twice; import
+  reads an anthropics/skills directory and refuses a symlink, a bundle with no SKILL.md and a
+  file over the bound rather than importing part of one; resolution walks the caller's own
+  placement chain nearest-first and skips the scopes the PDP refuses, so a team's version
+  overrides the org's, a nearer copy nobody may read does not shadow the further readable one,
+  and a name nothing publishes is the uniform 404 rather than an existence oracle — and because
+  the name is also the installed directory name, that gradient is a filesystem fact rather than
+  a policy one; a consumer names a channel and follows publications or names a commit and keeps
+  what it installed, and a FLOW-7 rewind refuses the pinned read naming both commits, PRMT-1's
+  rule inherited whole, which is what makes a receipt reproducible and a rollback still mean
+  sixty seconds; a bundle carrying a live credential is stopped at authoring by MEM-2's scanner,
+  so no secret reaches a client's disk; `SkillRead` and `SkillWrite` join the role×action golden
+  matrix under all three packs and the service-identity confinement list, which discharges
+  ADR-0036 decision 3 for the **last** of the three kinds it refused by name and leaves none;
+  every act is on the chain — `skill.authored`, `skill.resolved`, and the same
+  `vedaflow.channel.published` a memory publication emits with `asset` reading `skill` — with no
+  SKILL.md text and no file content in any payload, swept for; demo script. Deferred with a
+  recorded trigger: the behavioural half of "runs" — whether a model reaches for the skill it
+  was served — because it measures a model's disposition rather than the product's bytes and
+  would fail when a model changed rather than when the code did, which is EVAL-5's own deferral
+  arriving from the distribution side; the demo runs `claude` and `codex` live against the
+  materialised bundles when the binaries are present, and reports the skip with its reason when
+  they are not.
+  Written 2026-08-03 (SKIL-1, ADR-0051): the feature text named three clauses and a one-line AC
+  whose verb ("runs") belongs to a model rather than to this product. The load-bearing parts are
+  that the **format is somebody else's** — the first governed asset whose bytes must leave
+  Synveda untouched, which costs the watermark every other read surface carries and buys
+  portability in its place — and the discovery that the floor's skill rule required the
+  security-reviewer *role* without ever requiring a second *signature*.
 SKIL-2 Security scanning gate (M)
   Static analysis of skill scripts (secret patterns, network egress, dangerous calls);
   scan report attached to proposal; security-reviewer role required for executable skills.
