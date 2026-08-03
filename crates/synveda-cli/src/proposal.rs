@@ -549,8 +549,9 @@ pub async fn checklist(
     }
     if !concerns.is_empty() {
         eprintln!(
-            "synveda: you answered `no` to {} — publishing over that needs \
-             `--override-quality` under every pack",
+            "synveda: you answered `no` to {} — publishing over that needs an override \
+             under every pack, which somebody holding SkillQualityOverride records with \
+             `synveda proposal override-quality <id> --reason ...`",
             concerns.join(", "),
         );
     }
