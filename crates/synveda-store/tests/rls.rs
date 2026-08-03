@@ -4537,7 +4537,7 @@ fn a_checklist_cannot_be_forged_read_across_tenants_or_erased_and_never_outlives
         let (victim, victim_scope) = seed_skill(&db.pool).await;
         let (adversary, adversary_scope) = seed_skill(&db.pool).await;
         let reviewer = IdentityId::new();
-        let digest = vec![7u8; 32];
+        let digest = [7u8; 32];
         let answers = serde_json::json!({"tested": "yes", "scope-appropriate": "yes"});
 
         // Seed one review for each tenant.
@@ -4587,7 +4587,7 @@ fn a_checklist_cannot_be_forged_read_across_tenants_or_erased_and_never_outlives
              values ($1, $2, 'code-review', $3, $4, 1, $5)",
             victim.as_uuid(),
             victim_scope.as_uuid(),
-            &vec![9u8; 32][..],
+            &[9u8; 32][..],
             serde_json::json!({"tested": "yes"}),
             reviewer.as_uuid(),
         )
@@ -4639,7 +4639,7 @@ fn a_checklist_cannot_be_forged_read_across_tenants_or_erased_and_never_outlives
                  and bundle_digest = $3"#,
             adversary.as_uuid(),
             adversary_scope.as_uuid(),
-            &vec![8u8; 32][..],
+            &[8u8; 32][..],
         )
         .fetch_one(&mut *tx)
         .await

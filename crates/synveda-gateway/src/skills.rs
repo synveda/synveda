@@ -62,13 +62,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
-use synveda_ingest::{BundleScan, ScanOutcome};
+use synveda_ingest::{BundleScan, RubricScore, ScanOutcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::{hierarchy, rls, skills};
+use synveda_store::{hierarchy, rls, skill_reviews, skills};
 use synveda_types::{
-    Channel, Error, Frontmatter, HierarchyNode, IdentityId, RedactionMode, Result, ScanSeverity,
-    ScopeId, Sensitivity, SkillBundle, SkillChannel, SkillFile, SkillFilePath, SkillName,
-    SkillPath, SkillScanConfig,
+    Channel, ChecklistItem, Error, Frontmatter, HierarchyNode, IdentityId, QualityShortfall,
+    RedactionMode, Result, ScanSeverity, ScopeId, Sensitivity, SkillBundle, SkillChannel,
+    SkillFile, SkillFilePath, SkillName, SkillPath, SkillQualityConfig, SkillScanConfig,
 };
 use synveda_vedaflow::{self as vedaflow, ChannelRef, SkillAsset};
 
@@ -224,6 +224,281 @@ impl ScanReport {
     }
 }
 
+/// One rubric check, rendered for an API response (SKIL-3, ADR-0053
+/// decision 11).
+#[derive(Serialize)]
+pub(crate) struct QualityCheckView {
+    check: &'static str,
+    passed: bool,
+    weight: u8,
+    title: &'static str,
+    /// What specifically was wrong, when the check can say. Never file
+    /// content — a path or a count.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+}
+
+/// The reviewer's half, as it is rendered beside the automated half.
+#[derive(Serialize)]
+pub(crate) struct ChecklistView {
+    /// Item → verdict, by the wire names.
+    answers: BTreeMap<&'static str, &'static str>,
+    /// Whatever the reviewer wrote.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+    /// Every item has a verdict.
+    complete: bool,
+    /// The items answered `no`, which are what a publication needs an
+    /// override to step over.
+    concerns: Vec<&'static str>,
+    reviewed_at: DateTime<Utc>,
+    reviewed_by: IdentityId,
+}
+
+/// A bundle's quality, as an author and a reviewer read it (SKIL-3).
+///
+/// **Two halves, never averaged** (ADR-0053 decision 1). `score` is the
+/// automated rubric over the bytes; `checklist` is a person's judgement
+/// about them. Summing them would let each hide the other — a
+/// well-formatted bundle nobody reviewed would read the same as one a
+/// reviewer worked through — so the gate below reads both and names which
+/// one it refused on.
+#[derive(Serialize)]
+pub(crate) struct QualityReport {
+    /// Which rubric produced the score. It moves, and a number that did
+    /// not say which table produced it could not be compared with one
+    /// taken at review time.
+    rubric_version: u32,
+    /// 0..=100.
+    score: u8,
+    /// The bar this pack asks for. `0` means the pack gates nothing.
+    min_score: u8,
+    /// Whether this pack requires a checklist bound to exactly these
+    /// bytes.
+    requires_checklist: bool,
+    /// Every check, in table order — passing ones included, because "this
+    /// passed" and "this is not checked" must not look the same to
+    /// somebody deciding whether to trust the number.
+    checks: Vec<QualityCheckView>,
+    /// The checklist bound to **exactly these bytes**, if there is one.
+    ///
+    /// Absent means both "nobody has answered one" and "somebody did and
+    /// the bundle has changed since", and those being the same answer is
+    /// the design (ADR-0053 decision 4): from the publication's point of
+    /// view they are the same fact.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    checklist: Option<ChecklistView>,
+    /// The digest the checklist is keyed by — what a reviewer's
+    /// `proposal checklist` call binds its answers to.
+    bundle_digest: String,
+    /// Every bar this bundle misses. Empty means it publishes without an
+    /// override.
+    shortfalls: Vec<QualityShortfall>,
+    /// Whether publishing needs [`Action::SkillQualityOverride`]. Derived
+    /// from `shortfalls` rather than stored beside it, so the two can
+    /// never disagree.
+    needs_override: bool,
+}
+
+impl QualityReport {
+    pub(crate) fn new(
+        scored: &RubricScore,
+        config: &SkillQualityConfig,
+        digest: &[u8; 32],
+        review: Option<&skill_reviews::StoredReview>,
+    ) -> Self {
+        let checklist = review.map(|review| ChecklistView {
+            answers: review
+                .checklist
+                .answers
+                .iter()
+                .map(|(item, verdict)| (item.as_str(), verdict.as_str()))
+                .collect(),
+            note: review.checklist.note.clone(),
+            complete: review.checklist.is_complete(),
+            concerns: review
+                .checklist
+                .concerns()
+                .iter()
+                .map(ChecklistItem::as_str)
+                .collect(),
+            reviewed_at: review.reviewed_at,
+            reviewed_by: review.reviewed_by,
+        });
+        let shortfalls = config.shortfalls(scored.score, review.map(|r| &r.checklist));
+        QualityReport {
+            rubric_version: scored.rubric_version,
+            score: scored.score,
+            min_score: config.min_score,
+            requires_checklist: config.require_checklist,
+            checks: scored
+                .checks
+                .iter()
+                .map(|check| QualityCheckView {
+                    check: check.check,
+                    passed: check.passed,
+                    weight: check.weight,
+                    title: check.title,
+                    detail: check.detail.clone(),
+                })
+                .collect(),
+            checklist,
+            bundle_digest: hex(digest),
+            needs_override: !shortfalls.is_empty(),
+            shortfalls,
+        }
+    }
+}
+
+/// A 32-byte digest as lowercase hex — the form every address in this
+/// product travels in.
+pub(crate) fn hex(bytes: &[u8; 32]) -> String {
+    bytes.iter().fold(String::with_capacity(64), |mut out, b| {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{b:02x}");
+        out
+    })
+}
+
+/// The digest a checklist is keyed by, computed from draft rows.
+///
+/// The tree entry name — `<skill>/<path>` — is what goes into the hash,
+/// because that is what a proposal's members are named by, and a checklist
+/// answered at review must be found again at publication (ADR-0053
+/// decision 4).
+pub(crate) fn digest_of_files(files: &[skills::StoredFile]) -> [u8; 32] {
+    let names: Vec<(String, vedaflow::hash::ObjectHash)> = files
+        .iter()
+        .map(|file| {
+            (
+                SkillPath::new(file.skill_name.clone(), file.path.clone()).to_string(),
+                vedaflow::hash::ObjectHash::from_bytes(file.object_hash),
+            )
+        })
+        .collect();
+    let borrowed: Vec<(&str, vedaflow::hash::ObjectHash)> = names
+        .iter()
+        .map(|(name, hash)| (name.as_str(), *hash))
+        .collect();
+    vedaflow::bundle_digest(&borrowed)
+}
+
+/// The digest a checklist is keyed by, computed from proposal members.
+///
+/// The counterpart of [`digest_of_files`], and the two must agree: a
+/// reviewer answers against a proposal and the gate looks the answers up
+/// at publication, so a review surface and a publish seam that computed
+/// this differently would silently lose every checklist. Both hash
+/// `(tree entry name, object address)` pairs, which is the one
+/// representation both sides hold.
+///
+/// # Errors
+///
+/// [`Error::Internal`] if a member's address is not a 32-byte hex digest,
+/// which would mean the proposal store and this code have drifted.
+pub(crate) fn digest_of_members(members: &[(String, String)]) -> Result<[u8; 32]> {
+    let parsed: Vec<(&str, vedaflow::hash::ObjectHash)> = members
+        .iter()
+        .map(|(name, hex)| {
+            let bytes = (0..hex.len())
+                .step_by(2)
+                .map(|at| u8::from_str_radix(hex.get(at..at + 2).unwrap_or("zz"), 16))
+                .collect::<std::result::Result<Vec<u8>, _>>()
+                .map_err(|_| Error::Internal {
+                    message: format!("proposal member {name:?} has a non-hex address"),
+                })?;
+            let address = <[u8; 32]>::try_from(bytes.as_slice()).map_err(|_| Error::Internal {
+                message: format!("proposal member {name:?} has an address that is not 32 bytes"),
+            })?;
+            Ok((
+                name.as_str(),
+                vedaflow::hash::ObjectHash::from_bytes(address),
+            ))
+        })
+        .collect::<Result<_>>()?;
+    Ok(vedaflow::bundle_digest(&parsed))
+}
+
+/// The skill a set of proposal members belongs to, from the `<skill>/<path>`
+/// tree entry names.
+///
+/// `None` when the members do not agree on one, which a skill proposal
+/// cannot produce — a bundle is proposed whole — but which a caller must
+/// not assume away, because the alternative is looking a checklist up
+/// under whichever name happened to sort first.
+pub(crate) fn skill_of(members: &[String]) -> Option<SkillName> {
+    let mut names = members
+        .iter()
+        .filter_map(|member| member.parse::<SkillPath>().ok())
+        .map(|path| path.skill);
+    let first = names.next()?;
+    names.all(|name| name == first).then_some(first)
+}
+
+/// The bundled files behind a set of proposal members, read from the
+/// object store.
+///
+/// Used wherever a review surface or a gate needs the *bytes* rather than
+/// the addresses — the rubric and the scanner both do.
+///
+/// # Errors
+///
+/// [`Error::Storage`] on a database failure. A member whose object is
+/// missing or is not a `SkillAsset` is skipped rather than failing the
+/// read: the append-only store makes it impossible, and a review that
+/// refused wholesale would be less useful than one reporting on what it
+/// could read.
+pub(crate) async fn files_of_members(
+    tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
+    tenant_id: synveda_types::TenantId,
+    members: &[vedaflow::ChannelMember],
+) -> Result<Vec<SkillFile>> {
+    let addresses: Vec<vedaflow::hash::ObjectHash> =
+        members.iter().map(|member| member.object).collect();
+    let objects = vedaflow::read_objects(tx, tenant_id, &addresses).await?;
+    Ok(members
+        .iter()
+        .filter_map(|member| objects.get(&member.object))
+        .filter_map(|object| SkillAsset::from_bytes(&object.content).ok())
+        .map(|asset| asset.file)
+        .collect())
+}
+
+/// Refuses free text carrying a secret (SKIL-3, ADR-0053 compliance note).
+///
+/// A checklist note and an override reason are the first author-supplied
+/// prose this plane stores that is **not** a bundled file, so they go
+/// through MEM-2's scanner like everything else — but the disposition is
+/// always a refusal rather than the pack's ladder. Unlike a bundled file
+/// there is nothing a placeholder would preserve: the value of a reason is
+/// that a person wrote it, so a scrubbed one is worth less than asking
+/// them to write it again, and they are on the other end of the request.
+pub(crate) async fn refuse_if_secret(what: &str, text: &str) -> Result<()> {
+    let payload = json!({ "content": text });
+    let span = tracing::Span::current();
+    let scan = tokio::task::spawn_blocking(move || {
+        let _entered = span.enter();
+        synveda_ingest::scan(payload)
+    })
+    .await
+    .map_err(|err| Error::Internal {
+        message: format!("redaction scan task failed: {err}"),
+    })?;
+    if scan.findings.is_empty() {
+        return Ok(());
+    }
+    let rules: Vec<&str> = scan.findings.iter().map(|finding| finding.rule).collect();
+    Err(Error::Invalid {
+        message: format!(
+            "the {what} was stopped by the redaction scanner ({}); it is not stored. \
+             Unlike a bundled file there is nothing a placeholder would preserve here — \
+             the value of this text is that a person wrote it — so rewrite it without \
+             the finding",
+            rules.join(", "),
+        ),
+    })
+}
+
 /// What a scope's published channel holds for one file right now.
 #[derive(Serialize)]
 struct PublishedFile {
@@ -271,6 +546,16 @@ struct SkillView {
     /// not look the same to an author. A blocking finding never reaches
     /// this struct — it is a refusal.
     scan: ScanReport,
+    /// What SKIL-3's rubric scored it, and the reviewer checklist bound to
+    /// exactly these bytes if there is one (ADR-0053 decision 11).
+    ///
+    /// Present on every author so an author sees their score **before** a
+    /// reviewer does — which is the whole reason a score is worth
+    /// rendering at a seam where it gates nothing: a draft is where a
+    /// skill is supposed to be unfinished, and a registry that refused to
+    /// hold work in progress is one where the work happens in a text
+    /// editor instead.
+    quality: QualityReport,
     /// The commit the scope's skill channel serves, if any. Authoring never
     /// moves it, which is the whole of "reaches a client only through
     /// review".
@@ -334,7 +619,7 @@ async fn author_inner(
     // A read-only transaction: it writes nothing, so dropping it costs
     // nothing, and the scanner below is CPU that should not hold a
     // connection.
-    let (node, author, authorized, redaction, scan_config, pack) = {
+    let (node, author, authorized, redaction, scan_config, quality_config, pack) = {
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let node = found(
             hierarchy::node(&mut *tx, body.scope_id).await?,
@@ -361,6 +646,7 @@ async fn author_inner(
             authorized,
             effective.redaction,
             effective.scan,
+            effective.quality,
             pack,
         )
     };
@@ -441,6 +727,16 @@ async fn author_inner(
         .await;
     }
 
+    // ── The rubric, over the same bytes ────────────────────────────────
+    //
+    // SKIL-3, ADR-0053. It runs here and **gates nothing**: a draft is
+    // where a skill is supposed to be unfinished, and a registry that
+    // refused to hold work in progress is one where the work happens in a
+    // text editor instead (ADR-0053 option 11). What the score is for at
+    // this seam is telling an author what a reviewer will see, and
+    // filling the registry listing's cache.
+    let scored = score_quality(&scrubbed_bundle.files).await?;
+
     // ── Write, in one transaction ──────────────────────────────────────
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let stored_skill = skills::upsert_skill(
@@ -451,6 +747,12 @@ async fn author_inner(
             name: &body.name,
             description: &frontmatter.description,
             sensitivity,
+            // The cache, written from the bytes this very call is
+            // storing — never from another cache (ADR-0053 decision 3).
+            quality: skills::CachedScore {
+                score: scored.score,
+                rubric_version: scored.rubric_version,
+            },
             author,
         },
     )
@@ -477,6 +779,20 @@ async fn author_inner(
     let keep: Vec<SkillFilePath> = assets.iter().map(|asset| asset.file.path.clone()).collect();
     let removed =
         skills::prune_files(&mut *tx, tenant_id, body.scope_id, &body.name, &keep).await?;
+
+    // The digest of exactly what was just written, and whatever checklist
+    // is bound to it (ADR-0053 decision 4).
+    //
+    // Almost always `None` here, and that is the design working rather
+    // than a gap: an author who has just changed a file has produced a
+    // bundle nobody has reviewed, so the answers about the *previous*
+    // bytes are not found. It is `Some` only when an author re-submits an
+    // identical bundle, which is exactly when the old answers still apply.
+    let stored_files: Vec<skills::StoredFile> =
+        written.iter().map(|(stored, _)| stored.clone()).collect();
+    let digest = digest_of_files(&stored_files);
+    let review =
+        skill_reviews::for_bundle(&mut *tx, tenant_id, body.scope_id, &body.name, &digest).await?;
 
     let published = published_at(&mut tx, tenant_id, body.scope_id).await?;
     audit::record(
@@ -511,6 +827,17 @@ async fn author_inner(
             // did we let past" needs, and it rides the event the
             // authoring already chains.
             "scan": scan_payload(&security, &scan_config),
+            // What the rubric made of it (SKIL-3). No event of its own —
+            // scoring is not an act, and the two acts this feature adds
+            // are a reviewer answering and a publisher overriding.
+            "quality": {
+                "rubric_version": scored.rubric_version,
+                "score": scored.score,
+                "failed": scored.failed()
+                    .iter()
+                    .map(|check| check.check)
+                    .collect::<Vec<_>>(),
+            },
             // What a client would be served *now*, which is the point of the
             // whole surface: authoring moved nothing.
             "published_commit": published.as_ref().map(|(commit, _)| commit.to_hex()),
@@ -526,7 +853,10 @@ async fn author_inner(
         written,
         removed,
         published.as_ref(),
-        ScanReport::new(&security, &scan_config),
+        Reports {
+            scan: ScanReport::new(&security, &scan_config),
+            quality: QualityReport::new(&scored, &quality_config, &digest, review.as_ref()),
+        },
     )))
 }
 
@@ -632,6 +962,28 @@ async fn refuse_scanned<T>(
 ///
 /// CPU work bounded by ADR-0051's own bundle limits, so it goes off the
 /// reactor exactly as MEM-2's sibling does.
+/// Runs SKIL-3's rubric over the bundle (ADR-0053 decision 2).
+///
+/// Recomputed at every seam that renders it and stored nowhere a decision
+/// reads — ADR-0052 decision 6 inherited whole, for its reasons: it is a
+/// pure function of (file bytes, rubric version), and both are already
+/// present wherever it is needed.
+///
+/// CPU work bounded by ADR-0051's own bundle limits, so it goes off the
+/// reactor exactly as its two siblings do.
+pub(crate) async fn score_quality(files: &[SkillFile]) -> Result<RubricScore> {
+    let files = files.to_vec();
+    let span = tracing::Span::current();
+    tokio::task::spawn_blocking(move || {
+        let _entered = span.enter();
+        synveda_ingest::score_bundle(&files)
+    })
+    .await
+    .map_err(|err| Error::Internal {
+        message: format!("skill quality scoring task failed: {err}"),
+    })
+}
+
 pub(crate) async fn scan_security(files: &[SkillFile]) -> Result<BundleScan> {
     let files = files.to_vec();
     let span = tracing::Span::current();
@@ -1279,11 +1631,38 @@ pub(crate) struct ListParams {
     scope_id: ScopeId,
 }
 
+/// The automated score as a *listing* renders it — the one place in the
+/// product that reads the cache rather than recomputing (SKIL-3, ADR-0053
+/// decision 3).
+///
+/// A listing at a scope with forty skills would otherwise read every
+/// object of every bundle to draw one column, so the pair is denormalised
+/// onto the draft row at authoring. Two rules keep that honest, and both
+/// are visible in this struct: `stale` says the number came from a rubric
+/// this binary no longer runs, and **no gate reads these fields at all** —
+/// the publish seam recomputes from the bytes it is about to publish.
+#[derive(Serialize)]
+struct CachedQualityView {
+    score: u8,
+    rubric_version: u32,
+    /// The number was produced by a rubric that is not the one compiled
+    /// in. Rendered as a fact rather than hidden, because a score that
+    /// silently claimed to be current is how a cache becomes a lie — and
+    /// re-authoring the skill is what refreshes it.
+    stale: bool,
+}
+
 #[derive(Serialize)]
 struct ListEntry {
     name: String,
     description: String,
     sensitivity: Sensitivity,
+    /// Absent for a skill authored before the rubric existed, which is
+    /// "not scored yet" rather than "scored zero" — a distinction a
+    /// listing must not collapse, because one is a fact about a bundle and
+    /// the other is a fact about when it was written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quality: Option<CachedQualityView>,
     files: Vec<FileView>,
     updated_at: DateTime<Utc>,
     updated_by: IdentityId,
@@ -1343,6 +1722,11 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
         .into_iter()
         .filter(|bundle| permitted.get(&bundle.sensitivity).copied().unwrap_or(false))
         .map(|bundle| ListEntry {
+            quality: bundle.quality.map(|cached| CachedQualityView {
+                score: cached.score,
+                rubric_version: cached.rubric_version,
+                stale: !cached.is_current(synveda_ingest::RUBRIC_VERSION),
+            }),
             files: files
                 .iter()
                 .filter(|file| file.skill_name == bundle.name)
@@ -1424,6 +1808,16 @@ fn file_view(
     }
 }
 
+/// The two reports an author gets back beside their bundle.
+///
+/// Grouped because they arrived together and are read together — SKIL-2's
+/// "is this safe" and SKIL-3's "is this good" are the two questions the
+/// authoring response answers that the draft rows cannot.
+struct Reports {
+    scan: ScanReport,
+    quality: QualityReport,
+}
+
 fn view(
     node: &HierarchyNode,
     skill: skills::StoredSkill,
@@ -1431,8 +1825,9 @@ fn view(
     written: Vec<(skills::StoredFile, usize)>,
     removed: u64,
     published: Option<&PublishedState>,
-    scan: ScanReport,
+    reports: Reports,
 ) -> SkillView {
+    let Reports { scan, quality } = reports;
     SkillView {
         name: skill.name.to_string(),
         scope_id: skill.scope_id,
@@ -1446,6 +1841,7 @@ fn view(
             .collect(),
         removed,
         scan,
+        quality,
         published_commit: published.map(|(commit_hash, _)| commit_hash.to_hex()),
         created_at: skill.created_at,
         created_by: skill.created_by,

@@ -375,6 +375,13 @@ async fn resolve(w: &World, token: &str, name: &str) -> (StatusCode, Value) {
 /// Carries a bundle from a draft to a published version through the review
 /// **every** pack asks for: alice proposes, sam (steward) and sec (security
 /// reviewer) approve, cora runs the effect. Returns the commit.
+///
+/// Since SKIL-3 that review includes a **checklist** (ADR-0053 decision 7),
+/// because these tests run under `regulated-strict` and that pack requires
+/// one. The added call is not scaffolding to get the old tests green — it
+/// is the feature: a bank that ships a skill nobody worked through has not
+/// reviewed it, and every publication in this file now demonstrates the
+/// review it claims to have had.
 async fn review_and_publish(w: &World, scope: ScopeId, name: &str, title: &str) -> String {
     let (status, opened) = post(
         &w.app,
@@ -385,6 +392,21 @@ async fn review_and_publish(w: &World, scope: ScopeId, name: &str, title: &str) 
     .await;
     assert_eq!(status, StatusCode::OK, "open a skill proposal: {opened}");
     let id = opened["id"].as_str().expect("proposal id").to_owned();
+
+    let (status, checked) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/checklist"),
+        &w.sam,
+        json!({"answers": {
+            "instructions-correct": "yes",
+            "scope-appropriate": "yes",
+            "not-duplicate": "yes",
+            "dependencies-available": "yes",
+            "tested": "yes",
+        }}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "record the checklist: {checked}");
 
     for token in [&w.sam, &w.sec] {
         let (status, cast) = post(
@@ -1519,6 +1541,26 @@ async fn the_report_renders_in_review() {
     );
 
     // And it still publishes: reporting is not refusing.
+    //
+    // The checklist is SKIL-3's requirement rather than SKIL-2's, and it
+    // is recorded here for a reason worth naming: this test's claim is
+    // that the *scan's* reporting band does not block, and leaving the
+    // quality gate to refuse the publication would let that claim pass
+    // while proving nothing.
+    let (status, checked) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/checklist"),
+        &w.sam,
+        json!({"answers": {
+            "instructions-correct": "yes",
+            "scope-appropriate": "yes",
+            "not-duplicate": "yes",
+            "dependencies-available": "yes",
+            "tested": "yes",
+        }}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "record the checklist: {checked}");
     for token in [&w.sam, &w.sec] {
         let (status, cast) = post(
             &w.app,
@@ -1583,6 +1625,15 @@ async fn the_publish_seam_refuses_what_authoring_never_saw() {
             name: &name,
             description: "Does a thing. Use when the thing needs doing.",
             sensitivity: Sensitivity::Internal,
+            // A cache value the handler would have computed. This test
+            // goes round the handler on purpose (MEM-4's schema-backstop
+            // shape), so it supplies one — and a deliberately flattering
+            // one, to make the point that the publish gate recomputes
+            // rather than trusting this row (ADR-0053 decision 3).
+            quality: skills::CachedScore {
+                score: 100,
+                rubric_version: synveda_ingest::RUBRIC_VERSION,
+            },
             author,
         },
     )

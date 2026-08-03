@@ -123,6 +123,29 @@ alter table skills add constraint skills_quality_score_check
 alter table skills add constraint skills_quality_pair_check
     check ((quality_score is null) = (rubric_version is null));
 
+-- ── The pack's bar ──────────────────────────────────────────────────────────
+
+-- What a pack gets to say about quality: the automated score a bundle must
+-- reach, and whether a reviewer checklist bound to exactly those bytes is
+-- mandatory. `{"min_score": 70, "require_checklist": true}` is
+-- `regulated-strict`'s reading.
+--
+-- Two fields where migration 0032's `scan` has one, because they gate two
+-- different things and one number cannot express both: `min_score` is a bar
+-- on a machine's measurement, `require_checklist` is whether a human's
+-- judgement had to be recorded at all. A pack that wants the second without
+-- the first — an SMB that trusts its people but wants the review to have
+-- happened — is a coherent position the product should be able to hold.
+--
+-- **The fail-safe here is the opposite of every other config on this
+-- table**, and that inversion is the whole distinction between this gate
+-- and the security one next to it. An unconfigured pack gates *nothing*:
+-- there is no floor, because quality is not an invariant. A pack that has
+-- said nothing about quality has not asked for a quality gate, and a
+-- product that began refusing publications on a rubric nobody opted into
+-- would break every tenant on an upgrade (ADR-0053 decision 9).
+alter table policy_packs add column quality jsonb;
+
 -- ── RLS + least-privilege grants ────────────────────────────────────────────
 
 -- Tenant-scoped table ⇒ forced RLS + policy + least-privilege grants in the

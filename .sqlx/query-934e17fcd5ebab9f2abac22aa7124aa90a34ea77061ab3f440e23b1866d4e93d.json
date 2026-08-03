@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select tenant_id, name, version, source, redaction, composition,\n               approvals, promotion, lapse, dedup, retention, scan, updated_at\n        from policy_packs where tenant_id = $1\n        order by name\n        ",
+  "query": "\n        select tenant_id, name, version, source, redaction, composition,\n               approvals, promotion, lapse, dedup, retention, scan, quality, updated_at\n        from policy_packs where tenant_id = $1\n        order by name\n        ",
   "describe": {
     "columns": [
       {
@@ -65,6 +65,11 @@
       },
       {
         "ordinal": 12,
+        "name": "quality",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -87,8 +92,9 @@
       true,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "3e0ba8b4a52d6d146c7f7ce7a93f8c0b6107deca2bb1fcd00b655afae6e3a0da"
+  "hash": "934e17fcd5ebab9f2abac22aa7124aa90a34ea77061ab3f440e23b1866d4e93d"
 }
