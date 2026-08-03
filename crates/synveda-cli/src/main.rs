@@ -25,6 +25,7 @@ mod pack;
 mod prompt;
 mod proposal;
 mod recall;
+mod skill;
 
 use std::process::ExitCode;
 use std::time::Duration;
@@ -152,6 +153,21 @@ enum Command {
     /// a terminal can never disagree with it about a document's address.
     #[command(subcommand, name = "context-pack")]
     ContextPack(ContextPackCommand),
+    /// The skills registry (SKIL-1, ADR-0051): import an
+    /// agentskills.io-format bundle, list what a scope holds, open the
+    /// review that carries it, and **install** it into a client's own
+    /// skills directory.
+    ///
+    /// `install` is the only thing in the product that writes a skill onto
+    /// a disk, and it is here rather than in the gateway because the
+    /// harness is a guest (seed §2.6): a client moving its folder should
+    /// cost a CLI release, not a server one. What it writes is exactly the
+    /// reviewed files — the receipt goes beside your credentials, never
+    /// inside the bundle, because a file no reviewer approved in a
+    /// directory a client walks is the modification "installs unmodified"
+    /// forbids.
+    #[command(subcommand)]
+    Skill(SkillCommand),
     /// Fetch records in full by id (CTX-4, ADR-0041) — the other half of
     /// tiered injection.
     ///
@@ -291,6 +307,129 @@ enum PromptCommand {
         /// The scope whose channel would move. Requirements resolve here.
         #[arg(long)]
         scope: ScopeId,
+        /// What this proposes, in one line. Defaults to the name.
+        #[arg(long)]
+        title: Option<String>,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SkillCommand {
+    /// The registry at one scope: every skill, its files, and whether what
+    /// a client would install is what was last written.
+    List {
+        /// The scope UUID.
+        scope: ScopeId,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Resolve a bundle the way a client would: by name, walking your own
+    /// placement chain nearest-first, unless you name a scope.
+    ///
+    /// Because the name is also the installed directory name and a client's
+    /// skills root is flat, that walk is what decides which of two
+    /// same-named skills exists on your disk at all.
+    Show {
+        /// The skill's name, e.g. `code-review`.
+        name: String,
+        /// Resolve at this scope instead of walking your chain. Required
+        /// with --draft and with --commit.
+        #[arg(long)]
+        scope: Option<ScopeId>,
+        /// Read the authoring copy at --scope rather than the reviewed
+        /// version. Unreviewed by construction.
+        #[arg(long)]
+        draft: bool,
+        /// Pin to a commit that scope's channel has held.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Print the gateway's answer verbatim.
+        #[arg(long)]
+        json: bool,
+        /// Suppress the connection banner — for piping.
+        #[arg(long)]
+        quiet: bool,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Read an anthropics/skills-format directory and write it as a draft.
+    /// This moves nothing a client installs.
+    ///
+    /// The request is the bundle: a file you removed from the directory is
+    /// removed from the draft, because a client loads a skill whole and a
+    /// leftover file would be published back onto a laptop.
+    Import {
+        /// The directory holding SKILL.md and its bundled files.
+        dir: std::path::PathBuf,
+        /// The scope that will stand behind it.
+        #[arg(long)]
+        scope: ScopeId,
+        /// Override the skill name. Defaults to the directory's own name,
+        /// which is the spec's rule; the frontmatter `name` must agree
+        /// either way.
+        #[arg(long)]
+        name: Option<String>,
+        /// public | internal | confidential. Defaults to internal;
+        /// `restricted` is refused — nothing in the product mints that tier
+        /// for an authored asset.
+        #[arg(long)]
+        sensitivity: Option<String>,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Write a published bundle into a client's own skills directory, byte
+    /// for byte, and re-hash every file against the address the commit
+    /// named.
+    Install {
+        /// The skill's name — also the directory this creates.
+        name: String,
+        /// Which client's layout to write. The per-client difference is the
+        /// root and nothing else.
+        #[arg(long, default_value = "claude-code")]
+        client: String,
+        /// Write under this directory instead of the client's own root.
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
+        /// Install this scope's copy instead of walking your chain.
+        #[arg(long)]
+        scope: Option<ScopeId>,
+        /// Install the commit you were built against. A rewind that took it
+        /// off the channel refuses this, naming both commits.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Print the receipt as JSON.
+        #[arg(long)]
+        json: bool,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Open the review that can carry a bundle onto a scope's published
+    /// channel. Everything after this is `synveda proposal`.
+    ///
+    /// Under every pack this is the only route: the invariant floor asks
+    /// for a security reviewer and two distinct approvers, so no pack makes
+    /// shipping executable code a one-signature act.
+    Propose {
+        /// The skill's name. The proposal names the bundle, never a file.
+        name: String,
+        /// The scope whose channel would move. Requirements resolve here.
+        #[arg(long)]
+        scope: ScopeId,
+        /// The scope that holds it, when climbing. Defaults to --scope.
+        #[arg(long)]
+        source: Option<ScopeId>,
         /// What this proposes, in one line. Defaults to the name.
         #[arg(long)]
         title: Option<String>,
@@ -1449,6 +1588,93 @@ async fn run(cli: Cli) -> Result<(), String> {
                 title,
                 profile,
             } => prompt::propose(&profile_name(profile), &name, scope, title.as_deref()).await,
+        },
+        Command::Skill(command) => match command {
+            SkillCommand::List { scope, profile } => {
+                skill::list(&profile_name(profile), scope).await
+            }
+            SkillCommand::Show {
+                name,
+                scope,
+                draft,
+                commit,
+                json,
+                quiet,
+                profile,
+            } => {
+                skill::show(
+                    &profile_name(profile),
+                    skill::Ask {
+                        name: &name,
+                        scope,
+                        draft,
+                        commit: commit.as_deref(),
+                    },
+                    json,
+                    quiet,
+                )
+                .await
+            }
+            SkillCommand::Import {
+                dir,
+                scope,
+                name,
+                sensitivity,
+                profile,
+            } => {
+                let sensitivity = sensitivity
+                    .as_deref()
+                    .map(str::parse::<synveda_types::Sensitivity>)
+                    .transpose()
+                    .map_err(|err| err.to_string())?;
+                skill::import(
+                    &profile_name(profile),
+                    &dir,
+                    scope,
+                    name.as_deref(),
+                    sensitivity,
+                )
+                .await
+            }
+            SkillCommand::Install {
+                name,
+                client,
+                root,
+                scope,
+                commit,
+                json,
+                profile,
+            } => {
+                skill::install(
+                    &profile_name(profile),
+                    skill::Ask {
+                        name: &name,
+                        scope,
+                        draft: false,
+                        commit: commit.as_deref(),
+                    },
+                    &client,
+                    root.as_deref(),
+                    json,
+                )
+                .await
+            }
+            SkillCommand::Propose {
+                name,
+                scope,
+                source,
+                title,
+                profile,
+            } => {
+                skill::propose(
+                    &profile_name(profile),
+                    &name,
+                    scope,
+                    source,
+                    title.as_deref().unwrap_or(&name),
+                )
+                .await
+            }
         },
         Command::ContextPack(command) => match command {
             ContextPackCommand::List { scope, profile } => {

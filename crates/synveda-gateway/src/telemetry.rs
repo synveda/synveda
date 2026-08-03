@@ -141,6 +141,18 @@ pub const PROMPT_OPERATIONS_TOTAL: &str = "synveda_prompt_operations_total";
 /// `context.injected` like every other entry (ADR-0050 decision 13).
 pub const CONTEXT_PACK_OPERATIONS_TOTAL: &str = "synveda_context_pack_operations_total";
 
+/// Skills registry operations (SKIL-1, ADR-0051), labelled by `op`
+/// (`author`/`resolve`/`list`) and `outcome` (`ok`, `rejected`, `error`).
+///
+/// Three ops, like the prompt registry and unlike the pack one: a skill IS
+/// fetched by name. What it is not is *composed* — nothing here appears in
+/// `synveda_composed_entries_total`, because a skill's content becomes no
+/// records and enters no block (ADR-0051 decision 9). `author` chains
+/// `skill.authored` (or `skill.quarantined` when the scanner stops a file),
+/// `resolve` chains `skill.resolved`, and a publication is counted by
+/// `CHANNEL_OPERATIONS_TOTAL` like every other one.
+pub const SKILL_OPERATIONS_TOTAL: &str = "synveda_skill_operations_total";
+
 /// Lapse API operations (AUTHZ-4, ADR-0037), labelled by `op`
 /// (`propose`/`grant`/`revoke`/`list`) and `outcome` (`ok`, `rejected`,
 /// `error`).
@@ -570,6 +582,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         CONTEXT_PACK_OPERATIONS_TOTAL,
         "Context pack registry operations by op (author/list) and \
+         outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        SKILL_OPERATIONS_TOTAL,
+        "Skills registry operations by op (author/resolve/list) and \
          outcome (ok/rejected/error)"
     );
     metrics::describe_counter!(

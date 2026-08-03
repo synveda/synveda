@@ -840,9 +840,18 @@ fn only_set_channels_of_readable_assets_rewind() {
              is a malformed rewind rather than an ungoverned asset kind: {refused}"
         );
 
-        // The two kinds that still have no reader are still refused by
-        // name — the deferral shrank rather than closing.
-        for asset in ["skill", "context-pack"] {
+        // **The deferral is closed** (SKIL-1, ADR-0051 decision 10). Every
+        // asset kind that has a channel now has a read action, so all three
+        // authored kinds get as far as the rewind's own rules exactly as
+        // `prompt` does above.
+        //
+        // This block was stale between PRMT-2 and SKIL-1: PRMT-2 added
+        // `ContextPackRead` without coming back here, so the loop kept
+        // asserting a refusal the product had stopped giving. It is written
+        // against the *rule* now — "a kind with a channel is governed, a
+        // kind without one is refused" — rather than against a list of
+        // names, so the next asset kind cannot leave it behind again.
+        for asset in ["context-pack", "skill"] {
             let (status, refused) = post(
                 app,
                 &fx.tara,
@@ -851,19 +860,48 @@ fn only_set_channels_of_readable_assets_rewind() {
                     "asset": asset,
                     "from_commit": head,
                     "to_commit": head,
-                    "message": "rewind something with no reader",
+                    "message": "rewind a governed asset kind",
                 }),
             )
             .await;
             assert_eq!(status, StatusCode::BAD_REQUEST, "{asset} rewind: {refused}");
+            let message = refused["message"].as_str().unwrap_or_default();
             assert!(
-                refused["message"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .contains("no read action yet"),
-                "an asset kind without a reader is refused by name: {refused}"
+                !message.contains("no read action"),
+                "{asset} has a read action now; the deferral is discharged: {refused}"
+            );
+            assert!(
+                message.contains("already points at"),
+                "the request gets as far as the rewind's own rules — from == to \
+                 is a malformed rewind rather than an ungoverned asset kind: {refused}"
             );
         }
+
+        // `policy` is what remains, and it is refused for a different reason
+        // that will not shrink: it has no channel at all — a lapse writes a
+        // row (ADR-0037 decision 16). This is the assertion that keeps the
+        // route honest once every *channelled* kind is governed.
+        let (status, refused) = post(
+            app,
+            &fx.tara,
+            &format!("/v1/channels/{}/rollback", fx.estate.platform.id),
+            json!({
+                "asset": "policy",
+                "from_commit": head,
+                "to_commit": head,
+                "message": "rewind something that has no channel",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "policy rewind: {refused}");
+        assert!(
+            refused["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("has no channel"),
+            "an asset kind with no channel is refused by name, and says so \
+             rather than blaming a missing read action: {refused}"
+        );
     });
 }
 

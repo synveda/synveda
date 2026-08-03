@@ -679,6 +679,44 @@ pub(crate) fn decide_context_pack_read_from(
     )
 }
 
+/// [`decide_read`] for `SkillRead` (SKIL-1, ADR-0051 decision 10).
+///
+/// The fourth action that names a tier, and a separate wrapper for
+/// [`decide_prompt_read`]'s reason. What makes it different from
+/// [`decide_context_pack_read`] is what it does *not* do: it admits nothing
+/// into a composed block, because a skill's content becomes no records and
+/// enters no block at all (decision 9). It gates a fetch whose bytes are
+/// about to become files on somebody's machine.
+pub(crate) fn decide_skill_read(
+    state: &AppState,
+    input: &DecisionInput,
+    resource: Resource,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    decide_skill_read_from(state, input, 0, resource, sensitivity)
+}
+
+/// [`decide_skill_read`] for a resource whose chain starts at `position` —
+/// what the registry's gradient walk asks once per scope on the caller's own
+/// chain.
+pub(crate) fn decide_skill_read_from(
+    state: &AppState,
+    input: &DecisionInput,
+    position: usize,
+    resource: Resource,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    decide_inner(
+        state,
+        input,
+        position,
+        Action::SkillRead,
+        resource,
+        None,
+        Some(sensitivity),
+    )
+}
+
 /// [`decide_read`] for a resource whose chain starts at `position` — the
 /// [`decide_from`] shape, for the cross-scope decisions FLOW-5 takes.
 pub(crate) fn decide_read_from(

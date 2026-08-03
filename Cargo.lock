@@ -3641,6 +3641,7 @@ dependencies = [
  "synveda-policy",
  "synveda-store",
  "synveda-types",
+ "synveda-vedaflow",
  "tokio",
  "url",
 ]

@@ -197,6 +197,38 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
+    // The skills registry (/v1/skills, SKIL-1, ADR-0051 decision 10): may
+    // this principal be served a skill bundle attached to this scope, and
+    // may it author one there?
+    //
+    // `PromptRead`'s shape and none of `ContextPackRead`'s: a skill is
+    // fetched by name and materialised into a client's own skills
+    // directory, never ranked into a composed block (decision 9), so this
+    // action is taken on its own route and appears nowhere in the
+    // composition plan walk. The client's own progressive disclosure is the
+    // loader; a block would be doing that job twice and worse.
+    //
+    // `SkillWrite` is separate from `ContextPackWrite` on the separability
+    // rule, and here the reason is sharpest: a skill is executable, so a
+    // pack must be able to say "curate conventions here" without saying
+    // "author code here".
+    //
+    // No pack names `restricted` here either — migration 0031's CHECK is
+    // where that is structural (ADR-0051 decision 11).
+    action SkillRead
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String>, sensitivity: String },
+        };
+
+    action SkillWrite
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
+            context: { roles: Set<String> },
+        };
+
     // The policy admin plane (/v1/policy/*, ADR-0014 decision 8): reading
     // packs and effective assignments, and assigning packs to nodes (or
     // the tenant default — the Tenant resource).

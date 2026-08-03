@@ -222,6 +222,8 @@ const COVERED: &[&str] = &[
     "records",
     "records_history",
     "role_bindings",
+    "skill_files",
+    "skills",
     "vedaflow_commit_parents",
     "vedaflow_commits",
     "vedaflow_objects",
@@ -4290,5 +4292,225 @@ fn a_pack_cannot_be_forged_moved_renamed_raised_or_have_its_chunks_relabelled() 
                 "the app role must hold no DELETE on {table}"
             );
         }
+    });
+}
+
+// ── SKIL-1: the skills registry ─────────────────────────────────────────────
+
+/// A tenant with one skill and two files: its `SKILL.md` and a bundled
+/// script.
+///
+/// The objects are `seed_vedaflow`'s for migration 0029's reason. There is no
+/// third table to seed — a skill's content becomes no records at all
+/// (ADR-0051 decision 9), which is the shape of that decision showing up in
+/// a fixture.
+async fn seed_skill(pool: &PgPool) -> (TenantId, ScopeId) {
+    let (tenant, scope) = seed_vedaflow(pool).await;
+    let author = IdentityId::new();
+    sqlx::query!(
+        "insert into skills
+             (tenant_id, scope_id, name, description, sensitivity, created_by, updated_by)
+         values ($1, $2, 'code-review', 'Reviews a diff.', 'internal', $3, $3)",
+        tenant.as_uuid(),
+        scope.as_uuid(),
+        author.as_uuid(),
+    )
+    .execute(pool)
+    .await
+    .expect("seed skill");
+    for (path, hash) in [("SKILL.md", 1u8), ("scripts/check.py", 1u8)] {
+        sqlx::query!(
+            "insert into skill_files
+                 (tenant_id, scope_id, skill_name, path, object_hash, created_by, updated_by)
+             values ($1, $2, 'code-review', $3, $4, $5, $5)",
+            tenant.as_uuid(),
+            scope.as_uuid(),
+            path,
+            &[hash; 32][..],
+            author.as_uuid(),
+        )
+        .execute(pool)
+        .await
+        .expect("seed skill file");
+    }
+    (tenant, scope)
+}
+
+/// The attacks a skill invites. They are the prompt registry's — forge,
+/// move, rename, raise the tier — plus the one difference SKIL-1 makes
+/// deliberately: `skill_files` carries the only DELETE grant in the three
+/// registries (ADR-0051 decision 17), because a client loads a bundle whole
+/// and a file the author removed must not be published back onto a laptop.
+///
+/// What that grant must NOT reach is a published version, and the reason it
+/// cannot is structural rather than a rule: a tree names object addresses,
+/// objects are append-only, and nothing here can remove one.
+#[test]
+fn a_skill_cannot_be_forged_moved_renamed_or_raised_and_its_files_delete_only_as_drafts() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_scope) = seed_skill(&db.pool).await;
+        let (adversary, adversary_scope) = seed_skill(&db.pool).await;
+
+        // 1. Isolation across both tables.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        for table in ["skills", "skill_files"] {
+            let seen: i64 = sqlx::query_scalar(&format!(
+                "select count(*) from {table} where tenant_id = $1"
+            ))
+            .bind(victim.as_uuid())
+            .fetch_one(&mut *tx)
+            .await
+            .expect("count another tenant's rows");
+            assert_eq!(seen, 0, "another tenant's {table} rows must be invisible");
+        }
+
+        let forged = sqlx::query!(
+            "insert into skills
+                 (tenant_id, scope_id, name, description, sensitivity, created_by, updated_by)
+             values ($1, $2, 'forged', 'forged', 'internal', $3, $3)",
+            victim.as_uuid(),
+            victim_scope.as_uuid(),
+            IdentityId::new().as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant skill must be rejected: it would author executable \
+             content into a tenant no SkillWrite decision was taken in"
+        );
+        drop(tx);
+
+        // 2. Identity is immutable, content is not.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        sqlx::query!(
+            "update skills set description = 'Reviews a diff, carefully.'
+             where tenant_id = $1 and scope_id = $2",
+            adversary.as_uuid(),
+            adversary_scope.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("editing your own skill is the authoring act");
+
+        let moved = sqlx::query!(
+            "update skills set scope_id = $3 where tenant_id = $1 and scope_id = $2",
+            adversary.as_uuid(),
+            adversary_scope.as_uuid(),
+            ScopeId::new().as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            moved.is_err(),
+            "a skill cannot change scope: SkillWrite was decided at the one it \
+             was authored in"
+        );
+        drop(tx);
+
+        // A rename bites harder here than anywhere else, because the name is
+        // inside the artefact: the open spec requires SKILL.md's frontmatter
+        // `name` to match the directory (ADR-0051 decision 5).
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let renamed = sqlx::query!(
+            "update skills set name = 'code-review-v2'
+             where tenant_id = $1 and scope_id = $2",
+            adversary.as_uuid(),
+            adversary_scope.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            renamed.is_err(),
+            "a rename is a different skill, not an edit"
+        );
+        let repathed = sqlx::query!(
+            "update skill_files set path = 'scripts/other.py'
+             where tenant_id = $1 and path = 'scripts/check.py'",
+            adversary.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            repathed.is_err(),
+            "a re-path is a different file: a published entry would otherwise \
+             name bytes nobody reviewed at that path"
+        );
+        drop(tx);
+
+        // 3. The tier nothing can mint (ADR-0051 decision 11).
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let raised = sqlx::query!(
+            "update skills set sensitivity = 'restricted'
+             where tenant_id = $1 and scope_id = $2",
+            adversary.as_uuid(),
+            adversary_scope.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            raised.is_err(),
+            "no path in the product mints `restricted` for an authored asset"
+        );
+        drop(tx);
+
+        // 4. A file naming an address the store does not hold is rejected —
+        //    "the bytes a proposal will bind are already stored" is a
+        //    property of the schema rather than of a handler.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let dangling = sqlx::query!(
+            "insert into skill_files
+                 (tenant_id, scope_id, skill_name, path, object_hash, created_by, updated_by)
+             values ($1, $2, 'code-review', 'references/api.md', $3, $4, $4)",
+            adversary.as_uuid(),
+            adversary_scope.as_uuid(),
+            &[9u8; 32][..],
+            IdentityId::new().as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            dangling.is_err(),
+            "a bundled file naming an address the store does not hold must be \
+             rejected"
+        );
+        drop(tx);
+
+        // 5. The one DELETE grant in the three registries, and its boundary.
+        //    A draft file goes; the skill row does not, and no object does.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        sqlx::query!(
+            "delete from skill_files
+             where tenant_id = $1 and path = 'scripts/check.py'",
+            adversary.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("removing a file from a draft bundle is an ordinary edit");
+        let objects: i64 = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from vedaflow_objects where tenant_id = $1"#,
+            adversary.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count objects");
+        assert!(
+            objects > 0,
+            "removing a draft file must not remove the bytes a published tree \
+             may still name: that is why a delete here cannot reach a \
+             published version"
+        );
+        let deleted = sqlx::query!(
+            "delete from skills where tenant_id = $1",
+            adversary.as_uuid()
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            deleted.is_err(),
+            "the app role must hold no DELETE on skills: retracting a published \
+             skill is FLOW-7's rewind"
+        );
     });
 }

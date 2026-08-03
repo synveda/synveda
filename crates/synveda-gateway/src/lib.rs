@@ -55,5 +55,6 @@ pub mod quarantine;
 mod recall;
 pub mod roles;
 pub mod service_identities;
+pub mod skills;
 pub mod telemetry;
 pub mod tenant;

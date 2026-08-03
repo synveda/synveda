@@ -396,8 +396,9 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
     ));
 }
 
-/// The carve-out PRMT-1 widened and PRMT-2 widened again, and the four
-/// things neither widened (ADR-0049 decision 4; ADR-0050 decision 8).
+/// The carve-out PRMT-1 widened, PRMT-2 widened again and SKIL-1 widened a
+/// third time, and the four things none of them widened (ADR-0049
+/// decision 4; ADR-0050 decision 8; ADR-0051 decision 10).
 ///
 /// A headless agent is the consumer prompts exist for, and the org's
 /// `house-style` sits two levels above the anchor — so without `PromptRead`
@@ -407,11 +408,13 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
 /// composes through `inject`, off the same plan walk that already reaches
 /// the agent's own chain for memory, so leaving it out would mean an agent
 /// composed the org's memory and not the org's conventions in one block.
+/// `SkillRead` is there on the plainest version of it: an agent that cannot
+/// resolve the org's skills cannot do the work they were published for.
 ///
 /// What the carve-out stays is the *membership* floor: own chain, reads
 /// only. This test is the evidence for that sentence, because a carve-out
 /// is the kind of thing that is widened once and then assumed to be narrow
-/// — and it now runs over both authored asset types, so widening a third
+/// — and it runs over every authored asset type, so widening a fourth
 /// cannot quietly skip it.
 #[test]
 fn an_agent_reads_authored_assets_up_its_own_chain_and_nothing_else() {
@@ -426,6 +429,7 @@ fn an_agent_reads_authored_assets_up_its_own_chain_and_nothing_else() {
             Action::ContextPackWrite,
             "context packs",
         ),
+        (Action::SkillRead, Action::SkillWrite, "skills"),
     ] {
         // 1. Up the chain, role-free: the anchor, its department, the org,
         //    and the agent's own leaf. This is the zero-config resolution.

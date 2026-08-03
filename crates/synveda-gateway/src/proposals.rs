@@ -70,7 +70,8 @@ use synveda_store::{hierarchy, records, rls};
 use synveda_types::{
     ApprovalRequirement, AssetKind, CastApproval, Channel, DocumentPath, Error, HierarchyNode,
     IdentityId, PromotionEvidence, PromptName, ProposalEffect, ProposalId, ProposalState,
-    ProposalView, RecordId, Result, Role, ScopeId, Sensitivity, TenantId, Verdict,
+    ProposalView, RecordId, Result, Role, ScopeId, Sensitivity, SkillName, SkillPath, TenantId,
+    Verdict,
 };
 use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
 
@@ -492,6 +493,15 @@ pub(crate) struct OpenBody {
     /// people where it prices a team's memory at one.
     #[serde(default)]
     document_paths: Vec<DocumentPath>,
+    /// The skills to promote, by **name** (SKIL-1, ADR-0051 decision 1).
+    /// Never by file: a client loads a bundle whole, so proposing three of
+    /// its four files would propose a version nobody can run. Every file
+    /// the source holds becomes a member.
+    ///
+    /// Exactly one of the four lists may be present, for `prompt_names`'
+    /// reason.
+    #[serde(default)]
+    skill_names: Vec<SkillName>,
     /// What this proposes, in one line. A reviewer reads it in a list.
     title: String,
     /// What running this proposal would *do*. Absent means `published` —
@@ -590,19 +600,14 @@ async fn open_inner(
         });
     }
 
-    let asset = match (body.prompt_names.is_empty(), body.document_paths.is_empty()) {
-        (true, true) => AssetKind::Memory,
-        (false, true) => AssetKind::Prompt,
-        (true, false) => AssetKind::ContextPack,
-        (false, false) => {
-            return Err(Error::Invalid {
-                message: "a proposal has one asset kind: name prompts or context pack \
-                          documents, never both. The approval matrix resolves from the \
-                          kind, and a mixed set would have to be priced at the maximum \
-                          — a rule nobody wrote and a review nobody asked for"
-                    .to_owned(),
-            });
-        }
+    let asset = if !body.prompt_names.is_empty() {
+        AssetKind::Prompt
+    } else if !body.document_paths.is_empty() {
+        AssetKind::ContextPack
+    } else if !body.skill_names.is_empty() {
+        AssetKind::Skill
+    } else {
+        AssetKind::Memory
     };
     // The members, as the asset kind's own reader sees them: the two senses
     // of "the source holds it" (ADR-0034 decision 3) are the same two for
@@ -621,6 +626,11 @@ async fn open_inner(
                 .map(Proposed::ContextPack)
                 .collect()
         }
+        AssetKind::Skill => held_skills(&mut tx, tenant_id, source_scope_id, &body.skill_names)
+            .await?
+            .into_iter()
+            .map(Proposed::Skill)
+            .collect(),
         _ => held_prompts(&mut tx, tenant_id, source_scope_id, &body.prompt_names)
             .await?
             .into_iter()
@@ -701,6 +711,14 @@ async fn open_inner(
             // line where that stays true.
             Proposed::ContextPack(asset) => {
                 let object = vedaflow::put_context_pack(&mut tx, tenant_id, asset).await?;
+                (asset.entry_name(), object.hash)
+            }
+            // Same story again, and for the same reason: the file's object
+            // was stored at authoring — the draft row's foreign key required
+            // it — so this write dedups, and it runs anyway because a member
+            // reached through the *published* sense has no draft row here.
+            Proposed::Skill(asset) => {
+                let object = vedaflow::put_skill(&mut tx, tenant_id, asset).await?;
                 (asset.entry_name(), object.hash)
             }
         };
@@ -1236,6 +1254,21 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
         )
         .await;
     }
+    if proposal.asset == AssetKind::Skill {
+        return publish_skills(
+            tx,
+            tenant_id,
+            id,
+            &proposal,
+            publisher,
+            &authorized,
+            &requirement,
+            &cast,
+            &outstanding,
+            &proposed,
+        )
+        .await;
+    }
     if proposal.asset == AssetKind::Prompt {
         return publish_prompts(
             tx,
@@ -1532,6 +1565,172 @@ async fn publish_documents(
             "source_scope_id": source,
             "target_scope_id": proposal.target_scope_id,
             // Paths and addresses, never document text.
+            "records": members.iter().map(|(name, hash)| json!({
+                "member": name,
+                "object_hash": hash.to_hex(),
+            })).collect::<Vec<_>>(),
+            "commit": committed.commit.to_hex(),
+            "parent": committed.parent.map(|parent| parent.to_hex()),
+            "members": committed.entries,
+            "added": committed.added,
+            "approvals": approvals::audit_context(requirement, outstanding),
+            "approvers": cast.len(),
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+
+    Ok(Json(PublishResponse {
+        proposal_id: id,
+        scope_id: proposal.target_scope_id,
+        channel: channel.name(),
+        commit: committed.commit.to_hex(),
+        parent: committed.parent.map(|parent| parent.to_hex()),
+        proposal_commit: proposal.commit.to_hex(),
+        members: committed.entries,
+        added: committed.added,
+    }))
+}
+
+/// The publish effect for a skill proposal (SKIL-1, ADR-0051 decision 1).
+///
+/// [`publish_documents`] line for line, one table over: approvals bind
+/// bytes, so every member's address is required to equal what the approved
+/// commit named, and the source must still hold it. Every refusal is a
+/// `Conflict`, because the request was well formed when it was approved and
+/// what moved is the world.
+///
+/// It writes `skill/published` and chains the same
+/// `vedaflow.channel.published` event with `asset` reading `skill` — the
+/// same governed act with the same consequence (ADR-0019 decision 4).
+///
+/// **What it does not do is write a file.** Publication moves a ref; the
+/// bytes reach a client when somebody runs `synveda skill install`, and the
+/// receipt of that lives in the CLI's own state rather than in the bundle
+/// (ADR-0051 decision 12).
+#[allow(clippy::too_many_arguments)]
+async fn publish_skills(
+    mut tx: sqlx::Transaction<'static, sqlx::Postgres>,
+    tenant_id: TenantId,
+    id: ProposalId,
+    proposal: &vedaflow::StoredProposal,
+    publisher: IdentityId,
+    authorized: &crate::authz::Authorized,
+    requirement: &ApprovalRequirement,
+    cast: &[CastApproval],
+    outstanding: &synveda_types::Outstanding,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Json<PublishResponse>> {
+    let source = proposal.source_scope_id;
+    let paths: Vec<SkillPath> = proposed
+        .iter()
+        .map(|member| {
+            member
+                .name
+                .parse::<SkillPath>()
+                .map_err(|err| Error::Internal {
+                    message: format!(
+                        "proposal member {:?} is not a skill path: {err}",
+                        member.name
+                    ),
+                })
+        })
+        .collect::<Result<_>>()?;
+    let drafts: std::collections::HashMap<SkillPath, [u8; 32]> =
+        synveda_store::skills::list_all_files(&mut *tx, tenant_id, source)
+            .await?
+            .into_iter()
+            .map(|file| {
+                (
+                    SkillPath::new(file.skill_name.clone(), file.path.clone()),
+                    file.object_hash,
+                )
+            })
+            .collect();
+    let published_at_source = published_skills_at(&mut tx, tenant_id, source).await?;
+
+    let moved = |what: &str, path: &SkillPath| Error::Conflict {
+        message: format!(
+            "skill file {path} {what} after this proposal was approved; withdraw it and \
+             open a new one so the change is reviewed"
+        ),
+    };
+    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> = Vec::with_capacity(paths.len());
+    for (member, path) in proposed.iter().zip(&paths) {
+        match drafts.get(path) {
+            Some(address) if member.object.as_bytes() == address => {}
+            Some(_) => return Err(moved("changed", path)),
+            None => {
+                // No draft here — but a file *removed* from the bundle since
+                // the review lands here too, which is exactly the case
+                // ADR-0051 decision 17's DELETE grant creates and exactly
+                // the one this check exists to catch: a publication that
+                // silently dropped it would ship a bundle a reviewer never
+                // saw.
+                if published_at_source.get(path) != Some(&member.object) {
+                    return Err(Error::Conflict {
+                        message: format!(
+                            "scope {source} no longer holds skill file {path}; the bundle \
+                             was approved against files its source has since changed or \
+                             removed"
+                        ),
+                    });
+                }
+            }
+        }
+        members.push((member.name.clone(), member.object));
+    }
+
+    let channel = vedaflow::ChannelRef::skill(Channel::Published);
+    let snapshot = PolicySnapshot::new(
+        authorized.decision.pack_name.clone(),
+        authorized.decision.pack_version,
+    );
+    let committed = vedaflow::publish(
+        &mut tx,
+        tenant_id,
+        &vedaflow::ChannelWrite {
+            scope: proposal.target_scope_id,
+            channel,
+            members: &members,
+            merge_parents: &[proposal.commit],
+            author: publisher,
+            message: &proposal.title,
+            committed_at: Utc::now(),
+            policy_snapshot: &snapshot,
+        },
+        &Signer::Unsigned,
+    )
+    .await?;
+    close(
+        &mut tx,
+        tenant_id,
+        id,
+        ProposalState::Published,
+        publisher,
+        None,
+    )
+    .await?;
+    vedaflow::proposals::act("published", proposal.asset);
+
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::ChannelPublished,
+        Resource::Scope(proposal.target_scope_id).to_string(),
+        Outcome::Success,
+        json!({
+            "authz": audit::decision_context(Action::ChannelPublish, authorized),
+            "channel": channel.name(),
+            "asset": channel.asset.as_str(),
+            "message": proposal.title,
+            "proposal_id": id,
+            "proposal_commit": proposal.commit.to_hex(),
+            "sensitivity": proposal.sensitivity.as_str(),
+            "source_scope_id": source,
+            "target_scope_id": proposal.target_scope_id,
+            // Paths and addresses, never SKILL.md text and never file
+            // content.
             "records": members.iter().map(|(name, hash)| json!({
                 "member": name,
                 "object_hash": hash.to_hex(),
@@ -2134,6 +2333,9 @@ async fn member_views(
     if proposal.asset == AssetKind::ContextPack {
         return document_member_views(tx, tenant_id, proposal, &proposed).await;
     }
+    if proposal.asset == AssetKind::Skill {
+        return skill_member_views(tx, tenant_id, proposal, &proposed).await;
+    }
     if proposal.asset == AssetKind::Prompt {
         return prompt_member_views(tx, tenant_id, proposal, &proposed).await;
     }
@@ -2415,6 +2617,101 @@ async fn prompt_member_views(
         .collect())
 }
 
+/// [`member_views`] for a skill proposal (SKIL-1, ADR-0051 decision 1).
+///
+/// [`document_member_views`]'s shape, one table over — and the renderer
+/// ADR-0035 predicted for "SKIL-1's skill bundles", arriving as its third
+/// kind. A reviewer sees a file at a time, which is what makes reviewing a
+/// skill *like reviewing code* rather than like reviewing a blob.
+async fn skill_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let paths: Vec<SkillPath> = proposed
+        .iter()
+        .map(|member| {
+            member
+                .name
+                .parse::<SkillPath>()
+                .map_err(|err| Error::Internal {
+                    message: format!(
+                        "proposal member {:?} is not a skill path: {err}",
+                        member.name
+                    ),
+                })
+        })
+        .collect::<Result<_>>()?;
+    let drafts: std::collections::HashMap<SkillPath, [u8; 32]> =
+        synveda_store::skills::list_all_files(&mut *tx, tenant_id, proposal.source_scope_id)
+            .await?
+            .into_iter()
+            .map(|file| {
+                (
+                    SkillPath::new(file.skill_name.clone(), file.path.clone()),
+                    file.object_hash,
+                )
+            })
+            .collect();
+    let published = published_skills_at(tx, tenant_id, proposal.target_scope_id).await?;
+
+    let mut wanted: Vec<vedaflow::hash::ObjectHash> =
+        proposed.iter().map(|member| member.object).collect();
+    wanted.extend(paths.iter().filter_map(|path| published.get(path).copied()));
+    let objects = vedaflow::read_objects(tx, tenant_id, &wanted).await?;
+    // The *file's* bytes rather than the envelope's: a reviewer reads the
+    // script, not the JSON around it. That is the same content a client
+    // will load, which is the whole point of reviewing it here.
+    let text_at = |hash: &vedaflow::hash::ObjectHash| -> String {
+        objects
+            .get(hash)
+            .and_then(|object| vedaflow::SkillAsset::from_bytes(&object.content).ok())
+            .map(|asset| asset.file.content)
+            .unwrap_or_default()
+    };
+
+    Ok(proposed
+        .iter()
+        .zip(&paths)
+        .map(|(member, path)| {
+            let reviewed = objects
+                .get(&member.object)
+                .and_then(|object| vedaflow::SkillAsset::from_bytes(&object.content).ok());
+            let (unchanged, content) = match drafts.get(path) {
+                Some(address) => (member.object.as_bytes() == address, text_at(&member.object)),
+                None => (true, String::new()),
+            };
+            let (effect, baseline) = match published.get(path) {
+                None => (MemberEffect::Add, None),
+                Some(held) if *held == member.object => (MemberEffect::None, None),
+                Some(held) => (
+                    MemberEffect::Update,
+                    Some(BaselineView {
+                        object_hash: held.to_hex(),
+                        text: text_at(held),
+                    }),
+                ),
+            };
+            MemberView {
+                member: path.to_string(),
+                record_id: None,
+                asset: AssetKind::Skill.as_str().to_owned(),
+                object_hash: member.object.to_hex(),
+                unchanged,
+                class: None,
+                sensitivity: reviewed
+                    .as_ref()
+                    .map_or(proposal.sensitivity, |asset| asset.sensitivity),
+                content,
+                effect,
+                proposed: text_at(&member.object),
+                baseline,
+            }
+        })
+        .collect())
+}
+
 /// A proposal commit's entry names as record ids, in tree order.
 ///
 /// Only this crate writes memory-asset entries and it names them by id,
@@ -2459,10 +2756,12 @@ fn decide_asset_read(
         AssetKind::ContextPack => {
             authz::decide_context_pack_read(state, input, resource, Sensitivity::WORKING)
         }
+        AssetKind::Skill => authz::decide_skill_read(state, input, resource, Sensitivity::WORKING),
+        // `policy` is the one that remains, and it is not proposable here —
+        // a lapse is its own route (ADR-0037 decision 16).
         other => Err(Error::Invalid {
             message: format!(
-                "{} has no read action yet, so this route cannot decide who may govern \
-                 it; it arrives with that asset kind's feature (SKIL-1)",
+                "{} is not an asset a proposal carries; a policy lapse is POST /v1/lapses",
                 other.as_str()
             ),
         }),
@@ -2487,6 +2786,12 @@ enum Proposed {
     /// table over — and a bundle is several of these rather than one
     /// member, because the channel names documents.
     ContextPack(vedaflow::ContextPackAsset),
+    /// One **file** of a skill bundle, as it will be addressed (SKIL-1,
+    /// ADR-0051 decision 2). The same two senses again — and unlike the
+    /// other three, a caller never names one of these: it names the skill,
+    /// and every file of it becomes a member, because a client loads a
+    /// bundle whole.
+    Skill(vedaflow::SkillAsset),
 }
 
 impl Proposed {
@@ -2500,6 +2805,10 @@ impl Proposed {
             // priced at the runbook, which is `max_sensitivity`'s existing
             // rule doing exactly what it was written for.
             Proposed::ContextPack(asset) => asset.sensitivity,
+            // Per skill rather than per file (ADR-0051 decision 11), so
+            // every member of one bundle reports the same tier and the
+            // maximum over the set is that tier.
+            Proposed::Skill(asset) => asset.sensitivity,
         }
     }
 }
@@ -2683,6 +2992,91 @@ async fn held_documents(
     Ok(held)
 }
 
+/// What `scope`'s published skill channel names, by skill path.
+async fn published_skills_at(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+) -> Result<std::collections::HashMap<SkillPath, vedaflow::hash::ObjectHash>> {
+    Ok(
+        vedaflow::read_skill_members(tx, tenant_id, &[scope_id], Channel::Published)
+            .await?
+            .into_iter()
+            .next()
+            .map(|state| state.members)
+            .unwrap_or_default(),
+    )
+}
+
+/// The skills `scope` **holds**, refusing the whole request if any is not
+/// held there — [`held_documents`]'s two senses, one table over, with one
+/// difference that is the whole of ADR-0051 decision 17.
+///
+/// A caller names the **bundle** and every file of it becomes a member,
+/// because a client loads a skill whole: proposing three files of four
+/// would put a version nobody can run in front of a reviewer, and approving
+/// it would publish one.
+async fn held_skills(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+    names: &[SkillName],
+) -> Result<Vec<vedaflow::SkillAsset>> {
+    let mut requested: Vec<SkillName> = names.to_vec();
+    requested.sort();
+    requested.dedup();
+    let published = published_skills_at(tx, tenant_id, scope_id).await?;
+
+    let mut held = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
+    for name in &requested {
+        // Sense one: the draft lives here, and its files are the bundle.
+        let drafts = synveda_store::skills::files_of(&mut *tx, tenant_id, scope_id, name).await?;
+        let addresses: Vec<vedaflow::hash::ObjectHash> = if drafts.is_empty() {
+            // Sense two: no draft here, but this scope published it — which
+            // is how a second hop starts from where the first one landed.
+            let names_here: Vec<vedaflow::hash::ObjectHash> = published
+                .iter()
+                .filter(|(path, _)| &path.skill == name)
+                .map(|(_, address)| *address)
+                .collect();
+            if names_here.is_empty() {
+                missing.push(name.to_string());
+                continue;
+            }
+            names_here
+        } else {
+            drafts
+                .into_iter()
+                .map(|file| vedaflow::hash::ObjectHash::from_bytes(file.object_hash))
+                .collect()
+        };
+        for address in addresses {
+            let object = vedaflow::read_object(&mut *tx, tenant_id, address)
+                .await?
+                .ok_or_else(|| Error::Internal {
+                    message: format!(
+                        "skill {name} names object {} which the append-only store does \
+                         not hold",
+                        address.to_hex()
+                    ),
+                })?;
+            held.push(vedaflow::SkillAsset::from_bytes(&object.content)?);
+        }
+    }
+    if !missing.is_empty() {
+        return Err(Error::Invalid {
+            message: format!(
+                "scope {scope_id} neither drafts nor publishes: {} — name the scope \
+                 that does with source_scope_id, which must be {scope_id} or a scope \
+                 beneath it (FLOW-5 climbs the hierarchy, it does not cross it)",
+                missing.join(", ")
+            ),
+        });
+    }
+    Ok(held)
+}
+
 /// The current versions of `ids` that `scope` **holds**, refusing the
 /// whole request if any is not held there.
 ///
@@ -2787,20 +3181,22 @@ fn validate_open(body: &OpenBody) -> Result<()> {
     // the maximum by a rule nobody wrote.
     let named = usize::from(!body.record_ids.is_empty())
         + usize::from(!body.prompt_names.is_empty())
-        + usize::from(!body.document_paths.is_empty());
+        + usize::from(!body.document_paths.is_empty())
+        + usize::from(!body.skill_names.is_empty());
     match named {
         0 => {
             return invalid(
                 "name at least one member: record_ids for memories, prompt_names for \
-                 prompts, document_paths for context pack documents"
+                 prompts, document_paths for context pack documents, skill_names for \
+                 skills"
                     .to_owned(),
             );
         }
         1 => {}
         _ => {
             return invalid(
-                "a proposal carries one asset kind: name record_ids, prompt_names or \
-                 document_paths, never more than one — the approval matrix resolves \
+                "a proposal carries one asset kind: name record_ids, prompt_names, \
+                 document_paths or skill_names, never more than one — the approval matrix resolves \
                  from the asset, and regulated-strict prices a prompt at two distinct \
                  people where it prices a team's memory at one"
                     .to_owned(),
@@ -2811,20 +3207,21 @@ fn validate_open(body: &OpenBody) -> Result<()> {
         .record_ids
         .len()
         .max(body.prompt_names.len())
-        .max(body.document_paths.len());
+        .max(body.document_paths.len())
+        .max(body.skill_names.len());
     if members > vedaflow::MAX_PROPOSAL_MEMBERS {
         return invalid(format!(
             "a proposal may name at most {} members",
             vedaflow::MAX_PROPOSAL_MEMBERS
         ));
     }
-    if !body.prompt_names.is_empty()
+    if (!body.prompt_names.is_empty() || !body.skill_names.is_empty())
         && body.effect.unwrap_or(ProposalEffect::Published) != ProposalEffect::Published
     {
         return invalid(
-            "a prompt proposal publishes: reclassification is a records effect \
-             (ADR-0038 decision 9), and a prompt's tier is a field of the version \
-             under review"
+            "an authored-asset proposal publishes: reclassification is a records effect \
+             (ADR-0038 decision 9), and an authored asset's tier is a field of the \
+             version under review"
                 .to_owned(),
         );
     }

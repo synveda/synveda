@@ -329,6 +329,38 @@ pub enum AuditAction {
     /// `context.injected` with its object address like every other entry,
     /// which is why there is no third action here.
     ContextPackQuarantined,
+    /// A skill's draft was written at a scope (SKIL-1, ADR-0051
+    /// decision 16).
+    ///
+    /// The authoring act, not a publication, exactly as
+    /// [`AuditAction::ContextPackAuthored`] is. The payload carries the
+    /// name, the tier, the per-file object addresses and how many files
+    /// were removed from the bundle — never `SKILL.md` text and never file
+    /// content.
+    ///
+    /// There is deliberately no `skill.installed`: an install is a
+    /// client-side act on bytes an audited [`AuditAction::SkillResolved`]
+    /// already served, and an event the server cannot verify is a fact an
+    /// auditor would have to reconcile (ADR-0019 decision 4).
+    SkillAuthored,
+    /// A skill bundle was served to a consumer (ADR-0051 decision 16).
+    ///
+    /// A data-plane read, so it chains its own event for
+    /// [`AuditAction::PromptResolved`]'s reason — and here the question is
+    /// sharper than for a prompt, because what was served is about to
+    /// become **files on somebody's machine**. This event and the addresses
+    /// in it are the whole of a materialised bundle's provenance: nothing
+    /// inside the installed directory can carry a watermark without
+    /// breaking the one criterion the feature exists to meet (ADR-0051
+    /// force 2).
+    SkillResolved,
+    /// A skill bundle carrying a live credential was stopped at authoring
+    /// (ADR-0051 decision 14).
+    ///
+    /// [`AuditAction::ContextPackQuarantined`]'s twin, and the guarantee is
+    /// stronger here for having a different destination: a pack's secret
+    /// would have reached vector space, and a skill's reaches a laptop.
+    SkillQuarantined,
     /// A grant reached the end of its window. Emitted by the sweep under
     /// `actor_kind=system`, and **bookkeeping only** — the grant stopped
     /// deciding anything at `expires_at` whether or not this was ever
@@ -349,7 +381,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 44] = [
+    pub const ALL: [AuditAction; 47] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -394,6 +426,9 @@ impl AuditAction {
         AuditAction::PromptResolved,
         AuditAction::ContextPackAuthored,
         AuditAction::ContextPackQuarantined,
+        AuditAction::SkillAuthored,
+        AuditAction::SkillResolved,
+        AuditAction::SkillQuarantined,
     ];
 
     /// The stable dotted name stored in the `action` column. Renaming an
@@ -445,6 +480,9 @@ impl AuditAction {
             AuditAction::PromptResolved => "prompt.resolved",
             AuditAction::ContextPackAuthored => "context_pack.authored",
             AuditAction::ContextPackQuarantined => "context_pack.quarantined",
+            AuditAction::SkillAuthored => "skill.authored",
+            AuditAction::SkillResolved => "skill.resolved",
+            AuditAction::SkillQuarantined => "skill.quarantined",
         }
     }
 }

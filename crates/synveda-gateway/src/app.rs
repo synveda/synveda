@@ -37,6 +37,7 @@ use crate::proposals;
 use crate::quarantine;
 use crate::recall;
 use crate::roles;
+use crate::skills;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
 
@@ -221,6 +222,15 @@ pub fn router(state: AppState) -> Router {
         // omission: a prompt is fetched by name, and a pack's content
         // arrives through `/v1/inject` as ranked pinned material.
         .route("/v1/context-packs", get(packs::list).post(packs::author))
+        // The skills registry (SKIL-1, ADR-0051). Shaped like the prompt
+        // registry and not the pack one, because a skill IS fetched by name
+        // — and unlike a prompt, what comes back is the whole bundle from
+        // one commit, since a client loads a skill whole. There is no
+        // materialisation route: writing files into a client's own skills
+        // directory is `synveda skill install`, because the harness is a
+        // guest (seed §2.6, ADR-0051 decision 12).
+        .route("/v1/skills", get(skills::list).post(skills::author))
+        .route("/v1/skills/{name}", get(skills::resolve))
         // The lapse plane (AUTHZ-4, ADR-0037). `POST /v1/lapses` opens a
         // *proposal* and grants nothing; the grant is that proposal's
         // effect, beside `/publish` and taking the same shape.

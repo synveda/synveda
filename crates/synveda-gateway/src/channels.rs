@@ -240,6 +240,22 @@ pub(crate) struct PublishBody {
     /// single record's.
     #[serde(default)]
     document_paths: Vec<synveda_types::DocumentPath>,
+    /// The skills to admit, by name (SKIL-1, ADR-0051 decision 1). Must be
+    /// drafts of **this** scope, for the reason the other three lists must
+    /// be its material: the direct route stays same-scope.
+    ///
+    /// A skill names the *bundle*, never a file: a client loads a skill
+    /// whole, so publishing three of its four files would publish a version
+    /// nobody can run. Every file the draft holds becomes a member.
+    ///
+    /// Exactly one of the four lists may be present. Under **every** pack a
+    /// skill publication refuses here on its own arithmetic — the invariant
+    /// floor asks for a security reviewer and, since ADR-0051 decision 18,
+    /// two distinct approvers — and names the proposal route. That
+    /// uniformity is the difference from the other three: a skill is
+    /// executable, and no pack makes shipping code a one-signature act.
+    #[serde(default)]
+    skill_names: Vec<synveda_types::SkillName>,
     /// Why — an auditor and a reviewer both read this. Required: a
     /// publication with nothing to say is one nobody can review after
     /// the fact.
@@ -347,6 +363,8 @@ async fn publish_inner(
     // (ADR-0032 decision 8).
     let asset_kind = if !body.prompt_names.is_empty() {
         AssetKind::Prompt
+    } else if !body.skill_names.is_empty() {
+        AssetKind::Skill
     } else if body.document_paths.is_empty() {
         AssetKind::Memory
     } else {
@@ -428,6 +446,34 @@ async fn publish_inner(
             ),
         });
     }
+    // A skill names the bundle, so this reads every file of it: publishing
+    // a subset would publish a version no client can run (ADR-0051
+    // decision 17's rule, one surface over).
+    let mut skill_names = body.skill_names.clone();
+    skill_names.sort();
+    skill_names.dedup();
+    let mut skill_drafts: Vec<(
+        synveda_store::skills::StoredSkill,
+        Vec<synveda_store::skills::StoredFile>,
+    )> = Vec::with_capacity(skill_names.len());
+    for name in &skill_names {
+        let Some(skill) = synveda_store::skills::skill(&mut *tx, tenant_id, scope_id, name).await?
+        else {
+            return Err(Error::Invalid {
+                message: format!(
+                    "not a skill draft of this scope: {name} — promote from a child scope \
+                     with POST /v1/proposals and a source_scope_id (FLOW-5)"
+                ),
+            });
+        };
+        let files = synveda_store::skills::files_of(&mut *tx, tenant_id, scope_id, name).await?;
+        if files.is_empty() {
+            return Err(Error::Invalid {
+                message: format!("skill {name} holds no files; there is nothing to publish"),
+            });
+        }
+        skill_drafts.push((skill, files));
+    }
 
     // The approval matrix, resolved at this scope from this pack, this
     // asset kind, the *maximum* sensitivity over the set (a set is
@@ -439,6 +485,8 @@ async fn publish_inner(
         .iter()
         .map(|version| version.state.sensitivity)
         .chain(drafts.iter().map(|draft| draft.sensitivity))
+        .chain(documents.iter().map(|document| document.sensitivity))
+        .chain(skill_drafts.iter().map(|(skill, _)| skill.sensitivity))
         .max()
         .unwrap_or(Sensitivity::Public);
     // The second decision (ADR-0031 decision 12): may this principal *read*
@@ -462,6 +510,7 @@ async fn publish_inner(
         .iter()
         .map(|version| version.id.as_uuid().to_string())
         .chain(drafts.iter().map(|draft| draft.template.name.to_string()))
+        .chain(skill_drafts.iter().map(|(skill, _)| skill.name.to_string()))
         .collect();
     let requirement = approvals::resolve(
         state,
@@ -531,6 +580,21 @@ async fn publish_inner(
             record_id: None,
             object_hash: address.to_hex(),
         });
+    }
+    // A skill file's object is already stored, for the pack document's
+    // reason — and every file of the bundle goes, because a client loads it
+    // whole.
+    for (skill, files) in &skill_drafts {
+        for file in files {
+            let address = vedaflow::hash::ObjectHash::from_bytes(file.object_hash);
+            let path = synveda_types::SkillPath::new(skill.name.clone(), file.path.clone());
+            members.push((path.to_string(), address));
+            published.push(PublishedRecord {
+                member: path.to_string(),
+                record_id: None,
+                object_hash: address.to_hex(),
+            });
+        }
     }
 
     let channel = ChannelRef::new(asset_kind, Channel::Published);
@@ -659,11 +723,12 @@ fn channel_of(asset: Option<AssetKind>, channel: Option<Channel>) -> ChannelRef 
 /// *whose-material* question, which the privacy floor answers identically at
 /// every tier (ADR-0038 decision 10).
 ///
-/// PRMT-1 (ADR-0049 decision 4) supplies the second answer here, which is
-/// what makes a rewind or a pin of `prompt/published` decidable and
-/// discharges ADR-0036 decision 3's deferral. `skill` and `context-pack`
-/// are still refused by name, and `policy` has no channel at all — a lapse
-/// writes a row (ADR-0037 decision 16).
+/// PRMT-1 (ADR-0049 decision 4) supplied the second answer here, PRMT-2 the
+/// third and SKIL-1 (ADR-0051 decision 10) the fourth — which **closes**
+/// ADR-0036 decision 3's deferral: every asset kind that has a channel now
+/// has a read action, and the refusal below survives only for `policy`,
+/// which has no channel at all (a lapse writes a row, ADR-0037
+/// decision 16).
 fn decide_asset_read(
     state: &AppState,
     input: &crate::authz::DecisionInput,
@@ -679,10 +744,13 @@ fn decide_asset_read(
         AssetKind::ContextPack => {
             authz::decide_context_pack_read(state, input, resource, Sensitivity::WORKING)
         }
+        AssetKind::Skill => authz::decide_skill_read(state, input, resource, Sensitivity::WORKING),
+        // `policy` is the one that remains, and it has no channel at all —
+        // a lapse writes a row (ADR-0037 decision 16). ADR-0036 decision 3's
+        // refusal-by-name now reaches no asset kind that has one.
         other => Err(Error::Invalid {
             message: format!(
-                "{} channels have no read action yet, so this route cannot decide who \
-                 may govern them; it arrives with that asset kind's feature (SKIL-1)",
+                "{} has no channel, so there is nothing here to rewind or pin",
                 other.as_str()
             ),
         }),
@@ -1212,20 +1280,22 @@ fn validate(body: &PublishBody) -> Result<()> {
     // (ADR-0049 decision 6): the approval matrix resolves from it.
     let named = usize::from(!body.record_ids.is_empty())
         + usize::from(!body.prompt_names.is_empty())
-        + usize::from(!body.document_paths.is_empty());
+        + usize::from(!body.document_paths.is_empty())
+        + usize::from(!body.skill_names.is_empty());
     match named {
         0 => {
             return invalid(
                 "name at least one member: record_ids for memories, prompt_names for \
-                 prompts, document_paths for context pack documents"
+                 prompts, document_paths for context pack documents, skill_names for \
+                 skills"
                     .to_owned(),
             );
         }
         1 => {}
         _ => {
             return invalid(
-                "a publication carries one asset kind: name record_ids, prompt_names or \
-                 document_paths, never more than one"
+                "a publication carries one asset kind: name record_ids, prompt_names, \
+                 document_paths or skill_names, never more than one"
                     .to_owned(),
             );
         }
@@ -1235,6 +1305,7 @@ fn validate(body: &PublishBody) -> Result<()> {
         .len()
         .max(body.prompt_names.len())
         .max(body.document_paths.len())
+        .max(body.skill_names.len())
         > MAX_PUBLISH_RECORDS
     {
         return invalid(format!(

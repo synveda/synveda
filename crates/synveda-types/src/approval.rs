@@ -184,8 +184,19 @@ pub struct ApprovalMatrix {
 ///
 /// - anything `restricted` needs the `compliance` role and two distinct
 ///   approvers (tech plan §2.4; seed §4.2's own definition of the tier);
-/// - any `skill` needs `security-reviewer`, because a skill is
-///   executable and reviewed like the code it is.
+/// - any `skill` needs `security-reviewer` **and two distinct approvers**,
+///   because a skill is executable and reviewed like the code it is.
+///
+/// The second rule's approver count is ADR-0051 decision 18, and it is a
+/// correction rather than an addition. FLOW-3 wrote it at one, so under
+/// `standard` and `open-collaboration` — whose own skill rule also asks for
+/// one — the resolved requirement was a single signature, and one person
+/// holding both `steward` and `security-reviewer` published executable code
+/// alone. Separating those two roles has no other content than that they
+/// are two people. It is on the floor rather than in a pack because the
+/// floor is where "not a pack's to opt out of" lives, and it was taken in
+/// SKIL-1 because that is the feature that made the cell reachable at all —
+/// nothing could open a `skill` proposal before it.
 static FLOOR: LazyLock<Vec<ApprovalRule>> = LazyLock::new(|| {
     vec![
         ApprovalRule {
@@ -200,7 +211,7 @@ static FLOOR: LazyLock<Vec<ApprovalRule>> = LazyLock::new(|| {
             min_sensitivity: Sensitivity::Public,
             scope_kinds: None,
             roles: vec![RoleRequirement::new(Role::SecurityReviewer, 1)],
-            distinct_approvers: 1,
+            distinct_approvers: 2,
         },
     ]
 });

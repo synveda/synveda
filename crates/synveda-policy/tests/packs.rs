@@ -261,36 +261,45 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         );
     }
 
-    // And the context-pack plane beside it (PRMT-2, ADR-0050 decision 7),
-    // asserted for the same reason a third transcription is a third place
-    // to drift. What this does *not* say is that the two admit the same
-    // material: `ContextPackRead` admits pack chunks and `MemoryRead` never
-    // does (decision 8) — the claim here is only that the same people are
+    // And the context-pack and skill planes beside it (PRMT-2, ADR-0050
+    // decision 7; SKIL-1, ADR-0051 decision 10), asserted for the same
+    // reason a third transcription is a third place to drift. What this does
+    // *not* say is that they admit the same material: `ContextPackRead`
+    // admits pack chunks, `MemoryRead` never does (ADR-0050 decision 8), and
+    // `SkillRead` admits neither — a skill composes into no block at all
+    // (ADR-0051 decision 9). The claim here is only that the same people are
     // trusted at the same scopes.
-    for target in ALL_SCOPES {
-        let decision = memory(
-            &pdp,
-            &fx,
-            &alice,
-            Action::ContextPackRead,
-            Some("alice-user"),
-            target,
-            &assignments,
-        );
-        assert_eq!(
-            decision.allowed,
-            expected_for_alice.contains(&target),
-            "{pack}: alice reading context packs at {target} decided {} — the \
-             pack plane must mirror this pack's memory plane, tier for tier",
-            decision.allowed,
-        );
+    for (action, what) in [
+        (Action::ContextPackRead, "context packs"),
+        (Action::SkillRead, "skills"),
+    ] {
+        for target in ALL_SCOPES {
+            let decision = memory(
+                &pdp,
+                &fx,
+                &alice,
+                action,
+                Some("alice-user"),
+                target,
+                &assignments,
+            );
+            assert_eq!(
+                decision.allowed,
+                expected_for_alice.contains(&target),
+                "{pack}: alice reading {what} at {target} decided {} — the \
+                 {what} plane must mirror this pack's memory plane, tier for tier",
+                decision.allowed,
+            );
+        }
     }
 
     // Authoring mirrors the write floor, which is pack-uniform: own home
-    // and nowhere else without a content role. Both authored asset types.
+    // and nowhere else without a content role. All three authored asset
+    // types.
     for (action, what) in [
         (Action::PromptWrite, "prompts"),
         (Action::ContextPackWrite, "context packs"),
+        (Action::SkillWrite, "skills"),
     ] {
         let authorable: Vec<&str> = ALL_SCOPES
             .into_iter()
@@ -427,7 +436,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 fn golden_regulated_strict() {
     assert_pack_golden(
         REGULATED_STRICT,
-        13,
+        14,
         &["org", "eng", "team-a", "alice-user"],
     );
 }
@@ -438,7 +447,7 @@ fn golden_regulated_strict() {
 fn golden_standard() {
     assert_pack_golden(
         STANDARD,
-        13,
+        14,
         &["org", "eng", "team-a", "team-b", "alice-user"],
     );
 }
@@ -450,7 +459,7 @@ fn golden_standard() {
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        13,
+        14,
         &[
             "org",
             "eng",
