@@ -113,6 +113,20 @@ struct InjectResponse {
     /// rather than counted by a caller (ADR-0041 decision 14).
     index_entries: usize,
     index_tokens: u32,
+    /// The skills the block named: what this identity may install, in the
+    /// order the block named them (SKIL-4, ADR-0054 decisions 5 and 8).
+    ///
+    /// The citation rides here rather than in the block's text for
+    /// ADR-0031 decision 11's reason about commits — a response can carry
+    /// what a token budget should not — and it is what lets an adapter
+    /// materialise exactly what the block advertised without asking twice.
+    skills: Vec<SkillView>,
+    /// What the skills section spent, and how many available skills it
+    /// could not name. The second number is the one worth watching: an
+    /// omission nobody reports is indistinguishable from a fleet with
+    /// fewer capabilities.
+    skill_tokens: u32,
+    skills_omitted: usize,
     /// Estimated tokens of `text`; never exceeds `budget_tokens`.
     tokens: u32,
     /// The effective budget the block was composed under.
@@ -208,6 +222,7 @@ pub(crate) async fn create(
         scopes.permitted = tracing::field::Empty,
         block.entries = tracing::field::Empty,
         block.tokens = tracing::field::Empty,
+        block.skills = tracing::field::Empty,
         degraded = tracing::field::Empty,
     ),
     err(Display)
@@ -441,6 +456,21 @@ async fn handle(
             "skipped_over_budget": block.skipped_over_budget,
             "index_entries": block.index_entries,
             "index_tokens": block.index_tokens,
+            // What the block told this agent it could install (SKIL-4,
+            // ADR-0054 decision 8). Names, scopes, commits, addresses and
+            // tiers — never the description, on the discipline every plane
+            // has followed since AUD-1. "Was that agent told the payments
+            // runbook skill existed" is the distribution half of the
+            // question ADR-0041 decision 9 made the entry tier answer.
+            "skills": block.skills.iter().map(|skill| json!({
+                "name": skill.name.as_str(),
+                "scope_id": skill.scope_id,
+                "commit": skill.commit,
+                "object_hash": skill.object_hash,
+                "sensitivity": skill.sensitivity.as_str(),
+            })).collect::<Vec<_>>(),
+            "skill_tokens": block.skill_tokens,
+            "skills_omitted": block.skills_omitted,
             "degraded": degraded,
             // The aggregated per-scope MemoryRead decisions (ADR-0019
             // decision 4): one event, every chain scope's verdict. The
@@ -471,6 +501,7 @@ async fn handle(
     let span = tracing::Span::current();
     span.record("block.entries", block.entries.len());
     span.record("block.tokens", block.tokens);
+    span.record("block.skills", block.skills.len());
     span.record("degraded", degraded.join(","));
     Ok(render(block, as_of, degraded))
 }
@@ -495,6 +526,19 @@ fn render(
         tiers: block.entries.iter().map(|entry| entry.tier).collect(),
         index_entries: block.index_entries,
         index_tokens: block.index_tokens,
+        skills: block
+            .skills
+            .iter()
+            .map(|skill| SkillView {
+                name: skill.name.to_string(),
+                scope_id: skill.scope_id,
+                commit: skill.commit.clone(),
+                object_hash: skill.object_hash.clone(),
+                sensitivity: skill.sensitivity,
+            })
+            .collect(),
+        skill_tokens: block.skill_tokens,
+        skills_omitted: block.skills_omitted,
         channels: block
             .channels
             .iter()
@@ -512,6 +556,26 @@ fn render(
         as_of,
         degraded,
     }
+}
+
+/// One skill the block advertised (SKIL-4, ADR-0054 decision 8).
+///
+/// The description is deliberately absent: it is in the block's text,
+/// which is where the caller's model reads it, and repeating it here
+/// would put the same disclosure in two places with one budget.
+#[derive(Serialize)]
+struct SkillView {
+    /// The name — the install argument and the installed directory name.
+    name: String,
+    /// The scope whose published channel serves it: the nearest one on
+    /// this caller's chain that publishes the name and permits the read.
+    scope_id: ScopeId,
+    /// The commit that scope served — what an install pins to and what a
+    /// rewind will refuse by name (ADR-0051 decision 13).
+    commit: String,
+    /// The `SKILL.md` object address the advertised description came from.
+    object_hash: String,
+    sensitivity: synveda_types::Sensitivity,
 }
 
 /// One channel citation on a block.

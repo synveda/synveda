@@ -1626,9 +1626,58 @@ async fn members_at(
 
 #[derive(Deserialize)]
 pub(crate) struct ListParams {
-    /// The scope whose registry to list. Required: a listing is a scope's
-    /// own shelf.
+    /// The scope whose registry to list. **Absent walks the caller's own
+    /// placement chain and answers "which skills may I install"** — the
+    /// same convention the resolve route uses one line up, and the plural
+    /// of it (SKIL-4, ADR-0054 decision 1).
+    #[serde(default)]
+    scope_id: Option<ScopeId>,
+}
+
+/// One skill this identity may install (SKIL-4, ADR-0054 decisions 1–4).
+#[derive(Serialize)]
+struct AvailableEntry {
+    name: String,
+    description: String,
+    sensitivity: Sensitivity,
+    /// The scope that serves it: the nearest one on the caller's chain
+    /// that publishes this name **and** permits the read.
     scope_id: ScopeId,
+    scope_path: String,
+    /// Distance up the chain, 0 at home — why this copy won.
+    position: usize,
+    /// The commit that scope's skill channel serves.
+    commit: String,
+    /// Whether a FLOW-7 pin chose that commit rather than the ref. A
+    /// consumer that installs a pinned scope's skill is installing a
+    /// deliberately older version, and a listing that did not say so would
+    /// invite "this is the latest reviewed bundle" (ADR-0036 decision 10).
+    pinned: bool,
+    /// How many files the bundle holds — what an install will write.
+    files: usize,
+    /// The scopes further up the chain that publish this same name and were
+    /// shadowed by this one (ADR-0051 decision 6: a client's skills
+    /// namespace is flat, so only one of them can exist on disk).
+    ///
+    /// Present because the gradient is otherwise invisible: a reader whose
+    /// team overrode the org's `code-review` sees one skill and no sign
+    /// that a decision was taken. A scope that publishes the name but
+    /// denies this caller the read is **not** here — it never entered the
+    /// walk, so it shadowed nothing (decision 3).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    shadows: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct AvailableResponse {
+    /// Which question this payload answers. Two shapes ride one route, and
+    /// a response that left a reader to infer which from the request they
+    /// sent is one an SDK gets wrong once (ADR-0054 decision 1).
+    view: &'static str,
+    /// The chain the walk ran over, nearest first — the audit-visible
+    /// reason team B's skills are absent: team B is not in this list.
+    chain: Vec<String>,
+    skills: Vec<AvailableEntry>,
 }
 
 /// The automated score as a *listing* renders it — the one place in the
@@ -1675,7 +1724,8 @@ struct ListResponse {
     skills: Vec<ListEntry>,
 }
 
-/// `GET /v1/skills?scope_id=…` — the registry at one scope.
+/// `GET /v1/skills` — the registry at one scope, or the caller's own
+/// available set when no scope is named (SKIL-4, ADR-0054 decision 1).
 ///
 /// Skills the caller may not read at their tier are omitted rather than
 /// refused, for the reason a pack listing omits documents: a listing that
@@ -1685,8 +1735,150 @@ pub(crate) async fn list(
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> Response {
-    let result = list_inner(&state, params.scope_id).await;
-    respond(&state, "list", result).await
+    match params.scope_id {
+        Some(scope_id) => {
+            let result = list_inner(&state, scope_id).await;
+            respond(&state, "list", result).await
+        }
+        None => {
+            let result = available_inner(&state).await;
+            respond(&state, "available", result).await
+        }
+    }
+}
+
+/// `GET /v1/skills` with no scope — what this identity may install.
+///
+/// **The same walk the resolve route takes for one name, taken for the
+/// whole shelf** (ADR-0054 decision 2). It runs the composition plan the
+/// inject path runs — one `SkillRead` decision per chain scope per tier,
+/// under each scope's own effective pack — reads what each planned scope's
+/// `skill/published` channel serves, and applies the gradient **after** the
+/// tier check, so a nearer scope that publishes a name it will not serve
+/// this caller does not hide the readable copy behind it.
+///
+/// Three clauses of the acceptance criterion, three mechanisms: the org's
+/// skills arrive because the org is on this chain; the caller's team's
+/// arrive because it is; another team's are absent because that team is on
+/// no chain this caller has, which is the same reason another tenant's
+/// records are absent, one level down.
+async fn available_inner(state: &AppState) -> Result<Json<AvailableResponse>> {
+    let tenant_id = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let input = authz::gather_at_home(state, &mut tx).await?;
+    let chain: Vec<HierarchyNode> = input.chain.to_vec();
+    let scope_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
+    let published =
+        vedaflow::read_skill_members(&mut tx, tenant_id, &scope_ids, Channel::Published).await?;
+
+    let mut entries: Vec<AvailableEntry> = Vec::new();
+    let mut shadowed: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut decided = 0_usize;
+    for (position, node) in chain.iter().enumerate() {
+        let Some(state_at) = published.iter().find(|state| state.scope_id == node.id) else {
+            continue;
+        };
+        // The shelf, by name: every skill this scope's channel serves.
+        let mut names: Vec<SkillName> = state_at
+            .members
+            .keys()
+            .filter(|path| path.file.is_manifest())
+            .map(|path| path.skill.clone())
+            .collect();
+        names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        names.dedup();
+        for name in names {
+            let members = state_at.bundle(&name);
+            if members.is_empty() {
+                continue;
+            }
+            let Some((sensitivity, files, _authorized)) =
+                admit(state, &mut tx, tenant_id, &input, position, node, &members).await?
+            else {
+                // Denied at this scope's tier: skipped as though the scope
+                // published nothing, so it shadows nothing either
+                // (decision 3).
+                continue;
+            };
+            decided += 1;
+            // The gradient, applied on what survived the decision.
+            if let Some(existing) = entries.iter().find(|entry| entry.name == name.as_str()) {
+                shadowed
+                    .entry(existing.name.clone())
+                    .or_default()
+                    .push(node.path.clone());
+                continue;
+            }
+            let manifest = files
+                .iter()
+                .find(|(path, _, _)| path.is_manifest())
+                .ok_or_else(|| Error::Internal {
+                    message: format!(
+                        "the bundle {} serves at {} has no {}, which publication cannot produce",
+                        name,
+                        node.path,
+                        synveda_types::SKILL_MANIFEST
+                    ),
+                })?;
+            let frontmatter = Frontmatter::parse(&manifest.2)?;
+            entries.push(AvailableEntry {
+                name: name.to_string(),
+                description: frontmatter.description,
+                sensitivity,
+                scope_id: node.id,
+                scope_path: node.path.clone(),
+                position,
+                commit: state_at.commit.to_hex(),
+                pinned: state_at.pinned,
+                files: files.len(),
+                shadows: Vec::new(),
+            });
+        }
+    }
+    for entry in &mut entries {
+        if let Some(shadows) = shadowed.remove(&entry.name) {
+            entry.shadows = shadows;
+        }
+    }
+
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::AuthzDecision,
+        input.identity.as_ref().map_or_else(
+            || "scope none".to_owned(),
+            |identity| Resource::Scope(identity.scope_id).to_string(),
+        ),
+        Outcome::Allow,
+        json!({
+            "op": "skills.available",
+            "asset": synveda_types::AssetKind::Skill.as_str(),
+            // The chain is the answer to "why these and not those", and it
+            // is the half of the acceptance criterion no per-skill record
+            // carries: a scope absent from this list published nothing to
+            // this caller because it was never asked.
+            "chain": chain.iter().map(|node| node.path.as_str()).collect::<Vec<_>>(),
+            // Names, scopes and commits — never a description.
+            "skills": entries.iter().map(|entry| json!({
+                "name": entry.name,
+                "scope_id": entry.scope_id,
+                "commit": entry.commit,
+                "sensitivity": entry.sensitivity.as_str(),
+            })).collect::<Vec<_>>(),
+            // How many (scope, skill) pairs the walk admitted before the
+            // gradient collapsed them, so a shadowed shelf is visible as a
+            // number rather than only as an absence.
+            "admitted": decided,
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+
+    Ok(Json(AvailableResponse {
+        view: "available",
+        chain: chain.iter().map(|node| node.path.clone()).collect(),
+        skills: entries,
+    }))
 }
 
 async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResponse>> {
