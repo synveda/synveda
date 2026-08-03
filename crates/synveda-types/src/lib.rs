@@ -29,6 +29,7 @@ mod retention;
 mod role;
 mod sensitivity;
 mod skill;
+mod skillquality;
 mod skillscan;
 mod tenant;
 
@@ -83,6 +84,10 @@ pub use skill::{
     MAX_SKILL_DESCRIPTION_CHARS, MAX_SKILL_FILE_CHARS, MAX_SKILL_FILES, MAX_SKILL_NAME_CHARS,
     MAX_SKILL_PATH_CHARS, MAX_SKILL_PATH_SEGMENT_CHARS, MAX_SKILL_PATH_SEGMENTS, SKILL_MANIFEST,
     SkillBundle, SkillChannel, SkillFile, SkillFilePath, SkillName, SkillPath,
+};
+pub use skillquality::{
+    Checklist, ChecklistItem, ChecklistVerdict, MAX_CHECKLIST_NOTE_CHARS, QualityShortfall,
+    SkillQualityConfig,
 };
 pub use skillscan::{ScanSeverity, SkillScanConfig};
 pub use tenant::{Tenant, TenantStatus};
