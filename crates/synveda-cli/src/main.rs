@@ -691,6 +691,48 @@ enum ProposalCommand {
     Publish {
         /// The proposal UUID.
         id: ProposalId,
+        /// Publish a skill bundle the quality gate would refuse, saying
+        /// why (SKIL-3, ADR-0053 decision 8).
+        ///
+        /// Takes `SkillQualityOverride` at the target scope —
+        /// deliberately a *different* authority from the one that
+        /// publishes, so the person who decided a bundle was good enough
+        /// is not automatically the person who records that it was not.
+        /// Under the product packs that means a steward or an org-admin.
+        ///
+        /// The reason is what an auditor will read in a year to find out
+        /// why the product shipped something it had itself marked down,
+        /// so write it for them. It never waves the *security* scan
+        /// through: that has no override at any tier.
+        #[arg(long, value_name = "REASON")]
+        override_quality: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Record the reviewer's quality checklist for a skill proposal
+    /// (SKIL-3): the half of a skill's score no machine can supply.
+    ///
+    /// Its own act rather than part of approving, because a reviewer may
+    /// legitimately work through the checklist without yet deciding to
+    /// ship — indeed under `regulated-strict` that is the point, since the
+    /// pack requires one to exist *before* anybody publishes.
+    ///
+    /// The answers are bound to the bundle's bytes, not to this proposal:
+    /// if the author edits a file afterwards, the answers are not found
+    /// and the checklist has to be redone. That is deliberate — a review
+    /// of bytes nobody has since changed is the only kind worth recording.
+    Checklist {
+        /// The proposal UUID.
+        id: ProposalId,
+        /// An answer, repeatable: `--item tested=yes`. Items are
+        /// `instructions-correct`, `scope-appropriate`, `not-duplicate`,
+        /// `dependencies-available` and `tested`; verdicts are `yes`,
+        /// `no` and `n/a`.
+        #[arg(long = "item", value_name = "ITEM=VERDICT", required = true)]
+        items: Vec<String>,
+        /// Anything you want the record to say.
+        #[arg(long)]
+        note: Option<String>,
         #[arg(long)]
         profile: Option<String>,
     },
@@ -1533,9 +1575,17 @@ async fn run(cli: Cli) -> Result<(), String> {
             ProposalCommand::Withdraw { id, profile } => {
                 proposal::withdraw(&profile_name(profile), id).await
             }
-            ProposalCommand::Publish { id, profile } => {
-                proposal::publish(&profile_name(profile), id).await
-            }
+            ProposalCommand::Publish {
+                id,
+                override_quality,
+                profile,
+            } => proposal::publish(&profile_name(profile), id, override_quality).await,
+            ProposalCommand::Checklist {
+                id,
+                items,
+                note,
+                profile,
+            } => proposal::checklist(&profile_name(profile), id, &items, note).await,
             ProposalCommand::Classify { id, profile } => {
                 proposal::classify(&profile_name(profile), id).await
             }
