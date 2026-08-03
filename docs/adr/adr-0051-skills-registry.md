@@ -373,7 +373,7 @@ Decisions, specifically:
    renders diffs of what reviewers approve, and a base64 blob is a diff
    nobody reads. UTF-8 text is refused-loudly-or-accepted, which is the
    property review depends on.
-10. **Leaving the floor's skill rule at one distinct approver** (decision 17)
+10. **Leaving the floor's skill rule at one distinct approver** (decision 18)
     — the floor's job is to guarantee the role, and how many people sign is a
     pack's business; `standard` exists to be cheaper. Rejected on the narrow
     ground that this is the feature which makes the cell reachable at all:
@@ -397,6 +397,46 @@ Decisions, specifically:
     rules actually have to hold. Revisit if the spec grows a real schema
     document with versioning.
 
+## What the acceptance work turned up
+
+Three things, recorded because they are behaviour rather than notes.
+
+**Option 4's reversal trigger fired on its first run, and it was right to.**
+`tests/skill_corpus.rs` was written as that trigger's standing instrument and
+pointed at 37 bundles installed under `~/.codex/skills` and
+`~/.claude/plugins`. It refused five of them, for four distinct reasons:
+three keys the open spec does not define but real clients do (`tools`,
+`argument-hint`, `disable-model-invocation`), and one `description` folded
+across five indented lines inside a double-quoted scalar — a shape the
+subset had no reading for at all. All four were widened deliberately, with
+the bundles named, which is exactly the discipline the trigger asks for; the
+keys are kept in `Frontmatter::extra` rather than dropped, so a review can
+render what a client will act on, and the general-YAML alternative is still
+refused. The instrument stays, `#[ignore]`d, because the next widening should
+be forced by a bundle rather than guessed at.
+
+**A redaction can break spec compliance, so the bundle is validated twice.**
+Decision 14 inherits MEM-2's ladder, and `redact` scrubs and continues — but
+a finding inside `SKILL.md`'s frontmatter would be replaced by a placeholder,
+and a scrubbed `description:` or `name:` is a bundle no client will load.
+Authoring therefore re-runs `SkillBundle::validate` over the *scrubbed* files
+whenever anything was scrubbed, and refuses there rather than storing a
+bundle that passed a check on bytes it is not going to keep. The pack path
+has no equivalent because a pack document has no grammar to break.
+
+**A beat that reports a reason has to report the right one, and a demo may
+not hang.** The demo's live-run layer wrapped each client in `timeout`, which
+is not on macOS — so its first run said "could not run non-interactively
+(usually unauthenticated)" when the real cause was a missing binary, and then
+`codex exec` ran unbounded and sat for ten minutes waiting on stdin. Both are
+fixed with a POSIX bound and a closed stdin, and the beat now prints the
+client's own words. What those words say is worth keeping: Claude Code
+answers "Not logged in", because the scratch `HOME` that keeps this demo out
+of a developer's real skills directories is also where a client's
+credentials are not. That is the deferral's actual shape — not "we did not
+try", but "the isolation that makes the install checkable is the isolation
+that makes the model unreachable".
+
 ## Consequences
 
 - **Positive**: the approval matrix's `skill` cells resolve for the first
@@ -417,7 +457,7 @@ Decisions, specifically:
   being wrong about YAML — which is the cost of option 4 and is recorded as
   its trigger. SMB tenants on `standard` now need two people to publish a
   skill where a moment ago they needed one, which is a real cost paid
-  deliberately (decision 17). And **every served resolve appends to the
+  deliberately (decision 18). And **every served resolve appends to the
   tenant's audit chain**, inherited from ADR-0049's consequences with the
   same recorded upgrade (AUD-1 option 2's buffered appender) — a skill is
   installed rather than fetched per turn, so the rate is lower than a

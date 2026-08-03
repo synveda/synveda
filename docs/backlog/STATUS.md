@@ -2887,7 +2887,82 @@ _Phase demo goal: Entra/Okta live, spec-compliant governed skills into Claude Co
 - [ ] [TEN-4: Per-tenant encryption keys](TEN-4.md)
 - [ ] [TEN-5: Tenant lifecycle](TEN-5.md)
 - [ ] [TEN-6: Cross-tenant isolation test harness](TEN-6.md)
-- [ ] [SKIL-1: agentskills.io-compliant model](SKIL-1.md)
+- [x] [SKIL-1: agentskills.io-compliant model](SKIL-1.md) — done 2026-08-03, ADR-0051, migration 0031, AC tests: crates/synveda-gateway/tests/skills.rs (**the review half from the consumer's side and the install half by arithmetic**: a curator's direct publish refused under `regulated-strict` *and again under* `standard`, which is decision 18 — the invariant floor had required the security-reviewer role without ever requiring a second signature, so under the SMB pack one person shipped executable code alone; then the AC, an edit reaching a client only after a steward and a security reviewer, two distinct people, have signed; every served file's content address **recomputed by the client's own arithmetic** (`SkillAsset::address`) against the number the commit named, and the bundle proved to be exactly the reviewed files; a published skill composing into *nothing* — no block entry, no watermark, no recall hit — which is ADR-0049 option 4's third reason restored where PRMT-2 inverted it; the spec's own rules refused at authoring, the case-fold collision among them; the gradient walk, which for skills is a filesystem fact because the name is the installed directory name; the pin a rewind refuses naming both commits; the bundle a dropped file cannot ship past its own approval; a credential stopped before anything is stored; and the chain, swept for file content), crates/synveda-policy/tests/{packs,roles,approvals,service_scope}.rs (SkillRead/SkillWrite in the role×action golden at pack `@14`, the skill plane asserted to mirror each pack's own memory plane tier for tier, the confinement carve-out widened and now run over all three authored asset types, and the approval golden re-recorded for decision 18 — exactly 30 lines, two packs × three tiers × five scope kinds, with `regulated-strict` and every `restricted` cell untouched), crates/synveda-store/tests/rls.rs (`a_skill_cannot_be_forged_moved_renamed_or_raised_and_its_files_delete_only_as_drafts` — including the boundary that makes the one DELETE grant in the three registries safe: the draft file goes, the objects stay, and `skills` itself has no DELETE at all), crates/synveda-types/tests/skill_corpus.rs (`--ignored`: the frontmatter subset against a real corpus — 37 installed bundles under ~/.codex/skills and ~/.claude/plugins, 37/37 after the widenings its first run forced), crates/synveda-types + crates/synveda-vedaflow + crates/synveda-cli (28 unit tests on the spec's name grammar, the filesystem-safe path rules, the strict YAML subset construct by construct, the object address and the client table), demo: demos/skil-1-skills.sh (the whole arc from a terminal, the two clients' trees `diff -r`-identical in a scratch HOME, and `chain valid (42 events)`)
+
+_SKIL-1 notes (ADR-0051): a skill is the third authored asset and the
+first whose **format belongs to somebody else**. A memory, a prompt and a
+pack document are canonical-JSON envelopes whose only reader is this
+product; a skill's bytes are read by clients we do not ship, against the
+agentskills.io standard, and the criterion is a third party's loader
+accepting them. That inversion costs the watermark every read surface has
+carried since ADR-0031 decision 12 — there is nowhere inside a materialised
+directory to put a commit hash a foreign loader is guaranteed to ignore — so
+the receipt lives in the CLI's own config directory and "installs
+unmodified" becomes a hash the *client* recomputes from what it wrote.
+
+Three decisions carry the rest. The frontmatter is a **strict subset** of
+YAML rather than YAML (decision 4), because the reviewed meaning and the
+loaded meaning must be the same meaning and two parsers disagreeing is how
+that stops being true silently — safe in a way a permissive parser is not,
+since the bytes ship verbatim and a construct the subset refuses is one
+nobody can author. Bundled paths are validated against **filesystems**
+rather than taste (decision 7): no `..`, no absolute form, no reserved
+device stem, ASCII only because macOS stores NFD, and no two paths equal
+under case folding — the last being the one that turns two governed objects
+into one file with the loser silently overwritten. And a skill's content
+**never becomes a record** (decision 9), which restores ADR-0049 option 4's
+third reason where PRMT-2 inverted it: the client's own progressive
+disclosure is the loader, so ranking a SKILL.md body into a block would
+spend the budget doing that job twice and worse. The three authored assets
+now sit at three distinct points — a prompt composes into nothing, a pack is
+ranked, a skill is installed.
+
+The finding is one layer below PRMT-2's. The invariant floor required
+`security-reviewer` on every skill at `distinct_approvers: 1`;
+`regulated-strict` raised it to two, and `standard` and `open-collaboration`
+asked for a steward at one, so the resolved requirement was **a single
+signature** and one person holding both roles published executable code
+alone. Separating those two roles has no other content than that they are
+two people. Corrected on the **floor** (decision 18), where "not a pack's to
+opt out of" lives, before any tenant had published a skill: the golden diff
+is exactly 30 lines — two packs × three tiers × five scope kinds — with
+`regulated-strict` and every `restricted` cell untouched, which is what
+makes it a correction rather than a policy change.
+
+Two smaller decisions worth finding again. `skill_files` carries the **only
+DELETE grant** in the three authored-asset registries (decision 17): a pack
+is edited a document at a time because a pack is read piecemeal, and a skill
+is authored whole because a client loads it whole, so a file the author
+dropped must not survive to be published back onto a laptop. It cannot reach
+a published version — a tree names object addresses and objects are
+append-only — and `publish_skills` turns a dropped-then-approved file into a
+`Conflict` rather than a silent omission. And the materialisation is the
+**CLI's**, not the gateway's (decision 12): a client moving its skills
+folder should cost a CLI release, not a server one, which is seed §2.6's
+"the harness is a guest" applied to the one asset that leaves.
+
+ADR-0036 decision 3's refusal-by-name is **closed**. Every asset kind that
+has a channel now has a read action, so the `other =>` arm in
+`channels::decide_asset_read` and `proposals::decide_asset_read` survives
+only for `policy`, which has no channel at all (a lapse writes a row,
+ADR-0037 decision 16). AUTHZ-3's last marker row closes with it:
+security-reviewer's skill approval is live, one feature earlier than that
+note predicted, because SKIL-2 adds a *report* to a review that has to be
+openable first.
+
+Deferrals, all recorded in ADR-0051: skills do **not** appear in inject's
+index tier — advertisement is SKIL-4's own acceptance criterion, and
+shipping half of it here would make that AC untestable (ADR-0041 decision 4
+named this feature; ADR-0049 option 10 already answered it). A bundle
+carries no binary and no executable bit, both with triggers. A skill cannot
+be `restricted`, for prompts' and packs' reason. And the **behavioural half
+of "runs"** — whether a model reaches for the skill it was served — is
+deferred with a recorded trigger, because it measures a model's disposition
+rather than the product's bytes; the demo attempts it live against `claude`
+and `codex` and reports what they say, which on a scratch `HOME` is "not
+logged in": the isolation that makes the install checkable is the isolation
+that makes the model unreachable._
+
 - [ ] [SKIL-2: Security scanning gate](SKIL-2.md)
 - [ ] [SKIL-3: Skill quality scoring](SKIL-3.md)
 - [ ] [SKIL-4: Scope-targeted distribution](SKIL-4.md)

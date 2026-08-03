@@ -187,7 +187,7 @@ pub struct ApprovalMatrix {
 /// - any `skill` needs `security-reviewer` **and two distinct approvers**,
 ///   because a skill is executable and reviewed like the code it is.
 ///
-/// The second rule's approver count is ADR-0051 decision 17, and it is a
+/// The second rule's approver count is ADR-0051 decision 18, and it is a
 /// correction rather than an addition. FLOW-3 wrote it at one, so under
 /// `standard` and `open-collaboration` — whose own skill rule also asks for
 /// one — the resolved requirement was a single signature, and one person

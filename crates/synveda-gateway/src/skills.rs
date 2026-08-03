@@ -780,10 +780,13 @@ async fn at_scope(
         if members.is_empty() {
             return Err(not_found(name));
         }
+        // The draft row's tier is the authoritative one here — the objects
+        // carry it too, and they agree by construction.
+        let (_, files) = read_bundle(tx, tenant_id, &node, &members).await?;
         return Ok(Resolved {
             node,
             sensitivity: draft.sensitivity,
-            files: read_bundle(tx, tenant_id, &members).await?,
+            files,
             commit: None,
             origin: Origin::Draft,
             position: 0,
@@ -879,21 +882,7 @@ async fn admit(
         crate::authz::Authorized,
     )>,
 > {
-    let files = read_bundle(tx, tenant_id, members).await?;
-    let assets = read_assets(tx, tenant_id, node, members).await?;
-    let mut tiers: Vec<Sensitivity> = assets.iter().map(|asset| asset.sensitivity).collect();
-    tiers.sort_unstable();
-    tiers.dedup();
-    let sensitivity = match tiers.as_slice() {
-        [one] => *one,
-        // The clamp rather than the refusal: a bundle whose files carry two
-        // tiers cannot be authored through this product, so one here means a
-        // hand-built commit — and the safe reading of "two tiers" is the
-        // higher one.
-        many => *many.iter().max().ok_or_else(|| Error::Internal {
-            message: format!("{} names a skill with no files", node.path),
-        })?,
-    };
+    let (sensitivity, files) = read_bundle(tx, tenant_id, node, members).await?;
     let authorized = authz::decide_skill_read_from(
         state,
         input,
@@ -908,15 +897,29 @@ async fn admit(
     }
 }
 
-/// Every member's parsed asset.
-async fn read_assets(
+/// A bundle's tier and its files in path order, with their addresses and
+/// bytes — one object read each, because a resolve is what `install` calls
+/// and the envelope carries the tier beside the content.
+///
+/// The tier is the *bundle's* (ADR-0051 decision 11), and taking the maximum
+/// is a clamp rather than a refusal: authoring writes one tier onto every
+/// file, so a commit whose files disagree was not built by this product, and
+/// the safe reading of two tiers is the higher one.
+async fn read_bundle(
     tx: &mut sqlx::PgConnection,
     tenant_id: synveda_types::TenantId,
     node: &HierarchyNode,
     members: &HashMap<SkillFilePath, vedaflow::hash::ObjectHash>,
-) -> Result<Vec<SkillAsset>> {
-    let mut assets = Vec::with_capacity(members.len());
-    for address in members.values() {
+) -> Result<(
+    Sensitivity,
+    Vec<(SkillFilePath, vedaflow::hash::ObjectHash, String)>,
+)> {
+    // Sorted, because an install writes in this order and a byte-identity
+    // check compares two listings.
+    let ordered: BTreeMap<&SkillFilePath, &vedaflow::hash::ObjectHash> = members.iter().collect();
+    let mut files = Vec::with_capacity(ordered.len());
+    let mut sensitivity: Option<Sensitivity> = None;
+    for (path, address) in ordered {
         let object = vedaflow::read_object(&mut *tx, tenant_id, *address)
             .await?
             .ok_or_else(|| Error::Internal {
@@ -926,34 +929,17 @@ async fn read_assets(
                     address.to_hex()
                 ),
             })?;
-        assets.push(SkillAsset::from_bytes(&object.content)?);
-    }
-    Ok(assets)
-}
-
-/// A bundle's files in path order, with their addresses and bytes.
-async fn read_bundle(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: synveda_types::TenantId,
-    members: &HashMap<SkillFilePath, vedaflow::hash::ObjectHash>,
-) -> Result<Vec<(SkillFilePath, vedaflow::hash::ObjectHash, String)>> {
-    // Sorted, because an install writes in this order and a byte-identity
-    // check compares two listings.
-    let ordered: BTreeMap<&SkillFilePath, &vedaflow::hash::ObjectHash> = members.iter().collect();
-    let mut out = Vec::with_capacity(ordered.len());
-    for (path, address) in ordered {
-        let object = vedaflow::read_object(&mut *tx, tenant_id, *address)
-            .await?
-            .ok_or_else(|| Error::Internal {
-                message: format!(
-                    "a skill names object {} which the append-only store does not hold",
-                    address.to_hex()
-                ),
-            })?;
         let asset = SkillAsset::from_bytes(&object.content)?;
-        out.push((path.clone(), *address, asset.file.content));
+        sensitivity = Some(match sensitivity {
+            Some(held) => held.max(asset.sensitivity),
+            None => asset.sensitivity,
+        });
+        files.push((path.clone(), *address, asset.file.content));
     }
-    Ok(out)
+    let sensitivity = sensitivity.ok_or_else(|| Error::Internal {
+        message: format!("{} names a skill with no files", node.path),
+    })?;
+    Ok((sensitivity, files))
 }
 
 /// One `SkillRead` decision at `scope_id`, as an option rather than an

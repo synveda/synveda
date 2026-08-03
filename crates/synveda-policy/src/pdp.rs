@@ -78,7 +78,7 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// **invariant floor's** skill rule, which had required the
 /// `security-reviewer` role at one distinct approver, so under `standard`
 /// and `open-collaboration` one person holding both roles published
-/// executable code alone (ADR-0051 decisions 10 and 17).
+/// executable code alone (ADR-0051 decisions 10 and 18).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
     (REGULATED_STRICT, 14),
     (STANDARD, 14),
