@@ -298,18 +298,27 @@ pub async fn propose(
     Ok(())
 }
 
-/// The document's first Markdown heading, if it has one — the title an
-/// author almost always meant.
+/// The document's title: its first **level-one** Markdown heading.
 ///
-/// The same rule the server's chunker applies (`synveda_types::chunk`):
-/// one to six `#` **followed by whitespace**. Two implementations of "is
-/// this a heading" that disagreed would put a `#hashtag` in the index
-/// tier's title slot, which is the one place a wrong answer is expensive.
+/// Level one specifically, and that is the whole point rather than a
+/// detail. A title names the *document*; `##` and below name sections, and
+/// the index tier already renders the section beside the title
+/// (`pack/document#n § heading — title`, ADR-0050 decision 10). Taking the
+/// first heading of any level would label a document of a dozen `#
+/// Section k` blocks with "Section 0" and render `§ Section 7 — Section 0`,
+/// which reads as a contradiction and tells a reader nothing. A document
+/// with no `#` gets its file name, which at least identifies it.
+///
+/// The heading rule itself is the server's chunker's
+/// (`synveda_types::chunk`): `#` **followed by whitespace**. Two
+/// implementations of "is this a heading" that disagreed would put a
+/// `#hashtag` in the title slot, which is the one place a wrong answer is
+/// expensive.
 fn first_heading(content: &str) -> Option<String> {
     content.lines().find_map(|line| {
         let text = line.trim_start();
         let hashes = text.chars().take_while(|c| *c == '#').count();
-        if hashes == 0 || hashes > 6 {
+        if hashes != 1 {
             return None;
         }
         let rest = &text[hashes..];
@@ -349,17 +358,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_title_defaults_to_the_first_heading() {
+    fn a_title_is_the_documents_own_heading_and_never_a_sections() {
         assert_eq!(
             first_heading("# Refunds runbook\n\nEscalate.\n").as_deref(),
             Some("Refunds runbook")
         );
         assert_eq!(
-            first_heading("Preamble\n\n## Refunds\n").as_deref(),
-            Some("Refunds")
+            first_heading("Preamble\n\n# Refunds runbook\n").as_deref(),
+            Some("Refunds runbook")
         );
+        // A section is not a title. Without this, a glossary of `# Section
+        // k` blocks would render `§ Section 7 — Section 0` in the index
+        // tier, which reads as a contradiction.
+        assert_eq!(first_heading("## Refunds\n\n### Escalation\n"), None);
         assert_eq!(first_heading("no headings here\n"), None);
-        // Not a heading: no space after the hashes, and seven of them.
-        assert_eq!(first_heading("#hashtag\n####### deep\n"), None);
+        // Not a heading: no space after the hash.
+        assert_eq!(first_heading("#hashtag\n"), None);
     }
 }

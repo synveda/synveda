@@ -76,7 +76,12 @@ export SYNVEDA_DEV_JWT_SECRET
 SYNVEDA_EMBEDDER=deterministic
 export SYNVEDA_EMBEDDER
 
-cargo build -p synveda-gateway -p synveda-cli
+# Built against the committed `.sqlx` cache, not against DATABASE_URL: the
+# scratch database above is empty until `db migrate` runs twenty lines
+# down, so an online compile would check every query against a schema that
+# does not exist yet. This is the same build CI does (SQLX_OFFLINE=true),
+# which makes it the one that has to keep working anyway.
+SQLX_OFFLINE=true cargo build -p synveda-gateway -p synveda-cli
 CLI=./target/debug/synveda
 
 WORK="${TMPDIR:-/tmp}/prmt2-$$"
@@ -225,14 +230,21 @@ eng_id=$(api "$admin_token" POST /v1/hierarchy/nodes \
 team_id=$(api "$admin_token" POST /v1/hierarchy/nodes \
   "{\"parent_id\":\"$eng_id\",\"kind\":\"team\",\"slug\":\"platform\",\"name\":\"Platform\"}" |
   field id)
-for who in alice cora bea; do
+# The three people who act on the bundle are anchored at the DEPARTMENT,
+# because that is where this demo authors and publishes: AUTH-3's token
+# confinement forbids every write outside a service identity's own anchor
+# subtree, so a team-anchored author could not write at the department
+# above it however it were bound — which is the confinement doing its job,
+# not a gap.
+for who in alice cora sam; do
   $CLI service register --tenant "$tenant_id" \
-    --subject "$who" --scope "$team_id" >/dev/null
+    --subject "$who" --scope "$eng_id" >/dev/null
 done
-# The steward is anchored at the department, one level above the team — his
-# authority at eng is a role binding and nothing else (the PRMT-1 fixture's
-# reason, unchanged).
-$CLI service register --tenant "$tenant_id" --subject sam --scope "$eng_id" >/dev/null
+# The consumer is anchored at the team, one level BELOW the publishing
+# scope — which is the whole point of her: the department's conventions
+# reach her by composing up her own chain, through the read carve-out the
+# base layer gained for ContextPackRead.
+$CLI service register --tenant "$tenant_id" --subject bea --scope "$team_id" >/dev/null
 for who in alice cora sam; do
   case $who in
   alice) role=contributor ;;
@@ -370,11 +382,15 @@ echo "  pinned material so canonical content could not silently vanish;"
 echo "  it was decided about records costing tens of tokens. Nothing here"
 echo "  vanishes, because nothing about it is silent."
 echo "================================================================"
+# A level-one title and level-two sections — ordinary Markdown, and the
+# shape the index line is built for: `# Payments glossary` names the
+# document and each `## Section k` names the piece, so an entry reads
+# `payments/glossary.md#14 § Section 7 — Payments glossary`.
 node -e '
   const fs = require("fs");
-  let out = "";
+  let out = "# Payments glossary\n\n";
   for (let s = 0; s < 12; s++) {
-    out += `# Section ${s}\n\n`;
+    out += `## Section ${s}\n\n`;
     for (let l = 0; l < 20; l++) {
       out += `Term ${s}.${l} is settled under the schedule for section ${s} and reviewed every quarter. `;
     }
@@ -448,8 +464,11 @@ echo "  compose is decided by the commit the pack channel SERVES."
 echo "================================================================"
 history=$(api "$cora_token" \
   "GET" "/v1/channels/$eng_id/history?asset=context-pack&channel=published")
-head_commit=$(printf '%s' "$history" | field states 0 commit)
-prior_commit=$(printf '%s' "$history" | field states 2 commit)
+head_commit=$(printf '%s' "$history" | field head)
+# Newest first, and every entry but the head is a legal rewind target. The
+# glossary publication is entry 0 and the v2 runbook is entry 1, so the
+# state that served v1 is entry 2.
+prior_commit=$(printf '%s' "$history" | field history 2 commit)
 api "$cora_token" POST "/v1/channels/$eng_id/rollback" \
   "{\"asset\":\"context-pack\",\"channel\":\"published\",
     \"from_commit\":\"$head_commit\",\"to_commit\":\"$prior_commit\",
