@@ -634,3 +634,118 @@ fn redaction_config_rides_the_effective_pack() {
         assert_eq!(effective.redaction, expected, "{pack}");
     }
 }
+
+/// The skill-quality bar rides the effective pack, and its fail-safe is
+/// the **opposite** of every other config on this table (SKIL-3, ADR-0053
+/// decision 9).
+///
+/// This test exists for that inversion and not for the plumbing. Every
+/// config since ADR-0025 falls back to the strict reading, because the
+/// thing it governs is one a pack that said nothing must still not be able
+/// to weaken. Quality is not one of those: there is no floor, a pack that
+/// has said nothing has not asked for a gate, and a product that started
+/// refusing publications on a rubric nobody opted into would break every
+/// tenant on an upgrade.
+#[test]
+fn the_quality_bar_rides_the_pack_and_an_unconfigured_pack_gates_nothing() {
+    use synveda_types::SkillQualityConfig;
+
+    let pdp = Pdp::new().expect("build pdp");
+    let fx = fixture();
+    let team = fx.node("team-a").id;
+    let scopes = fx.chain("team-a");
+
+    let effective_under = |assignments: &[synveda_types::PolicyAssignment]| {
+        pdp.effective(
+            fx.tenant,
+            Resource::Scope(team),
+            &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
+                scopes: &scopes,
+                assignments,
+                ..Default::default()
+            },
+        )
+    };
+
+    // The product packs: a real bar and a mandatory checklist for a bank,
+    // a bar and no mandatory checklist for an SMB, nothing for an open
+    // tenant.
+    for (pack, expected) in [
+        (REGULATED_STRICT, SkillQualityConfig::STRICT),
+        (STANDARD, SkillQualityConfig::MODERATE),
+        (OPEN_COLLABORATION, SkillQualityConfig::OPEN),
+    ] {
+        let assignments = [fx.assignment("org", pack)];
+        let effective = effective_under(&assignments);
+        assert_eq!(effective.name, pack);
+        assert_eq!(effective.quality, expected, "{pack}");
+    }
+
+    // Nothing assigned anywhere: the embedded default is the strict pack,
+    // so the bar is the strict one — a tenant that has configured nothing
+    // still gets the product's opinion, because it is running the
+    // product's pack.
+    let unassigned = pdp.effective(
+        fx.tenant,
+        Resource::Scope(team),
+        &AuthzContext {
+            sensitivity: Some(Sensitivity::Internal),
+            scopes: &scopes,
+            ..Default::default()
+        },
+    );
+    assert_eq!(unassigned.name, REGULATED_STRICT);
+    assert_eq!(unassigned.quality, SkillQualityConfig::STRICT);
+
+    // **The inversion.** A stored pack that configures nothing gates
+    // nothing — where the same pack gets `RedactionConfig::STRICT` on the
+    // line above, because a secret leaking is a harm and a low-scoring
+    // skill is an opinion.
+    const MEMBER_READ: &str = r#"permit (principal, action == Synveda::Action::"MemoryRead", resource)
+           when { principal in resource };"#;
+    let demanding = SkillQualityConfig {
+        min_score: 90,
+        require_checklist: true,
+    };
+    pdp.install_source(
+        fx.tenant,
+        "acme-demanding",
+        1,
+        MEMBER_READ,
+        PackConfig {
+            quality: Some(demanding),
+            ..Default::default()
+        },
+    )
+    .expect("install configured pack");
+    pdp.install_source(
+        fx.tenant,
+        "acme-quiet",
+        1,
+        MEMBER_READ,
+        PackConfig::default(),
+    )
+    .expect("install unconfigured pack");
+
+    for (pack, expected) in [
+        ("acme-demanding", demanding),
+        ("acme-quiet", SkillQualityConfig::OPEN),
+    ] {
+        let assignments = [fx.assignment("org", pack)];
+        let effective = effective_under(&assignments);
+        assert_eq!(effective.name, pack);
+        assert_eq!(effective.quality, expected, "{pack}");
+    }
+
+    // And the security scan is untouched by any of it: a pack may be
+    // cheaper about quality and is never cheaper about the critical band
+    // (ADR-0052 decision 3). Asserted here because these two configs sit
+    // side by side on the same struct and are the two a reader is most
+    // likely to conflate.
+    let assignments = [fx.assignment("org", "acme-quiet")];
+    assert_eq!(
+        effective_under(&assignments).scan,
+        synveda_types::SkillScanConfig::FLOOR
+    );
+}

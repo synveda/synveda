@@ -694,6 +694,60 @@ enum ProposalCommand {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Record a decision to publish a skill the quality gate refuses
+    /// (SKIL-3, ADR-0053 decision 8).
+    ///
+    /// Takes `SkillQualityOverride` at the target scope — deliberately a
+    /// *different* authority from the one that publishes. Under the
+    /// product packs a `curator` publishes skills and a `steward` grants
+    /// this, so the person who decided a bundle was good enough is never
+    /// the person who records that it was not.
+    ///
+    /// It is its own act rather than a flag on `publish` for a plainer
+    /// reason too: a steward holds no content read, so a steward cannot
+    /// publish a skill at all. Grant the override, then let whoever
+    /// ordinarily publishes publish.
+    ///
+    /// The reason is what an auditor will read in a year to find out why
+    /// the product shipped something it had itself marked down, so write
+    /// it for them. It never waves the *security* scan through: that has
+    /// no override at any tier and must not acquire one.
+    OverrideQuality {
+        /// The proposal UUID.
+        id: ProposalId,
+        /// Why. Mandatory.
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Record the reviewer's quality checklist for a skill proposal
+    /// (SKIL-3): the half of a skill's score no machine can supply.
+    ///
+    /// Its own act rather than part of approving, because a reviewer may
+    /// legitimately work through the checklist without yet deciding to
+    /// ship — indeed under `regulated-strict` that is the point, since the
+    /// pack requires one to exist *before* anybody publishes.
+    ///
+    /// The answers are bound to the bundle's bytes, not to this proposal:
+    /// if the author edits a file afterwards, the answers are not found
+    /// and the checklist has to be redone. That is deliberate — a review
+    /// of bytes nobody has since changed is the only kind worth recording.
+    Checklist {
+        /// The proposal UUID.
+        id: ProposalId,
+        /// An answer, repeatable: `--item tested=yes`. Items are
+        /// `instructions-correct`, `scope-appropriate`, `not-duplicate`,
+        /// `dependencies-available` and `tested`; verdicts are `yes`,
+        /// `no` and `n/a`.
+        #[arg(long = "item", value_name = "ITEM=VERDICT", required = true)]
+        items: Vec<String>,
+        /// Anything you want the record to say.
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+    },
     /// Run an approved *classification* proposal's effect: move its
     /// records to the tier the review approved (AUTHZ-5).
     Classify {
@@ -1536,6 +1590,17 @@ async fn run(cli: Cli) -> Result<(), String> {
             ProposalCommand::Publish { id, profile } => {
                 proposal::publish(&profile_name(profile), id).await
             }
+            ProposalCommand::OverrideQuality {
+                id,
+                reason,
+                profile,
+            } => proposal::override_quality(&profile_name(profile), id, &reason).await,
+            ProposalCommand::Checklist {
+                id,
+                items,
+                note,
+                profile,
+            } => proposal::checklist(&profile_name(profile), id, &items, note).await,
             ProposalCommand::Classify { id, profile } => {
                 proposal::classify(&profile_name(profile), id).await
             }

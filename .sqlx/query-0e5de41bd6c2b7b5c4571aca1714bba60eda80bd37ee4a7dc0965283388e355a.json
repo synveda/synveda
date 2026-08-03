@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into skill_reviews\n                 (tenant_id, scope_id, skill_name, bundle_digest, answers, rubric_version,\n                  reviewed_by)\n             values ($1, $2, 'code-review', $3, $4, 1, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0e5de41bd6c2b7b5c4571aca1714bba60eda80bd37ee4a7dc0965283388e355a"
+}

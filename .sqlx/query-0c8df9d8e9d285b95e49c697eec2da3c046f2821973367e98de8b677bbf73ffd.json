@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select scope_id, name, description, sensitivity, created_at, created_by,\n                  updated_at, updated_by\n           from skills\n           where tenant_id = $1 and scope_id = $2\n           order by name",
+  "query": "select scope_id, name, description, sensitivity, quality_score, rubric_version,\n                  created_at, created_by, updated_at, updated_by\n           from skills\n           where tenant_id = $1 and scope_id = $2 and name = $3",
   "describe": {
     "columns": [
       {
@@ -25,21 +25,31 @@
       },
       {
         "ordinal": 4,
+        "name": "quality_score",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 5,
+        "name": "rubric_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 5,
+        "ordinal": 7,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "updated_by",
         "type_info": "Uuid"
       }
@@ -47,7 +57,8 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid"
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
@@ -55,11 +66,13 @@
       false,
       false,
       false,
+      true,
+      true,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "2c8280518c2167fd85f39027fa4ee080f366ea8785b72ee94506c765829a5994"
+  "hash": "0c8df9d8e9d285b95e49c697eec2da3c046f2821973367e98de8b677bbf73ffd"
 }

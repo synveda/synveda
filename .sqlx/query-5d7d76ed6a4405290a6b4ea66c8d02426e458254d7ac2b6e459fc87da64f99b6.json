@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "insert into skills\n               (tenant_id, scope_id, name, description, sensitivity, created_by, updated_by)\n           values ($1, $2, $3, $4, $5, $6, $6)\n           on conflict (tenant_id, scope_id, name) do update\n               set description = excluded.description,\n                   sensitivity = excluded.sensitivity,\n                   updated_at  = now(),\n                   updated_by  = excluded.updated_by\n           returning scope_id, name, description, sensitivity, created_at, created_by,\n                     updated_at, updated_by",
+  "query": "select scope_id, name, description, sensitivity, quality_score, rubric_version,\n                  created_at, created_by, updated_at, updated_by\n           from skills\n           where tenant_id = $1 and scope_id = $2\n           order by name",
   "describe": {
     "columns": [
       {
@@ -25,21 +25,31 @@
       },
       {
         "ordinal": 4,
+        "name": "quality_score",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 5,
+        "name": "rubric_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 5,
+        "ordinal": 7,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "updated_by",
         "type_info": "Uuid"
       }
@@ -47,10 +57,6 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        "Text",
-        "Text",
-        "Text",
         "Uuid"
       ]
     },
@@ -59,11 +65,13 @@
       false,
       false,
       false,
+      true,
+      true,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "840e9676ff726d161fd729bc88579a8882f2f5128be6da13638d218830506646"
+  "hash": "5d7d76ed6a4405290a6b4ea66c8d02426e458254d7ac2b6e459fc87da64f99b6"
 }

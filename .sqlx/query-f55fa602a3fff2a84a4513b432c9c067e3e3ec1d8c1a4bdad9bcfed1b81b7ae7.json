@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select scope_id, name, description, sensitivity, created_at, created_by,\n                  updated_at, updated_by\n           from skills\n           where tenant_id = $1 and scope_id = $2 and name = $3",
+  "query": "select scope_id, skill_name, bundle_digest, reason, score, rubric_version,\n                  granted_at, granted_by\n           from skill_quality_overrides\n           where tenant_id = $1 and scope_id = $2 and skill_name = $3 and bundle_digest = $4",
   "describe": {
     "columns": [
       {
@@ -10,37 +10,37 @@
       },
       {
         "ordinal": 1,
-        "name": "name",
+        "name": "skill_name",
         "type_info": "Text"
       },
       {
         "ordinal": 2,
-        "name": "description",
-        "type_info": "Text"
+        "name": "bundle_digest",
+        "type_info": "Bytea"
       },
       {
         "ordinal": 3,
-        "name": "sensitivity",
+        "name": "reason",
         "type_info": "Text"
       },
       {
         "ordinal": 4,
-        "name": "created_at",
-        "type_info": "Timestamptz"
+        "name": "score",
+        "type_info": "Int2"
       },
       {
         "ordinal": 5,
-        "name": "created_by",
-        "type_info": "Uuid"
+        "name": "rubric_version",
+        "type_info": "Int4"
       },
       {
         "ordinal": 6,
-        "name": "updated_at",
+        "name": "granted_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 7,
-        "name": "updated_by",
+        "name": "granted_by",
         "type_info": "Uuid"
       }
     ],
@@ -48,7 +48,8 @@
       "Left": [
         "Uuid",
         "Uuid",
-        "Text"
+        "Text",
+        "Bytea"
       ]
     },
     "nullable": [
@@ -62,5 +63,5 @@
       false
     ]
   },
-  "hash": "19660b301b22dce686b91f18215ab89e890067a456b4f92350c335c28fe7e020"
+  "hash": "f55fa602a3fff2a84a4513b432c9c067e3e3ec1d8c1a4bdad9bcfed1b81b7ae7"
 }

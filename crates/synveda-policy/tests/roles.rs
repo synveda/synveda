@@ -46,7 +46,7 @@ const ALL_SCOPES: [&str; 8] = [
 /// The decision columns: the action vocabulary, with `RoleAssign` split
 /// by what is being granted — the base layer decides those differently
 /// (ADR-0015 decision 5).
-const COLUMNS: [(Action, Option<Role>); 30] = [
+const COLUMNS: [(Action, Option<Role>); 31] = [
     (Action::HierarchyCreate, None),
     (Action::HierarchyRead, None),
     (Action::HierarchyUpdate, None),
@@ -59,6 +59,7 @@ const COLUMNS: [(Action, Option<Role>); 30] = [
     (Action::ContextPackWrite, None),
     (Action::SkillRead, None),
     (Action::SkillWrite, None),
+    (Action::SkillQualityOverride, None),
     (Action::QuarantineRead, None),
     (Action::QuarantineReview, None),
     (Action::PolicyRead, None),
@@ -316,6 +317,17 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             // policy, and ADR-0015 put the policy plane here.
             (Action::LapseGrant, None),
             (Action::LapseRevoke, None),
+            // Publishing a skill the rubric or a reviewer says is below
+            // the bar (SKIL-3, ADR-0053 decision 8). It sits here rather
+            // than with `curator` on purpose, and the exclusion is the
+            // whole content of the action: curator is the role that
+            // approves and publishes skills, so granting it the override
+            // would make the gate self-service — the same person deciding
+            // the bundle was good enough and recording that it was not.
+            //
+            // It grants nothing about the *security* scan, which has no
+            // override at any tier (ADR-0052 decision 3).
+            (Action::SkillQualityOverride, None),
         ],
         // Org-admin: steward plus org-admin grants; still no content.
         Role::OrgAdmin => vec![
@@ -341,6 +353,7 @@ fn allowed_in_subtree(role: Role) -> Vec<(Action, Option<Role>)> {
             (Action::ProposalReview, None),
             (Action::LapseGrant, None),
             (Action::LapseRevoke, None),
+            (Action::SkillQualityOverride, None),
         ],
         // Auditor: the read-only admin surfaces; never content, never
         // mutations (seed §5). The quarantine queue is (redacted)
@@ -439,6 +452,7 @@ fn assert_matrix(pack: &str, version: i64) {
                         | Action::ContextPackWrite
                         | Action::SkillRead
                         | Action::SkillWrite
+                        | Action::SkillQualityOverride
                         | Action::QuarantineReview
                         | Action::ServiceIdentityManage
                         | Action::ChannelRead

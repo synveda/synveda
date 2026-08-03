@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ApprovalMatrix, CompositionConfig, DedupConfig, LapseConfig, PromotionConfig, RedactionConfig,
-    RetentionConfig, ScopeId, SkillScanConfig, TenantId,
+    RetentionConfig, ScopeId, SkillQualityConfig, SkillScanConfig, TenantId,
 };
 
 /// A per-node policy pack assignment: the node (and its subtree, until a
@@ -81,4 +81,15 @@ pub struct PackConfig {
     /// asked it to, and the band that matters holds either way
     /// (ADR-0052 decision 9).
     pub scan: Option<SkillScanConfig>,
+    /// The bar a skill bundle's quality must clear to publish without an
+    /// override.
+    ///
+    /// Its fail-safe is the **opposite** of `scan`'s, and the difference
+    /// is the whole distinction between the two gates: an unconfigured
+    /// pack gates nothing here, because quality is not an invariant and
+    /// there is no floor to hold. A pack that has said nothing about
+    /// quality has not asked for a quality gate, and a product that began
+    /// refusing publications on a rubric nobody opted into would break
+    /// every tenant on an upgrade (ADR-0053 decision 9).
+    pub quality: Option<SkillQualityConfig>,
 }

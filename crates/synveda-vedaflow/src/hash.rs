@@ -37,6 +37,8 @@ const TREE_DOMAIN: &[u8] = b"synveda-vedaflow-tree-v1";
 const COMMIT_DOMAIN: &[u8] = b"synveda-vedaflow-commit-v1";
 /// Domain separator for policy-snapshot hashes.
 const POLICY_SNAPSHOT_DOMAIN: &[u8] = b"synveda-vedaflow-policy-snapshot-v1";
+/// Domain separator for skill-bundle digests (SKIL-3).
+const BUNDLE_DOMAIN: &[u8] = b"synveda-vedaflow-bundle-v1";
 
 /// Tag distinguishing a tree entry that points at an object.
 pub(crate) const TARGET_TAG_OBJECT: u8 = 0x01;
@@ -192,6 +194,47 @@ pub fn object_hash(kind: AssetKind, content: &[u8]) -> ObjectHash {
     ObjectHash::from_bytes(writer.finish())
 }
 
+/// A set of named objects addressed as one thing (SKIL-3, ADR-0053
+/// decision 4): the member count, then each member's name and object
+/// address, in bytewise name order.
+///
+/// This is a tree hash by another name, and it is separate from
+/// [`tree_hash_from`] on purpose — a `TreeHash` is a thing this product
+/// *stores*, with rows and parents and a commit above it, and a bundle
+/// digest is a key computed on the fly from members that may not be a tree
+/// yet. Sharing the type would invite one to be written where the other
+/// was meant.
+///
+/// # What it is for
+///
+/// Keying a reviewer's checklist to the bytes it was answered about. A
+/// checklist keyed by proposal id or by skill name survives an edit
+/// beneath it; keyed by this, an edited bundle is one for which no
+/// checklist is found, and no invalidation logic is needed anywhere.
+///
+/// # Why over addresses rather than content
+///
+/// ADR-0051 decision 2 put the governed context — scope, skill,
+/// sensitivity, path — inside each object's address. Hashing addresses
+/// therefore means reclassifying a bundle re-keys its checklist, which is
+/// correct: a reviewer who signed off on an `internal` skill did not sign
+/// off on a `confidential` one.
+///
+/// Order-independent by construction: members are sorted before they are
+/// absorbed, so a caller reading path-ordered draft rows and one reading
+/// proposal member order compute the same digest.
+#[must_use]
+pub fn bundle_digest(members: &[(&str, ObjectHash)]) -> [u8; 32] {
+    let mut sorted: Vec<&(&str, ObjectHash)> = members.iter().collect();
+    sorted.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()).then(a.1.cmp(&b.1)));
+    let mut writer = Writer::new(BUNDLE_DOMAIN);
+    writer.count(sorted.len() as u64);
+    for (name, object) in sorted {
+        writer.field(name.as_bytes()).fixed(object.as_bytes());
+    }
+    writer.finish()
+}
+
 /// One entry of a tree as it enters the hash: a name and what it points at.
 pub(crate) struct HashedEntry<'a> {
     pub(crate) name: &'a str,
@@ -311,6 +354,62 @@ mod tests {
             },
         ]);
         assert_ne!(ab_c, a_bc);
+    }
+
+    #[test]
+    fn a_bundle_digest_does_not_depend_on_the_order_it_was_read_in() {
+        // The property both callers rely on: the store returns draft files
+        // in path order and a proposal returns them in member order, and a
+        // checklist written from one must be found from the other.
+        let one = ObjectHash::from_bytes([1u8; 32]);
+        let two = ObjectHash::from_bytes([2u8; 32]);
+        let forwards = bundle_digest(&[("a/SKILL.md", one), ("a/scripts/run.py", two)]);
+        let backwards = bundle_digest(&[("a/scripts/run.py", two), ("a/SKILL.md", one)]);
+        assert_eq!(forwards, backwards);
+    }
+
+    #[test]
+    fn a_bundle_digest_moves_when_any_byte_a_reviewer_saw_moves() {
+        // Every one of these is an edit a checklist must not survive
+        // (ADR-0053 decision 4): different content at the same path, a
+        // renamed path, an added file, a removed file.
+        let one = ObjectHash::from_bytes([1u8; 32]);
+        let two = ObjectHash::from_bytes([2u8; 32]);
+        let base = bundle_digest(&[("a/SKILL.md", one)]);
+        assert_ne!(base, bundle_digest(&[("a/SKILL.md", two)]));
+        assert_ne!(base, bundle_digest(&[("b/SKILL.md", one)]));
+        assert_ne!(base, bundle_digest(&[("a/SKILL.md", one), ("a/x.py", two)]));
+        assert_ne!(base, bundle_digest(&[]));
+        // And it is stable for the bundle that did not move.
+        assert_eq!(base, bundle_digest(&[("a/SKILL.md", one)]));
+    }
+
+    #[test]
+    fn a_bundle_digest_is_not_a_tree_hash_of_the_same_members() {
+        // Domain separation: the two are computed from the same material
+        // and mean different things, so nothing should be able to pass one
+        // where the other is expected even by accident.
+        let target = [7u8; 32];
+        let tree = tree_hash_from(&[HashedEntry {
+            name: "x",
+            tag: TARGET_TAG_OBJECT,
+            target: &target,
+        }]);
+        let bundle = bundle_digest(&[("x", ObjectHash::from_bytes(target))]);
+        assert_ne!(tree.as_bytes(), &bundle);
+    }
+
+    #[test]
+    fn a_bundle_digest_cannot_be_confused_by_a_name_boundary() {
+        // The length-prefix property, checked here because this digest is
+        // a security-relevant key: `ab` + `c` and `a` + `bc` must not
+        // collide, or two different bundles would share a checklist.
+        let one = ObjectHash::from_bytes([1u8; 32]);
+        let two = ObjectHash::from_bytes([2u8; 32]);
+        assert_ne!(
+            bundle_digest(&[("ab", one), ("c", two)]),
+            bundle_digest(&[("a", one), ("bc", two)])
+        );
     }
 
     #[test]

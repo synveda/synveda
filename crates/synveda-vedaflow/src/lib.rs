@@ -104,7 +104,7 @@ pub use curators::{
     Approver, CURATORS_REF, CuratorCommit, CuratorFile, CuratorRule, CuratorWrite,
     MAX_CURATOR_FILE_BYTES, StoredCuratorFile, nearest_curators, read_curators, write_curators,
 };
-pub use hash::{CommitHash, ObjectHash, PolicySnapshotHash, TreeHash};
+pub use hash::{CommitHash, ObjectHash, PolicySnapshotHash, TreeHash, bundle_digest};
 pub use lapses::{LapseAsset, put_lapse, read_lapse};
 pub use objects::{MAX_OBJECT_BYTES, StoredObject, put_object, read_object, read_objects};
 pub use packs::{

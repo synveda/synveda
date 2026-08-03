@@ -20,7 +20,7 @@ use std::io::{BufRead, IsTerminal, Write};
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use synveda_types::{ProposalId, ProposalState, ProposalView, ScopeId, Sensitivity};
 
 use crate::api::{Api, Origin};
@@ -87,6 +87,10 @@ struct Detail {
     /// one four asset kinds come back in.
     #[serde(default)]
     scan: Option<ScanReport>,
+    /// The quality of the bytes this proposal would publish (SKIL-3,
+    /// ADR-0053). Present for `skill` proposals only.
+    #[serde(default)]
+    quality: Option<QualityReport>,
 }
 
 /// A bundle's security scan, as `synveda proposal review` renders it.
@@ -134,6 +138,97 @@ impl ScanReport {
             }
         }
         rank(severity) >= rank(&self.blocks_at)
+    }
+}
+
+/// A bundle's quality, as `synveda proposal review` renders it (SKIL-3,
+/// ADR-0053 decision 11).
+///
+/// **Two numbers, never one.** The rubric measures the bundle; the
+/// checklist is what a person checked. A reviewer who sees them averaged
+/// cannot tell a well-formatted bundle nobody worked through from one
+/// somebody did, which is the whole reason they are rendered apart.
+#[derive(Deserialize)]
+struct QualityReport {
+    rubric_version: u32,
+    score: u8,
+    min_score: u8,
+    requires_checklist: bool,
+    checks: Vec<QualityCheck>,
+    #[serde(default)]
+    checklist: Option<ChecklistView>,
+    #[serde(default)]
+    shortfalls: Vec<Shortfall>,
+    needs_override: bool,
+}
+
+#[derive(Deserialize)]
+struct QualityCheck {
+    check: String,
+    passed: bool,
+    weight: u8,
+    title: String,
+    #[serde(default)]
+    detail: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ChecklistView {
+    answers: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    note: Option<String>,
+    complete: bool,
+    concerns: Vec<String>,
+    reviewed_at: DateTime<Utc>,
+}
+
+/// One bar the bundle misses. `detail` is the gateway's own sentence, so
+/// the CLI never has to reconstruct the arithmetic behind a refusal.
+#[derive(Deserialize)]
+struct Shortfall {
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    score: Option<u8>,
+    #[serde(default)]
+    min_score: Option<u8>,
+    #[serde(default)]
+    items: Vec<String>,
+    #[serde(default)]
+    unanswered: Vec<String>,
+}
+
+impl Shortfall {
+    /// One line a reviewer can act on. Reconstructed here rather than sent
+    /// as prose because the gateway's `QualityShortfall` serialises its
+    /// data and not its sentence, and a CLI that printed a `kind` slug
+    /// would be making its reader look the meaning up.
+    fn describe(&self) -> String {
+        match self.kind.as_deref() {
+            Some("below-threshold") => format!(
+                "the rubric scored {} and this pack asks for {}",
+                self.score.unwrap_or(0),
+                self.min_score.unwrap_or(0),
+            ),
+            Some("checklist-missing") => {
+                "no reviewer checklist is recorded for exactly these bytes".to_owned()
+            }
+            Some("checklist-incomplete") => {
+                format!(
+                    "the checklist leaves {} unanswered",
+                    self.unanswered.join(", ")
+                )
+            }
+            Some("checklist-concerns") => {
+                format!("a reviewer answered `no` to {}", self.items.join(", "))
+            }
+            // A gateway newer than this CLI. Say so rather than print
+            // nothing: an unexplained bar is worse than an unnamed one.
+            other => format!(
+                "{} (this CLI is older than the gateway; run the publish to see why)",
+                other.unwrap_or("an unnamed bar")
+            ),
+        }
     }
 }
 
@@ -340,6 +435,145 @@ pub async fn publish(profile: &str, id: ProposalId) -> Result<(), String> {
         field("members"),
         field("added"),
     );
+    Ok(())
+}
+
+/// `synveda proposal override-quality` — record a decision to publish a
+/// skill the quality gate refuses (SKIL-3, ADR-0053 decision 8).
+///
+/// Its own verb rather than a flag on `publish`, because it is its own
+/// authority: a steward grants this and cannot publish a skill (no content
+/// read), a curator publishes and cannot grant this. Two acts, two people.
+pub async fn override_quality(profile: &str, id: ProposalId, reason: &str) -> Result<(), String> {
+    let (api, origin) = Api::connect(profile).await?;
+    announce(&api, &origin);
+    let granted = api
+        .post(
+            &format!("/v1/proposals/{id}/quality-override"),
+            Some(json!({"reason": reason})),
+        )
+        .await?;
+    let digest = granted
+        .get("bundle_digest")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    eprintln!(
+        "synveda: override recorded for {} at {}/100 — bound to bundle {}",
+        granted
+            .get("skill")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        granted.get("score").and_then(Value::as_u64).unwrap_or(0),
+        short(digest),
+    );
+    eprintln!(
+        "synveda: it stands over exactly these bytes; an edit needs a new one. \
+         Whoever ordinarily publishes can now run `synveda proposal publish {id}`"
+    );
+    Ok(())
+}
+
+/// `synveda proposal checklist` — record the reviewer's half of a skill's
+/// quality score (SKIL-3, ADR-0053 decision 6).
+///
+/// The answers are bound to the bundle's **bytes**, which is why the
+/// response echoes the digest: a reviewer who sees it change between two
+/// runs is a reviewer whose author edited something underneath them, and
+/// the previous answers no longer apply to anything.
+pub async fn checklist(
+    profile: &str,
+    id: ProposalId,
+    items: &[String],
+    note: Option<String>,
+) -> Result<(), String> {
+    let mut answers = serde_json::Map::new();
+    for item in items {
+        let (name, verdict) = item.split_once('=').ok_or_else(|| {
+            format!("--item wants ITEM=VERDICT, got {item:?} (e.g. --item tested=yes)")
+        })?;
+        let name = name.trim();
+        let verdict = verdict.trim();
+        // Spelling is checked at the gateway, where the vocabulary lives.
+        // What is checked here is the *shape*, because `--item tested` with
+        // no verdict is a typo a round trip should not be spent on.
+        if name.is_empty() || verdict.is_empty() {
+            return Err(format!(
+                "--item wants ITEM=VERDICT with both halves, got {item:?}"
+            ));
+        }
+        answers.insert(name.to_owned(), Value::String(verdict.to_owned()));
+    }
+
+    let (api, origin) = Api::connect(profile).await?;
+    announce(&api, &origin);
+    let mut body = serde_json::Map::new();
+    body.insert("answers".to_owned(), Value::Object(answers));
+    if let Some(note) = note {
+        body.insert("note".to_owned(), Value::String(note));
+    }
+    let recorded = api
+        .post(
+            &format!("/v1/proposals/{id}/checklist"),
+            Some(Value::Object(body)),
+        )
+        .await?;
+
+    let text = |name: &str| {
+        recorded
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let complete = recorded
+        .get("complete")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let concerns: Vec<&str> = recorded
+        .get("concerns")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+
+    eprintln!(
+        "synveda: checklist recorded for {} — {}, bound to bundle {}",
+        text("skill"),
+        if complete { "complete" } else { "PARTIAL" },
+        short(&text("bundle_digest")),
+    );
+    if !complete {
+        eprintln!(
+            "synveda: a pack that requires a checklist will not accept a partial one; \
+             answer the rest before publishing"
+        );
+    }
+    if !concerns.is_empty() {
+        eprintln!(
+            "synveda: you answered `no` to {} — publishing over that needs an override \
+             under every pack, which somebody holding SkillQualityOverride records with \
+             `synveda proposal override-quality <id> --reason ...`",
+            concerns.join(", "),
+        );
+    }
+    if let Some(quality) = recorded.get("quality") {
+        let score = quality.get("score").and_then(Value::as_u64).unwrap_or(0);
+        let min = quality
+            .get("min_score")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let needs = quality
+            .get("needs_override")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        eprintln!(
+            "synveda: the rubric scores it {score}/100 against this pack's {min}{}",
+            if needs {
+                " — publishing will need an override"
+            } else {
+                ""
+            },
+        );
+    }
     Ok(())
 }
 
@@ -623,6 +857,110 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
                 "    worst is {worst}; the pack in force reports it rather than refusing it, \
                  so this is yours to weigh\n"
             ));
+        }
+    }
+
+    // Quality after the scan and before the diff. The order is the order a
+    // reviewer decides in: is it safe, is it good, what changed.
+    if let Some(quality) = &detail.quality {
+        let bar = if quality.min_score == 0 {
+            "this pack sets no bar".to_owned()
+        } else {
+            format!("this pack asks for {}", quality.min_score)
+        };
+        out.push_str(&format!(
+            "\n  quality  {}/100  (rubric v{}, {bar})\n",
+            quality.score, quality.rubric_version,
+        ));
+        // Only the failures are listed. A reviewer reading eight lines of
+        // "passed" is a reviewer who stops reading this block, and the
+        // score already says how much passed.
+        for check in quality.checks.iter().filter(|check| !check.passed) {
+            out.push_str(&paint(
+                Mark::Meta,
+                &format!(
+                    "    -{:<3} {:<24} {}",
+                    check.weight, check.check, check.title
+                ),
+            ));
+            out.push('\n');
+            if let Some(detail) = &check.detail {
+                out.push_str(&format!("             {detail}\n"));
+            }
+        }
+        if quality.checks.iter().all(|check| check.passed) {
+            out.push_str(&paint(Mark::Plain, "    every check passed"));
+            out.push('\n');
+        }
+
+        // The reviewer's half, rendered as its own thing rather than
+        // folded into the number above it (ADR-0053 decision 1).
+        match &quality.checklist {
+            Some(checklist) => {
+                out.push_str(&format!(
+                    "\n    checklist  {} {}\n",
+                    if checklist.complete {
+                        "complete"
+                    } else {
+                        "PARTIAL"
+                    },
+                    checklist.reviewed_at.format("%Y-%m-%d %H:%M"),
+                ));
+                for (item, verdict) in &checklist.answers {
+                    let mark = if verdict == "no" {
+                        Mark::Removed
+                    } else {
+                        Mark::Meta
+                    };
+                    out.push_str(&paint(mark, &format!("      {verdict:<4} {item}")));
+                    out.push('\n');
+                }
+                if let Some(note) = &checklist.note {
+                    out.push_str(&format!("      \"{note}\"\n"));
+                }
+                if !checklist.concerns.is_empty() {
+                    out.push_str(&paint(
+                        Mark::Removed,
+                        &format!(
+                            "      a reviewer objected to {}; publishing over that needs an \
+                             override under every pack",
+                            checklist.concerns.join(", "),
+                        ),
+                    ));
+                    out.push('\n');
+                }
+            }
+            None if quality.requires_checklist => {
+                out.push_str(&paint(
+                    Mark::Removed,
+                    "\n    checklist  NONE recorded for these bytes — this pack requires one",
+                ));
+                out.push('\n');
+                out.push_str(&format!(
+                    "      record it with:  synveda proposal checklist {}\n",
+                    summary.id,
+                ));
+            }
+            None => {
+                out.push_str("\n    checklist  none recorded; this pack does not require one\n");
+            }
+        }
+
+        if quality.needs_override {
+            out.push_str(&paint(
+                Mark::Removed,
+                &format!(
+                    "    publishing this needs a quality override ({}); approving it does \
+                     not clear the bar",
+                    quality
+                        .shortfalls
+                        .iter()
+                        .map(Shortfall::describe)
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                ),
+            ));
+            out.push('\n');
         }
     }
 
@@ -930,6 +1268,7 @@ mod tests {
             )],
             approvals: Vec::new(),
             scan: None,
+            quality: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(
@@ -958,6 +1297,7 @@ mod tests {
             members: vec![member(Effect::Add, None, &asset("brand new"))],
             approvals: Vec::new(),
             scan: None,
+            quality: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(rendered.contains("0198f000-000"), "{rendered}");
@@ -1000,6 +1340,7 @@ mod tests {
             ],
             approvals: Vec::new(),
             scan: None,
+            quality: None,
         };
 
         let rendered = render_detail(&detail, false);
@@ -1020,6 +1361,7 @@ mod tests {
             members: vec![member(Effect::None, None, &asset("already published"))],
             approvals: Vec::new(),
             scan: None,
+            quality: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(rendered.contains("same  "), "{rendered}");
@@ -1036,6 +1378,7 @@ mod tests {
             members: vec![member(Effect::Add, None, &asset("as proposed"))],
             approvals: Vec::new(),
             scan: None,
+            quality: None,
         };
         detail.members[0].unchanged = false;
         let rendered = render_detail(&detail, false);
@@ -1069,6 +1412,7 @@ mod tests {
                 },
             ],
             scan: None,
+            quality: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(rendered.contains("matches the runbook"), "{rendered}");
@@ -1111,6 +1455,7 @@ mod tests {
                     },
                 ],
             }),
+            quality: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(rendered.contains("security scan"), "{rendered}");
@@ -1152,6 +1497,7 @@ mod tests {
                     count: 1,
                 }],
             }),
+            quality: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(rendered.contains("yours to weigh"), "{rendered}");
@@ -1175,6 +1521,151 @@ mod tests {
         // A severity a newer gateway grew is treated as blocking rather
         // than as decoration.
         assert!(report.blocks("catastrophic"));
+    }
+
+    fn quality(score: u8, min: u8, checklist: Option<ChecklistView>) -> QualityReport {
+        QualityReport {
+            rubric_version: 1,
+            score,
+            min_score: min,
+            requires_checklist: true,
+            checks: vec![
+                QualityCheck {
+                    check: "description-states-when".to_owned(),
+                    passed: true,
+                    weight: 20,
+                    title: "the description says when to use the skill".to_owned(),
+                    detail: None,
+                },
+                QualityCheck {
+                    check: "has-examples".to_owned(),
+                    passed: false,
+                    weight: 15,
+                    title: "SKILL.md shows at least one concrete example".to_owned(),
+                    detail: Some("no fenced code block in SKILL.md".to_owned()),
+                },
+            ],
+            checklist,
+            shortfalls: Vec::new(),
+            needs_override: false,
+        }
+    }
+
+    fn answered(pairs: &[(&str, &str)], concerns: &[&str]) -> ChecklistView {
+        ChecklistView {
+            answers: pairs
+                .iter()
+                .map(|(item, verdict)| ((*item).to_owned(), (*verdict).to_owned()))
+                .collect(),
+            note: None,
+            complete: true,
+            concerns: concerns.iter().map(|item| (*item).to_owned()).collect(),
+            reviewed_at: Utc::now(),
+        }
+    }
+
+    fn detail_with(quality: QualityReport) -> Detail {
+        Detail {
+            summary: summary(ProposalView::Open, "acme/eng", "acme/eng"),
+            members: Vec::new(),
+            approvals: Vec::new(),
+            scan: None,
+            quality: Some(quality),
+        }
+    }
+
+    /// The block a reviewer reads: the score against the pack's bar, the
+    /// checks that *failed* and not the ones that passed, and the
+    /// checklist rendered as its own thing rather than folded into the
+    /// number (ADR-0053 decision 1).
+    #[test]
+    fn the_quality_block_shows_the_score_the_failures_and_the_checklist_apart() {
+        let rendered = render_detail(
+            &detail_with(quality(
+                85,
+                70,
+                Some(answered(
+                    &[("instructions-correct", "yes"), ("tested", "yes")],
+                    &[],
+                )),
+            )),
+            false,
+        );
+        assert!(rendered.contains("quality  85/100"), "{rendered}");
+        assert!(rendered.contains("this pack asks for 70"), "{rendered}");
+        // Failures are listed with what they cost; passes are not, because
+        // eight lines of "passed" is a block nobody finishes reading.
+        assert!(rendered.contains("has-examples"), "{rendered}");
+        assert!(rendered.contains("-15"), "{rendered}");
+        assert!(
+            !rendered.contains("description-states-when"),
+            "a passing check must not be listed:\n{rendered}"
+        );
+        // The two halves are visibly two halves.
+        assert!(rendered.contains("checklist  complete"), "{rendered}");
+        assert!(rendered.contains("yes  instructions-correct"), "{rendered}");
+        // And quality comes after the safety question and before the diff.
+        let quality_at = rendered.find("quality  85").unwrap();
+        let effect_at = rendered.find("effect on").unwrap();
+        assert!(quality_at < effect_at, "{rendered}");
+    }
+
+    /// A pack that requires a checklist and has none says so where a
+    /// reviewer will act on it, and names the command that fixes it.
+    #[test]
+    fn a_missing_checklist_names_the_command_that_records_one() {
+        let rendered = render_detail(&detail_with(quality(85, 70, None)), false);
+        assert!(rendered.contains("NONE recorded"), "{rendered}");
+        assert!(
+            rendered.contains("synveda proposal checklist"),
+            "a refusal a reviewer cannot act on is half a refusal:\n{rendered}"
+        );
+    }
+
+    /// A written-down `no` is painted as a removal and says what it costs,
+    /// because that is the finding a reviewer must not skim past.
+    #[test]
+    fn a_concern_says_that_publishing_over_it_needs_an_override() {
+        let mut report = quality(100, 0, Some(answered(&[("tested", "no")], &["tested"])));
+        report.needs_override = true;
+        report.shortfalls = vec![Shortfall {
+            kind: Some("checklist-concerns".to_owned()),
+            score: None,
+            min_score: None,
+            items: vec!["tested".to_owned()],
+            unanswered: Vec::new(),
+        }];
+        let rendered = render_detail(&detail_with(report), false);
+        assert!(
+            rendered.contains("a reviewer objected to tested"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("needs a quality override"), "{rendered}");
+        assert!(
+            rendered.contains("a reviewer answered `no` to tested"),
+            "the shortfall is spelled out, not left as a slug:\n{rendered}"
+        );
+        // Even at a perfect score and a pack with no bar: a concern
+        // refuses under every config (ADR-0053 decision 7).
+        assert!(rendered.contains("quality  100/100"), "{rendered}");
+        assert!(rendered.contains("this pack sets no bar"), "{rendered}");
+    }
+
+    /// A shortfall kind this binary has never heard of is reported as one
+    /// rather than dropped — a gateway newer than the CLI must not make a
+    /// refusal invisible.
+    #[test]
+    fn an_unknown_shortfall_is_named_rather_than_swallowed() {
+        let unknown = Shortfall {
+            kind: Some("licence-missing".to_owned()),
+            score: None,
+            min_score: None,
+            items: Vec::new(),
+            unanswered: Vec::new(),
+        };
+        let described = unknown.describe();
+        assert!(described.contains("licence-missing"), "{described}");
+        assert!(described.contains("older than the gateway"), "{described}");
     }
 
     #[test]

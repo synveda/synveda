@@ -42,10 +42,15 @@ pub mod linking;
 pub mod promotion;
 mod redaction;
 pub mod retention;
+mod skillrubric;
 mod skillscan;
 pub mod worker;
 
 pub use redaction::{Finding, FindingCategory, ScanOutcome, scan};
+pub use skillrubric::{
+    CheckResult, MANIFEST_BUDGET_CHARS, MAX_SCORE, MIN_DESCRIPTION_CHARS, RUBRIC_VERSION,
+    RubricScore, score_bundle,
+};
 pub use skillscan::{
     BundleScan, FileScan, SKILL_RULESET_VERSION, SkillFinding, scan_bundle, scan_file,
 };

@@ -382,6 +382,38 @@ pub enum AuditAction {
     /// to a reviewer (the proposal read already chains, and the report is
     /// recomputable from what it names).
     SkillScanRejected,
+    /// A reviewer recorded a quality checklist against a skill bundle
+    /// (SKIL-3, ADR-0053 decision 10).
+    ///
+    /// The **durable record of the human half of the score**, and the
+    /// reason the row it writes can be last-writer-wins: a row is mutable
+    /// and a chained event is not, so re-answering replaces a row while
+    /// the chain keeps every answer anybody gave.
+    ///
+    /// Carries the item ids, the verdicts, the bundle digest the answers
+    /// are bound to and the rubric version rendered beside the reviewer —
+    /// never file content, and the note only because a reviewer wrote it
+    /// to be read (it passes MEM-2's scanner before it is stored).
+    SkillChecklistRecorded,
+    /// A skill was published over the quality gate's objection (SKIL-3,
+    /// ADR-0053 decision 10).
+    ///
+    /// **The most valuable event this feature produces.** "What did we
+    /// ship that we knew was below the bar, and who said so" is a question
+    /// no other event in the product answers, and an override whose event
+    /// was lost would be a publication with no explanation — which is why
+    /// it chains inside the publish transaction rather than beside it.
+    ///
+    /// Carries the score, which of the three bars was missed, the reason
+    /// the publisher gave, the pack that set the bar and the identity that
+    /// held [`Action::SkillQualityOverride`](synveda_policy::Action).
+    ///
+    /// There is deliberately **no equivalent for the security scan**, and
+    /// there must not be: ADR-0052 decision 3 put the `critical` band on
+    /// the invariant floor precisely so nothing can wave it through, and
+    /// an event recording that somebody had would be evidence of a path
+    /// that should not exist.
+    SkillQualityOverridden,
     /// A grant reached the end of its window. Emitted by the sweep under
     /// `actor_kind=system`, and **bookkeeping only** — the grant stopped
     /// deciding anything at `expires_at` whether or not this was ever
@@ -402,7 +434,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 48] = [
+    pub const ALL: [AuditAction; 50] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -451,6 +483,8 @@ impl AuditAction {
         AuditAction::SkillResolved,
         AuditAction::SkillQuarantined,
         AuditAction::SkillScanRejected,
+        AuditAction::SkillChecklistRecorded,
+        AuditAction::SkillQualityOverridden,
     ];
 
     /// The stable dotted name stored in the `action` column. Renaming an
@@ -506,6 +540,8 @@ impl AuditAction {
             AuditAction::SkillResolved => "skill.resolved",
             AuditAction::SkillQuarantined => "skill.quarantined",
             AuditAction::SkillScanRejected => "skill.scan.rejected",
+            AuditAction::SkillChecklistRecorded => "skill.checklist.recorded",
+            AuditAction::SkillQualityOverridden => "skill.quality.overridden",
         }
     }
 }

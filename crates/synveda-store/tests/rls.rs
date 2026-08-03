@@ -223,6 +223,8 @@ const COVERED: &[&str] = &[
     "records_history",
     "role_bindings",
     "skill_files",
+    "skill_quality_overrides",
+    "skill_reviews",
     "skills",
     "vedaflow_commit_parents",
     "vedaflow_commits",
@@ -4512,5 +4514,238 @@ fn a_skill_cannot_be_forged_moved_renamed_or_raised_and_its_files_delete_only_as
             "the app role must hold no DELETE on skills: retracting a published \
              skill is FLOW-7's rewind"
         );
+    });
+}
+
+/// The attacks a reviewer's checklist invites (SKIL-3, ADR-0053).
+///
+/// Three of them are the shape every governed row has — forge into another
+/// tenant, read across one, edit the identity. The fourth is this table's
+/// own and is the reason it exists: **a checklist must not be erasable**.
+/// `skill_files` carries a DELETE grant because a bundle is authored whole;
+/// a checklist is a record that a person judged something on a day, and a
+/// product that can delete one is a product whose review trail can be
+/// edited.
+///
+/// The fifth is the design itself, checked here because it is a storage
+/// property rather than a handler's: answers are keyed by a digest of the
+/// bundle's bytes, so an edited bundle finds **no** checklist rather than
+/// the previous one.
+#[test]
+fn a_checklist_cannot_be_forged_read_across_tenants_or_erased_and_never_outlives_its_bytes() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_scope) = seed_skill(&db.pool).await;
+        let (adversary, adversary_scope) = seed_skill(&db.pool).await;
+        let reviewer = IdentityId::new();
+        let digest = [7u8; 32];
+        let answers = serde_json::json!({"tested": "yes", "scope-appropriate": "yes"});
+
+        // Seed one review for each tenant.
+        for (tenant, scope) in [(victim, victim_scope), (adversary, adversary_scope)] {
+            let mut tx = app_tx(&db.pool, Some(tenant)).await;
+            sqlx::query!(
+                "insert into skill_reviews
+                     (tenant_id, scope_id, skill_name, bundle_digest, answers, rubric_version,
+                      reviewed_by)
+                 values ($1, $2, 'code-review', $3, $4, 1, $5)",
+                tenant.as_uuid(),
+                scope.as_uuid(),
+                &digest[..],
+                answers,
+                reviewer.as_uuid(),
+            )
+            .execute(&mut *tx)
+            .await
+            .expect("seed a checklist");
+            tx.commit().await.expect("commit seed");
+        }
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+
+        // 1. Isolation. The digests are deliberately *identical* across the
+        //    two tenants, which is the sharpest form of this check: the key
+        //    is content-derived, so two tenants reviewing byte-identical
+        //    bundles collide on everything except tenant_id.
+        let seen: i64 = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from skill_reviews where tenant_id = $1"#,
+            victim.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count another tenant's reviews");
+        assert_eq!(
+            seen, 0,
+            "another tenant's checklist must be invisible even when it is about \
+             byte-identical bytes"
+        );
+
+        // 2. Forging into another tenant.
+        let forged = sqlx::query!(
+            "insert into skill_reviews
+                 (tenant_id, scope_id, skill_name, bundle_digest, answers, rubric_version,
+                  reviewed_by)
+             values ($1, $2, 'code-review', $3, $4, 1, $5)",
+            victim.as_uuid(),
+            victim_scope.as_uuid(),
+            &[9u8; 32][..],
+            serde_json::json!({"tested": "yes"}),
+            reviewer.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a forged-tenant checklist must be rejected: it would let a low-quality \
+             publication clear a bar on a review nobody in that tenant performed"
+        );
+        drop(tx);
+
+        // 3. Re-answering is an ordinary act; the identity is not editable.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        sqlx::query!(
+            "update skill_reviews set answers = $3
+             where tenant_id = $1 and scope_id = $2",
+            adversary.as_uuid(),
+            adversary_scope.as_uuid(),
+            serde_json::json!({"tested": "no"}),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("re-answering your own checklist is an ordinary act");
+
+        // 4. No DELETE, which is this table's whole difference from
+        //    `skill_files` one migration earlier.
+        let erased = sqlx::query!(
+            "delete from skill_reviews where tenant_id = $1",
+            adversary.as_uuid()
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            erased.is_err(),
+            "the app role must hold no DELETE on skill_reviews: a checklist is a \
+             record that a person judged something, and a review trail that can be \
+             erased is not one"
+        );
+        drop(tx);
+
+        // 5. The design: answers are found by the bytes, so a bundle that
+        //    moved has none. This is what makes an edit beneath a review
+        //    fail closed rather than launder the old answers.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let after_edit: i64 = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from skill_reviews
+               where tenant_id = $1 and scope_id = $2 and skill_name = 'code-review'
+                 and bundle_digest = $3"#,
+            adversary.as_uuid(),
+            adversary_scope.as_uuid(),
+            &[8u8; 32][..],
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("look a moved bundle up by its digest");
+        assert_eq!(
+            after_edit, 0,
+            "a checklist must not be found for a bundle whose bytes have changed: \
+             the digest is the key precisely so that an edit finds nothing rather \
+             than finding answers about content nobody reviewed (ADR-0053 decision 4)"
+        );
+    });
+}
+
+/// The quality override is one grant narrower than the checklist beside it
+/// (SKIL-3, ADR-0053 decision 8): **insert and select, and no UPDATE**.
+///
+/// Re-answering a checklist is an ordinary act — a reviewer looked again.
+/// Rewriting the stated reason for shipping something below the bar is not
+/// an act anybody should have, because that sentence is the entire durable
+/// explanation of why the product shipped what it had itself marked down.
+/// A different reason is a different decision, and a different decision
+/// needs different bytes.
+#[test]
+fn an_override_is_tenant_isolated_write_once_and_never_rewritten() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_scope) = seed_skill(&db.pool).await;
+        let (adversary, adversary_scope) = seed_skill(&db.pool).await;
+        let granter = IdentityId::new();
+        let digest = [3u8; 32];
+
+        for (tenant, scope) in [(victim, victim_scope), (adversary, adversary_scope)] {
+            let mut tx = app_tx(&db.pool, Some(tenant)).await;
+            sqlx::query!(
+                "insert into skill_quality_overrides
+                     (tenant_id, scope_id, skill_name, bundle_digest, reason, score,
+                      rubric_version, granted_by)
+                 values ($1, $2, 'code-review', $3, 'needed for the incident review', 40, 1, $4)",
+                tenant.as_uuid(),
+                scope.as_uuid(),
+                &digest[..],
+                granter.as_uuid(),
+            )
+            .execute(&mut *tx)
+            .await
+            .expect("seed an override");
+            tx.commit().await.expect("commit seed");
+        }
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+
+        // 1. Isolation, again with identical digests across tenants —
+        //    the sharpest form, since the key is content-derived.
+        let seen: i64 = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from skill_quality_overrides where tenant_id = $1"#,
+            victim.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count another tenant's overrides");
+        assert_eq!(
+            seen, 0,
+            "another tenant's override must be invisible: it is what lets a bundle they              marked down go out"
+        );
+
+        // 2. Forging one into another tenant would be publishing below
+        //    their bar under a reason nobody there gave.
+        let forged = sqlx::query!(
+            "insert into skill_quality_overrides
+                 (tenant_id, scope_id, skill_name, bundle_digest, reason, score,
+                  rubric_version, granted_by)
+             values ($1, $2, 'code-review', $3, 'forged', 10, 1, $4)",
+            victim.as_uuid(),
+            victim_scope.as_uuid(),
+            &[4u8; 32][..],
+            granter.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(forged.is_err(), "a forged-tenant override must be rejected");
+        drop(tx);
+
+        // 3. **No UPDATE**, which is the difference from `skill_reviews`.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let rewritten = sqlx::query!(
+            "update skill_quality_overrides set reason = 'a better sounding reason'
+             where tenant_id = $1 and scope_id = $2",
+            adversary.as_uuid(),
+            adversary_scope.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            rewritten.is_err(),
+            "the app role must hold no UPDATE on skill_quality_overrides: the stated              reason is the whole durable explanation, and one that can be edited              explains nothing"
+        );
+
+        // 4. And no DELETE either — an override that can be erased is a
+        //    publication with no explanation, after the fact.
+        let erased = sqlx::query!(
+            "delete from skill_quality_overrides where tenant_id = $1",
+            adversary.as_uuid()
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(erased.is_err(), "the app role must hold no DELETE either");
     });
 }

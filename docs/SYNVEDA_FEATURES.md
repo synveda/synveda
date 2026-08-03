@@ -440,6 +440,18 @@ SKIL-2 Security scanning gate (M)
 SKIL-3 Skill quality scoring (M)
   SkillsBench-style rubric scoring (automated + reviewer checklist) stored on the version.
   AC: score displayed at review and in the registry; low-score publish requires override.
+  Written 2026-08-03 (SKIL-3, ADR-0053): the score is **two halves that are never averaged** —
+  a rubric recomputed from the bytes and a checklist a person supplies — because summing them
+  lets each hide the other, and "stored on the version" is true of exactly one of them. The
+  checklist is keyed by a **digest of the bundle's object addresses**, so an edit beneath a
+  review finds nothing rather than inheriting answers about content nobody read; that is
+  ADR-0032 decision 6 applied to the one review artefact with no address check of its own, and
+  it needs no invalidation logic at all. Two findings changed the design: the rubric's heaviest
+  check fired on 29 of 37 real bundles and had to be narrowed and repriced, and the override —
+  first a field on the publish request — deadlocked, because `curator` holds the reads that
+  publishing a skill takes and `steward` holds the override and no content read, so nobody
+  could publish a below-bar bundle under any pack. It is now a separate governed act the
+  publish seam looks up, which is ADR-0032 decision 9's own separation one seam later.
 SKIL-4 Scope-targeted distribution (M)
   Skills attach to hierarchy nodes; inject index tier lists skills available to this
   identity; adapter materialises them into the harness (Claude Code plugin dir).

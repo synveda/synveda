@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into skills\n               (tenant_id, scope_id, name, description, sensitivity, quality_score,\n                rubric_version, created_by, updated_by)\n           values ($1, $2, $3, $4, $5, $6, $7, $8, $8)\n           on conflict (tenant_id, scope_id, name) do update\n               set description    = excluded.description,\n                   sensitivity    = excluded.sensitivity,\n                   quality_score  = excluded.quality_score,\n                   rubric_version = excluded.rubric_version,\n                   updated_at     = now(),\n                   updated_by     = excluded.updated_by\n           returning scope_id, name, description, sensitivity, quality_score, rubric_version,\n                     created_at, created_by, updated_at, updated_by",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "quality_score",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 5,
+        "name": "rubric_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Int2",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d78e01b25ef983fbc039e7628fe13aff7e883372aebc9b2d6c2b38ddb8fb9180"
+}
