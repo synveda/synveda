@@ -426,6 +426,17 @@ SKIL-2 Security scanning gate (M)
   Static analysis of skill scripts (secret patterns, network egress, dangerous calls);
   scan report attached to proposal; security-reviewer role required for executable skills.
   AC: seeded-malicious skill cannot reach published; report renders in review.
+  Written 2026-08-03 (SKIL-2, ADR-0052): two of the three clauses arrived already discharged
+  — "secret patterns" has been MEM-2's scanner at this seam since ADR-0051 decision 14, and
+  the security-reviewer requirement is the invariant floor's second rule, on every skill
+  rather than only an executable one, because decision 8 refused the executable bit and there
+  is no such thing as a non-executable skill here. The load-bearing parts are that a skill's
+  **prose is executable** — a SKILL.md instructing an agent to fetch and run something is the
+  same attack with the model as the interpreter, so "skill scripts" is the wrong scope — and
+  that **"cannot reach published" is not the whole boundary**, because a draft is installable
+  by anyone the pack lets read skills at that scope. The gate therefore sits at authoring,
+  where a refused bundle is never stored, and again at publication, where the rule table is
+  re-applied to bytes an approval already bound.
 SKIL-3 Skill quality scoring (M)
   SkillsBench-style rubric scoring (automated + reviewer checklist) stored on the version.
   AC: score displayed at review and in the registry; low-score publish requires override.
