@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { SIGN_IN_URL, signOut, whoami, type Outcome, type WhoAmI } from "./api.mjs";
+import { Inbox } from "./Inbox.js";
 
 /**
  * The console shell (CNSL-1, ADR-0056).
  *
- * What it proves today is the round trip the rest of the feature stands on:
- * a login that leaves no credential in the browser, a `/v1` call
- * authenticated by a cookie the bundle cannot read, and a sign-out that
- * ends the session server-side. The proposals inbox — the hero screen
- * itself — lands on top of this against the parity corpus (decision 7),
- * because a renderer built before the corpus is a renderer the corpus then
- * has to be written around.
+ * The session underneath it is the part worth naming: a login that leaves
+ * no credential in the browser, `/v1` calls authenticated by a cookie the
+ * bundle cannot read, and a sign-out that ends the session server-side.
+ * The inbox sits on top of that and was written against the parity corpus
+ * (decision 7) rather than the other way round — a renderer built first is
+ * a renderer the corpus then has to be written around.
  */
 export function App() {
   const [state, setState] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
@@ -89,13 +89,7 @@ function Body({
               </dd>
             </dl>
           </section>
-          <section>
-            <h2>Proposals</h2>
-            <p className="muted">
-              The review queue lands here — diffs, scan reports, quality scores and evidence, at
-              full parity with <code>synveda proposal review</code>.
-            </p>
-          </section>
+          <Inbox />
         </>
       );
     }

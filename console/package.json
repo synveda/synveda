@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && vite build",
-    "test": "tsc -p tsconfig.test.json && node --test --test-timeout=60000 \"dist-test/*.test.mjs\"",
+    "test": "tsc -p tsconfig.test.json && node --test --test-timeout=60000 \"dist-test/*.test.mjs\" \"dist-test/*.test.js\"",
     "dev": "vite"
   },
   "dependencies": {

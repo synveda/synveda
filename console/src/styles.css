@@ -131,3 +131,198 @@ button:hover,
 .banner p {
   margin: 0.5rem 0 0;
 }
+
+/*
+ * The inbox (CNSL-1). Two columns where there is room for two, one where
+ * there is not — a review read on a laptop beside a terminal is the common
+ * case, and a queue that pushed the diff off the screen would be a queue
+ * nobody scrolls back to.
+ */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) 1fr;
+  gap: 2rem;
+  align-items: start;
+}
+
+@media (max-width: 60rem) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}
+
+h3 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 1.6rem 0 0.5rem;
+}
+
+h4 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 1rem 0 0.4rem;
+}
+
+ul.plain,
+ul.queue,
+ul.findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.queue li + li {
+  margin-top: 0.4rem;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.6rem 0.7rem;
+  line-height: 1.35;
+}
+
+.row.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.row-title {
+  font-weight: 600;
+}
+
+/*
+ * A blocking finding is marked in the text, not only in the colour. The
+ * chip is what a screen reader announces and what survives a copy-paste
+ * into a ticket; the colour is the fast read for somebody looking at it.
+ * Either alone would leave a reader unable to tell which findings stop the
+ * publication — most acutely for a severity served by a newer gateway,
+ * where the name itself tells them nothing (ADR-0056 decision 5).
+ */
+.chip {
+  display: inline-block;
+  border: 1px solid var(--error-line);
+  background: var(--error-bg);
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  margin-left: 0.4rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.finding {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.finding.blocking .severity {
+  font-weight: 700;
+}
+
+.severity {
+  display: inline-block;
+  min-width: 4.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.refusal {
+  color: var(--error-line);
+  margin: 0.5rem 0;
+}
+
+.stale,
+.weight {
+  color: var(--muted);
+}
+
+.comment {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.answers .concern .verdict {
+  color: var(--error-line);
+  font-weight: 700;
+}
+
+.verdict {
+  display: inline-block;
+  min-width: 2.5rem;
+}
+
+.member {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.7rem 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.member-head .effect {
+  display: inline-block;
+  min-width: 4rem;
+  font-weight: 600;
+}
+
+pre.diff,
+pre.now {
+  overflow-x: auto;
+  margin: 0.6rem 0 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+pre.diff .added {
+  background: color-mix(in srgb, #2f8132 16%, transparent);
+}
+
+pre.diff .removed {
+  background: color-mix(in srgb, #c0392b 16%, transparent);
+}
+
+.addresses {
+  font-size: 0.85rem;
+  margin: 0.3rem 0 0;
+}
+
+.verdict-section {
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  margin: 0.35rem 0 0.6rem;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

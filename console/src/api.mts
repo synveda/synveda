@@ -159,3 +159,80 @@ export async function signOut(fetchImpl: typeof fetch = fetch): Promise<void> {
 
 /** Where a sign-in starts. `console=true` is what asks for a cookie. */
 export const SIGN_IN_URL = "/auth/login?console=true";
+
+// ── Proposals ───────────────────────────────────────────────────────────
+//
+// Four calls, none of them new: FLOW-6 built a review flow and gave it a
+// JSON API, and the CLI is a client of that API rather than the owner of
+// it. CNSL-1 adds no governed route (ADR-0056 decision 9) — if this screen
+// needed something the API could not answer, the API would gain it and the
+// CLI would gain it too.
+//
+// Nothing here sets an `Origin` header, and nothing may: it is forbidden to
+// scripts, which is exactly what makes it worth checking. The browser
+// attaches it to these mutations on its own, and the gateway refuses a
+// cookie-authenticated non-GET without one (decision 4).
+
+/**
+ * The queue, newest first.
+ *
+ * `state=open` is the **stored** state, and that is wider than it looks: a
+ * proposal whose requirement is satisfied is stored `open` and rendered
+ * `approved` (ADR-0032 decision 11), because "has enough approvals" is
+ * computed live against a requirement a pack switch can move. Filtering on
+ * the stored state is therefore what an inbox wants — everything still
+ * actionable, including the ones waiting to be published — and filtering on
+ * the rendered one would drop exactly the rows somebody is coming here to
+ * finish.
+ */
+export async function listProposals(fetchImpl: typeof fetch = fetch): Promise<Outcome> {
+  return call("/proposals?state=open", { method: "GET" }, fetchImpl);
+}
+
+/** One proposal in full: members, approvals, scan and quality. */
+export async function readProposal(id: string, fetchImpl: typeof fetch = fetch): Promise<Outcome> {
+  return call(`/proposals/${encodeURIComponent(id)}`, { method: "GET" }, fetchImpl);
+}
+
+/**
+ * Approve. The comment is optional, so an empty box sends no comment at all
+ * rather than an empty string somebody has to read as if it meant something.
+ */
+export async function approve(
+  id: string,
+  comment: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Outcome> {
+  const trimmed = comment.trim();
+  return call(
+    `/proposals/${encodeURIComponent(id)}/approve`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(trimmed.length > 0 ? { comment: trimmed } : {}),
+    },
+    fetchImpl,
+  );
+}
+
+/**
+ * Reject. The reason is mandatory at the gateway, and the button that sends
+ * this is disabled without one — two checks for one rule, because the
+ * server's is the one that counts and the client's is the one that stops a
+ * reviewer losing what they typed to a 400.
+ */
+export async function reject(
+  id: string,
+  reason: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Outcome> {
+  return call(
+    `/proposals/${encodeURIComponent(id)}/reject`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: reason.trim() }),
+    },
+    fetchImpl,
+  );
+}
