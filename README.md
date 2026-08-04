@@ -76,8 +76,11 @@ consuming agent heals on its next session start.
 ## Project status
 
 **Phases 0–2 are complete. Phase 3 (enterprise surface) is in progress.**
-50 of 86 planned features are done, each one demonstrated by a runnable script in
+54 of 86 planned features are done, each one demonstrated by a runnable script in
 [`demos/`](demos/) and covered by an acceptance test.
+
+It installs: `synveda init` takes a laptop to working governed memory —
+see [docs/INSTALL.md](docs/INSTALL.md).
 
 | Phase | Scope | State |
 |---|---|---|

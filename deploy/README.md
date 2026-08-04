@@ -1,8 +1,24 @@
 # Deployment
 
-- `docker-compose/` — SMB single-node profile (Postgres+pgvector+AGE+PGMQ,
-  Rauthy, Temporal, TEI, Jaeger). Lands with FND-2.
+- `compose/` — SMB single-node profile (Postgres+pgvector+AGE+PGMQ, Rauthy,
+  Temporal, TEI, Jaeger; FND-2) plus the gateway itself (`gateway/Dockerfile`,
+  OPS-1). Installed with `synveda init` — see [docs/INSTALL.md](../docs/INSTALL.md).
 - `helm/` — enterprise multi-region profile. Lands with OPS-2 (Phase 3).
+
+## The gateway service is behind a profile
+
+`gateway` carries `profiles: ["deployed"]`, so `make dev-up` brings up the
+dependencies and not the product: that target is the contributor's loop,
+where the gateway runs from `cargo run` against whatever is checked out.
+`synveda init` starts it explicitly, and naming a profiled service on the
+command line is enough to activate it.
+
+Which of the two start paths `init` uses depends on the issuer, not on
+taste — with the bundled Rauthy the gateway runs as a host process, because
+an OIDC issuer identifier must be one URL both the browser and the gateway
+can reach and RFC 6761 makes `http://localhost:8100/...` unreachable from
+inside any container. ADR-0055 decision 8 has the measurements and the
+alternatives that were tried.
 
 ## The TEI image is per-architecture
 

@@ -3237,7 +3237,85 @@ what is on a caller's disk and a client's claim about it would be an
 unverifiable input to a governed read. And a rewind rewrites bundles whose
 bytes never changed, because a receipt is keyed by the commit it pins to,
 which is correct and will look like more writes than expected._
-- [ ] [OPS-1: SMB profile](OPS-1.md)
+- [x] [OPS-1: SMB profile](OPS-1.md) — done 2026-08-04, ADR-0055, no migration, AC demo: demos/ops-1-smb-profile.sh (**the criterion, and the invariant underneath it**: on a scratch HOME with no Synveda state, `synveda init` → `synveda login` → five `hierarchy create`s → a turn observed → the same turn recalled through the PDP, in **5s of the 600s budget** — then the assertion that makes the number mean something, which is that the store holds **0 scopes, 0 identities, 0 role bindings and 0 records** the moment the installer finishes, and the chain shows **exactly one break-glass event** (`tenant.created`) with `role.bound` and `identity.provisioned` arriving under the *operator's own subject* at first login and all five authored scopes carrying their own PDP decision, `chain valid (16 events)`; an installer that seeded an org would show the hierarchy under a break-glass actor and fail here), AC tests: crates/synveda-cli/src/init.rs (4 unit tests: the rendered issuer JSON parsing as one unquoted line the gateway's own reader accepts, the install path proven never to carry `SYNVEDA_DEV_JWT_SECRET`, every demo person's group resolving to a declared team — a mismatch would quarantine them and show an empty block — and two deployments on one laptop not sharing an operator), crates/synveda-cli/src/hierarchy.rs (2 unit tests on subtree indentation relative to the anchor, including the clamp that would panic in release rather than fail a test), new: `synveda init`, `synveda hierarchy create|list|show|root`, deploy/compose/gateway/Dockerfile + the `gateway` compose service behind `profiles: ["deployed"]`, docs/INSTALL.md
+_OPS-1 notes (ADR-0055): fifty-three features existed and none of them
+could be **installed**. The compose file served five dependencies and not
+the gateway, every CLI bootstrap verb was documented as "dev plumbing",
+there was no `hierarchy` verb at all, and the honest statement of what
+installation cost was the two hundred lines at the top of
+`demos/adpt-1-claude-code.sh` — four `curl`s at Rauthy's admin API, a
+scratch database dropped on exit, two `insert into records` with the vector
+riding the same statement because MEM-4's backstop refuses an
+embedding-less row, and a **second gateway** started with
+`SYNVEDA_DEV_JWT_SECRET` for the sole purpose of creating three hierarchy
+nodes before being killed so the real one could start under OIDC.
+
+Every one of those is fine in a demo that tears its state down, and two of
+them are the thing seed §2.2 forbids outright. The load-bearing discovery
+is that **refusing them cost nothing**, because AUTH-2 had already solved
+the chicken-and-egg and nobody had noticed: `ensure_root` creates the org
+root from the tenant's own slug and name inside the provisioning
+transaction, and ADR-0015 decision 6 places an admin-group subject with no
+team mapping under that root rather than in quarantine. **The first admin
+login manufactures the organisation.** So the installer does not need to,
+the dev-JWT gateway disappears from the install path entirely, and
+ADR-0010's "one auth mode, never two" stops being a constraint the
+bootstrap dances around and becomes a description of what installation
+does. `synveda init` writes migrations and one tenant row — both
+pre-existing audited break-glass paths — and nothing else. What it has
+instead of a seeding step is `synveda hierarchy`, the first governed verb
+added for an operational reason rather than a feature's: without it the
+documented way to create a department is a `curl`, and a documented `curl`
+is an undocumented product.
+
+**The finding is one the container found by failing.** The gateway was
+built as an image first, because that is the right deployment shape and
+what OPS-2 will ship — and it cannot serve the bundled IdP, for a reason
+no configuration reaches. An OIDC issuer identifier is *one URL that both
+the browser and the gateway must resolve*, compared byte-for-byte against
+the discovery document and the `iss` claim, and `IssuerConfig` carries no
+separate discovery URL on purpose. Rauthy's is
+`http://localhost:8100/auth/v1/`, and RFC 6761 makes every resolver answer
+`localhost` — and every `*.localhost` name — with the **caller's own**
+loopback, ahead of DNS and ahead of `/etc/hosts`. Measured: a container
+reaches the host's published 8100 through `host.docker.internal` (200), and
+the same container given `extra_hosts: rauthy.localhost:host-gateway` gets
+the correct host address written into `/etc/hosts` and still resolves the
+name to 127.0.0.1. The gateway answered `502 {"service":"oidc-jwks"}`,
+correctly. The alternative was to move the bundled IdP off a loopback URL,
+rewriting `pub_url`, `rp_id` and `rp_origin` in the shared dev config and
+churning the five demos that hard-code it — so the split falls where the
+problem actually is: a real issuer resolves identically everywhere and runs
+the container, the bundled one runs the binary on the host. Two start paths
+is a real cost, accepted; the image is built on every demo run so it cannot
+silently stop compiling, but nothing yet proves it *serves*, and OPS-2's
+kind-cluster test is where that becomes true.
+
+The second finding is smaller and worse. Convergence first skipped the
+gateway when the pidfile's process was alive — and "already running" is not
+"running what you just configured". A second `init` admitting a different
+tenant left the old process up, so the login that followed authenticated
+against the *previous* tenant's issuer config and provisioned an org root
+in the wrong organisation, silently, with every surface downstream looking
+healthy. The rendered configuration now lives beside the pidfile and is
+compared on every run.
+
+Deferred with triggers, all in ADR-0055: **no re-embed command** — the
+embedder is chosen at install time and stated as permanent, because
+`record_embeddings` stores the model, embed-or-fail is unconditional, and
+a corpus half-written at `hash@1` and half at `bge-m3` is a retrieval
+failure that presents as bad relevance and nothing else; doing it properly
+is a bitemporal rewrite under RLS with the sidecar rebuilt, and inventing
+that inside an installer is how it gets done badly. **No headless `init`**
+(the CI and kind-cluster path) — the install-time operator would have to be
+a service identity, and AUTH-3's confinement forbid means one cannot hold
+the tenant-wide `org-admin` an install needs; widening it is exactly the
+carve-out AUTHZ-1's golden matrix exists to prevent, so it waits for
+AUTH-4's joiner path. And the AC's clock **excludes image acquisition**,
+the ADPT-1 split for the ADPT-1 reason; the cold path measured 227s on the
+same laptop, so the criterion holds either way and the split buys honesty
+rather than a passing number._
+
 - [ ] [CNSL-1: Proposals inbox (hero screen)](CNSL-1.md)
 - [ ] [ADPT-2: Generic MCP server](ADPT-2.md)
 - [ ] [CNSL-2: Hierarchy & policy explorer](CNSL-2.md)
