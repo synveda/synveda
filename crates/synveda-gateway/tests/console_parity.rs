@@ -120,6 +120,21 @@ const SECRET: &[u8] = b"cnsl-1-parity-secret";
 /// The env var that flips recording on. Anything other than `1` verifies.
 const RECORD: &str = "SYNVEDA_RECORD_FIXTURES";
 
+/// Every case in the corpus, recorded and synthesised alike.
+///
+/// Named in one place because three things iterate it — the recorder, the
+/// facts derivation, and the CLI's renderer suite over in `synveda-cli` —
+/// and a case added to one and not the others is a case that proves nothing.
+const CASES: &[&str] = &[
+    "memory-update",
+    "memory-drifted",
+    "skill-clean",
+    "skill-below-bar",
+    "skill-checklist-stale",
+    "skill-blocking-scan",
+    "skill-unknown-severity",
+];
+
 // ── The corpus on disk ───────────────────────────────────────────────────────
 
 /// `console/fixtures/`, from this crate's manifest directory.
@@ -140,30 +155,45 @@ fn recording() -> bool {
 /// alternative is a contributor hand-editing a fixture until a test passes
 /// — which is precisely the way this corpus stops being evidence (ADR-0056's
 /// reversal trigger for decision 7).
+/// Settles a case and the facts derived from it together.
+///
+/// Together rather than in two passes because the facts are a function of
+/// the payload and nothing else: recording one without the other leaves a
+/// pair on disk that disagree, and the disagreement would surface in the CLI
+/// and console suites rather than here, where it belongs.
 fn settle(name: &str, payload: &Value) {
-    let path = corpus_dir().join(format!("{name}.json"));
+    settle_file(&format!("{name}.json"), payload, "the gateway serves");
+    settle_file(
+        &format!("{name}.facts.json"),
+        &facts(payload),
+        "the corpus implies",
+    );
+}
+
+fn settle_file(file: &str, payload: &Value, provenance: &str) {
+    let path = corpus_dir().join(file);
     let recorded = format!(
         "{}\n",
         serde_json::to_string_pretty(payload).expect("payload serialises")
     );
     if recording() {
-        std::fs::write(&path, &recorded).unwrap_or_else(|err| panic!("write {name}: {err}"));
-        eprintln!("recorded console/fixtures/{name}.json");
+        std::fs::write(&path, &recorded).unwrap_or_else(|err| panic!("write {file}: {err}"));
+        eprintln!("recorded console/fixtures/{file}");
         return;
     }
     let committed = std::fs::read_to_string(&path).unwrap_or_else(|err| {
         panic!(
-            "console/fixtures/{name}.json is missing ({err}) — record it with \
+            "console/fixtures/{file} is missing ({err}) — record it with \
              `{RECORD}=1 make db-test`"
         )
     });
     if committed != recorded {
         panic!(
-            "console/fixtures/{name}.json is not what the gateway serves.\n\n\
-             If the payload changed on purpose, re-record with `{RECORD}=1 make db-test` \
+            "console/fixtures/{file} is not what {provenance}.\n\n\
+             If it changed on purpose, re-record with `{RECORD}=1 make db-test` \
              and read the diff: every renderer that consumes this corpus is being asked \
              to change with it.\n\n\
-             served:\n{recorded}"
+             derived:\n{recorded}"
         );
     }
 }
@@ -227,12 +257,20 @@ impl Stable {
             // Still parses as a UUID, and still 36 characters of hex and
             // hyphens — which is the test a renderer uses to decide whether
             // to abbreviate it.
-            format!("00000000-0000-4000-8000-{:012}", self.ids)
+            //
+            // The counter goes at the **front**, and that is not cosmetic.
+            // Both surfaces abbreviate an id to its first twelve characters,
+            // so stand-ins that differ only in their tail are stand-ins a
+            // renderer cannot tell apart — a corpus in which every member
+            // shares one label, and a parity suite that would pass while
+            // the surface showed the wrong row.
+            format!("{:08x}-0000-4000-8000-000000000000", self.ids)
         } else if is_object_address(raw) {
             self.hashes += 1;
             // Still 64 hex characters, so an abbreviation to twelve is still
-            // an abbreviation of an address.
-            format!("{:064x}", self.hashes)
+            // an abbreviation of an address — and distinguishing in its
+            // first twelve, for the reason above.
+            format!("{:08x}{}", self.hashes, "0".repeat(56))
         } else if as_instant(raw).is_some() {
             self.times += 1;
             // Still an instant, and still written to the precision the
@@ -739,6 +777,12 @@ const REVISED: &str =
     "check the on-call rota\nrotate the signing key every 90 days\nfile the change record";
 const STANDING: &str = "escalate to the platform lead before touching production";
 
+/// Three versions of one record, so the drift case's three contents are
+/// three visibly different strings rather than three copies of one.
+const DRIFT_V1: &str = "page the platform lead";
+const DRIFT_V2: &str = "page the platform lead, then the incident commander";
+const DRIFT_V3: &str = "page the incident commander first, then the platform lead";
+
 /// The memory case: a channel that already holds one version, an edit that
 /// would replace it, and a second member publication would not touch.
 async fn memory_update(w: &World) -> Value {
@@ -803,6 +847,77 @@ async fn memory_update(w: &World) -> Value {
     .await;
 
     record(detail(w, &second).await)
+}
+
+/// The drift case, and the only one in which a member's **three** contents
+/// are three different strings.
+///
+/// A record is published, proposed again, and then edited *while the review
+/// is open*. The proposal still names the bytes that were proposed, because
+/// approvals bind bytes and not records (ADR-0032 decision 6) — so
+/// `baseline` is what the channel holds, `proposed` is what the approvals
+/// are about, and `content` is what the record says right now, which is a
+/// third thing and belongs to nobody's decision yet. Publishing will refuse.
+///
+/// Without this case the corpus cannot tell whether a surface renders the
+/// record or the proposal, because everywhere else the two agree.
+async fn memory_drifted(w: &World) -> Value {
+    let alice = identities::by_subject(&w.pool, w.tenant, "alice")
+        .await
+        .expect("read alice")
+        .expect("alice exists");
+
+    let note = seed_record(&w.pool, w.tenant, w.platform, alice.id, DRIFT_V1).await;
+    let (status, opened) = post(
+        &w.app,
+        &w.alice,
+        "/v1/proposals",
+        json!({
+            "scope_id": w.platform,
+            "record_ids": [note],
+            "title": "the escalation note",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "open the first proposal: {opened}");
+    let first = opened["id"].as_str().expect("proposal id").to_owned();
+    approve(w, &w.sec, &first, "read it").await;
+    approve(w, &w.cora, &first, "ship it").await;
+    let (status, published) = post(
+        &w.app,
+        &w.cora,
+        &format!("/v1/proposals/{first}/publish"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "publish the baseline: {published}");
+
+    // v2 is proposed…
+    rewrite(&w.pool, note, w.platform, alice.id, DRIFT_V2).await;
+    let (status, opened) = post(
+        &w.app,
+        &w.alice,
+        "/v1/proposals",
+        json!({
+            "scope_id": w.platform,
+            "record_ids": [note],
+            "title": "the escalation note, revised",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "open the second proposal: {opened}");
+    let second = opened["id"].as_str().expect("proposal id").to_owned();
+
+    // …and then somebody edits the record underneath the open review.
+    rewrite(&w.pool, note, w.platform, alice.id, DRIFT_V3).await;
+
+    let detail = detail(w, &second).await;
+    assert_eq!(
+        detail["members"][0]["unchanged"],
+        json!(false),
+        "the case is only worth recording if the member really drifted: {detail}",
+    );
+    record(detail)
 }
 
 /// The clean case: a scan that found nothing, and a bundle over the bar with
@@ -902,6 +1017,7 @@ async fn the_parity_corpus_is_what_the_gateway_serves() {
     // and leaves it in force, so the cases that want the product default
     // run before it.
     settle("memory-update", &memory_update(&w).await);
+    settle("memory-drifted", &memory_drifted(&w).await);
     settle("skill-clean", &skill_clean(&w).await);
     settle("skill-below-bar", &skill_below_bar(&w).await);
     settle("skill-checklist-stale", &skill_checklist_stale(&w).await);
@@ -980,4 +1096,210 @@ fn keys(value: &Value) -> Vec<&str> {
         .map(Map::keys)
         .map(|keys| keys.map(String::as_str).collect())
         .unwrap_or_default()
+}
+
+// ── The facts a review must name ─────────────────────────────────────────────
+
+/// The review-relevant facts of one case, derived from its recorded payload.
+///
+/// This is the other half of decision 7. The corpus says what the gateway
+/// serves; **these say what a surface has to get out of it**, and both
+/// renderers are asserted against the same file. Without them "parity" is a
+/// diff of two transcripts, which fails on whitespace and passes on a
+/// missing finding.
+///
+/// # Where the line is drawn
+///
+/// These are *data*, never layout. ADR-0056's option 3 was rejected — a
+/// gateway serialising a display model would either constrain the console to
+/// what a terminal can do or ship two display models and call it one — and
+/// the same line holds here: the corpus fixes **what must be named**, and
+/// each surface owns *how*. So a finding's path, line, rule, severity and
+/// verdict are here, and the fact that the CLI paints a blocking one with
+/// `Mark::Removed` and the console will use a red chip is not.
+///
+/// # Derived, not authored
+///
+/// Every field is a projection of the payload rather than a judgement about
+/// it — the judgements moved to the gateway in decisions 5 and 6, which is
+/// what makes this safe. `blocking` is copied, not computed; a shortfall's
+/// sentence is copied, not composed. If a future field here needed a rule to
+/// derive it, that rule would belong on the gateway and not in this file.
+///
+/// The one thing deliberately absent is the AC's "set of actions offered".
+/// Which acts a proposal admits is a function of its state, its pack and the
+/// reader's own roles, and only the first is on the wire — so a corpus that
+/// claimed it would be inventing the other two. It needs a served field, and
+/// that is a decision to take with a screen in front of you rather than in a
+/// fixture generator.
+/// The text inside a member's bytes, as a reviewer reads it.
+///
+/// A memory's proposed bytes are a canonical JSON object and a skill file's
+/// are the file. Both renderers show the *content* either way — the CLI's
+/// diff is field-wise over the object rather than a diff of its braces — so
+/// the fact is the content, and the envelope is an implementation detail of
+/// how it travelled.
+fn readable(value: &Value) -> Value {
+    let Some(text) = value.as_str() else {
+        return Value::Null;
+    };
+    as_json_object(text)
+        .and_then(|object| {
+            object
+                .get("content")
+                .and_then(Value::as_str)
+                .map(String::from)
+        })
+        .map_or_else(|| value.clone(), Value::String)
+}
+
+fn facts(detail: &Value) -> Value {
+    let mut out = Map::new();
+    out.insert("state".to_owned(), detail["state"].clone());
+    out.insert("outstanding".to_owned(), detail["outstanding"].clone());
+
+    out.insert(
+        "approvals".to_owned(),
+        Value::Array(
+            detail["approvals"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|approval| {
+                    json!({
+                        "subject": approval["approver_subject"],
+                        "verdict": approval["verdict"],
+                        // A review act cast against an earlier commit is
+                        // evidence about other content, and a surface that
+                        // rendered it like a live one would be showing a
+                        // requirement as met that is not.
+                        "counts": approval["counts"],
+                    })
+                })
+                .collect(),
+        ),
+    );
+
+    out.insert(
+        "members".to_owned(),
+        Value::Array(
+            detail["members"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|member| {
+                    let drifted = !member["unchanged"].as_bool().unwrap_or(true);
+                    // A member the publication would not touch has no diff
+                    // to show, and the *corpus* says so rather than each
+                    // renderer deciding it locally — a condition encoded
+                    // twice is a condition two surfaces can disagree about,
+                    // which is the whole thing decision 7 is for.
+                    let shows_a_diff = member["effect"] != json!("none");
+                    json!({
+                        "name": member["member"],
+                        "effect": member["effect"],
+                        // `unchanged` inverted, because what a reviewer has
+                        // to be told is the exceptional case: the bytes moved
+                        // under the review and publishing will refuse.
+                        "drifted": drifted,
+                        // The three contents ADR-0035 decision 5 puts in front
+                        // of a reviewer, as **text a person reads** rather than
+                        // as the bytes that carry it: a memory's canonical
+                        // object is JSON, and what has to be named is the
+                        // content inside it, not the envelope.
+                        "proposed": if shows_a_diff { readable(&member["proposed"]) } else { Value::Null },
+                        "baseline": match member.get("baseline") {
+                            Some(baseline) if shows_a_diff => readable(&baseline["text"]),
+                            _ => Value::Null,
+                        },
+                        // The record as it stands now. Equal to `proposed`
+                        // unless somebody edited underneath the review, which
+                        // is the only condition under which it is a third
+                        // fact rather than a repeat of the second — so it is
+                        // carried only then, and a surface is asked to name
+                        // it only when it means something.
+                        "current": if drifted { readable(&member["content"]) } else { Value::Null },
+                    })
+                })
+                .collect(),
+        ),
+    );
+
+    if let Some(scan) = detail.get("scan") {
+        out.insert(
+            "scan".to_owned(),
+            json!({
+                "blocks_at": scan["blocks_at"],
+                "blocked": scan["blocked"],
+                // Order is a fact: worst first is what makes a truncated
+                // read still lead with the reason.
+                "findings": scan["findings"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|finding| json!({
+                        "path": finding["path"],
+                        "line": finding["line"],
+                        "rule": finding["rule"],
+                        "severity": finding["severity"],
+                        "blocking": finding["blocking"],
+                    }))
+                    .collect::<Vec<_>>(),
+            }),
+        );
+    }
+
+    if let Some(quality) = detail.get("quality") {
+        let checklist = match quality.get("checklist") {
+            Some(checklist) if checklist["complete"] == json!(true) => "complete",
+            Some(_) => "partial",
+            None => "absent",
+        };
+        out.insert(
+            "quality".to_owned(),
+            json!({
+                // Two numbers, never one. A surface that averaged them could
+                // not tell a well-formatted bundle nobody worked through from
+                // one somebody did (ADR-0053 decision 1).
+                "score": quality["score"],
+                "min_score": quality["min_score"],
+                "checklist": checklist,
+                "checklist_required": quality["requires_checklist"],
+                // The gateway's sentences, copied. Composing them here would
+                // be a third author of a line ADR-0056 decision 6 exists to
+                // give one author.
+                "shortfalls": quality["shortfalls"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|shortfall| shortfall["detail"].clone())
+                    .collect::<Vec<_>>(),
+                "needs_override": quality["needs_override"],
+            }),
+        );
+    }
+
+    Value::Object(out)
+}
+
+/// Derives the facts from every committed payload.
+///
+/// Pure, and therefore not gated on a database: `make ci` checks that the
+/// facts still follow from the payloads even where no Postgres exists, which
+/// matters because the facts are what both renderers are held to and a stale
+/// one would weaken two suites at once.
+#[test]
+fn the_facts_follow_from_the_corpus() {
+    for case in CASES {
+        let detail = read_case(&corpus_dir(), case);
+        settle_file(
+            &format!("{case}.facts.json"),
+            &facts(&detail),
+            "the corpus implies",
+        );
+    }
 }

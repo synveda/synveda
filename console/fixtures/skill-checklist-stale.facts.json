@@ -1,0 +1,30 @@
+{
+  "state": "open",
+  "outstanding": "steward × 1, security-reviewer × 1, 2 distinct approver(s)",
+  "approvals": [],
+  "members": [
+    {
+      "name": "triage/SKILL.md",
+      "effect": "add",
+      "drifted": false,
+      "proposed": "---\nname: triage\ndescription: Use when reviewing a change to the on-call runbook.\n---\n\n# triage\n\nSort an incoming report into a queue, and say why it landed there.\n\n## Steps\n\n1. Read what is in front of you.\n2. Do the thing this skill is for.\n3. Report what changed.\n\n## Example\n\n```sh\necho 'ran triage'\n```\n",
+      "baseline": null,
+      "current": null
+    }
+  ],
+  "scan": {
+    "blocks_at": "high",
+    "blocked": false,
+    "findings": []
+  },
+  "quality": {
+    "score": 100,
+    "min_score": 70,
+    "checklist": "absent",
+    "checklist_required": true,
+    "shortfalls": [
+      "no reviewer checklist is recorded for exactly these bytes"
+    ],
+    "needs_override": true
+  }
+}

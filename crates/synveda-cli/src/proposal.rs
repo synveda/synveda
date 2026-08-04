@@ -252,6 +252,14 @@ struct Member {
     sensitivity: Sensitivity,
     effect: Effect,
     proposed: String,
+    /// The member's text **as it stands now**, which is neither the
+    /// baseline nor the proposal when somebody has edited underneath an
+    /// open review. Rendered only in that case: everywhere else it is a
+    /// second copy of `proposed`, and a review surface that printed it
+    /// twice would be inviting a reader to look for a difference that is
+    /// not there.
+    #[serde(default)]
+    content: String,
     #[serde(default)]
     baseline: Option<Baseline>,
 }
@@ -831,11 +839,20 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
             } else {
                 String::new()
             };
+            // The verdict in the text and not only in the colour. Colour is
+            // the fast read for somebody at a terminal, and it is *nothing*
+            // to a review piped to a file, read by a screen reader, or
+            // pasted into a ticket — and this is the one fact on the line
+            // that decides whether approving the proposal can achieve
+            // anything. It matters most in the case the reader cannot
+            // reason around: a severity from a gateway newer than this
+            // binary, where the name itself tells them nothing.
+            let blocks = if blocking { "  [blocks]" } else { "" };
             out.push_str(&paint(
                 mark,
                 &format!(
-                    "    {:<8} {}:{}  {}{}",
-                    finding.severity, finding.path, finding.line, finding.rule, times,
+                    "    {:<8} {}:{}  {}{}{}",
+                    finding.severity, finding.path, finding.line, finding.rule, times, blocks,
                 ),
             ));
             out.push('\n');
@@ -999,6 +1016,16 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
                  publishing will refuse",
             ));
             out.push('\n');
+            // And what it says *now*, which is a third thing beside the
+            // baseline and the proposal and belongs to nobody's decision
+            // yet (ADR-0035 decision 5). Telling a reviewer the bytes moved
+            // without telling them where to is telling them to go and look
+            // — and the diff below is deliberately not this text, because
+            // what the approvals bind is what was proposed.
+            for line in member.content.lines() {
+                out.push_str(&paint(Mark::Meta, &format!("              now: {line}")));
+                out.push('\n');
+            }
         }
         if member.effect == Effect::None {
             continue;
@@ -1233,6 +1260,8 @@ mod tests {
             sensitivity: Sensitivity::Internal,
             effect,
             proposed: after.to_owned(),
+            // Undrifted, so the record still says what was proposed.
+            content: after.to_owned(),
             baseline: before.map(|text| Baseline {
                 object_hash: "c".repeat(64),
                 text: text.to_owned(),
@@ -1825,5 +1854,291 @@ mod tests {
         assert!(painted.starts_with("\u{1b}[32m") && painted.ends_with("\u{1b}[0m"));
         // Plain lines stay plain either way, so a piped diff is byte-clean.
         assert_eq!(paint_line(Mark::Plain, "  x", true), "  x");
+    }
+
+    // ── The parity corpus (CNSL-1, ADR-0056 decision 7) ─────────────────
+
+    /// Every case in `console/fixtures/`. Kept in step with the list in
+    /// `synveda-gateway/tests/console_parity.rs`, which is what records
+    /// them; a case added there and not here is a case only one surface
+    /// answers.
+    const CASES: &[&str] = &[
+        "memory-update",
+        "memory-drifted",
+        "skill-clean",
+        "skill-below-bar",
+        "skill-checklist-stale",
+        "skill-blocking-scan",
+        "skill-unknown-severity",
+    ];
+
+    fn corpus_dir() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../console/fixtures")
+    }
+
+    /// A case recorded over in the gateway and not listed here is a case
+    /// this surface never answers, and the list above is a comment asking
+    /// somebody to remember. This is the same request, addressed to a test.
+    #[test]
+    fn every_case_in_the_corpus_is_answered_here() {
+        let mut found: Vec<String> = std::fs::read_dir(corpus_dir())
+            .expect("read console/fixtures")
+            .filter_map(|entry| {
+                let name = entry.ok()?.file_name().into_string().ok()?;
+                name.strip_suffix(".facts.json").map(str::to_owned)
+            })
+            .collect();
+        found.sort();
+        let mut listed: Vec<String> = CASES.iter().map(|case| (*case).to_owned()).collect();
+        listed.sort();
+        assert_eq!(
+            found, listed,
+            "the corpus on disk and the cases this suite answers have diverged",
+        );
+    }
+
+    fn corpus(case: &str, extension: &str) -> Value {
+        let path = corpus_dir().join(format!("{case}.{extension}"));
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+        serde_json::from_str(&text).unwrap_or_else(|err| panic!("{case}.{extension}: {err}"))
+    }
+
+    /// Asserts the rendering **names** a fact, with a message that says
+    /// which case and which fact rather than dumping a transcript and
+    /// leaving the reader to find the missing line.
+    fn names(case: &str, rendered: &str, needle: &str, what: &str) {
+        assert!(
+            rendered.contains(needle),
+            "{case}: the review does not name {what} ({needle:?})\n\n{rendered}",
+        );
+    }
+
+    /// How a member is identifiable in a rendering.
+    ///
+    /// Derived from the *shape* of the name rather than by calling the
+    /// renderer's own `label`, which would make the assertion agree with
+    /// whatever the renderer did. An address a reader cannot type is
+    /// abbreviated by both surfaces; a path somebody chose is not, because
+    /// a name a person typed is the whole point of the name.
+    fn identifier(name: &str) -> String {
+        let uuid_shaped =
+            name.len() == 36 && name.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+        if uuid_shaped {
+            short(name)
+        } else {
+            name.to_owned()
+        }
+    }
+
+    /// The part of a rendering from one heading to the next.
+    ///
+    /// Facts are asserted where a reviewer would look for them, which is
+    /// not pedantry: a scan finding names the file it was found in, and a
+    /// member names the same file, so a search over the whole transcript
+    /// would let the scan block satisfy an assertion about the diff and
+    /// the review would pass with no members rendered at all.
+    fn section<'a>(case: &str, rendered: &'a str, from: &str, to: Option<&str>) -> &'a str {
+        let start = rendered
+            .find(from)
+            .unwrap_or_else(|| panic!("{case}: no {from:?} block\n\n{rendered}"));
+        let rest = &rendered[start..];
+        to.and_then(|to| rest.find(to))
+            .map_or(rest, |end| &rest[..end])
+    }
+
+    /// The line of the rendering that mentions `needle`.
+    fn line_with<'a>(case: &str, rendered: &'a str, needle: &str) -> &'a str {
+        rendered
+            .lines()
+            .find(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{case}: no line mentions {needle:?}\n\n{rendered}"))
+    }
+
+    /// **The acceptance criterion, this half of it.**
+    ///
+    /// CNSL-1 asks for full review parity with the CLI, and the only
+    /// version of that a test can fail is one where both surfaces answer
+    /// the same corpus. `console/fixtures/<case>.facts.json` says what a
+    /// review has to name; this asserts that `synveda proposal review`
+    /// names all of it, and the console's suite asserts the same file
+    /// against its own rendering.
+    ///
+    /// Every assertion here is about **naming a fact**, never about
+    /// layout: that a blocking finding is distinguishable, not that it is
+    /// red; that both quality numbers appear, not the shape of the line
+    /// they appear on. ADR-0056 rejected serving a display model precisely
+    /// so a terminal and a browser could differ where they should, and a
+    /// parity suite that pinned wording would be that display model
+    /// arriving through the back door.
+    #[test]
+    fn the_cli_names_every_fact_the_corpus_requires() {
+        for case in CASES {
+            let detail: Detail = serde_json::from_value(corpus(case, "json"))
+                .unwrap_or_else(|err| panic!("{case} is not a proposal detail: {err}"));
+            let facts = corpus(case, "facts.json");
+            // No colour: a review piped to a file or read by a screen
+            // reader has to carry every fact in its text, and the console
+            // has no ANSI to lean on either.
+            let rendered = render_detail(&detail, false);
+
+            names(
+                case,
+                &rendered,
+                facts["state"].as_str().expect("state"),
+                "the proposal's state",
+            );
+            names(
+                case,
+                &rendered,
+                facts["outstanding"].as_str().expect("outstanding"),
+                "what the requirement still lacks",
+            );
+
+            let reviews = section(case, &rendered, "  reviews", Some("\n  effect on "));
+            let members = section(case, &rendered, "  effect on ", None);
+
+            for approval in facts["approvals"].as_array().expect("approvals") {
+                let subject = approval["subject"].as_str().expect("subject");
+                names(case, reviews, subject, "an approver");
+                let line = line_with(case, reviews, subject);
+                assert!(
+                    line.contains(approval["verdict"].as_str().expect("verdict")),
+                    "{case}: {subject}'s verdict is not on the line naming them: {line:?}",
+                );
+                if approval["counts"] == json!(false) {
+                    assert!(
+                        line.contains("does not count"),
+                        "{case}: an approval of an earlier commit must be marked as \
+                         not counting, or a reviewer reads a requirement as met that \
+                         is not: {line:?}",
+                    );
+                }
+            }
+
+            for member in facts["members"].as_array().expect("members") {
+                let name = member["name"].as_str().expect("name");
+                // A uuid-shaped name may be abbreviated and a path may not
+                // (both surfaces abbreviate an address the reader cannot
+                // type); what parity asks is that the member is
+                // identifiable, so the assertion is the twelve characters
+                // that make it so.
+                let identifier = identifier(name);
+                names(case, members, &identifier, "a member");
+                let line = line_with(case, members, &identifier);
+                let label = match member["effect"].as_str().expect("effect") {
+                    "add" => "add",
+                    "update" => "update",
+                    "none" => "same",
+                    other => panic!("{case}: unknown effect {other}"),
+                };
+                assert!(
+                    line.contains(label),
+                    "{case}: what publishing would do to {name} is not on its line: \
+                     {line:?}",
+                );
+                if member["drifted"] == json!(true) {
+                    names(
+                        case,
+                        members,
+                        "publishing will refuse",
+                        "that the member drifted under the review",
+                    );
+                }
+                for (field, what) in [
+                    ("baseline", "the bytes a publication would overwrite"),
+                    ("proposed", "the bytes under review"),
+                    ("current", "the member as it stands now"),
+                ] {
+                    let Some(text) = member[field].as_str() else {
+                        continue;
+                    };
+                    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+                        names(case, members, line, what);
+                    }
+                }
+            }
+
+            if let Some(scan) = facts.get("scan") {
+                let scan_block =
+                    section(case, &rendered, "  security scan", Some("\n  effect on "));
+                for finding in scan["findings"].as_array().expect("findings") {
+                    let rule = finding["rule"].as_str().expect("rule");
+                    names(case, scan_block, rule, "a scan finding");
+                    let line = line_with(case, scan_block, rule);
+                    for part in [
+                        finding["path"].as_str().expect("path").to_owned(),
+                        finding["line"].to_string(),
+                        finding["severity"].as_str().expect("severity").to_owned(),
+                    ] {
+                        assert!(
+                            line.contains(&part),
+                            "{case}: {rule} is missing {part:?} from its line: {line:?}",
+                        );
+                    }
+                    // ADR-0056 decision 5: the gateway's verdict, and a
+                    // reader who cannot see colour still has to be able to
+                    // tell which findings stop the publication — including
+                    // in the case where the severity means nothing to them.
+                    assert_eq!(
+                        line.contains("blocks"),
+                        finding["blocking"] == json!(true),
+                        "{case}: {rule} is served blocking={} and its line does not \
+                         say so: {line:?}",
+                        finding["blocking"],
+                    );
+                }
+                if scan["blocked"] == json!(true) {
+                    names(
+                        case,
+                        scan_block,
+                        "REFUSED",
+                        "that the pack in force will refuse this bundle",
+                    );
+                }
+            }
+
+            if let Some(quality) = facts.get("quality") {
+                // Two numbers, never one (ADR-0053 decision 1).
+                names(
+                    case,
+                    &rendered,
+                    &format!("{}/100", quality["score"]),
+                    "the rubric score",
+                );
+                names(
+                    case,
+                    &rendered,
+                    &quality["min_score"].to_string(),
+                    "the bar the pack asks for",
+                );
+                let checklist = match quality["checklist"].as_str().expect("checklist") {
+                    "complete" => "complete",
+                    "partial" => "PARTIAL",
+                    _ if quality["checklist_required"] == json!(true) => "NONE recorded",
+                    _ => "none recorded",
+                };
+                names(case, &rendered, checklist, "the state of the checklist");
+                for shortfall in quality["shortfalls"].as_array().expect("shortfalls") {
+                    // Verbatim: the sentence is the gateway's, and a surface
+                    // that reworded it would be the second author decision 6
+                    // exists to prevent.
+                    names(
+                        case,
+                        &rendered,
+                        shortfall.as_str().expect("a sentence"),
+                        "a bar this bundle misses",
+                    );
+                }
+                if quality["needs_override"] == json!(true) {
+                    names(
+                        case,
+                        &rendered,
+                        "quality override",
+                        "that publishing needs an override",
+                    );
+                }
+            }
+        }
     }
 }

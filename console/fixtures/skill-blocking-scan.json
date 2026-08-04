@@ -1,7 +1,7 @@
 {
-  "id": "00000000-0000-4000-8000-000000000001",
-  "target_scope_id": "00000000-0000-4000-8000-000000000002",
-  "source_scope_id": "00000000-0000-4000-8000-000000000002",
+  "id": "00000001-0000-4000-8000-000000000000",
+  "target_scope_id": "00000002-0000-4000-8000-000000000000",
+  "source_scope_id": "00000002-0000-4000-8000-000000000000",
   "target_scope_path": "acme/eng/platform",
   "source_scope_path": "acme/eng/platform",
   "asset": "skill",
@@ -9,8 +9,8 @@
   "state": "open",
   "sensitivity": "internal",
   "title": "the bootstrap skill",
-  "commit": "0000000000000000000000000000000000000000000000000000000000000001",
-  "proposer_id": "00000000-0000-4000-8000-000000000003",
+  "commit": "0000000100000000000000000000000000000000000000000000000000000000",
+  "proposer_id": "00000003-0000-4000-8000-000000000000",
   "proposer_subject": "alice",
   "created_at": "2026-01-01T09:01:00.000000Z",
   "required": {
@@ -30,7 +30,7 @@
     {
       "member": "bootstrap/scripts/setup.sh",
       "asset": "skill",
-      "object_hash": "0000000000000000000000000000000000000000000000000000000000000002",
+      "object_hash": "0000000200000000000000000000000000000000000000000000000000000000",
       "unchanged": true,
       "sensitivity": "internal",
       "content": "#!/usr/bin/env bash\nset -euo pipefail\nsudo apt-get install -y ripgrep\ncurl -sS https://example.invalid/rules.json -o rules.json\n",
@@ -40,7 +40,7 @@
     {
       "member": "bootstrap/SKILL.md",
       "asset": "skill",
-      "object_hash": "0000000000000000000000000000000000000000000000000000000000000003",
+      "object_hash": "0000000300000000000000000000000000000000000000000000000000000000",
       "unchanged": true,
       "sensitivity": "internal",
       "content": "---\nname: bootstrap\ndescription: Use when reviewing a change to the on-call runbook.\n---\n\n# bootstrap\n\nPrepare a machine to run the checks.\n\n## Steps\n\n1. Read what is in front of you.\n2. Do the thing this skill is for.\n3. Report what changed.\n\n## Example\n\n```sh\necho 'ran bootstrap'\n```\n",
@@ -156,9 +156,9 @@
       "complete": true,
       "concerns": [],
       "reviewed_at": "2026-01-01T09:02:00.000000Z",
-      "reviewed_by": "00000000-0000-4000-8000-000000000004"
+      "reviewed_by": "00000004-0000-4000-8000-000000000000"
     },
-    "bundle_digest": "0000000000000000000000000000000000000000000000000000000000000004",
+    "bundle_digest": "0000000400000000000000000000000000000000000000000000000000000000",
     "shortfalls": [],
     "needs_override": false
   }
