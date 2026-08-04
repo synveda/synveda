@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update console_sessions\n        set access_token = $2,\n            access_expires_at = $3,\n            refresh_token = coalesce($4, refresh_token),\n            last_seen_at = now()\n        where token_hash = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Text",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f38ecc158e5d7cf48ad45238894088429fd6ae629df5e1f76d4cd92419784dfd"
+}

@@ -23,6 +23,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod console_sessions;
 pub mod dedup;
 pub mod graph;
 pub mod group_mappings;

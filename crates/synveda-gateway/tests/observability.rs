@@ -53,6 +53,7 @@ fn state(url: &str) -> AppState {
         // These tests exercise the ops plane only; fail-closed default.
         verifier: std::sync::Arc::new(synveda_identity::DisabledVerifier),
         login: None,
+        public_origin: "http://127.0.0.1:8120".to_owned(),
         search_index: Arc::new(
             synveda_retrieval::SearchIndex::open(
                 std::env::temp_dir()

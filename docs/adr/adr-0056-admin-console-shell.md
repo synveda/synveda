@@ -96,12 +96,19 @@ Four forces.
 2. **The cookie names a bearer; it does not become one.** A new
    `console_sessions` table (migration 0034) holds the IdP access and refresh
    tokens server-side against an opaque, high-entropy session id; the browser
-   receives that id as `HttpOnly; Secure; SameSite=Strict; Path=/`. When a
-   `/v1` request arrives with no `Authorization` header, `tenant::resolve`
-   reads the cookie, loads the stored **access token**, and hands it to
-   `state.verifier.verify()` — the same call, the same JWKS, the same
-   `active_tenant`, the same uniform 401 (ADR-0008). No claims are ever minted
-   from a session row.
+   receives that id as `__Host-synveda_console`, `HttpOnly; Secure;
+   SameSite=Strict; Path=/`. When a `/v1` request arrives with no
+   `Authorization` header, `tenant::resolve` reads the cookie, loads the
+   stored **access token**, and hands it to `state.verifier.verify()` — the
+   same call, the same JWKS, the same `active_tenant`, the same uniform 401
+   (ADR-0008). No claims are ever minted from a session row, and since the
+   row carries no tenant (see the compliance notes) none could be.
+
+   A presented `Authorization` header **wins** over a cookie. The console is
+   the only caller with both to offer, and a client that went to the trouble
+   of sending a bearer meant that bearer; preferring the ambient credential
+   would make "which credential did this act under" a question whose answer
+   depends on header order.
 
    This is the load-bearing sentence of the ADR, so it is worth stating as an
    invariant rather than as an implementation note: **the session's authority
@@ -304,15 +311,29 @@ Four forces.
   `console_sessions` row to a `Claims` value that does not pass through token
   verification.
 
-- **Multi-tenancy.** `console_sessions` is read *before* the tenant scope
-  exists — it is one of the inputs that establishes it — so it sits with
-  `tenants` on the pre-scope side of RLS rather than under a tenant predicate
-  that would return zero rows at the moment it is needed. Lookup is only ever
-  by the hash of a full session secret, never by tenant or subject, so the
-  table is not a listing surface; the row carries `tenant_id` and the tenant
-  it resolves to is then subject to TEN-1's active-tenant rule and the uniform
-  401 exactly as a bearer's is. The trade-off is the one `tenants` already
-  makes and is recorded here rather than rediscovered.
+- **Multi-tenancy.** `console_sessions` **carries no `tenant_id` at all**, and
+  that is a correction to this ADR's first draft rather than an accident of
+  it. The draft gave the row a tenant and placed it beside `tenants` on the
+  pre-scope side of RLS, reasoning that a session is read *before* the tenant
+  scope exists and so cannot sit under a predicate that would return zero rows
+  at the moment it is needed. Writing the migration showed that argument is
+  correct and beside the point. The RLS completeness guard
+  (`crates/synveda-store/tests/rls.rs`) discovers tenant-scoped tables *by*
+  their `tenant_id` column and demands forced row security on each, so a
+  tenant column would have needed either an exemption or a renaming — both of
+  which work, and both of which are lies told to a guard whose entire value is
+  that nobody can quietly opt out of it.
+
+  Removing the column instead makes decision 2 structural. The tenant comes
+  from the verified token's `tid` claim, exactly as it does for a bearer
+  (TEN-1, ADR-0008), and a corrupted or forged session row cannot move a
+  reviewer into another organisation **because there is nowhere in it to write
+  an organisation**. What was going to be an invariant maintained by the code
+  that reads the table is now one the schema cannot express a violation of.
+  The table is credential custody keyed by a secret, not tenant-scoped data;
+  lookup is only ever by the hash of a full session secret, and the tenant it
+  resolves to is then subject to TEN-1's active-tenant rule and the uniform
+  401 exactly as a bearer's is.
 
 - **Audit.** Unchanged vocabulary and unchanged envelope (decision 9).
   Successful logins remain non-events on ADR-0019 decision 6's reasoning —

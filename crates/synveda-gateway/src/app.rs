@@ -56,6 +56,11 @@ pub struct AppState {
     /// The code+PKCE login flow when OIDC is configured (AUTH-1); `None`
     /// otherwise, in which case `/auth/*` answers 404.
     pub login: Option<Arc<LoginFlow>>,
+    /// This gateway's own origin (`scheme://host[:port]`), derived from
+    /// `SYNVEDA_PUBLIC_URL`. The value a cookie-authenticated mutation's
+    /// `Origin` header must equal (CNSL-1, ADR-0056 decision 4). Bearer
+    /// requests never consult it.
+    pub public_origin: String,
     /// The embedded PDP (AUTHZ-1, ADR-0012): handlers authorize through it
     /// before acting; the pack refresher hot-swaps stored packs into it.
     pub pdp: Arc<Pdp>,
@@ -278,6 +283,11 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/callback", get(auth::callback))
         .route("/auth/cli/exchange", post(auth::cli_exchange))
         .route("/auth/refresh", post(auth::refresh))
+        // Sign-out (CNSL-1, ADR-0056). Unauthenticated for the same reason
+        // its siblings are: destroying a credential needs only that
+        // credential, and requiring a valid session to end one would mean
+        // an expired session could not be cleared.
+        .route("/auth/console/logout", post(auth::console_logout))
         .merge(authenticated)
         .layer(middleware::from_fn(track_http_metrics))
         // Added last so the request span is outermost and every inner span —

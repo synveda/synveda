@@ -46,10 +46,11 @@ pub const OIDC_LOGINS_TOTAL: &str = "synveda_oidc_logins_total";
 /// client, so this is where "log in once" is actually kept true.
 pub const OIDC_REFRESHES_TOTAL: &str = "synveda_oidc_refreshes_total";
 
-/// The scope that asks an issuer for a refresh token. Requested only for
-/// CLI logins, and only where discovery advertises it (ADR-0027 decision
-/// 6): an issuer that rejects unknown scopes must not have its browser
-/// logins broken by a scope only the CLI needs.
+/// The scope that asks an issuer for a refresh token. Requested for the
+/// two destinations that can keep one — the CLI (ADR-0027 decision 6) and
+/// the console (ADR-0056 decision 3) — and only where discovery advertises
+/// it: an issuer that rejects unknown scopes must not have its JSON browser
+/// logins broken by a scope those two need and it cannot hold.
 const OFFLINE_ACCESS: &str = "offline_access";
 
 /// How long a pending login may wait between redirect and callback.
@@ -72,9 +73,34 @@ struct PendingLogin {
     code_verifier: String,
     nonce: String,
     expires_at: Instant,
-    /// Where to hand the completed session back, for a CLI-initiated
-    /// login; `None` for a browser login, which reads it as JSON.
-    cli: Option<CliHandoff>,
+    /// Where to hand the completed session back.
+    destination: LoginDestination,
+}
+
+/// Where a completed login is delivered. The OIDC exchange is identical for
+/// all three — same PKCE, same JWKS verification, same TEN-1 active-tenant
+/// rule, same AUTH-2 provisioning — and this decides only the last step.
+///
+/// An enum rather than a pair of optional fields, on ADR-0027 decision 6's
+/// own reasoning: a struct with `cli: Option<..>` beside `console: bool`
+/// can represent "a CLI login that is also a console login", and the way
+/// that gets fixed is somebody noticing. Here it cannot be written.
+#[derive(Debug, Clone)]
+pub enum LoginDestination {
+    /// AUTH-1's browser login (ADR-0010 §1): the session comes back as
+    /// JSON on the callback response.
+    Json,
+    /// ADPT-1's CLI login (ADR-0027 decision 5): a one-time, state-bound
+    /// code 302'd to the CLI's loopback listener; the session material
+    /// waits on the gateway until the CLI redeems it.
+    Cli(CliHandoff),
+    /// CNSL-1's console login (ADR-0056 decision 2): the gateway keeps the
+    /// tokens, sets an `HttpOnly` cookie naming them, and 302s into the
+    /// app. Carries no return address — the console is served from the
+    /// gateway's own origin, so there is nowhere else for it to land, and
+    /// an operator-supplied redirect target here would be an open
+    /// redirector attached to a login.
+    Console,
 }
 
 /// A CLI-initiated login's return address (ADR-0027 decision 5): the
@@ -144,10 +170,11 @@ pub struct LoginSession {
     pub expires_in: Option<u64>,
     /// The refresh token, when the issuer grants one. It leaves the
     /// gateway on the CLI handoff exchange and nowhere else (ADR-0027
-    /// decision 6) — never in the browser-facing response.
+    /// decision 6) — never in the browser-facing response. A console login
+    /// keeps it on the server entirely (ADR-0056 decision 3).
     pub refresh_token: Option<String>,
-    /// The parked CLI return address, when this login was CLI-initiated.
-    pub cli: Option<CliHandoff>,
+    /// Where this login asked to be delivered.
+    pub destination: LoginDestination,
 }
 
 /// A refreshed credential (ADR-0027 decision 6). No claims: a refresh
@@ -219,12 +246,16 @@ impl LoginFlow {
     }
 
     /// Starts a login and returns the IdP authorization URL to redirect to.
-    /// `issuer` may be omitted when exactly one is configured. `cli` is
-    /// `Some` when `synveda login` started this flow (ADR-0027 decision 5);
-    /// it changes nothing about the OIDC exchange, only where the completed
-    /// session is handed back.
-    pub async fn begin(&self, issuer: Option<&str>, cli: Option<CliHandoff>) -> Result<String> {
-        if let Some(handoff) = &cli {
+    /// `issuer` may be omitted when exactly one is configured.
+    /// `destination` decides only where the completed session is handed
+    /// back (ADR-0027 decision 5, ADR-0056 decision 2); the OIDC exchange
+    /// is identical for all three.
+    pub async fn begin(
+        &self,
+        issuer: Option<&str>,
+        destination: LoginDestination,
+    ) -> Result<String> {
+        if let LoginDestination::Cli(handoff) = &destination {
             validate_cli_redirect_uri(&handoff.redirect_uri)?;
             if handoff.state.is_empty() {
                 return Err(Error::Invalid {
@@ -244,11 +275,16 @@ impl LoginFlow {
         // Per-issuer (ADR-0013 decision 1): IdPs that gate the groups claim
         // behind a scope add it in config; the default stays universal.
         let mut scope_list = config.login_scopes.clone();
-        // "Log in once" needs a refresh token, and only the CLI keeps a
-        // credential long enough to need one (ADR-0027 decision 6). Ask
-        // only where the issuer says it understands the scope: an IdP that
-        // rejects unknown scopes would otherwise fail the whole login.
-        if cli.is_some()
+        // "Log in once" needs a refresh token, and two of the three
+        // destinations keep a credential long enough to need one: the CLI
+        // on disk (ADR-0027 decision 6) and the console in
+        // `console_sessions` (ADR-0056 decision 3). A JSON browser login
+        // does not — ADR-0027 decision 6 made it structurally incapable of
+        // carrying one back — so asking for the scope there would request
+        // a credential with nowhere to go. Ask only where the issuer says
+        // it understands the scope: an IdP that rejects unknown scopes
+        // would otherwise fail the whole login.
+        if !matches!(destination, LoginDestination::Json)
             && issuer_state.advertises_scope(OFFLINE_ACCESS)
             && !scope_list.iter().any(|scope| scope == OFFLINE_ACCESS)
         {
@@ -288,7 +324,7 @@ impl LoginFlow {
                     code_verifier,
                     nonce,
                     expires_at: now + PENDING_TTL,
-                    cli,
+                    destination,
                 },
             );
         }
@@ -297,17 +333,18 @@ impl LoginFlow {
         Ok(url.into())
     }
 
-    /// The CLI return address parked under `state`, without consuming the
-    /// pending login. The gateway reads it *before* completing so that
-    /// every way a login can fail still lands back in the terminal
-    /// `synveda login` is waiting in, rather than on a page nobody is
-    /// looking at (ADR-0027 decision 5).
-    pub fn peek_cli(&self, state: &str) -> Option<CliHandoff> {
+    /// The destination parked under `state`, without consuming the pending
+    /// login. The gateway reads it *before* completing so that every way a
+    /// login can fail still lands where the caller is waiting — the
+    /// terminal `synveda login` is sitting in (ADR-0027 decision 5), or the
+    /// console's own error page rather than a JSON body rendered into a
+    /// browser tab (ADR-0056).
+    pub fn peek_destination(&self, state: &str) -> Option<LoginDestination> {
         let pending = self.pending.lock().expect("pending login lock");
         pending
             .get(state)
             .filter(|login| login.expires_at > Instant::now())
-            .and_then(|login| login.cli.clone())
+            .map(|login| login.destination.clone())
     }
 
     /// Discards a pending login without completing it — the IdP-reported
@@ -363,7 +400,7 @@ impl LoginFlow {
             token_type: tokens.token_type,
             expires_in: tokens.expires_in,
             refresh_token: tokens.refresh_token,
-            cli: login.cli,
+            destination: login.destination,
         })
     }
 
@@ -560,7 +597,7 @@ mod tests {
     #[tokio::test]
     async fn named_but_unconfigured_issuer_is_invalid() {
         let err = flow()
-            .begin(Some("http://other-idp"), None)
+            .begin(Some("http://other-idp"), LoginDestination::Json)
             .await
             .expect_err("unconfigured issuer must be rejected");
         assert!(matches!(err, Error::Invalid { .. }), "got {err:?}");
@@ -611,7 +648,7 @@ mod tests {
         let err = flow()
             .begin(
                 None,
-                Some(CliHandoff {
+                LoginDestination::Cli(CliHandoff {
                     redirect_uri: "http://evil.test/callback".to_owned(),
                     state: "s".to_owned(),
                 }),

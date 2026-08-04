@@ -296,6 +296,7 @@ fn oidc_state(url: &str, issuer: &str) -> AppState {
         metrics: metrics_handle(),
         verifier: verifier.clone(),
         login: Some(Arc::new(LoginFlow::new(verifier, REDIRECT_URI.to_owned()))),
+        public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
         scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
@@ -815,6 +816,7 @@ async fn the_cli_auth_plane_is_404_without_oidc() {
     let state = AppState {
         verifier: Arc::new(synveda_identity::DisabledVerifier),
         login: None,
+        public_origin: "http://127.0.0.1:8120".to_owned(),
         ..oidc_state(UNREACHABLE_URL, "http://unused.test")
     };
     for (uri, body) in [
