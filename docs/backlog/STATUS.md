@@ -2881,12 +2881,17 @@ rather than by a dedicated one._
 
 _Phase demo goal: Entra/Okta live, spec-compliant governed skills into Claude Code + Cursor, LoCoMo/LongMemEval scores published, Helm install._
 
-- [ ] [AUTH-4: SCIM 2.0 server](AUTH-4.md)
-- [ ] [AUTH-5: Directory sync fallback](AUTH-5.md)
-- [ ] [TEN-3: Tenant-partitioned storage layout](TEN-3.md)
-- [ ] [TEN-4: Per-tenant encryption keys](TEN-4.md)
-- [ ] [TEN-5: Tenant lifecycle](TEN-5.md)
-- [ ] [TEN-6: Cross-tenant isolation test harness](TEN-6.md)
+_Reordered 2026-08-04 (see the Sequencing note in SYNVEDA_FEATURES.md). The
+original order scattered this phase's own demo goal across slots 1, 2, 10, 13
+and 18, so the phase could not run its demo until the phase was nearly over.
+Nothing here blocks anything else — every Phase 3 dependency was met by Phase
+2 — so the order is by demo-readiness. OPS-1 and CNSL-1 lead because they are
+what makes any of it showable: until `synveda init` exists there is no
+instance that survives a restart, and FLOW-6's CLI parity notwithstanding, a
+terminal undersells a governance product to the people who buy it. TEN-3..6
+and AUD-3,4 move behind them — a customer asks for those at procurement, not
+at a demo. Nothing is cut._
+
 - [x] [SKIL-1: agentskills.io-compliant model](SKIL-1.md) — done 2026-08-03, ADR-0051, migration 0031, AC tests: crates/synveda-gateway/tests/skills.rs (**the review half from the consumer's side and the install half by arithmetic**: a curator's direct publish refused under `regulated-strict` *and again under* `standard`, which is decision 18 — the invariant floor had required the security-reviewer role without ever requiring a second signature, so under the SMB pack one person shipped executable code alone; then the AC, an edit reaching a client only after a steward and a security reviewer, two distinct people, have signed; every served file's content address **recomputed by the client's own arithmetic** (`SkillAsset::address`) against the number the commit named, and the bundle proved to be exactly the reviewed files; a published skill composing into *nothing* — no block entry, no watermark, no recall hit — which is ADR-0049 option 4's third reason restored where PRMT-2 inverted it; the spec's own rules refused at authoring, the case-fold collision among them; the gradient walk, which for skills is a filesystem fact because the name is the installed directory name; the pin a rewind refuses naming both commits; the bundle a dropped file cannot ship past its own approval; a credential stopped before anything is stored; and the chain, swept for file content), crates/synveda-policy/tests/{packs,roles,approvals,service_scope}.rs (SkillRead/SkillWrite in the role×action golden at pack `@14`, the skill plane asserted to mirror each pack's own memory plane tier for tier, the confinement carve-out widened and now run over all three authored asset types, and the approval golden re-recorded for decision 18 — exactly 30 lines, two packs × three tiers × five scope kinds, with `regulated-strict` and every `restricted` cell untouched), crates/synveda-store/tests/rls.rs (`a_skill_cannot_be_forged_moved_renamed_or_raised_and_its_files_delete_only_as_drafts` — including the boundary that makes the one DELETE grant in the three registries safe: the draft file goes, the objects stay, and `skills` itself has no DELETE at all), crates/synveda-types/tests/skill_corpus.rs (`--ignored`: the frontmatter subset against a real corpus — 37 installed bundles under ~/.codex/skills and ~/.claude/plugins, 37/37 after the widenings its first run forced), crates/synveda-types + crates/synveda-vedaflow + crates/synveda-cli (28 unit tests on the spec's name grammar, the filesystem-safe path rules, the strict YAML subset construct by construct, the object address and the client table), demo: demos/skil-1-skills.sh (the whole arc from a terminal, the two clients' trees `diff -r`-identical in a scratch HOME, and `chain valid (42 events)`)
 
 _SKIL-1 notes (ADR-0051): a skill is the third authored asset and the
@@ -3232,18 +3237,24 @@ what is on a caller's disk and a client's claim about it would be an
 unverifiable input to a governed read. And a rewind rewrites bundles whose
 bytes never changed, because a receipt is keyed by the commit it pins to,
 which is correct and will look like more writes than expected._
-- [ ] [GRPH-3: Graph-augmented recall](GRPH-3.md)
+- [ ] [OPS-1: SMB profile](OPS-1.md)
+- [ ] [CNSL-1: Proposals inbox (hero screen)](CNSL-1.md)
+- [ ] [ADPT-2: Generic MCP server](ADPT-2.md)
+- [ ] [CNSL-2: Hierarchy & policy explorer](CNSL-2.md)
+- [ ] [AUTH-4: SCIM 2.0 server](AUTH-4.md)
+- [ ] [AUTH-5: Directory sync fallback](AUTH-5.md)
+- [ ] [EVAL-3: Public benchmark adapters](EVAL-3.md)
+- [ ] [OPS-2: Helm chart / enterprise profile](OPS-2.md)
+- [ ] [TEN-3: Tenant-partitioned storage layout](TEN-3.md)
+- [ ] [TEN-4: Per-tenant encryption keys](TEN-4.md)
+- [ ] [TEN-5: Tenant lifecycle](TEN-5.md)
+- [ ] [TEN-6: Cross-tenant isolation test harness](TEN-6.md)
 - [ ] [AUD-3: WORM export](AUD-3.md)
 - [ ] [AUD-4: SIEM streaming](AUD-4.md)
-- [ ] [EVAL-3: Public benchmark adapters](EVAL-3.md)
+- [ ] [GRPH-3: Graph-augmented recall](GRPH-3.md)
 - [ ] [EVAL-6: Load & latency suite](EVAL-6.md)
-- [ ] [OPS-1: SMB profile](OPS-1.md)
-- [ ] [OPS-2: Helm chart / enterprise profile](OPS-2.md)
 - [ ] [OPS-3: Residency routing](OPS-3.md)
 - [ ] [OPS-4: Qdrant adapter behind VectorIndex trait](OPS-4.md)
-- [ ] [CNSL-1: Proposals inbox (hero screen)](CNSL-1.md)
-- [ ] [CNSL-2: Hierarchy & policy explorer](CNSL-2.md)
-- [ ] [ADPT-2: Generic MCP server](ADPT-2.md)
 - [ ] [ADPT-3: REST/gRPC API + OpenAPI](ADPT-3.md)
 - [ ] [CTX-6: Session compression assist](CTX-6.md)
 - [ ] [FLOW-8: Git bridge — export](FLOW-8.md)

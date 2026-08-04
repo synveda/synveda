@@ -73,16 +73,21 @@ const PHASES = [
     title: "Phase 3 — Enterprise (wk 11–16)",
     demo:
       "Entra/Okta live, spec-compliant governed skills into Claude Code + Cursor, LoCoMo/LongMemEval scores published, Helm install.",
+    // Reordered 2026-08-04 by demo-readiness — see the Sequencing section's
+    // note. The demo block first (OPS-1 and CNSL-1 make the phase showable at
+    // all; the rest are what the phase demo goal names), then the block a
+    // customer asks for at procurement rather than at a demo.
     ids: [
-      "AUTH-4", "AUTH-5",
-      "TEN-3", "TEN-4", "TEN-5", "TEN-6",
       "SKIL-1", "SKIL-2", "SKIL-3", "SKIL-4",
-      "GRPH-3",
+      "OPS-1",
+      "CNSL-1", "ADPT-2", "CNSL-2",
+      "AUTH-4", "AUTH-5",
+      "EVAL-3", "OPS-2",
+      "TEN-3", "TEN-4", "TEN-5", "TEN-6",
       "AUD-3", "AUD-4",
-      "EVAL-3", "EVAL-6",
-      "OPS-1", "OPS-2", "OPS-3", "OPS-4",
-      "CNSL-1", "CNSL-2",
-      "ADPT-2", "ADPT-3",
+      "GRPH-3", "EVAL-6",
+      "OPS-3", "OPS-4",
+      "ADPT-3",
       "CTX-6", "FLOW-8",
     ],
   },
