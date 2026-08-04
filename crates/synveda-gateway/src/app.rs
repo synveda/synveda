@@ -99,6 +99,21 @@ impl AppState {
     }
 }
 
+/// The console bundle's routes, nested under its prefix — or nothing at
+/// all when no bundle is built (CNSL-1, ADR-0056 decision 1). Resolved
+/// once per router build rather than per request: whether a directory
+/// exists is not a question worth asking on the hot path, and a bundle
+/// that appears while the process is running is a deployment nobody
+/// performed.
+fn console_routes() -> Router<AppState> {
+    match crate::console::bundle_dir() {
+        Some(dir) => {
+            Router::new().nest_service(crate::console::CONSOLE_PREFIX, crate::console::router(&dir))
+        }
+        None => Router::new(),
+    }
+}
+
 /// Builds the gateway router: ops-plane routes plus the authenticated `/v1`
 /// plane, wrapped in the per-request trace span and HTTP metrics middleware.
 pub fn router(state: AppState) -> Router {
@@ -288,6 +303,11 @@ pub fn router(state: AppState) -> Router {
         // credential, and requiring a valid session to end one would mean
         // an expired session could not be cleared.
         .route("/auth/console/logout", post(auth::console_logout))
+        // The console bundle (CNSL-1, ADR-0056 decision 1), when one is
+        // built. Unauthenticated by nature: it is the page a signed-out
+        // operator lands on to sign in, and it holds no data — every fact
+        // it shows comes from a `/v1` call the cookie authenticates.
+        .merge(console_routes())
         .merge(authenticated)
         .layer(middleware::from_fn(track_http_metrics))
         // Added last so the request span is outermost and every inner span —

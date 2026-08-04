@@ -124,7 +124,15 @@ sqlx = { version = "0.8", default-features = false, features = [
     "json",
 ] }
 thiserror = "2"
-tower-http = { version = "0.7", default-features = false, features = ["trace"] }
+# `fs` and `set-header` added with CNSL-1 (ADR-0056 decision 1): ServeDir
+# serves the console bundle from the gateway's own origin, and the response
+# headers around it carry the Content-Security-Policy that makes decision 8's
+# "no third-party fetch" an enforcement rather than a claim.
+tower-http = { version = "0.7", default-features = false, features = [
+    "trace",
+    "fs",
+    "set-header",
+] }
 tracing = "0.1"
 tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

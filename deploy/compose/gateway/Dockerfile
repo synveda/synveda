@@ -7,6 +7,28 @@
 # decision 6 puts *outside* the acceptance criterion's clock — a release
 # ships this image, and the operator being timed pulls it.
 
+# The console bundle (CNSL-1, ADR-0056 decision 1). Its own stage, because
+# it shares nothing with the Rust build and must not invalidate it: editing
+# a stylesheet should not recompile Cedar.
+#
+# This is also what keeps decision 1's promise concrete — the image gains a
+# static directory, not a second runtime. Node appears here and never in
+# the runtime stage.
+FROM node:22-bookworm-slim AS console
+WORKDIR /src
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY console/package.json console/
+# Adapters and SDKs are workspace members the lockfile resolves against;
+# their manifests have to exist for a frozen install to succeed.
+COPY adapters/claude-code/package.json adapters/claude-code/
+COPY adapters/mcp-server/package.json  adapters/mcp-server/
+COPY sdks/typescript/package.json      sdks/typescript/
+RUN pnpm install --frozen-lockfile --filter @synveda/console...
+COPY tsconfig.base.json ./
+COPY console console
+RUN pnpm --filter @synveda/console build
+
 FROM rust:1.96.0-bookworm AS build
 WORKDIR /src
 
@@ -62,6 +84,12 @@ RUN apt-get update \
 # no policy directory to ship and no way for the image's policy to differ
 # from the binary's.
 COPY --from=build /src/target/release/synveda-gateway /usr/local/bin/synveda-gateway
+
+# The console bundle: static files the binary serves from its own origin
+# (CNSL-1, ADR-0056 decision 1). No Node in this stage — the build stage
+# above is where it lived, and the runtime is still one process.
+COPY --from=console /src/console/dist /usr/share/synveda/console
+ENV SYNVEDA_CONSOLE_DIR=/usr/share/synveda/console
 
 # The Tantivy sidecar (CTX-1). A named volume mounts here so an index
 # survives a container replacement rather than being rebuilt on every

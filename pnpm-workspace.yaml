@@ -1,3 +1,15 @@
 packages:
   - adapters/*
+  - console
   - sdks/typescript
+
+# Build scripts are denied by default and allowed one package at a time
+# (pnpm's own posture, and the right one for a product that sells
+# trustworthiness): a postinstall script runs arbitrary code on every
+# developer machine and every CI runner.
+#
+# esbuild is allowed because Vite cannot bundle without it and its script
+# does exactly one thing — link the platform-specific binary that its
+# own optionalDependencies already downloaded. Added with CNSL-1.
+allowBuilds:
+  esbuild: true

@@ -1,0 +1,161 @@
+/**
+ * The console's `/v1` client (CNSL-1, ADR-0056).
+ *
+ * Two things live here, and only the second one is interesting.
+ *
+ * The first is that **no credential is handled in this file**, or anywhere
+ * else in the bundle. The session is an `HttpOnly` cookie the browser
+ * attaches on its own (ADR-0056 decision 2); there is no token to read, no
+ * header to set, and nothing for an XSS to steal out of JavaScript. A
+ * `credentials: "same-origin"` is the whole of the authentication code.
+ *
+ * The second is the **classification**, which decides what a reviewer is
+ * shown and is therefore the part worth testing. It is a pure function of
+ * a status code precisely so that it can be.
+ */
+
+/** Where the gateway serves the console, and the prefix its API shares. */
+export const API_BASE = "/v1";
+
+/**
+ * What a response means to the console, as opposed to what it says.
+ *
+ * The load-bearing distinction is **`unauthenticated` versus `forbidden`**.
+ * A 401 means there is no usable session and the answer is to sign in; a
+ * 403 means the session is fine and the PDP said no. Collapsing them — the
+ * easy mistake, since both are "you cannot have this" — puts a Sign in
+ * button in front of somebody who is already signed in, and clicking it
+ * returns them to the same 403. That is an infinite loop rendered as a
+ * helpful suggestion, and it is the kind of thing that survives a demo and
+ * fails in front of a customer whose reviewer holds one role short.
+ */
+export type Outcome =
+  | { kind: "ok"; body: unknown }
+  | { kind: "unauthenticated" }
+  | { kind: "forbidden"; message: string }
+  | { kind: "invalid"; message: string }
+  | { kind: "conflict"; message: string }
+  | { kind: "unavailable"; message: string };
+
+/**
+ * Maps a status and a parsed body onto the console's vocabulary.
+ *
+ * Unknown statuses land on `unavailable` rather than on `ok`: a surface
+ * that treats a status it has never seen as success will render an error
+ * body as if it were data, which is worse than saying nothing.
+ */
+export function classify(status: number, body: unknown): Outcome {
+  if (status >= 200 && status < 300) {
+    return { kind: "ok", body };
+  }
+  const message = messageOf(body);
+  switch (status) {
+    case 401:
+      return { kind: "unauthenticated" };
+    case 403:
+      return { kind: "forbidden", message };
+    case 400:
+    case 404:
+    case 422:
+      // A 404 is deliberately `invalid` rather than a kind of its own. The
+      // gateway returns a uniform 404 for a resource the caller may not
+      // see (AUTHZ-3), so "not found" and "not yours" are the same answer
+      // by design, and a console that rendered them differently would be
+      // inventing a distinction the product refuses to make.
+      return { kind: "invalid", message };
+    case 409:
+      return { kind: "conflict", message };
+    default:
+      return { kind: "unavailable", message };
+  }
+}
+
+/**
+ * Pulls the human-facing sentence out of the gateway's error taxonomy,
+ * falling back to something honest rather than to `[object Object]`.
+ *
+ * The gateway owns the wording (`crate::error::caller_facing`), and the
+ * console displays it rather than composing its own — the same rule
+ * ADR-0056 decision 6 applies to quality shortfalls, for the same reason:
+ * two authors of one sentence is two sentences.
+ */
+function messageOf(body: unknown): string {
+  if (typeof body === "object" && body !== null) {
+    const message = (body as { message?: unknown }).message;
+    if (typeof message === "string" && message.length > 0) {
+      return message;
+    }
+  }
+  return "the gateway did not say why";
+}
+
+/** A `fetch` that returns the console's vocabulary instead of a Response. */
+export async function call(
+  path: string,
+  init: RequestInit = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<Outcome> {
+  let response: Response;
+  try {
+    response = await fetchImpl(`${API_BASE}${path}`, {
+      ...init,
+      // Same-origin by construction (ADR-0056 decision 1). Stated rather
+      // than left to the default so that moving the console off this
+      // origin fails here, visibly, instead of silently dropping the
+      // cookie and looking like a session that expired.
+      credentials: "same-origin",
+      headers: {
+        accept: "application/json",
+        ...(init.headers ?? {}),
+      },
+    });
+  } catch (cause) {
+    // A dead gateway is `unavailable`, not `unauthenticated`. Told apart
+    // because the answers differ: wait and retry, versus sign in again.
+    return {
+      kind: "unavailable",
+      message: cause instanceof Error ? cause.message : "the gateway is unreachable",
+    };
+  }
+  let body: unknown = null;
+  const text = await response.text();
+  if (text.length > 0) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = null;
+    }
+  }
+  return classify(response.status, body);
+}
+
+/** Who the current session resolves to, as `/v1/whoami` reports it. */
+export interface WhoAmI {
+  subject: string;
+  tenant: { id: string; slug: string; name: string };
+}
+
+/** Resolves the session. `unauthenticated` here is the signed-out state. */
+export async function whoami(fetchImpl: typeof fetch = fetch): Promise<Outcome> {
+  return call("/whoami", { method: "GET" }, fetchImpl);
+}
+
+/**
+ * Ends the session. Not under {@link API_BASE}: sign-out is part of the
+ * unauthenticated auth plane, because a session too expired to authenticate
+ * is exactly the one that most needs clearing.
+ */
+export async function signOut(fetchImpl: typeof fetch = fetch): Promise<void> {
+  try {
+    await fetchImpl("/auth/console/logout", {
+      method: "POST",
+      credentials: "same-origin",
+    });
+  } catch {
+    // The gateway clears the cookie; if it could not be reached, reloading
+    // onto a signed-out page is still the right next step.
+  }
+}
+
+/** Where a sign-in starts. `console=true` is what asks for a cookie. */
+export const SIGN_IN_URL = "/auth/login?console=true";
