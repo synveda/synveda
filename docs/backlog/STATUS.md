@@ -3318,7 +3318,88 @@ the ADPT-1 split for the ADPT-1 reason; the cold path measured 227s on the
 same laptop, so the criterion holds either way and the split buys honesty
 rather than a passing number._
 
-- [ ] [CNSL-1: Proposals inbox (hero screen)](CNSL-1.md)
+- [x] [CNSL-1: Proposals inbox (hero screen)](CNSL-1.md) — done 2026-08-04, ADR-0056 (amending ADR-0052 decision 7 and ADR-0053 decision 8), migration 0034_console_sessions, AC demo: demos/cnsl-1-proposals-inbox.sh (**the criterion, and the thing that makes it checkable**: one person logs in twice — once at a terminal, once in a browser — and reads the same live proposal through both renderers, then **11 facts pulled straight out of the JSON the gateway just answered with** are looked for in both, and every one is found; around it the seam that had no other way to be shown, a login that answers `Set-Cookie: __Host-synveda_console, HttpOnly Secure SameSite=Strict Path=/` and **no `access_token` and no `refresh_token` anywhere in the response**, a cookie-authenticated mutation refused **401 with no `Origin` and 401 from `evil.example`** while the same cookie reads **200** without one, and the browser's approval landing on the chain as `vedaflow.proposal.approved, actor_kind=subject` — `chain valid (15 events)`, indistinguishable from the CLI's), AC tests: crates/synveda-gateway/tests/console_parity.rs (the corpus recorded from the real `/v1` API and verified against it, plus the facts derivation and the synthesised case's shape), crates/synveda-cli/src/proposal.rs (25 tests, including `the_cli_names_every_fact_the_corpus_requires` over all seven cases), console/src/review.test.tsx + diff.test.mts + text.test.mts (33 tests, the same seven cases through `react-dom/server`), crates/synveda-gateway/tests/console_session.rs (12) + console_serving.rs (8), new: console/ (the Vite/React package, served by the gateway under `/console/`), console/fixtures/ (the parity corpus and its facts), `console_sessions`, `POST /auth/console/logout`, scripts/check-npm-licences.mjs
+_CNSL-1 notes (ADR-0056): the feature adds **no governed API**. `GET
+/v1/proposals/{id}` already carried every noun in the feature text, so what
+was actually missing was a browser at the `/v1` seam and a *second renderer*
+of judgements that existed in exactly one implementation.
+
+**The load-bearing decision is that the cookie names a bearer rather than
+becoming one.** `console_sessions` holds the IdP's tokens server-side against
+an opaque session id, the browser gets that id and nothing else, and a `/v1`
+request carrying it reaches `state.verifier.verify()` by the same call
+sequence a bearer does. The session's authority is the token's authority,
+re-checked every request: there is no code path from a session row to a
+`Claims` value that skips verification, so an expired or revoked token cannot
+be laundered into a longer-lived console session. The table **carries no
+`tenant_id` at all**, and that is a correction to the ADR's first draft
+rather than an accident of it — the RLS completeness guard discovers
+tenant-scoped tables *by* that column, so a tenant column would have needed
+an exemption or a renaming, both of which are lies told to a guard whose
+entire value is that nobody can quietly opt out. Removing it makes the
+invariant structural: a forged session row cannot move a reviewer into
+another organisation because there is nowhere in it to write one.
+
+**Two judgements moved to the gateway before either renderer was written,
+and that is what the AC turned out to be about.** A scan finding now carries
+its own `blocking`, and a `QualityShortfall` its own sentence. The CLI used
+to derive both — a rank comparison that has to know the order is `notice <
+high < critical` rather than the alphabetical one, and four hand-written
+sentences reconstructing the arithmetic behind a refusal. Reimplementing
+either in TypeScript would have produced two answers to one question that
+agree on the day they are written. The CLI keeps its rank comparison only as
+a fallback for a gateway *older* than itself, which is the one skew direction
+that survives: the console cannot be out of step with its gateway, because
+the gateway ships it.
+
+**Parity is a corpus, and the corpus found three things.** Seven
+`ProposalDetail` payloads recorded from the real API by a test that also
+verifies them (`SYNVEDA_RECORD_FIXTURES=1` re-records), each with a
+`.facts.json` saying what a review must name, asserted by both renderers.
+Building it found that the CLI marked a **blocking finding only in colour** —
+nothing to a review piped to a file, read by a screen reader, or pasted into
+a ticket, and the one fact on the line that decides whether approving can
+achieve anything; that the CLI **never rendered the third content at all**,
+so a reviewer was told "this has changed since it was proposed" and not what
+it had changed *to* (`MemberView.content` was not even deserialised); and
+that the corpus's own normalisation defeated it, because every stand-in
+shared its first twelve characters and twelve is exactly what both surfaces
+abbreviate an id to. The suite was then checked for teeth rather than assumed
+to have them: deleting the chip fails `skill-blocking-scan` and
+`skill-unknown-severity` and nothing else, deleting the drifted content fails
+`memory-drifted` and nothing else.
+
+The sharpest case is one **no gateway can serve**, so it is synthesised:
+two severity bands outside `ScanSeverity`'s three, one above the pack's
+threshold and one below. A client meeting an unfamiliar severity has to
+guess, and the only safe guess is to rank it above everything — which is what
+the CLI's fallback does and must, and which is wrong for the band below. What
+holds a synthesised fixture honest is its shape, so a second test asserts it
+carries the same fields as a recorded sibling.
+
+Two smaller findings, both from the demo. `synveda skill propose` read
+`proposal_id` and `members` off a response that carries neither, so it had
+been printing an empty id beside "0 member(s)" — the verb's whole output was
+unusable, and naming the proposal is the next thing anybody does with one.
+And a member's `proposed` and `baseline.text` are canonical JSON objects
+carried **as strings**, so the corpus recorder's scrubber walked past the ids
+inside them and the corpus changed every run for a reason invisible in a
+diff; the drift guard caught it on its first verifying run, which is the
+argument for the guard.
+
+Deferred with a named trigger: **the set of actions offered**, which is the
+one clause of the AC the corpus does not cover and says so. Which acts a
+proposal admits is a function of its state, its pack and the reader's own
+roles, and only the first is on the wire — so the screen currently offers
+approve and reject unconditionally rather than what the reader may actually
+do. Claiming it in a fixture would be inventing the other two. It wants a
+served field on the same reasoning as decisions 5 and 6, and CNSL-2's
+hierarchy and policy explorer is where the reader's own capabilities stop
+being avoidable. Also accepted and named: `console_sessions` is the first
+table to store a live credential at rest, stored recoverable because the
+gateway has to *use* the refresh token, with **TEN-4 (per-tenant encryption
+keys) as its named successor** and the hashed session id, the IdP's own
+lifetime and the 12-hour cap as the compensating controls until then._
 - [ ] [ADPT-2: Generic MCP server](ADPT-2.md)
 - [ ] [CNSL-2: Hierarchy & policy explorer](CNSL-2.md)
 - [ ] [AUTH-4: SCIM 2.0 server](AUTH-4.md)

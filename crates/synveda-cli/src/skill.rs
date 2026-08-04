@@ -972,18 +972,25 @@ pub async fn propose(
     let (api, origin) = Api::connect(profile).await?;
     announce(&api, &origin);
     let response = api.post("/v1/proposals", Some(body)).await?;
+    // `id`, not `proposal_id`: opening returns the proposal's summary
+    // (`ProposalSummary`, flattened), and `proposal_id` is what the *other*
+    // responses and the audit payloads call it. Reading the wrong one
+    // printed an empty id beside "0 member(s)" — the summary carries no
+    // member list either — which is to say the verb's whole output was
+    // unusable, and the next thing anybody does with a proposal is name it.
+    // Found by `demos/cnsl-1-proposals-inbox.sh`, which had to parse this
+    // line to review what it had just proposed.
+    let id = response["id"].as_str().unwrap_or_default();
     println!(
-        "synveda: opened proposal {} — {} member(s), {}",
-        response["proposal_id"].as_str().unwrap_or_default(),
-        response["members"].as_array().map_or(0, Vec::len),
+        "synveda: opened proposal {} — {}, {}",
+        id,
+        response["asset"].as_str().unwrap_or("skill"),
         response["state"].as_str().unwrap_or_default(),
     );
-    if let Some(required) = response.get("required")
-        && !required.is_null()
-    {
-        println!("         needs {required}");
+    if let Some(outstanding) = response["outstanding"].as_str() {
+        println!("         outstanding {outstanding}");
     }
-    println!("         review with `synveda proposal show <id>`");
+    println!("         review with `synveda proposal review {id}`");
     Ok(())
 }
 
