@@ -225,6 +225,20 @@ Decisions, specifically:
    unremarked publication is the exact failure the feature exists to
    prevent.
 
+   **Amended 2026-08-04 by ADR-0056 decision 6, on the arrival of a second
+   renderer.** A `QualityShortfall` serialised its *data* and not its
+   sentence, and the CLI composed the prose, so that a reader was never
+   shown a `kind` slug to look up. That was right against the forces this
+   ADR had — one client, and a gateway that would have been serialising
+   layout. With CNSL-1's console it becomes a drift source: the same
+   shortfall explained in two languages by two authors, with nothing able
+   to fail when they diverge. The report now carries `detail` beside the
+   data — [`QualityShortfall::describe`], the sentence the refusal at
+   publication and the audit payload already used — and both surfaces
+   display the served one. The data stays on the wire, so a client that
+   wants to lay out the arithmetic itself still can; what stops being
+   duplicated is the *wording*.
+
 9. **The override is a PDP action, `SkillQualityOverride`, spent through a
    separate governed act with a mandatory reason** — and this is where
    force 3 is spent. `POST /v1/proposals/{id}/quality-override` records the

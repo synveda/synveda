@@ -117,18 +117,34 @@ struct ScanFinding {
     title: String,
     line: usize,
     count: usize,
+    /// The gateway's verdict on this finding (ADR-0056 decision 5).
+    ///
+    /// Absent only from a gateway older than this CLI, which is the one
+    /// skew direction that survives — the console cannot be out of step
+    /// with its gateway because the gateway ships it, and this binary
+    /// can.
+    #[serde(default)]
+    blocking: Option<bool>,
 }
 
 impl ScanReport {
-    /// Whether a finding of this severity is one the pack in force
-    /// refuses.
+    /// Whether this finding is one the pack in force refuses.
     ///
-    /// Compared by **rank rather than by string**: `critical` under a
-    /// `high` threshold blocks, and equality would have said it did not.
-    /// An unknown name — a gateway newer than this CLI — ranks above
-    /// everything, so a severity this binary has never heard of is
-    /// treated as blocking rather than as decoration.
-    fn blocks(&self, severity: &str) -> bool {
+    /// **The served verdict wins.** The gateway holds both the severity
+    /// order and the pack, so it is the only participant that can answer
+    /// this without guessing; ADR-0056 decision 5 moved the answer there
+    /// so that two renderers could not disagree about it.
+    ///
+    /// The rank comparison below is what remains, and it is a fallback
+    /// for an *older* gateway rather than a second implementation of the
+    /// rule. It compares by rank rather than by string, so `critical`
+    /// under a `high` threshold blocks where equality would have said it
+    /// did not, and a severity this binary has never heard of ranks above
+    /// everything and is treated as blocking rather than as decoration.
+    fn blocks(&self, finding: &ScanFinding) -> bool {
+        if let Some(blocking) = finding.blocking {
+            return blocking;
+        }
         fn rank(severity: &str) -> u8 {
             match severity {
                 "notice" => 0,
@@ -137,7 +153,7 @@ impl ScanReport {
                 _ => u8::MAX,
             }
         }
-        rank(severity) >= rank(&self.blocks_at)
+        rank(&finding.severity) >= rank(&self.blocks_at)
     }
 }
 
@@ -182,53 +198,40 @@ struct ChecklistView {
     reviewed_at: DateTime<Utc>,
 }
 
-/// One bar the bundle misses. `detail` is the gateway's own sentence, so
-/// the CLI never has to reconstruct the arithmetic behind a refusal.
+/// One bar the bundle misses.
+///
+/// The data fields ADR-0053 defined are still on the wire and are
+/// deliberately not deserialised here: since ADR-0056 decision 6 the
+/// gateway serves `detail` — [`QualityShortfall::describe`], the same
+/// sentence its refusals and audit payloads carry — and this CLI's
+/// reconstruction of that sentence is deleted rather than kept beside it.
+/// Two authors of one sentence is two sentences, and a shortfall
+/// explained one way at review and another at publication is the drift a
+/// second renderer would have made permanent.
 #[derive(Deserialize)]
 struct Shortfall {
     #[serde(default)]
     kind: Option<String>,
     #[serde(default)]
-    score: Option<u8>,
-    #[serde(default)]
-    min_score: Option<u8>,
-    #[serde(default)]
-    items: Vec<String>,
-    #[serde(default)]
-    unanswered: Vec<String>,
+    detail: Option<String>,
 }
 
 impl Shortfall {
-    /// One line a reviewer can act on. Reconstructed here rather than sent
-    /// as prose because the gateway's `QualityShortfall` serialises its
-    /// data and not its sentence, and a CLI that printed a `kind` slug
-    /// would be making its reader look the meaning up.
+    /// One line a reviewer can act on, as the gateway wrote it.
+    ///
+    /// The fallback is for a gateway *older* than this CLI, which serves
+    /// the slug and no sentence. Naming the slug is worse than a sentence
+    /// and better than silence: an unexplained bar cannot be acted on at
+    /// all.
     fn describe(&self) -> String {
-        match self.kind.as_deref() {
-            Some("below-threshold") => format!(
-                "the rubric scored {} and this pack asks for {}",
-                self.score.unwrap_or(0),
-                self.min_score.unwrap_or(0),
-            ),
-            Some("checklist-missing") => {
-                "no reviewer checklist is recorded for exactly these bytes".to_owned()
-            }
-            Some("checklist-incomplete") => {
-                format!(
-                    "the checklist leaves {} unanswered",
-                    self.unanswered.join(", ")
-                )
-            }
-            Some("checklist-concerns") => {
-                format!("a reviewer answered `no` to {}", self.items.join(", "))
-            }
-            // A gateway newer than this CLI. Say so rather than print
-            // nothing: an unexplained bar is worse than an unnamed one.
-            other => format!(
-                "{} (this CLI is older than the gateway; run the publish to see why)",
-                other.unwrap_or("an unnamed bar")
-            ),
+        if let Some(detail) = &self.detail {
+            return detail.clone();
         }
+        format!(
+            "{} (this gateway is older than the CLI and did not say why; run the publish to \
+             see the refusal)",
+            self.kind.as_deref().unwrap_or("an unnamed bar")
+        )
     }
 }
 
@@ -821,7 +824,7 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
             // are things to weigh, and colouring them all red would make
             // the one that stops publication indistinguishable from a
             // `pip install`.
-            let blocking = scan.blocks(&finding.severity);
+            let blocking = scan.blocks(finding);
             let mark = if blocking { Mark::Removed } else { Mark::Meta };
             let times = if finding.count > 1 {
                 format!(" ×{}", finding.count)
@@ -846,7 +849,7 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
                      or above); approving it cannot make it publishable",
                     scan.findings
                         .iter()
-                        .filter(|finding| scan.blocks(&finding.severity))
+                        .filter(|finding| scan.blocks(finding))
                         .count(),
                     scan.blocks_at,
                 ),
@@ -1444,6 +1447,7 @@ mod tests {
                             .to_owned(),
                         line: 4,
                         count: 1,
+                        blocking: Some(true),
                     },
                     ScanFinding {
                         path: "helper/SKILL.md".to_owned(),
@@ -1452,6 +1456,7 @@ mod tests {
                         title: "installs packages at run time".to_owned(),
                         line: 9,
                         count: 2,
+                        blocking: Some(false),
                     },
                 ],
             }),
@@ -1495,6 +1500,7 @@ mod tests {
                     title: "escalates privileges or makes a file executable".to_owned(),
                     line: 2,
                     count: 1,
+                    blocking: Some(false),
                 }],
             }),
             quality: None,
@@ -1504,10 +1510,42 @@ mod tests {
         assert!(!rendered.contains("REFUSED"), "{rendered}");
     }
 
-    /// The rank comparison, not the string one: `critical` under a `high`
+    fn finding(severity: &str, blocking: Option<bool>) -> ScanFinding {
+        ScanFinding {
+            path: "helper/scripts/setup.sh".to_owned(),
+            rule: "fetch-and-execute".to_owned(),
+            severity: severity.to_owned(),
+            title: "does something worth weighing".to_owned(),
+            line: 1,
+            count: 1,
+            blocking,
+        }
+    }
+
+    /// ADR-0056 decision 5: the gateway holds the rule table and the pack,
+    /// so its verdict is the answer and this CLI's comparison does not get
+    /// a vote. The case that proves it is one where the two disagree —
+    /// a `notice` the gateway calls blocking under a `critical`
+    /// threshold, which the rank comparison would have painted as
+    /// decoration.
+    #[test]
+    fn the_gateways_verdict_wins_over_the_local_comparison() {
+        let report = ScanReport {
+            ruleset_version: 1,
+            worst: Some("notice".to_owned()),
+            blocks_at: "critical".to_owned(),
+            blocked: true,
+            findings: Vec::new(),
+        };
+        assert!(report.blocks(&finding("notice", Some(true))));
+        assert!(!report.blocks(&finding("critical", Some(false))));
+    }
+
+    /// The fallback, for a gateway older than this binary: the rank
+    /// comparison, not the string one. `critical` under a `high`
     /// threshold blocks, and equality would have said it did not.
     #[test]
-    fn a_severity_above_the_threshold_blocks() {
+    fn without_a_served_verdict_a_severity_above_the_threshold_blocks() {
         let report = ScanReport {
             ruleset_version: 1,
             worst: Some("critical".to_owned()),
@@ -1515,12 +1553,15 @@ mod tests {
             blocked: true,
             findings: Vec::new(),
         };
-        assert!(report.blocks("critical"));
-        assert!(report.blocks("high"));
-        assert!(!report.blocks("notice"));
+        assert!(report.blocks(&finding("critical", None)));
+        assert!(report.blocks(&finding("high", None)));
+        assert!(!report.blocks(&finding("notice", None)));
         // A severity a newer gateway grew is treated as blocking rather
-        // than as decoration.
-        assert!(report.blocks("catastrophic"));
+        // than as decoration. Unreachable in practice now — a gateway new
+        // enough to have grown a severity is new enough to serve
+        // `blocking` — and kept because the fallback has to be safe on
+        // its own terms.
+        assert!(report.blocks(&finding("catastrophic", None)));
     }
 
     fn quality(score: u8, min: u8, checklist: Option<ChecklistView>) -> QualityReport {
@@ -1630,10 +1671,7 @@ mod tests {
         report.needs_override = true;
         report.shortfalls = vec![Shortfall {
             kind: Some("checklist-concerns".to_owned()),
-            score: None,
-            min_score: None,
-            items: vec!["tested".to_owned()],
-            unanswered: Vec::new(),
+            detail: Some("a reviewer answered `no` to tested".to_owned()),
         }];
         let rendered = render_detail(&detail_with(report), false);
         assert!(
@@ -1651,21 +1689,38 @@ mod tests {
         assert!(rendered.contains("this pack sets no bar"), "{rendered}");
     }
 
-    /// A shortfall kind this binary has never heard of is reported as one
-    /// rather than dropped — a gateway newer than the CLI must not make a
-    /// refusal invisible.
+    /// ADR-0056 decision 6: the sentence is the gateway's, so a kind this
+    /// binary has never heard of needs no local prose to be explained. A
+    /// shortfall invented after this CLI was built renders as well as one
+    /// invented before it.
     #[test]
-    fn an_unknown_shortfall_is_named_rather_than_swallowed() {
+    fn a_shortfall_kind_this_binary_never_heard_of_still_explains_itself() {
         let unknown = Shortfall {
             kind: Some("licence-missing".to_owned()),
-            score: None,
-            min_score: None,
-            items: Vec::new(),
-            unanswered: Vec::new(),
+            detail: Some("no licence file is present and this pack requires one".to_owned()),
         };
-        let described = unknown.describe();
-        assert!(described.contains("licence-missing"), "{described}");
-        assert!(described.contains("older than the gateway"), "{described}");
+        assert_eq!(
+            unknown.describe(),
+            "no licence file is present and this pack requires one"
+        );
+    }
+
+    /// The other direction, which is the one that now degrades: a gateway
+    /// older than this CLI serves the slug and no sentence. Name it rather
+    /// than drop it — an unexplained bar is worse than an unnamed one, and
+    /// a refusal a reviewer cannot see is the failure mode worth avoiding.
+    #[test]
+    fn an_unexplained_shortfall_is_named_rather_than_swallowed() {
+        let bare = Shortfall {
+            kind: Some("checklist-missing".to_owned()),
+            detail: None,
+        };
+        let described = bare.describe();
+        assert!(described.contains("checklist-missing"), "{described}");
+        assert!(
+            described.contains("older than the CLI"),
+            "the skew is named so the reader knows why the sentence is missing: {described}"
+        );
     }
 
     #[test]
