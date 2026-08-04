@@ -3303,8 +3303,10 @@ compared on every run.
 Deferred with triggers, all in ADR-0055: **no re-embed command** — the
 embedder is chosen at install time and stated as permanent, because
 `record_embeddings` stores the model, embed-or-fail is unconditional, and
-a corpus half-written at `hash@1` and half at `bge-m3` is a retrieval
-failure that presents as bad relevance and nothing else; doing it properly
+a corpus half-written at `hash@1` and half at `bge-m3` fails more quietly
+than "bad relevance" — the dense leg filters on `model` and `dim`, so the
+older half is **excluded from that leg entirely** and survives on BM25
+alone, with no error, no warning and no degraded header; doing it properly
 is a bitemporal rewrite under RLS with the sidecar rebuilt, and inventing
 that inside an installer is how it gets done badly. **No headless `init`**
 (the CI and kind-cluster path) — the install-time operator would have to be

@@ -131,10 +131,18 @@ Four forces.
    documents the first-run download; the default starts no TEI at all and the
    AC's ten minutes never contain a model download. `init` prints, in both
    cases, which embedder the corpus will be written with and that changing it
-   later requires re-embedding every record — because a corpus half-written
-   at `hash@1` and half at `bge-m3` is a retrieval failure that presents as
-   bad relevance and nothing else. There is deliberately **no re-embed
-   command**: see the deferral.
+   later requires re-embedding every record.
+
+   The failure a mixed corpus produces is worth stating exactly, because it
+   is quieter than "bad relevance". The dense leg's query filters
+   `where e.dim = <n> and e.model = $3` (`synveda-store/src/search.rs`), so
+   records written under the *other* model are not mis-ranked — they are
+   **excluded from the dense leg entirely** and survive on BM25 alone. Half
+   the corpus silently becomes lexical-only: no error, no warning, and not
+   even a degraded header, because from the read path's point of view
+   nothing went wrong. There is deliberately **no re-embed command**: see the
+   deferral. Note also that `SUPPORTED_ANN_DIMS` is `[16, 1024]` (ADR-0024
+   decision 5), so a third embedder is a schema question rather than a flag.
 
 6. **The AC clock starts at the first `synveda init` keystroke, with image
    acquisition untimed — the ADPT-1 split, for the ADPT-1 reason.** That

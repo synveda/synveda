@@ -104,12 +104,22 @@ synveda init --embedder deterministic   # the default; no download
 ```
 
 `record_embeddings` stores the model that wrote each vector, embed-or-fail is
-unconditional, and **nothing in the product re-embeds a corpus**. A deployment
-that writes records under one embedder and then switches has a corpus it
-cannot compare across the switch, which shows up as bad relevance and nothing
-else. The default is `deterministic`: retrieval works and the lexical leg is
-exact, but semantic similarity is not meaningful — right for a functional
-demo, wrong for a quality one.
+unconditional, and **nothing in the product re-embeds a corpus**.
+
+The default is `deterministic`: BLAKE3 of the content expanded to a 16-dim
+unit vector, recorded as `hash@1`. It needs no network and no model, and the
+same text always gives the same vector — which is what makes tests and demos
+reproduce exactly. Its geometry carries no meaning, though: equal texts
+collide and similar texts do not attract, so the dense leg contributes
+nothing and BM25 does all the real work. Right for a functional demo, wrong
+for a quality one.
+
+If you switch after writing records, the older half does not rank badly — it
+**disappears from the dense leg**. That leg filters on `model` and `dim`, so
+records written under the previous embedder are excluded from it entirely and
+survive on BM25 alone, with no error and no warning. Choose before you write,
+or start a fresh tenant. Supported dimensions are 16 and 1024 (ADR-0024
+decision 5), so a third model is not simply a flag.
 
 ## Using your own IdP
 
