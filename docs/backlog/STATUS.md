@@ -1,14 +1,19 @@
 # Backlog status
 
 86 features parsed from docs/SYNVEDA_FEATURES.md — one file per
-feature in this directory. Phases per the Sequencing section. Regenerate with
-`node scripts/generate-backlog.mjs` (preserves done-marks listed in the script).
+feature in this directory. Phases per the Sequencing section. This file and the
+per-feature files are **hand-maintained**; `node scripts/check-backlog.mjs`
+(in `make ci`) asserts that the three agree, and writes nothing.
 
-Note (2026-07-25): the per-feature **narrative paragraphs** below are
-hand-written here and are *not* in the generator's `PHASE_NOTES`, so a
-regeneration would discard everything from FLOW-3's paragraph onward. Add
-the done-mark to `DONE` in the script as usual; if you ever need to
-regenerate, lift the paragraphs out of git first.
+Note (2026-08-05): the generator that used to write these files was removed.
+It could no longer be run — the narrative paragraphs below, and several
+backlog files' hand-added `## Design` sections, exist only in its output, so
+regenerating discarded them; its header warned about this file and in practice
+it rewrote eleven others too. Its `DONE` map was a second copy of the records
+below that had already drifted behind them (AUTHZ-5, MEM-5), so a regeneration
+downgraded those two entries. Adding a feature is now three edits —
+SYNVEDA_FEATURES.md (Part B *and* the Sequencing line), docs/backlog/&lt;ID&gt;.md,
+and a checklist line here — and the checker fails the build if one is missed.
 
 Phase 1+ must not start until FND is complete and `make dev-up && make smoke`
 passes (CLAUDE.md, current phase).
@@ -720,7 +725,8 @@ directory, `driver.mts` included even though its scratch paths were never
 at risk, because "the adapter does not use the recursive flag" is checkable
 where "uses it only where the path is safe" is an argument.
 `scripts/generate-backlog.mjs` still uses it and is left alone: it names a
-path inside the repository rather than one from the environment.
+path inside the repository rather than one from the environment. (That
+script was removed on 2026-08-05 — see the note at the top of this file.)
 
 **The regression test runs in a child process with a five-second deadline
 and SIGKILL**, because an assertion written in a spinning thread is an

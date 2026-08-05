@@ -43,6 +43,12 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/check-crate-deps.mjs
+      # SYNVEDA_FEATURES.md, docs/backlog/<ID>.md and STATUS.md describe one
+      # feature set; this asserts they agree. It replaced the generator that
+      # used to write all three (removed 2026-08-05 — regenerating discarded
+      # STATUS.md's hand-written narrative), so nothing writes them now and
+      # a feature added to one file and forgotten in another fails here.
+      - run: node scripts/check-backlog.mjs
 
   # The gate that can block a merge (EVAL-4, ADR-0047 decision 7), which is
   # ADR-0028 option 5's own reversal trigger fired by name: it declined this
