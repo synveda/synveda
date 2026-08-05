@@ -186,6 +186,18 @@ Deploy: single binary + Postgres for SMB │ Helm chart, regional data planes fo
 latency-critical read path). Claude Code adapter in **TypeScript** (hooks ecosystem). SDKs:
 Rust, TS, Python. Admin console: React (later phase; API-first until then).
 
+> **Footnote, added by ADPT-2 (ADR-0057, amended 2026-08-05).** The *generic MCP
+> server* in the adapters row ships as `synveda mcp`, a subcommand of the Rust CLI,
+> rather than as its own TypeScript package: the official TS MCP SDK does not
+> implement the `2026-07-28` revision and the Rust one does. It stays in this row by
+> **behaviour** — a gateway client over `/v1` holding a bearer, three primitives only
+> — but it now lives in a binary that also links `synveda-store`, `synveda-identity`,
+> `synveda-policy` and `synveda-audit` for its dev-bootstrap commands. So for that one
+> adapter the arrow's *three primitives only* is a **review obligation rather than a
+> structural guarantee**, and `crates/synveda-cli/src/mcp.rs` carries a test that fails
+> on any reference to a core crate. The `claude-code` adapter no longer speaks MCP
+> itself either; its `mcpServers` entry launches the same binary.
+
 **Licensing/stack constraint**: permissive or self-hostable OSS only — PostgreSQL, pgvector,
 Apache AGE, Qdrant, OPA, OpenFGA, Temporal, Keycloak-compatible OIDC. No cloud-locked services
 in the core path.
@@ -208,9 +220,10 @@ synveda/
 │   ├── synveda-identity     # OIDC, SCIM, directory sync, hierarchy provisioning
 │   ├── synveda-gateway      # axum HTTP/gRPC; the ONLY binary that speaks to the outside
 │   └── synveda-cli          # admin/dev CLI (synveda init, synveda policy apply, ...)
+│                            #   + `synveda mcp`: the generic MCP server (see §7 footnote)
 ├── adapters/
-│   ├── claude-code/         # TS: SessionStart/PreCompact/Stop hooks + MCP recall tool
-│   └── mcp-server/          # generic MCP server exposing recall (+ scoped write)
+│   └── claude-code/         # TS: SessionStart/PreCompact/Stop hooks; its MCP
+│                            #   entry launches `synveda mcp` (ADR-0057 decision 4)
 ├── sdks/ (rust, typescript, python)
 ├── policies/                # policy packs as versioned OPA bundles + FGA models
 ├── deploy/ (docker-compose single-node, helm multi-region)

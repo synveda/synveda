@@ -210,11 +210,10 @@ crates/
   synveda-identity    OIDC, JIT provisioning, hierarchy sync
   synveda-audit       the hash-chained log
   synveda-gateway     axum HTTP — the only binary that faces the outside world
-  synveda-cli         synveda login / proposal review / channel rollback / ...
+  synveda-cli         synveda login / proposal review / channel rollback / mcp / ...
   synveda-eval        the eval harness and its gates
 adapters/
-  claude-code/        hooks + the recall MCP tool (TypeScript)
-  mcp-server/         stub — lands with ADPT-2
+  claude-code/        hooks (TypeScript); its MCP entry launches `synveda mcp`
 sdks/                 rust, typescript, python — stubs, Phase 4
 policies/             Cedar policy packs
 deploy/compose/       the dev environment

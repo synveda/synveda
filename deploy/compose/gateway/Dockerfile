@@ -22,7 +22,6 @@ COPY console/package.json console/
 # Adapters and SDKs are workspace members the lockfile resolves against;
 # their manifests have to exist for a frozen install to succeed.
 COPY adapters/claude-code/package.json adapters/claude-code/
-COPY adapters/mcp-server/package.json  adapters/mcp-server/
 COPY sdks/typescript/package.json      sdks/typescript/
 RUN pnpm install --frozen-lockfile --filter @synveda/console...
 COPY tsconfig.base.json ./
