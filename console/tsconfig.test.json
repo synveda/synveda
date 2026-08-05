@@ -1,0 +1,30 @@
+{
+  // The console's tests run on Node, under the repo's existing
+  // `tsc && node --test` convention (ADPT-1), rather than pulling a browser
+  // test runner into a repo that has never had one.
+  //
+  // Rendering is covered without one. The parity suite renders the real
+  // components with `react-dom/server` and asserts over the text they
+  // produce (ADR-0056 decision 7), which is the whole of what the
+  // acceptance criterion is about: a browser is where the markup is laid
+  // out, but *which facts appear in it* is decided by this code and by
+  // nothing the DOM contributes. What a jsdom would add here is a slower
+  // way to run the same assertions.
+  //
+  // What it cannot cover is behaviour that needs events and effects — the
+  // queue's selection, the verdict round trip. Those are asserted at the
+  // seam below them instead: `api.test.mts` pins the request each verdict
+  // sends and the classification of every answer it can get back.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist-test",
+    "rootDir": "src",
+    "jsx": "react-jsx",
+    // `DOM` is here for React's own types rather than for anything under
+    // test: nothing in this configuration touches a `window`.
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["src"],
+  "exclude": ["src/main.tsx"]
+}

@@ -36,6 +36,12 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
+# CNSL-1 (ADR-0056 decision 4): derives this gateway's own origin from
+# SYNVEDA_PUBLIC_URL for the console's CSRF check. Parsed rather than
+# string-trimmed because the value is compared against a browser-supplied
+# header, and hand-rolling URL parsing for a security control is how the
+# comparison ends up wrong in a way nobody reads.
+url = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }

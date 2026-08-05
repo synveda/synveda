@@ -169,6 +169,18 @@ Decisions, specifically:
    a credential-exfiltration rule's matched text *is* a path to a credential.
    The reviewer has the file open beside it; a line number is enough.
 
+   **Amended 2026-08-04 by ADR-0056 decision 5.** A finding also names
+   whether *it* is one the pack in force refuses. The bundle-level
+   `blocked` above was enough for one client, which then derived the
+   per-finding answer by comparing `severity` against `blocks_at` — and
+   that comparison is not free: it has to know the order is `notice < high
+   < critical` rather than the alphabetical one, and it has to decide what
+   a severity it has never heard of means. With CNSL-1's console there
+   would be two clients guessing at a vocabulary this side of the wire
+   owns. The gateway serves the verdict; the CLI keeps its rank comparison
+   only as a fallback for a gateway older than itself, and the console
+   never needs one because the gateway ships it.
+
 8. **One new audit action, `skill.scan.rejected`**, chained whenever the gate
    refuses at either seam, carrying scope, skill, path, rule ids, severities,
    counts, lines, the ruleset version and the pack that decided — never file

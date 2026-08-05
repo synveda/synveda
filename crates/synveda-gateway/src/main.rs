@@ -73,6 +73,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_connections(8)
         .connect_lazy(&database_url)?;
 
+    // The gateway's own public URL. Read once here rather than inside the
+    // OIDC arm, because CNSL-1's Origin check needs it in every auth mode:
+    // a console session is refused under a dev verifier too, and it is
+    // refused for the right reason rather than because nothing was
+    // configured to compare against.
+    let public_url = std::env::var("SYNVEDA_PUBLIC_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:8120".to_owned())
+        .trim_end_matches('/')
+        .to_owned();
+    // `Origin` is scheme://host[:port] and never carries a path, so a
+    // public URL that has one would never match. Derived rather than
+    // demanded as a second setting: two settings that must agree are two
+    // settings that will not (ADR-0055's second finding, one layer down).
+    let public_origin = url::Url::parse(&public_url)
+        .ok()
+        .and_then(|url| {
+            url.origin()
+                .is_tuple()
+                .then(|| url.origin().ascii_serialization())
+        })
+        .ok_or("SYNVEDA_PUBLIC_URL must be an absolute http(s) URL")?;
+
     // One auth mode, never two (ADR-0010); fail closed when neither is
     // configured (ADR-0008).
     let oidc_issuers = std::env::var("SYNVEDA_OIDC_ISSUERS")
@@ -92,9 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             (Some(json), None) => {
                 let issuers = synveda_identity::parse_issuers(&json)?;
-                let public_url = std::env::var("SYNVEDA_PUBLIC_URL")
-                    .unwrap_or_else(|_| "http://127.0.0.1:8120".to_owned());
-                let redirect_uri = format!("{}/auth/callback", public_url.trim_end_matches('/'));
+                let redirect_uri = format!("{public_url}/auth/callback");
                 let oidc = Arc::new(OidcVerifier::new(issuers)?);
                 tracing::info!(
                     redirect_uri,
@@ -277,6 +297,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             metrics,
             verifier,
             login,
+            public_origin,
             pdp,
             scope_chains,
             service_token_max_ttl: Duration::from_secs(service_token_max_ttl_secs),

@@ -1,0 +1,72 @@
+{
+  "state": "open",
+  "outstanding": "security-reviewer × 1, 2 distinct approver(s)",
+  "approvals": [],
+  "members": [
+    {
+      "name": "bootstrap/scripts/setup.sh",
+      "effect": "add",
+      "drifted": false,
+      "proposed": "#!/usr/bin/env bash\nset -euo pipefail\nsudo apt-get install -y ripgrep\ncurl -sS https://example.invalid/rules.json -o rules.json\n",
+      "baseline": null,
+      "current": null
+    },
+    {
+      "name": "bootstrap/SKILL.md",
+      "effect": "add",
+      "drifted": false,
+      "proposed": "---\nname: bootstrap\ndescription: Use when reviewing a change to the on-call runbook.\n---\n\n# bootstrap\n\nPrepare a machine to run the checks.\n\n## Steps\n\n1. Read what is in front of you.\n2. Do the thing this skill is for.\n3. Report what changed.\n\n## Example\n\n```sh\necho 'ran bootstrap'\n```\n",
+      "baseline": null,
+      "current": null
+    }
+  ],
+  "scan": {
+    "blocks_at": "high",
+    "blocked": true,
+    "findings": [
+      {
+        "path": "bootstrap/scripts/setup.sh",
+        "line": 2,
+        "rule": "kernel-module-load",
+        "severity": "severe",
+        "blocking": true
+      },
+      {
+        "path": "bootstrap/scripts/setup.sh",
+        "line": 3,
+        "rule": "privilege-change",
+        "severity": "high",
+        "blocking": true
+      },
+      {
+        "path": "bootstrap/scripts/setup.sh",
+        "line": 3,
+        "rule": "package-install",
+        "severity": "notice",
+        "blocking": false
+      },
+      {
+        "path": "bootstrap/scripts/setup.sh",
+        "line": 4,
+        "rule": "network-egress",
+        "severity": "notice",
+        "blocking": false
+      },
+      {
+        "path": "bootstrap/scripts/setup.sh",
+        "line": 1,
+        "rule": "undeclared-shebang",
+        "severity": "advisory",
+        "blocking": false
+      }
+    ]
+  },
+  "quality": {
+    "score": 95,
+    "min_score": 70,
+    "checklist": "complete",
+    "checklist_required": true,
+    "shortfalls": [],
+    "needs_override": false
+  }
+}

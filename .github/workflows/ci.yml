@@ -117,5 +117,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
-      # The adapter suites (ADPT-1); packages without a test script are skipped.
+      # CLAUDE.md's licence rule on the npm side (CNSL-1, ADR-0056
+      # decision 8) — the gate cargo-deny gives the Rust side. After the
+      # install, because it reads the resolved tree.
+      - run: node scripts/check-npm-licences.mjs
+      # The adapter suites (ADPT-1) and the console's (CNSL-1); packages
+      # without a test script are skipped.
       - run: pnpm -r test

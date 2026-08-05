@@ -1,0 +1,29 @@
+{
+  "state": "open",
+  "outstanding": "curator × 1",
+  "approvals": [
+    {
+      "subject": "sec",
+      "verdict": "approve",
+      "counts": true
+    }
+  ],
+  "members": [
+    {
+      "name": "00000004-0000-4000-8000-000000000000",
+      "effect": "update",
+      "drifted": false,
+      "proposed": "check the on-call rota\nrotate the signing key every 90 days\nfile the change record",
+      "baseline": "check the on-call rota\nrotate the signing key\nfile the change record",
+      "current": null
+    },
+    {
+      "name": "00000005-0000-4000-8000-000000000000",
+      "effect": "none",
+      "drifted": false,
+      "proposed": null,
+      "baseline": null,
+      "current": null
+    }
+  ]
+}

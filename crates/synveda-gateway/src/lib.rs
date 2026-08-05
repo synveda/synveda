@@ -40,6 +40,7 @@ mod audit_query;
 pub mod auth;
 pub mod authz;
 pub mod channels;
+pub mod console;
 pub mod curators;
 pub mod error;
 pub mod hierarchy;

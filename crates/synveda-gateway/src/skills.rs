@@ -162,6 +162,17 @@ pub(crate) struct ScanFindingView {
     /// 1-based, so it matches what an editor shows.
     line: usize,
     count: usize,
+    /// Whether *this* finding is one the pack in force refuses
+    /// (ADR-0056 decision 5).
+    ///
+    /// Served rather than left to the client, because the gateway is the
+    /// only participant holding both the severity order and the pack that
+    /// will decide the publication. A client comparing `severity` against
+    /// `blocks_at` has to know that the order is `notice < high <
+    /// critical` and not the alphabetical one, and has to decide what a
+    /// severity it has never heard of means — a question with a right
+    /// answer only on this side of the wire.
+    blocking: bool,
 }
 
 /// A bundle's scan as a reviewer or an author reads it.
@@ -190,6 +201,7 @@ pub(crate) struct ScanReport {
 
 impl ScanReport {
     pub(crate) fn new(scan: &BundleScan, config: &SkillScanConfig) -> Self {
+        let threshold = config.threshold();
         let mut findings: Vec<ScanFindingView> = scan
             .files
             .iter()
@@ -201,6 +213,10 @@ impl ScanReport {
                     title: finding.title,
                     line: finding.line,
                     count: finding.count,
+                    // The same comparison `SkillScanConfig::blocks` makes
+                    // about the bundle, made about one finding: an
+                    // ordering over the enum, not a string equality.
+                    blocking: finding.severity >= threshold,
                 })
             })
             .collect();
@@ -293,11 +309,33 @@ pub(crate) struct QualityReport {
     bundle_digest: String,
     /// Every bar this bundle misses. Empty means it publishes without an
     /// override.
-    shortfalls: Vec<QualityShortfall>,
+    shortfalls: Vec<ShortfallView>,
     /// Whether publishing needs [`Action::SkillQualityOverride`]. Derived
     /// from `shortfalls` rather than stored beside it, so the two can
     /// never disagree.
     needs_override: bool,
+}
+
+/// One bar the bundle misses, with the sentence that explains it
+/// (ADR-0056 decision 6, amending ADR-0053 decision 7).
+///
+/// ADR-0053 served the shortfall's *data* and had the CLI compose the
+/// prose, so that a reader was never shown a `kind` slug to look up. That
+/// was right for one client. With a second renderer it is a drift source:
+/// the same shortfall explained in two languages by two authors, with
+/// nothing able to fail when they diverge. The gateway now serves both,
+/// and both surfaces display the served sentence — which is
+/// [`QualityShortfall::describe`], the one a refusal and an audit payload
+/// already use, so a reviewer and the refusal that stops them read the
+/// same words.
+///
+/// The data is flattened rather than nested so the wire shape stays what
+/// ADR-0053 defined, with one field added.
+#[derive(Serialize)]
+pub(crate) struct ShortfallView {
+    #[serde(flatten)]
+    shortfall: QualityShortfall,
+    detail: String,
 }
 
 impl QualityReport {
@@ -345,7 +383,13 @@ impl QualityReport {
             checklist,
             bundle_digest: hex(digest),
             needs_override: !shortfalls.is_empty(),
-            shortfalls,
+            shortfalls: shortfalls
+                .into_iter()
+                .map(|shortfall| ShortfallView {
+                    detail: shortfall.describe(),
+                    shortfall,
+                })
+                .collect(),
         }
     }
 }
@@ -2053,4 +2097,166 @@ fn identity_of(input: &DecisionInput) -> Result<IdentityId> {
         .ok_or_else(|| Error::Invalid {
             message: "authoring a skill requires a provisioned identity".to_owned(),
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use synveda_ingest::{FileScan, SkillFinding};
+
+    use super::*;
+
+    fn scan(findings: &[(&'static str, ScanSeverity)]) -> BundleScan {
+        BundleScan {
+            ruleset_version: 1,
+            files: vec![FileScan {
+                path: "helper/scripts/setup.sh".to_owned(),
+                findings: findings
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (rule, severity))| SkillFinding {
+                        rule,
+                        severity: *severity,
+                        title: "does something worth weighing",
+                        line: index + 1,
+                        count: 1,
+                    })
+                    .collect(),
+            }],
+        }
+    }
+
+    /// ADR-0056 decision 5. The verdict is served per finding, and the
+    /// case that makes it worth serving is a threshold no client can
+    /// answer by comparing strings: under `high`, a `critical` blocks —
+    /// which equality would have denied — and a `notice` does not.
+    ///
+    /// This is the judgement `synveda proposal review` used to make on its
+    /// own. It is here now because the gateway holds the severity order
+    /// and the pack in force, and a client that reimplements the
+    /// comparison is a second implementation that agrees on the day it is
+    /// written.
+    #[test]
+    fn each_finding_carries_the_packs_verdict_on_it() {
+        let report = ScanReport::new(
+            &scan(&[
+                ("fetch-and-execute", ScanSeverity::Critical),
+                ("privilege-change", ScanSeverity::High),
+                ("package-install", ScanSeverity::Notice),
+            ]),
+            &SkillScanConfig::STRICT,
+        );
+        let verdicts: Vec<(ScanSeverity, bool)> = report
+            .findings
+            .iter()
+            .map(|finding| (finding.severity, finding.blocking))
+            .collect();
+        assert_eq!(
+            verdicts,
+            vec![
+                (ScanSeverity::Critical, true),
+                (ScanSeverity::High, true),
+                (ScanSeverity::Notice, false),
+            ],
+            "worst first, and blocking is an ordering against the threshold \
+             rather than an equality with it",
+        );
+
+        // The same bundle under the floor: only the invariant band
+        // refuses, so `high` moves from a refusal to something a reviewer
+        // weighs. The finding did not change; the pack did.
+        let relaxed = ScanReport::new(
+            &scan(&[("privilege-change", ScanSeverity::High)]),
+            &SkillScanConfig::FLOOR,
+        );
+        assert!(!relaxed.findings[0].blocking);
+        assert!(!relaxed.blocked);
+    }
+
+    /// A per-finding verdict has to agree with the bundle-level one, or a
+    /// reviewer reads "this will be refused" above a list in which nothing
+    /// is marked as the reason.
+    #[test]
+    fn a_blocked_bundle_names_at_least_one_blocking_finding() {
+        let report = ScanReport::new(
+            &scan(&[
+                ("package-install", ScanSeverity::Notice),
+                ("fetch-and-execute", ScanSeverity::Critical),
+            ]),
+            &SkillScanConfig::FLOOR,
+        );
+        assert!(report.blocked);
+        assert_eq!(
+            report.findings.iter().filter(|f| f.blocking).count(),
+            1,
+            "the count the refusal line quotes is the count of blocking findings",
+        );
+    }
+
+    /// ADR-0056 decision 6, amending ADR-0053 decision 7: the shortfall's
+    /// data and the shortfall's sentence both reach the wire, and the
+    /// sentence is [`QualityShortfall::describe`] — the same one the
+    /// refusal at publication and the audit payload carry, so a reviewer
+    /// and the refusal that stops them are not told the bar was missed in
+    /// two different languages.
+    #[test]
+    fn a_shortfall_serialises_its_data_and_its_sentence() {
+        let shortfall = QualityShortfall::BelowThreshold {
+            score: 40,
+            min_score: 70,
+        };
+        let sentence = shortfall.describe();
+        let view = ShortfallView {
+            detail: shortfall.describe(),
+            shortfall,
+        };
+        let json = serde_json::to_value(&view).expect("serialises");
+
+        // The shape ADR-0053 defined, unchanged: flattened, tagged by
+        // `kind`, with the arithmetic still available to a client that
+        // wants to lay it out itself.
+        assert_eq!(json["kind"], json!("below-threshold"), "{json}");
+        assert_eq!(json["score"], json!(40), "{json}");
+        assert_eq!(json["min_score"], json!(70), "{json}");
+
+        // And the sentence, which is the addition.
+        assert_eq!(json["detail"], json!(sentence), "{json}");
+        assert!(
+            json["detail"].as_str().expect("detail").contains("70"),
+            "the bar is in the sentence, so a surface that renders only \
+             `detail` still says what to fix: {json}"
+        );
+    }
+
+    /// Every shortfall kind, not just the one with arithmetic in it: a
+    /// kind that reached the wire without a sentence would be a slug in
+    /// front of a reviewer on both surfaces at once.
+    #[test]
+    fn every_shortfall_kind_carries_a_sentence() {
+        for shortfall in [
+            QualityShortfall::BelowThreshold {
+                score: 40,
+                min_score: 70,
+            },
+            QualityShortfall::ChecklistMissing,
+            QualityShortfall::ChecklistIncomplete {
+                unanswered: vec![ChecklistItem::Tested],
+            },
+            QualityShortfall::ChecklistConcerns {
+                items: vec![ChecklistItem::Tested],
+            },
+        ] {
+            let view = ShortfallView {
+                detail: shortfall.describe(),
+                shortfall,
+            };
+            let json = serde_json::to_value(&view).expect("serialises");
+            let detail = json["detail"].as_str().expect("detail");
+            assert!(!detail.is_empty(), "{json}");
+            assert_ne!(
+                detail,
+                json["kind"].as_str().expect("kind"),
+                "a sentence, not the slug again: {json}"
+            );
+        }
+    }
 }

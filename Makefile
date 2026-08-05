@@ -110,6 +110,11 @@ deny:
 check-deps:
 	node scripts/check-crate-deps.mjs
 
+# CLAUDE.md's licence rule on the npm side (CNSL-1, ADR-0056 decision 8).
+# Needs the workspace installed, so it runs after ts-build in `ci`.
+check-npm-licences:
+	node scripts/check-npm-licences.mjs
+
 ts-build:
 	pnpm install --frozen-lockfile
 	pnpm -r build
@@ -118,4 +123,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps eval-check ts-build ts-test
+ci: fmt lint test build deny check-deps eval-check ts-build check-npm-licences ts-test

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- No external stylesheet, font or script, and the gateway's
+         Content-Security-Policy enforces it rather than trusting it
+         (ADR-0056 decision 8): an air-gapped install is a normal install. -->
+    <title>Synveda console</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Root-relative to this package, not to the served prefix: Vite
+         rewrites it to /console/assets/*.js at build time, from `base`. -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

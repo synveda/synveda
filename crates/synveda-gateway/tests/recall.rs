@@ -87,6 +87,7 @@ fn state_with(url: &str, search_index: Arc<SearchIndex>, pdp: Arc<Pdp>) -> AppSt
         metrics: metrics_handle(),
         verifier: Arc::new(Hs256Verifier::new(SECRET)),
         login: None,
+        public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
         scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),

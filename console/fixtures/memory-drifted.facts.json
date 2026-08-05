@@ -1,0 +1,15 @@
+{
+  "state": "open",
+  "outstanding": "curator × 1, 1 distinct approver(s)",
+  "approvals": [],
+  "members": [
+    {
+      "name": "00000004-0000-4000-8000-000000000000",
+      "effect": "update",
+      "drifted": true,
+      "proposed": "page the platform lead, then the incident commander",
+      "baseline": "page the platform lead",
+      "current": "page the incident commander first, then the platform lead"
+    }
+  ]
+}

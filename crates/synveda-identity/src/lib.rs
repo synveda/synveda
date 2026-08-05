@@ -14,6 +14,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod console;
 mod context;
 mod flow;
 mod mapping;
@@ -22,8 +23,8 @@ mod token;
 
 pub use context::{TenantContext, current_tenant, with_tenant};
 pub use flow::{
-    CliHandoff, LoginFlow, LoginSession, OIDC_LOGINS_TOTAL, OIDC_REFRESHES_TOTAL, RefreshedSession,
-    validate_cli_redirect_uri,
+    CliHandoff, LoginDestination, LoginFlow, LoginSession, OIDC_LOGINS_TOTAL, OIDC_REFRESHES_TOTAL,
+    RefreshedSession, validate_cli_redirect_uri,
 };
 pub use mapping::{
     ADMIN_GROUP, CONVENTION_PREFIX, ConventionCandidate, contains_admin_group,
