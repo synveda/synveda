@@ -911,14 +911,21 @@ enum McpCommand {
     /// the file, are written back as they were found; an existing
     /// `synveda` entry that differs is refused rather than replaced.
     Install {
-        /// Which client to configure: `claude-desktop` or `cursor`.
+        /// Which client to configure. Pass an unknown name to be told the
+        /// ones this installation knows.
+        ///
+        /// The list is data, not code: it ships in the binary and
+        /// `~/.config/synveda/mcp-clients.jsonc` adds to it or overrides
+        /// it, so a client we have never heard of needs a file rather than
+        /// a release (seed §2 principle 6).
         ///
         /// Claude Code is absent on purpose — its plugin already carries
         /// the entry, and carries it with the write tool switched off.
         #[arg(long)]
         client: String,
         /// Write this file instead of the client's own — a project-level
-        /// `.cursor/mcp.json`, or a layout this release has not heard of.
+        /// `.cursor/mcp.json` or `.zed/settings.json`, or a layout this
+        /// release has not heard of.
         #[arg(long)]
         config: Option<std::path::PathBuf>,
         /// Report what would change and write nothing.

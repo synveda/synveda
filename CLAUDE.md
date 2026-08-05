@@ -35,9 +35,10 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 
 ## Current phase
 Phase 3 — Enterprise (wk 11–16). Phases 0, 1 and 2 are complete; SKIL-1
-through SKIL-4, OPS-1 and CNSL-1 are the Phase 3 features done so far. 55 of
-86 features delivered — see docs/backlog/STATUS.md for what each one proved
-and what it left standing.
+through SKIL-4, OPS-1, CNSL-1 and ADPT-2 are the Phase 3 features done so
+far. 56 of 88 features delivered — see docs/backlog/STATUS.md for what each
+one proved and what it left standing. (The total read 86 until 2026-08-05;
+STATUS.md and `make check-backlog` have both said 88 for some time.)
 
 Phase 3 was reordered on 2026-08-04 by demo-readiness (see the Sequencing
 note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,
@@ -50,6 +51,9 @@ before the gateway will start.
 
 Phase demo goal: Entra/Okta live, spec-compliant governed skills into Claude
 Code + Cursor, LoCoMo/LongMemEval scores published, Helm install.
+(ADPT-2 recorded its acceptance corpus from Claude Desktop and **Zed** —
+Cursor stays an `install` target because this goal names it, but nothing has
+replayed a real Cursor frame. See ADR-0057 amendment 2.)
 
 ## Commands
 - make dev-up      — start Postgres(+pgvector+PGMQ), Rauthy, Temporal, TEI, Jaeger

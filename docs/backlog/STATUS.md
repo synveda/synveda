@@ -3406,7 +3406,34 @@ table to store a live credential at rest, stored recoverable because the
 gateway has to *use* the refresh token, with **TEN-4 (per-tenant encryption
 keys) as its named successor** and the hashed session id, the IdP's own
 lifetime and the 12-hour cap as the compensating controls until then._
-- [ ] [ADPT-2: Generic MCP server](ADPT-2.md)
+- [x] [ADPT-2: Generic MCP server](ADPT-2.md) — done 2026-08-05, ADR-0057, **amended twice on the day it was accepted**: decisions 1, 2 and 4 when checking found the official MCP *TypeScript* SDK tops out at `2025-11-25` and cannot serve the era decision 3 requires (`rmcp` 3.1.0 can, so the server became `synveda mcp` in the Rust CLI rather than an npm package), and decisions 10 and 11 when recording the corpus found the non-Anthropic client we could actually drive was Zed, not Cursor. AC tests: crates/synveda-cli/tests/mcp_corpus.rs (**the criterion is a recorded corpus and it is recorded** — Claude Desktop 1.25927.0 and Zed 1.13.2 as they actually spoke, captured through `fixtures/mcp/capture.sh`, replayed against the shipped binary with `HOME`/`XDG_CONFIG_HOME` pointed at an empty directory so a developer with a live session records the same bytes as CI; two guards, both verified by breaking what they defend: an AC client whose case goes back to `authored` fails, and a captured client carrying no `tools/call` fails — because the handshake and `tools/list` arrive on their own when a client *starts* the server, so only the third frame shows it can *use* one). **Recording falsified four things the authored cases asserted**: both clients start request ids at `0` where the fixtures had `1`; both send `tools/list` with **no `params` member** where the fixtures had `{}` — and Claude Desktop sends both forms, because it launches the server **twice**, an enumeration probe as `claude-ai` then an agent session as `local-agent-mode-synveda` negotiating `roots.listChanged` and an `io.modelcontextprotocol/ui` extension the probe does not; and both open at `2025-11-25` where the fixtures had Desktop on `2025-06-18`. The server answered every one correctly, so the finding is not a defect but the corpus ceasing to be a transcript of its author's assumptions — an id of `0` is falsy in every language a client is written in, and an absent `params` is where a hand-written parser reaches for the unchecked access. Around it: two tools, `recall` (CTX-5's schema unchanged) and `remember`, the latter advertised by **who owns the write** — `--writes tool` for a model-driven client, `--writes host` where a harness already writes, a capability rather than a vendor list (seed §2 principle 6); a new `ObserveKind::Assertion` carried to recall time, so a fact the model chose to store is distinguishable from a decision the harness observed; the Claude Code plugin's hand-written protocol loop **deleted** (630 lines, pinned two revisions behind) and replaced by a launcher that execs the same binary, so one protocol implementation serves every client; `synveda mcp install` writing the client's own config with a dry-run, a refusal to clobber and an atomic write; and demos/adpt-2-mcp-server.sh, which ends by exec'ing the line it just generated. Other tests: crates/synveda-cli/src/mcp.rs and mcp/install.rs (111 in the binary, including `this_adapter_reaches_the_product_only_through_the_gateway` — the seed §7 constraint the TypeScript package would have enforced structurally and a Rust subcommand can only assert), adapters/claude-code/src/mcp-server.test.mts (5). New: `synveda mcp`, `synveda mcp install`, crates/synveda-cli/src/mcp/clients.jsonc, jsonc-parser (MIT, `cargo deny` clean with no new exception).
+
+  _What it left standing, named. **No shipping client opens in the `2026-07-28`
+  era.** Claude Desktop and Zed were both recorded opening at `2025-11-25`, so
+  the `modern-era` case — `server/discover`, the per-request `_meta` version,
+  `-32022` — stays **authored** and is attributed to the specification rather
+  than borrowing a vendor's name for frames that vendor does not send. It is
+  the only thing exercising a path decision 3 requires the server to serve, and
+  becomes `captured` the day a client ships that opens there. **Cursor is an
+  install target nothing has replayed**: the phase demo goal names it and an
+  ADR for one feature does not get to rewrite a product commitment, so
+  `--client cursor` stays and `clients.jsonc` says in its own comment that it
+  is unrecorded. **Zed called `recall` but not `remember`** — decision 11 asks
+  for `tools/call` and got one, but the non-Anthropic side has less tool
+  coverage than Claude Desktop's, which carries both. Also accepted: the
+  client registry became **data rather than code** mid-feature — `clients.jsonc`
+  embedded, `~/.config/synveda/mcp-clients.jsonc` merged over it through the
+  identical loader — because the first cut was a `match` arm per vendor, which
+  is the vocabulary seed §2 principle 6 forbids and decision 6 had already
+  refused one level up for `--writes`. That answers decision 10's own reversal
+  trigger ("a third client arrives with another config format → `install` grows
+  a generic print-the-JSON mode rather than a branch per vendor") better than
+  the trigger's remedy did, and the trigger is spent rather than pending. A
+  client whose config its **owner** maintains is spliced through a concrete
+  syntax tree, not rendered by a formatter, and which path a client takes is
+  **declared** in the registry rather than sniffed from the bytes — a settings
+  file that happens to carry no comments today is still not ours to reformat
+  tomorrow._
 - [ ] [CNSL-2: Hierarchy & policy explorer](CNSL-2.md)
 - [ ] [AUTH-4: SCIM 2.0 server](AUTH-4.md)
 - [ ] [AUTH-5: Directory sync fallback](AUTH-5.md)

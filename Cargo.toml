@@ -80,6 +80,15 @@ jsonwebtoken = { version = "10", default-features = false, features = [
     "use_pem",
     "rust_crypto",
 ] }
+# JSONC with byte ranges, for `synveda mcp install --client zed` (ADPT-2,
+# ADR-0057 decision 10 as amended). Zed's settings.json is a file its owner
+# edits — comments, trailing commas — which serde_json rejects outright and
+# a formatter would strip. This parses it for ranges so the one key we write
+# is spliced textually and everything else survives byte-for-byte. MIT.
+jsonc-parser = { version = "0.33", default-features = false, features = [
+    "cst",
+    "serde_json",
+] }
 # The redaction scanner (MEM-2, ADR-0021): finite automata only — no
 # backtracking, so a hostile payload cannot pathologically slow the ack
 # path. MIT/Apache-2.0.

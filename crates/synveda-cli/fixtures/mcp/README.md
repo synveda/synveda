@@ -13,27 +13,38 @@ cargo test -p synveda-cli --test mcp_corpus                    # verify
 SYNVEDA_RECORD_MCP=1 cargo test -p synveda-cli --test mcp_corpus  # re-record
 ```
 
-## Read this before citing the corpus as the AC
+## Where these frames come from
 
-The two halves of a case have different provenance, and only one of them is
-real:
+Both halves of a case are real for the two clients the AC names:
 
-| | where it comes from | what it is worth |
+| | where it comes from |
+| --- | --- |
+| `expect` — the answers | **Recorded** from the shipped binary, over a real pipe, by the test |
+| `send` — the questions | **Recorded** from Claude Desktop 1.25927.0 and Zed 1.13.2 on 2026-08-05, via `capture.sh` |
+
+Every case declares this in its own `provenance` block, and the suite fails
+if a case is missing one *or if either AC client stops being represented by a
+real recording*. Two cases remain `authored` and say why below.
+
+### What recording actually found
+
+The authored cases these replaced were wrong in ways nothing else here would
+have caught:
+
+| | authored | recorded |
 | --- | --- | --- |
-| `expect` — the answers | **Recorded** from the shipped binary, over a real pipe, by the test | A regression guard. It fails when the server's protocol behaviour changes. |
-| `send` — the questions | **Authored** from the spec and each client's documented behaviour | Only as good as the reading. It cannot discover a client that opens differently from the way the spec was read here. |
+| first request id | `1` | **`0`**, from both clients |
+| `tools/list` params | `"params": {}` | **absent** — and *present* on Claude Desktop's other launch |
+| Claude Desktop launches | one | **two**, different `clientInfo`, different capabilities |
+| era each opens at | Desktop `2025-06-18`, Zed `2025-11-25` | **`2025-11-25` from both** |
 
-**No case is captured from Claude Desktop or Cursor.** Neither was available
-to record from when the corpus was built, so decision 11 is *not yet
-satisfied* and this suite must not be cited as evidence that it is. Every
-case says so in its own `provenance` block, and the suite fails if one does
-not. `provenance.kind` is `authored` today and becomes `captured` when real
-frames land; the test prints the tally on every run.
+An id of `0` is falsy in every language a client is written in and an absent
+`params` is where a hand-written parser reaches for the unchecked access — so
+these are not cosmetic. The server answered all of them correctly, which is
+the point: the corpus stopped being a transcript of its author's assumptions.
 
-The distinction is not pedantry. An authored frame agrees with what its
-author expected the client to send, so a corpus of them is a mirror. What it
-still buys is real: the server's answers are pinned, both eras are covered,
-and a change to either fails here rather than in somebody's client.
+The last row is the one that reaches beyond this directory. **No shipping
+client opens in the modern era.**
 
 ## Capturing the real thing
 
@@ -50,20 +61,23 @@ for a test, at exactly the layer this feature keeps thin.
 
 ## The cases
 
-| case | client / era / launch | what it is in the corpus for |
-| --- | --- | --- |
-| `claude-desktop-legacy` | claude-desktop · legacy · `--writes tool` | The `initialize` handshake, answered on the client's own terms rather than upgraded. Ends in a `tools/call` with no credential, which pins the failure posture ADR-0057 inverts from the hooks: a caller who *asked* is told, as `isError` content it can read, not as a protocol error the client renders opaquely. |
-| `claude-desktop-modern` | claude-desktop · modern · `--writes tool` | The era the hand-written loop could not reach: `server/discover`, and the version carried per request in `_meta` with no handshake at all. Pins the supported list itself, because that list is what a client retries against. |
-| `cursor-legacy` | cursor · legacy · `--writes tool` | The non-Anthropic client the AC names, opening at `2025-11-25` — the revision between the one CTX-5 pinned and the current one, so the corpus covers the middle rather than only the ends. Its `tools/call` uses `ids` where Claude Desktop's uses `query`, so both halves of the xor appear. |
-| `cursor-modern` | cursor · modern · `--writes tool` | The same vendor on the current revision, so the corpus does not assume a client stays on the era it shipped with. Its `tools/call` passes `query` **and** `ids`, which is refused before the gateway is troubled — the one `tools/call` case here that reaches past the credential seam. |
-| `claude-code-plugin` | claude-code · legacy · `--writes host` | The one launch this repository owns rather than a vendor: the plugin's entry point execs `--writes host`, so `tools/list` carries `recall` alone and `tools/call remember` is `-32602`. Decision 6 has two halves and this pins the second — a tool absent from the listing that still answered a call would not be absent. |
-| `unsupported-version` | any · modern · `--writes tool` | Not a vendor's frame at all: what *any* client on a revision this server does not implement must be told. `-32022` carrying `{requested, supported}` is what lets it retry instead of fail. |
+| case | client / era / launch | provenance | what it is in the corpus for |
+| --- | --- | --- | --- |
+| `claude-desktop-probe` | claude-desktop · legacy · `--writes tool` | captured | Claude Desktop's **first** launch: an enumeration probe whose `clientInfo` is `claude-ai`, asking only what tools exist. Its `tools/list` carries `"params": {}`. Nothing predicted that the app starts the server twice. |
+| `claude-desktop-agent` | claude-desktop · legacy · `--writes tool` | captured | The **second** launch, the agent session — `clientInfo` is `local-agent-mode-synveda`, and it negotiates `roots.listChanged` and an `io.modelcontextprotocol/ui` extension the probe does not. Carries both `tools/call` frames, composed by the model: `recall` with a `query` and a `limit`, `remember` with prose. Both stop at the credential seam and answer `isError` with readable text, which pins the failure posture ADR-0057 inverts from the hooks — a caller who *asked* is told, not handed a protocol error the client renders opaquely. Its `tools/list` sends **no** `params` member, unlike the probe's. |
+| `zed` | zed · legacy · `--writes tool` | captured | The non-Anthropic client decision 11 names as amended. Opens at `2025-11-25`, ids from `0`, `tools/list` with no `params` — and asks twice. |
+| `modern-era` | spec · modern · `--writes tool` | authored | The `2026-07-28` era decision 3 requires: `server/discover`, the version carried per request in `_meta`, no handshake at all. Attributed to the **specification, not a vendor**, because neither AC client opens here — so this is the only thing exercising that path, and it says so rather than borrowing a vendor's name for frames the vendor does not send. Becomes `captured` the day a client ships that opens there. |
+| `claude-code-plugin` | claude-code · legacy · `--writes host` | authored | The one launch this repository owns rather than a vendor: the plugin's entry point execs `--writes host`, so `tools/list` carries `recall` alone and `tools/call remember` is `-32602`. Decision 6 has two halves and this pins the second — a tool absent from the listing that still answered a call would not be absent. |
+| `unsupported-version` | any · modern · `--writes tool` | authored | Synthetic by construction, and permanently so: no client sends a version on purpose in order to be refused. What *any* client on a revision this server does not implement must be told — `-32022` carrying `{requested, supported}`, which is what lets it retry instead of fail. |
 
 ## What is not here, and why
 
 **No gateway.** Every case is decided by the server alone, so the suite runs
-in CI with nothing running. That bounds `tools/call`: three cases reach the
-credential seam and stop, and the recorded answer is the sign-in sentence.
+in CI with nothing running. That bounds `tools/call`: the cases that make one
+reach the credential seam and stop, and the recorded answer is the sign-in
+sentence. The test points `HOME` and `XDG_CONFIG_HOME` at an empty directory
+for exactly this reason — a developer with a live session records the same
+bytes as CI.
 The gateway-backed round trip — a real recall answering from a real corpus,
 watermarked — is `demos/ctx-5-recall.sh`, against a live stack.
 

@@ -465,6 +465,44 @@ gen_tools=$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params
   echo "demo FAILED: the generated config launched [$gen_tools]" >&2; exit 1; }
 echo "    running that line verbatim serves [$gen_tools]"
 
+# A config the *user* maintains, which is a different obligation: Zed keeps
+# its servers under `context_servers` in a settings.json full of comments
+# that serde_json cannot even parse. Rendering that file through a formatter
+# would hand its owner back their editor config with their notes deleted.
+echo
+echo "    a config its owner maintains (Zed) is spliced, not reformatted:"
+cat >"$SCRATCH/zed-settings.json" <<'JSONC'
+// Zed settings — mine, with my notes in them.
+{
+  "telemetry": { "metrics": false },
+  "ui_font_size": 16,
+  "theme": {
+    "mode": "system", // follows the OS
+    "dark": "One Dark",
+  },
+}
+JSONC
+./target/debug/synveda mcp install --client zed --config "$SCRATCH/zed-settings.json" | sed 's/^/    /'
+node -e '
+  const raw = require("fs").readFileSync(process.argv[1], "utf8");
+  for (const kept of ["// Zed settings — mine, with my notes in them.",
+                      "// follows the OS",
+                      "\"ui_font_size\": 16,",
+                      "\"dark\": \"One Dark\","]) {
+    if (!raw.includes(kept)) {
+      console.error(`demo FAILED: the splice lost ${JSON.stringify(kept)}`); process.exit(1);
+    }
+  }
+  if (raw.includes("mcpServers")) {
+    console.error("demo FAILED: Zed reads context_servers, not mcpServers"); process.exit(1);
+  }
+  if (!/"context_servers"[\s\S]*"synveda"/.test(raw)) {
+    console.error("demo FAILED: the entry did not land"); process.exit(1);
+  }
+  console.log("    every comment, the trailing commas and the layout survived;");
+  console.log("    the entry landed under context_servers, which is what Zed reads");
+' "$SCRATCH/zed-settings.json"
+
 echo
 echo "==> ONE TRACE: the tool call and the gateway work it triggered"
 # The MCP server mints a W3C traceparent per gateway client, and it resolves
@@ -559,11 +597,18 @@ echo "recalled it labelled \`assertion\`, a sibling team's reader could not see"
 echo "it because the route has nowhere to say otherwise, a secret was refused"
 echo "by the same scan every other write meets, the hook-driven host was"
 echo "offered no second way to write, both protocol eras answered over one"
-echo "corpus, and a generated client config launched the server verbatim."
+echo "corpus, and a generated client config launched the server verbatim —"
+echo "including one its owner maintains, spliced with their comments intact."
 echo
-echo "NOT YET the acceptance criterion. \"Works in Claude Desktop + one"
-echo "non-Anthropic client\" needs those clients' own frames, and the corpus"
-echo "at crates/synveda-cli/fixtures/mcp holds authored ones — real answers,"
-echo "authored questions. crates/synveda-cli/fixtures/mcp/capture.sh is how"
-echo "the real ones get recorded; until they are, this demo shows the server"
-echo "works and not that those two clients do."
+echo "THE ACCEPTANCE CRITERION. \"Works in Claude Desktop + one non-Anthropic"
+echo "client\" is demonstrated by recorded frames, not by this script: the"
+echo "corpus at crates/synveda-cli/fixtures/mcp carries Claude Desktop"
+echo "1.25927.0 and Zed 1.13.2 as they actually spoke on 2026-08-05, and"
+echo "mcp_corpus.rs fails if either stops being a real recording."
+echo
+echo "Recording them was not a formality. Both clients start request ids at"
+echo "0 and send tools/list with no params member — the authored cases had"
+echo "1 and {} — Claude Desktop launches the server twice with different"
+echo "capabilities, and both open at 2025-11-25. So no shipping client uses"
+echo "the 2026-07-28 era the server also serves; that case stays authored"
+echo "and is attributed to the spec rather than borrowing a vendor's name."

@@ -1,5 +1,5 @@
 {
-  "client": "cursor",
+  "client": "spec",
   "era": "modern",
   "launch": [
     "mcp",
@@ -8,7 +8,7 @@
   ],
   "provenance": {
     "kind": "authored",
-    "note": "Authored from the MCP specification and Cursor's documented behaviour, NOT captured from Cursor — it was not available to record from when this corpus was built. The same client on the current revision, so the corpus does not assume a vendor stays on the era it shipped with. Replace `send` with captured frames (see capture.sh) and set kind to `captured`; ADR-0057 decision 11 asks for the real ones."
+    "note": "Authored from the MCP 2026-07-28 specification, and deliberately not attributed to a vendor. **Neither AC client opens in this era**: Claude Desktop 1.25927.0 and Zed 1.13.2 were both recorded on 2026-08-05 opening at 2025-11-25. ADR-0057 decision 3 requires the server to implement 2026-07-28 anyway — `server/discover`, the per-request `_meta` version, `-32022` — and this case is the only thing exercising it, so it stays and says what it is. It becomes `captured` the day a client ships that opens here."
   },
   "exchange": [
     {
@@ -21,7 +21,7 @@
             "io.modelcontextprotocol/protocolVersion": "2026-07-28",
             "io.modelcontextprotocol/clientCapabilities": {},
             "io.modelcontextprotocol/clientInfo": {
-              "name": "cursor-vscode",
+              "name": "claude-ai",
               "version": "0.1.0"
             }
           }
@@ -62,7 +62,7 @@
             "io.modelcontextprotocol/protocolVersion": "2026-07-28",
             "io.modelcontextprotocol/clientCapabilities": {},
             "io.modelcontextprotocol/clientInfo": {
-              "name": "cursor-vscode",
+              "name": "claude-ai",
               "version": "0.1.0"
             }
           }
@@ -140,16 +140,13 @@
             "io.modelcontextprotocol/protocolVersion": "2026-07-28",
             "io.modelcontextprotocol/clientCapabilities": {},
             "io.modelcontextprotocol/clientInfo": {
-              "name": "cursor-vscode",
+              "name": "claude-ai",
               "version": "0.1.0"
             }
           },
-          "name": "recall",
+          "name": "remember",
           "arguments": {
-            "query": "a",
-            "ids": [
-              "0198f0a0-0000-7000-8000-000000000001"
-            ]
+            "text": "the settlement runbook lives in the payments team scope"
           }
         }
       },
@@ -161,7 +158,7 @@
           "content": [
             {
               "type": "text",
-              "text": "Pass either `query` or `ids`, not both."
+              "text": "Not signed in to Synveda. Run `synveda login` in a terminal, then try again."
             }
           ],
           "isError": true

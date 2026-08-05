@@ -7,29 +7,29 @@
     "tool"
   ],
   "provenance": {
-    "kind": "authored",
-    "note": "Authored from the MCP specification and Claude Desktop's documented behaviour, NOT captured from Claude Desktop — it was not available to record from when this corpus was built. Claude Desktop opens with the `initialize` handshake. Replace `send` with captured frames (see capture.sh) and set kind to `captured`; ADR-0057 decision 11 asks for the real ones."
+    "kind": "captured",
+    "note": "Captured from Claude Desktop 1.25927.0 (macOS, 2026-08-05). Claude Desktop launches the server **twice**, and this is the first: an enumeration probe whose clientInfo is `claude-ai` and which asks only what tools exist. Its `tools/list` carries `\"params\": {}`, where the agent-session launch beside it sends no `params` member at all — the same vendor, one process apart, using both forms. Neither was guessed: the authored case this replaced sent id 1 and `params: {}` everywhere."
   },
   "exchange": [
     {
       "send": {
-        "jsonrpc": "2.0",
-        "id": 1,
         "method": "initialize",
         "params": {
-          "protocolVersion": "2025-06-18",
+          "protocolVersion": "2025-11-25",
           "capabilities": {},
           "clientInfo": {
             "name": "claude-ai",
             "version": "0.1.0"
           }
-        }
+        },
+        "jsonrpc": "2.0",
+        "id": 0
       },
       "expect": {
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": 0,
         "result": {
-          "protocolVersion": "2025-06-18",
+          "protocolVersion": "2025-11-25",
           "capabilities": {
             "tools": {}
           },
@@ -50,14 +50,14 @@
     },
     {
       "send": {
-        "jsonrpc": "2.0",
-        "id": 2,
         "method": "tools/list",
-        "params": {}
+        "params": {},
+        "jsonrpc": "2.0",
+        "id": 1
       },
       "expect": {
         "jsonrpc": "2.0",
-        "id": 2,
+        "id": 1,
         "result": {
           "tools": [
             {
@@ -113,32 +113,6 @@
               }
             }
           ]
-        }
-      }
-    },
-    {
-      "send": {
-        "jsonrpc": "2.0",
-        "id": 3,
-        "method": "tools/call",
-        "params": {
-          "name": "recall",
-          "arguments": {
-            "query": "what did we decide about settlement"
-          }
-        }
-      },
-      "expect": {
-        "jsonrpc": "2.0",
-        "id": 3,
-        "result": {
-          "content": [
-            {
-              "type": "text",
-              "text": "Not signed in to Synveda. Run `synveda login` in a terminal, then try again."
-            }
-          ],
-          "isError": true
         }
       }
     }

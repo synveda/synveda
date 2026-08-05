@@ -32,6 +32,10 @@ clap = { workspace = true }
 # `synveda login`'s loopback CSRF state (ADPT-1, ADR-0027 decision 5) —
 # the same CSPRNG the login flow itself uses for state/nonce/verifier.
 getrandom = { workspace = true }
+# `synveda mcp install --client zed` writes into a config its owner edits by
+# hand (ADR-0057 decision 10 as amended); this parses JSONC for byte ranges
+# so the splice keeps their comments.
+jsonc-parser = { workspace = true }
 # The CLI is a gateway client for `login`, `auth token`, and everything
 # else a running gateway serves (ADR-0027 decision 4).
 reqwest = { workspace = true }

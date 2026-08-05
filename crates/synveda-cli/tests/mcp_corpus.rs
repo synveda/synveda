@@ -25,23 +25,31 @@
 //! is the regression guard, and it is the half that fails when the
 //! protocol drifts.
 //!
-//! **The requests are not vendor-recorded.** ADR-0057 decision 11 asks for
-//! *each client's real frames*, and the frames below are **authored** from
-//! the specification and each client's documented behaviour — because
-//! neither Claude Desktop nor Cursor was available to record from when the
-//! corpus was built. Each fixture says so in its own `provenance` block,
-//! and [`every_case_declares_where_its_frames_came_from`] fails if one
-//! does not.
+//! **Both AC clients' requests are real too**, recorded on 2026-08-05 from
+//! Claude Desktop 1.25927.0 and Zed 1.13.2 with `fixtures/mcp/capture.sh`.
+//! Each fixture says where its frames came from in its own `provenance`
+//! block, and [`every_case_declares_where_its_frames_came_from`] fails if a
+//! case is missing one — or if either AC client stops being represented by
+//! a real recording.
 //!
-//! The distinction is not pedantry, and this file should not be read as
-//! satisfying the AC. An authored frame is a frame that agrees with what I
-//! expected the client to send, so a corpus of them cannot discover the
-//! one thing the AC is actually about: a client that opens the connection
-//! differently from the way the spec is read here. What it *can* do is
-//! fail when the server's answers change, and hold the shape a real
-//! recording drops into — `fixtures/mcp/capture.sh` is how those get made,
-//! and swapping a case's `send` frames for captured ones is the whole
-//! migration.
+//! Recording them was not a formality. The authored cases they replaced
+//! were wrong in ways nothing else would have caught:
+//!
+//! | | authored | recorded |
+//! |---|---|---|
+//! | first request id | `1` | **`0`**, from both clients |
+//! | `tools/list` params | `"params": {}` | **absent** — and *present* on Claude Desktop's other launch |
+//! | Claude Desktop launches | one | **two**, with different `clientInfo` and different capabilities |
+//! | era both open at | Desktop `2025-06-18`, Zed `2025-11-25` | **`2025-11-25` from both** |
+//!
+//! That last row is the one that matters beyond this file. **No shipping
+//! client opens in the modern era**, so `modern-era` — the `2026-07-28`
+//! frames decision 3 requires the server to serve — stays authored, is
+//! attributed to the specification rather than to a vendor, and is the only
+//! thing exercising that path. It becomes `captured` the day a client
+//! arrives that opens there. `unsupported-version` is synthetic by
+//! construction and never will be: no client sends a version on purpose to
+//! be refused.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -55,10 +63,10 @@ const RECORD: &str = "SYNVEDA_RECORD_MCP";
 /// Every case in the corpus. Named in one place so a fixture added to the
 /// directory and not to this list is a fixture nothing replays.
 const CASES: &[&str] = &[
-    "claude-desktop-legacy",
-    "claude-desktop-modern",
-    "cursor-legacy",
-    "cursor-modern",
+    "claude-desktop-probe",
+    "claude-desktop-agent",
+    "zed",
+    "modern-era",
     "claude-code-plugin",
     "unsupported-version",
 ];
@@ -248,19 +256,53 @@ fn every_case_declares_where_its_frames_came_from() {
             "{name}: era is `legacy` or `modern` — the two ADR-0057 decision 3 serves",
         );
         if kind == "captured" {
-            vendor_recorded.push((*name).to_owned());
+            vendor_recorded.push(case["client"].as_str().unwrap_or_default().to_owned());
         }
     }
-    // Not an assertion, because captured cases arriving is the good
-    // outcome. It is here so the count is visible in test output rather
-    // than something a reader has to derive from six files.
+
+    // The acceptance criterion is about *clients*, not cases: "works in
+    // Claude Desktop + one non-Anthropic client". Counting cases would set
+    // a target the corpus can never reach — `modern-era` is the spec's own
+    // frames and no shipping client opens there, and `unsupported-version`
+    // is synthetic by construction, so neither will ever be captured from
+    // anything.
+    for client in ["claude-desktop", "zed"] {
+        assert!(
+            vendor_recorded.iter().any(|seen| seen == client),
+            "no case carries real frames from {client}; ADR-0057 decision 11 makes the AC a \
+             recorded corpus, and an authored case is this suite testing my assumptions \
+             about {client} rather than {client}. Record with fixtures/mcp/capture.sh.",
+        );
+        // Decision 11 enumerates the frames it wants — `server/discover` or
+        // `initialize`, `tools/list`, **`tools/call`** — and the first two
+        // arrive on their own when a client starts the server. Only the
+        // third needs a model to decide to call a tool, which makes it the
+        // one a capture session quietly ends without. A client recorded to
+        // the handshake and no further has demonstrated that it launches
+        // us, not that it can use us.
+        assert!(
+            CASES
+                .iter()
+                .map(|name| read_case(name))
+                .filter(|case| case["provenance"]["kind"] == "captured" && case["client"] == client)
+                .any(
+                    |case| case["exchange"].as_array().is_some_and(|frames| frames
+                        .iter()
+                        .any(|frame| frame["send"]["method"] == "tools/call"))
+                ),
+            "{client} is recorded, but no captured case from it carries a `tools/call` — \
+             so the corpus shows it starting the server and never using it.",
+        );
+    }
+
+    // Not an assertion, because a case going from authored to captured is
+    // always the good outcome and never an obligation this suite can name
+    // in advance.
     eprintln!(
-        "mcp corpus: {} of {} cases captured from a real client; the rest are authored \
-         (ADR-0057 decision 11 is met when this reads {}/{})",
+        "mcp corpus: {} of {} cases carry a real client's frames ({})",
         vendor_recorded.len(),
         CASES.len(),
-        CASES.len(),
-        CASES.len(),
+        vendor_recorded.join(", "),
     );
 }
 

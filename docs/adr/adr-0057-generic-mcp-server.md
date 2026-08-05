@@ -1,7 +1,8 @@
 # ADR-0057: the surface follows the harness — hooks own the write where a harness has them and a tool owns it where it does not, the protocol era changed under us so the SDK trigger fires, and the corpus records which surface asserted the fact
 
-- **Status**: Accepted, **amended 2026-08-05** (decisions 1, 2 and 4 — see
-  the amendment below; decisions 3 and 5–11 stand unchanged)
+- **Status**: Accepted, **amended 2026-08-05** twice (decisions 1, 2 and 4 in
+  the first amendment; decisions 10 and 11 in the second; decisions 3 and 5–9
+  stand unchanged)
 - **Date**: 2026-08-05
 - **Feature(s)**: ADPT-2 (ADPT-3, ADPT-4 inherit the standalone server's shape)
 - **Deciders**: sujitn
@@ -71,6 +72,63 @@ and the CLI's other served verbs do, and it must not call a core crate — not
 for a shortcut, not in a test. This is the one property option 1 costs that
 the TypeScript package would have enforced structurally, and it is now a
 review obligation instead. Seed §7's diagram wants a footnote to match.
+
+## Amendment 2 (2026-08-05): the non-Anthropic client the corpus records is Zed, and a hand-maintained config is not a generated one
+
+Decisions 10 and 11 name Cursor as the non-Anthropic client — decision 10 as
+an `install` target, decision 11 as a corpus client. That choice was
+**inherited rather than made**: the context below says "the phase demo goal
+names the second: Cursor", and nothing else about Cursor was checked.
+
+What checking found, on the day the corpus was to be recorded:
+
+1. **Cursor was not installed and Zed was.** Recording a `tools/call` needs
+   an account and a live model session before the client will emit one; Zed
+   was already in daily use on the machine doing the work. Decision 11's
+   whole claim is that "works in X" stays unfalsifiable until X's frames are
+   on disk — and a client nobody here can drive keeps it unfalsifiable no
+   matter whose name is in the ADR.
+
+2. **Recording from Zed falsified two authored frames inside an hour**,
+   which is decision 11 earning its cost immediately:
+
+   | | authored `cursor-legacy` | Zed 1.13.2, recorded |
+   |---|---|---|
+   | first request id | `1` | **`0`** |
+   | `tools/list` params | `"params": {}` | ***no `params` member at all*** |
+
+   The server answered both correctly, so this is not a defect — it is the
+   corpus ceasing to be a transcript of my assumptions. Both matter to
+   anyone reading it as a reference: an id of `0` is falsy in every language
+   a client is written in, and an absent `params` is exactly where a
+   hand-written parser reaches for the unchecked access. Zed also opens at
+   `2025-11-25`, which the authored case did guess right, and sends
+   `tools/list` twice, which it did not.
+
+3. **Zed's config is not a generated file.** `~/.config/zed/settings.json`
+   is JSONC — comments, trailing commas — and hand-maintained.
+   `serde_json::from_str` rejects it outright (measured, not assumed), and
+   `to_string_pretty` would erase every comment in it. Decision 10 argued
+   "generated, not documented" against two app-managed JSON files; a
+   hand-maintained one makes that argument *sharper*, not weaker, because
+   telling a developer to paste into the file where they keep their own
+   notes is the worse of the two failures.
+
+**What this changes.** Decision 11's non-Anthropic recorded client is
+**Zed**; the `cursor-*` fixtures become `zed-*` and carry
+`provenance.kind: captured`. Decision 10 gains `--client zed`, whose merge
+preserves the file byte-for-byte outside the one key it writes — parse for
+byte ranges, splice textually — rather than round-tripping it through a
+formatter.
+
+**What it does not change.** `--client cursor` **stays**. The phase demo
+goal (SYNVEDA_FEATURES.md, and CLAUDE.md's summary of it) names Cursor, and
+an ADR for one feature does not get to rewrite a product commitment; the
+target is already written and tested and costs nothing to keep. But it is
+now **explicitly unrecorded**: decision 11's obligation stands against it,
+and the corpus no longer carries an authored case implying otherwise.
+Whoever can drive Cursor should record it — `capture.sh` is unchanged and
+works for any client.
 
 ## Context
 
@@ -302,18 +360,40 @@ one pointing at Rust.
    versioned API, API keys for service identities — rather than something to
    improvise here.
 
-10. **Client configuration is generated, not documented.** `synveda mcp
-    install --client claude-desktop|cursor` writes the client's own config
-    and says what it wrote, with a dry-run and a refusal to clobber. The AC
-    is "works in", and "paste this JSON into that file" is exactly where two
-    clients diverge into a support burden nobody can test.
+10. **[Amended 2026-08-05]** **Client configuration is generated, not
+    documented.** `synveda mcp install --client claude-desktop|cursor|zed`
+    writes the client's own config and says what it wrote, with a dry-run
+    and a refusal to clobber. The AC is "works in", and "paste this JSON
+    into that file" is exactly where clients diverge into a support burden
+    nobody can test.
 
-11. **The AC is a recorded protocol corpus, per client and per era.** CNSL-1
-    established the pattern and the reason: a criterion phrased "works in X"
-    is unfalsifiable until what X actually exchanges is on disk and replayed.
-    Each client's real frames — `server/discover` or `initialize`,
-    `tools/list`, `tools/call` — are recorded and replayed against the
-    server, so a protocol regression fails a test rather than a demo.
+    **A hand-maintained config is written in place, not reformatted.** Zed's
+    `settings.json` is JSONC that its owner edits — the reasoning is in
+    amendment 2 — so the merge parses for byte ranges and splices the one
+    key textually. Everything outside that key, comments included, comes out
+    byte-for-byte as it went in. A config the tool is willing to reformat is
+    a config the tool has to be trusted with; this one it only has to be
+    trusted to *append to*.
+
+    *This replaces:* `--client claude-desktop|cursor`, and a merge that
+    assumed every client's config is strict JSON a formatter may rewrite.
+
+11. **[Amended 2026-08-05]** **The AC is a recorded protocol corpus, per
+    client and per era.** CNSL-1 established the pattern and the reason: a
+    criterion phrased "works in X" is unfalsifiable until what X actually
+    exchanges is on disk and replayed. Each client's real frames —
+    `server/discover` or `initialize`, `tools/list`, `tools/call` — are
+    recorded and replayed against the server, so a protocol regression fails
+    a test rather than a demo.
+
+    **The two recorded clients are Claude Desktop and Zed.** Zed is the
+    non-Anthropic half, for the reason amendment 2 gives: it is the one we
+    can actually drive, and driving it falsified two authored frames on the
+    first run. A case whose frames are authored rather than captured says so
+    in its own `provenance` block and the suite counts them out loud, so the
+    gap between "replays" and "recorded" is never silent.
+
+    *This replaces:* Cursor as the non-Anthropic recorded client.
 
 ## Options considered
 
