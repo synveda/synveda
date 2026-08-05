@@ -1,9 +1,76 @@
 # ADR-0057: the surface follows the harness — hooks own the write where a harness has them and a tool owns it where it does not, the protocol era changed under us so the SDK trigger fires, and the corpus records which surface asserted the fact
 
-- **Status**: Accepted
+- **Status**: Accepted, **amended 2026-08-05** (decisions 1, 2 and 4 — see
+  the amendment below; decisions 3 and 5–11 stand unchanged)
 - **Date**: 2026-08-05
 - **Feature(s)**: ADPT-2 (ADPT-3, ADPT-4 inherit the standalone server's shape)
 - **Deciders**: sujitn
+
+## Amendment (2026-08-05): the TypeScript SDK cannot serve the era decision 3 requires
+
+Decision 2 took the official MCP TypeScript SDK on the reasoning that
+ADR-0042 option 8's reversal trigger had fired and "the reason to hand-write
+is gone at exactly the moment the surface to hand-write got bigger". That
+sentence assumed the SDK covers the bigger surface. **It was written without
+checking, and checking it before writing any code found it false.**
+
+Measured, at the versions current on the day this ADR was accepted:
+
+| | spec `2026-07-28` | `@modelcontextprotocol/sdk@1.30.0` | `rmcp` 3.1.0 |
+|---|---|---|---|
+| newest version implemented | — | `LATEST_PROTOCOL_VERSION = '2025-11-25'` | `V_2026_07_28`, in `SUPPORTED` |
+| `server/discover` | **MUST** (schema.ts) | *absent from `dist/esm/`* | `DiscoverRequestMethod` |
+| `-32022` | `UNSUPPORTED_PROTOCOL_VERSION` | *absent* | `UNSUPPORTED_PROTOCOL_VERSION` |
+| `_meta` per-request version | required | *absent* | handled in the tower layer |
+
+1.30.0 is the latest published version — `latest` is its only dist-tag, there
+is no prerelease — and it shipped **2026-07-27, one day before** the revision.
+It has not fallen behind through neglect; the revision is simply newer than
+it. `SUPPORTED_PROTOCOL_VERSIONS` tops out at `2025-11-25`.
+
+The consequence is that decisions 2 and 3 do not compose. Taking the TS SDK
+delivers a **legacy-era server** — which is exactly the thing decision 4
+deletes `mcp.mts` for being — and the only way to keep decision 3 on top of
+it is to hand-write `server/discover`, per-request `_meta` selection and
+`-32022` against an SDK that does not model them, which is more
+hand-written protocol than ADR-0042 wrote and rejected. Meanwhile option 1's
+rejection turned substantially on "option 9's strongest argument — avoiding a
+dependency-heavy SDK — evaporates once decision 2 takes an SDK anyway", and
+that premise is now false in the direction that decides it: **one of the two
+SDKs implements the current revision, and it is the Rust one.**
+
+So option 1 is taken. It was already recorded here as "the live alternative",
+and the trigger that fired is not the one this ADR predicted (a customer
+blocked by the Node runtime) but a plainer one — the TypeScript SDK cannot do
+the job decision 3 defines.
+
+**What this changes:** decisions 1 and 2 are replaced, and decision 4's
+mechanism changes with them. **What it does not change:** decision 3 is now
+*deliverable as written* rather than aspirational, and decisions 5–11 — the
+two tools, the `--writes` capability flag, the `remember` naming, the
+`Assertion` kind, stdio-only, generated client config, and the recorded
+protocol corpus — are all surface-level and survive the move intact.
+
+**What was checked before committing to it**: `rmcp` 3.1.0 is Apache-2.0;
+`cargo deny check` returns `advisories ok, bans ok, licenses ok, sources ok`
+with **no new per-crate exception**; and with `default-features = false,
+features = ["server", "macros", "transport-io"]` it pulls 14 direct
+dependencies of which 9 are already in the workspace. The dependency-weight
+objection that shaped ADR-0042 option 9 does not survive measurement either.
+
+**The constraint that replaces the one we gave up.** Seed §7 places the
+generic MCP server in the "Harness adapters (thin, stateless)" row, and that
+row's defining property is the label on the arrow beneath it: *three
+primitives only*. Shipping the server as a `synveda` subcommand keeps the
+layer and gives up only the language, **but it puts an adapter inside a
+binary that already links `synveda-store`, `synveda-identity`,
+`synveda-policy` and `synveda-audit`** for its dev-bootstrap commands. So the
+rule is stated rather than assumed: `synveda mcp` is a **gateway client**. It
+reaches the product over `/v1` holding a bearer, exactly as `synveda login`
+and the CLI's other served verbs do, and it must not call a core crate — not
+for a shortcut, not in a test. This is the one property option 1 costs that
+the TypeScript package would have enforced structurally, and it is now a
+review obligation instead. Seed §7's diagram wants a footnote to match.
 
 ## Context
 
@@ -132,20 +199,33 @@ the constraint that an SDK was off the table; once the SDK trigger fires that
 constraint is gone, and three recorded positions point at TypeScript against
 one pointing at Rust.
 
+> **Superseded by the amendment above.** Counting recorded positions is not
+> the same as checking whether either candidate can implement the protocol,
+> and the count was doing the work here. The three positions were about where
+> a TS package *belongs*; none of them was a claim that the TS SDK serves
+> `2026-07-28`, and it does not.
+
 ## Decision
 
-1. **The server ships as `@synveda/mcp-server`, the TypeScript package FND-1
-   scaffolded for it**, in the adapters layer seed §7 puts it in. `npx -y
-   @synveda/mcp-server` is the config line both AC clients already use for
-   every other server they run, so a Node runtime costs the criterion
-   nothing — which is the fact that made ADR-0042 option 9's "must not
-   require Node" argument weaker than it looked.
+1. **[Amended 2026-08-05]** **The server ships as `synveda mcp`, a subcommand
+   of the existing Rust CLI** — option 1 below, taken for the reason the
+   amendment sets out. It stays in seed §7's adapters row by *behaviour*: a
+   gateway client over `/v1`, three primitives only, no core-crate call. The
+   config line both AC clients get is the absolute path to a binary they
+   already have after `synveda init`, which is one fewer runtime than `npx`
+   and removes the install step rather than relocating it.
 
-2. **It takes the official MCP TypeScript SDK.** ADR-0042 option 8's trigger
-   has fired and this is the answer it named. A standalone package has no
-   no-install-step constraint to protect — that constraint is ADR-0027
-   decision 1's and belongs to the plugin — so the reason to hand-write is
-   gone at exactly the moment the surface to hand-write got bigger.
+   *This replaces:* shipping as `@synveda/mcp-server`, the TypeScript package
+   FND-1 scaffolded, launched via `npx -y`. That scaffold is now an empty
+   package with no feature behind it; it goes, and seed §7's file tree
+   (`adapters/mcp-server/`) is stale until someone updates it.
+
+2. **[Amended 2026-08-05]** **It takes `rmcp`, the official MCP Rust SDK.**
+   ADR-0042 option 8's trigger has fired and an SDK is still the answer —
+   only not the one this ADR first named, because the TypeScript one does
+   not implement the revision decision 3 requires and the Rust one does.
+
+   *This replaces:* taking the official MCP TypeScript SDK.
 
 3. **Dual-era, modern-preferred.** The server implements `2026-07-28` —
    `server/discover`, per-request `_meta` version, `UnsupportedProtocol-
@@ -153,14 +233,22 @@ one pointing at Rust.
    clients that open that way. The AC's two clients decide which era is
    exercised, and the corpus records both rather than assuming.
 
-4. **`adapters/claude-code`'s protocol loop is deleted; the plugin execs the
-   shared package.** `mcp.mts`'s hand-written JSON-RPC goes, its
-   `mcpServers` entry runs `@synveda/mcp-server`, and its stale
-   `2025-06-18` pin — and the test that asserts it — go with it. Two
-   implementations of one protocol is two places for the `ids` xor `query`
-   rule to drift, which is CTX-5's own argument for one tool instead of
-   three, applied one level up. This also fixes a live defect rather than
-   leaving it shipped.
+4. **[Amended 2026-08-05]** **`adapters/claude-code`'s protocol loop is
+   deleted; the plugin's `mcpServers` entry execs `synveda mcp`.** The
+   reasoning is untouched — two implementations of one protocol is two
+   places for the `ids` xor `query` rule to drift, which is CTX-5's own
+   argument for one tool instead of three applied one level up, and the
+   stale `2025-06-18` pin plus the test asserting it are a live defect
+   rather than a cosmetic one. Only the exec target changes: the `synveda`
+   binary rather than a TypeScript package.
+
+   This makes the plugin depend on the CLI being installed, which
+   ADR-0027 decision 4 already established — the plugin shells out to
+   `synveda` for credentials, so the binary is a prerequisite the plugin
+   has today. The `mcpServers` entry resolves it the same way that code
+   does; **a plugin that cannot find the binary must fail with the message
+   ADR-0027 decision 4 already writes for that case, not silently serve no
+   tools.**
 
 5. **Two tools, `recall` and `remember`.** `recall`'s schema is CTX-5's
    unchanged — `{query?, ids?, as_of?, valid_at?, limit?}`, one tool rather
@@ -229,18 +317,30 @@ one pointing at Rust.
 
 ## Options considered
 
-1. **`synveda mcp` in the Rust CLI (ADR-0042 option 9)** — the CLI already
-   holds the credential, is already a shipped binary, needs no Node, and the
-   official Rust SDK (`rmcp`) implements 2026-07-28 with compatibility back
-   through 2025-11-25, so dual-era would come free. Rejected on architecture
-   fit rather than capability: seed §7 places the generic MCP server in the
-   adapters row, FND-1 scaffolded the package, and ADR-0027 decision 1 says
-   in terms that this server is a TS ecosystem. Option 9's strongest
-   argument — avoiding a dependency-heavy SDK — evaporates once decision 2
-   takes an SDK anyway, and `npx` is the ecosystem's install norm for the two
-   clients the AC names. **Recorded as the live alternative**: if the Node
-   runtime becomes a real obstacle for a customer, this is the move, and
-   `rmcp` makes it cheaper than it was when ADR-0042 wrote it down.
+1. **`synveda mcp` in the Rust CLI (ADR-0042 option 9)** — **ACCEPTED on
+   2026-08-05; see the amendment.** The original entry is kept verbatim
+   below, because the shape of the mistake is the useful part: every clause
+   of the rejection was about fit and cost, none of it about whether the
+   chosen SDK could do the job, and *that* was the question that decided it.
+
+   > the CLI already holds the credential, is already a shipped binary,
+   > needs no Node, and the official Rust SDK (`rmcp`) implements 2026-07-28
+   > with compatibility back through 2025-11-25, so dual-era would come
+   > free. Rejected on architecture fit rather than capability: seed §7
+   > places the generic MCP server in the adapters row, FND-1 scaffolded the
+   > package, and ADR-0027 decision 1 says in terms that this server is a TS
+   > ecosystem. Option 9's strongest argument — avoiding a dependency-heavy
+   > SDK — evaporates once decision 2 takes an SDK anyway, and `npx` is the
+   > ecosystem's install norm for the two clients the AC names. **Recorded
+   > as the live alternative**: if the Node runtime becomes a real obstacle
+   > for a customer, this is the move, and `rmcp` makes it cheaper than it
+   > was when ADR-0042 wrote it down.
+
+   Two clauses were checked when it was taken and both held: `rmcp` 3.1.0
+   does carry `V_2026_07_28` in `SUPPORTED` alongside `V_2025_11_25` (its
+   `LATEST` const still names the older one, so dual-era is a configuration
+   rather than literally free), and the dependency weight is 5 crates the
+   workspace did not already have.
 2. **Keep the hand-written loop and just add the new methods** — no
    dependency, no bundler, and the existing code is proven. Rejected:
    `server/discover`, per-request `_meta` validation, `-32022` with a
@@ -301,19 +401,26 @@ one pointing at Rust.
   the ADR that creates the hazard. LlamaIndex and Semantic Kernel appear in
   no feature, epic or roadmap line today; scheduling them is a
   SYNVEDA_FEATURES.md decision, not this ADR's.
-- **Negative / accepted trade-offs:** an SDK dependency and therefore a
-  bundler question for the first time in this product's TS surface, plus the
-  npm licence gate CNSL-1 built (`scripts/check-npm-licences.mjs`) now
-  covering a real dependency tree rather than three first-party packages; a
-  new `ObserveKind` variant is a migration and touches MEM-3's extraction,
-  which is not this feature's code; `synveda mcp install` writes another
-  application's config file; deleting `mcp.mts`'s loop churns a CTX-5 AC test
-  that currently asserts the stale protocol version; and stdio-only means the
-  first hosted-agent user waits for ADPT-3.
-- **Reversal triggers:** the Node runtime blocks a real customer, or the
-  credential shell-out proves too slow at session start → option 1, `synveda
-  mcp` on `rmcp`, with the TS package as the thin alias in the other
-  direction; ADPT-3 lands API-key service identities → decision 9's HTTP
+- **Negative / accepted trade-offs** *(revised 2026-08-05)*: the CLI binary
+  grows an SDK and 5 crates not already in the workspace, and every `synveda`
+  invocation — `init`, `login`, `policy apply` — carries them whether or not
+  it serves MCP; **an adapter now lives in a binary that links the core
+  crates, so "three primitives only" is a review obligation rather than a
+  structural one** (decision 1); a new `ObserveKind` variant is a migration
+  and touches MEM-3's extraction, which is not this feature's code; `synveda
+  mcp install` writes another application's config file; deleting `mcp.mts`'s
+  loop churns a CTX-5 AC test that currently asserts the stale protocol
+  version; and stdio-only means the first hosted-agent user waits for ADPT-3.
+
+  *No longer applicable, having been the TypeScript path's costs:* the
+  bundler question, and `scripts/check-npm-licences.mjs` covering a real
+  dependency tree. The npm surface stays three first-party packages.
+- **Reversal triggers** *(revised 2026-08-05 — the first one has fired and is
+  now the decision)*: the TypeScript SDK ships `2026-07-28` **and** a customer
+  is blocked by requiring the `synveda` binary → the TS package becomes the
+  thin alias in the other direction, on this ADR's original reasoning, which
+  is preserved below rather than deleted; ADPT-3 lands API-key service
+  identities → decision 9's HTTP
   transport becomes the hosted story and stdio stays local; a third client
   arrives with another config format → `install` grows a generic
   print-the-JSON mode rather than a branch per vendor; a harness we tap hooks
@@ -345,10 +452,14 @@ one pointing at Rust.
   into a `remember` call gets the same scan, the same quarantine or deny
   disposition, and the same guarantee that raw finding text survives in no
   table, response, metric or audit payload (ADR-0021).
-- **Licence path**: the SDK enters the shipped npm surface, so
-  `check-npm-licences.mjs` gates it on the same MIT/Apache-2.0/PostgreSQL
-  rule as the core path, and a non-conforming transitive dependency is a
-  build failure rather than a review note.
+- **Licence path** *(revised 2026-08-05)*: the SDK enters the **Rust** core
+  path, so `cargo deny` gates it on the MIT/Apache-2.0/PostgreSQL rule
+  directly. Measured before the decision was taken: `rmcp` 3.1.0 is
+  Apache-2.0 and `cargo deny check` returns `advisories ok, bans ok,
+  licenses ok, sources ok` with **no new per-crate exception added to
+  `deny.toml`** — which matters, because every existing exception in that
+  file is a reviewed diff with a written justification, and a new SDK that
+  needed one would be a worse trade than it looks.
 - **No test bypasses the PDP** (seed §2.2): the AC corpus drives the real
   server against the real gateway under a test policy pack, on ADR-0042's
   precedent for `demos/ctx-5-recall.sh`.

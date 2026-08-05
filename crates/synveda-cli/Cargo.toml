@@ -35,6 +35,9 @@ getrandom = { workspace = true }
 # The CLI is a gateway client for `login`, `auth token`, and everything
 # else a running gateway serves (ADR-0027 decision 4).
 reqwest = { workspace = true }
+# `synveda mcp` — the generic MCP server (ADPT-2, ADR-0057 as amended).
+rmcp = { workspace = true }
+
 serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }
