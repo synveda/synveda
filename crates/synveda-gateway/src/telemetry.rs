@@ -703,6 +703,24 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_ingest::retention::RETENTION_DESTROYED_TOTAL,
         "Rows destroyed by retention, by plane (history/staging/quarantine)"
     );
+    // AUTH-4 (ADR-0059): the directory plane. Reads there are metered and
+    // traced rather than chained (decision 14), so these three counters and
+    // the `scim.*` spans are the whole record of a provisioning agent's
+    // polling — which makes describing them load-bearing rather than
+    // decorative.
+    metrics::describe_counter!(
+        SCIM_REQUESTS_TOTAL,
+        "SCIM plane requests by authentication outcome (authenticated/rejected)"
+    );
+    metrics::describe_counter!(
+        SCIM_RECONCILES_TOTAL,
+        "Directory reconciliations by outcome \
+         (provisioned/adopted/moved/moved_and_sealed/sealed/unchanged)"
+    );
+    metrics::describe_counter!(
+        SCIM_CREDENTIAL_OPERATIONS_TOTAL,
+        "Provisioning-credential admin operations by op (issue/list/revoke) and outcome"
+    );
     // Touch the label-less histogram so it renders (count 0) before the first
     // inject exists — the FND-5 contract is visible in /metrics from boot.
     let _ = metrics::histogram!(TOKENS_PER_INJECT);

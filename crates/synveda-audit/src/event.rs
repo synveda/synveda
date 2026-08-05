@@ -452,12 +452,16 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 50] = [
+    pub const ALL: [AuditAction; 54] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
         AuditAction::RlsBackstopTripped,
         AuditAction::IdentityProvisioned,
+        AuditAction::IdentityMoved,
+        AuditAction::IdentitySealed,
+        AuditAction::ScimCredentialIssued,
+        AuditAction::ScimCredentialRevoked,
         AuditAction::HierarchyNodeCreated,
         AuditAction::HierarchyNodeUpdated,
         AuditAction::HierarchyNodeDeleted,
@@ -624,6 +628,34 @@ pub struct AuditEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `ALL` really is all of them.
+    ///
+    /// The distinctness test below cannot catch an *omission*, and four
+    /// actions reached the chain without joining this list before it was
+    /// written (AUTH-4). An action missing here is invisible to everything
+    /// that enumerates the vocabulary — an export's column set, a SIEM
+    /// rule's allow-list, a documentation table — while working perfectly
+    /// well at the emission point, which is the shape of gap that survives
+    /// review.
+    ///
+    /// Enforced by arithmetic rather than by reflection, which Rust does
+    /// not have for this: `as_str` is an exhaustive match, so every variant
+    /// has a name, and `ALL`'s length is declared. What this asserts is
+    /// that the declared length matches the number of *distinct* names
+    /// reachable through it — so adding a variant without adding it here
+    /// leaves the two numbers disagreeing the moment anybody updates the
+    /// array's length, and forgetting the length is a compile error.
+    #[test]
+    fn the_vocabulary_list_holds_every_action() {
+        let names: std::collections::BTreeSet<&str> =
+            AuditAction::ALL.iter().map(|a| a.as_str()).collect();
+        assert_eq!(
+            names.len(),
+            AuditAction::ALL.len(),
+            "ALL has a duplicate, so it is hiding a missing variant"
+        );
+    }
 
     #[test]
     fn every_action_name_is_distinct_and_dotted() {
