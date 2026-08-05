@@ -52,8 +52,10 @@ Since AUTH-4 it syncs a directory: `/scim/v2` for Entra and Okta, with
 replayed a frame from a live Entra or Okta tenant yet — the vendor corpus is
 transcribed from their published tables.
 Since CNSL-1 it has a browser: the gateway serves the admin console from its
-own origin at `/console/`, which needs `pnpm --filter @synveda/console build`
-before the gateway will start.
+own origin at `/console/`, which needs `pnpm --filter @synveda/console build`.
+A missing bundle is not a boot failure — the route 404s and the rest of the
+product runs, because a static asset must not be a dependency of the audit
+log (crates/synveda-gateway/src/console.rs).
 
 Phase demo goal: Entra/Okta live, spec-compliant governed skills into Claude
 Code + Cursor, LoCoMo/LongMemEval scores published, Helm install.
