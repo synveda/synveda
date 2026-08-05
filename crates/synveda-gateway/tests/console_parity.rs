@@ -488,7 +488,7 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
         &mut tx,
         id,
         tenant,
-        subject,
+        Some(subject),
         IdentityKind::User,
         None,
         None,

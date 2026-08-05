@@ -314,7 +314,7 @@ async fn over_ttl_service_token_chains_the_rejection() {
         &mut tx,
         IdentityId::new(),
         tenant_id,
-        "agent-1",
+        Some("agent-1"),
         IdentityKind::Service,
         None,
         None,

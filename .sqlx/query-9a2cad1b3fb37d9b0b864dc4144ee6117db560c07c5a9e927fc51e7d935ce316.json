@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into identities\n            (id, tenant_id, subject, kind, email, display_name, scope_id,\n             status, departed_at)\n        values ($1, $2, null, $3, $4, $5, $6, 'departed', now())\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9a2cad1b3fb37d9b0b864dc4144ee6117db560c07c5a9e927fc51e7d935ce316"
+}

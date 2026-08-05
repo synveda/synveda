@@ -37,6 +37,7 @@ fn node(
             || slug.to_owned(),
             |parent| format!("{}/{slug}", parent.path),
         ),
+        sealed: false,
         created_at: Utc::now(),
     }
 }

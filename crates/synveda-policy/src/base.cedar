@@ -18,6 +18,39 @@ forbid (
     resource
 ) when { principal.quarantined };
 
+// A sealed scope is nobody's to act on (AUTH-4, ADR-0059 decision 8).
+//
+// The mirror of the quarantine forbid above, and the pairing is the whole
+// design: quarantine says *this caller* may do nothing, a seal says nothing
+// may be done to *this material*. A person's personal scope is sealed when
+// the directory says they have left, and from that moment no pack, no role
+// and no lapse reaches it — the lapse permit at the bottom of this file
+// could not anyway, because its `resource.kind != "user"` privacy floor
+// (ADR-0015 decision 4) already excludes every personal scope, sealed or
+// live.
+//
+// It forbids **every** action rather than reads alone, and the write half
+// is the one that would be missed: a departed person's scope that still
+// accepted observations would keep growing under a retention hold, and an
+// extraction worker draining a queue after somebody's last day would be
+// writing memory for a person the directory has already said is gone.
+//
+// There is deliberately no carve-out for compliance, legal or org-admin.
+// Adding a reader here is adding this product's first "read somebody
+// else's private material" surface, and that belongs to the export plane
+// with its own ADR and its own approval matrix — not to the feature that
+// handles somebody resigning (ADR-0059 decision 8).
+//
+// `sealed` is required by the schema, so this forbid can never be skipped
+// for want of the attribute — the ADR-0015 decision 5 shape, applied to
+// the rule whose silent absence would be least visible: everything would
+// simply keep working.
+forbid (
+    principal,
+    action,
+    resource
+) when { resource is Synveda::Scope && resource.sealed };
+
 // Escalation resistance (AUTHZ-3, ADR-0015 decision 5): granting or
 // revoking org-admin requires holding org-admin, under every pack — a
 // custom pack that forgot the guard must not let its permitted

@@ -172,7 +172,7 @@ async fn provision_once(
         &mut tx,
         identity_id,
         tenant.id,
-        subject,
+        Some(subject),
         IdentityKind::User,
         claims.email.as_deref(),
         claims.display_name.as_deref(),

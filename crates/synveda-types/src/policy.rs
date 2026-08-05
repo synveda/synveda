@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ApprovalMatrix, CompositionConfig, DedupConfig, LapseConfig, PromotionConfig, RedactionConfig,
-    RetentionConfig, ScopeId, SkillQualityConfig, SkillScanConfig, TenantId,
+    ApprovalMatrix, CompositionConfig, DedupConfig, LapseConfig, MoverConfig, PromotionConfig,
+    RedactionConfig, RetentionConfig, ScopeId, SkillQualityConfig, SkillScanConfig, TenantId,
 };
 
 /// A per-node policy pack assignment: the node (and its subtree, until a
@@ -73,6 +73,15 @@ pub struct PackConfig {
     pub dedup: Option<DedupConfig>,
     /// The pack's retention, disposal and staleness configuration.
     pub retention: Option<RetentionConfig>,
+    /// What happens to a mover's own memory when the directory moves them
+    /// across a policy boundary (AUTH-4, ADR-0059 decision 10).
+    ///
+    /// Its fail-safe is `retention`'s rather than `quality`'s, and for
+    /// `retention`'s reason: an unconfigured pack seals on a cross-pack
+    /// move, because the alternative hands material to a schedule nobody
+    /// wrote it under. Nothing is refused either way — the move always
+    /// happens.
+    pub mover: Option<MoverConfig>,
     /// The severity at which a skill bundle's security scan refuses.
     ///
     /// Its fail-safe is the invariant floor (`critical` blocks and

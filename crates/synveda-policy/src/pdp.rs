@@ -21,8 +21,9 @@ use cedar_policy::{
 };
 use synveda_types::{
     ApprovalMatrix, CompositionConfig, DedupConfig, Error, HierarchyNode, Lapse, LapseAction,
-    LapseConfig, PackConfig, PromotionConfig, RedactionConfig, Result, RetentionConfig, Role,
-    ScopeId, ScopeKind, Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId,
+    LapseConfig, MoverConfig, PackConfig, PromotionConfig, RedactionConfig, Result,
+    RetentionConfig, Role, ScopeId, ScopeKind, Sensitivity, SkillQualityConfig, SkillScanConfig,
+    TenantId,
 };
 
 use crate::entity_store::EntityStore;
@@ -78,11 +79,19 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// **invariant floor's** skill rule, which had required the
 /// `security-reviewer` role at one distinct approver, so under `standard`
 /// and `open-collaboration` one person holding both roles published
-/// executable code alone (ADR-0051 decisions 10 and 18).
+/// executable code alone (ADR-0051 decisions 10 and 18). `@15`: AUTH-4
+/// added the base layer's second forbid — a sealed scope is nobody's to
+/// act on — and the `Scope` entity attribute it stands on, which is the
+/// mirror of the quarantine rule these packs have carried since ADR-0013:
+/// quarantine says this caller may do nothing, a seal says nothing may be
+/// done to this material. Every pack's own policies are **byte-identical**
+/// across this bump, which is what makes the golden diff checkable: the
+/// only cells that move are the ones a seal turns off (ADR-0059
+/// decisions 8 and 9).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 14),
-    (STANDARD, 14),
-    (OPEN_COLLABORATION, 14),
+    (REGULATED_STRICT, 15),
+    (STANDARD, 15),
+    (OPEN_COLLABORATION, 15),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -132,6 +141,10 @@ struct LoadedPack {
     /// destroyed, and how fast it decays in ranking (MEM-6, ADR-0040).
     /// `Copy`, so no `Arc`.
     retention: RetentionConfig,
+    /// What happens to a mover's own memory when the directory moves them
+    /// across a policy boundary (AUTH-4, ADR-0059 decision 10). `Copy`,
+    /// so no `Arc`.
+    mover: MoverConfig,
     /// The severity at which a skill bundle's security scan refuses
     /// rather than reports (SKIL-2, ADR-0052 decision 9). `Copy`, so no
     /// `Arc`.
@@ -231,6 +244,12 @@ pub struct EffectivePack {
     /// every planned scope, and by the sweep at the scope a record lives
     /// at (ADR-0040 decision 10).
     pub retention: RetentionConfig,
+    /// The pack's mover configuration (AUTH-4, ADR-0059 decision 10):
+    /// whether a person's own memory follows them across a policy
+    /// boundary or is sealed where it was written. Read by the SCIM
+    /// reconciler at the scope the person is moving **away from** —
+    /// authority over material belongs where the material is.
+    pub mover: MoverConfig,
     /// The pack's skill-scan configuration (SKIL-2, ADR-0052 decision 9):
     /// the severity at which a bundle's security scan refuses rather than
     /// reports. Read at the authoring seam and again at publication —
@@ -327,6 +346,7 @@ impl Pdp {
                 RedactionConfig::STRICT,
                 LapseConfig::STRICT,
                 RetentionConfig::STRICT,
+                MoverConfig::STRICT,
                 SkillScanConfig::STRICT,
                 SkillQualityConfig::STRICT,
             ),
@@ -336,6 +356,7 @@ impl Pdp {
                 RedactionConfig::REDACT_ALL,
                 LapseConfig::RELAXED,
                 RetentionConfig::DEFAULT,
+                MoverConfig::FOLLOWS,
                 SkillScanConfig::FLOOR,
                 SkillQualityConfig::MODERATE,
             ),
@@ -345,12 +366,13 @@ impl Pdp {
                 RedactionConfig::REDACT_ALL,
                 LapseConfig::RELAXED,
                 RetentionConfig::DEFAULT,
+                MoverConfig::FOLLOWS,
                 SkillScanConfig::FLOOR,
                 SkillQualityConfig::OPEN,
             ),
         ];
         let mut embedded = HashMap::new();
-        for ((name, version), (_, source, redaction, lapse, retention, scan, quality)) in
+        for ((name, version), (_, source, redaction, lapse, retention, mover, scan, quality)) in
             EMBEDDED_PACKS.iter().zip(sources)
         {
             let pack = compile(
@@ -380,6 +402,13 @@ impl Pdp {
                     // decision 13). What differs is the staging plane,
                     // whose disposal ADR-0020/0021 already promised.
                     retention: Some(retention),
+                    // `regulated-strict` seals a personal scope that
+                    // crosses a policy boundary; the relaxed packs let it
+                    // follow. Safe under those two for a reason they
+                    // state themselves — neither sets a record horizon,
+                    // so there is no schedule for the material to be
+                    // handed to (ADR-0059 decision 10).
+                    mover: Some(mover),
                     scan: Some(scan),
                     quality: Some(quality),
                 },
@@ -435,6 +464,7 @@ impl Pdp {
                 lapse: None,
                 dedup: None,
                 retention: None,
+                mover: None,
                 scan: None,
                 quality: None,
             },
@@ -824,6 +854,7 @@ impl Pdp {
             lapse: pack.lapse,
             dedup: pack.dedup,
             retention: pack.retention,
+            mover: pack.mover,
             scan: pack.scan,
             quality: pack.quality,
         }
@@ -1057,6 +1088,14 @@ impl Pdp {
                     (
                         "kind".to_owned(),
                         RestrictedExpression::new_string(node.kind.as_str().to_owned()),
+                    ),
+                    (
+                        // AUTH-4, ADR-0059 decision 9. Carried on the node
+                        // rather than supplied beside it, so the fragment
+                        // shape below covers it and no cached fragment can
+                        // serve an unsealed answer for a sealed scope.
+                        "sealed".to_owned(),
+                        RestrictedExpression::new_bool(node.sealed),
                     ),
                 ]),
                 HashSet::from([parent]),
@@ -1385,6 +1424,12 @@ fn compile(
     // unset: a stored pack that says nothing about retention must not
     // start destroying a tenant's memory (ADR-0040 decision 13).
     let retention = config.retention.unwrap_or_default();
+    // Unconfigured seals on a cross-pack move, which is `retention`'s
+    // fail-safe rather than `quality`'s: nothing here refuses anything —
+    // the move always happens — so the honest default is the one that
+    // cannot hand material to a schedule nobody wrote it under (ADR-0059
+    // decision 10, on ADR-0040 decision 13's argument).
+    let mover = config.mover.unwrap_or_default();
     // Unconfigured is the invariant floor rather than the strict pack's
     // threshold: `critical` refuses either way, and a pack that says
     // nothing must not start refusing bundles nobody asked it to
@@ -1458,6 +1503,7 @@ fn compile(
         lapse,
         dedup,
         retention,
+        mover,
         scan,
         quality,
     })

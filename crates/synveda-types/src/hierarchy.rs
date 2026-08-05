@@ -106,6 +106,20 @@ pub struct HierarchyNode {
     /// Slug chain from the root (`acme/emea/payments`). Display and
     /// ordering only — never an authorisation input (ADR-0011).
     pub path: String,
+    /// Whether this scope is sealed (AUTH-4, ADR-0059 decisions 7 and 9).
+    ///
+    /// Derived in the query, never stored on the node: a user-kind scope
+    /// is sealed exactly when the identity that owns it is departed, and
+    /// the one-personal-scope-per-identity constraint makes that a 1:1.
+    /// The same shape [`crate::Identity::quarantined`] has had since
+    /// ADR-0013 decision 4, and for the same reason — one source of
+    /// truth, nothing to drift.
+    ///
+    /// It reaches Cedar as a `Scope` entity attribute, which is why it
+    /// lives on the node rather than travelling beside it: a fact about a
+    /// node that arrives by a second road is a fact that can disagree
+    /// with the node. Non-user scopes are never sealed.
+    pub sealed: bool,
     /// When the node was created.
     pub created_at: DateTime<Utc>,
 }

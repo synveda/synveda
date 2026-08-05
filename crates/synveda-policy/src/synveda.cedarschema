@@ -49,9 +49,23 @@ namespace Synveda {
 
     // A node of the tenancy hierarchy. Parents follow the hierarchy's
     // parent pointers; the org root's parent is the Tenant entity.
+    //
+    // `sealed` is AUTH-4's leaver state (ADR-0059 decision 9), derived
+    // from the identity that owns a user-kind node rather than stored on
+    // the node. It is **required** rather than optional, for the reason
+    // `context.grant` and `context.sensitivity` are: the base layer's
+    // forbid must never go missing for want of an attribute — a policy
+    // referencing a missing one errors, and Cedar drops a policy that
+    // errors, which would silently unseal every departed person.
+    //
+    // It is an attribute of the *resource* where `quarantined` is an
+    // attribute of the principal, and the pair is the whole shape of the
+    // two controls: quarantine says this caller may do nothing, and a
+    // seal says nothing may be done to this material.
     entity Scope in [Tenant, Scope] {
         tenant: Tenant,
         kind: String,
+        sealed: Bool,
     };
 
     // The hierarchy admin plane (/v1/hierarchy/*, ADR-0011 decision 8).

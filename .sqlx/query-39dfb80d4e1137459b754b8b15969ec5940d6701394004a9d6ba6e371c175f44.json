@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update identities set subject = $3\n        where tenant_id = $1 and id = $2 and subject is null and status = 'active'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "39dfb80d4e1137459b754b8b15969ec5940d6701394004a9d6ba6e371c175f44"
+}

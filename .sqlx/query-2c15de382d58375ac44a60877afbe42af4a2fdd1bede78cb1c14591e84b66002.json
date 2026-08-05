@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select distinct scope_id as \"scope_id!\"\n        from records\n        where tenant_id = $1 and kind = 'derived'\n        -- A sealed scope is retention-held: its material is exempt from\n        -- every horizon, because a hold whose whole purpose is to survive\n        -- a schedule must not be implemented as one (AUTH-4, ADR-0059\n        -- decision 8). Excluded at enumeration rather than per record, so\n        -- the sweep never forms a work list it must then remember not to\n        -- act on.\n        and not exists (\n            select 1 from identities i\n            where i.tenant_id = $1 and i.scope_id = records.scope_id\n              and i.status = 'departed'\n        )\n        order by scope_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2c15de382d58375ac44a60877afbe42af4a2fdd1bede78cb1c14591e84b66002"
+}

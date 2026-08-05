@@ -130,3 +130,24 @@ define_id!(
     /// decisions 3 and 4). Stable across the versions of that claim.
     GraphEdgeId
 );
+
+define_id!(
+    /// Identifies a directory user — one row of the SCIM mirror, and the
+    /// `id` a provisioning agent stores and addresses that resource by
+    /// forever (AUTH-4, ADR-0059 decision 3). Deliberately distinct from
+    /// the [`IdentityId`] it projects onto: a rehire is a new identity and
+    /// a new personal scope, and the client must still be able to fetch
+    /// the resource by the id it holds.
+    DirectoryUserId
+);
+define_id!(
+    /// Identifies a directory group — one row of the SCIM mirror, whose
+    /// `displayName` is what the AUTH-2 mapping resolver sees (AUTH-4,
+    /// ADR-0059 decision 6).
+    DirectoryGroupId
+);
+define_id!(
+    /// Identifies a provisioning credential — the static bearer a SCIM
+    /// client authenticates with (AUTH-4, ADR-0059 decision 13).
+    ScimCredentialId
+);

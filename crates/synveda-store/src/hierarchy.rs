@@ -8,6 +8,15 @@
 //! the adjacency. Closure maintenance is deliberately explicit SQL here,
 //! not triggers (ADR-0011 decision 2).
 //!
+//! Every read here derives `sealed` (AUTH-4, ADR-0059 decision 7) by the
+//! same left join, in one form: a user-kind node is sealed exactly when the
+//! identity that owns it is departed. It rides the node rather than
+//! travelling beside it because it reaches Cedar as a `Scope` entity
+//! attribute, and a fact about a node that arrives by a second road is a
+//! fact that can disagree with the node. The join is an index lookup on
+//! `identities (tenant_id, scope_id)`, which is unique — so it can neither
+//! multiply a row nor cost more than a probe.
+//!
 //! AUD-1 wiring point: create/rename/move/delete are audit emission points;
 //! events are wired when the hash-chained log lands. Until then they are
 //! visible in the `store.hierarchy.*` spans and the gateway's
@@ -29,6 +38,7 @@ struct NodeRow {
     name: String,
     depth: i32,
     path: String,
+    sealed: bool,
     created_at: DateTime<Utc>,
 }
 
@@ -49,6 +59,7 @@ impl TryFrom<NodeRow> for HierarchyNode {
             name: row.name,
             depth: row.depth,
             path: row.path,
+            sealed: row.sealed,
             created_at: row.created_at,
         })
     }
@@ -101,9 +112,15 @@ async fn lock_node(conn: &mut PgConnection, id: ScopeId) -> Result<Option<Hierar
     let row = sqlx::query_as!(
         NodeRow,
         r#"
-        select id, tenant_id, parent_id, kind, slug, name, depth, path, created_at
-        from hierarchy_nodes where id = $1
-        for update
+        select n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name, n.depth,
+               n.path, n.created_at, coalesce(s.status = 'departed', false) as "sealed!"
+        from hierarchy_nodes n
+        left join identities s on s.tenant_id = n.tenant_id and s.scope_id = n.id
+        where n.id = $1
+        -- `of n`: the seal derivation puts a nullable side in this query
+        -- and Postgres will not lock one. The node row is the only row
+        -- this lock was ever about.
+        for update of n
         "#,
         id.as_uuid(),
     )
@@ -169,7 +186,10 @@ pub async fn create(
         insert into hierarchy_nodes
             (id, tenant_id, parent_id, kind, slug, name, depth, path)
         values ($1, $2, $3, $4, $5, $6, $7, $8)
-        returning id, tenant_id, parent_id, kind, slug, name, depth, path, created_at
+        returning id, tenant_id, parent_id, kind, slug, name, depth, path, created_at,
+                  coalesce((select s.status = 'departed' from identities s
+                            where s.tenant_id = hierarchy_nodes.tenant_id
+                              and s.scope_id = hierarchy_nodes.id), false) as "sealed!"
         "#,
         id.as_uuid(),
         tenant_id.as_uuid(),
@@ -212,8 +232,11 @@ pub async fn node(executor: impl PgExecutor<'_>, id: ScopeId) -> Result<Option<H
     let row = sqlx::query_as!(
         NodeRow,
         r#"
-        select id, tenant_id, parent_id, kind, slug, name, depth, path, created_at
-        from hierarchy_nodes where id = $1
+        select n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name, n.depth,
+               n.path, n.created_at, coalesce(s.status = 'departed', false) as "sealed!"
+        from hierarchy_nodes n
+        left join identities s on s.tenant_id = n.tenant_id and s.scope_id = n.id
+        where n.id = $1
         "#,
         id.as_uuid(),
     )
@@ -232,8 +255,11 @@ pub async fn root(
     let row = sqlx::query_as!(
         NodeRow,
         r#"
-        select id, tenant_id, parent_id, kind, slug, name, depth, path, created_at
-        from hierarchy_nodes where tenant_id = $1 and parent_id is null
+        select n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name, n.depth,
+               n.path, n.created_at, coalesce(s.status = 'departed', false) as "sealed!"
+        from hierarchy_nodes n
+        left join identities s on s.tenant_id = n.tenant_id and s.scope_id = n.id
+        where n.tenant_id = $1 and parent_id is null
         "#,
         tenant_id.as_uuid(),
     )
@@ -259,8 +285,11 @@ pub async fn child_by_slug(
     let row = sqlx::query_as!(
         NodeRow,
         r#"
-        select id, tenant_id, parent_id, kind, slug, name, depth, path, created_at
-        from hierarchy_nodes where parent_id = $1 and slug = $2
+        select n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name, n.depth,
+               n.path, n.created_at, coalesce(s.status = 'departed', false) as "sealed!"
+        from hierarchy_nodes n
+        left join identities s on s.tenant_id = n.tenant_id and s.scope_id = n.id
+        where n.parent_id = $1 and slug = $2
         "#,
         parent_id.as_uuid(),
         slug,
@@ -293,7 +322,11 @@ pub async fn teams_matching(
         NodeRow,
         r#"
         select distinct n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name,
-               n.depth, n.path, n.created_at
+               n.depth, n.path, n.created_at,
+               -- A team node never owns an identity, so this is always
+               -- false here; derived rather than asserted so that one
+               -- expression answers the question everywhere.
+               coalesce(s.status = 'departed', false) as "sealed!"
         from unnest($2::text[], $3::text[]) as candidate(dept_slug, team_slug)
         join hierarchy_nodes n
           on n.tenant_id = $1 and n.kind = 'team' and n.slug = candidate.team_slug
@@ -302,6 +335,7 @@ pub async fn teams_matching(
         join hierarchy_nodes a
           on a.id = c.ancestor_id
          and a.kind = 'department' and a.slug = candidate.dept_slug
+        left join identities s on s.tenant_id = n.tenant_id and s.scope_id = n.id
         "#,
         tenant_id.as_uuid(),
         departments,
@@ -319,8 +353,11 @@ pub async fn children(executor: impl PgExecutor<'_>, id: ScopeId) -> Result<Vec<
     let rows = sqlx::query_as!(
         NodeRow,
         r#"
-        select id, tenant_id, parent_id, kind, slug, name, depth, path, created_at
-        from hierarchy_nodes where parent_id = $1
+        select n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name, n.depth,
+               n.path, n.created_at, coalesce(s.status = 'departed', false) as "sealed!"
+        from hierarchy_nodes n
+        left join identities s on s.tenant_id = n.tenant_id and s.scope_id = n.id
+        where n.parent_id = $1
         order by slug
         "#,
         id.as_uuid(),
@@ -340,9 +377,11 @@ pub async fn ancestors(executor: impl PgExecutor<'_>, id: ScopeId) -> Result<Vec
         NodeRow,
         r#"
         select n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name,
-               n.depth, n.path, n.created_at
+               n.depth, n.path, n.created_at,
+               coalesce(s.status = 'departed', false) as "sealed!"
         from hierarchy_closure c
         join hierarchy_nodes n on n.id = c.ancestor_id
+        left join identities s on s.tenant_id = n.tenant_id and s.scope_id = n.id
         where c.descendant_id = $1 and c.distance > 0
         order by c.distance
         "#,
@@ -370,9 +409,11 @@ pub async fn chain(
         NodeRow,
         r#"
         select n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name,
-               n.depth, n.path, n.created_at
+               n.depth, n.path, n.created_at,
+               coalesce(s.status = 'departed', false) as "sealed!"
         from hierarchy_closure c
         join hierarchy_nodes n on n.id = c.ancestor_id
+        left join identities s on s.tenant_id = n.tenant_id and s.scope_id = n.id
         where c.descendant_id = $1 and c.tenant_id = $2
         order by c.distance
         "#,
@@ -393,9 +434,11 @@ pub async fn descendants(executor: impl PgExecutor<'_>, id: ScopeId) -> Result<V
         NodeRow,
         r#"
         select n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name,
-               n.depth, n.path, n.created_at
+               n.depth, n.path, n.created_at,
+               coalesce(s.status = 'departed', false) as "sealed!"
         from hierarchy_closure c
         join hierarchy_nodes n on n.id = c.descendant_id
+        left join identities s on s.tenant_id = n.tenant_id and s.scope_id = n.id
         where c.ancestor_id = $1 and c.distance > 0
         order by n.path
         "#,
@@ -419,7 +462,10 @@ pub async fn rename(
         NodeRow,
         r#"
         update hierarchy_nodes set name = $2 where id = $1
-        returning id, tenant_id, parent_id, kind, slug, name, depth, path, created_at
+        returning id, tenant_id, parent_id, kind, slug, name, depth, path, created_at,
+                  coalesce((select s.status = 'departed' from identities s
+                            where s.tenant_id = hierarchy_nodes.tenant_id
+                              and s.scope_id = hierarchy_nodes.id), false) as "sealed!"
         "#,
         id.as_uuid(),
         name,

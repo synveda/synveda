@@ -25,6 +25,7 @@
 
 pub mod console_sessions;
 pub mod dedup;
+pub mod directory;
 pub mod graph;
 pub mod group_mappings;
 pub mod hierarchy;

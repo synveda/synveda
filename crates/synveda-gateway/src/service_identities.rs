@@ -138,7 +138,7 @@ pub(crate) async fn register(
             &mut tx,
             identity_id,
             tenant_id,
-            &body.subject,
+            Some(&body.subject),
             IdentityKind::Service,
             None,
             body.display_name.as_deref(),

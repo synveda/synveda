@@ -785,6 +785,13 @@ async fn authorize_owner(
     let Some(identity) = identities::by_id(&mut *tx, tenant_id, key.owner_id).await? else {
         return Ok(None);
     };
+    // An identity with no subject is one a directory created and nobody
+    // has logged in as yet (AUTH-4, ADR-0059 decision 5) — it holds no
+    // authority to run an act on. It falls out of the same door as an
+    // owner who was deleted: no special case, nothing proposed.
+    let Some(subject) = identity.subject.clone() else {
+        return Ok(None);
+    };
     let mut quarantined = identity.quarantined;
     let principal_chain: Vec<HierarchyNode> = deps
         .chains
@@ -806,7 +813,7 @@ async fn authorize_owner(
     };
     let principal = Principal {
         tenant_id,
-        subject: identity.subject.clone(),
+        subject: subject.clone(),
         quarantined,
         scope_id: Some(identity.scope_id),
         token_scope,
@@ -815,8 +822,7 @@ async fn authorize_owner(
     let assignments = policy_assignments::for_scopes(&mut *tx, tenant_id, &chain_ids).await?;
     let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
     let bindings =
-        role_bindings::for_subject_on_scopes(&mut *tx, tenant_id, &identity.subject, &chain_ids)
-            .await?;
+        role_bindings::for_subject_on_scopes(&mut *tx, tenant_id, &subject, &chain_ids).await?;
     let context = AuthzContext {
         scopes: scope_chain,
         principal_scopes: &principal_chain,
@@ -837,13 +843,13 @@ async fn authorize_owner(
         tracing::debug!(
             tenant.id = %tenant_id,
             scope.id = %key.scope_id,
-            identity.subject = %identity.subject,
+            identity.subject = %subject,
             "promotion declined: the owner may not propose here",
         );
         return Ok(None);
     }
     Ok(Some(OwnerAuth {
-        subject: identity.subject,
+        subject,
         decision,
         principal_scopes: principal_chain,
     }))

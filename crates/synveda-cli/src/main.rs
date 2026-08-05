@@ -1879,7 +1879,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 &mut tx,
                 identity_id,
                 tenant,
-                &subject,
+                Some(&subject),
                 IdentityKind::Service,
                 None,
                 name.as_deref(),
