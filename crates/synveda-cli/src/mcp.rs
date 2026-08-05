@@ -658,14 +658,38 @@ impl ServerHandler for Server {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
+        // The three facts about a tool call that only this process holds.
+        // The gateway sees a bearer and a route; it cannot tell an MCP tool
+        // call from a `synveda recall`, which client made it, or which
+        // protocol era that client opened with — so those are recorded
+        // here, where they are known, rather than guessed at later.
+        let span = tracing::info_span!(
+            "mcp.tools/call",
+            tool = %request.name,
+            era = context
+                .protocol_version()
+                .map_or_else(|| "unknown".to_owned(), |version| version.to_string()),
+            client = context
+                .client_info()
+                .map_or_else(|| "unknown".to_owned(), |info| info.name),
+            outcome = tracing::field::Empty,
+        );
+        let _entered = span.enter();
+
         let arguments = Value::Object(request.arguments.unwrap_or_default());
         let advertised = self.tools.iter().any(|tool| tool.name == request.name);
         if !advertised {
             // A protocol error, not a tool error: an unknown tool is the
             // client's mistake to handle, not something a model can retry
-            // its way out of.
+            // its way out of. Logged at warn because it is the shape a
+            // misconfigured `--writes` takes from the server's side.
+            span.record("outcome", "not_advertised");
+            tracing::warn!(
+                tool = %request.name,
+                "a tool this launch does not advertise was called",
+            );
             return Err(McpError::invalid_params(
                 format!("unknown tool `{}`", request.name),
                 None,
@@ -681,12 +705,25 @@ impl ServerHandler for Server {
                 Err(error) => tool_error(format!("Could not read the arguments: {error}")),
             },
             other => {
+                span.record("outcome", "unknown_tool");
                 return Err(McpError::invalid_params(
                     format!("unknown tool `{other}`"),
                     None,
                 ));
             }
         };
+        // The same `ok` / `rejected` vocabulary every governed plane uses,
+        // so a reader of this log is reading the funnel they already know.
+        // `rejected` covers both a refusal the model can act on and a
+        // gateway denial — the text says which, and the text is the thing
+        // that must never be a metric label (ADR-0021).
+        let outcome = if result.is_error == Some(true) {
+            "rejected"
+        } else {
+            "ok"
+        };
+        span.record("outcome", outcome);
+        tracing::info!(tool = %request.name, outcome, "tool call served");
         Ok(result.into())
     }
 }
@@ -700,28 +737,100 @@ impl ServerHandler for Server {
 /// hosted story is ADPT-3's — versioned API, API keys for service
 /// identities — rather than something to improvise here.
 pub async fn serve(profile: String, writes: Writes) -> Result<(), String> {
+    subscribe();
     let server = Server::new(profile, writes)?;
-    // stderr, because stdout is the protocol. It says which tools this
-    // launch advertises, which is the one thing about `--writes` that is
-    // invisible from the client side when it is wrong.
-    eprintln!(
-        "synveda mcp: serving {} on stdio",
-        server
-            .tools
-            .iter()
-            .map(|tool| tool.name.to_string())
-            .collect::<Vec<_>>()
-            .join(" and "),
+    let advertising = server
+        .tools
+        .iter()
+        .map(|tool| tool.name.to_string())
+        .collect::<Vec<_>>()
+        .join(" and ");
+    // stderr, because stdout is the protocol. Which tools this launch
+    // advertises is the one thing about `--writes` that is invisible from
+    // the client side when it is wrong, so it is said unconditionally
+    // rather than at a level someone has to opt into.
+    eprintln!("synveda mcp: serving {advertising} on stdio");
+    tracing::info!(
+        writes = ?writes,
+        tools = %advertising,
+        session_id = %server.session_id,
+        supported = %ProtocolVersion::V_2026_07_28,
+        "mcp server starting",
     );
     let running = server
         .serve(rmcp::transport::stdio())
         .await
         .map_err(|err| format!("serve MCP on stdio: {err}"))?;
-    running
+    let reason = running
         .waiting()
         .await
         .map_err(|err| format!("the MCP service ended abnormally: {err}"))?;
+    tracing::info!(?reason, "mcp server stopped");
     Ok(())
+}
+
+/// Diagnostics for the one CLI verb that outlives its terminal.
+///
+/// **To stderr, never stdout**, and this is the load-bearing line in the
+/// function: stdout is the JSON-RPC stream, so a single log line written
+/// there is a parse error at the client rather than a message anybody
+/// reads. `tracing_subscriber`'s fmt layer defaults to stdout, so the
+/// writer is set explicitly, and `tests/mcp_corpus.rs`'s
+/// `a_talkative_server_writes_nothing_but_protocol_to_stdout` holds it
+/// there by running the binary at `trace` and parsing every stdout line.
+///
+/// stderr is also exactly where an MCP client looks: Claude Desktop
+/// collects each server's stderr into
+/// `~/Library/Logs/Claude/mcp-server-<name>.log`, and its own documentation
+/// says stdio servers may use stderr for all their logging. So this needs
+/// no file of its own — unlike ADPT-1's hooks, which log to
+/// `$XDG_STATE_HOME` precisely because a hook's stderr goes nowhere.
+///
+/// Quiet by default. The gateway defaults to `info` because an operator is
+/// watching it; this runs inside somebody's editor, where a server that
+/// fills a log with routine chatter is a server they turn off. `RUST_LOG`
+/// raises it — `RUST_LOG=synveda=debug,rmcp=debug` is the one to reach for
+/// when a client will not connect, because it turns on `rmcp`'s own frame
+/// handling as well as ours.
+///
+/// # What is deliberately not installed here
+///
+/// **No OTLP exporter.** The gateway is the traced service and exports to
+/// the collector (FND-5); this is a subprocess on a laptop that starts and
+/// stops with an editor window, and opening a gRPC connection to a
+/// collector that is usually not there would be a new network dependency,
+/// a start-up delay, and an error in a log for every user who has no
+/// Jaeger. The tool call's own timing is recorded below, which is the part
+/// a person debugging this actually needs.
+///
+/// **No `traceparent` on the gateway calls.** ADR-0027's observability note
+/// promises one from the Claude Code adapter, and the adapter sends one —
+/// but nothing on the gateway extracts it today, so a header added here
+/// would join no trace and mean nothing. Worth doing when the gateway
+/// grows a propagator; cargo-culted before then.
+///
+/// **No metrics recorder.** `metrics` without a recorder is a no-op, and a
+/// stdio subprocess has no scrape endpoint to expose one on. The gateway
+/// already counts every `/v1` call this server makes, with the funnel shape
+/// every governed plane uses — a second, unreadable counter here would add
+/// nothing. What only this process knows is per-call, and is recorded as
+/// span fields instead, where the client's log can show it.
+fn subscribe() {
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+    // `try_init` rather than `init`: a subscriber already installed is not
+    // worth refusing to serve over.
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_ansi(false),
+        )
+        .try_init();
 }
 
 // ── Shared plumbing ────────────────────────────────────────────────────

@@ -3742,6 +3742,8 @@ dependencies = [
  "synveda-types",
  "synveda-vedaflow",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "url",
 ]
 

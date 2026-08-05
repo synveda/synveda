@@ -120,6 +120,22 @@ somewhere unusual — a project-level `.cursor/mcp.json`, say.
 launches the server with the write tool switched off, because its `Stop` hook is
 already recording your turns — the tool would store each one a second time.
 
+If a client will not connect, the server's diagnostics are on its stderr, which
+is where clients collect them — Claude Desktop keeps them in
+`~/Library/Logs/Claude/mcp-server-synveda.log`. It is quiet by default; add
+`RUST_LOG` to the entry's `env` to turn it up:
+
+```json
+"synveda": {
+  "command": "/usr/local/bin/synveda",
+  "args": ["mcp", "--writes", "tool"],
+  "env": { "RUST_LOG": "synveda=debug,rmcp=debug" }
+}
+```
+
+`rmcp` is the protocol SDK, so including it shows the frames themselves — which
+is what you want when the handshake is the thing failing.
+
 ## Choosing an embedder — do this before writing records
 
 ```sh

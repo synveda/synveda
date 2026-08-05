@@ -264,6 +264,91 @@ fn every_case_declares_where_its_frames_came_from() {
     );
 }
 
+/// The one way diagnostics can break this server, checked at the level it
+/// would break: a whole process, at the noisiest filter there is.
+///
+/// `tracing_subscriber`'s fmt layer writes to **stdout** by default, and
+/// stdout here is the JSON-RPC stream — so one log line on the wrong
+/// descriptor is a parse error at the client and a server that "won't
+/// connect" for reasons nothing in the code reads as a logging bug. The
+/// unit tests cannot see this; only running the binary can.
+///
+/// `RUST_LOG=trace` rather than `debug`, and `rmcp` in the filter as well
+/// as `synveda`, because the frames the SDK traces are the ones most
+/// likely to be written next to the frames it sends.
+#[test]
+fn a_talkative_server_writes_nothing_but_protocol_to_stdout() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_synveda"))
+        .args(["mcp", "--writes", "tool"])
+        .env("RUST_LOG", "trace")
+        .env(
+            "HOME",
+            std::env::temp_dir().join("synveda-mcp-corpus-nohome"),
+        )
+        .env(
+            "XDG_CONFIG_HOME",
+            std::env::temp_dir().join("synveda-mcp-corpus-nohome/.config"),
+        )
+        .env_remove("SYNVEDA_TOKEN")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn synveda mcp");
+
+    let meta = serde_json::json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": { "name": "probe", "version": "0" },
+    });
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        for frame in [
+            serde_json::json!({"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":meta}}),
+            serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":meta}}),
+            // One of each outcome the span records, so every logging path
+            // this call can take runs while stdout is being watched.
+            serde_json::json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+                "_meta":meta,"name":"recall","arguments":{"query":"anything"}}}),
+            serde_json::json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
+                "_meta":meta,"name":"not-a-tool","arguments":{}}}),
+        ] {
+            writeln!(stdin, "{frame}").expect("write a frame");
+        }
+    }
+    drop(child.stdin.take());
+    let out = child.wait_with_output().expect("wait");
+
+    let mut frames = 0;
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        serde_json::from_str::<Value>(line).unwrap_or_else(|err| {
+            panic!(
+                "a non-protocol line reached stdout ({err}): {line:?}\n\
+                 stdout is the JSON-RPC stream — diagnostics belong on stderr, and \
+                 tracing_subscriber's fmt layer defaults to stdout, so check \
+                 `.with_writer(std::io::stderr)` in mcp::subscribe.",
+            )
+        });
+        frames += 1;
+    }
+    assert_eq!(frames, 4, "one answer per request, and nothing else");
+
+    // And the diagnostics did happen — otherwise this test passes on a
+    // server that logs nothing at all, which is not the property wanted.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("mcp server starting"),
+        "nothing was traced at RUST_LOG=trace, so stdout being clean proves nothing:\n{stderr}",
+    );
+    assert!(
+        stderr.contains("mcp.tools/call"),
+        "the tool-call span did not reach stderr:\n{stderr}",
+    );
+}
+
 /// The two eras are both in the corpus, and so are both launch modes.
 /// Without this a corpus can drift into covering only the path its author
 /// happened to exercise — which for a dual-era server is the whole risk.
