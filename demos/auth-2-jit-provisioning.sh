@@ -173,6 +173,16 @@ echo "    alice ($ALICE_EMAIL) is in $TEAM_GROUP; the rauthy admin is in no synv
 
 DATABASE_URL=postgres://synveda:synveda-dev@localhost:5432/synveda
 export DATABASE_URL
+# `sqlx::query!` expands against DATABASE_URL at compile time, and the
+# database named above can still be empty at this point: a crate that needs
+# a rebuild here type-checks against a schema that does not exist yet and
+# fails with `relation "audit_chain_heads" does not exist` rather than with
+# anything about this demo. It is invisible whenever the workspace happens
+# to be built already. The checked-in `.sqlx` cache is the answer to
+# "compile without a database", and it is what `make ci` and
+# scripts/db-test.sh use for the same reason.
+SQLX_OFFLINE=true
+export SQLX_OFFLINE
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 export OTEL_EXPORTER_OTLP_ENDPOINT
 OTEL_BSP_SCHEDULE_DELAY=500
