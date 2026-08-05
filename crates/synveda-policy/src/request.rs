@@ -219,6 +219,21 @@ pub enum Action {
     /// [`Action::MemoryRead`] through a different route (ADR-0045
     /// decision 6).
     AuditRead,
+    /// Issue, list or revoke this tenant's provisioning credentials —
+    /// `/v1/scim/credentials` (AUTH-4, ADR-0059 decision 13).
+    ///
+    /// **Tenant resource only**, like [`Action::AuditRead`] and for a
+    /// related reason: a provisioning credential is anchored nowhere — it
+    /// can place a joiner anywhere the mapping rules reach and seal
+    /// anybody the directory says has left — so a subtree-scoped authority
+    /// over one would be a fiction the schema refuses to let a route tell.
+    ///
+    /// One action for the inventory *and* its mutation, unlike the
+    /// service-identity plane's pair: the inventory is a list of live keys
+    /// to the directory plane, and a role that could see which credentials
+    /// exist without being able to rotate them would hold nothing but
+    /// reconnaissance.
+    DirectoryManage,
     /// Read the VedaFlow channels standing at the resource scope —
     /// `GET /v1/channels/{scope}` (FLOW-2, ADR-0031 decision 12).
     ChannelRead,
@@ -296,7 +311,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 32] = [
+    pub const ALL: [Action; 33] = [
         Action::HierarchyCreate,
         Action::HierarchyRead,
         Action::HierarchyUpdate,
@@ -320,6 +335,7 @@ impl Action {
         Action::ServiceIdentityRead,
         Action::ServiceIdentityManage,
         Action::AuditRead,
+        Action::DirectoryManage,
         Action::ChannelRead,
         Action::ChannelPublish,
         Action::ChannelRollback,
@@ -382,7 +398,7 @@ impl Action {
     /// much shorter than the scope set and that is the honest shape: most
     /// of this vocabulary is about a node, and an action that is only ever
     /// taken at a node has no tenant-level answer to give.
-    pub const PROBED_AT_TENANT: [Action; 11] = [
+    pub const PROBED_AT_TENANT: [Action; 12] = [
         Action::HierarchyCreate,
         Action::HierarchyRead,
         Action::HierarchyUpdate,
@@ -393,6 +409,7 @@ impl Action {
         Action::RoleRead,
         Action::ServiceIdentityRead,
         Action::AuditRead,
+        Action::DirectoryManage,
         Action::ProposalRead,
     ];
 
@@ -438,6 +455,7 @@ impl Action {
             Action::ServiceIdentityRead => "service_identity.read",
             Action::ServiceIdentityManage => "service_identity.manage",
             Action::AuditRead => "audit.read",
+            Action::DirectoryManage => "directory.manage",
             Action::ChannelRead => "channel.read",
             Action::ChannelPublish => "channel.publish",
             Action::ChannelRollback => "channel.rollback",
@@ -476,6 +494,7 @@ impl Action {
             Action::ServiceIdentityRead => "ServiceIdentityRead",
             Action::ServiceIdentityManage => "ServiceIdentityManage",
             Action::AuditRead => "AuditRead",
+            Action::DirectoryManage => "DirectoryManage",
             Action::ChannelRead => "ChannelRead",
             Action::ChannelPublish => "ChannelPublish",
             Action::ChannelRollback => "ChannelRollback",
@@ -643,7 +662,11 @@ mod probe_vocabulary_tests {
             .iter()
             .chain(Action::TIERED_READS.iter())
             .chain(std::iter::once(&Action::RoleAssign))
+            // The two tenant-only actions: the schema gives neither a
+            // scope resource, so a per-node probe would be asking a
+            // question the model refuses to represent.
             .chain(std::iter::once(&Action::AuditRead))
+            .chain(std::iter::once(&Action::DirectoryManage))
         {
             if !seen.insert(action.as_str()) {
                 twice.push(action.as_str());

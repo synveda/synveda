@@ -215,7 +215,12 @@ async fn provision_once(
 /// Resolves the groups to a placement scope, or `None` for quarantine:
 /// overrides before convention, groups in lexicographic order, first
 /// resolution wins (ADR-0013 decision 3).
-async fn resolve_mapping(
+///
+/// Shared with the SCIM reconciler (AUTH-4, ADR-0059 decision 6), which is
+/// the whole of what "joining is AUTH-2's resolver, called from somewhere
+/// else" means: the two doors differ in where the group names come from —
+/// a token claim or the directory mirror — and in nothing else.
+pub(crate) async fn resolve_mapping(
     tx: &mut sqlx::PgConnection,
     tenant_id: synveda_types::TenantId,
     groups: &[String],
@@ -296,7 +301,10 @@ async fn ensure_root(tx: &mut sqlx::PgConnection, tenant: &Tenant) -> Result<Hie
 
 /// The tenant's quarantine scope — the org root's child with the reserved
 /// slug — creating the root and the quarantine node on first use.
-async fn ensure_quarantine(tx: &mut sqlx::PgConnection, tenant: &Tenant) -> Result<HierarchyNode> {
+pub(crate) async fn ensure_quarantine(
+    tx: &mut sqlx::PgConnection,
+    tenant: &Tenant,
+) -> Result<HierarchyNode> {
     let root = ensure_root(&mut *tx, tenant).await?;
     match hierarchy::child_by_slug(&mut *tx, root.id, identities::QUARANTINE_SLUG).await? {
         Some(quarantine) => Ok(quarantine),

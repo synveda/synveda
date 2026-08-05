@@ -513,3 +513,51 @@ pub async fn by_scope(
     .map_err(storage_error)?;
     row.map(TryInto::try_into).transpose()
 }
+
+/// The identity whose recorded email matches `email`, case-folded — the
+/// last of the correspondence rule's three matches (AUTH-4, ADR-0059
+/// decision 4), and the weakest.
+///
+/// It exists because `externalId` is the customer's attribute mapping
+/// rather than a protocol constant: Entra's default for a custom
+/// application is a mutable attribute, so a directory can send an anchor
+/// that has changed for somebody the product already knows. Matching the
+/// address they were provisioned with is how the two are joined instead of
+/// duplicated.
+///
+/// Ordered by `created_at` and taking the first, so a tenant that somehow
+/// holds two rows with one address resolves the same way on every call
+/// rather than by whichever the planner reached first.
+#[tracing::instrument(
+    name = "store.identities.by_email",
+    skip_all,
+    fields(tenant.id = %tenant_id),
+    err(Display)
+)]
+pub async fn by_email(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    email: &str,
+) -> Result<Option<Identity>> {
+    let row = sqlx::query_as!(
+        IdentityRow,
+        r#"
+        select i.id, i.tenant_id, i.subject, i.kind, i.email, i.display_name,
+               i.scope_id, i.status, i.departed_at, i.created_at,
+               coalesce(p.slug = 'quarantine' and p.depth = 1, false)
+                   as "quarantined!"
+        from identities i
+        join hierarchy_nodes n on n.id = i.scope_id
+        left join hierarchy_nodes p on p.id = n.parent_id
+        where i.tenant_id = $1 and lower(i.email) = lower($2)
+        order by i.created_at
+        limit 1
+        "#,
+        tenant_id.as_uuid(),
+        email,
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}

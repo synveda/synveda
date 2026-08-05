@@ -56,6 +56,7 @@ mod provision;
 pub mod quarantine;
 mod recall;
 pub mod roles;
+pub mod scim;
 pub mod service_identities;
 pub mod skills;
 pub mod telemetry;

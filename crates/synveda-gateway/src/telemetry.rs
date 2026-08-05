@@ -709,3 +709,18 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
 
     Ok(handle)
 }
+
+/// SCIM plane requests by authentication outcome (`authenticated`,
+/// `rejected`) — AUTH-4, ADR-0059 decision 14. Reads on that plane are
+/// metered and traced rather than chained, so this counter and the
+/// `scim.*` spans are the whole record of a provisioning agent's polling.
+pub const SCIM_REQUESTS_TOTAL: &str = "synveda_scim_requests_total";
+
+/// Reconciliations by outcome (`provisioned`, `moved`, `sealed`,
+/// `adopted`, `unchanged`, `quarantined`) — what the directory actually
+/// changed, as opposed to what it sent.
+pub const SCIM_RECONCILES_TOTAL: &str = "synveda_scim_reconciles_total";
+
+/// Provisioning-credential admin operations by op and outcome — the
+/// `/v1/scim/credentials` plane's counter (AUTH-4, ADR-0059 decision 13).
+pub const SCIM_CREDENTIAL_OPERATIONS_TOTAL: &str = "synveda_scim_credential_operations_total";

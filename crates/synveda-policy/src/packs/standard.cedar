@@ -557,3 +557,22 @@ permit (
     resource in principal.tenant
         && context.roles.containsAny(["steward", "org-admin", "security-reviewer"])
 };
+
+// The directory plane (AUTH-4, ADR-0059 decision 13): who may wire this
+// tenant up to an identity provider, and rotate the credential that does
+// it. Pack-uniform, like the channel, quarantine and proposal planes and
+// for their reason — how a directory is connected does not loosen per pack.
+//
+// `org-admin` alone, and the exclusion of `steward` is the point rather
+// than an omission: a steward's authority is a subtree, and this credential
+// is not anchored in one. It can place a joiner anywhere the mapping rules
+// reach and seal anybody the directory says has left, so an authority over
+// it that stopped at a department boundary would be a fiction.
+permit (
+    principal,
+    action == Synveda::Action::"DirectoryManage",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.contains("org-admin")
+};

@@ -338,6 +338,32 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
+    // The directory plane (/v1/scim/credentials, AUTH-4, ADR-0059
+    // decision 13): issuing, listing and revoking the static credential a
+    // provisioning agent authenticates with.
+    //
+    // **Tenant only**, like AuditRead and for a related reason: a
+    // provisioning credential is not anchored anywhere — it can create,
+    // move and seal identities anywhere in the tenancy — so a subtree-scoped
+    // authority over one could only ever be a half-truth. Leaving `Scope`
+    // out of `appliesTo` makes that unrepresentable rather than relying on
+    // a handler to remember, and the base layer's token-scope confinement
+    // therefore covers service identities for free: the tenant plane is
+    // never inside a scope subtree, so no agent can mint a directory
+    // credential however it is bound.
+    //
+    // One action for reading the inventory *and* mutating it, unlike the
+    // service-identity plane's pair. The inventory is a list of live keys
+    // to the directory plane, and there is nobody who should be able to see
+    // which credentials exist without also being able to rotate them —
+    // splitting it would create a role whose only power is reconnaissance.
+    action DirectoryManage
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant],
+            context: { roles: Set<String> },
+        };
+
     // The audit query plane (/v1/audit/*, AUD-2, ADR-0045 decision 1):
     // searching the chain, the two questions the feature exists for, and
     // the chain check itself. One action, not four — verification returns a

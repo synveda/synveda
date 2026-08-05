@@ -296,6 +296,12 @@ pub fn router(state: AppState) -> Router {
             "/v1/service-identities/{id}",
             get(service_identities::get).delete(service_identities::remove),
         )
+        // The directory plane's credentials (AUTH-4, ADR-0059
+        // decision 13). On `/v1` rather than on `/scim/v2`: issuing one is
+        // an act of the product's own authority, PDP-gated at the tenant,
+        // and a credential that could mint another would make the
+        // directory the authority on its own access.
+        .merge(crate::scim::credential_routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             tenant::resolve_tenant,
@@ -323,6 +329,11 @@ pub fn router(state: AppState) -> Router {
         // operator lands on to sign in, and it holds no data — every fact
         // it shows comes from a `/v1` call the cookie authenticates.
         .merge(console_routes())
+        // The SCIM plane (AUTH-4, ADR-0059 decision 1). Outside the `/v1`
+        // tenant middleware by nature: it authenticates with a
+        // provisioning credential rather than a bearer, and resolves its
+        // tenant from that credential (`synveda_identity::scim`).
+        .merge(crate::scim::router(state.clone()))
         .merge(authenticated)
         .layer(middleware::from_fn(track_http_metrics))
         // Added last so the request span is outermost and every inner span —
