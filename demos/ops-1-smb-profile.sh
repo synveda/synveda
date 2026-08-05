@@ -47,10 +47,20 @@ BUDGET_SECS=600
 
 DEMO_HOME=$(mktemp -d "${TMPDIR:-/tmp}/ops1-home-XXXXXX")
 cleanup() {
-  # The deployment is deliberately left running — this demo's whole
-  # subject is an instance that survives, and a demo that tore it down
-  # would be asserting the opposite of its own feature. Only the scratch
-  # HOME and this run's tenant go.
+  # Only the scratch HOME goes.
+  #
+  # The deployment is deliberately left running — this demo's whole subject
+  # is an instance that survives, and a demo that tore it down would be
+  # asserting the opposite of its own feature. That extends to the tenant,
+  # the org root and the operator identity in the IdP: the last thing this
+  # script prints is those credentials and an invitation to go and use
+  # them, so removing any of it on exit would make the demo lie.
+  #
+  # The cost is that each run leaves one more tenant and one more operator
+  # behind, and nothing reaps them — see the teardown line at the end,
+  # which exists because there was no documented way to remove a demo
+  # deployment you were finished with. (This comment used to claim "this
+  # run's tenant" was cleaned up here. It never was.)
   rm -rf "$DEMO_HOME"
   return 0
 }
@@ -311,5 +321,10 @@ echo "    operator  $OPERATOR / $PASSWORD"
 echo "    traces    http://localhost:16686"
 echo ""
 echo "    docker compose -f deploy/compose/docker-compose.yml down    # stops it; state persists"
+echo ""
+echo "    when you are finished with this deployment, its tenant and its"
+echo "    operator outlive the container — nothing reaps them:"
+echo "      psql \$DATABASE_URL -c \"delete from tenants where slug = '$SLUG'\""
+echo "      curl -X DELETE \$RAUTHY/auth/v1/users/<id-of-$OPERATOR> -H \"Authorization: \$RAUTHY_API_KEY\""
 echo ""
 echo "OPS-1 acceptance criterion: PASS (${elapsed}s of ${BUDGET_SECS}s)"
