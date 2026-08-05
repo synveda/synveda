@@ -157,18 +157,44 @@ if [ -z "$alice_id" ]; then
          \"family_name\":\"Demo\",\"language\":\"en\",
          \"groups\":[\"$TEAM_GROUP\"],\"roles\":[]}" | json_field id)
 fi
-# Desired state, twice: with the password for a user that has never had
-# one, and without it for a re-run — Rauthy refuses a password it has
-# seen in the last three, which is exactly the state a second run is in.
+# Desired state, and it CONVERGES rather than hopes.
+#
+# Rauthy keeps a password history and refuses one it has seen in the last
+# three, so a re-run cannot always PUT this demo's constant back. The
+# version of this block that fell back to a PUT *without* the password read
+# that refusal as "the password is already what I want" — and those are
+# different. A constant can sit in the history without being current, and
+# once it does, every future run is refused when it tries to set it and
+# rejected when it tries to log in, with a 401 forty lines later that names
+# nothing. That is what happened: alice's stored password stopped matching,
+# the demo could not put it back, and both this and `auth-2` failed for a
+# week for what looked like an IdP problem.
+#
+# So: set it, and if Rauthy will not take it, delete the user and make a
+# new one. A fresh user has no history. Rauthy state is dev-only and this
+# demo wants a person who has never logged in to Synveda anyway, so
+# recreating costs nothing it was relying on.
 alice_state="{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
        \"family_name\":\"Demo\",\"language\":\"en\",\"roles\":[],
        \"groups\":[\"$TEAM_GROUP\"],\"enabled\":true,\"email_verified\":true"
-if ! curl -fsS -X PUT "$RAUTHY_URL/auth/v1/users/$alice_id" \
-  -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
-  -d "$alice_state,\"password\":\"$ALICE_PASSWORD\"}" >/dev/null 2>&1; then
-  curl -fsS -X PUT "$RAUTHY_URL/auth/v1/users/$alice_id" \
+set_alice_password() {
+  curl -fsS -X PUT "$RAUTHY_URL/auth/v1/users/$1" \
     -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
-    -d "$alice_state}" >/dev/null
+    -d "$alice_state,\"password\":\"$ALICE_PASSWORD\"}" >/dev/null 2>&1
+}
+if ! set_alice_password "$alice_id"; then
+  echo "    rauthy will not re-set alice's password (its history rule) — recreating her"
+  curl -fsS -X DELETE "$RAUTHY_URL/auth/v1/users/$alice_id" \
+    -H "Authorization: $RAUTHY_API_KEY" >/dev/null
+  alice_id=$(curl -fsS -X POST "$RAUTHY_URL/auth/v1/users" \
+    -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
+         \"family_name\":\"Demo\",\"language\":\"en\",
+         \"groups\":[\"$TEAM_GROUP\"],\"roles\":[]}" | json_field id)
+  set_alice_password "$alice_id" || {
+    echo "demo FAILED: could not set alice's password even on a fresh user" >&2
+    exit 1
+  }
 fi
 echo "    alice ($ALICE_EMAIL) is in $TEAM_GROUP and has never logged in to Synveda"
 
@@ -457,8 +483,21 @@ login_response=$(curl -si -X POST "$RAUTHY_URL/auth/v1/oidc/authorize" \
 callback_url=$(printf '%s\n' "$login_response" | grep -i '^location:' |
   sed 's/^[Ll]ocation: //' | tr -d '\r')
 if [ -z "$callback_url" ]; then
-  echo "demo FAILED: rauthy returned no callback location:" >&2
-  printf '%s\n' "$login_response" | head -5 >&2
+  echo "demo FAILED: rauthy returned no callback location." >&2
+  # The whole response, headers and body: the body is where rauthy says
+  # what it objected to, and printing five lines of headers hid
+  # "Invalid user credentials" behind a bare 401 for long enough that the
+  # provisioning bug above looked like an IdP outage.
+  printf '%s\n' "$login_response" >&2
+  case $login_response in
+  *"Invalid user credentials"*)
+    echo >&2
+    echo "  alice's stored password is not this demo's constant. Provisioning" >&2
+    echo "  above should have converged on it — check that block rather than" >&2
+    echo "  rauthy: its password-history rule can leave the constant in the" >&2
+    echo "  history without it being current, and then nothing can log in." >&2
+    ;;
+  esac
   exit 1
 fi
 

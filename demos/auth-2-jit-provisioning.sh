@@ -126,15 +126,45 @@ if [ -z "$alice_id" ]; then
          \"family_name\":\"Demo\",\"language\":\"en\",
          \"groups\":[\"$TEAM_GROUP\"],\"roles\":[]}" | json_field id)
 fi
-# Idempotent desired state: group membership, a known password, verified
-# email so the login flow needs no mailbox.
-curl -fsS -X PUT "$RAUTHY_URL/auth/v1/users/$alice_id" \
-  -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
-  -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
-       \"family_name\":\"Demo\",\"language\":\"en\",
-       \"password\":\"$ALICE_PASSWORD\",\"roles\":[],
-       \"groups\":[\"$TEAM_GROUP\"],\"enabled\":true,
-       \"email_verified\":true}" >/dev/null
+# Desired state: group membership, a known password, verified email so the
+# login flow needs no mailbox — and it CONVERGES rather than assuming.
+#
+# Rauthy keeps a password history and refuses one it has seen in the last
+# three, so this PUT fails on a re-run. It used to fail *hard* — `curl -fsS`
+# and `set -e`, so the demo died here with a bare `curl: (22) ... 400` and
+# no mention of a password. Falling back to a PUT without the password is
+# not the fix either: that reads "cannot set it" as "it is already set",
+# and a constant can sit in the history without being current, which
+# locks every future run out with a 401 much later (see
+# `demos/adpt-1-claude-code.sh`, which had exactly that and was dark for a
+# week).
+#
+# So: set it, and if Rauthy will not take it, delete the user and make a
+# new one. A fresh user has no history, and this demo's whole subject is a
+# person Synveda has never seen before.
+set_alice_password() {
+  curl -fsS -X PUT "$RAUTHY_URL/auth/v1/users/$1" \
+    -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
+         \"family_name\":\"Demo\",\"language\":\"en\",
+         \"password\":\"$ALICE_PASSWORD\",\"roles\":[],
+         \"groups\":[\"$TEAM_GROUP\"],\"enabled\":true,
+         \"email_verified\":true}" >/dev/null 2>&1
+}
+if ! set_alice_password "$alice_id"; then
+  echo "    rauthy will not re-set alice's password (its history rule) — recreating her"
+  curl -fsS -X DELETE "$RAUTHY_URL/auth/v1/users/$alice_id" \
+    -H "Authorization: $RAUTHY_API_KEY" >/dev/null
+  alice_id=$(curl -fsS -X POST "$RAUTHY_URL/auth/v1/users" \
+    -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
+         \"family_name\":\"Demo\",\"language\":\"en\",
+         \"groups\":[\"$TEAM_GROUP\"],\"roles\":[]}" | json_field id)
+  set_alice_password "$alice_id" || {
+    echo "demo FAILED: could not set alice's password even on a fresh user" >&2
+    exit 1
+  }
+fi
 echo "    alice ($ALICE_EMAIL) is in $TEAM_GROUP; the rauthy admin is in no synveda group"
 
 DATABASE_URL=postgres://synveda:synveda-dev@localhost:5432/synveda
@@ -178,6 +208,13 @@ SEED_PID=$!
 trap 'kill "$SEED_PID" 2>/dev/null || true' EXIT INT TERM
 wait_gateway http://127.0.0.1:8131
 seed_token=$(./target/debug/synveda token issue --tenant "$tenant_id" --subject demo-admin)
+# A token is not an authority. The seeding subject needs `org-admin` bound
+# to it or the PDP denies `hierarchy.create` — a tenant with no assignment
+# falls back to `regulated-strict`, which grants nothing to nobody. Every
+# other demo binds this; AUTH-2 predates the packs having teeth and was
+# never updated, so it died at the first `create_node` with a bare 403.
+./target/debug/synveda role bind --tenant "$tenant_id" \
+  --subject demo-admin --role org-admin >/dev/null
 create_node() {
   curl -fsS -X POST http://127.0.0.1:8131/v1/hierarchy/nodes \
     -H "Authorization: Bearer $seed_token" -H 'Content-Type: application/json' \
