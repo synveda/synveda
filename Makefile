@@ -89,8 +89,12 @@ eval-extraction-live:
 eval-check:
 	cargo run -q -p synveda-eval -- check
 
+# The full suite against a scratch database of its own, dropped afterwards
+# (kept on failure, and by KEEP_TEST_DB=1). It used to run against the
+# long-lived dev database and leave every tenant it admitted behind — see
+# scripts/db-test.sh for what that cost.
 db-test:
-	DATABASE_URL=$(DATABASE_URL) cargo test --workspace
+	DATABASE_URL=$(DATABASE_URL) bash scripts/db-test.sh
 
 fmt:
 	cargo fmt --all --check
