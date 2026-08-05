@@ -236,3 +236,85 @@ export async function reject(
     fetchImpl,
   );
 }
+
+// ── The explorer (CNSL-2, ADR-0058) ─────────────────────────────────────
+//
+// Five reads, and the same rule as above: every one of them is a route the
+// CLI also has (`synveda hierarchy policy|roles|capabilities`, `synveda
+// lapse list`, `synveda whoami --capabilities`). ADR-0056 decision 9 is a
+// standing decision — no console-only route — and CNSL-2 honoured it by
+// giving the CLI the verbs rather than by giving the console a private
+// door.
+//
+// The tree is **lazy**: children on expand, never `descendants` from the
+// root (ADR-0058 decision 5). HIER-1's own AC is a 10,000-node hierarchy,
+// and a screen that fetched a subtree to draw a sidebar would pull all of
+// it and then probe every node in it.
+
+/** The tenant's org root — where the tree starts. */
+export async function hierarchyRoot(fetchImpl: typeof fetch = fetch): Promise<Outcome> {
+  return call("/hierarchy/root", { method: "GET" }, fetchImpl);
+}
+
+/** One node's direct children, slug order. The tree's only expansion call. */
+export async function children(id: string, fetchImpl: typeof fetch = fetch): Promise<Outcome> {
+  return call(`/hierarchy/nodes/${encodeURIComponent(id)}/children`, { method: "GET" }, fetchImpl);
+}
+
+/** The pack in force at a node, and where it came from. */
+export async function nodePolicy(id: string, fetchImpl: typeof fetch = fetch): Promise<Outcome> {
+  return call(`/hierarchy/nodes/${encodeURIComponent(id)}/policy`, { method: "GET" }, fetchImpl);
+}
+
+/**
+ * Role bindings at a node, or every binding in force there.
+ *
+ * `effective` is the question this screen is for: roles inherit downward,
+ * so "who holds what here" includes every ancestor's bindings and the
+ * tenant-wide ones, and until CNSL-2 no route answered it — each client
+ * walked `/ancestors` and unioned for itself, which is a second
+ * implementation of an inheritance rule the PDP owns.
+ */
+export async function nodeRoles(
+  id: string,
+  effective: boolean,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Outcome> {
+  const query = effective ? "?effective=true" : "";
+  return call(
+    `/hierarchy/nodes/${encodeURIComponent(id)}/roles${query}`,
+    { method: "GET" },
+    fetchImpl,
+  );
+}
+
+/**
+ * What *this reader* may do at a node.
+ *
+ * A forecast, never a grant (ADR-0058 decision 2). Nothing in this bundle
+ * may use the answer to decide whether an act is allowed — only whether to
+ * offer it. The gateway decides again, at the act's own seam, under the
+ * pack effective then; if the two disagree the act's answer is the one that
+ * counts and the reader sees the refusal.
+ */
+export async function nodeCapabilities(
+  id: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Outcome> {
+  return call(
+    `/hierarchy/nodes/${encodeURIComponent(id)}/capabilities`,
+    { method: "GET" },
+    fetchImpl,
+  );
+}
+
+/**
+ * Every standing grant this reader may see, anywhere in the tenant.
+ *
+ * Scope-free on purpose: an explorer whose lapse view required you to
+ * already know which scope to ask about is answering the question you would
+ * have asked if you already had the answer.
+ */
+export async function standingLapses(fetchImpl: typeof fetch = fetch): Promise<Outcome> {
+  return call("/lapses", { method: "GET" }, fetchImpl);
+}

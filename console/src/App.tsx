@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { SIGN_IN_URL, signOut, whoami, type Outcome, type WhoAmI } from "./api.mjs";
+import { Explorer } from "./Explorer.js";
 import { Inbox } from "./Inbox.js";
 
 /**
@@ -90,6 +91,7 @@ function Body({
             </dl>
           </section>
           <Inbox />
+          <Explorer />
         </>
       );
     }

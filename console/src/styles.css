@@ -326,3 +326,172 @@ button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ── The hierarchy & policy explorer (CNSL-2, ADR-0058) ─────────────────
+ *
+ * A neutral badge, deliberately not `.chip`. That class is CNSL-1's alert
+ * for a finding that blocks a publication and is styled as one; an origin
+ * or a grant's outcome is a fact rather than a warning, and painting
+ * "assigned here" in the refusal colour would teach a reader that the
+ * loudest thing on the screen is the ordinary one.
+ */
+.tag {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  margin-left: 0.4rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* Inherited is the one worth seeing across a tree at a glance: it is the
+ * answer to "why does this team have that pack" and the reason the origin
+ * exists at all. */
+.tag.inherited {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* A grant that has ended reads as history rather than as something
+ * standing — the distinction the scoped and scope-free listings are
+ * literally two different questions about. */
+.tag.expired,
+.tag.revoked {
+  opacity: 0.65;
+}
+
+.tag.active {
+  border-color: var(--error-line);
+  background: var(--error-bg);
+  color: inherit;
+}
+
+.tree {
+  font-size: 0.92rem;
+  overflow-y: auto;
+  max-height: 32rem;
+}
+
+.branch-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+/* Indentation is the only thing carrying the shape of the hierarchy, so it
+ * is a border rather than padding: a reader scanning a deep subtree
+ * follows the line, not the offset. */
+.branch-children {
+  margin-left: 0.55rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--line);
+}
+
+.twisty {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 0.15rem;
+  font-size: 0.8rem;
+}
+
+.node {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+}
+
+.node.selected {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.node.selected .muted {
+  color: var(--bg);
+  opacity: 0.8;
+}
+
+.node-slug {
+  font-weight: 600;
+}
+
+.node-detail table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.node-detail th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.node-detail td {
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Subjects are opaque IdP identifiers and long. Wrapping them keeps the
+ * two columns that carry meaning — the role and where it came from — where
+ * a reader can compare them down the page. */
+.subject {
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.84rem;
+}
+
+ul.lapses {
+  list-style: none;
+  padding: 0;
+}
+
+ul.lapses li {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+ul.actions-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+.tiers div {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.tiers dt {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  min-width: 12rem;
+}
+
+.tiers dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* The sentence that stops a capability list reading as a permission
+ * (ADR-0058 decision 2). Bordered rather than muted-and-forgotten: it is
+ * the one line on the panel a reader must not skim past. */
+.capabilities .forecast {
+  border-top: 1px solid var(--line);
+  padding-top: 0.4rem;
+  margin-top: 0.6rem;
+  font-style: italic;
+}

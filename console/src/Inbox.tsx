@@ -12,7 +12,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { approve, listProposals, readProposal, reject, type Outcome } from "./api.mjs";
+import {
+  approve,
+  listProposals,
+  nodeCapabilities,
+  readProposal,
+  reject,
+  type Outcome,
+} from "./api.mjs";
+import { offers, type Capabilities } from "./explorer.mjs";
 import { Review } from "./Review.js";
 import type { Proposal, ProposalDetail } from "./review.mjs";
 
@@ -102,9 +110,28 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
   const [state, setState] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // CNSL-1's one deferral, closed where ADR-0056 sent it. That feature
+  // offered approve and reject unconditionally, because which acts a
+  // proposal admits is a function of its state, the pack in force and the
+  // reader's own roles — and only the first was on the wire. CNSL-2's probe
+  // puts the third there.
+  //
+  // It decides what to *render* and never what to allow (ADR-0058 decision
+  // 2): a reader who gets past this because the forecast aged still meets
+  // the gateway's refusal, which `onVerdict` already displays.
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
 
   const load = useCallback(async () => {
-    setState(await readProposal(id));
+    const outcome = await readProposal(id);
+    setState(outcome);
+    if (outcome.kind === "ok") {
+      const scope = (outcome.body as ProposalDetail).target_scope_id;
+      const probe = await nodeCapabilities(scope);
+      // A probe that fails leaves the forecast `null`, which offers
+      // nothing — fail closed, so an unreachable PDP shows a reviewer no
+      // buttons rather than buttons that will not work.
+      setCapabilities(probe.kind === "ok" ? (probe.body as Capabilities) : null);
+    }
   }, [id]);
 
   useEffect(() => {
@@ -138,10 +165,23 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
   if (state.kind !== "ok") {
     return <Failure state={state} onRetry={() => void load()} />;
   }
+  const mayReview = offers(capabilities, "proposal.review");
   return (
     <Review
       detail={state.body as ProposalDetail}
-      onVerdict={(verdict, reason) => void onVerdict(verdict, reason)}
+      // Absent rather than disabled: a disabled Approve button is a promise
+      // that signing in harder would enable it, and it would not — the
+      // answer is a role this reader does not hold at this scope.
+      onVerdict={mayReview ? (verdict, reason) => void onVerdict(verdict, reason) : undefined}
+      cannotReview={
+        mayReview
+          ? null
+          : capabilities === null
+            ? "Your capabilities here could not be read, so no verdict is offered."
+            : `You hold ${
+                capabilities.roles.length > 0 ? capabilities.roles.join(", ") : "no role"
+              } at ${capabilities.scope_path}, which does not include casting a verdict here.`
+      }
       error={error}
       busy={busy}
     />
