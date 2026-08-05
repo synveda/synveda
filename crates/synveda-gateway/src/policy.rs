@@ -294,37 +294,44 @@ pub(crate) async fn clear_default(State(state): State<AppState>) -> Response {
     respond(&state, "clear_default", result).await
 }
 
+/// Where an inherited thing came from.
+///
+/// `pub(crate)` since CNSL-2 (ADR-0058 decision 6): the capabilities probe
+/// and the effective-roles listing both report an origin, and the whole
+/// point of that decision is that the admin planes say "this came from
+/// above" in **one** vocabulary rather than three that agree on the day
+/// they are written.
 #[derive(Serialize)]
-struct OriginResponse {
-    kind: &'static str,
+pub(crate) struct OriginView {
+    pub(crate) kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    scope_id: Option<ScopeId>,
+    pub(crate) scope_id: Option<ScopeId>,
 }
 
 #[derive(Serialize)]
 struct EffectiveResponse {
     name: String,
     version: i64,
-    origin: OriginResponse,
+    origin: OriginView,
     /// The node's own assignment row, when it carries one.
     assignment: Option<synveda_types::PolicyAssignment>,
 }
 
-fn origin_response(effective: &EffectivePack) -> OriginResponse {
+pub(crate) fn origin_view(effective: &EffectivePack) -> OriginView {
     match effective.origin {
-        PackOrigin::Assigned(scope_id) => OriginResponse {
+        PackOrigin::Assigned(scope_id) => OriginView {
             kind: "assigned",
             scope_id: Some(scope_id),
         },
-        PackOrigin::TenantDefault => OriginResponse {
+        PackOrigin::TenantDefault => OriginView {
             kind: "tenant-default",
             scope_id: None,
         },
-        PackOrigin::Default => OriginResponse {
+        PackOrigin::Default => OriginView {
             kind: "default",
             scope_id: None,
         },
-        PackOrigin::Fallback => OriginResponse {
+        PackOrigin::Fallback => OriginView {
             kind: "fallback",
             scope_id: None,
         },
@@ -372,7 +379,7 @@ pub(crate) async fn get_node_policy(
         .await?;
         commit(tx).await?;
         Ok(Json(EffectiveResponse {
-            origin: origin_response(&effective),
+            origin: origin_view(&effective),
             name: effective.name,
             version: effective.version,
             assignment,

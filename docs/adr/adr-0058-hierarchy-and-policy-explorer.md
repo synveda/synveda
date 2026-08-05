@@ -1,6 +1,6 @@
 # ADR-0058: an explorer that asks the PDP instead of re-deriving it — the probe is a forecast rather than a grant, a fan-out of decisions chains as one event, and the two questions that look alike are kept apart
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-08-05
 - **Feature(s)**: CNSL-2 (closing ADR-0056's named deferral; inheriting its toolchain and session)
 - **Deciders**: sujitn

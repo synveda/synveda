@@ -26,6 +26,7 @@ use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
 use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::policy::OriginView;
 use crate::telemetry::ROLE_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the same outcome
@@ -211,8 +212,54 @@ pub(crate) async fn unbind_tenant_wide(
     respond(&state, "unbind", result).await
 }
 
-/// `GET /v1/hierarchy/nodes/{id}/roles` — the bindings at one node.
-pub(crate) async fn list_node(State(state): State<AppState>, Path(id): Path<ScopeId>) -> Response {
+/// A binding with where it came from (CNSL-2, ADR-0058 decision 6).
+///
+/// The pack surface has served an origin since AUTHZ-2 and this one served
+/// none, so the inheritance every reader needs was a walk each client did
+/// for itself — which is a second implementation of a rule the PDP owns.
+/// The `origin` shape is `EffectiveResponse`'s, deliberately: the two admin
+/// planes say "this came from above" in one vocabulary or in two that agree
+/// only on the day they are written.
+#[derive(Serialize)]
+struct EffectiveBinding {
+    #[serde(flatten)]
+    binding: RoleBinding,
+    origin: OriginView,
+}
+
+#[derive(Serialize)]
+struct EffectiveBindingsResponse {
+    bindings: Vec<EffectiveBinding>,
+    /// The chain the answer was assembled over, node-first — so a reader
+    /// can see *why* a binding is in force here rather than being asked to
+    /// trust that it is.
+    chain: Vec<ScopeId>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ListNodeParams {
+    /// Ask for the inherited set rather than this node's own rows.
+    #[serde(default)]
+    effective: bool,
+}
+
+/// `GET /v1/hierarchy/nodes/{id}/roles` — the bindings at one node, or
+/// (`?effective=true`) every binding in force here with its origin.
+///
+/// The local form stays the default because it is the question the
+/// mutation surfaces beside it are about: `PUT` and `DELETE` operate on
+/// *this node's* rows, and a listing that answered a different question by
+/// default would make them look broken.
+pub(crate) async fn list_node(
+    State(state): State<AppState>,
+    Path(id): Path<ScopeId>,
+    Query(params): Query<ListNodeParams>,
+) -> Response {
+    let op = if params.effective {
+        "list_node_effective"
+    } else {
+        "list_node"
+    };
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
@@ -221,6 +268,10 @@ pub(crate) async fn list_node(State(state): State<AppState>, Path(id): Path<Scop
             tenant_id,
             id,
         )?;
+        // The same `RoleRead` at the same node either way. The effective
+        // view is a wider *answer*, not a wider authority: every row it
+        // adds is one already in force over material this reader was
+        // just permitted to read the governance of.
         let authorized = authz::require(
             &state,
             &mut tx,
@@ -229,7 +280,30 @@ pub(crate) async fn list_node(State(state): State<AppState>, Path(id): Path<Scop
             Some(&node),
         )
         .await?;
-        let bindings = role_bindings::for_scope(&mut *tx, tenant_id, id).await?;
+        let response = if params.effective {
+            let chain = state
+                .scope_chains
+                .resolve(&mut *tx, tenant_id, id)
+                .await?
+                .unwrap_or_else(|| vec![node.clone()].into());
+            let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
+            let bindings = role_bindings::in_force_at(&mut *tx, tenant_id, &chain_ids).await?;
+            let bindings = bindings
+                .into_iter()
+                .map(|binding| EffectiveBinding {
+                    origin: binding_origin(&binding),
+                    binding,
+                })
+                .collect();
+            Json(EffectiveBindingsResponse {
+                bindings,
+                chain: chain_ids,
+            })
+            .into_response()
+        } else {
+            let bindings = role_bindings::for_scope(&mut *tx, tenant_id, id).await?;
+            Json(BindingsResponse { bindings }).into_response()
+        };
         audit::record(
             &mut tx,
             tenant_id,
@@ -237,16 +311,36 @@ pub(crate) async fn list_node(State(state): State<AppState>, Path(id): Path<Scop
             Resource::Scope(id).to_string(),
             Outcome::Allow,
             json!({
-                "op": "list_node",
+                "op": op,
                 "authz": audit::decision_context(Action::RoleRead, &authorized),
             }),
         )
         .await?;
         commit(tx).await?;
-        Ok(Json(BindingsResponse { bindings }))
+        Ok(response)
     }
     .await;
-    respond(&state, "list_node", result).await
+    respond(&state, op, result).await
+}
+
+/// Where a binding in force at a node came from.
+///
+/// `assigned` carries the node it was bound at — which the caller compares
+/// to the node it asked about to tell "here" from "from above", exactly as
+/// it does for a pack. `tenant-wide` is a binding with no scope at all: in
+/// force everywhere, and not a fallback like a pack's tenant default but an
+/// actual row somebody wrote.
+fn binding_origin(binding: &RoleBinding) -> OriginView {
+    match binding.scope_id {
+        Some(scope_id) => OriginView {
+            kind: "assigned",
+            scope_id: Some(scope_id),
+        },
+        None => OriginView {
+            kind: "tenant-wide",
+            scope_id: None,
+        },
+    }
 }
 
 /// `PUT /v1/hierarchy/nodes/{id}/roles` — bind a role at the node; its
