@@ -58,8 +58,31 @@ verbatim — and an agent navigates from a handle to the body by running
 `synveda recall <id>`, which is on `PATH` already because the same binary
 issues this plugin's bearer.
 
-The MCP recall tool is CTX-5/ADPT-2 and lands in this same manifest as
-`mcpServers`.
+### The MCP tool
+
+The `mcpServers` slot of the same manifest gives the model a `recall`
+tool, so it can reach past the block it was handed and ask the corpus a
+question of its own.
+
+The protocol behind it is **not in this package**. CTX-5 hand-wrote a
+JSON-RPC loop here to keep the plugin dependency-free; ADR-0042 option 8
+recorded what would reverse that — "protocol revisions churn, or a second
+transport" — and `2026-07-28` did, replacing the negotiation handshake
+with per-request `_meta`, making `server/discover` mandatory, and adding
+`-32022`. Since ADR-0057 decision 4 the server is `synveda mcp`, one
+implementation shared with Claude Desktop and Cursor, and
+`dist/mcp-server.mjs` is a ~40-line launcher that resolves the binary the
+way the credential seam does (`SYNVEDA_CLI`, else `synveda` on `PATH`),
+hands it the client's own stdio, and — if the CLI is missing — says so
+instead of coming up with an empty tool list.
+
+It launches `synveda mcp --writes host`, hard-coded. This plugin's `Stop`
+hook already POSTs the turn to `/v1/observe`, so a `remember` tool here
+would let the model store a fact by tool call while the hook independently
+observes the transcript containing it: two rows, same scope, different
+payloads, and nothing downstream able to tell they were one turn
+(ADR-0057 decision 6). There is no configuration of this plugin under
+which the other value is right, so there is no flag for it.
 
 ### Governed skills
 

@@ -367,9 +367,15 @@ echo "    decides with the roles held now, so a timestamp is not a credential."
 
 echo "==> MCP CLIENT E2E: real JSON-RPC over stdio to the real server"
 cat >"/tmp/ctx5-mcp-$$.mjs" <<'MCPCLIENT'
-// A minimal MCP client: spawn the server, speak the protocol, assert.
-// Deliberately not the adapter's own code — a client that shared the
-// server's helpers would prove less than one that does not.
+// A minimal MCP client: spawn the plugin's entry point, speak the
+// protocol, assert. Deliberately not the adapter's own code — a client
+// that shared the server's helpers would prove less than one that does
+// not.
+//
+// Since ADR-0057 decision 4 the entry point is a launcher and the server
+// is `synveda mcp`, so this now proves the whole path a Claude Code user
+// gets: the manifest's command, the binary it resolves, and the protocol
+// the Rust server speaks.
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
@@ -395,18 +401,41 @@ const call = (method, params) =>
 
 const fail = (why) => { console.error(`demo FAILED: ${why}`); server.kill(); process.exit(1); };
 
+// The legacy era, opened exactly as the shipped plugin's own loop pinned
+// it. It still answers — ADR-0057 decision 3 is dual-era, and a client
+// that opens this way is served on its own terms rather than refused.
 const init = await call("initialize", {
   protocolVersion: "2025-06-18",
   capabilities: {},
   clientInfo: { name: "ctx-5-demo", version: "0" },
 });
 if (init.result?.serverInfo?.name !== "synveda") fail("initialize did not name the server");
+if (init.result?.protocolVersion !== "2025-06-18") fail(`a legacy opener must be answered on its own terms, got ${init.result?.protocolVersion}`);
 console.log(`      initialize    -> ${init.result.serverInfo.name}, protocol ${init.result.protocolVersion}`);
 server.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
 
+// And the modern era, which the hand-written loop could not reach at all:
+// `server/discover` is MUST in 2026-07-28, and the pin this demo used to
+// print without checking was the live defect ADR-0057 decision 4 removed.
+const meta = {
+  "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+  "io.modelcontextprotocol/clientCapabilities": {},
+  "io.modelcontextprotocol/clientInfo": { name: "ctx-5-demo", version: "0" },
+};
+const discovered = await call("server/discover", { _meta: meta });
+const supported = discovered.result?.supportedVersions ?? [];
+if (!supported.includes("2026-07-28")) fail(`server/discover must offer the current revision, got ${JSON.stringify(supported)}`);
+console.log(`      discover      -> ${supported.join(", ")}`);
+
 const listed = await call("tools/list", {});
 const tools = listed.result?.tools ?? [];
+// Still exactly one, and now for a stated reason rather than by
+// construction: the plugin launches `--writes host` because its Stop hook
+// already observes this session's turns (ADR-0057 decision 6), so the
+// model is offered the deep read and never a second way to write.
 if (tools.length !== 1 || tools[0].name !== "recall") fail(`expected exactly one tool named recall, got ${JSON.stringify(tools.map((t) => t.name))}`);
+const denied = await call("tools/call", { _meta: meta, name: "remember", arguments: { text: "x" } });
+if (denied.error === undefined) fail("a write tool this launch does not advertise must not be callable either");
 console.log(`      tools/list    -> ${tools.length} tool: ${tools[0].name}`);
 
 const called = await call("tools/call", {
@@ -431,6 +460,10 @@ console.log("      tools/call    -> and the same tool answers as-of, historicall
 server.kill();
 MCPCLIENT
 
+# The seam the launcher resolves (ADR-0027 decision 4, ADR-0057 decision
+# 4): this demo's server is the build in the working tree, never whichever
+# `synveda` happens to be installed on the machine running it.
+SYNVEDA_CLI="$PWD/target/debug/synveda" \
 node "/tmp/ctx5-mcp-$$.mjs" \
   "adapters/claude-code/dist/mcp-server.mjs" \
   "$(printf '%s' "$before" | sed 's/ /T/; s/+00$/Z/')"
@@ -455,7 +488,13 @@ echo
 echo "==> the AC suites"
 cargo test -p synveda-gateway --test recall
 cargo test -p synveda-gateway --test tiered
-( cd adapters/claude-code && node --test "dist/mcp.test.mjs" )
+# The protocol suite moved with the protocol (ADR-0057 decision 4): the
+# frames are `synveda-cli`'s to prove now, and what is left in the plugin
+# is the launcher — the binary it resolves, the `--writes host` that keeps
+# this hook-driven host from being offered a second way to write, and the
+# message a missing CLI produces instead of an empty tool list.
+cargo test -p synveda-cli mcp::
+( cd adapters/claude-code && node --test "dist/mcp-server.test.mjs" )
 
 echo
 echo "CTX-5 demo OK: a permit \`standard\` has carried since AUTHZ-2 became"
