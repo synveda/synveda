@@ -10,6 +10,14 @@ use crate::Error;
 /// What an observe event reports (seed §3: "transcript deltas, tool
 /// results, decisions"). Drives extraction routing in MEM-3; stored as the
 /// staging row's `kind` and CHECK-constrained to this vocabulary.
+///
+/// The vocabulary answers two questions at once, and they are not the same
+/// question. The first three variants say *what was seen*, all of them by a
+/// host watching a session. [`Assertion`](ObserveKind::Assertion) says the
+/// content was *composed and volunteered by a model* rather than observed,
+/// which is a provenance claim rather than a content one — see its own
+/// documentation, and ADR-0057 decision 8 for why this axis is `kind` and
+/// not a parallel field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObserveKind {
@@ -17,16 +25,31 @@ pub enum ObserveKind {
     TranscriptDelta,
     /// The outcome of a tool invocation.
     ToolResult,
-    /// A decision the agent or user made, with its context.
+    /// A decision the agent or user made, with its context — one the host
+    /// *observed being made*. A model reporting its own decision through a
+    /// tool call is an [`Assertion`](ObserveKind::Assertion).
     Decision,
+    /// A fact a model composed and chose to store, arriving because the
+    /// model called a write tool (ADPT-2's `remember`, ADR-0057 decisions 7
+    /// and 8) rather than because a hook observed a session.
+    ///
+    /// The distinction is epistemic and cannot be recovered later: a hook
+    /// records what happened whether or not the model thinks to call it,
+    /// while an assertion is the model's own claim, shaped by the model,
+    /// for the recorder. Everything downstream is unchanged — the same
+    /// route, the same `MemoryWrite` decision, the same redaction scan, the
+    /// same home-scope placement — so this variant buys provenance, not
+    /// privilege.
+    Assertion,
 }
 
 impl ObserveKind {
     /// All kinds.
-    pub const ALL: [ObserveKind; 3] = [
+    pub const ALL: [ObserveKind; 4] = [
         ObserveKind::TranscriptDelta,
         ObserveKind::ToolResult,
         ObserveKind::Decision,
+        ObserveKind::Assertion,
     ];
 
     /// Stable wire name, identical to the serde form.
@@ -36,7 +59,18 @@ impl ObserveKind {
             ObserveKind::TranscriptDelta => "transcript_delta",
             ObserveKind::ToolResult => "tool_result",
             ObserveKind::Decision => "decision",
+            ObserveKind::Assertion => "assertion",
         }
+    }
+
+    /// Whether the content was composed by a model rather than observed by
+    /// a host. The one question the [`Assertion`](ObserveKind::Assertion)
+    /// variant exists to answer, named so that callers ask it by meaning
+    /// rather than by matching on a variant they have to remember the
+    /// significance of.
+    #[must_use]
+    pub const fn is_model_asserted(&self) -> bool {
+        matches!(self, ObserveKind::Assertion)
     }
 }
 
@@ -50,14 +84,12 @@ impl FromStr for ObserveKind {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "transcript_delta" => Ok(ObserveKind::TranscriptDelta),
-            "tool_result" => Ok(ObserveKind::ToolResult),
-            "decision" => Ok(ObserveKind::Decision),
-            other => Err(Error::Invalid {
-                message: format!("unknown observe kind: {other:?}"),
-            }),
-        }
+        ObserveKind::ALL
+            .into_iter()
+            .find(|kind| kind.as_str() == s)
+            .ok_or_else(|| Error::Invalid {
+                message: format!("unknown observe kind: {s:?}"),
+            })
     }
 }
 

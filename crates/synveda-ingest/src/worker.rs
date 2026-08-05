@@ -709,6 +709,13 @@ async fn commit_group(
                 provenance: json!({
                     "event_id": item.input.event_id,
                     "session_id": item.input.session_id,
+                    // The observed kind, carried so the model-asserted /
+                    // host-observed distinction survives to recall time
+                    // (ADR-0057 decision 8). Recall echoes `provenance`
+                    // verbatim, so writing it here is what makes it
+                    // provenance rather than telemetry that dies in the
+                    // staging buffer.
+                    "kind": item.input.kind,
                     "method": item.method,
                     "model_version": item.model_version,
                     "confidence": candidate.confidence,
