@@ -48,8 +48,28 @@ GATEWAY_URL=http://127.0.0.1:8120
 SEED_URL=http://127.0.0.1:8131
 # Dev-only bootstrap API key from deploy/compose/rauthy/config.toml.
 RAUTHY_API_KEY='API-Key synveda-dev$6xxmjZD7Wqe9zWN1fWzOW1jA4uxAkFQ9rYlVFpxBzVgJ0xEj2KWSLiaRTZzKV1oz'
-ALICE_EMAIL=alice@demo.localhost
+# Per run, and deleted on the way out.
+#
+# This demo asserts a property about a person Synveda has never seen — "the
+# fresh machine to a personalised session" — and a shared identity is not
+# fresh on the second run. It also used to share `alice@demo.localhost` with
+# `demos/auth-2-jit-provisioning.sh`, so one demo's leftovers were the
+# other's starting state; that is how a password nobody could re-set took
+# both of them down at once.
+#
+# The repo already settled this shape: CNSL-1 uses `reviewer-$$@…`, OPS-1
+# derives its operator from the tenant slug, and `synveda init`'s
+# `operator_email` carries a test named
+# `two_deployments_on_one_laptop_do_not_share_an_operator`. This is that
+# rule reaching the two demos that predate it.
+#
+# The **group** stays shared on purpose: it holds no mutable state, it is
+# created idempotently, and its name is load-bearing — `convention_candidates`
+# parses `synveda-<department>-<team>` onto hierarchy slugs (ADR-0013), so a
+# per-run group would drag per-run team slugs behind it for no benefit.
+ALICE_EMAIL="alice-$$@demo.localhost"
 ALICE_PASSWORD='Auth2demo-Passw0rd!'
+ALICE_ID=""
 TEAM_GROUP=synveda-eng-platform
 # The AC's budget, in seconds.
 BUDGET_SECS=120
@@ -141,8 +161,13 @@ if ! printf '%s\n' "$groups_json" | node -e '
     -d "{\"group\":\"$TEAM_GROUP\"}" >/dev/null
 fi
 
-users_json=$(curl -fsS "$RAUTHY_URL/auth/v1/users" -H "Authorization: $RAUTHY_API_KEY")
-alice_id=$(printf '%s\n' "$users_json" | node -e '
+# A leaked identity from a crashed run, or a reused pid, would put us back
+# in the state this demo spent a week failing in — Rauthy will not re-set a
+# password it has seen in its last three, and a constant that is in the
+# history without being current locks every future run out. One DELETE
+# removes that possibility entirely, so nothing below needs a recovery path.
+stale_id=$(curl -fsS "$RAUTHY_URL/auth/v1/users" -H "Authorization: $RAUTHY_API_KEY" |
+  node -e '
   let d = "";
   process.stdin.on("data", (c) => (d += c));
   process.stdin.on("end", () => {
@@ -150,52 +175,22 @@ alice_id=$(printf '%s\n' "$users_json" | node -e '
     if (user) console.log(user.id);
   });
 ' "$ALICE_EMAIL")
-if [ -z "$alice_id" ]; then
-  alice_id=$(curl -fsS -X POST "$RAUTHY_URL/auth/v1/users" \
-    -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
-         \"family_name\":\"Demo\",\"language\":\"en\",
-         \"groups\":[\"$TEAM_GROUP\"],\"roles\":[]}" | json_field id)
-fi
-# Desired state, and it CONVERGES rather than hopes.
-#
-# Rauthy keeps a password history and refuses one it has seen in the last
-# three, so a re-run cannot always PUT this demo's constant back. The
-# version of this block that fell back to a PUT *without* the password read
-# that refusal as "the password is already what I want" — and those are
-# different. A constant can sit in the history without being current, and
-# once it does, every future run is refused when it tries to set it and
-# rejected when it tries to log in, with a 401 forty lines later that names
-# nothing. That is what happened: alice's stored password stopped matching,
-# the demo could not put it back, and both this and `auth-2` failed for a
-# week for what looked like an IdP problem.
-#
-# So: set it, and if Rauthy will not take it, delete the user and make a
-# new one. A fresh user has no history. Rauthy state is dev-only and this
-# demo wants a person who has never logged in to Synveda anyway, so
-# recreating costs nothing it was relying on.
-alice_state="{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
-       \"family_name\":\"Demo\",\"language\":\"en\",\"roles\":[],
-       \"groups\":[\"$TEAM_GROUP\"],\"enabled\":true,\"email_verified\":true"
-set_alice_password() {
-  curl -fsS -X PUT "$RAUTHY_URL/auth/v1/users/$1" \
-    -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
-    -d "$alice_state,\"password\":\"$ALICE_PASSWORD\"}" >/dev/null 2>&1
-}
-if ! set_alice_password "$alice_id"; then
-  echo "    rauthy will not re-set alice's password (its history rule) — recreating her"
-  curl -fsS -X DELETE "$RAUTHY_URL/auth/v1/users/$alice_id" \
+if [ -n "$stale_id" ]; then
+  curl -fsS -X DELETE "$RAUTHY_URL/auth/v1/users/$stale_id" \
     -H "Authorization: $RAUTHY_API_KEY" >/dev/null
-  alice_id=$(curl -fsS -X POST "$RAUTHY_URL/auth/v1/users" \
-    -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
-         \"family_name\":\"Demo\",\"language\":\"en\",
-         \"groups\":[\"$TEAM_GROUP\"],\"roles\":[]}" | json_field id)
-  set_alice_password "$alice_id" || {
-    echo "demo FAILED: could not set alice's password even on a fresh user" >&2
-    exit 1
-  }
 fi
+alice_id=$(curl -fsS -X POST "$RAUTHY_URL/auth/v1/users" \
+  -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
+       \"family_name\":\"Demo\",\"language\":\"en\",
+       \"groups\":[\"$TEAM_GROUP\"],\"roles\":[]}" | json_field id)
+ALICE_ID=$alice_id
+curl -fsS -X PUT "$RAUTHY_URL/auth/v1/users/$alice_id" \
+  -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
+       \"family_name\":\"Demo\",\"language\":\"en\",\"roles\":[],
+       \"groups\":[\"$TEAM_GROUP\"],\"enabled\":true,\"email_verified\":true,
+       \"password\":\"$ALICE_PASSWORD\"}" >/dev/null
 echo "    alice ($ALICE_EMAIL) is in $TEAM_GROUP and has never logged in to Synveda"
 
 # A scratch database per run: the long-lived dev database carries thousands
@@ -251,6 +246,11 @@ cleanup() {
   wait 2>/dev/null || true
   $COMPOSE exec -T postgres psql -U synveda -d synveda \
     -c "drop database if exists $DEMO_DB with (force)" >/dev/null 2>&1 || true
+  # The run's own identity goes with it. OPS-1 leaves its per-run operators
+  # behind and the dev IdP has been accumulating them since; a per-run
+  # fixture that is never removed is a leak with a nicer name.
+  [ -n "$ALICE_ID" ] && curl -fsS -X DELETE "$RAUTHY_URL/auth/v1/users/$ALICE_ID" \
+    -H "Authorization: $RAUTHY_API_KEY" >/dev/null 2>&1
   rm -rf "$SYNVEDA_SEARCH_INDEX_DIR" "$DEMO_HOME"
   return 0
 }
