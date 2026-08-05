@@ -1,9 +1,48 @@
 # ADR-0007: Observability via the tracing facade, with OTel export and metrics owned by the gateway binary
 
-- **Status**: Accepted
+- **Status**: Accepted, **deferred clause landed 2026-08-05** (see below)
 - **Date**: 2026-07-18
 - **Feature(s)**: FND-5
 - **Deciders**: sujitn
+
+## The deferred clause, landed 2026-08-05
+
+This ADR ends its options list with one sentence of deferral:
+
+> W3C `traceparent` extraction from incoming requests is deliberately
+> deferred to Phase 1 (ADPT-1/CTX-3), when external callers exist; the
+> baseline emits new root traces per request.
+
+**Phase 1 shipped without it, and so did Phases 2 and 3 up to this point.**
+ADPT-1 went further than the deferral asked and started *sending* a
+`traceparent` on every hook call — ADR-0027's observability note promises
+one — but nothing on this side ever read it, so the header was decorative
+and every trace still began at the gateway. The gap was found while wiring
+ADPT-2's MCP server, when the obvious next step (send a `traceparent` from
+the CLI too) turned out to have nothing to join.
+
+No decision changes: this is the clause being met, four features late. The
+propagator is installed in `telemetry::init` and the extraction happens in
+`app::make_request_span`, which is where the request span is already built
+and therefore the only place a parent can be set before anything nests
+under it. A request with no usable context still roots its own trace,
+exactly as the baseline did.
+
+Two behaviours of `TraceContextPropagator` are recorded in
+`tests/observability.rs` rather than worked around, because a length check
+or a version check here would be the first line of a second implementation
+of a protocol we took a library for: a trace-id shorter than W3C's 32 hex
+digits is accepted and zero-padded, and a `traceparent` from a future
+revision is parsed forward (which W3C asks for). Both are pinned so a
+tightened propagator fails a test rather than changing behaviour silently.
+
+**A caller's trace id is caller-controlled and therefore not evidence.**
+This ADR's compliance note already fixes what that can cost — "traces are
+plumbing for the audit story, not a substitute for it: AUD-1's
+hash-chained events remain the tamper-evident record" — and that is now
+load-bearing rather than incidental. Nothing authorises off a trace id, no
+audit event derives from one, and the PDP never sees one; a forged
+`traceparent` buys a misleading Jaeger view and nothing else.
 
 ## Context
 

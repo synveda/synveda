@@ -15,12 +15,16 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post, put};
 use metrics_exporter_prometheus::PrometheusHandle;
+// The two extension traits W3C trace-context extraction needs: `.span()` on
+// an extracted `Context`, and `.set_parent()` on the request span.
+use opentelemetry::trace::TraceContextExt as _;
 use serde::Serialize;
 use sqlx::PgPool;
 use synveda_identity::{LoginFlow, TokenVerifier};
 use synveda_policy::Pdp;
 use synveda_types::{Error, Tenant};
 use tower_http::trace::TraceLayer;
+use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
 use crate::audit_query;
 use crate::auth;
@@ -371,9 +375,12 @@ async fn whoami() -> Response {
 /// One span per request. `otel.name` gives Jaeger the `VERB /route` operation
 /// name; the status code is recorded on response, and `tenant.id` by the
 /// tenant-resolution middleware once resolution succeeds (TEN-1 AC).
+///
+/// When the caller sent a W3C `traceparent`, this span continues that trace
+/// instead of starting a new one — see [`parent_context`].
 fn make_request_span(request: &Request) -> tracing::Span {
     let route = matched_route(request);
-    tracing::info_span!(
+    let span = tracing::info_span!(
         "http.request",
         otel.name = %format!("{} {}", request.method(), route),
         otel.kind = "server",
@@ -382,7 +389,92 @@ fn make_request_span(request: &Request) -> tracing::Span {
         url.path = %request.uri().path(),
         http.response.status_code = tracing::field::Empty,
         tenant.id = tracing::field::Empty,
-    )
+    );
+    if let Some(parent) = parent_context(request.headers())
+        // Only fails when no OTel subscriber layer is installed — the unit
+        // tests, and any binary that skipped `telemetry::init`. The span is
+        // still a perfectly good `tracing` span; it simply has no trace to
+        // join, which is the same position the gateway was in before this.
+        && let Err(err) = span.set_parent(parent)
+    {
+        tracing::debug!(%err, "no OpenTelemetry layer to attach the caller's trace to");
+    }
+    span
+}
+
+/// The caller's trace context, when it sent a usable one.
+///
+/// ADR-0007 deferred W3C `traceparent` extraction "to Phase 1 (ADPT-1/CTX-3),
+/// when external callers exist; the baseline emits new root traces per
+/// request". Those callers arrived — ADPT-1's hooks have sent a `traceparent`
+/// since they shipped, and ADPT-2's MCP server is a second — and nothing here
+/// read it, so every trace still began at this process and the header was
+/// decorative. This is that clause, landing late.
+///
+/// # `None` rather than an empty context, deliberately
+///
+/// `set_parent` with a context carrying no valid span makes the span an
+/// explicit root and detaches it from whatever it would otherwise nest
+/// under. That is harmless here today, because this layer is outermost — but
+/// it is harmless by accident, and a future layer added outside this one
+/// would silently lose its parent. Returning `None` when there is nothing to
+/// join keeps the default behaviour the default.
+///
+/// A `traceparent` the propagator cannot parse extracts to exactly that
+/// invalid context, so a bad header is ignored rather than rejected: a
+/// trace is plumbing, and refusing a request over its telemetry would make
+/// an observability feature into an availability one.
+///
+/// **One kind of malformed header is not ignored, and it is the SDK's
+/// reading rather than ours.** W3C requires a version-`00` trace-id to be
+/// exactly 32 hex digits; `TraceContextPropagator` checks the field parses
+/// as hex and not that it is full width, so `00-4bf92f3577b34da6-…` is
+/// accepted and zero-padded into a valid id. The cost is a confusing
+/// Jaeger view — two callers sending the same short id share a trace — and
+/// it stops there, because nothing authorises off a trace id. Left as the
+/// SDK has it, and pinned by
+/// `observability.rs::a_short_trace_id_is_accepted_and_padded_by_the_sdk`
+/// so a tightened propagator is a failing test rather than a silent change:
+/// a length check here would be the first line of a second implementation
+/// of a protocol we deliberately took a library for.
+///
+/// # What accepting a caller's trace id does and does not mean
+///
+/// It means the caller chooses this request's trace id, so a client can
+/// place its requests in a trace of its own — which is the entire point, and
+/// how a slow session start becomes one trace from hook through plan, embed,
+/// search and compose.
+///
+/// It also means the id is **caller-controlled and therefore not evidence**.
+/// A client may reuse an id, forge one, or join a trace it guessed. ADR-0007
+/// already fixes what that can cost: "traces are plumbing for the audit
+/// story, not a substitute for it — AUD-1's hash-chained events remain the
+/// tamper-evident record". Nothing authorises off a trace id, no audit event
+/// derives from one, and the PDP never sees one. The blast radius of a
+/// forged `traceparent` is a misleading Jaeger view, which is the same blast
+/// radius as a client that lies in its own logs.
+fn parent_context(headers: &axum::http::HeaderMap) -> Option<opentelemetry::Context> {
+    let context = opentelemetry::global::get_text_map_propagator(|propagator| {
+        propagator.extract(&HeaderExtractor(headers))
+    });
+    context.span().span_context().is_valid().then_some(context)
+}
+
+/// `HeaderMap` as OTel's text-map source. Header names are already
+/// lowercase-normalised by `http`, which is what the W3C keys need.
+struct HeaderExtractor<'a>(&'a axum::http::HeaderMap);
+
+impl opentelemetry::propagation::Extractor for HeaderExtractor<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        // A header whose bytes are not UTF-8 is absent rather than an
+        // error: the propagator's job is to find a trace, not to validate
+        // somebody's HTTP.
+        self.0.get(key).and_then(|value| value.to_str().ok())
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.0.keys().map(axum::http::HeaderName::as_str).collect()
+    }
 }
 
 fn record_response(response: &Response, _latency: Duration, span: &tracing::Span) {
