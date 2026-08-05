@@ -173,6 +173,30 @@ Four forces.
    by design" (seed §2.3) has no terminal in which to ask what is currently
    relaxed.
 
+   > **Amended 2026-08-05, during implementation.** This decision named
+   > `synveda policy show` and `synveda role list --effective`, and both
+   > spellings were wrong for a reason worth recording rather than quietly
+   > fixing: **`synveda policy` and `synveda role` are direct-store operator
+   > plumbing.** Every verb in both families takes `--tenant` and a database
+   > connection and answers with no PDP decision at all — they predate the
+   > API and exist to bootstrap a deployment. Growing `role list` an
+   > `--effective` flag would therefore have meant implementing the chain
+   > walk against Postgres: the second implementation decision 1 refuses
+   > *and* the bypass seed §2.2 forbids, in a single flag, on the one surface
+   > whose whole subject is who may do what.
+   >
+   > The reads land instead where the routes are and where the HTTP-only
+   > rule already holds — `synveda hierarchy policy|roles|capabilities`,
+   > beside `hierarchy create` and under its module's own stated discipline
+   > ("this module opens no database connection") — plus `synveda lapse
+   > list` and `synveda whoami --capabilities` as their own verbs, matching
+   > `/v1/lapses` and `/v1/whoami`. The intent of the decision is unchanged
+   > and fully met: every surface CNSL-2 adds is reachable from a terminal.
+   > What changed is that a governed read cannot be hung off a verb family
+   > that was never governed, and the pre-existing `synveda policy` gap is
+   > closed by a *new* verb rather than by teaching an old one to answer
+   > without deciding.
+
 9. **The explorer is read-only, and the asymmetry it surfaces gets a feature ID
    rather than a footnote.** Content mutates only through proposals — CNSL-4's
    rule, adopted early by ADR-0056 decision 9 — but `PUT .../policy` and
