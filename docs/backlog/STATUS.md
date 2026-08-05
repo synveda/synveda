@@ -1,6 +1,6 @@
 # Backlog status
 
-88 features parsed from docs/SYNVEDA_FEATURES.md — one file per
+89 features parsed from docs/SYNVEDA_FEATURES.md — one file per
 feature in this directory. Phases per the Sequencing section. This file and the
 per-feature files are **hand-maintained**; `node scripts/check-backlog.mjs`
 (in `make ci`) asserts that the three agree, and writes nothing.
@@ -3468,6 +3468,7 @@ lifetime and the 12-hour cap as the compensating controls until then._
 - [ ] [CNSL-4: Memory browser](CNSL-4.md)
 - [ ] [AUD-5: Compliance mapping doc](AUD-5.md)
 - [ ] [AUTHZ-6: OpenFGA adapter spike](AUTHZ-6.md)
+- [ ] [AUTHZ-7: Governed admin-plane mutation](AUTHZ-7.md) — filed 2026-08-05 by CNSL-2 (ADR-0058 decision 9): pack assignment and role binding are direct `PUT`s while every content act is proposal-gated, so one steward replaces a subtree's pack with one call and one signature, permanently, where the lapse that relaxes far less needs a reasoned, time-boxed, dual-approved proposal. Phase 4 because both bounds hold — a pack flip widens no candidate universe (ADR-0037 decision 13) and cannot reach below the invariant floor.
 
 ## Unscheduled — not listed in the Sequencing section
 

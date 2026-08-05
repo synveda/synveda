@@ -224,6 +224,26 @@ AUTHZ-5 ABAC conditions (M)
 AUTHZ-6 OpenFGA adapter spike (S) [de-risk]
   Prove the facade can back onto FGA for deep ReBAC; document trigger conditions for switch.
   AC: spike report + conformance test suite passing on both engines for the shared subset.
+AUTHZ-7 Governed admin-plane mutation (M)
+  Pack assignment and role binding are direct `PUT`s (AUTHZ-2, AUTHZ-3) while every content act
+  is proposal-gated. Decide whether they gain an approval-matrix cell of their own, and record
+  the answer either way. Filed by CNSL-2 (ADR-0058 decision 9), which found it by building the
+  screen that renders a pack, its origin and the grants over it on one page: all three packs
+  grant `PolicyAssign` to steward/org-admin over the bound subtree and the decision skips the
+  node's own assignment (ADR-0014 decision 4), so one steward replaces a team's pack with one
+  call and one signature, permanently — while the **lapse** that relaxes far less requires a
+  reasoned, time-boxed, dual-approved proposal that expires on its own. Seed §2.3 has controls
+  relaxed "through explicit, audited, time-boxable policy relaxations"; a pack assignment is
+  explicit and audited and is neither of the other two. Bounded, and the bounds hold: a pack
+  flip cannot widen anyone's candidate universe (ADR-0037 decision 13 — which is why EVAL-5's
+  relaxation demo had to be a lapse) and cannot reach below the invariant floor (ADR-0032
+  decision 4, ADR-0051 decision 18, ADR-0052 decision 3). It changes approval counts,
+  sensitivity ceilings, scan thresholds and quality bars for a whole subtree.
+  AC: the decision recorded as an ADR before any implementation; if gated, the admin-plane cell
+  joins the role×action and approval golden tests under all three packs, `policy.node.assigned`
+  and `role.bound` become proposal effects, and the explorer gains the write path CNSL-2
+  declined; if left direct, the seed §2.3 reading that permits it is written down and the
+  compensating control named.
 
 ──────────────────────────────────────────────
 EPIC HIER — Hierarchy & scopes
@@ -774,6 +794,63 @@ EPIC CNSL — Admin console (Phase 3)
 CNSL-1 Proposals inbox (hero screen) (L) — review queue with diffs, scan reports, quality
   scores, evidence; approve/reject. AC: full review parity with CLI.
 CNSL-2 Hierarchy & policy explorer (M) — visualise scopes, packs, roles, active lapses.
+  AC: the four nouns are answered for a node in one screen and by the CLI beside it, because
+  ADR-0056 decision 9 — the console gets no endpoint the CLI does not have — is a standing
+  decision and `synveda policy` has no read verb while `lapse` is not a verb at all, so the
+  machinery that is this product's whole answer to "strict by default, relaxable by design"
+  has no terminal in which to ask what is currently relaxed; a pack renders with **where it
+  came from** — assigned here, assigned at a named ancestor, the tenant default, the embedded
+  default — and roles render the same way, the effective set with each binding's origin node,
+  which is the asymmetry this feature closes: policy has served an origin since AUTHZ-2 and
+  roles have served only the bindings at the node asked about, so the inheritance every reader
+  needs was a walk each client did for itself and the two admin planes disagreed about how to
+  say "this came from above"; "active lapses" is answerable **without already knowing which
+  scope to ask about**, the scope-free list returning the standing set the caller may see with
+  each lapse visible from **either** end under `PolicyRead` at that end rather than under a
+  tenant-wide grant nothing below an org-admin holds, which is what lets the steward of a
+  granted scope list — and therefore revoke — a grant their own team holds, where `at_target`
+  had made a standing grant visible only to the side that disclosed it; the standing set is
+  `active_for_scopes`' own predicate on the database's own clock, so the screen and the PDP
+  cannot disagree about which grants are live, while the scoped form keeps returning expired
+  and revoked rows because "who could read what, when" is a question about history; **what the
+  reader may do is the PDP's own verdict and never a re-derivation of it** — the answer carries
+  the pack `name@version` it was decided under, is asserted to move when a lapse opens and when
+  a pack is assigned, neither of which a role-derived answer can express, and is proved to be a
+  **forecast rather than a grant** by a probe that answers yes, a pack change, and the same act
+  then refused at its own seam, since the enforcement point is unchanged and a client may decide
+  what to offer and never what to allow; the probe answers about the caller and takes no
+  `subject`, so an explorer cannot become an enumeration oracle for an organisation's role
+  assignments one 403 at a time, and "who holds what here" keeps `RoleRead` and its own denial;
+  a **10,000-node** hierarchy (HIER-1's own AC) renders without fetching a subtree or probing a
+  node nobody looked at — children on expand, capabilities batched for the rendered set under a
+  maximum the API declares, with the response naming what it did not answer rather than
+  truncating silently — and the whole render chains **one** `authz.decision` per probe request
+  with the pairs summarised rather than one row per (node, action), which is ADR-0019 decision
+  4's second sentence (CTX-2's per-candidate sweep aggregating into the request-level event)
+  arriving on the admin plane, asserted as a count on the chain rather than as a claim, because
+  a governance product whose audit log is mostly a record of people looking at it has made its
+  own chain unreadable; CNSL-1's deferral closes where it was sent — the inbox offers the acts
+  the reader may actually take, and a reader holding one role short is shown a refusal rather
+  than a button that returns one; the parity corpus takes four new cases — effective roles with
+  mixed origins, a pack inherited from two levels up, a standing lapse beside an expired one,
+  and a capability set with at least one denial — asserted by both renderers and checked for
+  teeth the way CNSL-1's was, by deleting each fact and naming which case fails and which do
+  not; every act is on the chain, with no third party's binding and no lapse reason in any probe
+  payload, swept for; demo script. Deferred with a recorded trigger: **policy simulation** —
+  "what would this scope compose under `standard`" — because a forecast against a pack nobody
+  assigned is a second decision path through the PDP and the honest version decides against a
+  supplied pack rather than the effective one; and **mutation from the explorer**, because
+  assigning a pack and binding a role are direct routes where content is proposal-gated, and a
+  second direct mutation surface would settle by accident a question that is AUTHZ-7's to answer
+  on purpose — this feature's own finding, that all three packs let one steward replace a
+  subtree's pack with one call and one signature while the lapse relaxing far less needs a
+  reasoned, time-boxed, dual-approved proposal.
+  Written 2026-08-05 (CNSL-2, ADR-0058): the feature text named four nouns and no criteria.
+  Three of the four already had surfaces, so the load-bearing parts are the two that did not
+  answer the question actually being asked — a role that will not say where it came from, and a
+  lapse that can only be found from the side that granted it — plus the discovery that the
+  reader's own capabilities cannot be derived client-side at all without producing a second
+  implementation of "may I" that disagrees with the PDP immediately rather than eventually.
 CNSL-3 Audit explorer (M) — AUD-2 surfaced; "what did agent know at T" as a UI query.
 CNSL-4 Memory browser (M) — per-scope records with provenance, channel, validity; manual
   pin/retire (as proposals). AC: no direct-mutation path exists — everything is a proposal.
@@ -814,5 +891,10 @@ Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-
    FLOW-8. Nothing is cut and the phase's contents are unchanged.)
    → Demo: Entra/Okta live, spec-compliant governed skills into Claude Code + Cursor,
      LoCoMo/LongMemEval scores published, Helm install.
-Phase 4 ecosystem: ADPT-4,5,6,7 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6 · CNSL-3,4 · AUD-5 · AUTHZ-6
+Phase 4 ecosystem: ADPT-4,5,6,7 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6 · CNSL-3,4 · AUD-5 · AUTHZ-6,7
+   (AUTHZ-7 added 2026-08-05 by CNSL-2/ADR-0058 decision 9, which found the asymmetry it
+   names while building the explorer. Placed here rather than in Phase 3 because its two
+   bounds hold — a pack flip widens no candidate universe and cannot reach below the
+   invariant floor — so it is a governance question rather than a hole; if that reading is
+   ever wrong, it belongs in front of the Phase 3 procurement block, not behind it.)
 ──────────────────────────────────────────────
