@@ -152,6 +152,10 @@ enum Command {
     /// client over `/v1` holding the bearer `synveda login` stored, three
     /// primitives only, no database connection and no core-crate call.
     Mcp {
+        /// Configure a client to launch this server. Bare `synveda mcp`
+        /// *is* the server, which is what a client's config execs.
+        #[command(subcommand)]
+        command: Option<McpCommand>,
         /// Who owns the write at this host. `tool` advertises `remember`
         /// as well as `recall`, because nothing else writes; `host`
         /// advertises `recall` only, because the harness or framework
@@ -894,6 +898,47 @@ enum ProposalCommand {
 }
 
 #[derive(Subcommand)]
+enum McpCommand {
+    /// Write a client's own config so it launches this server (ADPT-2,
+    /// ADR-0057 decision 10).
+    ///
+    /// The acceptance criterion is "works in", and "paste this JSON into
+    /// that file" is exactly where two clients diverge into a support
+    /// burden nobody can test — so the product writes the file and says
+    /// what it wrote.
+    ///
+    /// It changes one key. Your other MCP servers, and everything else in
+    /// the file, are written back as they were found; an existing
+    /// `synveda` entry that differs is refused rather than replaced.
+    Install {
+        /// Which client to configure: `claude-desktop` or `cursor`.
+        ///
+        /// Claude Code is absent on purpose — its plugin already carries
+        /// the entry, and carries it with the write tool switched off.
+        #[arg(long)]
+        client: String,
+        /// Write this file instead of the client's own — a project-level
+        /// `.cursor/mcp.json`, or a layout this release has not heard of.
+        #[arg(long)]
+        config: Option<std::path::PathBuf>,
+        /// Report what would change and write nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Replace an existing `synveda` entry that differs from this one.
+        #[arg(long)]
+        force: bool,
+        /// Print the entry as JSON and write nothing — for a client this
+        /// release does not know, or a config kept somewhere unusual.
+        #[arg(long)]
+        print: bool,
+        /// Credential profile the generated entry names. Defaults to
+        /// $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum AuthCommand {
     /// Print a currently-valid bearer for the profile, refreshing it
     /// through the gateway first if it has expired. Exits non-zero when
@@ -1356,7 +1401,30 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Auth(AuthCommand::Token { profile, json }) => {
             login::auth_token(profile_name(profile), json).await
         }
-        Command::Mcp { writes, profile } => mcp::serve(profile_name(profile), writes).await,
+        Command::Mcp {
+            command: None,
+            writes,
+            profile,
+        } => mcp::serve(profile_name(profile), writes).await,
+        Command::Mcp {
+            command:
+                Some(McpCommand::Install {
+                    client,
+                    config,
+                    dry_run,
+                    force,
+                    print,
+                    profile,
+                }),
+            ..
+        } => mcp::install::install(&mcp::install::Plan {
+            client,
+            config,
+            profile: profile_name(profile),
+            dry_run,
+            force,
+            print,
+        }),
         Command::Auth(AuthCommand::Logout { profile, all }) => {
             let mut stored = credentials::load()?;
             if all {

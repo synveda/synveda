@@ -64,6 +64,8 @@
 //!
 //! Diagnostics go to stderr, always: stdout is the protocol.
 
+pub mod install;
+
 use std::borrow::Cow;
 use std::sync::Arc;
 
