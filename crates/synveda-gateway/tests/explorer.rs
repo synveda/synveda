@@ -1032,3 +1032,247 @@ async fn a_reader_without_admin_read_still_learns_what_they_may_do() {
     let payload = last_payload(&w.pool, w.tenant).await;
     assert_eq!(payload["op"], json!("capabilities"));
 }
+
+// ── The tree at HIER-1's own scale ───────────────────────────────────────────
+
+/// The AC's scale clause: **a 10,000-node hierarchy renders without
+/// fetching a subtree or probing a node nobody looked at** (ADR-0058
+/// decision 5).
+///
+/// The claim is about *what a screen fetches*, not about how fast a query
+/// runs — HIER-1's own suite owns the latency bound and measures it at the
+/// store. What this measures is the thing the explorer decides: a lazy tree
+/// touches the nodes a reader opened and nothing else, where the
+/// `descendants` call it deliberately does not make would have returned all
+/// of them and then handed each one to a PDP fan-out.
+///
+/// It also makes the batch bound testable for the first time. The small
+/// fixture has four scopes, so `a_batch_beyond_the_bound_names_what_it_did
+/// _not_answer` could only assert the envelope; here there are ten thousand
+/// distinct ids and the split is real.
+#[tokio::test]
+async fn a_ten_thousand_node_tree_renders_without_fetching_or_probing_it() {
+    // Its own tenant, because a hierarchy has one root per tenant and the
+    // count has to be exact for the contrast below to mean anything.
+    let Some(w) = wide_world().await else { return };
+    install(&w, "open-everything", 1, PERMISSIVE).await;
+
+    // HIER-1's own shape: 1 org + 9 divisions + 90 departments + 900 teams
+    // + 9000 users.
+    let seeded = std::time::Instant::now();
+    let mut tx = w.pool.begin().await.expect("begin");
+    let root = node(&mut tx, w.tenant, None, ScopeKind::Org, "wide").await;
+    let mut first_division = None;
+    let mut first_department = None;
+    let mut every_id: Vec<ScopeId> = vec![root.id];
+    for d in 0..9 {
+        let division = node(
+            &mut tx,
+            w.tenant,
+            Some(root.id),
+            ScopeKind::Division,
+            &format!("div-{d}"),
+        )
+        .await;
+        every_id.push(division.id);
+        first_division.get_or_insert(division.id);
+        for p in 0..10 {
+            let dept = node(
+                &mut tx,
+                w.tenant,
+                Some(division.id),
+                ScopeKind::Department,
+                &format!("dept-{d}-{p}"),
+            )
+            .await;
+            every_id.push(dept.id);
+            first_department.get_or_insert(dept.id);
+            for m in 0..10 {
+                let team = node(
+                    &mut tx,
+                    w.tenant,
+                    Some(dept.id),
+                    ScopeKind::Team,
+                    &format!("team-{d}-{p}-{m}"),
+                )
+                .await;
+                every_id.push(team.id);
+                for u in 0..10 {
+                    let user = node(
+                        &mut tx,
+                        w.tenant,
+                        Some(team.id),
+                        ScopeKind::User,
+                        &format!("user-{d}-{p}-{m}-{u}"),
+                    )
+                    .await;
+                    every_id.push(user.id);
+                }
+            }
+        }
+    }
+    tx.commit().await.expect("commit the wide fixture");
+    eprintln!("seeded {} nodes in {:?}", every_id.len(), seeded.elapsed());
+    assert_eq!(every_id.len(), 10_000, "the fixture must actually be 10k");
+
+    // What the screen does NOT do, measured so the contrast is a number
+    // rather than a claim: one `descendants` at the root is the whole tree.
+    let (status, subtree) = get(
+        &w.app,
+        &w.sam,
+        &format!("/v1/hierarchy/nodes/{}/descendants", root.id),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let subtree_size = subtree.as_array().unwrap().len();
+    assert_eq!(
+        subtree_size, 9_999,
+        "the call the explorer refuses to make returns the entire tree"
+    );
+
+    // What the screen DOES do: children on expand, one level at a time.
+    // A reader opening root → division → department → team sees four
+    // fetches and touches a bounded handful of nodes.
+    let mut touched: Vec<ScopeId> = vec![root.id];
+    let mut fetches = 0usize;
+    let mut cursor = root.id;
+    for _ in 0..4 {
+        let (status, kids) = get(
+            &w.app,
+            &w.sam,
+            &format!("/v1/hierarchy/nodes/{cursor}/children"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        fetches += 1;
+        let kids = kids.as_array().unwrap();
+        for kid in kids {
+            touched.push(kid["id"].as_str().unwrap().parse().unwrap());
+        }
+        cursor = kids[0]["id"].as_str().unwrap().parse().unwrap();
+    }
+    eprintln!(
+        "a four-level descent: {fetches} fetches, {} nodes touched of {}",
+        touched.len(),
+        every_id.len()
+    );
+    assert!(
+        touched.len() <= 64,
+        "opening four levels must touch a handful, not a subtree: {} nodes",
+        touched.len()
+    );
+    // 9 divisions + 10 departments + 10 teams + 10 users + the root.
+    assert_eq!(touched.len(), 40);
+
+    // And the probe is over what was rendered, in ONE request and ONE
+    // event — which is the other half of the claim: a tree that fetched
+    // lazily and then probed every node would have moved the cost rather
+    // than removed it.
+    let before = chain_len(&w.pool, w.tenant).await;
+    let scopes: Vec<String> = touched.iter().map(ToString::to_string).collect();
+    let (status, probed) = get(
+        &w.app,
+        &w.sam,
+        &format!("/v1/capabilities?scopes={}", scopes.join(",")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(probed["capabilities"].as_array().unwrap().len(), 40);
+    assert_eq!(
+        chain_len(&w.pool, w.tenant).await - before,
+        1,
+        "forty nodes, one event"
+    );
+
+    // The bound, on real distinct ids at last. Ask for more than the API
+    // will answer and it splits rather than truncating: the answered head
+    // in the order asked, the rest named.
+    let overflow: Vec<String> = every_id
+        .iter()
+        .take(MAX_BATCH + 37)
+        .map(ToString::to_string)
+        .collect();
+    let (status, split) = get(
+        &w.app,
+        &w.sam,
+        &format!("/v1/capabilities?scopes={}", overflow.join(",")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        split["capabilities"].as_array().unwrap().len(),
+        MAX_BATCH,
+        "the bound is the API's and it holds"
+    );
+    assert_eq!(
+        split["not_answered"].as_array().unwrap().len(),
+        37,
+        "and what it did not answer is named rather than dropped: {split}"
+    );
+    let answered: Vec<&str> = split["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["scope_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        answered,
+        overflow[..MAX_BATCH]
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        "in the order the caller asked, so paging is predictable"
+    );
+}
+
+/// The API's declared batch bound, mirrored from
+/// `capabilities::MAX_BATCH_SCOPES` — which is `pub(crate)`, so a test
+/// binary cannot import it. `a_batch_beyond_the_bound_names_what_it_did_not
+/// _answer` asserts the served `max_scopes` equals this, which is what keeps
+/// the mirror honest.
+const MAX_BATCH: usize = 128;
+
+/// A tenant with nothing in it but a token and a pack — the wide fixture
+/// builds its own hierarchy, and it needs the root.
+async fn wide_world() -> Option<World> {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("skipping the CNSL-2 scale test: DATABASE_URL is not set");
+        return None;
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(4)
+        .connect(&url)
+        .await
+        .expect("connect to DATABASE_URL");
+    synveda_store::migrate(&pool)
+        .await
+        .expect("apply migrations");
+
+    let tenant = TenantId::new();
+    let slug = format!("cnsl2w-{}", tenant.as_uuid().simple());
+    tenants::create(&pool, tenant, &slug, "CNSL-2 scale", TenantStatus::Active)
+        .await
+        .expect("admit tenant");
+    // Tenant-wide, because the fixture's own scopes do not exist yet and
+    // this reader has to be able to walk all of them.
+    bind(&pool, tenant, "sam", None, Role::OrgAdmin).await;
+
+    let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
+    let app = router(state(&url, pdp.clone()));
+    // The unused anchors are the small world's shape; this fixture builds
+    // its own and the struct is shared.
+    let placeholder = ScopeId::new();
+    Some(World {
+        pool,
+        tenant,
+        app,
+        pdp,
+        org: placeholder,
+        eng: placeholder,
+        platform: placeholder,
+        vault: placeholder,
+        sam: issue("sam", tenant),
+        vic: issue("vic", tenant),
+        vaughn: issue("vaughn", tenant),
+    })
+}
