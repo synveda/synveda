@@ -1,0 +1,148 @@
+{
+  "client": "cursor",
+  "era": "legacy",
+  "launch": [
+    "mcp",
+    "--writes",
+    "tool"
+  ],
+  "provenance": {
+    "kind": "authored",
+    "note": "Authored from the MCP specification and Cursor's documented behaviour, NOT captured from Cursor — it was not available to record from when this corpus was built. Cursor is the non-Anthropic client the acceptance criterion names; this opens at 2025-11-25, the revision between the one CTX-5 pinned and the current one. Replace `send` with captured frames (see capture.sh) and set kind to `captured`; ADR-0057 decision 11 asks for the real ones."
+  },
+  "exchange": [
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "cursor-vscode",
+            "version": "0.1.0"
+          }
+        }
+      },
+      "expect": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {
+            "tools": {}
+          },
+          "serverInfo": {
+            "name": "synveda",
+            "version": "0.1.0"
+          },
+          "instructions": "Synveda is governed organisational memory. `recall` answers from every scope this identity's policy permits, which is wider than what a session-start context block composes from — reach for it when the answer might already be known here rather than reasoning from scratch. Results say whether they were reviewed and how fresh they are; weigh them on that."
+        }
+      }
+    },
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+      },
+      "expect": null
+    },
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {}
+      },
+      "expect": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+          "tools": [
+            {
+              "name": "recall",
+              "title": "Recall governed memory",
+              "description": "Search or fetch governed organisational memory. Ask a question with `query` to search every scope your policy lets you read — which is wider than the scopes your session-start context block composes from — or pass `ids` to fetch the full body of records a block named as `(recall <id>)`. Use `as_of` to ask what was known at a past instant. Results carry their channel (published means reviewed, derived means unreviewed), provenance, and validity window, so you can weigh them. What you may read is decided at call time under your own identity: material you have no access to is simply absent from the answer.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "The question to answer. Mutually exclusive with `ids`."
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Record ids to fetch in full, as an inject block printed them. Mutually exclusive with `query`."
+                  },
+                  "as_of": {
+                    "type": "string",
+                    "description": "RFC 3339 instant. Serve bodies as the database held them then (\"what did we know on 2026-03-03\"). Rewinds the corpus, never your access."
+                  },
+                  "valid_at": {
+                    "type": "string",
+                    "description": "RFC 3339 instant. Which assertions were true about the world then. Defaults to `as_of`."
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "How many records a query may return (1-32, default 32)."
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "remember",
+              "title": "Remember a fact",
+              "description": "Store one durable fact in your own personal memory, so a future session can recall it. Use it for something worth keeping past this conversation — a decision and its reason, a preference, a procedure that worked. Do not narrate the session: this is not a log, and material that is only useful right now makes future recall worse. It writes to your own personal scope and nowhere else — never to a team, a department, or another person — and nothing reaches a shared scope without a human review. Secrets are scanned for and refused or quarantined before anything is stored, so do not pass credentials in the hope of storing them.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "The fact to remember, stated so it still makes sense to a reader who has none of this conversation's context."
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+          "name": "recall",
+          "arguments": {
+            "ids": [
+              "0198f0a0-0000-7000-8000-000000000001"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Not signed in to Synveda. Run `synveda login` in a terminal, then try again."
+            }
+          ],
+          "isError": true
+        }
+      }
+    }
+  ]
+}
