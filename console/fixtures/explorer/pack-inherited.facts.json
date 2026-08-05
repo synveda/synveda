@@ -1,0 +1,10 @@
+{
+  "must_name": [
+    "eng-pack",
+    "7",
+    "inherited"
+  ],
+  "must_not_name": [
+    "assigned here"
+  ]
+}

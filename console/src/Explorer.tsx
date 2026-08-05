@@ -365,9 +365,9 @@ function CapabilityPanel({ state, node }: { state: Outcome | { kind: "loading" }
                 <p className="muted">may bind: {bindable.join(", ")}</p>
               ) : null}
               <p className="muted forecast">
-                {deniedCount(caps)} action(s) denied. Decided under {caps.pack.name}@
-                {caps.pack.version} — a forecast, not a grant: every act decides again at its own
-                seam.
+                {deniedCount(caps)} action(s) denied. Decided under{" "}
+                {caps.pack ? `${caps.pack.name}@${caps.pack.version}` : "the pack in force"} — a
+                forecast, not a grant: every act decides again at its own seam.
               </p>
             </>
           );

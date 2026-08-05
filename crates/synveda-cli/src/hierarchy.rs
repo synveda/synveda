@@ -169,15 +169,39 @@ pub struct OriginView {
 impl OriginView {
     /// Renders an origin relative to the node that was asked about, which
     /// is the only frame in which "here" and "from above" mean anything.
+    ///
+    /// # The word is shared; the layout is not
+    ///
+    /// The first draft of this said `assigned at <uuid>` where the console
+    /// said `inherited`, and building the parity corpus is what caught it.
+    /// ADR-0056 decision 5 draws the line: the gateway owns **verdicts and
+    /// sentences** — the things with one right answer — and each client
+    /// owns its own layout. Whether a pack is inherited has one right
+    /// answer, so both surfaces say `inherited`; *which* ancestor it came
+    /// from is a detail a terminal renders as an id and a browser can render
+    /// as a name, so [`describe_with_source`] adds it separately and only
+    /// here.
     fn describe(&self, asked_about: ScopeId) -> String {
         match (self.kind.as_str(), self.scope_id) {
             ("assigned", Some(id)) if id == asked_about => "assigned here".to_owned(),
-            ("assigned", Some(id)) => format!("assigned at {id}"),
+            ("assigned", _) => "inherited".to_owned(),
             ("tenant-wide", _) => "tenant-wide".to_owned(),
             ("tenant-default", _) => "the tenant default".to_owned(),
             ("default", _) => "the built-in default".to_owned(),
-            ("fallback", _) => "a fallback (the assigned pack did not compile)".to_owned(),
+            ("fallback", _) => "a fallback — the assigned pack did not compile".to_owned(),
             (other, _) => other.to_owned(),
+        }
+    }
+
+    /// [`Self::describe`] plus the node an inherited thing came from.
+    ///
+    /// A terminal has nothing to hyperlink, so the id is the only way to go
+    /// and look — which is why the CLI shows it and the console does not
+    /// need to.
+    fn describe_with_source(&self, asked_about: ScopeId) -> String {
+        match (self.kind.as_str(), self.scope_id) {
+            ("assigned", Some(id)) if id != asked_about => format!("inherited from {id}"),
+            _ => self.describe(asked_about),
         }
     }
 }
@@ -209,7 +233,7 @@ pub fn render_policy(effective: &EffectivePackView, asked_about: ScopeId) -> Str
     out.push_str(&format!("{}@{}\n", effective.name, effective.version));
     out.push_str(&format!(
         "  origin  {}\n",
-        effective.origin.describe(asked_about)
+        effective.origin.describe_with_source(asked_about)
     ));
     out
 }
@@ -284,7 +308,7 @@ pub fn render_effective_roles(view: &EffectiveBindingsView, asked_about: ScopeId
             "{:<12} {:<40} {}\n",
             binding.role,
             binding.subject,
-            binding.origin.describe(asked_about),
+            binding.origin.describe_with_source(asked_about),
         ));
     }
     // The chain is printed because it is the *reason* the answer has the
@@ -299,8 +323,10 @@ pub fn render_effective_roles(view: &EffectiveBindingsView, asked_about: ScopeId
 
 #[derive(serde::Deserialize)]
 pub struct CapabilitiesView {
-    scope_path: String,
-    pack: EffectivePackView,
+    /// Absent when the caller may not read the node itself — the verdicts
+    /// beside it are still the caller's own and still served.
+    scope_path: Option<String>,
+    pack: Option<EffectivePackView>,
     roles: Vec<String>,
     actions: std::collections::BTreeMap<String, bool>,
     read_tiers: std::collections::BTreeMap<String, Vec<String>>,
@@ -328,13 +354,22 @@ pub async fn capabilities(profile: &str, id: ScopeId, json_out: bool) -> Result<
 /// permission and is not one (ADR-0058 decision 2).
 pub fn render_capabilities(view: &CapabilitiesView, asked_about: ScopeId) -> String {
     let mut out = String::new();
-    out.push_str(&format!("{}\n", view.scope_path));
     out.push_str(&format!(
-        "  pack    {}@{} ({})\n",
-        view.pack.name,
-        view.pack.version,
-        view.pack.origin.describe(asked_about),
+        "{}\n",
+        view.scope_path.as_deref().unwrap_or("(this scope)")
     ));
+    match &view.pack {
+        Some(pack) => out.push_str(&format!(
+            "  pack    {}@{} ({})\n",
+            pack.name,
+            pack.version,
+            pack.origin.describe_with_source(asked_about),
+        )),
+        // Said rather than omitted: a reader who cannot see which pack
+        // decided should know that is *why* the line is missing, not
+        // wonder whether the probe half-answered.
+        None => out.push_str("  pack    — (you may not read this scope's governance)\n"),
+    }
     out.push_str(&format!(
         "  roles   {}\n",
         if view.roles.is_empty() {
@@ -382,10 +417,13 @@ pub fn render_capabilities(view: &CapabilitiesView, asked_about: ScopeId) -> Str
         out.push_str(&format!("\nmay bind: {}\n", comma(&bindable)));
     }
 
+    let decided_under = view.pack.as_ref().map_or_else(
+        || "the pack in force".to_owned(),
+        |pack| format!("{}@{}", pack.name, pack.version),
+    );
     out.push_str(&format!(
-        "\n{denied} action(s) denied. Decided under {}@{} — a forecast, not a grant: \
-         every act decides again at its own seam.\n",
-        view.pack.name, view.pack.version,
+        "\n{denied} action(s) denied. Decided under {decided_under} — a forecast, not a \
+         grant: every act decides again at its own seam.\n",
     ));
     out
 }
@@ -461,5 +499,121 @@ mod tests {
         let anchor = node(ScopeKind::Team, "platform", 2, "acme/eng/platform");
         let stray = node(ScopeKind::Org, "acme", 0, "acme");
         assert_eq!((stray.depth - anchor.depth).max(0), 0);
+    }
+}
+
+#[cfg(test)]
+mod parity {
+    //! The explorer's half of the parity corpus (CNSL-2, ADR-0058
+    //! decision 10).
+    //!
+    //! Four payloads recorded from the real gateway in
+    //! `crates/synveda-gateway/tests/explorer.rs`, each with a
+    //! `.facts.json` saying what a reader must be told. The console answers
+    //! the same corpus in `console/src/explorer.parity.test.tsx`.
+    //!
+    //! What a fact is, and is not: a **substring the rendering must
+    //! contain**, never a line either surface must produce. The word for an
+    //! origin is shared because it has one right answer (ADR-0056 decision
+    //! 5); the layout around it is each client's own, so a terminal prints
+    //! the ancestor's id where a browser could print its name and both are
+    //! right.
+
+    use super::*;
+    use std::path::PathBuf;
+
+    const CASES: &[&str] = &[
+        "pack-inherited",
+        "roles-mixed-origins",
+        "capabilities-with-denial",
+        "lapses-standing-and-ended",
+    ];
+
+    fn corpus(name: &str) -> serde_json::Value {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../console/fixtures/explorer")
+            .join(format!("{name}.json"));
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+        serde_json::from_str(&text).expect("parse fixture")
+    }
+
+    fn facts(name: &str) -> serde_json::Value {
+        corpus(&format!("{name}.facts"))
+    }
+
+    fn asked_about(case: &serde_json::Value) -> ScopeId {
+        case["asked_about"].as_str().unwrap().parse().unwrap()
+    }
+
+    /// Renders one case the way the verb that owns it would.
+    fn render(name: &str, case: &serde_json::Value) -> String {
+        let payload = case["payload"].clone();
+        let id = asked_about(case);
+        match name {
+            "pack-inherited" => {
+                let view: EffectivePackView = serde_json::from_value(payload).expect("pack");
+                render_policy(&view, id)
+            }
+            "roles-mixed-origins" => {
+                let view: EffectiveBindingsView = serde_json::from_value(payload).expect("roles");
+                render_effective_roles(&view, id)
+            }
+            "capabilities-with-denial" => {
+                let view: CapabilitiesView = serde_json::from_value(payload).expect("caps");
+                render_capabilities(&view, id)
+            }
+            "lapses-standing-and-ended" => {
+                let view: crate::lapse::Listing = serde_json::from_value(payload).expect("lapses");
+                crate::lapse::render_lapses(&view, true)
+            }
+            other => panic!("no renderer for {other}"),
+        }
+    }
+
+    #[test]
+    fn the_cli_names_every_fact_the_corpus_requires() {
+        for name in CASES {
+            let case = corpus(name);
+            let rendered = render(name, &case);
+            let facts = facts(name);
+            for fact in facts["must_name"].as_array().expect("must_name") {
+                let needle = fact.as_str().expect("fact is a string");
+                assert!(
+                    rendered.contains(needle),
+                    "{name}: the CLI never names `{needle}`:\n\n{rendered}"
+                );
+            }
+            for fact in facts["must_not_name"].as_array().expect("must_not_name") {
+                let needle = fact.as_str().expect("fact is a string");
+                assert!(
+                    !rendered.contains(needle),
+                    "{name}: the CLI names `{needle}`, which this case says it must not \
+                     — a denied action rendered as something the reader may do:\n\n{rendered}"
+                );
+            }
+        }
+    }
+
+    /// The guard that keeps the suite honest: a case added to the corpus and
+    /// not to `CASES` is a case that proves nothing.
+    #[test]
+    fn every_recorded_case_is_answered_here() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../console/fixtures/explorer");
+        let mut recorded: Vec<String> = std::fs::read_dir(&dir)
+            .expect("read corpus dir")
+            .filter_map(|entry| {
+                let name = entry.ok()?.file_name().to_string_lossy().into_owned();
+                let stem = name.strip_suffix(".json")?;
+                (!stem.ends_with(".facts")).then(|| stem.to_owned())
+            })
+            .collect();
+        recorded.sort();
+        let mut answered: Vec<String> = CASES.iter().map(|case| (*case).to_owned()).collect();
+        answered.sort();
+        assert_eq!(
+            recorded, answered,
+            "the corpus and this suite disagree about which cases exist"
+        );
     }
 }

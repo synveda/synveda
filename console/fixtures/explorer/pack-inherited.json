@@ -1,0 +1,12 @@
+{
+  "asked_about": "0199c000-0000-7000-8000-000000000000",
+  "payload": {
+    "name": "eng-pack",
+    "version": 7,
+    "origin": {
+      "kind": "assigned",
+      "scope_id": "0199c000-0000-7000-8000-000000000001"
+    },
+    "assignment": null
+  }
+}

@@ -3434,7 +3434,73 @@ lifetime and the 12-hour cap as the compensating controls until then._
   **declared** in the registry rather than sniffed from the bytes — a settings
   file that happens to carry no comments today is still not ours to reformat
   tomorrow._
-- [ ] [CNSL-2: Hierarchy & policy explorer](CNSL-2.md)
+- [x] [CNSL-2: Hierarchy & policy explorer](CNSL-2.md) — done 2026-08-05, ADR-0058 (amending its own decision 8 during implementation), no migration, AC tests: crates/synveda-gateway/tests/explorer.rs (**eight, and two of them are claims that were wrong until the suite asked**: `a_capability_is_a_forecast_and_the_act_decides_again` — the probe answers yes, the pack moves, the same act is refused at its own seam, and the probe then agrees because it never held an answer, which is the sentence the whole feature stands on; `a_reader_without_admin_read_still_learns_what_they_may_do`, the **defect the demo found** — the first cut gated the probe on `HierarchyRead`, which under every shipped pack is steward/org-admin/auditor only, so a *curator* was refused the probe and the console showed the role the inbox exists for no verdict buttons at all; `a_probe_chains_one_event_however_many_pairs_it_decides`, asserted as a chain count with the pair count ≥30/node beside it, because that is the row count a per-pair rule would have written; `a_probe_answers_about_its_own_caller_and_takes_no_subject`, where `?subject=` is proved inert rather than absent; `effective_roles_say_where_each_binding_came_from`, three origins asserted as three *mechanisms* — the origin naming this node, naming the ancestor, and carrying no scope at all; `a_grant_is_visible_from_both_ends_and_hides_the_end_you_cannot_read`; the bound that splits rather than truncates; and the parity corpus recorder), crates/synveda-policy/src/request.rs (`Action::ALL` + `PROBED_AT_SCOPE`/`PROBED_AT_TENANT`/`TIERED_READS` with 5 tests, one of which fails the build when an action is added and nobody classifies it), console/fixtures/explorer/ + crates/synveda-cli/src/hierarchy.rs::parity + console/src/explorer.parity.test.tsx (**four cases, both renderers, checked for teeth by mutation** — dropping the forecast sentence and listing a denied action each fail naming the exact fact), console/src/{explorer,review}.test.* (15 new), crates/synveda-cli (117 tests incl. the lapse end that shows an id and never a path), demo: demos/cnsl-2-explorer.sh (the forecast ageing from a terminal, three origins rendered distinctly, `synveda lapse list` with no scope, and `chain valid (32 events)` with the leak sweep at 0), new: `GET /v1/hierarchy/nodes/{id}/capabilities`, `GET /v1/capabilities`, `GET /v1/whoami?capabilities=true`, `?effective=true` on the roles route, the scope-free `GET /v1/lapses`, `synveda hierarchy policy|roles|capabilities`, `synveda lapse list`, `synveda whoami`, console/src/Explorer.tsx
+
+_CNSL-2 notes (ADR-0058): three of the feature's four nouns already had
+read surfaces, so most of this is a second renderer on the toolchain
+CNSL-1 bought. The other three things it names were answerable by no call
+at all, and each was a different kind of gap. **Roles served no origin**
+where packs have served one since AUTHZ-2, so the inheritance every reader
+needs was a walk each client did for itself. **A lapse could only be found
+from the end that granted it** — `at_target` is target-keyed — so the
+steward of a *granted* scope could not list, and therefore could not
+revoke, what their own team held, though `POST /v1/lapses/{id}/revoke` has
+existed since AUTHZ-4. And **the reader's own capabilities were on no
+wire**, which is the deferral ADR-0056 parked here by name.
+
+The load-bearing decision is that a capability is **the PDP's own verdict,
+asked for** — never derived from role bindings, because that derivation
+disagrees with the PDP *immediately* rather than eventually: a lapse, a
+quarantine, a service identity's confinement, ABAC context and the base
+layer's escalation guard all decide things a role table cannot express.
+And it is a **forecast rather than a grant**: nothing in this product
+reads a capability answer in order to decide anything, so a client chooses
+what to *offer* and never what to *allow*.
+
+**The sharpest finding is one the demo produced, not the tests.** The
+probe was first gated on `HierarchyRead` — a literal-looking reading of
+decision 3's "no permission beyond the visibility the node already
+requires". Under every shipped pack that action belongs to steward,
+org-admin and auditor alone, so a **curator** — the role the proposals
+inbox exists for — was refused the probe outright, and CNSL-1's newly
+closed deferral therefore hid approve and reject from exactly the readers
+who hold them. A capability surface only privileged readers may consult is
+worse than none. It now takes no permission beyond uniform-404 ownership,
+and what `HierarchyRead` decides instead is the **node detail**: the
+verdicts are about the caller and always answered, while `scope_path` and
+the effective pack are facts about the node and are withheld from a caller
+who may not read it, so the route cannot become a node-metadata oracle for
+anybody holding a scope id.
+
+**A fan-out chains one event.** ADR-0019 decision 4's second sentence —
+CTX-2's per-candidate sweep aggregating into the request-level event —
+arriving on the admin plane, where the first sentence ("every allowed
+admin-plane read") would have priced a 10,000-node tree at thousands of
+rows. The pair count rides the payload and a metric, so a client that
+stops bounding what it renders is visible rather than merely expensive.
+
+Two things changed shape during implementation, both recorded rather than
+quietly fixed. **Decision 8 named the wrong verbs**: `synveda policy` and
+`synveda role` are direct-store operator plumbing — every verb takes
+`--tenant` and answers with no PDP decision — so `role list --effective`
+would have meant implementing the chain walk against Postgres, which is
+the second implementation decision 1 refuses *and* the bypass seed §2.2
+forbids, in one flag. The reads landed on `synveda hierarchy`, whose
+module doc already carried the rule. And **the two renderers had drifted
+before either shipped**: the CLI said `assigned at <uuid>` where the
+console said `inherited`, which the parity corpus caught on its first run
+— ADR-0056 decision 5's line applied, so the word is shared and the
+ancestor's id beside it is layout.
+
+Deferrals, all recorded in ADR-0058 with triggers: **policy simulation**
+("what would this scope compose under `standard`") is a second decision
+path through the PDP and wants an ADR of its own; and **mutation from the
+explorer** is refused while the admin plane's own asymmetry is open —
+`PUT .../policy` and `PUT .../roles` are direct routes where all content
+is proposal-gated, which this feature filed as **AUTHZ-7** rather than
+parking in CNSL-4, whose "no direct-mutation path exists" is a rule about
+records. A rewind of a pack assignment is still not a thing, and a probe
+costs one `gather` per node, which decision 5's bound exists to contain._
 - [ ] [AUTH-4: SCIM 2.0 server](AUTH-4.md)
 - [ ] [AUTH-5: Directory sync fallback](AUTH-5.md)
 - [ ] [EVAL-3: Public benchmark adapters](EVAL-3.md)

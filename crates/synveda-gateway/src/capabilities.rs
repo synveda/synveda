@@ -64,12 +64,18 @@ pub(crate) const MAX_BATCH_SCOPES: usize = 128;
 #[derive(Serialize)]
 pub(crate) struct NodeCapabilities {
     scope_id: ScopeId,
-    scope_path: String,
+    /// Where the node sits — a fact about the *node*, so it is served only
+    /// to a caller who may read it (`HierarchyRead`). Absent otherwise, and
+    /// the verdicts beside it are unaffected: they are about the caller.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope_path: Option<String>,
     /// The pack the answers were decided under, and where it came from.
     /// Carried because a capability is only true *under a pack*, and a
-    /// client comparing a forecast to a later refusal needs to be able to
-    /// see that the pack moved underneath it.
-    pack: PackView,
+    /// client comparing a forecast to a later refusal needs to see that the
+    /// pack moved underneath it — and withheld, like `scope_path`, from a
+    /// caller who may not read the node's governance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pack: Option<PackView>,
     /// The caller's own effective roles here — the caller's, never anyone
     /// else's (decision 3).
     roles: Vec<Role>,
@@ -281,55 +287,78 @@ async fn probe(
         )?);
     }
 
-    // The probe is available exactly where the node is visible, which is
-    // ADR-0058 decision 3's "no permission beyond the visibility the node
-    // already requires" read literally: `HierarchyRead` is that visibility.
-    // It is gathered per node because the effective pack, the roles and the
-    // grants that bear on a decision are all properties of *that* node's
-    // chain — the cost decision 5's bound exists to contain.
+    // **The probe takes no permission of its own beyond ownership**, which
+    // is ADR-0058 decision 3 read literally — "no permission beyond the
+    // visibility the node already requires ... uniform-404 ownership first,
+    // as everywhere". An answer about what *you* may do discloses nothing
+    // about anybody else, so there is nothing here for a permission to
+    // protect.
+    //
+    // The first cut required `HierarchyRead` and CNSL-2's own demo found
+    // what that costs: under every shipped pack that action is
+    // steward/org-admin/auditor only, so a **curator** — the role the
+    // proposals inbox exists for — was refused the probe outright and shown
+    // no verdict buttons at all. A capability surface that only privileged
+    // readers may consult is worse than none: it hides acts from exactly
+    // the readers who hold them.
+    //
+    // What `HierarchyRead` *does* still decide is the **node detail**. The
+    // verdicts are about the caller and always served; `scope_path` and the
+    // effective pack are facts about the node, so a caller who may not read
+    // the node does not receive them and the route cannot become a
+    // node-metadata oracle for anyone holding a scope id.
     let mut answers = Vec::with_capacity(nodes.len());
     let mut pairs = 0usize;
     let mut allowed_pairs = 0usize;
     let mut gate = None;
     for node in &nodes {
         let input = authz::gather(state, &mut tx, Some(node)).await?;
-        let authorized = authz::decide(
+        let readable = authz::decide(
             state,
             &input,
             Action::HierarchyRead,
             Resource::Scope(node.id),
             None,
-        )?;
-        let answer = answer_for(state, &input, node)?;
+        );
+        let may_read_node = readable.is_ok();
+        let answer = answer_for(state, &input, node, may_read_node)?;
         pairs += answer.pair_count();
         allowed_pairs += answer.allowed_count();
         answers.push(answer);
-        gate.get_or_insert(authorized);
+        if let Ok(authorized) = readable {
+            gate.get_or_insert(authorized);
+        }
     }
 
     // One event for the whole fan-out (decision 4). The payload carries
     // counts and scope ids — never a third party's binding, and never a
     // lapse's reason, which is free text a steward wrote about an incident.
+    let mut payload = json!({
+        "op": "capabilities",
+        "route": op,
+        "scopes": answered,
+        "scopes_answered": answers.len(),
+        "scopes_not_answered": not_answered.len(),
+        "pairs_decided": pairs,
+        "pairs_allowed": allowed_pairs,
+    });
+    // The decision context when at least one node was readable. A probe by a
+    // caller who may read none of them still chains — somebody sweeping an
+    // organisation's admin surface is exactly the reconnaissance an audit
+    // log should show, and it is the probes that answer *nothing* that most
+    // want recording.
     if let Some(authorized) = gate {
-        audit::record(
-            &mut tx,
-            tenant_id,
-            AuditAction::AuthzDecision,
-            Resource::Tenant(tenant_id).to_string(),
-            Outcome::Allow,
-            json!({
-                "op": "capabilities",
-                "route": op,
-                "authz": audit::decision_context(Action::HierarchyRead, &authorized),
-                "scopes": answered,
-                "scopes_answered": answers.len(),
-                "scopes_not_answered": not_answered.len(),
-                "pairs_decided": pairs,
-                "pairs_allowed": allowed_pairs,
-            }),
-        )
-        .await?;
+        payload["authz"] = audit::decision_context(Action::HierarchyRead, &authorized);
     }
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::AuthzDecision,
+        Resource::Tenant(tenant_id).to_string(),
+        Outcome::Allow,
+        payload,
+    )
+    .await?;
     commit(tx).await?;
 
     metrics::counter!(CAPABILITY_PROBES_TOTAL, "op" => "pairs", "outcome" => "decided")
@@ -393,7 +422,12 @@ impl Answer {
 /// evaluation (ADR-0042 decision 6 measured it), so it is built once here
 /// and reused across ~50 asks. Sharing it changes no verdict: a batch
 /// missing a chain produces a *denial*, never a wrong allow.
-fn answer_for(state: &AppState, input: &DecisionInput, node: &HierarchyNode) -> Result<Answer> {
+fn answer_for(
+    state: &AppState,
+    input: &DecisionInput,
+    node: &HierarchyNode,
+    may_read_node: bool,
+) -> Result<Answer> {
     let resource = Resource::Scope(node.id);
     let context = input.context();
     let batch: EntityBatch =
@@ -440,12 +474,12 @@ fn answer_for(state: &AppState, input: &DecisionInput, node: &HierarchyNode) -> 
     Ok(Answer {
         node: NodeCapabilities {
             scope_id: node.id,
-            scope_path: node.path.clone(),
-            pack: PackView {
+            scope_path: may_read_node.then(|| node.path.clone()),
+            pack: may_read_node.then(|| PackView {
                 name: tiers.effective.name.clone(),
                 version: tiers.effective.version,
                 origin: origin_view(&tiers.effective),
-            },
+            }),
             roles: effective_roles_at(&input.principal, resource, &context),
             actions,
             read_tiers,

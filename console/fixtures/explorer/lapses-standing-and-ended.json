@@ -1,0 +1,38 @@
+{
+  "asked_about": "0199c000-0000-7000-8000-000000000000",
+  "payload": {
+    "lapses": [
+      {
+        "id": "0199c000-0000-7000-8000-000000000004",
+        "proposal_id": "0199c000-0000-7000-8000-000000000005",
+        "grantee_scope_id": "0199c000-0000-7000-8000-000000000000",
+        "target_scope_id": "0199c000-0000-7000-8000-000000000006",
+        "grantee_scope_path": "acme/eng/platform",
+        "action": "memory.read",
+        "reason": "a grant that was withdrawn",
+        "granted_at": "2026-08-05T09:00:00Z",
+        "expires_at": "2026-08-05T09:00:00Z",
+        "granted_by": "0199c000-0000-7000-8000-000000000007",
+        "outcome": "revoked",
+        "revoked_at": "2026-08-05T09:00:00Z",
+        "revoke_reason": "the review finished early"
+      },
+      {
+        "id": "0199c000-0000-7000-8000-000000000008",
+        "proposal_id": "0199c000-0000-7000-8000-000000000009",
+        "grantee_scope_id": "0199c000-0000-7000-8000-000000000000",
+        "target_scope_id": "0199c000-0000-7000-8000-000000000006",
+        "grantee_scope_path": "acme/eng/platform",
+        "action": "memory.read",
+        "reason": "joint incident review",
+        "granted_at": "2026-08-05T09:00:00Z",
+        "expires_at": "2026-08-05T09:00:00Z",
+        "granted_by": "0199c000-0000-7000-8000-000000000007",
+        "outcome": "active"
+      }
+    ],
+    "standing_only": false,
+    "truncated": false,
+    "max_lapses": 500
+  }
+}

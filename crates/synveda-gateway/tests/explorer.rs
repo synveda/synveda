@@ -703,3 +703,332 @@ async fn post(app: &Router, token: &str, uri: &str, body: Value) -> (StatusCode,
     )
     .await
 }
+
+// ── The parity corpus (ADR-0058 decision 10) ─────────────────────────────────
+//
+// Four payloads recorded from the real API, each with a `.facts.json` saying
+// what a reader must be told. Both renderers answer them: the CLI's in
+// `crates/synveda-cli`, the console's in `console/src/explorer.parity.test.tsx`.
+//
+// The cases are chosen for the judgements the surfaces make rather than the
+// shapes a serialiser emits — an origin that is *not* local, a pack from two
+// levels up, a grant beside one that has ended, and a capability answer with
+// a denial in it. A corpus of happy paths proves the two renderers agree
+// about nothing difficult.
+//
+// `SYNVEDA_RECORD_FIXTURES=1 make db-test` re-records; otherwise this
+// verifies, which is the point — a corpus nobody checks drifts out of the
+// shape the product serves, and then both renderers agree about a response
+// nobody receives.
+
+/// Ids and instants are replaced with stable, **shape-preserving** stand-ins:
+/// a scope id stays uuid-shaped because both surfaces key behaviour off that
+/// shape (the CLI abbreviates an id and does not abbreviate a path), so a
+/// corpus that normalised one to `scope-01` would be a corpus in which that
+/// rule is never exercised.
+fn stabilise(value: &mut Value, map: &mut std::collections::BTreeMap<String, String>) {
+    match value {
+        Value::String(text) => {
+            if is_uuid(text) {
+                let next = map.len();
+                let stable = map
+                    .entry(text.clone())
+                    .or_insert_with(|| format!("0199c000-0000-7000-8000-{next:012}"));
+                *text = stable.clone();
+            } else if text.len() >= 20 && text.contains("T") && text.ends_with('Z') {
+                *text = "2026-08-05T09:00:00Z".to_owned();
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(|item| stabilise(item, map)),
+        Value::Object(fields) => fields
+            .iter_mut()
+            .for_each(|(_, field)| stabilise(field, map)),
+        _ => {}
+    }
+}
+
+fn is_uuid(text: &str) -> bool {
+    text.len() == 36 && text.split('-').map(str::len).eq([8, 4, 4, 4, 12])
+}
+
+fn corpus_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../console/fixtures/explorer")
+        .canonicalize()
+        .unwrap_or_else(|_| {
+            let dir =
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../console/fixtures/explorer");
+            std::fs::create_dir_all(&dir).expect("create corpus dir");
+            dir.canonicalize().expect("canonicalize")
+        })
+}
+
+fn settle(name: &str, payload: &Value) {
+    let path = corpus_dir().join(format!("{name}.json"));
+    let rendered = format!(
+        "{}\n",
+        serde_json::to_string_pretty(payload).expect("render")
+    );
+    if std::env::var("SYNVEDA_RECORD_FIXTURES").as_deref() == Ok("1") {
+        std::fs::write(&path, &rendered).expect("write fixture");
+        return;
+    }
+    let existing = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+        panic!(
+            "{} is missing — re-record with SYNVEDA_RECORD_FIXTURES=1",
+            path.display()
+        )
+    });
+    assert_eq!(
+        existing,
+        rendered,
+        "the corpus has drifted from what the gateway serves ({}). \
+         Re-record with SYNVEDA_RECORD_FIXTURES=1 and read the diff.",
+        path.display()
+    );
+}
+
+#[tokio::test]
+async fn the_explorer_parity_corpus_is_what_the_gateway_serves() {
+    let Some(w) = world().await else { return };
+
+    // A pack assigned at the department, so `platform` inherits it from one
+    // level up — the "not local" origin the corpus exists for.
+    //
+    // `ROLES_DECIDE` rather than the permissive source, because the
+    // capability case has to carry a **denial**: under a pack that permits
+    // everything, every reader is allowed everything and the panel a
+    // renderer must get right — the one where some actions are absent — is
+    // never exercised. `vic` is a viewer, so `policy.assign` comes back
+    // false and the corpus has the case it is for.
+    install(&w, "eng-pack", 7, ROLES_DECIDE).await;
+    policy_assignments::assign(&w.pool, w.tenant, w.eng, "eng-pack")
+        .await
+        .expect("assign at the department");
+
+    let (status, pack) = get(
+        &w.app,
+        &w.sam,
+        &format!("/v1/hierarchy/nodes/{}/policy", w.platform),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, roles) = get(
+        &w.app,
+        &w.sam,
+        &format!("/v1/hierarchy/nodes/{}/roles?effective=true", w.platform),
+    )
+    .await;
+    let (_, caps) = get(&w.app, &w.vic, &caps_path(w.platform)).await;
+
+    // A standing grant and one that has already ended, so a renderer that
+    // showed them the same way fails on exactly this case.
+    grant(&w, w.platform, w.vault, "joint incident review").await;
+    expire_one(&w).await;
+    let (_, lapses) = get(&w.app, &w.sam, "/v1/lapses?active=false").await;
+
+    let mut ids = std::collections::BTreeMap::new();
+    // The node each payload is *about*, because an origin cannot be
+    // described without the frame it is described against.
+    let asked_about = w.platform.to_string();
+    for (name, mut payload) in [
+        (
+            "pack-inherited",
+            json!({"asked_about": asked_about, "payload": pack}),
+        ),
+        (
+            "roles-mixed-origins",
+            json!({"asked_about": asked_about, "payload": roles}),
+        ),
+        (
+            "capabilities-with-denial",
+            json!({"asked_about": asked_about, "payload": caps}),
+        ),
+        (
+            "lapses-standing-and-ended",
+            json!({"asked_about": asked_about, "payload": lapses}),
+        ),
+    ] {
+        stabilise(&mut payload, &mut ids);
+        let facts = facts_for(name, &payload);
+        settle(name, &payload);
+        settle(&format!("{name}.facts"), &facts);
+    }
+}
+
+/// What a reader must be told about a case, derived from the payload rather
+/// than hand-written — so a fact cannot quietly stop describing the case it
+/// is about.
+///
+/// These are **facts, not strings**: an origin's word is shared between the
+/// surfaces (ADR-0056 decision 5 — one right answer), but the layout around
+/// it is not, so a fact is a substring each renderer must contain somewhere
+/// and never a line either must produce.
+fn facts_for(name: &str, case: &Value) -> Value {
+    let asked_about = case["asked_about"].as_str().expect("asked_about");
+    let payload = &case["payload"];
+    match name {
+        "pack-inherited" => json!({
+            "must_name": [
+                payload["name"].as_str().unwrap(),
+                &payload["version"].to_string(),
+                // Not local: the whole reason this case is in the corpus.
+                "inherited",
+            ],
+            "must_not_name": ["assigned here"],
+        }),
+        "roles-mixed-origins" => {
+            let mut must = Vec::new();
+            for binding in payload["bindings"].as_array().unwrap() {
+                must.push(binding["subject"].as_str().unwrap().to_owned());
+                must.push(binding["role"].as_str().unwrap().to_owned());
+                must.push(origin_word(&binding["origin"], asked_about));
+            }
+            json!({"must_name": must, "must_not_name": []})
+        }
+        "capabilities-with-denial" => {
+            let allowed: Vec<String> = payload["actions"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .filter(|(_, permitted)| permitted.as_bool() == Some(true))
+                .map(|(action, _)| action.clone())
+                .collect();
+            let denied = payload["actions"]
+                .as_object()
+                .unwrap()
+                .values()
+                .filter(|permitted| permitted.as_bool() == Some(false))
+                .count();
+            assert!(denied > 0, "this case exists to carry a denial");
+            let mut must = allowed;
+            must.push(payload["pack"]["name"].as_str().unwrap().to_owned());
+            // The sentence that stops a capability list reading as a
+            // permission (ADR-0058 decision 2). Both surfaces carry it or
+            // one of them is telling a reader something untrue.
+            must.push("forecast".to_owned());
+            json!({
+                "must_name": must,
+                // A denied action must not be listed as something the
+                // reader may do — the failure that would make the panel
+                // worse than useless.
+                "must_not_name": denied_actions(payload),
+            })
+        }
+        "lapses-standing-and-ended" => {
+            let mut must = Vec::new();
+            let mut outcomes = std::collections::BTreeSet::new();
+            for lapse in payload["lapses"].as_array().unwrap() {
+                must.push(lapse["reason"].as_str().unwrap().to_owned());
+                outcomes.insert(lapse["outcome"].as_str().unwrap().to_owned());
+            }
+            assert!(
+                outcomes.len() > 1,
+                "this case exists to carry a standing grant beside an ended one, got {outcomes:?}"
+            );
+            must.extend(outcomes);
+            json!({"must_name": must, "must_not_name": []})
+        }
+        other => panic!("no facts derivation for {other}"),
+    }
+}
+
+/// The shared word for an origin — the half of a rendering that has one
+/// right answer and must therefore be the same on both surfaces.
+fn origin_word(origin: &Value, asked_about: &str) -> String {
+    match origin["kind"].as_str() {
+        Some("assigned") if origin["scope_id"].as_str() == Some(asked_about) => {
+            "assigned here".to_owned()
+        }
+        Some("assigned") => "inherited".to_owned(),
+        Some(other) => other.to_owned(),
+        None => "unknown".to_owned(),
+    }
+}
+
+fn denied_actions(payload: &Value) -> Vec<String> {
+    payload["actions"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(_, permitted)| permitted.as_bool() == Some(false))
+        .map(|(action, _)| action.clone())
+        .collect()
+}
+
+/// Ends one grant early so the corpus carries a standing row beside a
+/// finished one. Revocation rather than waiting: an expiry needs a clock to
+/// pass and a corpus must not be slow.
+async fn expire_one(w: &World) {
+    let extra = grant(w, w.platform, w.vault, "a grant that was withdrawn").await;
+    let (status, body) = post(
+        &w.app,
+        &w.vaughn,
+        &format!("/v1/lapses/{extra}/revoke"),
+        json!({"reason": "the review finished early"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "revoking failed: {body}");
+}
+
+/// The defect CNSL-2's own demo found, and the reason decision 3 is read
+/// literally (ADR-0058).
+///
+/// The first cut gated the probe on `HierarchyRead`. Under **every shipped
+/// pack** that action belongs to steward, org-admin and auditor alone — so a
+/// `curator`, the role the proposals inbox exists for, was refused the probe
+/// outright and the console showed them no verdict buttons at all. A
+/// capability surface only privileged readers may consult is worse than
+/// none: it hides acts from exactly the readers who hold them.
+///
+/// What survives is the split. The verdicts are about the caller and are
+/// always answered; `scope_path` and the effective pack are facts about the
+/// *node* and are withheld from a caller who may not read it, so the route
+/// cannot become a node-metadata oracle for anyone holding a scope id.
+#[tokio::test]
+async fn a_reader_without_admin_read_still_learns_what_they_may_do() {
+    let Some(w) = world().await else { return };
+    // The shipped pack, not a permissive test one — the whole point is what
+    // the real packs grant.
+    policy_assignments::set_default(&w.pool, w.tenant, "standard")
+        .await
+        .expect("set default pack");
+
+    // `vic` is a viewer: no `HierarchyRead` under `standard`.
+    let (status, caps) = get(&w.app, &w.vic, &caps_path(w.platform)).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a viewer may ask what they themselves may do: {caps}"
+    );
+    assert_eq!(
+        caps["actions"]["hierarchy.read"],
+        json!(false),
+        "and the answer is honest about the very action that used to gate it"
+    );
+    assert!(
+        caps["actions"].as_object().unwrap().len() >= 20,
+        "the full vocabulary is answered, not a stub: {caps}"
+    );
+
+    // The node's own facts are withheld, because those are not about the
+    // caller.
+    assert!(
+        caps["scope_path"].is_null(),
+        "a caller who may not read the node does not learn where it sits: {caps}"
+    );
+    assert!(caps["pack"].is_null(), "nor which pack governs it: {caps}");
+
+    // A reader who *may* read the node gets both, so the withholding is a
+    // decision rather than a missing feature.
+    let (status, admin) = get(&w.app, &w.sam, &caps_path(w.platform)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(admin["scope_path"], json!("acme/eng/platform"));
+    assert_eq!(admin["pack"]["name"], json!("standard"));
+
+    // And the probe still chains, including for the caller who learned
+    // nothing about the node — a sweep that answers nothing is the one most
+    // worth recording.
+    let payload = last_payload(&w.pool, w.tenant).await;
+    assert_eq!(payload["op"], json!("capabilities"));
+}

@@ -60,8 +60,10 @@ export interface EffectiveBindings {
 
 export interface Capabilities {
   scope_id: string;
-  scope_path: string;
-  pack: EffectivePack;
+  /** Absent when the reader may not read the node itself (ADR-0058
+   * decision 3): the verdicts beside it are the reader's own either way. */
+  scope_path?: string;
+  pack?: EffectivePack;
   roles: string[];
   actions: Record<string, boolean>;
   read_tiers: Record<string, string[]>;

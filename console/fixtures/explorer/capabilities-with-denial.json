@@ -1,0 +1,81 @@
+{
+  "asked_about": "0199c000-0000-7000-8000-000000000000",
+  "payload": {
+    "scope_id": "0199c000-0000-7000-8000-000000000000",
+    "scope_path": "acme/eng/platform",
+    "pack": {
+      "name": "eng-pack",
+      "version": 7,
+      "origin": {
+        "kind": "assigned",
+        "scope_id": "0199c000-0000-7000-8000-000000000001"
+      }
+    },
+    "roles": [
+      "viewer"
+    ],
+    "actions": {
+      "channel.pin": true,
+      "channel.publish": true,
+      "channel.read": true,
+      "channel.rollback": true,
+      "context_pack.write": true,
+      "hierarchy.create": true,
+      "hierarchy.delete": true,
+      "hierarchy.read": true,
+      "hierarchy.update": true,
+      "lapse.grant": true,
+      "lapse.revoke": true,
+      "memory.classify": true,
+      "memory.write": true,
+      "policy.assign": false,
+      "policy.read": true,
+      "prompt.write": true,
+      "proposal.open": true,
+      "proposal.read": true,
+      "proposal.review": true,
+      "quarantine.read": true,
+      "quarantine.review": true,
+      "role.read": true,
+      "service_identity.manage": true,
+      "service_identity.read": true,
+      "skill.quality.override": true,
+      "skill.write": true
+    },
+    "read_tiers": {
+      "context_pack.read": [
+        "public",
+        "internal",
+        "confidential",
+        "restricted"
+      ],
+      "memory.read": [
+        "public",
+        "internal",
+        "confidential"
+      ],
+      "prompt.read": [
+        "public",
+        "internal",
+        "confidential",
+        "restricted"
+      ],
+      "skill.read": [
+        "public",
+        "internal",
+        "confidential",
+        "restricted"
+      ]
+    },
+    "role_assign": {
+      "auditor": true,
+      "compliance": true,
+      "contributor": true,
+      "curator": true,
+      "org-admin": false,
+      "security-reviewer": true,
+      "steward": true,
+      "viewer": true
+    }
+  }
+}

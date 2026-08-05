@@ -180,7 +180,7 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
             ? "Your capabilities here could not be read, so no verdict is offered."
             : `You hold ${
                 capabilities.roles.length > 0 ? capabilities.roles.join(", ") : "no role"
-              } at ${capabilities.scope_path}, which does not include casting a verdict here.`
+              } at ${capabilities.scope_path ?? "this scope"}, which does not include casting a verdict here.`
       }
       error={error}
       busy={busy}
