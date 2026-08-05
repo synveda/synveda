@@ -8,10 +8,17 @@
 # synveda-eng-platform, user alice in it) -> seed the acme/eng/platform
 # hierarchy through the admin API (dev-mode gateway phase) -> boot the
 # gateway in OIDC mode -> alice's first login lands her personal scope
-# under acme/eng/platform and her bearer can read -> the admin (no synveda
-# group) lands under acme/quarantine and the PDP denies reads (403, not
-# 401) -> metrics show both provisioning outcomes. The CI-clean mock-IdP
-# half of the AC runs in crates/synveda-gateway/tests/jit_provisioning.rs.
+# under acme/eng/platform, and her bearer is *refused* the admin plane
+# until a role is bound -> the admin (no synveda group) lands under
+# acme/quarantine and the PDP denies reads (403, not 401) -> metrics show
+# both provisioning outcomes. The CI-clean mock-IdP half of the AC runs in
+# crates/synveda-gateway/tests/jit_provisioning.rs.
+#
+# The two denials look alike and are not the same fact, which is the thing
+# to watch: alice is *placed and unbound*, so one `role bind` and the same
+# bearer reads on the next request; the admin is *contained*, and no
+# binding is what AC 2 is about. Placement gives a home; a role gives the
+# admin plane (AUTHZ-3, ADR-0015 decision 4).
 #
 # On Windows, run via Git Bash. Needs postgres, jaeger, and rauthy from the
 # dev compose, plus node (PoW solving and JSON parsing — no jq dependency).
@@ -305,7 +312,7 @@ login() {
 
 echo "==> AC 1: alice's first login lands in the platform team, zero admin action"
 alice_session=$(login "$ALICE_EMAIL" "$ALICE_PASSWORD")
-alice_token=$(echo "$alice_session" | node -e '
+alice_out=$(echo "$alice_session" | node -e '
   let d = "";
   process.stdin.on("data", (c) => (d += c));
   process.stdin.on("end", () => {
@@ -317,16 +324,52 @@ alice_token=$(echo "$alice_session" | node -e '
       process.exit(1);
     }
     console.error(`    provisioned: ${s.subject} -> ${path} (quarantined: false)`);
+    console.log(s.subject);
     console.log(s.access_token);
   });
 ')
+alice_sub=$(printf '%s\n' "$alice_out" | sed -n 1p)
+alice_token=$(printf '%s\n' "$alice_out" | sed -n 2p)
+
+# THE PLACEMENT IS A HOME, NOT AN AUTHORITY.
+#
+# This demo used to assert 200 here, and it was right when it was written.
+# AUTHZ-3 changed it: an unbound member holds no hierarchy-admin read
+# (ADR-0015 decision 4), so a placed person is *denied* the admin plane
+# until a role says otherwise. The demo was never updated and had been
+# asserting a behaviour the product deliberately removed — the gateway's
+# own AC test (`tests/jit_provisioning.rs`) has encoded the current rule
+# all along, which is why CI stayed green while this went red.
+#
+# The denial is the interesting half, so it is asserted rather than
+# skipped: 403 with the `policy_denied` taxonomy, meaning her bearer
+# authenticated, resolved a tenant, reached the PDP and was refused on
+# authority — not a 401, and not the containment AC 2 is about.
+denial=$(curl -s -w '\n%{http_code}' \
+  -H "Authorization: Bearer $alice_token" "$GATEWAY_URL/v1/hierarchy/root")
+code=$(printf '%s\n' "$denial" | tail -1)
+kind=$(printf '%s\n' "$denial" | sed '$d' | json_field kind 2>/dev/null || echo "")
+if [ "$code" != "403" ] || [ "$kind" != "policy_denied" ]; then
+  echo "demo FAILED: an unbound member's admin read returned HTTP $code ($kind)," >&2
+  echo "  want 403 policy_denied — placement is a home, not an authority" >&2
+  exit 1
+fi
+echo "    alice's bearer reaches the PDP and is refused the admin plane:"
+echo "      403 policy_denied — placed, authenticated, unbound (ADR-0015 decision 4)"
+
+# And the role, not the placement, is what carries it: one binding and the
+# same bearer reads on the very next request. Without this the demo would
+# show a denial and prove nothing about why.
+./target/debug/synveda role bind --tenant "$tenant_id" \
+  --subject "$alice_sub" --role auditor >/dev/null
 code=$(curl -s -o /dev/null -w '%{http_code}' \
   -H "Authorization: Bearer $alice_token" "$GATEWAY_URL/v1/hierarchy/root")
 if [ "$code" != "200" ]; then
-  echo "demo FAILED: a placed user's read returned HTTP $code, want 200" >&2
+  echo "demo FAILED: the auditor binding did not carry the read (HTTP $code)" >&2
   exit 1
 fi
-echo "    alice's bearer reads the hierarchy: 200"
+echo "    one auditor binding, same bearer, next request: 200"
+echo "      the role carries the admin plane; JIT placement carried the home"
 
 echo "==> AC 2: the rauthy admin (no synveda group) lands in quarantine, no read rights"
 admin_session=$(login "$ADMIN_EMAIL" "$ADMIN_PASSWORD")
