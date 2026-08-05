@@ -104,7 +104,19 @@ psql_test -c "create extension if not exists vector;
 # migrations against an empty database is a thing to avoid rather than
 # survive. Every demo in this repo migrates before it starts, for the same
 # reason.
-DATABASE_URL="$TEST_URL" cargo run -q -p synveda-cli --bin synveda -- db migrate
+#
+# `SQLX_OFFLINE=true` for this build and this build only, and it is not a
+# convenience: the scratch database is **empty at this moment**, so any
+# crate that has to recompile here would expand its `sqlx::query!` macros
+# against a schema that does not exist yet and fail with `relation
+# "audit_chain_heads" does not exist`. It went unnoticed for as long as the
+# workspace happened to be built already — the migrate step then compiled
+# nothing — and surfaced the first time a change to a low crate forced a
+# rebuild inside this window. The checked-in `.sqlx` cache is exactly the
+# right answer to "compile without a database", and it is what `make ci`
+# uses for the same reason.
+SQLX_OFFLINE=true DATABASE_URL="$TEST_URL" \
+  cargo run -q -p synveda-cli --bin synveda -- db migrate
 echo "db-test: $TEST_DB (scratch, migrated)"
 
 # On interrupt the database goes; a Ctrl-C is not a failure worth keeping
