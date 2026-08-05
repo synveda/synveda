@@ -266,3 +266,51 @@ test("a read-only review offers no verdict, and an actionable one requires a rea
     `Reject must start disabled with no reason given:\n\n${actionable}`,
   );
 });
+
+test("a reader who may not review is told why, not shown a button that will fail", () => {
+  // CNSL-1's one deferral, closed where ADR-0056 sent it. That feature
+  // offered approve and reject unconditionally, because which acts a
+  // proposal admits depends on its state, the pack in force *and the
+  // reader's own roles* — and only the first was on the wire. CNSL-2's
+  // capability probe puts the third there.
+  const detail = corpus("skill-clean.json") as ProposalDetail;
+  const refused = toText(
+    renderToStaticMarkup(
+      <Review
+        detail={detail}
+        cannotReview="You hold viewer at acme/eng/platform, which does not include casting a verdict here."
+      />,
+    ),
+  );
+
+  assert.ok(
+    !refused.includes("Approve"),
+    `no verdict is offered when the probe says the reader may not cast one:\n\n${refused}`,
+  );
+  // A disabled button is a promise that trying harder would work. The
+  // answer is a role this reader does not hold, so the screen says the
+  // role and the scope — the two things they need to ask an administrator
+  // for.
+  assert.ok(refused.includes("viewer"), `names the role held:\n\n${refused}`);
+  assert.ok(refused.includes("acme/eng/platform"), `names the scope:\n\n${refused}`);
+
+  // And the section is still there: a reviewer who sees no verdict block at
+  // all cannot tell "you may not" from "this screen forgot".
+  assert.ok(refused.includes("your verdict"), `the section still appears:\n\n${refused}`);
+});
+
+test("an unreadable probe offers nothing rather than defaulting open", () => {
+  // Fail closed. The probe is a forecast and never a permission, but a
+  // forecast that could not be read must not become an invitation.
+  const detail = corpus("skill-clean.json") as ProposalDetail;
+  const unknown = toText(
+    renderToStaticMarkup(
+      <Review
+        detail={detail}
+        cannotReview="Your capabilities here could not be read, so no verdict is offered."
+      />,
+    ),
+  );
+  assert.ok(!unknown.includes("Approve"), unknown);
+  assert.ok(unknown.includes("could not be read"), unknown);
+});

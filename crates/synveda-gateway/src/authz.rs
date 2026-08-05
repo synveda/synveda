@@ -93,6 +93,36 @@ impl DecisionInput {
     }
 }
 
+/// [`DecisionInput::context`] carrying the role being granted, for the one
+/// action that fails closed without it (ADR-0015 decision 5).
+///
+/// Exists for CNSL-2's probe, which asks `RoleAssign` once per role
+/// because "may I bind a role here" is not a question with one answer —
+/// the base layer's escalation guard reads `context.grant`, so a probe
+/// that supplied no role would be asking something the PDP is right to
+/// refuse (ADR-0058 decision 1).
+pub(crate) fn context_granting<'a>(input: &'a DecisionInput, grant: Role) -> AuthzContext<'a> {
+    AuthzContext {
+        grant: Some(grant),
+        ..input.context()
+    }
+}
+
+/// [`DecisionInput::context`] naming a tier, for the tier-bearing reads
+/// (AUTHZ-5, ADR-0038 decision 2).
+///
+/// Also CNSL-2's: a capability answer for a tiered read is the *set* of
+/// tiers permitted, which takes one ask per tier.
+pub(crate) fn context_at_tier<'a>(
+    input: &'a DecisionInput,
+    sensitivity: Sensitivity,
+) -> AuthzContext<'a> {
+    AuthzContext {
+        sensitivity: Some(sensitivity),
+        ..input.context()
+    }
+}
+
 /// Assembles the decision input for the request's ambient principal (the
 /// resolved tenant + token subject) inside the caller's transaction.
 /// `anchor` is the already-fetched, ownership-checked node the resource

@@ -22,6 +22,7 @@ mod credentials;
 mod diff;
 mod hierarchy;
 mod init;
+mod lapse;
 mod login;
 mod mcp;
 mod pack;
@@ -31,6 +32,7 @@ mod recall;
 mod skill;
 #[cfg(test)]
 mod testing;
+mod whoami;
 
 use std::process::ExitCode;
 use std::time::Duration;
@@ -116,6 +118,26 @@ enum Command {
     /// decision 2), so every `create` has a parent.
     #[command(subcommand)]
     Hierarchy(HierarchyCommand),
+    /// Which identity is acting, and what it may do tenant-wide.
+    ///
+    /// The first question anybody asks a deployment they just logged into,
+    /// and until CNSL-2 the answer was a `curl` (ADR-0058 decision 8).
+    Whoami {
+        /// Also probe the tenant plane: what this caller may do there.
+        #[arg(long)]
+        capabilities: bool,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// What is currently relaxed, and over what (AUTHZ-4's grants).
+    ///
+    /// The lapse machinery is this product's answer to "strict by default,
+    /// relaxable by design" (seed §2.3), and until CNSL-2 there was no
+    /// terminal in which to ask what was relaxed.
+    #[command(subcommand)]
+    Lapse(LapseCommand),
     /// Log in to a gateway through your browser (AUTH-1 end to end,
     /// ADR-0027 decision 5) and store the session under a profile. This
     /// is the whole of "zero-config": every other Synveda client on this
@@ -1050,6 +1072,65 @@ enum HierarchyCommand {
         #[arg(long)]
         json: bool,
     },
+    /// The policy pack in force at a scope, and where it came from.
+    Policy {
+        /// Scope UUID.
+        id: ScopeId,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Role bindings at a scope, or (--effective) every binding in force
+    /// there with the node it was bound at.
+    Roles {
+        /// Scope UUID.
+        id: ScopeId,
+        /// Include bindings inherited from ancestors and tenant-wide ones.
+        #[arg(long)]
+        effective: bool,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// What *you* may do at a scope, decided by the PDP.
+    ///
+    /// A forecast rather than a grant: every act decides again at its own
+    /// seam, so this says what to try, never what will be permitted.
+    Capabilities {
+        /// Scope UUID.
+        id: ScopeId,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum LapseCommand {
+    /// Standing grants anywhere you may read, or one scope's history.
+    ///
+    /// Each grant is visible from *either* end — the scope that discloses
+    /// and the scope that receives — so the steward of a granted team can
+    /// list, and therefore revoke, what their own team holds (ADR-0058
+    /// decision 7).
+    List {
+        /// Limit to grants over one target scope. Without it, every grant
+        /// you may see, anywhere in the tenant.
+        #[arg(long)]
+        scope: Option<ScopeId>,
+        /// Include grants that have expired or been revoked. Default with
+        /// --scope (that form answers "who could read this in March"),
+        /// off without it (that form answers "what is relaxed now").
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Refuses `org` and `user` at the surface (ADR-0011's rank rule and
@@ -1393,6 +1474,29 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Hierarchy(HierarchyCommand::Root { profile, json }) => {
             hierarchy::root(&profile_name(profile), json).await
         }
+        Command::Hierarchy(HierarchyCommand::Policy { id, profile, json }) => {
+            hierarchy::policy(&profile_name(profile), id, json).await
+        }
+        Command::Hierarchy(HierarchyCommand::Roles {
+            id,
+            effective,
+            profile,
+            json,
+        }) => hierarchy::roles(&profile_name(profile), id, effective, json).await,
+        Command::Hierarchy(HierarchyCommand::Capabilities { id, profile, json }) => {
+            hierarchy::capabilities(&profile_name(profile), id, json).await
+        }
+        Command::Whoami {
+            capabilities,
+            profile,
+            json,
+        } => whoami::show(&profile_name(profile), capabilities, json).await,
+        Command::Lapse(LapseCommand::List {
+            scope,
+            all,
+            profile,
+            json,
+        }) => lapse::list(&profile_name(profile), scope, all, json).await,
         Command::Login {
             gateway,
             issuer,

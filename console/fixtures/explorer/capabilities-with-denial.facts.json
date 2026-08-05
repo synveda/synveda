@@ -1,0 +1,34 @@
+{
+  "must_name": [
+    "channel.pin",
+    "channel.publish",
+    "channel.read",
+    "channel.rollback",
+    "context_pack.write",
+    "hierarchy.create",
+    "hierarchy.delete",
+    "hierarchy.read",
+    "hierarchy.update",
+    "lapse.grant",
+    "lapse.revoke",
+    "memory.classify",
+    "memory.write",
+    "policy.read",
+    "prompt.write",
+    "proposal.open",
+    "proposal.read",
+    "proposal.review",
+    "quarantine.read",
+    "quarantine.review",
+    "role.read",
+    "service_identity.manage",
+    "service_identity.read",
+    "skill.quality.override",
+    "skill.write",
+    "eng-pack",
+    "forecast"
+  ],
+  "must_not_name": [
+    "policy.assign"
+  ]
+}

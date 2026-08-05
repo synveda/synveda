@@ -34,12 +34,20 @@ export interface ReviewProps {
   detail: ProposalDetail;
   /** Cast a verdict. Absent when the screen is read-only. */
   onVerdict?: (verdict: "approve" | "reject", reason: string) => void;
+  /**
+   * Why no verdict is offered, when none is (CNSL-2, ADR-0058).
+   *
+   * A sentence rather than a boolean, because "you cannot do this" without
+   * a reason is the thing a reviewer takes to an administrator and cannot
+   * describe. Present only when `onVerdict` is absent.
+   */
+  cannotReview?: string | null;
   /** What the last attempt said, if it failed. */
   error?: string | null;
   busy?: boolean;
 }
 
-export function Review({ detail, onVerdict, error, busy }: ReviewProps) {
+export function Review({ detail, onVerdict, cannotReview, error, busy }: ReviewProps) {
   return (
     <article className="review">
       <Heading detail={detail} />
@@ -52,7 +60,14 @@ export function Review({ detail, onVerdict, error, busy }: ReviewProps) {
       {detail.scan ? <Scan scan={detail.scan} /> : null}
       {detail.quality ? <Quality quality={detail.quality} id={detail.id} /> : null}
       <Effect detail={detail} />
-      {onVerdict ? <Verdict onVerdict={onVerdict} busy={busy ?? false} /> : null}
+      {onVerdict ? (
+        <Verdict onVerdict={onVerdict} busy={busy ?? false} />
+      ) : cannotReview ? (
+        <section className="verdict-section">
+          <h3>your verdict</h3>
+          <p className="muted">{cannotReview}</p>
+        </section>
+      ) : null}
     </article>
   );
 }

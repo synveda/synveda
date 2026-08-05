@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use crate::service_identities;
 
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, MatchedPath, Request, State};
+use axum::extract::{DefaultBodyLimit, MatchedPath, Query, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
@@ -18,7 +18,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 // The two extension traits W3C trace-context extraction needs: `.span()` on
 // an extracted `Context`, and `.set_parent()` on the request span.
 use opentelemetry::trace::TraceContextExt as _;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use synveda_identity::{LoginFlow, TokenVerifier};
 use synveda_policy::Pdp;
@@ -28,6 +28,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
 use crate::audit_query;
 use crate::auth;
+use crate::capabilities;
 use crate::channels;
 use crate::curators;
 use crate::error::ApiError;
@@ -146,6 +147,16 @@ pub fn router(state: AppState) -> Router {
             "/v1/hierarchy/nodes/{id}/descendants",
             get(hierarchy::descendants),
         )
+        // The capability probe (CNSL-2, ADR-0058): what the *caller* may
+        // do, asked of the PDP. A forecast rather than a grant (decision
+        // 2) — nothing downstream reads the answer to decide anything —
+        // and it never takes a `subject`, so it cannot answer about a
+        // third party (decision 3).
+        .route(
+            "/v1/hierarchy/nodes/{id}/capabilities",
+            get(capabilities::at_node),
+        )
+        .route("/v1/capabilities", get(capabilities::batch))
         // The policy admin plane (AUTHZ-2, ADR-0014 decision 8).
         .route("/v1/policy/packs", get(policy::packs))
         .route(
@@ -352,15 +363,42 @@ async fn render_metrics(State(state): State<AppState>) -> String {
 struct WhoamiResponse {
     subject: String,
     tenant: Tenant,
+    /// The tenant plane's capability probe, when the caller asked for it
+    /// (CNSL-2, ADR-0058 decision 1). Absent by default: the base call is
+    /// a pure task-local read that touches no database, and a screen that
+    /// only wants a name should not pay for a PDP fan-out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    capabilities: Option<crate::capabilities::TenantCapabilities>,
 }
 
-/// Introspection: who does the gateway think is calling? Returns only the
-/// caller's own resolution result — no governed assets, so no PDP
-/// involvement (ADR-0008). Reads the task-local rather than a request
-/// extension: this endpoint exists to prove the propagation path end to end.
-async fn whoami() -> Response {
+#[derive(Deserialize)]
+pub(crate) struct WhoamiParams {
+    /// Ask for the tenant-plane capability block.
+    #[serde(default)]
+    capabilities: bool,
+}
+
+/// Introspection: who does the gateway think is calling? Returns the
+/// caller's own resolution result, and — only when asked — what the caller
+/// may do on the tenant plane.
+///
+/// The base answer names no governed asset and takes no PDP decision
+/// (ADR-0008); `?capabilities=true` takes decisions **about the caller
+/// only**, which is why it needs no permission of its own (ADR-0058
+/// decision 3). Reads the task-local rather than a request extension: this
+/// endpoint exists to prove the propagation path end to end.
+async fn whoami(State(state): State<AppState>, Query(params): Query<WhoamiParams>) -> Response {
+    let capabilities = if params.capabilities {
+        match crate::capabilities::at_tenant(&state).await {
+            Ok(block) => Some(block),
+            Err(error) => return ApiError(error).into_response(),
+        }
+    } else {
+        None
+    };
     match synveda_identity::current_tenant() {
         Some(context) => Json(WhoamiResponse {
+            capabilities,
             subject: context.claims.subject,
             tenant: context.tenant,
         })

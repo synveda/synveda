@@ -63,6 +63,17 @@ pub const JIT_PROVISIONS_TOTAL: &str = "synveda_jit_provisions_total";
 /// included — are an AUD-1 emission point once the audit log lands.
 pub const ROLE_OPERATIONS_TOTAL: &str = "synveda_role_operations_total";
 
+/// Capability probes (CNSL-2, ADR-0058), labelled by `op` (`at_node`,
+/// `batch`, and `pairs` for the fan-out size) and `outcome` (`ok`,
+/// `rejected`, `error`, `decided`).
+///
+/// The `pairs` series is the one worth watching: it counts (node, action)
+/// decisions, which is exactly the number that would have been audit rows
+/// under a per-pair chaining rule (ADR-0058 decision 4). If it grows
+/// faster than probe requests, a client has stopped bounding what it
+/// renders.
+pub const CAPABILITY_PROBES_TOTAL: &str = "synveda_capability_probes_total";
+
 /// Service-identity admin operations (AUTH-3, ADR-0018 decision 3),
 /// labelled by `op` (register/list/get/remove) and `outcome` (`ok`,
 /// `rejected`, `error`). Register and remove are AUD-1 emission points
@@ -429,6 +440,12 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         ROLE_OPERATIONS_TOTAL,
         "Role admin operations by op and outcome (ok/rejected/error)"
+    );
+    // CNSL-2 counter (ADR-0058): probes in the gateway's capabilities
+    // routes, plus the fan-out size the single audit event summarises.
+    metrics::describe_counter!(
+        CAPABILITY_PROBES_TOTAL,
+        "Capability probes by op and outcome, and (node, action) pairs decided"
     );
     // AUTH-3 counters (ADR-0018): operations in the gateway's
     // service-identity routes; rejections at the enforcement seam.

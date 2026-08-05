@@ -216,6 +216,48 @@ pub async fn for_scope(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// Every binding **in force at** a node: the bindings on its own chain
+/// plus the tenant-wide rows (CNSL-2, ADR-0058 decision 6).
+///
+/// The set difference from [`for_scope`] is the whole point of the
+/// effective view. Roles inherit downward (ADR-0015 decision 3), so "who
+/// holds what here" is a question about a chain, and answering it from
+/// one node's rows is answering a different question — the one the
+/// mutation surfaces ask, which is why [`for_scope`] stays.
+///
+/// `scope_ids` is the node's chain, node-first. Tenant-wide rows
+/// (`scope_id is null`) are always in force and are always included; the
+/// caller distinguishes them by the null.
+#[tracing::instrument(
+    name = "store.role_bindings.in_force_at",
+    skip_all,
+    fields(tenant.id = %tenant_id, scopes = scope_ids.len()),
+    err(Display)
+)]
+pub async fn in_force_at(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    scope_ids: &[ScopeId],
+) -> Result<Vec<RoleBinding>> {
+    let ids: Vec<uuid::Uuid> = scope_ids.iter().map(ScopeId::as_uuid).collect();
+    let rows = sqlx::query_as!(
+        BindingRow,
+        r#"
+        select tenant_id, subject, scope_id, role, updated_at
+        from role_bindings
+        where tenant_id = $1
+          and (scope_id is null or scope_id = any($2))
+        order by scope_id nulls first, subject, role
+        "#,
+        tenant_id.as_uuid(),
+        &ids,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// Every binding of the tenant (`GET /v1/roles/bindings`) — the "who
 /// holds what where" view an administrator or auditor reads.
 #[tracing::instrument(

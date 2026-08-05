@@ -330,6 +330,60 @@ pub async fn at_target(
     collect(rows)
 }
 
+/// Every grant in the tenant, newest first, bounded (CNSL-2, ADR-0058
+/// decision 7).
+///
+/// The scope-free half of the explorer's lapse view. It reads the tenant's
+/// rows and the **caller** filters them per scope — which is the shape
+/// decision 7 chose deliberately: a tenant-wide `LapseRead` would have
+/// handed the standing-relaxation view to org-admins alone, and the person
+/// who needs it is a team steward.
+///
+/// `standing_only` applies [`active_for_scopes`]' own predicate — unrevoked
+/// and `expires_at > now()` on the database's clock — so the explorer and
+/// the PDP cannot disagree about which grants are live. With it `false`,
+/// expired and revoked rows come too, because "who could read this in
+/// March" is a question about history.
+///
+/// The bound is real rather than defensive: lapses are exceptional by
+/// construction, so a tenant with more than `limit` of them has something
+/// worth noticing, and the caller reports the truncation rather than
+/// hiding it.
+#[tracing::instrument(
+    name = "store.lapses.in_tenant",
+    skip_all,
+    fields(tenant.id = %tenant_id, standing_only, lapses = tracing::field::Empty),
+    err(Display)
+)]
+pub async fn in_tenant(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    standing_only: bool,
+    limit: i64,
+) -> Result<Vec<Lapse>> {
+    let rows = sqlx::query_as!(
+        LapseRow,
+        r#"
+        select tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
+               action, max_sensitivity, reason, granted_at, expires_at, granted_by,
+               revoked_at, revoked_by, revoke_reason, expiry_recorded_at
+        from policy_lapses
+        where tenant_id = $1
+          and ($2 = false or (revoked_at is null and expires_at > now()))
+        order by granted_at desc, id
+        limit $3
+        "#,
+        tenant_id.as_uuid(),
+        standing_only,
+        limit,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    tracing::Span::current().record("lapses", rows.len());
+    collect(rows)
+}
+
 /// Grants whose window has closed and whose expiry has not been chained
 /// yet — the sweep's input (ADR-0037 decision 4).
 ///

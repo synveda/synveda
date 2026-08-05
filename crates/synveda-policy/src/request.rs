@@ -289,6 +289,127 @@ pub enum Action {
 }
 
 impl Action {
+    /// Every action in the vocabulary, for exhaustive iteration.
+    ///
+    /// Kept beside [`Action::PROBED_AT_SCOPE`] and its siblings so that
+    /// adding a variant forces a classification: the test below asserts
+    /// every action is in exactly one of the four groups, so a new action
+    /// that nobody classified fails the build rather than silently going
+    /// unanswerable at CNSL-2's probe.
+    pub const ALL: [Action; 32] = [
+        Action::HierarchyCreate,
+        Action::HierarchyRead,
+        Action::HierarchyUpdate,
+        Action::HierarchyDelete,
+        Action::MemoryRead,
+        Action::MemoryWrite,
+        Action::MemoryClassify,
+        Action::PromptRead,
+        Action::PromptWrite,
+        Action::ContextPackRead,
+        Action::ContextPackWrite,
+        Action::SkillRead,
+        Action::SkillWrite,
+        Action::SkillQualityOverride,
+        Action::QuarantineRead,
+        Action::QuarantineReview,
+        Action::PolicyRead,
+        Action::PolicyAssign,
+        Action::RoleRead,
+        Action::RoleAssign,
+        Action::ServiceIdentityRead,
+        Action::ServiceIdentityManage,
+        Action::AuditRead,
+        Action::ChannelRead,
+        Action::ChannelPublish,
+        Action::ChannelRollback,
+        Action::ChannelPin,
+        Action::ProposalRead,
+        Action::ProposalOpen,
+        Action::ProposalReview,
+        Action::LapseGrant,
+        Action::LapseRevoke,
+    ];
+
+    /// The actions a capability probe answers as a plain yes/no about a
+    /// **scope** (CNSL-2, ADR-0058 decision 1).
+    ///
+    /// The membership rule is mechanical rather than editorial, which is
+    /// what keeps this list from becoming a place where a surface quietly
+    /// decides what a reader is allowed to ask about: an action is here
+    /// when it applies to `Scope` in the Cedar schema **and** needs no
+    /// operand beyond (principal, action, resource). The two exclusions
+    /// are their own groups — [`Action::TIERED_READS`], which answer with
+    /// a tier set because a bare boolean would have to pick a tier and
+    /// then hide which one, and [`Action::RoleAssign`], which fails closed
+    /// without [`AuthzContext::grant`] and is therefore probed once per
+    /// role. [`Action::AuditRead`] is absent because the schema refuses it
+    /// a scope resource at all (ADR-0045 decision 2); it appears in
+    /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
+    /// lives.
+    pub const PROBED_AT_SCOPE: [Action; 26] = [
+        Action::HierarchyCreate,
+        Action::HierarchyRead,
+        Action::HierarchyUpdate,
+        Action::HierarchyDelete,
+        Action::MemoryWrite,
+        Action::MemoryClassify,
+        Action::PromptWrite,
+        Action::ContextPackWrite,
+        Action::SkillWrite,
+        Action::SkillQualityOverride,
+        Action::QuarantineRead,
+        Action::QuarantineReview,
+        Action::PolicyRead,
+        Action::PolicyAssign,
+        Action::RoleRead,
+        Action::ServiceIdentityRead,
+        Action::ServiceIdentityManage,
+        Action::ChannelRead,
+        Action::ChannelPublish,
+        Action::ChannelRollback,
+        Action::ChannelPin,
+        Action::ProposalRead,
+        Action::ProposalOpen,
+        Action::ProposalReview,
+        Action::LapseGrant,
+        Action::LapseRevoke,
+    ];
+
+    /// The same, for the **tenant** plane — what `whoami` answers.
+    ///
+    /// Strictly the schema's `Tenant`-applicable, operand-free set. It is
+    /// much shorter than the scope set and that is the honest shape: most
+    /// of this vocabulary is about a node, and an action that is only ever
+    /// taken at a node has no tenant-level answer to give.
+    pub const PROBED_AT_TENANT: [Action; 11] = [
+        Action::HierarchyCreate,
+        Action::HierarchyRead,
+        Action::HierarchyUpdate,
+        Action::HierarchyDelete,
+        Action::QuarantineRead,
+        Action::PolicyRead,
+        Action::PolicyAssign,
+        Action::RoleRead,
+        Action::ServiceIdentityRead,
+        Action::AuditRead,
+        Action::ProposalRead,
+    ];
+
+    /// The four actions that name the tier they ask about (AUTHZ-5,
+    /// ADR-0038 decision 2), so a probe answers them with the set of tiers
+    /// permitted rather than with a boolean.
+    ///
+    /// A boolean here would have to choose a tier to ask at, and then the
+    /// answer would be about that tier while looking like it was about the
+    /// action — the failure ADR-0038 decision 2 refuses a default for.
+    pub const TIERED_READS: [Action; 4] = [
+        Action::MemoryRead,
+        Action::PromptRead,
+        Action::ContextPackRead,
+        Action::SkillRead,
+    ];
+
     /// Stable machine-readable name: audit events, metrics labels, and
     /// [`Error::PolicyDenied`] all carry this string.
     #[must_use]
@@ -502,5 +623,89 @@ impl AuthzDecision {
                 self.pack_name, self.pack_version
             ),
         })
+    }
+}
+
+#[cfg(test)]
+mod probe_vocabulary_tests {
+    use super::Action;
+    use std::collections::HashSet;
+
+    /// The guard that makes the probe lists maintainable: every action is
+    /// classified exactly once, so adding one to the vocabulary without
+    /// deciding how a capability probe answers it fails here rather than
+    /// leaving a hole in a governed read surface.
+    #[test]
+    fn every_action_is_classified_exactly_once() {
+        let mut seen: HashSet<&'static str> = HashSet::new();
+        let mut twice: Vec<&'static str> = Vec::new();
+        for action in Action::PROBED_AT_SCOPE
+            .iter()
+            .chain(Action::TIERED_READS.iter())
+            .chain(std::iter::once(&Action::RoleAssign))
+            .chain(std::iter::once(&Action::AuditRead))
+        {
+            if !seen.insert(action.as_str()) {
+                twice.push(action.as_str());
+            }
+        }
+        assert!(twice.is_empty(), "classified more than once: {twice:?}");
+
+        let unclassified: Vec<&'static str> = Action::ALL
+            .iter()
+            .map(Action::as_str)
+            .filter(|name| !seen.contains(name))
+            .collect();
+        assert!(
+            unclassified.is_empty(),
+            "unclassified actions — add each to PROBED_AT_SCOPE, TIERED_READS, \
+             or the operand/tenant-only exceptions: {unclassified:?}"
+        );
+        assert_eq!(seen.len(), Action::ALL.len(), "ALL is missing a variant");
+    }
+
+    /// The tenant list is a subset of the vocabulary and never invents a
+    /// name — a typo here would probe an action the schema has no permit
+    /// for and read as a denial rather than as the mistake it is.
+    #[test]
+    fn the_tenant_probe_set_is_drawn_from_the_vocabulary() {
+        let all: HashSet<&'static str> = Action::ALL.iter().map(Action::as_str).collect();
+        for action in Action::PROBED_AT_TENANT {
+            assert!(all.contains(action.as_str()), "not in ALL: {action:?}");
+        }
+    }
+
+    /// A tiered read must never appear in a boolean list: it would be
+    /// decided with no tier in context, which the PDP refuses rather than
+    /// defaults (ADR-0038 decision 2).
+    #[test]
+    fn no_tiered_read_is_probed_as_a_boolean() {
+        for tiered in Action::TIERED_READS {
+            assert!(
+                !Action::PROBED_AT_SCOPE.contains(&tiered),
+                "{tiered:?} is tier-bearing and cannot be a boolean probe"
+            );
+            assert!(
+                !Action::PROBED_AT_TENANT.contains(&tiered),
+                "{tiered:?} is tier-bearing and cannot be a boolean probe"
+            );
+        }
+    }
+
+    /// `RoleAssign` fails closed without `context.grant`, so it must not
+    /// be in a list the probe loops over without one.
+    #[test]
+    fn role_assign_is_not_probed_without_a_grant() {
+        assert!(!Action::PROBED_AT_SCOPE.contains(&Action::RoleAssign));
+        assert!(!Action::PROBED_AT_TENANT.contains(&Action::RoleAssign));
+    }
+
+    /// `AuditRead` applies to the tenant and nothing else (ADR-0045
+    /// decision 2), so probing it at a scope would ask the schema a
+    /// question it refuses.
+    #[test]
+    fn audit_read_is_probed_only_at_the_tenant() {
+        assert!(!Action::PROBED_AT_SCOPE.contains(&Action::AuditRead));
+        assert!(Action::PROBED_AT_TENANT.contains(&Action::AuditRead));
     }
 }

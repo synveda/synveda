@@ -39,6 +39,8 @@
 //! permit. **Expiry is that query's predicate**, so nothing has to run for
 //! the window to close.
 
+use std::collections::HashMap;
+
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
@@ -648,38 +650,74 @@ async fn revoke_inner(
 
 // ── Listing ────────────────────────────────────────────────────────────
 
+/// The most grants one scope-free listing returns.
+///
+/// Lapses are exceptional by construction (ADR-0037), so a tenant holding
+/// more standing grants than this has something worth noticing — which is
+/// why the response says it was truncated rather than quietly shortening.
+const MAX_TENANT_LAPSES: i64 = 500;
+
 #[derive(Deserialize)]
 pub(crate) struct ListParams {
     /// The target scope whose grants to list — the scope whose material
-    /// they disclose.
-    scope_id: ScopeId,
+    /// they disclose. Absent asks the scope-free question instead: every
+    /// grant this caller may see, anywhere in the tenant (CNSL-2, ADR-0058
+    /// decision 7).
+    scope_id: Option<ScopeId>,
+    /// Standing grants only. Defaults to **true** without a `scope_id` and
+    /// **false** with one, which is not an inconsistency but the two
+    /// questions the two forms ask: "what is relaxed right now" against
+    /// "who could read this scope's material in March".
+    active: Option<bool>,
 }
 
-/// `GET /v1/lapses?scope_id=` — every grant ever made over a scope.
+/// `GET /v1/lapses` — grants over one scope, or every grant this caller
+/// may see.
 ///
 /// Under `PolicyRead` rather than an action of its own: a lapse is policy,
 /// and "how is this node governed" should have one place to look (the
 /// ADR-0032 decision 15 argument for curator files).
 ///
-/// Expired and revoked rows are included deliberately — "who could read
-/// this scope's material in March" is the question the surface exists for,
-/// and a listing of only standing grants cannot answer it.
+/// # The scope-free form is a union of per-scope decisions
+///
+/// A lapse has two ends, and until CNSL-2 only the target end could be
+/// listed — so the steward of a *granted* scope could not see the grant
+/// their own team held, and therefore could not revoke it, though
+/// `POST /v1/lapses/{id}/revoke` has existed since AUTHZ-4. Each row is now
+/// visible if the caller holds `PolicyRead` at **either** end, decided per
+/// scope exactly as the scoped form decides it. No tenant-wide grant is
+/// invented: that shape exists next door on `GET /v1/roles/bindings` and is
+/// held by org-admins, who are not the people this view is for.
 #[tracing::instrument(name = "lapses.list", skip_all)]
 pub(crate) async fn list(
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> Response {
-    let result = list_inner(&state, params).await;
-    respond(&state, "list", result).await
+    match params.scope_id {
+        Some(scope_id) => {
+            let standing_only = params.active.unwrap_or(false);
+            let result = list_at_target(&state, scope_id, standing_only).await;
+            respond(&state, "list", result).await
+        }
+        None => {
+            let standing_only = params.active.unwrap_or(true);
+            let result = list_in_tenant(&state, standing_only).await;
+            respond(&state, "list_tenant", result).await
+        }
+    }
 }
 
-async fn list_inner(state: &AppState, params: ListParams) -> Result<Json<serde_json::Value>> {
+async fn list_at_target(
+    state: &AppState,
+    scope_id: ScopeId,
+    standing_only: bool,
+) -> Result<Json<serde_json::Value>> {
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let target = found(
-        hierarchy::node(&mut *tx, params.scope_id).await?,
+        hierarchy::node(&mut *tx, scope_id).await?,
         tenant_id,
-        params.scope_id,
+        scope_id,
     )?;
     let input = authz::gather(state, &mut tx, Some(&target)).await?;
     authz::decide(
@@ -693,6 +731,7 @@ async fn list_inner(state: &AppState, params: ListParams) -> Result<Json<serde_j
     let now = Utc::now();
     let views: Vec<LapseView> = rows
         .iter()
+        .filter(|lapse| !standing_only || lapse.outcome_at(now) == LapseOutcome::Active)
         .map(|lapse| render(lapse, (None, Some(target.path.clone())), now))
         .collect();
     Ok(Json(json!({
@@ -700,6 +739,117 @@ async fn list_inner(state: &AppState, params: ListParams) -> Result<Json<serde_j
         "scope_path": target.path,
         "lapses": views,
     })))
+}
+
+/// The scope-free listing: read the tenant's grants, then keep the ones
+/// either of whose ends this caller may read.
+///
+/// The `PolicyRead` fan-out is one decision per distinct scope named by the
+/// result set — bounded by how many scopes lapses actually touch, which is
+/// small because a lapse is an exception. Scopes are decided once and
+/// memoised across both ends, so a grant between two scopes the caller can
+/// read costs two decisions rather than two per row.
+async fn list_in_tenant(state: &AppState, standing_only: bool) -> Result<Json<serde_json::Value>> {
+    let tenant_id = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let rows = lapses::in_tenant(&mut *tx, tenant_id, standing_only, MAX_TENANT_LAPSES).await?;
+    let truncated = rows.len() as i64 == MAX_TENANT_LAPSES;
+
+    let mut readable: HashMap<ScopeId, Option<String>> = HashMap::new();
+    let mut decided = 0usize;
+    for scope_id in rows
+        .iter()
+        .flat_map(|lapse| [lapse.grantee_scope_id, lapse.target_scope_id])
+    {
+        if readable.contains_key(&scope_id) {
+            continue;
+        }
+        decided += 1;
+        // A scope that has been deleted since the grant was made decides
+        // nothing and is not readable — fail closed, the same reading
+        // `gather_lapsed` gives a target whose chain no longer resolves.
+        let permitted = match hierarchy::node(&mut *tx, scope_id).await? {
+            Some(node) if node.tenant_id == tenant_id => {
+                let input = authz::gather(state, &mut tx, Some(&node)).await?;
+                let allowed = authz::decide(
+                    state,
+                    &input,
+                    Action::PolicyRead,
+                    Resource::Scope(node.id),
+                    None,
+                )
+                .is_ok();
+                allowed.then_some(node.path)
+            }
+            _ => None,
+        };
+        readable.insert(scope_id, permitted);
+    }
+
+    let now = Utc::now();
+    let views: Vec<LapseView> = rows
+        .iter()
+        .filter(|lapse| {
+            readable
+                .get(&lapse.grantee_scope_id)
+                .is_some_and(Option::is_some)
+                || readable
+                    .get(&lapse.target_scope_id)
+                    .is_some_and(Option::is_some)
+        })
+        .map(|lapse| {
+            // Paths only for the ends this caller may read: a grant is
+            // visible from one end without the other end's path becoming
+            // the caller's to know.
+            let grantee = readable
+                .get(&lapse.grantee_scope_id)
+                .cloned()
+                .unwrap_or_default();
+            let target = readable
+                .get(&lapse.target_scope_id)
+                .cloned()
+                .unwrap_or_default();
+            render(lapse, (grantee, target), now)
+        })
+        .collect();
+
+    // One summarised event for the fan-out, ADR-0058 decision 4's rule
+    // applied to the other surface that decides many scopes for one answer.
+    // Counts and nothing else: never a reason, which is free text a steward
+    // wrote about an incident.
+    audit_scope_sweep(&mut tx, tenant_id, decided, views.len()).await?;
+    commit(tx).await?;
+
+    Ok(Json(json!({
+        "lapses": views,
+        "standing_only": standing_only,
+        "truncated": truncated,
+        "max_lapses": MAX_TENANT_LAPSES,
+    })))
+}
+
+/// Chains the scope-free listing's single decision event.
+async fn audit_scope_sweep(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    scopes_decided: usize,
+    lapses_visible: usize,
+) -> Result<()> {
+    audit::record(
+        tx,
+        tenant_id,
+        AuditAction::AuthzDecision,
+        Resource::Tenant(tenant_id).to_string(),
+        Outcome::Allow,
+        json!({
+            "op": "list_tenant",
+            "action": Action::PolicyRead.as_str(),
+            "scopes_decided": scopes_decided,
+            "lapses_visible": lapses_visible,
+        }),
+    )
+    .await
+    .map(|_| ())
 }
 
 // ── Shared plumbing ────────────────────────────────────────────────────
