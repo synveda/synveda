@@ -462,3 +462,83 @@ async fn a_quiet_console_still_records_spans_for_export() {
          depend on log verbosity — see telemetry::init",
     );
 }
+
+/// `X-Synveda-Client` on the request span (ADR-0027's other observability
+/// promise, read at last). The adapter has sent this since ADPT-1 and
+/// nothing here consumed it, so a trace could not say which surface caused
+/// the work — the bearer, the tenant and the route are identical whether a
+/// person ran `synveda recall` or a model called the recall tool.
+#[tokio::test]
+async fn the_caller_client_name_lands_on_the_span() {
+    let _serial = serial().await;
+    let span = exported_request_span(
+        Request::get("/healthz")
+            .header("x-synveda-client", "synveda-mcp/0.1.0")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let recorded = span
+        .attributes
+        .iter()
+        .find(|kv| kv.key.as_str() == "synveda.client")
+        .map(|kv| kv.value.to_string());
+    assert_eq!(recorded.as_deref(), Some("synveda-mcp/0.1.0"));
+}
+
+/// The header is caller-controlled, so the span field is bounded and the
+/// refusal is whole-value rather than a sanitised remnant.
+///
+/// It must also never become a **metric** label: `track_http_metrics`
+/// labels by matched route exactly to keep Prometheus cardinality bounded,
+/// and a caller-supplied string there would be an unbounded series per
+/// unique value. This test covers the span; that separation is the reason
+/// the value is only ever recorded here.
+#[tokio::test]
+async fn a_hostile_client_name_is_refused_rather_than_recorded() {
+    let long = "a".repeat(65);
+    for value in [
+        "",
+        "   ",
+        &long,
+        // Newlines and control characters, which would break a log line and
+        // muddy a trace view.
+        "synveda-cli/0.1.0\\nX-Injected: yes",
+        // Something that wants to look like structure.
+        "{\"name\":\"cli\"}",
+        "cli 0.1.0; drop table",
+    ] {
+        let _serial = serial().await;
+        let span = exported_request_span(
+            Request::get("/healthz")
+                .header("x-synveda-client", value)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert!(
+            !span
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "synveda.client"),
+            "{value:?} was recorded; an implausible client name must leave the field \
+             unset, so that `absent` and `a client that says something odd` stay \
+             distinguishable",
+        );
+    }
+}
+
+/// A client that sends nothing leaves the field unset rather than
+/// `"unknown"` — a caller that literally sends `unknown` and one that sends
+/// nothing are different facts.
+#[tokio::test]
+async fn no_client_header_leaves_the_field_unset() {
+    let _serial = serial().await;
+    let span = exported_request_span(Request::get("/healthz").body(Body::empty()).unwrap()).await;
+    assert!(
+        !span
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == "synveda.client"),
+    );
+}

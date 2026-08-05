@@ -29,9 +29,25 @@ pub struct Api {
     pub subject: String,
     http: reqwest::Client,
     /// The W3C trace context every call from this client carries
-    /// (ADR-0007's deferred clause; see [`Api::traceparent`]).
+    /// (ADR-0007's deferred clause; see [`TraceContext`]).
     trace: TraceContext,
+    /// What this caller tells the gateway it is, as `X-Synveda-Client`.
+    client: &'static str,
 }
+
+/// The default: a person at a terminal running a governed verb.
+const CLI_CLIENT: &str = concat!("synveda-cli/", env!("CARGO_PKG_VERSION"));
+
+/// `synveda mcp`, which is a model calling a tool rather than a person
+/// typing a command.
+///
+/// Worth a name of its own rather than folding into [`CLI_CLIENT`]: the
+/// bearer, the tenant and the route are identical either way, so without
+/// this the gateway's trace cannot tell "alice ran `synveda recall`" from
+/// "a model alice is talking to called the recall tool". That distinction
+/// is the whole reason ADR-0057 decision 8 put `assertion` in the observe
+/// vocabulary, and it should not stop at the write path.
+pub const MCP_CLIENT: &str = concat!("synveda-mcp/", env!("CARGO_PKG_VERSION"));
 
 /// The `traceparent` this client sends, minted once and reused.
 ///
@@ -114,6 +130,20 @@ impl Api {
     /// these commands carry no `--gateway` flag: pointing a bearer at a
     /// host of the caller's choosing is not a convenience.
     pub async fn connect(profile_name: &str) -> Result<(Self, Origin), String> {
+        Self::connect_as(profile_name, CLI_CLIENT).await
+    }
+
+    /// [`Api::connect`], naming a caller other than the CLI itself.
+    ///
+    /// A second constructor rather than a parameter on the first, because
+    /// there is exactly one caller that is not a person at a terminal —
+    /// `synveda mcp` — and threading an argument through thirty-odd call
+    /// sites to say "the default" thirty-odd times is a worse trade than
+    /// one extra function.
+    pub async fn connect_as(
+        profile_name: &str,
+        client: &'static str,
+    ) -> Result<(Self, Origin), String> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))
@@ -134,6 +164,7 @@ impl Api {
                     subject: "SYNVEDA_TOKEN".to_owned(),
                     http,
                     trace,
+                    client,
                 },
                 Origin::Environment,
             ));
@@ -147,6 +178,7 @@ impl Api {
                 subject: profile.subject.clone(),
                 http,
                 trace,
+                client,
             },
             Origin::Profile(profile_name.to_owned()),
         ))
@@ -204,6 +236,11 @@ impl Api {
             // what makes a `synveda proposal publish` and the gateway work
             // it triggers one trace instead of two unconnected halves.
             .header("traceparent", self.trace.header())
+            // ADR-0027's other observability promise. The gateway records
+            // it on the request span (`app::client_name`), so a trace says
+            // which surface caused the work — the one thing the bearer,
+            // the tenant and the route between them cannot say.
+            .header("x-synveda-client", self.client)
             .send()
             .await
             .map_err(|err| format!("{method} {}{path}: {err}", self.base))?;
@@ -315,7 +352,7 @@ mod tests {
 
         // Two requests, so the test can say whether the trace is stable
         // across a command rather than minted per call.
-        let seen = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
+        let seen = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<(String, String)>::new()));
         let server = tokio::spawn({
             let seen = std::sync::Arc::clone(&seen);
             async move {
@@ -324,15 +361,17 @@ mod tests {
                     let mut buffer = vec![0u8; 4096];
                     let read = stream.read(&mut buffer).await.expect("read");
                     let request = String::from_utf8_lossy(&buffer[..read]).to_string();
-                    let header = request
-                        .lines()
-                        .find_map(|line| {
-                            line.strip_prefix("traceparent: ")
-                                .map(str::trim)
-                                .map(str::to_owned)
-                        })
-                        .unwrap_or_else(|| format!("ABSENT in:\n{request}"));
-                    seen.lock().await.push(header);
+                    let field = |name: &str| {
+                        request
+                            .lines()
+                            .find_map(|line| {
+                                line.strip_prefix(name).map(str::trim).map(str::to_owned)
+                            })
+                            .unwrap_or_else(|| format!("ABSENT in:\n{request}"))
+                    };
+                    seen.lock()
+                        .await
+                        .push((field("traceparent: "), field("x-synveda-client: ")));
                     stream
                         .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}")
                         .await
@@ -358,20 +397,50 @@ mod tests {
 
         let seen = seen.lock().await;
         assert_eq!(seen.len(), 2);
+        let (traceparent, client) = &seen[0];
         assert!(
-            seen[0].starts_with("00-") && seen[0].ends_with("-01"),
-            "no usable traceparent on the wire: {:?}",
-            seen[0],
+            traceparent.starts_with("00-") && traceparent.ends_with("-01"),
+            "no usable traceparent on the wire: {traceparent:?}",
         );
         assert_eq!(
-            seen[0], seen[1],
+            seen[0].0, seen[1].0,
             "both calls of one command must land in one trace",
         );
         assert!(
-            seen[0].contains(api.trace_id()),
+            traceparent.contains(api.trace_id()),
             "the id the header carries must be the one `trace_id()` reports, or the \
              number printed for a human to paste into Jaeger names a different trace",
         );
+        // ADR-0027 promises `<name>/<version>`, and the gateway refuses a
+        // value outside a conservative character set rather than sanitising
+        // it — so a name invented freely on this side is a name that
+        // silently stops being recorded on that one.
+        assert_eq!(client, CLI_CLIENT, "the default caller is the CLI itself");
+        assert_eq!(seen[0].1, seen[1].1, "one client name per command");
+    }
+
+    /// The MCP server must not look like the CLI on the wire. Everything
+    /// else about its requests is identical — same bearer, same tenant,
+    /// same route — so this string is the only thing that lets a trace say
+    /// a model called a tool rather than a person running a command.
+    ///
+    /// Both names are held to the gateway rule as well as the promise,
+    /// because a name this side is free to invent is a name the other side
+    /// is free to drop.
+    #[test]
+    fn the_mcp_server_names_itself_apart_from_the_cli() {
+        assert_ne!(MCP_CLIENT, CLI_CLIENT);
+        assert!(MCP_CLIENT.starts_with("synveda-mcp/"), "{MCP_CLIENT}");
+        assert!(CLI_CLIENT.starts_with("synveda-cli/"), "{CLI_CLIENT}");
+        for name in [CLI_CLIENT, MCP_CLIENT] {
+            assert!(name.len() <= 64, "{name} exceeds the gateway cap");
+            assert!(
+                name.chars().all(|c| {
+                    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '+')
+                }),
+                "{name} holds a character the gateway refuses whole",
+            );
+        }
     }
 
     #[test]

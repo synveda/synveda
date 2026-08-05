@@ -83,7 +83,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use synveda_types::{ObserveKind, RecordId};
 
-use crate::api::Api;
+use crate::api::{self, Api};
 
 /// The tool names, in one place: `tools/list` advertises them, `tools/call`
 /// dispatches on them, and `--writes host` removes one of them.
@@ -849,7 +849,11 @@ fn subscribe() {
 /// one a human can act on — every other error the model reads is about the
 /// request, and this one is about the machine.
 async fn connect(server: &Server) -> Result<Api, String> {
-    match Api::connect(&server.profile).await {
+    // Named as the MCP server rather than as the CLI: everything else about
+    // this request — bearer, tenant, route — is what `synveda recall` would
+    // send, so without the name the gateway's trace cannot tell a model's
+    // tool call from a person's command (`api::MCP_CLIENT`).
+    match Api::connect_as(&server.profile, api::MCP_CLIENT).await {
         Ok((api, _origin)) => {
             // Recorded on the enclosing `mcp.tools/call` span, so the id
             // this tool call sends as its `traceparent` is the id in the

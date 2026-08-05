@@ -36,6 +36,26 @@ digits is accepted and zero-padded, and a `traceparent` from a future
 revision is parsed forward (which W3C asks for). Both are pinned so a
 tightened propagator fails a test rather than changing behaviour silently.
 
+**`X-Synveda-Client` is read too, for the same reason and at the same
+place.** ADR-0027's observability note promises the header alongside the
+`traceparent`, and ADPT-1's hooks have sent `claude-code/0.1.0` on every
+call since they shipped — into a gateway that read neither. It is now a
+`synveda.client` field on the request span, so a trace says which *surface*
+caused the work: the bearer, the tenant and the route are identical whether
+a person ran `synveda recall` or a model called the recall tool through
+ADPT-2's server, and that was the one attribution nothing could supply.
+The adapter needed no change; its header simply started meaning something.
+
+The value is caller-controlled, so it is bounded at 64 characters and
+refused whole outside a conservative character set — absent, unreadable and
+refused all leave the field unset rather than recording `"unknown"`, since
+a client that says `unknown` and one that says nothing are different facts.
+**It must never become a metric label**: `track_http_metrics` labels by
+matched route precisely to keep Prometheus cardinality bounded, and a
+caller-supplied string there is an unbounded series per unique value. A
+span field carries no such risk, which is why the attribution lives only
+there.
+
 **A second defect surfaced while demonstrating the first, and it was the
 larger one.** The single `EnvFilter` this ADR's init block put on the
 registry applied to the span exporter as well as the console, so

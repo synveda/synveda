@@ -377,7 +377,9 @@ async fn whoami() -> Response {
 /// tenant-resolution middleware once resolution succeeds (TEN-1 AC).
 ///
 /// When the caller sent a W3C `traceparent`, this span continues that trace
-/// instead of starting a new one — see [`parent_context`].
+/// instead of starting a new one — see [`parent_context`]. When it named
+/// itself in `X-Synveda-Client`, that lands on `synveda.client` — see
+/// [`client_name`].
 fn make_request_span(request: &Request) -> tracing::Span {
     let route = matched_route(request);
     let span = tracing::info_span!(
@@ -389,7 +391,11 @@ fn make_request_span(request: &Request) -> tracing::Span {
         url.path = %request.uri().path(),
         http.response.status_code = tracing::field::Empty,
         tenant.id = tracing::field::Empty,
+        synveda.client = tracing::field::Empty,
     );
+    if let Some(client) = client_name(request.headers()) {
+        span.record("synveda.client", client);
+    }
     if let Some(parent) = parent_context(request.headers())
         // Only fails when no OTel subscriber layer is installed — the unit
         // tests, and any binary that skipped `telemetry::init`. The span is
@@ -459,6 +465,44 @@ fn parent_context(headers: &axum::http::HeaderMap) -> Option<opentelemetry::Cont
     });
     context.span().span_context().is_valid().then_some(context)
 }
+
+/// What the caller says it is, from `X-Synveda-Client: <name>/<version>`.
+///
+/// ADR-0027's observability note promises this header from the Claude Code
+/// adapter, and the adapter has sent it since it shipped — but nothing here
+/// read it, so the gateway could not tell an inject from a hook, a `synveda
+/// recall` from a console click, or a human's command from a model's tool
+/// call. That is the attribution the tenant and the route cannot supply,
+/// and now it is a span field beside them.
+///
+/// # Bounded, because a caller controls it
+///
+/// A span field is not a metric label — Prometheus cardinality is not at
+/// risk here, and deliberately so: `track_http_metrics` labels by matched
+/// route precisely to keep that bounded, and **this must never join it**.
+/// What a span *is* at risk of is bloat, so the value is capped at
+/// [`MAX_CLIENT_CHARS`] and anything outside a conservative character set
+/// is refused whole rather than sanitised character by character. A caller
+/// that will not name itself plainly gets no attribution, which costs it
+/// nothing it was entitled to.
+///
+/// Absent, unreadable or refused leaves the field unset rather than
+/// recording `"unknown"`: a client that literally sends `unknown` and one
+/// that sends nothing are different facts, and a reader should be able to
+/// tell them apart.
+fn client_name(headers: &axum::http::HeaderMap) -> Option<&str> {
+    let value = headers.get("x-synveda-client")?.to_str().ok()?.trim();
+    let plausible = !value.is_empty()
+        && value.chars().count() <= MAX_CLIENT_CHARS
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '+'));
+    plausible.then_some(value)
+}
+
+/// Long enough for `<name>/<semver-with-build-metadata>`, short enough that
+/// a caller cannot make every span in a trace expensive.
+const MAX_CLIENT_CHARS: usize = 64;
 
 /// `HeaderMap` as OTel's text-map source. Header names are already
 /// lowercase-normalised by `http`, which is what the W3C keys need.

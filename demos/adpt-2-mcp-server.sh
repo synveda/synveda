@@ -496,6 +496,23 @@ node -e '
           const ops = [...new Set(hit.spans.map((s) => s.operationName))];
           console.log(`    Jaeger holds trace ${caller}: ${ops.join(", ")}`);
           console.log(`    view it: http://localhost:16686/trace/${caller}`);
+          // ADR-0027 other observability promise: the request span says
+          // which surface caused the work. Without it the bearer, the
+          // tenant and the route are identical whether a person ran
+          // `synveda recall` or a model called the recall tool.
+          const named = hit.spans.flatMap((s) =>
+            (s.tags ?? [])
+              .filter((t) => t.key === "synveda.client")
+              .map((t) => String(t.value)),
+          );
+          if (!named.some((v) => v.startsWith("synveda-mcp/"))) {
+            console.error(
+              `demo FAILED: no span in ${caller} is attributed to the MCP server; ` +
+                `saw ${JSON.stringify(named)}`,
+            );
+            process.exit(1);
+          }
+          console.log(`    and it is attributed to ${named[0]}, not to the CLI`);
           process.exit(0);
         }
       } catch {
