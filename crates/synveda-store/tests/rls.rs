@@ -222,6 +222,10 @@ const COVERED: &[&str] = &[
     "records",
     "records_history",
     "role_bindings",
+    "scim_credentials",
+    "scim_group_members",
+    "scim_groups",
+    "scim_users",
     "skill_files",
     "skill_quality_overrides",
     "skill_reviews",
@@ -909,7 +913,7 @@ async fn seed_identity(pool: &PgPool) -> TenantId {
         &mut tx,
         IdentityId::new(),
         tenant,
-        "alice",
+        Some("alice"),
         IdentityKind::User,
         None,
         None,
@@ -992,7 +996,7 @@ fn cross_tenant_identity_write_is_rejected() {
             &mut tx,
             IdentityId::new(),
             other,
-            "mallory",
+            Some("mallory"),
             IdentityKind::User,
             None,
             None,
@@ -1056,7 +1060,7 @@ fn same_tenant_identity_lifecycle_works_under_rls() {
             &mut tx,
             IdentityId::new(),
             tenant,
-            "bob",
+            Some("bob"),
             IdentityKind::User,
             Some("bob@example.test"),
             Some("Bob"),
@@ -1643,7 +1647,7 @@ async fn seed_observe(pool: &PgPool) -> (TenantId, ScopeId, IdentityId) {
         &mut tx,
         IdentityId::new(),
         tenant,
-        "alice",
+        Some("alice"),
         IdentityKind::User,
         None,
         None,
@@ -4747,5 +4751,229 @@ fn an_override_is_tenant_isolated_write_once_and_never_rewritten() {
         .execute(&mut *tx)
         .await;
         assert!(erased.is_err(), "the app role must hold no DELETE either");
+    });
+}
+
+// ── AUTH-4: the directory mirror and the provisioning credential ────────────
+
+/// Seeds a tenant with a mirror row, a group, a membership and a
+/// credential — the four tables migration 0036 adds.
+async fn seed_directory(pool: &PgPool) -> (TenantId, synveda_types::ScimCredentialId) {
+    let tenant = seed_identity(pool).await;
+    let mut tx = rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin tenant tx");
+    let user = synveda_store::directory::create_user(
+        &mut *tx,
+        synveda_types::DirectoryUserId::new(),
+        tenant,
+        &synveda_store::directory::UserAttributes {
+            external_id: Some("ext-1".to_owned()),
+            user_name: "person@example.test".to_owned(),
+            active: true,
+            display_name: None,
+            given_name: None,
+            family_name: None,
+            work_email: None,
+        },
+    )
+    .await
+    .expect("create mirror user");
+    let group = synveda_store::directory::create_group(
+        &mut *tx,
+        synveda_types::DirectoryGroupId::new(),
+        tenant,
+        None,
+        "synveda-eng-core",
+    )
+    .await
+    .expect("create mirror group");
+    synveda_store::directory::add_member(&mut *tx, tenant, group.id, user.id)
+        .await
+        .expect("add member");
+    let credential_id = synveda_types::ScimCredentialId::new();
+    // A distinct hash per tenant, because `scim_credentials_hash_unique` is
+    // **global**: one presented token identifies at most one credential
+    // anywhere, so a hash can never be ambiguous across tenants. The
+    // fixture has to respect that to seed two tenants at all.
+    let hash: Vec<u8> = credential_id.as_uuid().as_bytes().repeat(2);
+    synveda_store::directory::issue_credential(
+        &mut *tx,
+        credential_id,
+        tenant,
+        &hash,
+        "rls-suite",
+        chrono::Utc::now() + chrono::Duration::days(1),
+        "operator",
+    )
+    .await
+    .expect("issue credential");
+    tx.commit().await.expect("commit directory fixture");
+    (tenant, credential_id)
+}
+
+async fn visible_directory_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64, i64, i64) {
+    let users = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from scim_users where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count scim_users");
+    let groups = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from scim_groups where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count scim_groups");
+    let members = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from scim_group_members where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count scim_group_members");
+    let credentials = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from scim_credentials where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count scim_credentials");
+    (users, groups, members, credentials)
+}
+
+/// The directory plane is tenant-confidential in both directions.
+///
+/// Who a tenant employs, which groups they are in, and **which credentials
+/// can provision them** are all things another tenant must not be able to
+/// count, let alone read. The credential table matters most: it is the
+/// lookup a request authenticates against, so a policy that leaked across
+/// tenants would make the token's own tenant claim decorative.
+#[test]
+fn wrong_tenant_guc_sees_no_directory_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, victim_credential) = seed_directory(&db.pool).await;
+        let (adversary, _) = seed_directory(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_directory_rows(&mut tx, victim).await,
+            (0, 0, 0, 0),
+            "another tenant's directory plane is invisible"
+        );
+        assert_eq!(
+            visible_directory_rows(&mut tx, adversary).await,
+            (1, 1, 1, 1),
+            "its own is not"
+        );
+        tx.rollback().await.expect("rollback");
+
+        // The victim's own credential, looked up by its exact hash from
+        // inside the adversary's tenant, is not there. This is the property
+        // the token's tenant prefix rests on: naming a tenant selects whose
+        // rows the hash is checked against, and naming the wrong one finds
+        // nothing rather than somebody else's key.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let hash: Vec<u8> = victim_credential.as_uuid().as_bytes().repeat(2);
+        let found = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from scim_credentials where token_hash = $1"#,
+            &hash,
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count by hash");
+        assert_eq!(found, 0, "another tenant's credential is not reachable");
+        tx.rollback().await.expect("rollback");
+    });
+}
+
+/// A forged write into another tenant's directory plane is refused by the
+/// `with check` half of every policy.
+#[test]
+fn cross_tenant_directory_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _) = seed_directory(&db.pool).await;
+        let (adversary, _) = seed_directory(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            r#"
+            insert into scim_users (id, tenant_id, user_name)
+            values ($1, $2, 'forged@example.test')
+            "#,
+            uuid::Uuid::now_v7(),
+            victim.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a mirror row forged into another tenant must be refused"
+        );
+        tx.rollback().await.expect("rollback");
+
+        // And the one that matters most: a credential minted into somebody
+        // else's tenant would be a key to their directory plane.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            r#"
+            insert into scim_credentials
+                (id, tenant_id, token_hash, label, expires_at, created_by)
+            values ($1, $2, $3, 'forged', now() + interval '1 day', 'attacker')
+            "#,
+            uuid::Uuid::now_v7(),
+            victim.as_uuid(),
+            &[9u8; 32][..],
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a credential forged into another tenant must be refused"
+        );
+        tx.rollback().await.expect("rollback");
+    });
+}
+
+/// The grants migration 0036 chose, asserted as behaviour.
+///
+/// The mirror is fully mutable because the directory authors it; the
+/// credential is append-and-stamp because **which credential sealed which
+/// identity has to stay answerable after the credential is gone**. A
+/// `delete` on `scim_credentials` is the one operation that would take that
+/// answer away, so the app role does not hold it.
+#[test]
+fn a_credential_can_be_revoked_but_never_erased() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, credential) = seed_directory(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let revoked = synveda_store::directory::revoke_credential(&mut *tx, tenant, credential)
+            .await
+            .expect("revoke");
+        assert!(revoked, "revocation is an update the app role holds");
+        tx.commit().await.expect("commit revoke");
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let deleted = sqlx::query!(
+            "delete from scim_credentials where tenant_id = $1 and id = $2",
+            tenant.as_uuid(),
+            credential.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            deleted.is_err(),
+            "no DELETE grant: a credential's history is the point"
+        );
+        tx.rollback().await.expect("rollback");
     });
 }

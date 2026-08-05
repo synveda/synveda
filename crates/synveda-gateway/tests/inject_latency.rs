@@ -282,7 +282,7 @@ async fn inject_median_under_budget_at_1k_concurrent_sessions() {
             &mut tx,
             id,
             tenant,
-            &subject,
+            Some(&subject),
             IdentityKind::User,
             None,
             None,

@@ -28,12 +28,28 @@ use crate::{CEDAR_ENTITY_FLUSHES_TOTAL, CEDAR_ENTITY_FRAGMENTS_TOTAL};
 
 /// The fields of a chain that Cedar entities are built from — a fragment
 /// serves only a chain whose shape matches, in order.
-type ShapeRow = (ScopeId, Option<ScopeId>, TenantId, ScopeKind);
+///
+/// `sealed` joined the row with AUTH-4 (ADR-0059 decision 9) because it
+/// joined the entity: a fragment built before somebody's last day must not
+/// answer for the chain that carries their seal. The gateway also flushes
+/// this store when an identity departs, so the shape check is the second
+/// of two independent reasons a stale seal cannot be served — which is the
+/// right number for the one attribute here whose staleness would be a
+/// disclosure rather than a delay.
+type ShapeRow = (ScopeId, Option<ScopeId>, TenantId, ScopeKind, bool);
 
 fn shape_of(chain: &[HierarchyNode]) -> Vec<ShapeRow> {
     chain
         .iter()
-        .map(|node| (node.id, node.parent_id, node.tenant_id, node.kind))
+        .map(|node| {
+            (
+                node.id,
+                node.parent_id,
+                node.tenant_id,
+                node.kind,
+                node.sealed,
+            )
+        })
         .collect()
 }
 
@@ -141,6 +157,7 @@ mod tests {
             name: slug.to_owned(),
             depth: 0,
             path: slug.to_owned(),
+            sealed: false,
             created_at: Utc::now(),
         }
     }

@@ -49,9 +49,23 @@ namespace Synveda {
 
     // A node of the tenancy hierarchy. Parents follow the hierarchy's
     // parent pointers; the org root's parent is the Tenant entity.
+    //
+    // `sealed` is AUTH-4's leaver state (ADR-0059 decision 9), derived
+    // from the identity that owns a user-kind node rather than stored on
+    // the node. It is **required** rather than optional, for the reason
+    // `context.grant` and `context.sensitivity` are: the base layer's
+    // forbid must never go missing for want of an attribute — a policy
+    // referencing a missing one errors, and Cedar drops a policy that
+    // errors, which would silently unseal every departed person.
+    //
+    // It is an attribute of the *resource* where `quarantined` is an
+    // attribute of the principal, and the pair is the whole shape of the
+    // two controls: quarantine says this caller may do nothing, and a
+    // seal says nothing may be done to this material.
     entity Scope in [Tenant, Scope] {
         tenant: Tenant,
         kind: String,
+        sealed: Bool,
     };
 
     // The hierarchy admin plane (/v1/hierarchy/*, ADR-0011 decision 8).
@@ -321,6 +335,32 @@ namespace Synveda {
         appliesTo {
             principal: [Principal],
             resource: [Scope],
+            context: { roles: Set<String> },
+        };
+
+    // The directory plane (/v1/scim/credentials, AUTH-4, ADR-0059
+    // decision 13): issuing, listing and revoking the static credential a
+    // provisioning agent authenticates with.
+    //
+    // **Tenant only**, like AuditRead and for a related reason: a
+    // provisioning credential is not anchored anywhere — it can create,
+    // move and seal identities anywhere in the tenancy — so a subtree-scoped
+    // authority over one could only ever be a half-truth. Leaving `Scope`
+    // out of `appliesTo` makes that unrepresentable rather than relying on
+    // a handler to remember, and the base layer's token-scope confinement
+    // therefore covers service identities for free: the tenant plane is
+    // never inside a scope subtree, so no agent can mint a directory
+    // credential however it is bound.
+    //
+    // One action for reading the inventory *and* mutating it, unlike the
+    // service-identity plane's pair. The inventory is a list of live keys
+    // to the directory plane, and there is nobody who should be able to see
+    // which credentials exist without also being able to rotate them —
+    // splitting it would create a role whose only power is reconnaissance.
+    action DirectoryManage
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant],
             context: { roles: Set<String> },
         };
 

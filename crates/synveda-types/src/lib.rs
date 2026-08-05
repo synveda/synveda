@@ -11,12 +11,14 @@ mod asset;
 mod channel;
 mod composition;
 mod dedup;
+mod directory;
 mod error;
 mod graph;
 mod hierarchy;
 mod id;
 mod identity;
 mod lapse;
+mod mover;
 mod observe;
 mod pack;
 mod policy;
@@ -43,18 +45,20 @@ pub use composition::{
     CompositionConfig, DEFAULT_INDEX_ENTRY_CHARS, EntryTier, IndexTier, InjectChannels, SkillIndex,
 };
 pub use dedup::{DedupConfig, DedupMode, MAX_DEDUP_NEIGHBOURS, permille};
+pub use directory::{DirectoryGroup, DirectoryUser, ScimCredential};
 pub use error::{Error, Result};
 pub use graph::{Depth, Graph};
 pub use hierarchy::{HierarchyNode, ScopeKind};
 pub use id::{
-    GraphEdgeId, GraphVertexId, IdentityId, LapseId, ObserveEventId, ProposalId, RecordId, ScopeId,
-    TenantId,
+    DirectoryGroupId, DirectoryUserId, GraphEdgeId, GraphVertexId, IdentityId, LapseId,
+    ObserveEventId, ProposalId, RecordId, ScimCredentialId, ScopeId, TenantId,
 };
-pub use identity::{Identity, IdentityKind};
+pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use lapse::{
     Lapse, LapseAction, LapseConfig, LapseOutcome, LapseTerms, MAX_LAPSE_REASON,
     PRODUCT_MAX_DURATION_SECS, STRICT_MAX_DURATION_SECS,
 };
+pub use mover::{MoverConfig, PersonalMemory};
 pub use observe::{ObserveKind, QuarantineState};
 pub use pack::{
     CHUNK_CHARS, ContextPackChannel, ContextPackName, DocumentChunk, DocumentName, DocumentPath,

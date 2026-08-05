@@ -99,7 +99,7 @@ async fn stage_one(
         &mut tx,
         owner,
         tenant,
-        "queue-owner",
+        Some("queue-owner"),
         IdentityKind::User,
         None,
         None,

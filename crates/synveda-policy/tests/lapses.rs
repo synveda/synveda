@@ -123,6 +123,7 @@ fn fixture() -> Fixture {
             name: slug.to_owned(),
             depth,
             path: slug.to_owned(),
+            sealed: false,
             created_at: Utc::now(),
         });
         id

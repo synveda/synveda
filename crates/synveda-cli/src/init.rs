@@ -318,8 +318,17 @@ fn print_external_issuer_instructions(issuer: &str) {
     println!();
     println!("    Group claims drive placement: a `{ADMIN_GROUP}` member becomes");
     println!("    tenant-wide org-admin, and `synveda-<department>-<team>` places by");
-    println!("    convention. Directory *sync* — joiners, movers, leavers — is AUTH-4/5;");
-    println!("    this command configures an issuer, it does not synchronise a directory.");
+    println!("    convention. This command configures an issuer; it does not");
+    println!("    synchronise a directory.");
+    println!();
+    println!("    For joiners, movers and leavers, issue a provisioning credential");
+    println!("    once the instance is up:");
+    println!();
+    println!("      synveda scim token issue --label entra");
+    println!();
+    println!("    then point your IdP at {GATEWAY_URL}/scim/v2. For Entra, also set");
+    println!("    `external_id_claim` to `oid` on the issuer — its `sub` is pairwise");
+    println!("    per application and will not match what its provisioning agent sends.");
 }
 
 // ── the bundled IdP ─────────────────────────────────────────────────────

@@ -55,6 +55,18 @@ pub struct ProvisioningClaims {
     pub email: Option<String>,
     /// The `name` claim, if present.
     pub display_name: Option<String>,
+    /// The directory anchor from the per-issuer `external_id_claim`
+    /// (default `sub`), if present — the value a SCIM mirror row's
+    /// `externalId` is matched against at first login (AUTH-4, ADR-0059
+    /// decision 4).
+    ///
+    /// Configurable per issuer because it is not `sub` everywhere and the
+    /// difference is not cosmetic: Entra issues a **pairwise** `sub`,
+    /// unique per (application, user), so an Entra tenant's `sub` will
+    /// never equal the directory object id its provisioning agent sends.
+    /// A server that assumed otherwise would give every Entra user two
+    /// identities and half their memory in each.
+    pub external_id: Option<String>,
 }
 
 /// Verifies a bearer token and returns its claims. Implementations must be

@@ -477,6 +477,7 @@ mod tests {
             name: slug.to_owned(),
             depth,
             path: path.to_owned(),
+            sealed: false,
             created_at: chrono::Utc::now(),
         }
     }

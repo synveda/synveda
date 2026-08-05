@@ -60,6 +60,7 @@ fn node(
         name: slug.to_owned(),
         depth,
         path: path.to_owned(),
+        sealed: false,
         created_at: Utc::now(),
     }
 }

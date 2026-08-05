@@ -29,6 +29,7 @@ mod pack;
 mod prompt;
 mod proposal;
 mod recall;
+mod scim;
 mod skill;
 #[cfg(test)]
 mod testing;
@@ -131,6 +132,15 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// The directory plane's credentials (AUTH-4, ADR-0059 decision 13):
+    /// the static bearer Entra and Okta authenticate `/scim/v2` with.
+    ///
+    /// A governed act over HTTP, not operator plumbing: issuing one is
+    /// decided by the PDP at the tenant and chained, so a verb that wrote
+    /// the row directly would answer a governed question with no decision
+    /// in the trail.
+    #[command(subcommand)]
+    Scim(ScimCommand),
     /// What is currently relaxed, and over what (AUTHZ-4's grants).
     ///
     /// The lapse machinery is this product's answer to "strict by default,
@@ -1109,6 +1119,46 @@ enum HierarchyCommand {
 }
 
 #[derive(Subcommand)]
+enum ScimCommand {
+    /// Issue, list and revoke provisioning credentials.
+    #[command(subcommand)]
+    Token(ScimTokenCommand),
+}
+
+#[derive(Subcommand)]
+enum ScimTokenCommand {
+    /// Issue a credential and print it **once**.
+    Issue {
+        /// What an operator recognises it by when deciding to rotate.
+        #[arg(long)]
+        label: String,
+        /// How long it lives, in days. Capped at 365; defaults to 90.
+        #[arg(long)]
+        days: Option<i64>,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Every credential this tenant has ever been issued, revoked and
+    /// expired ones included — rotation is a decision about a history.
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Revoke one. A stamp rather than a delete: what it did stays
+    /// answerable from the chain, named by this id.
+    Revoke {
+        /// The credential id, as `list` shows it.
+        id: String,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum LapseCommand {
     /// Standing grants anywhere you may read, or one scope's history.
     ///
@@ -1491,6 +1541,18 @@ async fn run(cli: Cli) -> Result<(), String> {
             profile,
             json,
         } => whoami::show(&profile_name(profile), capabilities, json).await,
+        Command::Scim(ScimCommand::Token(ScimTokenCommand::Issue {
+            label,
+            days,
+            profile,
+            json,
+        })) => scim::issue(&profile_name(profile), &label, days, json).await,
+        Command::Scim(ScimCommand::Token(ScimTokenCommand::List { profile, json })) => {
+            scim::list(&profile_name(profile), json).await
+        }
+        Command::Scim(ScimCommand::Token(ScimTokenCommand::Revoke { id, profile })) => {
+            scim::revoke(&profile_name(profile), &id).await
+        }
         Command::Lapse(LapseCommand::List {
             scope,
             all,
@@ -1879,7 +1941,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 &mut tx,
                 identity_id,
                 tenant,
-                &subject,
+                Some(&subject),
                 IdentityKind::Service,
                 None,
                 name.as_deref(),

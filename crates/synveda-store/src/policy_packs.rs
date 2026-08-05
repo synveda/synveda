@@ -128,6 +128,10 @@ pub async fn apply(
         .retention
         .map(|value| config_json("retention", serde_json::to_value(value)))
         .transpose()?;
+    let mover_json = config
+        .mover
+        .map(|value| config_json("mover", serde_json::to_value(value)))
+        .transpose()?;
     let scan_json = config
         .scan
         .map(|value| config_json("scan", serde_json::to_value(value)))
@@ -141,8 +145,8 @@ pub async fn apply(
         r#"
         insert into policy_packs
             (tenant_id, name, version, source, redaction, composition, approvals,
-             promotion, lapse, dedup, retention, scan, quality)
-        values ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             promotion, lapse, dedup, retention, mover, scan, quality)
+        values ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         on conflict (tenant_id, name) do update
             set source = excluded.source,
                 redaction = excluded.redaction,
@@ -152,12 +156,14 @@ pub async fn apply(
                 lapse = excluded.lapse,
                 dedup = excluded.dedup,
                 retention = excluded.retention,
+                mover = excluded.mover,
                 scan = excluded.scan,
                 quality = excluded.quality,
                 version = policy_packs.version + 1,
                 updated_at = now()
         returning tenant_id, name, version, source, redaction, composition,
-                  approvals, promotion, lapse, dedup, retention, scan, quality, updated_at
+                  approvals, promotion, lapse, dedup, retention, mover, scan, quality,
+                  updated_at
         "#,
         tenant_id.as_uuid(),
         name,
@@ -169,6 +175,7 @@ pub async fn apply(
         lapse_json,
         dedup_json,
         retention_json,
+        mover_json,
         scan_json,
         quality_json,
     )
@@ -191,7 +198,8 @@ pub async fn stored(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Resul
         PolicyPackRow,
         r#"
         select tenant_id, name, version, source, redaction, composition,
-               approvals, promotion, lapse, dedup, retention, scan, quality, updated_at
+               approvals, promotion, lapse, dedup, retention, mover, scan, quality,
+               updated_at
         from policy_packs where tenant_id = $1
         order by name
         "#,
@@ -219,7 +227,8 @@ pub async fn get(
         PolicyPackRow,
         r#"
         select tenant_id, name, version, source, redaction, composition,
-               approvals, promotion, lapse, dedup, retention, scan, quality, updated_at
+               approvals, promotion, lapse, dedup, retention, mover, scan, quality,
+               updated_at
         from policy_packs where tenant_id = $1 and name = $2
         "#,
         tenant_id.as_uuid(),
@@ -289,6 +298,7 @@ struct PolicyPackRow {
     lapse: Option<serde_json::Value>,
     dedup: Option<serde_json::Value>,
     retention: Option<serde_json::Value>,
+    mover: Option<serde_json::Value>,
     scan: Option<serde_json::Value>,
     quality: Option<serde_json::Value>,
     updated_at: DateTime<Utc>,
@@ -427,6 +437,12 @@ impl From<PolicyPackRow> for PolicyPack {
         // so the fail-safe direction is the safe one by construction:
         // `critical` still refuses, and only the band a pack was trying
         // to tighten is lost (ADR-0052 decision 9).
+        // A mover config that does not parse is unconfigured, and
+        // unconfigured seals on a cross-pack move — the fail-safe that
+        // cannot hand somebody's memory to a schedule nobody wrote it
+        // under (ADR-0059 decision 10). No `validate`: the type has one
+        // field and every value of it is meaningful.
+        let mover = parse_config(&row.name, "mover", row.mover);
         let scan = parse_config(&row.name, "scan", row.scan);
         // Same treatment, opposite consequence: an unparseable quality
         // config is treated as unconfigured, and unconfigured here gates
@@ -448,6 +464,7 @@ impl From<PolicyPackRow> for PolicyPack {
                 lapse,
                 dedup,
                 retention,
+                mover,
                 scan,
                 quality,
             },

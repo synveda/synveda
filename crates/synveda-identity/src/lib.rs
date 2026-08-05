@@ -19,6 +19,7 @@ mod context;
 mod flow;
 mod mapping;
 mod oidc;
+pub mod scim;
 mod token;
 
 pub use context::{TenantContext, current_tenant, with_tenant};

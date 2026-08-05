@@ -1156,6 +1156,16 @@ async fn authorize_owner(
             reason: "owner identity no longer exists".to_owned(),
         });
     };
+    // A directory-created identity nobody has logged in as yet holds no
+    // authority for this seam to re-decide with (AUTH-4, ADR-0059
+    // decision 5). It is denied by the same door as a vanished owner —
+    // and an event of theirs can only be in flight at all if a seal
+    // landed between the observe and the drain.
+    let Some(subject) = identity.subject.clone() else {
+        return Ok(OwnerAuth::Denied {
+            reason: "owner identity has no bound subject".to_owned(),
+        });
+    };
     let mut quarantined = identity.quarantined;
     let chain: Arc<[HierarchyNode]> = deps
         .chains
@@ -1176,7 +1186,7 @@ async fn authorize_owner(
     };
     let principal = Principal {
         tenant_id,
-        subject: identity.subject.clone(),
+        subject: subject.clone(),
         quarantined,
         scope_id: Some(identity.scope_id),
         token_scope,
@@ -1189,8 +1199,7 @@ async fn authorize_owner(
     };
     let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
     let bindings =
-        role_bindings::for_subject_on_scopes(&mut *tx, tenant_id, &identity.subject, &chain_ids)
-            .await?;
+        role_bindings::for_subject_on_scopes(&mut *tx, tenant_id, &subject, &chain_ids).await?;
     let context = AuthzContext {
         scopes: &chain,
         principal_scopes: &chain,

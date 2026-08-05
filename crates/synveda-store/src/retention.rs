@@ -66,6 +66,17 @@ pub async fn populated_scopes(
         select distinct scope_id as "scope_id!"
         from records
         where tenant_id = $1 and kind = 'derived'
+        -- A sealed scope is retention-held: its material is exempt from
+        -- every horizon, because a hold whose whole purpose is to survive
+        -- a schedule must not be implemented as one (AUTH-4, ADR-0059
+        -- decision 8). Excluded at enumeration rather than per record, so
+        -- the sweep never forms a work list it must then remember not to
+        -- act on.
+        and not exists (
+            select 1 from identities i
+            where i.tenant_id = $1 and i.scope_id = records.scope_id
+              and i.status = 'departed'
+        )
         order by scope_id
         "#,
         tenant_id.as_uuid(),
@@ -256,6 +267,17 @@ pub async fn scopes_with_closed_versions(
         select distinct scope_id as "scope_id!"
         from records_history
         where tenant_id = $1 and tx_to <= $2
+        -- A sealed scope is retention-held: its material is exempt from
+        -- every horizon, because a hold whose whole purpose is to survive
+        -- a schedule must not be implemented as one (AUTH-4, ADR-0059
+        -- decision 8). Excluded at enumeration rather than per record, so
+        -- the sweep never forms a work list it must then remember not to
+        -- act on.
+        and not exists (
+            select 1 from identities i
+            where i.tenant_id = $1 and i.scope_id = records_history.scope_id
+              and i.status = 'departed'
+        )
         order by scope_id
         "#,
         tenant_id.as_uuid(),

@@ -35,8 +35,8 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 
 ## Current phase
 Phase 3 — Enterprise (wk 11–16). Phases 0, 1 and 2 are complete; SKIL-1
-through SKIL-4, OPS-1, CNSL-1, ADPT-2 and CNSL-2 are the Phase 3 features
-done so far. 57 of 89 features delivered — see docs/backlog/STATUS.md for what each
+through SKIL-4, OPS-1, CNSL-1, ADPT-2, CNSL-2 and AUTH-4 are the Phase 3
+features done so far. 58 of 89 features delivered — see docs/backlog/STATUS.md for what each
 one proved and what it left standing. (The total read 86 until 2026-08-05,
 when it was corrected to the 88 STATUS.md and `make check-backlog` had both
 said for some time; AUTHZ-7 was filed the same day by CNSL-2/ADR-0058, making
@@ -47,6 +47,10 @@ note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4,5, EVAL-3, OPS-2 — and TEN-3..6, AUD-3,4 and the rest follow.
 
 The product is installable since OPS-1: `synveda init` — see docs/INSTALL.md.
+Since AUTH-4 it syncs a directory: `/scim/v2` for Entra and Okta, with
+`synveda scim token issue` for the credential (ADR-0059). Nothing has
+replayed a frame from a live Entra or Okta tenant yet — the vendor corpus is
+transcribed from their published tables.
 Since CNSL-1 it has a browser: the gateway serves the admin console from its
 own origin at `/console/`, which needs `pnpm --filter @synveda/console build`
 before the gateway will start.

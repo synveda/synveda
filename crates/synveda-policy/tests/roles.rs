@@ -168,6 +168,7 @@ fn fixture() -> Fixture {
             name: slug.to_owned(),
             depth,
             path: slug.to_owned(),
+            sealed: false,
             created_at: Utc::now(),
         });
         id
@@ -502,20 +503,20 @@ fn assert_matrix(pack: &str, version: i64) {
 /// regulated-strict: the golden matrix (the AC).
 #[test]
 fn matrix_regulated_strict() {
-    assert_matrix(REGULATED_STRICT, 14);
+    assert_matrix(REGULATED_STRICT, 15);
 }
 
 /// standard: identical role matrix — packs differ on composition
 /// membership, never on who administers (ADR-0015 decision 4).
 #[test]
 fn matrix_standard() {
-    assert_matrix(STANDARD, 14);
+    assert_matrix(STANDARD, 15);
 }
 
 /// open-collaboration: identical role matrix.
 #[test]
 fn matrix_open_collaboration() {
-    assert_matrix(OPEN_COLLABORATION, 14);
+    assert_matrix(OPEN_COLLABORATION, 15);
 }
 
 /// A tenant-wide binding is in force everywhere, the tenant plane

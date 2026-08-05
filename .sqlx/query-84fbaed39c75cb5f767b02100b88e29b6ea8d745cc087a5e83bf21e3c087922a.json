@@ -1,0 +1,95 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select u.id, u.tenant_id, u.external_id, u.user_name, u.active,\n               u.display_name, u.given_name, u.family_name, u.work_email,\n               u.identity_id, u.version, u.created_at, u.updated_at\n        from scim_group_members m\n        join scim_users u on u.tenant_id = m.tenant_id and u.id = m.user_id\n        where m.tenant_id = $1 and m.group_id = $2\n        order by u.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "external_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "user_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "given_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "family_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "work_email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "identity_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "version",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "84fbaed39c75cb5f767b02100b88e29b6ea8d745cc087a5e83bf21e3c087922a"
+}

@@ -104,6 +104,7 @@ fn fixture() -> Fixture {
             name: slug.to_owned(),
             depth,
             path: slug.to_owned(),
+            sealed: false,
             created_at: Utc::now(),
         });
         id
@@ -436,7 +437,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 fn golden_regulated_strict() {
     assert_pack_golden(
         REGULATED_STRICT,
-        14,
+        15,
         &["org", "eng", "team-a", "alice-user"],
     );
 }
@@ -447,7 +448,7 @@ fn golden_regulated_strict() {
 fn golden_standard() {
     assert_pack_golden(
         STANDARD,
-        14,
+        15,
         &["org", "eng", "team-a", "team-b", "alice-user"],
     );
 }
@@ -459,7 +460,7 @@ fn golden_standard() {
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        14,
+        15,
         &[
             "org",
             "eng",
