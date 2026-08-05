@@ -29,6 +29,8 @@ mod prompt;
 mod proposal;
 mod recall;
 mod skill;
+#[cfg(test)]
+mod testing;
 
 use std::process::ExitCode;
 use std::time::Duration;

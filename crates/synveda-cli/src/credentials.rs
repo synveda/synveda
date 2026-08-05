@@ -200,13 +200,17 @@ mod tests {
     /// test. Serialised, because the environment is process-global.
     struct Scratch {
         dir: PathBuf,
-        _guard: std::sync::MutexGuard<'static, ()>,
+        _guard: tokio::sync::MutexGuard<'static, ()>,
     }
 
     impl Scratch {
         fn new(name: &str) -> Self {
-            static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-            let guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            // The binary's one environment lock rather than a private one:
+            // `XDG_CONFIG_HOME` is read by the same credential resolution
+            // `api::tests` reaches through, so a lock only this module
+            // knows about is a lock that does not serialise the pair. See
+            // `crate::testing`.
+            let guard = crate::testing::ENV.blocking_lock();
             let dir = std::env::temp_dir().join(format!("synveda-cli-{name}"));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).expect("scratch dir");

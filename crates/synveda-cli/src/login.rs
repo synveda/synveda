@@ -493,7 +493,14 @@ mod tests {
 
     #[test]
     fn gateway_url_precedence_and_trailing_slash() {
-        // SAFETY: no other thread reads this variable in this test binary.
+        // The binary's one environment lock. This used to take none at
+        // all, on a comment asserting "no other thread reads this variable
+        // in this test binary" — true when written, false the moment
+        // `api::tests` started setting `SYNVEDA_GATEWAY` and reading it
+        // back through `Api::connect`. See `crate::testing`.
+        let _guard = crate::testing::ENV.blocking_lock();
+        // SAFETY: the lock above makes this the only thread touching the
+        // environment for the duration of the test.
         unsafe { std::env::remove_var("SYNVEDA_GATEWAY") };
         assert_eq!(gateway_url(None), "http://127.0.0.1:8120");
         assert_eq!(

@@ -338,12 +338,12 @@ mod tests {
     async fn every_call_carries_the_same_traceparent_to_the_wire() {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-        // `Api::connect` reads the environment; this is the credentials
-        // tests' lock discipline, in the async-aware form this test needs —
-        // a `std::sync::MutexGuard` held across an await is what clippy
-        // rejects, and rightly: it parks a thread the runtime wanted.
-        static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-        let _guard = LOCK.lock().await;
+        // `Api::connect` reads the environment, so this takes the binary's
+        // one environment lock. It used to be a `static LOCK` here, which
+        // protected this test from itself and from nothing else — and
+        // `login::tests` mutates `SYNVEDA_GATEWAY` too. See `crate::testing`
+        // for the failure that cost.
+        let _guard = crate::testing::ENV.lock().await;
 
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
