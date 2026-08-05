@@ -1,6 +1,6 @@
 # Backlog status
 
-86 features parsed from docs/SYNVEDA_FEATURES.md — one file per
+88 features parsed from docs/SYNVEDA_FEATURES.md — one file per
 feature in this directory. Phases per the Sequencing section. This file and the
 per-feature files are **hand-maintained**; `node scripts/check-backlog.mjs`
 (in `make ci`) asserts that the three agree, and writes nothing.
@@ -3430,6 +3430,8 @@ lifetime and the 12-hour cap as the compensating controls until then._
 
 - [ ] [ADPT-4: Python & TS SDKs](ADPT-4.md)
 - [ ] [ADPT-5: Importers](ADPT-5.md)
+- [ ] [ADPT-6: LlamaIndex memory adapter](ADPT-6.md)
+- [ ] [ADPT-7: Semantic Kernel memory connector](ADPT-7.md)
 - [ ] [PRMT-3: A/B channels for prompts](PRMT-3.md)
 - [ ] [SKIL-5: Skill usage telemetry](SKIL-5.md)
 - [ ] [MEM-7: Identity stitching](MEM-7.md)

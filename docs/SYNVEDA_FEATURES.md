@@ -736,6 +736,16 @@ ADPT-4 Python & TS SDKs (M)
 ADPT-5 Importers (M) [Phase 4]
   claude-mem, Cognee, mem0 export formats → Synveda records with provenance=imported.
   AC: round-trip fidelity report per source.
+ADPT-6 LlamaIndex memory adapter (M) [Phase 4]
+  Synveda behind LlamaIndex's memory and retriever interfaces; governed recall as a
+  retriever, writes host-owned (ADR-0057 decision 6) so the same turn is not also
+  stored by ADPT-2's tool. AC: example app persists and recalls across sessions, and
+  a run with the adapter and the MCP server both configured writes each turn once.
+ADPT-7 Semantic Kernel memory connector (M) [Phase 4]
+  Synveda behind SK's memory abstraction and recall as a plugin; .NET and Python
+  surfaces over one governed corpus, writes host-owned on ADPT-6's rule.
+  AC: example app persists and recalls across sessions on both surfaces, and the
+  two answer the same corpus for one identity.
 
 ──────────────────────────────────────────────
 EPIC OPS — Deployment & operations
@@ -804,5 +814,5 @@ Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-
    FLOW-8. Nothing is cut and the phase's contents are unchanged.)
    → Demo: Entra/Okta live, spec-compliant governed skills into Claude Code + Cursor,
      LoCoMo/LongMemEval scores published, Helm install.
-Phase 4 ecosystem: ADPT-4,5 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6 · CNSL-3,4 · AUD-5 · AUTHZ-6
+Phase 4 ecosystem: ADPT-4,5,6,7 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6 · CNSL-3,4 · AUD-5 · AUTHZ-6
 ──────────────────────────────────────────────
