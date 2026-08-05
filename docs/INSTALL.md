@@ -96,6 +96,46 @@ synveda audit verify --tenant <id>           # the chain
 
 Traces are at <http://localhost:16686>.
 
+## Connect an AI client
+
+`synveda mcp` serves governed memory to any MCP client over stdio: `recall` to
+search or fetch, and `remember` to store one durable fact in your own personal
+scope. You do not have to write the config by hand —
+
+```sh
+synveda mcp install --client claude-desktop   # or: --client cursor
+synveda mcp install --client cursor --dry-run # see it first
+```
+
+It changes one key in the client's own config file and writes everything else
+back as it found it, so your other MCP servers are untouched. An existing
+`synveda` entry that differs is reported rather than replaced; pass `--force`
+if you meant to replace it. Restart the client afterwards.
+
+For a client this release does not know, `synveda mcp install --print` gives you
+the entry to place yourself, and `--config <path>` writes a config kept
+somewhere unusual — a project-level `.cursor/mcp.json`, say.
+
+**Claude Code needs none of this.** Its plugin already carries the entry, and it
+launches the server with the write tool switched off, because its `Stop` hook is
+already recording your turns — the tool would store each one a second time.
+
+If a client will not connect, the server's diagnostics are on its stderr, which
+is where clients collect them — Claude Desktop keeps them in
+`~/Library/Logs/Claude/mcp-server-synveda.log`. It is quiet by default; add
+`RUST_LOG` to the entry's `env` to turn it up:
+
+```json
+"synveda": {
+  "command": "/usr/local/bin/synveda",
+  "args": ["mcp", "--writes", "tool"],
+  "env": { "RUST_LOG": "synveda=debug,rmcp=debug" }
+}
+```
+
+`rmcp` is the protocol SDK, so including it shows the frames themselves — which
+is what you want when the handshake is the thing failing.
+
 ## Choosing an embedder — do this before writing records
 
 ```sh

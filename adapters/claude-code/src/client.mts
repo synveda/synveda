@@ -1,9 +1,15 @@
 /**
- * The HTTP client for the two primitives.
+ * The HTTP client for the two primitives the hooks own.
  *
  * Every call is deadline-bounded and returns a result rather than
  * throwing: the caller's contract is to degrade (ADR-0027 decision 3),
  * and an exception is a poor way to express "no context this time".
+ *
+ * Recall is deliberately absent. It was here for the hand-written MCP loop
+ * and for nothing else, and since ADR-0057 decision 4 that loop is
+ * `synveda mcp` — so this file is back to exactly the two primitives with
+ * a hook behind them, which is also the only two that must degrade in
+ * silence.
  */
 
 import { randomBytes } from "node:crypto";
@@ -14,8 +20,6 @@ import type {
   InjectResponse,
   ObserveRequest,
   ObserveResponse,
-  RecallRequest,
-  RecallResponse,
 } from "./types.mjs";
 
 export const CLIENT_NAME = "claude-code";
@@ -39,20 +43,6 @@ export async function observe(
   request: ObserveRequest,
 ): Promise<CallResult<ObserveResponse>> {
   return call<ObserveResponse>(config, bearer, "/v1/observe", request);
-}
-
-/**
- * The third primitive (CTX-5, ADR-0042 decision 15). Unlike the hooks,
- * this one's caller *asked*, so the MCP tool reports what goes wrong
- * rather than degrading silently — but the transport contract is the
- * same, because a result is still easier to be honest with than a throw.
- */
-export async function recall(
-  config: AdapterConfig,
-  bearer: string,
-  request: RecallRequest,
-): Promise<CallResult<RecallResponse>> {
-  return call<RecallResponse>(config, bearer, "/v1/recall", request);
 }
 
 async function call<T>(

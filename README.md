@@ -210,17 +210,16 @@ crates/
   synveda-identity    OIDC, JIT provisioning, hierarchy sync
   synveda-audit       the hash-chained log
   synveda-gateway     axum HTTP — the only binary that faces the outside world
-  synveda-cli         synveda login / proposal review / channel rollback / ...
+  synveda-cli         synveda login / proposal review / channel rollback / mcp / ...
   synveda-eval        the eval harness and its gates
 adapters/
-  claude-code/        hooks + the recall MCP tool (TypeScript)
-  mcp-server/         stub — lands with ADPT-2
+  claude-code/        hooks (TypeScript); its MCP entry launches `synveda mcp`
 sdks/                 rust, typescript, python — stubs, Phase 4
 policies/             Cedar policy packs
 deploy/compose/       the dev environment
-demos/                49 runnable acceptance demos, one per delivered feature
+demos/                55 runnable acceptance demos, one per feature
 evals/                corpora, scenarios, and the committed baselines CI gates on
-docs/                 the seed, the tech plan, the backlog, and 51 ADRs
+docs/                 the seed, the tech plan, the backlog, and 58 ADRs
 ```
 
 **Dependency rule:** `types ← {policy, store, identity, audit} ← retrieval/ingest

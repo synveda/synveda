@@ -62,12 +62,14 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId)> {
     Some((pool, id))
 }
 
-/// Seeds an org → user leaf → identity, and stages one event with a work
-/// signal. Returns the identity's scope, id, and the staged event id.
+/// Seeds an org → user leaf → identity, and stages one event of `kind`
+/// with a work signal. Returns the identity's scope, id, and the staged
+/// event id.
 async fn stage_one(
     pool: &PgPool,
     tenant: TenantId,
     text: &str,
+    kind: ObserveKind,
 ) -> (ScopeId, IdentityId, ObserveEventId) {
     let mut tx = pool.begin().await.expect("begin");
     let org = hierarchy::create(
@@ -116,7 +118,7 @@ async fn stage_one(
         "queue-session",
         &[NewObserveEvent {
             idempotency_key: format!("q-{}", ObserveEventId::new().as_uuid().simple()),
-            kind: ObserveKind::TranscriptDelta,
+            kind,
             payload: serde_json::json!({"text": text}),
             occurred_at: chrono::Utc::now(),
             redactions: None,
@@ -154,7 +156,13 @@ async fn signals_read_redeliver_and_archive_exactly_once() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (scope, owner, event_id) = stage_one(&pool, tenant, "queue roundtrip").await;
+    let (scope, owner, event_id) = stage_one(
+        &pool,
+        tenant,
+        "queue roundtrip",
+        ObserveKind::TranscriptDelta,
+    )
+    .await;
 
     // First read: the signal, invisible to a second reader while vt runs.
     let signals = read_own(&pool, tenant, 1, 100).await;
@@ -240,5 +248,89 @@ async fn malformed_messages_surface_with_their_archive_handle() {
         observe::archive_signal(&mut conn, malformed)
             .await
             .expect("archive garbage")
+    );
+}
+
+/// The stored vocabulary and [`ObserveKind`] are two spellings of one list,
+/// and nothing but this test makes them agree. The staging column is
+/// CHECK-constrained (migration 0012, widened to four values by 0035 for
+/// ADR-0057 decision 8's `assertion`), so a variant added in Rust without a
+/// migration inserts fine in every unit test and fails at the database on
+/// the first real write — a failure that surfaces in production traffic
+/// rather than in CI.
+///
+/// Reads the constraint back from the catalogue rather than restating it:
+/// a test that hard-codes the four strings passes when the migration was
+/// never applied.
+#[tokio::test]
+async fn the_check_constraint_admits_exactly_the_observe_kinds_rust_knows() {
+    // Reads nothing from the queue, but `admitted_tenant` purges it — so
+    // this holds the same lock as everything else here, or it purges the
+    // backlog out from under a test that is mid-read.
+    let _serial = serial().await;
+    let Some((pool, _tenant)) = admitted_tenant().await else {
+        return;
+    };
+    let definition: String = sqlx::query_scalar!(
+        r#"select pg_get_constraintdef(oid) as "def!"
+           from pg_constraint
+           where conname = 'observe_events_kind_check'"#
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the kind CHECK constraint exists");
+
+    for kind in ObserveKind::ALL {
+        assert!(
+            definition.contains(&format!("'{}'", kind.as_str())),
+            "ObserveKind::{kind:?} ({}) is missing from {definition} — \
+             a migration widening the CHECK is missing",
+            kind.as_str()
+        );
+    }
+    // The other direction: a value the database accepts that Rust cannot
+    // name is just as broken, and is how a removed variant leaves rows
+    // nothing can parse. Counting quoted literals is enough — the
+    // constraint is a single `= ANY (ARRAY[...])` over string literals.
+    let admitted = definition.matches("::text").count();
+    assert_eq!(
+        admitted,
+        ObserveKind::ALL.len(),
+        "the CHECK admits {admitted} values but ObserveKind has {} — {definition}",
+        ObserveKind::ALL.len()
+    );
+}
+
+/// The point of the migration, end to end: an `assertion` reaches the
+/// staging buffer and reads back as one. Before 0035 this insert fails the
+/// CHECK — which is exactly what a model-driven `remember` call would have
+/// hit on its first use (ADR-0057 decision 8).
+#[tokio::test]
+async fn an_assertion_buffers_and_reads_back_with_its_kind() {
+    let _guard = serial().await;
+    let Some((pool, tenant)) = admitted_tenant().await else {
+        return;
+    };
+    let (_scope, _owner, event_id) = stage_one(
+        &pool,
+        tenant,
+        "the deploy target is eu-west-1",
+        ObserveKind::Assertion,
+    )
+    .await;
+
+    let mut tx = rls::begin_tenant_tx(&pool, tenant)
+        .await
+        .expect("tenant tx");
+    let staged = observe::load_event(&mut tx, tenant, event_id)
+        .await
+        .expect("load staged event")
+        .expect("the assertion is staged");
+    assert_eq!(
+        staged.kind,
+        ObserveKind::Assertion,
+        "the kind must survive the round trip — if it degrades to \
+         transcript_delta the model-asserted distinction is lost at the \
+         first hop (ADR-0057 decision 8)"
     );
 }

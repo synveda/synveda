@@ -1,0 +1,183 @@
+{
+  "client": "claude-desktop",
+  "era": "legacy",
+  "launch": [
+    "mcp",
+    "--writes",
+    "tool"
+  ],
+  "provenance": {
+    "kind": "captured",
+    "note": "Captured from Claude Desktop 1.25927.0 (macOS, 2026-08-05), the second of its two launches: the agent session. `clientInfo.name` is `local-agent-mode-synveda` — the server name is in it — and this handshake negotiates capabilities the probe does not: `roots.listChanged` and an `io.modelcontextprotocol/ui` extension. It carries the two `tools/call` frames the acceptance criterion wants, one per tool, composed by the model rather than by us: `recall` with a `query` and a `limit`, and `remember` with prose. Both answer `isError` with readable text because this machine holds no credential, which is the failure posture ADR-0057 inverts from the hooks — a caller who asked is told."
+  },
+  "exchange": [
+    {
+      "send": {
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {
+            "roots": {
+              "listChanged": true
+            },
+            "extensions": {
+              "io.modelcontextprotocol/ui": {
+                "mimeTypes": [
+                  "text/html;profile=mcp-app"
+                ]
+              }
+            }
+          },
+          "clientInfo": {
+            "name": "local-agent-mode-synveda",
+            "version": "1.0.0"
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 0
+      },
+      "expect": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {
+            "tools": {}
+          },
+          "serverInfo": {
+            "name": "synveda",
+            "version": "0.1.0"
+          },
+          "instructions": "Synveda is governed organisational memory. `recall` answers from every scope this identity's policy permits, which is wider than what a session-start context block composes from — reach for it when the answer might already be known here rather than reasoning from scratch. Results say whether they were reviewed and how fresh they are; weigh them on that."
+        }
+      }
+    },
+    {
+      "send": {
+        "method": "notifications/initialized",
+        "jsonrpc": "2.0"
+      },
+      "expect": null
+    },
+    {
+      "send": {
+        "method": "tools/list",
+        "jsonrpc": "2.0",
+        "id": 1
+      },
+      "expect": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "tools": [
+            {
+              "name": "recall",
+              "title": "Recall governed memory",
+              "description": "Search or fetch governed organisational memory. Ask a question with `query` to search every scope your policy lets you read — which is wider than the scopes your session-start context block composes from — or pass `ids` to fetch the full body of records a block named as `(recall <id>)`. Use `as_of` to ask what was known at a past instant. Results carry their channel (published means reviewed, derived means unreviewed), provenance, and validity window, so you can weigh them. What you may read is decided at call time under your own identity: material you have no access to is simply absent from the answer.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "The question to answer. Mutually exclusive with `ids`."
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Record ids to fetch in full, as an inject block printed them. Mutually exclusive with `query`."
+                  },
+                  "as_of": {
+                    "type": "string",
+                    "description": "RFC 3339 instant. Serve bodies as the database held them then (\"what did we know on 2026-03-03\"). Rewinds the corpus, never your access."
+                  },
+                  "valid_at": {
+                    "type": "string",
+                    "description": "RFC 3339 instant. Which assertions were true about the world then. Defaults to `as_of`."
+                  },
+                  "limit": {
+                    "type": "number",
+                    "description": "How many records a query may return (1-32, default 32)."
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "remember",
+              "title": "Remember a fact",
+              "description": "Store one durable fact in your own personal memory, so a future session can recall it. Use it for something worth keeping past this conversation — a decision and its reason, a preference, a procedure that worked. Do not narrate the session: this is not a log, and material that is only useful right now makes future recall worse. It writes to your own personal scope and nowhere else — never to a team, a department, or another person — and nothing reaches a shared scope without a human review. Secrets are scanned for and refused or quarantined before anything is stored, so do not pass credentials in the hope of storing them.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "The fact to remember, stated so it still makes sense to a reader who has none of this conversation's context."
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "send": {
+        "method": "tools/call",
+        "params": {
+          "name": "recall",
+          "arguments": {
+            "query": "Synveda architecture and governance model",
+            "limit": 5
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 2
+      },
+      "expect": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Not signed in to Synveda. Run `synveda login` in a terminal, then try again."
+            }
+          ],
+          "isError": true
+        }
+      }
+    },
+    {
+      "send": {
+        "method": "tools/call",
+        "params": {
+          "name": "remember",
+          "arguments": {
+            "text": "Synveda's Phase 1 vertical slice is defined as OIDC login → observe a transcript → inject on the next session, validated end-to-end against a live Claude Code session before scope expands."
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 3
+      },
+      "expect": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Not signed in to Synveda. Run `synveda login` in a terminal, then try again."
+            }
+          ],
+          "isError": true
+        }
+      }
+    }
+  ]
+}

@@ -62,29 +62,30 @@ const DEMO_TEAMS: &[(&str, &str, &str)] = &[
     ("eng", "payments", "Payments"),
     ("sales", "emea", "EMEA"),
 ];
-/// `(email, given, family, group)` — the group is convention-shaped
+/// `(local-part, given, family, group)` — the group is convention-shaped
 /// (`synveda-<department>-<team>`), which is what makes placement a
 /// mapping rather than an assignment.
+///
+/// The address is completed with the tenant slug by [`demo_email`], for the
+/// same reason [`operator_email`] does it: two deployments on one laptop
+/// must not share a login. These were hard-coded at `@demo.localhost` while
+/// the operator beside them was already slug-derived and carried a test
+/// saying why — the rule was written down and then not applied here.
+///
+/// It is not only tidiness. `init` sets a password for everyone it creates,
+/// and Rauthy refuses one it has seen in its last three; two deployments
+/// writing the same address means the second cannot set its password and
+/// [`ensure_user`] falls back to leaving whatever is there. A shared login
+/// whose password nobody can restore is the failure that took
+/// `demos/adpt-1-claude-code.sh` and `demos/auth-2-jit-provisioning.sh`
+/// down together, and this constant is the same shape one layer up — with a
+/// *different* `DEMO_PASSWORD` from the one those demos use, so the two
+/// writers could never have agreed.
 const DEMO_PEOPLE: &[(&str, &str, &str, &str)] = &[
-    (
-        "alice@demo.localhost",
-        "Alice",
-        "Chen",
-        "synveda-eng-platform",
-    ),
-    (
-        "bob@demo.localhost",
-        "Bob",
-        "Okafor",
-        "synveda-eng-platform",
-    ),
-    (
-        "carol@demo.localhost",
-        "Carol",
-        "Diaz",
-        "synveda-eng-payments",
-    ),
-    ("dan@demo.localhost", "Dan", "Novak", "synveda-sales-emea"),
+    ("alice", "Alice", "Chen", "synveda-eng-platform"),
+    ("bob", "Bob", "Okafor", "synveda-eng-platform"),
+    ("carol", "Carol", "Diaz", "synveda-eng-payments"),
+    ("dan", "Dan", "Novak", "synveda-sales-emea"),
 ];
 const DEMO_PASSWORD: &str = "Synveda-Demo-Passw0rd!";
 
@@ -217,7 +218,7 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         }
         step(6, "the ACME demo organisation");
         println!("    people and groups are in the IdP; scopes are created after you log in");
-        seed_demo_people().await?;
+        seed_demo_people(&plan.slug).await?;
     }
 
     let elapsed = started.elapsed();
@@ -242,7 +243,8 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         println!("    synveda init --demo --dry-run   # prints the exact commands");
         println!();
         println!("    # demo logins (bundled IdP): password {DEMO_PASSWORD}");
-        for (email, _, _, group) in DEMO_PEOPLE {
+        for (local, _, _, group) in DEMO_PEOPLE {
+            let email = demo_email(local, &plan.slug);
             println!("    #   {email:<26} {group}");
         }
     }
@@ -372,7 +374,7 @@ async fn converge_rauthy(plan: &Plan) -> Result<(), String> {
     Ok(())
 }
 
-async fn seed_demo_people() -> Result<(), String> {
+async fn seed_demo_people(slug: &str) -> Result<(), String> {
     let http = idp_client()?;
     for (_, _, team_group) in DEMO_TEAMS
         .iter()
@@ -380,8 +382,9 @@ async fn seed_demo_people() -> Result<(), String> {
     {
         ensure_group(&http, &team_group).await?;
     }
-    for (email, given, family, group) in DEMO_PEOPLE {
-        ensure_user(&http, email, given, family, group).await?;
+    for (local, given, family, group) in DEMO_PEOPLE {
+        let email = demo_email(local, slug);
+        ensure_user(&http, &email, given, family, group).await?;
         println!("    {email}  {group}");
     }
     Ok(())
@@ -420,6 +423,20 @@ async fn ensure_group(http: &reqwest::Client, group: &str) -> Result<(), String>
 /// refuses a password it has seen in the last three, which is exactly the
 /// state a second `init` is in, and a re-run that fails on its own
 /// idempotence is not idempotent (ADR-0055 decision 7).
+///
+/// **That fallback is only correct while this command is the sole writer of
+/// the address.** It reads "Rauthy would not take the password" as "the
+/// password is already the one I want", and those are the same fact only if
+/// nothing else has set a different one in between. If something has, the
+/// constant is in the history without being current, no `init` can put it
+/// back, and the login is unrecoverable — which is precisely what happened
+/// to `alice@demo.localhost` when this command and two demo scripts wrote
+/// the same address with two different passwords. Slug-derived addresses
+/// ([`demo_email`], [`operator_email`]) are what make the assumption true,
+/// so they are the reason this stays simple rather than growing a
+/// delete-and-recreate path — which would be wrong here anyway: the
+/// operator goes through this function, and minting a new `sub` for them
+/// would orphan the org-admin binding their deployment depends on.
 async fn ensure_user(
     http: &reqwest::Client,
     email: &str,
@@ -537,6 +554,12 @@ fn idp_refusal(method: &str, path: &str, status: reqwest::StatusCode, body: &str
 /// tenant slug so two deployments on one laptop do not share an operator.
 fn operator_email(slug: &str) -> String {
     format!("operator@{slug}.localhost")
+}
+
+/// A demo person's login for this deployment, on [`operator_email`]'s rule
+/// and for [`DEMO_PEOPLE`]'s reasons.
+fn demo_email(local: &str, slug: &str) -> String {
+    format!("{local}@{slug}.localhost")
 }
 
 // ── compose, environment, waiting ───────────────────────────────────────
@@ -894,14 +917,14 @@ mod tests {
                 "team {team} names department {department}, which is not declared"
             );
         }
-        for (email, _, _, group) in DEMO_PEOPLE {
+        for (local, _, _, group) in DEMO_PEOPLE {
             let expected: Vec<String> = DEMO_TEAMS
                 .iter()
                 .map(|(department, team, _)| format!("synveda-{department}-{team}"))
                 .collect();
             assert!(
                 expected.iter().any(|candidate| candidate == group),
-                "{email} is in {group}, which no declared team maps from"
+                "{local} is in {group}, which no declared team maps from"
             );
         }
     }
@@ -909,5 +932,31 @@ mod tests {
     #[test]
     fn two_deployments_on_one_laptop_do_not_share_an_operator() {
         assert_ne!(operator_email("acme"), operator_email("globex"));
+    }
+
+    /// The same rule, for the people the operator was already following.
+    ///
+    /// This assertion existed for `operator_email` alone while `DEMO_PEOPLE`
+    /// sat hard-coded at `@demo.localhost` two hundred lines above it — the
+    /// rule was written down, tested, and then not applied to the constant
+    /// beside it. `init` sets a password for everyone it creates and Rauthy
+    /// refuses one it has seen recently, so a shared address is a login the
+    /// second deployment cannot fix.
+    #[test]
+    fn two_deployments_on_one_laptop_do_not_share_a_demo_person_either() {
+        for (local, _, _, _) in DEMO_PEOPLE {
+            assert_ne!(
+                demo_email(local, "acme"),
+                demo_email(local, "globex"),
+                "{local} is the same login in both deployments"
+            );
+        }
+        // And no demo person collides with the operator, whose address is
+        // built by the same rule.
+        let taken: Vec<String> = DEMO_PEOPLE
+            .iter()
+            .map(|(local, _, _, _)| demo_email(local, "acme"))
+            .collect();
+        assert!(!taken.contains(&operator_email("acme")), "{taken:?}");
     }
 }

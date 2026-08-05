@@ -46,6 +46,10 @@ url = { workspace = true }
 [dev-dependencies]
 base64 = { workspace = true }
 http-body-util = { workspace = true }
+# `InMemorySpanExporter`, so FND-5's traceparent test can read the spans the
+# gateway would have exported instead of asserting on a header it parsed.
+# Dev-only: the shipped path takes `opentelemetry_sdk` without it.
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
 # The AUTH-1 AC test's mock IdP signs RS256 tokens and checks PKCE itself.
 jsonwebtoken = { workspace = true }
 # Drives the mock IdP's authorize redirect the way a browser would.

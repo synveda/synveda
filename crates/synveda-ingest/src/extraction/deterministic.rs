@@ -218,11 +218,21 @@ impl Extractor for DeterministicExtractor {
 
 /// Kind routes first (the client told us what this is); transcript deltas
 /// fall through to keyword heuristics, default `fact`.
+///
+/// `assertion` takes the keyword path with them, and deliberately. It is the
+/// one kind that says nothing about *class*: "a model composed this and
+/// chose to store it" (ADR-0057 decision 8) is a claim about who put the
+/// content on the wire, not about what the content is — a model asserts
+/// preferences, procedures and decisions as readily as bare facts. Routing
+/// it to a fixed class at `KIND_CONFIDENCE` would be asserting a
+/// classification the kind does not carry, so the text is read the same way
+/// a transcript delta's is, and the provenance claim rides on the record's
+/// `provenance.kind` instead (worker.rs).
 fn classify(kind: ObserveKind, text: &str) -> (RecordClass, f64) {
     match kind {
         ObserveKind::Decision => (RecordClass::Decision, KIND_CONFIDENCE),
         ObserveKind::ToolResult => (RecordClass::Episode, KIND_CONFIDENCE),
-        ObserveKind::TranscriptDelta => {
+        ObserveKind::TranscriptDelta | ObserveKind::Assertion => {
             if PREFERENCE.is_match(text) {
                 (RecordClass::Preference, KEYWORD_CONFIDENCE)
             } else if DECISION.is_match(text) {
@@ -333,4 +343,73 @@ fn truncate(text: &str) -> String {
         .rfind(' ')
         .unwrap_or(MAX_CONTENT_CHARS);
     format!("{}…", &text[..cut])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The kinds whose class the client effectively told us, and the class
+    /// each one means. `assertion` is absent by design — see below.
+    #[test]
+    fn kind_routing_is_fixed_for_the_kinds_that_carry_a_class() {
+        assert_eq!(
+            classify(ObserveKind::Decision, "anything at all").0,
+            RecordClass::Decision
+        );
+        assert_eq!(
+            classify(ObserveKind::ToolResult, "anything at all").0,
+            RecordClass::Episode
+        );
+    }
+
+    /// ADR-0057 decision 8: `assertion` is a provenance claim, not a class
+    /// claim. It must read the text exactly as a transcript delta does —
+    /// identical class *and* identical confidence — because a model asserts
+    /// preferences and procedures as readily as bare facts, and pinning it
+    /// to one class would assert a classification the kind never carried.
+    #[test]
+    fn assertion_classifies_exactly_as_a_transcript_delta_does() {
+        let texts = [
+            "I prefer tabs over spaces",
+            "we decided to ship on Friday",
+            "to deploy, run make release then tag it",
+            "Acme Corp is the customer",
+            "the staging cluster is in eu-west-1",
+            "",
+        ];
+        for text in texts {
+            assert_eq!(
+                classify(ObserveKind::Assertion, text),
+                classify(ObserveKind::TranscriptDelta, text),
+                "assertion and transcript_delta disagreed on {text:?}"
+            );
+        }
+    }
+
+    /// The keyword path is what both of them share, so it is worth pinning
+    /// that it actually discriminates — otherwise the test above passes on
+    /// a routing that collapsed everything to `fact`.
+    #[test]
+    fn the_shared_keyword_path_still_discriminates() {
+        let classes = [
+            "I prefer tabs over spaces",
+            "we decided to ship on Friday",
+            "how to deploy: then run make release",
+        ]
+        .map(|text| classify(ObserveKind::Assertion, text).0);
+        assert_eq!(
+            classes,
+            [
+                RecordClass::Preference,
+                RecordClass::Decision,
+                RecordClass::Procedure
+            ]
+        );
+        assert_eq!(
+            classify(ObserveKind::Assertion, "the sky is a colour").0,
+            RecordClass::Fact,
+            "the default"
+        );
+    }
 }

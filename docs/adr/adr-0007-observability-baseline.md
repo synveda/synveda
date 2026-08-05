@@ -1,9 +1,83 @@
 # ADR-0007: Observability via the tracing facade, with OTel export and metrics owned by the gateway binary
 
-- **Status**: Accepted
+- **Status**: Accepted, **deferred clause landed 2026-08-05** (see below)
 - **Date**: 2026-07-18
 - **Feature(s)**: FND-5
 - **Deciders**: sujitn
+
+## The deferred clause, landed 2026-08-05
+
+This ADR ends its options list with one sentence of deferral:
+
+> W3C `traceparent` extraction from incoming requests is deliberately
+> deferred to Phase 1 (ADPT-1/CTX-3), when external callers exist; the
+> baseline emits new root traces per request.
+
+**Phase 1 shipped without it, and so did Phases 2 and 3 up to this point.**
+ADPT-1 went further than the deferral asked and started *sending* a
+`traceparent` on every hook call — ADR-0027's observability note promises
+one — but nothing on this side ever read it, so the header was decorative
+and every trace still began at the gateway. The gap was found while wiring
+ADPT-2's MCP server, when the obvious next step (send a `traceparent` from
+the CLI too) turned out to have nothing to join.
+
+No decision changes: this is the clause being met, four features late. The
+propagator is installed in `telemetry::init` and the extraction happens in
+`app::make_request_span`, which is where the request span is already built
+and therefore the only place a parent can be set before anything nests
+under it. A request with no usable context still roots its own trace,
+exactly as the baseline did.
+
+Two behaviours of `TraceContextPropagator` are recorded in
+`tests/observability.rs` rather than worked around, because a length check
+or a version check here would be the first line of a second implementation
+of a protocol we took a library for: a trace-id shorter than W3C's 32 hex
+digits is accepted and zero-padded, and a `traceparent` from a future
+revision is parsed forward (which W3C asks for). Both are pinned so a
+tightened propagator fails a test rather than changing behaviour silently.
+
+**`X-Synveda-Client` is read too, for the same reason and at the same
+place.** ADR-0027's observability note promises the header alongside the
+`traceparent`, and ADPT-1's hooks have sent `claude-code/0.1.0` on every
+call since they shipped — into a gateway that read neither. It is now a
+`synveda.client` field on the request span, so a trace says which *surface*
+caused the work: the bearer, the tenant and the route are identical whether
+a person ran `synveda recall` or a model called the recall tool through
+ADPT-2's server, and that was the one attribution nothing could supply.
+The adapter needed no change; its header simply started meaning something.
+
+The value is caller-controlled, so it is bounded at 64 characters and
+refused whole outside a conservative character set — absent, unreadable and
+refused all leave the field unset rather than recording `"unknown"`, since
+a client that says `unknown` and one that says nothing are different facts.
+**It must never become a metric label**: `track_http_metrics` labels by
+matched route precisely to keep Prometheus cardinality bounded, and a
+caller-supplied string there is an unbounded series per unique value. A
+span field carries no such risk, which is why the attribution lives only
+there.
+
+**A second defect surfaced while demonstrating the first, and it was the
+larger one.** The single `EnvFilter` this ADR's init block put on the
+registry applied to the span exporter as well as the console, so
+`RUST_LOG=warn` — a thing operators do to production — stopped `info`-level
+spans being recorded at all and with them every exported trace. Measured:
+at `warn`, a request carrying a `traceparent` reached Jaeger not at all; at
+`info`, it arrived. This ADR's own acceptance criterion, "a single trace
+visible in Jaeger spanning an end-to-end request", silently stopped holding
+for anyone who turned their logs down, and nothing said so. The filters are
+now per-layer: the console keeps `RUST_LOG`, and the exporter carries a
+fixed `INFO` floor. Trade-off stated rather than discovered — `RUST_LOG=debug`
+no longer deepens what is *traced*, only what is printed, because a trace is
+an operational contract with an SLO attached and widening it should be a
+decision rather than a side effect of an environment variable.
+
+**A caller's trace id is caller-controlled and therefore not evidence.**
+This ADR's compliance note already fixes what that can cost — "traces are
+plumbing for the audit story, not a substitute for it: AUD-1's
+hash-chained events remain the tamper-evident record" — and that is now
+load-bearing rather than incidental. Nothing authorises off a trace id, no
+audit event derives from one, and the PDP never sees one; a forged
+`traceparent` buys a misleading Jaeger view and nothing else.
 
 ## Context
 

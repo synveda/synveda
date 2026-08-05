@@ -28,7 +28,7 @@ One file per **group**; a group is one eval actor's worth of fixtures.
       "name": "alpha-decision-blake3",
       "note": "optional — why this fixture is interesting, or what it is expected to miss and why",
       "input": {
-        "kind": "transcript_delta | tool_result | decision",
+        "kind": "transcript_delta | tool_result | decision | assertion",
         "session_id": "alpha-1",
         "occurred_at": "2026-07-20T10:00:00Z",
         "payload": { "text": "..." }

@@ -80,6 +80,15 @@ jsonwebtoken = { version = "10", default-features = false, features = [
     "use_pem",
     "rust_crypto",
 ] }
+# JSONC with byte ranges, for `synveda mcp install --client zed` (ADPT-2,
+# ADR-0057 decision 10 as amended). Zed's settings.json is a file its owner
+# edits — comments, trailing commas — which serde_json rejects outright and
+# a formatter would strip. This parses it for ranges so the one key we write
+# is spliced textually and everything else survives byte-for-byte. MIT.
+jsonc-parser = { version = "0.33", default-features = false, features = [
+    "cst",
+    "serde_json",
+] }
 # The redaction scanner (MEM-2, ADR-0021): finite automata only — no
 # backtracking, so a hostile payload cannot pathologically slow the ack
 # path. MIT/Apache-2.0.
@@ -89,6 +98,10 @@ regex = "1"
 # backend for the Claude API: schannel on Windows, OpenSSL 3 (Apache-2.0)
 # on Linux — the rustls stack pulls ring/aws-lc, whose licences deny.toml
 # does not admit (same reasoning as jsonwebtoken above).
+# The official MCP Rust SDK (ADPT-2, ADR-0057 as amended). Server + stdio
+# only: `transport-io` rather than the HTTP transports, so no second
+# listener and no reqwest tree enters the CLI for this.
+rmcp = { version = "3.1", default-features = false, features = ["server", "macros", "transport-io"] }
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "native-tls",

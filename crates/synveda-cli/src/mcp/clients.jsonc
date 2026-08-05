@@ -1,0 +1,84 @@
+// The MCP clients `synveda mcp install` knows how to configure.
+//
+// This file is data, and it is data on purpose. Seed §2 principle 6 is law:
+// "The harness is a guest… Supporting a new harness must never require
+// touching the core." A `match client { "cursor" => …, "zed" => … }` is a
+// vocabulary every new guest has to be added to by us, in a release — the
+// same mistake ADR-0057 decision 6 refused when it made `--writes` describe
+// a capability instead of naming harnesses. There are ~40 MCP client
+// platforms (SYNVEDA_FEATURES A3); we are not going to enumerate them, and
+// a user should not have to wait for us to try.
+//
+// So this table ships embedded, and `~/.config/synveda/mcp-clients.jsonc`
+// is read after it through **the identical loader**, adding clients or
+// overriding these. Same schema, same code path — if the extension path
+// were second-class it would rot, and the way to keep it first-class is for
+// the built-ins to use it too.
+//
+// It is JSONC rather than JSON so the file you maintain can carry your own
+// notes, which is the same courtesy `--client zed` extends to yours.
+//
+// ── Schema ────────────────────────────────────────────────────────────
+//
+//   "<client-name>": {
+//     "key":     the top-level key holding the client's server map.
+//                `mcpServers` is the ecosystem's; some clients differ.
+//     "syntax":  "json"  — an app-generated file, rendered whole.
+//                "jsonc" — a file its owner edits. Written by splicing the
+//                one key we own; comments and layout survive byte-for-byte.
+//                Declared rather than sniffed: a JSONC file that happens to
+//                have no comments in it today must still not be reformatted.
+//     "restart": what to tell the user once it is written.
+//     "path":    where the config lives, by OS. Keys are Rust's
+//                `std::env::consts::OS` values — "macos", "linux",
+//                "windows" — plus "any" for a client whose path does not
+//                vary. `~` is your home directory and `$VAR` is an
+//                environment variable. An OS that is absent here is one the
+//                vendor documents no path for, and `install` says so and
+//                refuses rather than guessing at a file nothing reads.
+//   }
+{
+  // modelcontextprotocol.io, "Connect to local MCP servers": macOS and
+  // Windows are the two Claude Desktop ships for, and the two its
+  // documentation gives a path for. Linux is absent because the vendor
+  // does not document one, not because we forgot.
+  "claude-desktop": {
+    "key": "mcpServers",
+    "syntax": "json",
+    "restart": "quit Claude Desktop completely and reopen it to pick this up",
+    "path": {
+      "macos": "~/Library/Application Support/Claude/claude_desktop_config.json",
+      "windows": "$APPDATA/Claude/claude_desktop_config.json"
+    }
+  },
+
+  // cursor.com/docs: `~/.cursor/mcp.json` is the global one;
+  // `.cursor/mcp.json` in a project is the per-project form, which
+  // `--config` reaches.
+  //
+  // Unrecorded: ADR-0057 decision 11 as amended names Claude Desktop and
+  // Zed as the corpus's two clients, because those are the two whose real
+  // frames are on disk. This entry stays because the phase demo goal names
+  // Cursor, but nothing here has been replayed against a real one.
+  "cursor": {
+    "key": "mcpServers",
+    "syntax": "json",
+    "restart": "restart Cursor to pick this up",
+    "path": { "any": "~/.cursor/mcp.json" }
+  },
+
+  // zed.dev/docs: one settings file for the whole editor, with servers as a
+  // key inside it rather than a file of their own — and Zed calls them
+  // context servers, so an entry written under `mcpServers` is one the
+  // client reads and finds nothing in. `.zed/settings.json` in a project is
+  // the per-project form, which `--config` reaches.
+  //
+  // Zed uses `~/.config` on macOS as well as Linux rather than Application
+  // Support, which is why this has no per-OS split.
+  "zed": {
+    "key": "context_servers",
+    "syntax": "jsonc",
+    "restart": "restart Zed to pick this up",
+    "path": { "any": "~/.config/zed/settings.json" }
+  }
+}

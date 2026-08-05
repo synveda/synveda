@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-backlog ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -89,8 +89,12 @@ eval-extraction-live:
 eval-check:
 	cargo run -q -p synveda-eval -- check
 
+# The full suite against a scratch database of its own, dropped afterwards
+# (kept on failure, and by KEEP_TEST_DB=1). It used to run against the
+# long-lived dev database and leave every tenant it admitted behind — see
+# scripts/db-test.sh for what that cost.
 db-test:
-	DATABASE_URL=$(DATABASE_URL) cargo test --workspace
+	DATABASE_URL=$(DATABASE_URL) bash scripts/db-test.sh
 
 fmt:
 	cargo fmt --all --check
@@ -110,6 +114,12 @@ deny:
 check-deps:
 	node scripts/check-crate-deps.mjs
 
+# SYNVEDA_FEATURES.md, docs/backlog/<ID>.md and STATUS.md describe one feature
+# set; this asserts they agree. Writes nothing — it replaced a generator that
+# wrote all three and discarded their hand-written narrative doing it.
+check-backlog:
+	node scripts/check-backlog.mjs
+
 # CLAUDE.md's licence rule on the npm side (CNSL-1, ADR-0056 decision 8).
 # Needs the workspace installed, so it runs after ts-build in `ci`.
 check-npm-licences:
@@ -123,4 +133,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-backlog eval-check ts-build check-npm-licences ts-test

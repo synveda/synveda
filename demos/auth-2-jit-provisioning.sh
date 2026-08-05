@@ -8,10 +8,17 @@
 # synveda-eng-platform, user alice in it) -> seed the acme/eng/platform
 # hierarchy through the admin API (dev-mode gateway phase) -> boot the
 # gateway in OIDC mode -> alice's first login lands her personal scope
-# under acme/eng/platform and her bearer can read -> the admin (no synveda
-# group) lands under acme/quarantine and the PDP denies reads (403, not
-# 401) -> metrics show both provisioning outcomes. The CI-clean mock-IdP
-# half of the AC runs in crates/synveda-gateway/tests/jit_provisioning.rs.
+# under acme/eng/platform, and her bearer is *refused* the admin plane
+# until a role is bound -> the admin (no synveda group) lands under
+# acme/quarantine and the PDP denies reads (403, not 401) -> metrics show
+# both provisioning outcomes. The CI-clean mock-IdP half of the AC runs in
+# crates/synveda-gateway/tests/jit_provisioning.rs.
+#
+# The two denials look alike and are not the same fact, which is the thing
+# to watch: alice is *placed and unbound*, so one `role bind` and the same
+# bearer reads on the next request; the admin is *contained*, and no
+# binding is what AC 2 is about. Placement gives a home; a role gives the
+# admin plane (AUTHZ-3, ADR-0015 decision 4).
 #
 # On Windows, run via Git Bash. Needs postgres, jaeger, and rauthy from the
 # dev compose, plus node (PoW solving and JSON parsing — no jq dependency).
@@ -27,8 +34,27 @@ GATEWAY_URL=http://127.0.0.1:8120
 RAUTHY_API_KEY='API-Key synveda-dev$6xxmjZD7Wqe9zWN1fWzOW1jA4uxAkFQ9rYlVFpxBzVgJ0xEj2KWSLiaRTZzKV1oz'
 ADMIN_EMAIL=admin@localhost
 ADMIN_PASSWORD=synveda-dev-admin
-ALICE_EMAIL=alice@demo.localhost
+# Per run, and deleted on the way out.
+#
+# This demo's whole subject is a person Synveda has never seen, and a shared
+# identity is not new on the second run. It also used to share
+# `alice@demo.localhost` with `demos/adpt-1-claude-code.sh`, so each demo
+# inherited the other's leftovers — which is how one password that Rauthy
+# would not re-set took both of them down at once.
+#
+# The repo already settled this shape: CNSL-1 uses `reviewer-$$@…`, OPS-1
+# derives its operator from the tenant slug, and `synveda init`'s
+# `operator_email` carries a test named
+# `two_deployments_on_one_laptop_do_not_share_an_operator`. This is that
+# rule reaching the two demos that predate it.
+#
+# The **group** stays shared on purpose: it holds no mutable state, it is
+# created idempotently, and its name is load-bearing — `convention_candidates`
+# parses `synveda-<department>-<team>` onto hierarchy slugs (ADR-0013), so a
+# per-run group would drag per-run team slugs behind it for no benefit.
+ALICE_EMAIL="alice-$$@demo.localhost"
 ALICE_PASSWORD='Auth2demo-Passw0rd!'
+ALICE_ID=""
 TEAM_GROUP=synveda-eng-platform
 
 $COMPOSE up --detach --wait postgres jaeger
@@ -110,8 +136,13 @@ if ! echo "$groups_json" | node -e '
     -d "{\"group\":\"$TEAM_GROUP\"}" >/dev/null
 fi
 
-users_json=$(curl -fsS "$RAUTHY_URL/auth/v1/users" -H "Authorization: $RAUTHY_API_KEY")
-alice_id=$(echo "$users_json" | node -e '
+# A leaked identity from a crashed run, or a reused pid, would put us back
+# in the state that took this demo down: Rauthy will not re-set a password
+# it has seen in its last three, and a constant that is in the history
+# without being current locks every future run out. One DELETE removes that
+# possibility, so nothing below needs a recovery path.
+stale_id=$(curl -fsS "$RAUTHY_URL/auth/v1/users" -H "Authorization: $RAUTHY_API_KEY" |
+  node -e '
   let d = "";
   process.stdin.on("data", (c) => (d += c));
   process.stdin.on("end", () => {
@@ -119,15 +150,18 @@ alice_id=$(echo "$users_json" | node -e '
     if (user) console.log(user.id);
   });
 ' "$ALICE_EMAIL")
-if [ -z "$alice_id" ]; then
-  alice_id=$(curl -fsS -X POST "$RAUTHY_URL/auth/v1/users" \
-    -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
-         \"family_name\":\"Demo\",\"language\":\"en\",
-         \"groups\":[\"$TEAM_GROUP\"],\"roles\":[]}" | json_field id)
+if [ -n "$stale_id" ]; then
+  curl -fsS -X DELETE "$RAUTHY_URL/auth/v1/users/$stale_id" \
+    -H "Authorization: $RAUTHY_API_KEY" >/dev/null
 fi
-# Idempotent desired state: group membership, a known password, verified
-# email so the login flow needs no mailbox.
+alice_id=$(curl -fsS -X POST "$RAUTHY_URL/auth/v1/users" \
+  -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
+       \"family_name\":\"Demo\",\"language\":\"en\",
+       \"groups\":[\"$TEAM_GROUP\"],\"roles\":[]}" | json_field id)
+ALICE_ID=$alice_id
+# Group membership, a known password, verified email so the login flow
+# needs no mailbox.
 curl -fsS -X PUT "$RAUTHY_URL/auth/v1/users/$alice_id" \
   -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
   -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
@@ -173,11 +207,26 @@ SYNVEDA_LISTEN_ADDR=127.0.0.1:8131
 export SYNVEDA_LISTEN_ADDR
 SYNVEDA_DEV_JWT_SECRET=auth-2-demo-secret
 export SYNVEDA_DEV_JWT_SECRET
+# The run's own identity goes with it. OPS-1 leaves its per-run operators
+# behind and the dev IdP has been accumulating them since; a per-run fixture
+# that is never removed is a leak with a nicer name.
+drop_alice() {
+  [ -n "$ALICE_ID" ] && curl -fsS -X DELETE "$RAUTHY_URL/auth/v1/users/$ALICE_ID" \
+    -H "Authorization: $RAUTHY_API_KEY" >/dev/null 2>&1
+  return 0
+}
 ./target/debug/synveda-gateway &
 SEED_PID=$!
-trap 'kill "$SEED_PID" 2>/dev/null || true' EXIT INT TERM
+trap 'kill "$SEED_PID" 2>/dev/null || true; drop_alice' EXIT INT TERM
 wait_gateway http://127.0.0.1:8131
 seed_token=$(./target/debug/synveda token issue --tenant "$tenant_id" --subject demo-admin)
+# A token is not an authority. The seeding subject needs `org-admin` bound
+# to it or the PDP denies `hierarchy.create` — a tenant with no assignment
+# falls back to `regulated-strict`, which grants nothing to nobody. Every
+# other demo binds this; AUTH-2 predates the packs having teeth and was
+# never updated, so it died at the first `create_node` with a bare 403.
+./target/debug/synveda role bind --tenant "$tenant_id" \
+  --subject demo-admin --role org-admin >/dev/null
 create_node() {
   curl -fsS -X POST http://127.0.0.1:8131/v1/hierarchy/nodes \
     -H "Authorization: Bearer $seed_token" -H 'Content-Type: application/json' \
@@ -203,7 +252,7 @@ EOF
 export SYNVEDA_OIDC_ISSUERS
 ./target/debug/synveda-gateway &
 GATEWAY_PID=$!
-trap 'kill "$GATEWAY_PID" 2>/dev/null || true; kill "$SEED_PID" 2>/dev/null || true' EXIT INT TERM
+trap 'kill "$GATEWAY_PID" 2>/dev/null || true; kill "$SEED_PID" 2>/dev/null || true; drop_alice' EXIT INT TERM
 wait_gateway "$GATEWAY_URL"
 
 # login <email> <password> — drives the full code+PKCE flow (Rauthy
@@ -263,7 +312,7 @@ login() {
 
 echo "==> AC 1: alice's first login lands in the platform team, zero admin action"
 alice_session=$(login "$ALICE_EMAIL" "$ALICE_PASSWORD")
-alice_token=$(echo "$alice_session" | node -e '
+alice_out=$(echo "$alice_session" | node -e '
   let d = "";
   process.stdin.on("data", (c) => (d += c));
   process.stdin.on("end", () => {
@@ -275,16 +324,52 @@ alice_token=$(echo "$alice_session" | node -e '
       process.exit(1);
     }
     console.error(`    provisioned: ${s.subject} -> ${path} (quarantined: false)`);
+    console.log(s.subject);
     console.log(s.access_token);
   });
 ')
+alice_sub=$(printf '%s\n' "$alice_out" | sed -n 1p)
+alice_token=$(printf '%s\n' "$alice_out" | sed -n 2p)
+
+# THE PLACEMENT IS A HOME, NOT AN AUTHORITY.
+#
+# This demo used to assert 200 here, and it was right when it was written.
+# AUTHZ-3 changed it: an unbound member holds no hierarchy-admin read
+# (ADR-0015 decision 4), so a placed person is *denied* the admin plane
+# until a role says otherwise. The demo was never updated and had been
+# asserting a behaviour the product deliberately removed — the gateway's
+# own AC test (`tests/jit_provisioning.rs`) has encoded the current rule
+# all along, which is why CI stayed green while this went red.
+#
+# The denial is the interesting half, so it is asserted rather than
+# skipped: 403 with the `policy_denied` taxonomy, meaning her bearer
+# authenticated, resolved a tenant, reached the PDP and was refused on
+# authority — not a 401, and not the containment AC 2 is about.
+denial=$(curl -s -w '\n%{http_code}' \
+  -H "Authorization: Bearer $alice_token" "$GATEWAY_URL/v1/hierarchy/root")
+code=$(printf '%s\n' "$denial" | tail -1)
+kind=$(printf '%s\n' "$denial" | sed '$d' | json_field kind 2>/dev/null || echo "")
+if [ "$code" != "403" ] || [ "$kind" != "policy_denied" ]; then
+  echo "demo FAILED: an unbound member's admin read returned HTTP $code ($kind)," >&2
+  echo "  want 403 policy_denied — placement is a home, not an authority" >&2
+  exit 1
+fi
+echo "    alice's bearer reaches the PDP and is refused the admin plane:"
+echo "      403 policy_denied — placed, authenticated, unbound (ADR-0015 decision 4)"
+
+# And the role, not the placement, is what carries it: one binding and the
+# same bearer reads on the very next request. Without this the demo would
+# show a denial and prove nothing about why.
+./target/debug/synveda role bind --tenant "$tenant_id" \
+  --subject "$alice_sub" --role auditor >/dev/null
 code=$(curl -s -o /dev/null -w '%{http_code}' \
   -H "Authorization: Bearer $alice_token" "$GATEWAY_URL/v1/hierarchy/root")
 if [ "$code" != "200" ]; then
-  echo "demo FAILED: a placed user's read returned HTTP $code, want 200" >&2
+  echo "demo FAILED: the auditor binding did not carry the read (HTTP $code)" >&2
   exit 1
 fi
-echo "    alice's bearer reads the hierarchy: 200"
+echo "    one auditor binding, same bearer, next request: 200"
+echo "      the role carries the admin plane; JIT placement carried the home"
 
 echo "==> AC 2: the rauthy admin (no synveda group) lands in quarantine, no read rights"
 admin_session=$(login "$ADMIN_EMAIL" "$ADMIN_PASSWORD")

@@ -48,8 +48,28 @@ GATEWAY_URL=http://127.0.0.1:8120
 SEED_URL=http://127.0.0.1:8131
 # Dev-only bootstrap API key from deploy/compose/rauthy/config.toml.
 RAUTHY_API_KEY='API-Key synveda-dev$6xxmjZD7Wqe9zWN1fWzOW1jA4uxAkFQ9rYlVFpxBzVgJ0xEj2KWSLiaRTZzKV1oz'
-ALICE_EMAIL=alice@demo.localhost
+# Per run, and deleted on the way out.
+#
+# This demo asserts a property about a person Synveda has never seen — "the
+# fresh machine to a personalised session" — and a shared identity is not
+# fresh on the second run. It also used to share `alice@demo.localhost` with
+# `demos/auth-2-jit-provisioning.sh`, so one demo's leftovers were the
+# other's starting state; that is how a password nobody could re-set took
+# both of them down at once.
+#
+# The repo already settled this shape: CNSL-1 uses `reviewer-$$@…`, OPS-1
+# derives its operator from the tenant slug, and `synveda init`'s
+# `operator_email` carries a test named
+# `two_deployments_on_one_laptop_do_not_share_an_operator`. This is that
+# rule reaching the two demos that predate it.
+#
+# The **group** stays shared on purpose: it holds no mutable state, it is
+# created idempotently, and its name is load-bearing — `convention_candidates`
+# parses `synveda-<department>-<team>` onto hierarchy slugs (ADR-0013), so a
+# per-run group would drag per-run team slugs behind it for no benefit.
+ALICE_EMAIL="alice-$$@demo.localhost"
 ALICE_PASSWORD='Auth2demo-Passw0rd!'
+ALICE_ID=""
 TEAM_GROUP=synveda-eng-platform
 # The AC's budget, in seconds.
 BUDGET_SECS=120
@@ -141,8 +161,13 @@ if ! printf '%s\n' "$groups_json" | node -e '
     -d "{\"group\":\"$TEAM_GROUP\"}" >/dev/null
 fi
 
-users_json=$(curl -fsS "$RAUTHY_URL/auth/v1/users" -H "Authorization: $RAUTHY_API_KEY")
-alice_id=$(printf '%s\n' "$users_json" | node -e '
+# A leaked identity from a crashed run, or a reused pid, would put us back
+# in the state this demo spent a week failing in — Rauthy will not re-set a
+# password it has seen in its last three, and a constant that is in the
+# history without being current locks every future run out. One DELETE
+# removes that possibility entirely, so nothing below needs a recovery path.
+stale_id=$(curl -fsS "$RAUTHY_URL/auth/v1/users" -H "Authorization: $RAUTHY_API_KEY" |
+  node -e '
   let d = "";
   process.stdin.on("data", (c) => (d += c));
   process.stdin.on("end", () => {
@@ -150,26 +175,22 @@ alice_id=$(printf '%s\n' "$users_json" | node -e '
     if (user) console.log(user.id);
   });
 ' "$ALICE_EMAIL")
-if [ -z "$alice_id" ]; then
-  alice_id=$(curl -fsS -X POST "$RAUTHY_URL/auth/v1/users" \
-    -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
-         \"family_name\":\"Demo\",\"language\":\"en\",
-         \"groups\":[\"$TEAM_GROUP\"],\"roles\":[]}" | json_field id)
+if [ -n "$stale_id" ]; then
+  curl -fsS -X DELETE "$RAUTHY_URL/auth/v1/users/$stale_id" \
+    -H "Authorization: $RAUTHY_API_KEY" >/dev/null
 fi
-# Desired state, twice: with the password for a user that has never had
-# one, and without it for a re-run — Rauthy refuses a password it has
-# seen in the last three, which is exactly the state a second run is in.
-alice_state="{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
-       \"family_name\":\"Demo\",\"language\":\"en\",\"roles\":[],
-       \"groups\":[\"$TEAM_GROUP\"],\"enabled\":true,\"email_verified\":true"
-if ! curl -fsS -X PUT "$RAUTHY_URL/auth/v1/users/$alice_id" \
+alice_id=$(curl -fsS -X POST "$RAUTHY_URL/auth/v1/users" \
   -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
-  -d "$alice_state,\"password\":\"$ALICE_PASSWORD\"}" >/dev/null 2>&1; then
-  curl -fsS -X PUT "$RAUTHY_URL/auth/v1/users/$alice_id" \
-    -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
-    -d "$alice_state}" >/dev/null
-fi
+  -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
+       \"family_name\":\"Demo\",\"language\":\"en\",
+       \"groups\":[\"$TEAM_GROUP\"],\"roles\":[]}" | json_field id)
+ALICE_ID=$alice_id
+curl -fsS -X PUT "$RAUTHY_URL/auth/v1/users/$alice_id" \
+  -H "Authorization: $RAUTHY_API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ALICE_EMAIL\",\"given_name\":\"Alice\",
+       \"family_name\":\"Demo\",\"language\":\"en\",\"roles\":[],
+       \"groups\":[\"$TEAM_GROUP\"],\"enabled\":true,\"email_verified\":true,
+       \"password\":\"$ALICE_PASSWORD\"}" >/dev/null
 echo "    alice ($ALICE_EMAIL) is in $TEAM_GROUP and has never logged in to Synveda"
 
 # A scratch database per run: the long-lived dev database carries thousands
@@ -225,6 +246,11 @@ cleanup() {
   wait 2>/dev/null || true
   $COMPOSE exec -T postgres psql -U synveda -d synveda \
     -c "drop database if exists $DEMO_DB with (force)" >/dev/null 2>&1 || true
+  # The run's own identity goes with it. OPS-1 leaves its per-run operators
+  # behind and the dev IdP has been accumulating them since; a per-run
+  # fixture that is never removed is a leak with a nicer name.
+  [ -n "$ALICE_ID" ] && curl -fsS -X DELETE "$RAUTHY_URL/auth/v1/users/$ALICE_ID" \
+    -H "Authorization: $RAUTHY_API_KEY" >/dev/null 2>&1
   rm -rf "$SYNVEDA_SEARCH_INDEX_DIR" "$DEMO_HOME"
   return 0
 }
@@ -457,8 +483,21 @@ login_response=$(curl -si -X POST "$RAUTHY_URL/auth/v1/oidc/authorize" \
 callback_url=$(printf '%s\n' "$login_response" | grep -i '^location:' |
   sed 's/^[Ll]ocation: //' | tr -d '\r')
 if [ -z "$callback_url" ]; then
-  echo "demo FAILED: rauthy returned no callback location:" >&2
-  printf '%s\n' "$login_response" | head -5 >&2
+  echo "demo FAILED: rauthy returned no callback location." >&2
+  # The whole response, headers and body: the body is where rauthy says
+  # what it objected to, and printing five lines of headers hid
+  # "Invalid user credentials" behind a bare 401 for long enough that the
+  # provisioning bug above looked like an IdP outage.
+  printf '%s\n' "$login_response" >&2
+  case $login_response in
+  *"Invalid user credentials"*)
+    echo >&2
+    echo "  alice's stored password is not this demo's constant. Provisioning" >&2
+    echo "  above should have converged on it — check that block rather than" >&2
+    echo "  rauthy: its password-history rule can leave the constant in the" >&2
+    echo "  history without it being current, and then nothing can log in." >&2
+    ;;
+  esac
   exit 1
 fi
 

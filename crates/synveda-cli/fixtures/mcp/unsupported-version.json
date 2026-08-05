@@ -1,0 +1,48 @@
+{
+  "client": "any",
+  "era": "modern",
+  "launch": [
+    "mcp",
+    "--writes",
+    "tool"
+  ],
+  "provenance": {
+    "kind": "authored",
+    "note": "Authored, and not a vendor's frame at all: it is what any client on a revision this server does not implement must be told. -32022 carrying the supported list is what lets it retry rather than fail, so the corpus pins the list itself."
+  },
+  "exchange": [
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+        "params": {
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2024-11-05",
+            "io.modelcontextprotocol/clientCapabilities": {},
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "some-client",
+              "version": "0.1.0"
+            }
+          }
+        }
+      },
+      "expect": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "error": {
+          "code": -32022,
+          "message": "Unsupported protocol version",
+          "data": {
+            "requested": "2024-11-05",
+            "supported": [
+              "2026-07-28",
+              "2025-11-25",
+              "2025-06-18"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

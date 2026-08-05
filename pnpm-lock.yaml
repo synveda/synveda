@@ -17,12 +17,6 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  adapters/mcp-server:
-    devDependencies:
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-
   console:
     dependencies:
       react:

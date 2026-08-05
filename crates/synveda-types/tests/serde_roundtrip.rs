@@ -6,9 +6,9 @@ use std::str::FromStr;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use synveda_types::{
-    CompositionConfig, Depth, Error, Graph, IdentityId, InjectChannels, RecordClass, RecordId,
-    RecordKind, RedactionConfig, RedactionMode, Role, RoleBinding, ScopeId, Sensitivity, Tenant,
-    TenantId, TenantStatus,
+    CompositionConfig, Depth, Error, Graph, IdentityId, InjectChannels, ObserveKind, RecordClass,
+    RecordId, RecordKind, RedactionConfig, RedactionMode, Role, RoleBinding, ScopeId, Sensitivity,
+    Tenant, TenantId, TenantStatus,
 };
 
 fn json_roundtrip<T>(value: &T) -> T
@@ -235,6 +235,56 @@ fn record_kind_and_class_reject_unknown_values() {
     assert!(RecordKind::from_str("Pinned").is_err(), "lowercase only");
     assert!(serde_json::from_str::<RecordClass>("\"note\"").is_err());
     assert!(RecordClass::from_str("Fact").is_err(), "lowercase only");
+}
+
+// ── Observe kind (MEM-1, ADR-0020; `assertion` from ADR-0057) ────────────────
+
+#[test]
+fn observe_kind_all_roundtrip_and_match_as_str() {
+    for kind in ObserveKind::ALL {
+        json_roundtrip(&kind);
+        let json = serde_json::to_string(&kind).expect("serialize");
+        assert_eq!(json, format!("\"{}\"", kind.as_str()));
+        assert_eq!(ObserveKind::from_str(kind.as_str()).unwrap(), kind);
+        assert_eq!(kind.to_string(), kind.as_str());
+    }
+}
+
+#[test]
+fn observe_kind_rejects_unknown_kinds() {
+    assert!(serde_json::from_str::<ObserveKind>("\"summary\"").is_err());
+    assert!(
+        ObserveKind::from_str("Decision").is_err(),
+        "snake_case only"
+    );
+    assert!(
+        ObserveKind::from_str("transcriptDelta").is_err(),
+        "snake_case only"
+    );
+}
+
+/// The wire names are stored values under a CHECK constraint (migration
+/// 0012, widened by 0035), so renaming one silently orphans every row
+/// already written with the old spelling. Pinned literally, on purpose:
+/// this test is meant to fail when someone edits `as_str`.
+#[test]
+fn observe_kind_wire_names_are_pinned_to_the_stored_vocabulary() {
+    assert_eq!(ObserveKind::TranscriptDelta.as_str(), "transcript_delta");
+    assert_eq!(ObserveKind::ToolResult.as_str(), "tool_result");
+    assert_eq!(ObserveKind::Decision.as_str(), "decision");
+    assert_eq!(ObserveKind::Assertion.as_str(), "assertion");
+}
+
+/// ADR-0057 decision 8's whole point: exactly one kind reports that a model
+/// composed the content. If a later variant joins the model-driven side it
+/// has to come here deliberately rather than by inheriting a default.
+#[test]
+fn only_assertion_is_model_asserted() {
+    let asserted: Vec<_> = ObserveKind::ALL
+        .into_iter()
+        .filter(ObserveKind::is_model_asserted)
+        .collect();
+    assert_eq!(asserted, vec![ObserveKind::Assertion]);
 }
 
 // ── Graph vocabulary (GRPH-1, ADR-0043) ──────────────────────────────────────
