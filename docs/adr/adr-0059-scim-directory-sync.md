@@ -1,6 +1,6 @@
 # ADR-0059: SCIM 2.0 — directory facts, one reconciler, and the seal
 
-- **Status**: Proposed
+- **Status**: Accepted (amended twice on the day it was accepted)
 - **Date**: 2026-08-05
 - **Feature(s)**: AUTH-4 (and the seam AUTH-5 drives)
 - **Deciders**: sujitn
@@ -108,10 +108,18 @@ Forces at play:
    identities for one person.** `IssuerConfig` gains `external_id_claim`
    (default `sub`). Reconciliation matches, in order:
 
-   1. `identities.external_id` = the mirror row's `externalId`;
+   1. the mirror row's own link to an identity (`scim_users.identity_id`);
    2. `identities.subject` = the mirror row's `externalId` (the case
       where the directory's anchor *is* the token subject);
    3. `identities.email`, case-folded, = the mirror row's `userName`.
+
+   **[Implementation note, 2026-08-05]** The first match was drafted as an
+   `identities.external_id` column. There is none: the mirror holds
+   `external_id`, the login path joins through `scim_users.identity_id`, and
+   the reconciler is the only writer of that link. Same rule, one source of
+   truth — which matters here more than usual, because the anchor is the
+   customer's attribute mapping and a second copy would drift the day they
+   remap it.
 
    A SCIM POST for somebody who has already logged in **adopts** the JIT
    identity and stamps its `external_id`; a login for somebody SCIM
@@ -156,6 +164,23 @@ Forces at play:
    produce the same thing.
 
 7. **Leaving seals, and the seal is stored once, on the identity.**
+
+    **[Implementation note, 2026-08-05]** A mover under a sealing pack needs
+    a **former self**: an identity row with no subject, the departed status,
+    and the scope its person has moved on from. Sealing derives from the
+    identity that owns a node, which works for a leaver and does not work
+    for somebody who keeps going at a new scope — `identities` allows one
+    subject and one scope per row, so the person's live row cannot hold both.
+    It is the same thing decision 12 already says a rehire leaves behind,
+    arriving one lifecycle event earlier, which is why it is a note rather
+    than an amendment: the shape was already in the ADR, one paragraph down.
+
+    A seal also **keeps** the departed row's subject. Releasing it would have
+    freed the address for a rehire — and would have let the very next login
+    re-provision the departed person through the JIT door with a fresh scope
+    and normal access, the seal undone by the person it sealed. What releases
+    a subject is one directory-anchored successor, and nothing else.
+
    `identities.status` — `active` | `departed`, with `departed_at`. The
    scope's sealed-ness is *derived* through the 1:1
    `identities_scope_unique`: a user-kind node is sealed iff the identity
@@ -258,6 +283,26 @@ Forces at play:
     Naming it now costs one optional field; finding it later costs
     somebody's data.
 
+    **[Amendment 2, 2026-08-05] A hop with quarantine at either end never
+    seals**, whatever the packs at the two ends say. This was in no version
+    of this decision and the acceptance suite found it.
+
+    Quarantine is not a placement. It is where somebody waits for a mapping
+    to be fixed (decision 11), and — because both AC clients create a person
+    *before* putting them in a group — where every joiner sits for the
+    moment in between. Both ends occur in practice: a directory that removes
+    a group before adding the next passes somebody **into** quarantine, and
+    every joiner comes **out** of it. Without this rule, a tenant whose org
+    root ran a different pack from its departments would seal a scope on
+    either — in the joiner's case sealing a scope that was seconds old and
+    empty, permanently, on a technicality of request ordering. Material is
+    never *written under* quarantine's pack, so there is nothing for a pack
+    to have an opinion about.
+
+    What this leaves standing is recorded in the consequences below: a
+    two-request move loses the source department's say, because by the
+    second hop the material sits at quarantine.
+
 11. **Losing every group is quarantine; only an explicit deactivation
     seals.** A PATCH that removes a user from the last group mapping to
     anything re-resolves to nothing, which ADR-0013 already answers:
@@ -283,8 +328,9 @@ Forces at play:
     holds the provisioning credential, which after a directory compromise
     is the attacker. A hold that the directory can release is not a hold.
 
-13. **The credential is a static bearer token, tenant-bound, hashed,
-    expiring, rotatable in pairs, and confined to this plane.** Issued by
+13. **[Amended 2026-08-05]** **The credential is a static bearer token whose
+    tenant is named inside it**, hashed whole, expiring, rotatable in pairs,
+    and confined to this plane. Issued by
     `synveda scim token issue` behind a PDP decision at the tenant
     resource; stored as SHA-256 with an expiry (required, capped, AUTH-3's
     lifetime-cap doctrine) and `last_used_at`; two may be live at once so
@@ -297,6 +343,25 @@ Forces at play:
     work instead: a SCIM token is refused by the `/v1` router, a `/v1`
     bearer token is refused here, and the plane it does reach holds no
     governed asset by decision 2.
+
+    *This replaces:* "a credential is bound to one tenant at issuance and
+    there is no tenant-selecting parameter on the wire". There is one, and
+    it is inside the credential: `synveda_scim_v1.<tenant>.<secret>`, with
+    the **whole presented string** hashed so a secret pasted behind another
+    tenant's prefix hashes to nothing.
+
+    The reason is structural rather than cosmetic. `scim_credentials` is
+    tenant data under forced RLS like everything else, and the gateway has
+    to know which tenant to look a credential up in *before* it can look it
+    up. The alternative was console_sessions' pre-scope side of RLS
+    (migration 0034) — but that table works there precisely because it holds
+    no tenant, and a provisioning credential must hold one. Naming it in the
+    token makes this the same shape a bearer's `tid` claim already has
+    (TEN-1, ADR-0008): the caller names the tenant, the secret proves it,
+    the lookup runs inside that tenant's own row policy, and a cross-tenant
+    credential is absent rather than denied. It also makes the deployment
+    simpler — one tenant URL for every customer of a deployment, which is
+    what Entra's single "Tenant URL" field wants.
 
     **This does not close ADR-0055's headless-`init` deferral**, and the
     reason is worth recording rather than discovering later: issuing the
@@ -407,6 +472,27 @@ Forces at play:
   function that already exists and is already tested; and a departed
   person's token stops working at the next request rather than at the
   next AUTH-6 feature.
+- **The sharpest finding is the acceptance demo's, not the tests'.** The
+  correspondence rule's last match was written as "`identities.email` = the
+  mirror row's `userName`", which silently assumes those are the same
+  string. A directory record **re-created** with a new anchor and a new
+  `userName` for somebody whose mailbox never changed matched nothing, and
+  made them a second identity with a second personal scope — the exact
+  failure decision 4 exists to prevent, arriving through the one shape the
+  decision did not picture. The match now tries the work address first. And
+  once it fired, the 1:1 projection constraint refused the link *after* the
+  create had committed, so the client received a `409` for a resource that
+  by then existed; the question is now asked before anything is written.
+- **Found while building, recorded here because it is not this feature's
+  code**: `personal_slug`'s uniqueness suffix (AUTH-2, `synveda-identity`)
+  took the **first** eight hex characters of a UUIDv7 — which are a
+  millisecond clock, identical for everything minted in the same ~65-second
+  window. The comment above it said "so siblings never collide"; it did not.
+  Two people with the same email local part placed under one parent inside a
+  minute collided on `hierarchy_nodes_sibling_slug_unique`, and so did one
+  person given a second personal scope milliseconds after their first, which
+  is what a rehire is. It now takes the random tail, with a thousand-id
+  regression test. AUTH-2 never hit it; AUTH-4 hit it on the first run.
 - Negative / accepted trade-offs: a nullable `subject` on `identities`
   is a schema loosening on the product's most security-relevant table,
   bounded by two partial unique indexes and by every caller seam keying
@@ -420,6 +506,15 @@ Forces at play:
   effect is invisible under the embedded packs today, which makes it
   exactly the kind of field that is easy to get wrong later and hard to
   notice.
+- Standing limitation (amendment 2's remainder): a **two-request move** —
+  remove from the old group, then add to the new — passes the person through
+  quarantine, so the second hop's source pack is quarantine's rather than
+  the department's. Neither hop seals, so nothing is lost; what is lost is
+  the source department's *say*, and a cross-regime move done in that order
+  carries material where the same move in the other order would have sealed
+  it. The trigger is a tenant that sets record horizons at a department: at
+  that point request ordering stops being cosmetic and this wants either a
+  remembered origin or a debounce.
 - Reversal trigger: if a customer's directory sends a mover signal for
   somebody whose personal scope is under a *stored* pack and the
   seal-and-restart default surprises them into a support ticket, the

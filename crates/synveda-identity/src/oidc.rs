@@ -77,6 +77,13 @@ fn default_groups_claim() -> String {
     "groups".to_owned()
 }
 
+/// `sub` — right for every issuer whose subject is stable across
+/// applications, and wrong for Entra, which is why it is configurable
+/// (AUTH-4, ADR-0059 decision 4).
+fn default_external_id_claim() -> String {
+    "sub".to_owned()
+}
+
 fn default_login_scopes() -> Vec<String> {
     // `openid` is what makes it OIDC; profile and email feed AUTH-2's
     // provisioning claims. IdPs that gate the groups claim behind a scope
@@ -114,6 +121,18 @@ pub struct IssuerConfig {
     /// ADR-0013). Defaults to `groups`.
     #[serde(default = "default_groups_claim")]
     pub groups_claim: String,
+    /// The claim carrying this issuer's stable directory anchor (AUTH-4,
+    /// ADR-0059 decision 4) — matched against a SCIM mirror row's
+    /// `externalId` at first login. Defaults to `sub`.
+    ///
+    /// **Set this to `oid` for Entra.** Entra's `sub` is pairwise per
+    /// application and never equals the object id its provisioning agent
+    /// sends as `externalId`, so the default would match nothing there and
+    /// the login would fall through to the weaker email match — or, for
+    /// somebody whose address the directory never sent, to a second
+    /// identity.
+    #[serde(default = "default_external_id_claim")]
+    pub external_id_claim: String,
     /// Scopes requested at login. Defaults to `openid profile email`;
     /// must include `openid` (no ID token without it).
     #[serde(default = "default_login_scopes")]
@@ -462,7 +481,11 @@ impl OidcVerifier {
             tenant_id,
             // Always Some for IdP-verified tokens, even with no groups:
             // presence marks the subject as IdP-backed (ADR-0013).
-            provisioning: Some(provisioning_claims(&claims, &entry.config.groups_claim)),
+            provisioning: Some(provisioning_claims(
+                &claims,
+                &entry.config.groups_claim,
+                &entry.config.external_id_claim,
+            )),
             lifetime,
         })
     }
@@ -647,7 +670,11 @@ fn verifying_key(jwk: &Jwk, allowed: &[Algorithm]) -> Option<VerifyingKey> {
 /// token's payload. Absent or ill-shaped claims degrade to empty/`None` —
 /// they gate placement, never verification; non-string group entries
 /// (some IdPs mix formats) are skipped.
-fn provisioning_claims(claims: &serde_json::Value, groups_claim: &str) -> ProvisioningClaims {
+fn provisioning_claims(
+    claims: &serde_json::Value,
+    groups_claim: &str,
+    external_id_claim: &str,
+) -> ProvisioningClaims {
     let text = |name: &str| {
         claims
             .get(name)
@@ -671,6 +698,7 @@ fn provisioning_claims(claims: &serde_json::Value, groups_claim: &str) -> Provis
         groups,
         email: text("email"),
         display_name: text("name"),
+        external_id: text(external_id_claim),
     }
 }
 
@@ -743,7 +771,7 @@ mod tests {
             "email": "alice@example.test",
             "name": "Alice Example",
         });
-        let harvested = provisioning_claims(&claims, "groups");
+        let harvested = provisioning_claims(&claims, "groups", "sub");
         assert_eq!(harvested.groups, ["synveda-eng-platform", "everyone"]);
         assert_eq!(harvested.email.as_deref(), Some("alice@example.test"));
         assert_eq!(harvested.display_name.as_deref(), Some("Alice Example"));
@@ -755,12 +783,39 @@ mod tests {
             serde_json::json!({ "sub": "alice" }),
             serde_json::json!({ "sub": "alice", "groups": "not-an-array", "email": 7 }),
         ] {
-            let harvested = provisioning_claims(&claims, "groups");
-            assert_eq!(harvested, ProvisioningClaims::default(), "from {claims}");
+            let harvested = provisioning_claims(&claims, "groups", "sub");
+            assert_eq!(
+                ProvisioningClaims {
+                    external_id: None,
+                    ..harvested.clone()
+                },
+                ProvisioningClaims::default(),
+                "from {claims}"
+            );
+            // The one thing these tokens *do* carry: the default anchor is
+            // `sub`, so a subject that is stable across applications needs
+            // no per-issuer configuration at all (AUTH-4, ADR-0059
+            // decision 4).
+            assert_eq!(harvested.external_id.as_deref(), Some("alice"));
         }
-        // A configured claim name other than the default is honoured.
-        let entra_style = serde_json::json!({ "wids": ["role-a"], "groups": ["ignored"] });
-        assert_eq!(provisioning_claims(&entra_style, "wids").groups, ["role-a"]);
+        // A configured claim name other than the default is honoured — for
+        // groups, and for the anchor.
+        let entra_style = serde_json::json!({
+            "sub": "pairwise-per-application",
+            "oid": "9f2c1b70-object-id",
+            "wids": ["role-a"],
+            "groups": ["ignored"]
+        });
+        let harvested = provisioning_claims(&entra_style, "wids", "oid");
+        assert_eq!(harvested.groups, ["role-a"]);
+        // The Entra case in one assertion: the anchor is the object id, and
+        // it is *not* the subject. A server that joined a SCIM mirror row on
+        // `sub` here would match nothing and provision a second identity.
+        assert_eq!(harvested.external_id.as_deref(), Some("9f2c1b70-object-id"));
+        assert_ne!(
+            harvested.external_id.as_deref(),
+            Some("pairwise-per-application")
+        );
     }
 
     #[test]

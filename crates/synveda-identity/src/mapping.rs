@@ -66,6 +66,16 @@ pub fn convention_candidates(group: &str) -> Vec<ConventionCandidate> {
 /// suffix so siblings never collide. Paths are display-only (ADR-0011).
 /// Used by JIT provisioning (AUTH-2) and service-identity registration
 /// (AUTH-3), which place their leaves the same way.
+///
+/// **The suffix is the id's tail, not its head, and that is a correction.**
+/// Identifiers here are UUIDv7 (ADR-0005): the first 48 bits are a
+/// millisecond timestamp, so the *first* eight hex characters are identical
+/// for everything minted in the same ~65-second window — which made this
+/// suffix a constant rather than a discriminator. Two people whose email
+/// local parts match, placed under one parent inside a minute, collided on
+/// `hierarchy_nodes_sibling_slug_unique`; AUTH-4 found it by creating two
+/// personal scopes for one person milliseconds apart (a rehire), where JIT
+/// had only ever created them seconds apart by different humans.
 #[must_use]
 pub fn personal_slug(email: Option<&str>, subject: &str, id: IdentityId) -> String {
     let base = email
@@ -79,7 +89,10 @@ pub fn personal_slug(email: Option<&str>, subject: &str, id: IdentityId) -> Stri
         .collect();
     readable.truncate(40);
     let readable = readable.trim_matches('-');
-    let suffix = &id.as_uuid().simple().to_string()[..8];
+    // The tail: UUIDv7's low bits are random, where its high bits are a
+    // clock every sibling minted this minute shares.
+    let simple = id.as_uuid().simple().to_string();
+    let suffix = &simple[simple.len() - 8..];
     if readable.is_empty() {
         format!("u-{suffix}")
     } else {
@@ -154,7 +167,8 @@ mod tests {
     #[test]
     fn personal_slugs_fit_the_grammar() {
         let id = IdentityId::new();
-        let suffix = &id.as_uuid().simple().to_string()[..8];
+        let simple = id.as_uuid().simple().to_string();
+        let suffix = &simple[simple.len() - 8..];
         let cases = [
             (
                 Some("alice@example.test"),
@@ -176,6 +190,27 @@ mod tests {
                         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
                 "slug {slug:?} breaks the grammar"
             );
+        }
+    }
+
+    /// The suffix has to *discriminate*, which is the whole reason it is
+    /// there — and until AUTH-4 it did not.
+    ///
+    /// Identifiers are UUIDv7 (ADR-0005), whose leading bits are a
+    /// millisecond clock, so the first eight hex characters are shared by
+    /// everything minted in the same ~65-second window. Two people with the
+    /// same email local part placed under one parent inside a minute
+    /// collided on `hierarchy_nodes_sibling_slug_unique` — and so did one
+    /// person given a second personal scope milliseconds after their first,
+    /// which is what a rehire is.
+    ///
+    /// A thousand ids minted back to back is the shape that failure had.
+    #[test]
+    fn the_suffix_discriminates_between_ids_minted_in_one_instant() {
+        let mut slugs = std::collections::HashSet::new();
+        for _ in 0..1_000 {
+            let slug = personal_slug(Some("alice@example.test"), "sub", IdentityId::new());
+            assert!(slugs.insert(slug.clone()), "slug {slug} collided");
         }
     }
 }

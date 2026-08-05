@@ -3501,7 +3501,104 @@ is proposal-gated, which this feature filed as **AUTHZ-7** rather than
 parking in CNSL-4, whose "no direct-mutation path exists" is a rule about
 records. A rewind of a pack assignment is still not a thing, and a probe
 costs one `gather` per node, which decision 5's bound exists to contain._
-- [ ] [AUTH-4: SCIM 2.0 server](AUTH-4.md)
+- [x] [AUTH-4: SCIM 2.0 server](AUTH-4.md) — done 2026-08-05, ADR-0059 (**amended twice while it was built**), migration 0036, AC tests: crates/synveda-gateway/tests/scim.rs (**twelve, and the AC is asserted as a contrast rather than a behaviour**: `a_movers_memories_re_scope_per_the_source_packs_policy` runs one directory event — one person, one group change — against two departments under two packs and gets two answers, the material sealed where it was written leaving `regulated-strict` and following out of `standard`, with the chain carrying `crossed_policy_boundary` and `personal_memory` so the difference is auditable rather than merely observable; `a_move_inside_one_packs_governance_asks_nothing`, the half that keeps changing team friction-free; `a_hop_through_quarantine_never_seals`, which is **amendment 2** and was not in the ADR at all; `a_seal_stops_the_token_the_reads_and_the_retention_sweep`, whose third layer is asserted as a scope leaving the sweep's own work list; `one_person_never_becomes_two_identities` from both ends; `a_rehire_is_a_new_identity_and_the_sealed_one_stays_sealed` in both shapes a rehire arrives in; `losing_every_group_quarantines_rather_than_seals`, asserted as *reversible*; `the_advertised_config_matches_what_the_routes_do`, including that `/Schemas` publishes nothing the mirror does not store; `errors_are_scim_errors_and_unsupported_filters_are_501`; `delete_answers_204_then_404_and_seals_rather_than_deletes`; and the credential confined from both directions plus a forged prefix and a revocation), crates/synveda-store/tests/rls.rs (the four new tables join the adversarial suite and its completeness guard; `a_credential_can_be_revoked_but_never_erased` pins the one grant migration 0036 withheld), crates/synveda-identity (`the_suffix_discriminates_between_ids_minted_in_one_instant` — the regression for the defect below — plus the credential's mint/parse/hash suite and the Entra anchor case), crates/synveda-gateway/src/scim/{wire,filter,mod}.rs + crates/synveda-cli/src/scim.rs (30 unit tests on the wire shapes, the filter subset, the page clamp and the credential renderer), demo: demos/auth-4-scim.sh (the arc from a terminal: a credential issued through the PDP and printed once, a joiner placed with zero admin action, a login that *binds* rather than provisioning again, the AC's two-pack contrast, a seal, the conformance answers, and `chain valid` with the token-leak sweep at 0), new: `/scim/v2/{ServiceProviderConfig,ResourceTypes,Schemas,Users,Groups}`, `POST|GET /v1/scim/credentials`, `POST /v1/scim/credentials/{id}/revoke`, `synveda scim token issue|list|revoke`, `Action::DirectoryManage`, packs `@15`
+
+_AUTH-4 notes (ADR-0059): this is the feature nine earlier ADRs deferred to
+by name, and the plane it adds is deliberately **not** `/v1`. The
+load-bearing sentence is decision 2: **a SCIM request carries directory
+facts, never product instructions.** There is no field in the wire format
+for a scope, a record, a role or a pack, and none will be added as an
+extension — so every product effect is the mapping resolver's and the
+effective pack's, and ADR-0013's reachability argument for seed §2.2
+carries over unchanged rather than being re-made.
+
+**The instinct about movers is wrong, and that is the feature's finding.**
+Moving somebody's personal scope into a looser department discloses
+nothing: every embedded pack excludes user-kind scopes from every
+content-role grant, and a lapse cannot target one, so a personal scope is
+readable by its owner and nobody else wherever it hangs. What a move
+actually changes is the **retention regime** — ADR-0040 decision 10
+resolves horizons at the record's own scope, per sweep, with nothing
+stamped on the record — so a move from a seven-year department into a
+ninety-day one is a bulk destruction that nobody approved, that no diff
+shows, and that happens on a background loop's next pass. The hazard is
+disposal, not disclosure, which is why the **source** scope's pack decides
+(ADR-0037's rule for lapses, applied to a move), why the same pack at both
+ends asks nothing, and why an unconfigured stored pack seals: of the two
+options only one of them can destroy anything, and ADR-0040 decision 13's
+sentence is "a pack that configures nothing must not start destroying
+memory". With today's embedded packs no horizon is set at all, so no move
+destroys anything yet — the config exists because the moment a customer
+sets one is the moment this stops being hypothetical.
+
+**The correspondence rule is the other thing that would have been silently
+wrong.** Entra issues a pairwise `sub`, unique per (application, user), so
+it never equals the directory object id its provisioning agent sends as
+`externalId`. A server that joined on `sub` alone gives every Entra user
+two identities, two personal scopes and half their memory in each, with
+nothing anywhere that looks wrong. `IssuerConfig::external_id_claim` sits
+beside `groups_claim` for exactly this class of vendor difference, and the
+match is ordered — link, anchor, case-folded address — because the anchor
+is the *customer's attribute mapping* rather than a protocol constant.
+
+Two amendments, both recorded where they were found rather than quietly
+fixed. **The credential names its tenant inside the token** (migration
+0036): decision 13 said there was no tenant-selecting parameter on the
+wire, and the alternative to one was a credential table holding tenant data
+with no tenant policy over it, so the token took the `tid` claim's shape —
+the caller names the tenant, the whole-string hash proves it, the lookup
+runs under that tenant's own RLS. And **a hop with quarantine at either end
+never seals**, which is in no version of the ADR: quarantine is not a
+placement, and because both AC clients create a person *before* putting
+them in a group, every joiner passes through it. Without the rule a tenant
+whose org root ran a different pack from its departments would have sealed
+every new hire's scope seconds after creating it.
+
+**The sharpest finding is the demo's, not the suite's** — CNSL-2's pattern
+again. The correspondence rule's last match was written as "the identity's
+email equals the mirror row's `userName`", which assumes those are the same
+string; a directory record **re-created** with a new anchor and a new
+`userName` for somebody whose mailbox never changed matched nothing and gave
+them a second identity with a second personal scope, which is the precise
+failure decision 4 exists to prevent. It now tries the work address first.
+And when the match then did fire, the 1:1 projection constraint refused the
+link *after* the create had committed — a `409` for a resource that by then
+existed — so the question is asked before anything is written, and a refused
+create leaves nothing behind.
+
+Two more defects the suite found rather than the design. **A mover under a
+sealing pack needs a former self**: sealing derives from the identity that
+owns a node, which works for a leaver and not for somebody who keeps going
+at a new scope, so what stays behind is an identity row with no subject and
+the departed status — the same thing decision 12 already said a rehire
+leaves behind, arriving one lifecycle event earlier. And **`personal_slug`'s
+uniqueness suffix was not unique**: it took the first eight hex characters
+of a UUIDv7, which are a millisecond clock, so every identity minted inside
+the same ~65-second window shared them. AUTH-2 never hit it because two
+people rarely log in inside a minute with the same email local part;
+AUTH-4 hit it immediately by giving one person a second personal scope
+milliseconds after their first. It now takes the random tail, with a
+thousand-id regression test.
+
+The seal is three layers — the token stops working at the enforcement seam,
+the scope is unreadable under a base-layer forbid, the sweep stops
+enumerating it — and deliberately not a fourth. There is no reader for a
+departed person's private material in this feature, and adding one would
+have made a lifecycle event the occasion for this product's first
+read-somebody-else's-memory surface. That belongs to the export plane, with
+its own ADR and its own approval matrix.
+
+Deferrals: **the reader above**, triggered by AUD-3's export plane;
+**ADR-0055's headless `init` is not closed** — issuing the credential is
+PDP-gated at `org-admin`, so it presupposes the identity a headless install
+lacks, and AUTH-4 gives that deferral a joiner path rather than a bootstrap;
+and a **two-request move** (remove before add) passes through quarantine, so
+its second hop's source pack is quarantine's rather than the department's —
+bounded by amendment 2, and triggered the day a tenant sets record horizons
+at a department. The vendor conformance corpus is transcribed from
+Microsoft's and Okta's published tables; **nothing here has replayed a frame
+from a live Entra or Okta tenant**, which is ADPT-2's honesty applied to
+this feature's own claim._
 - [ ] [AUTH-5: Directory sync fallback](AUTH-5.md)
 - [ ] [EVAL-3: Public benchmark adapters](EVAL-3.md)
 - [ ] [OPS-2: Helm chart / enterprise profile](OPS-2.md)

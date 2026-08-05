@@ -198,6 +198,24 @@ async fn gather_inner(
         Some(identity) => identity.quarantined,
         None => context.claims.provisioning.is_some(),
     };
+    // A departed identity may do nothing (AUTH-4, ADR-0059 decision 8,
+    // first layer). Refused through the quarantine attribute rather than
+    // through a rule of its own: the base layer's forbid is already
+    // invariant, already golden-tested against every pack, and already
+    // proof against a pack that forgets it — a second everything-denied
+    // mechanism beside it would be a second thing to keep true.
+    //
+    // This is what makes a seal outlive the IdP: an access token minted
+    // before somebody's last day stops working on the next request,
+    // whatever the issuer still thinks, and without waiting for AUTH-6's
+    // revocation list.
+    if identity.as_ref().is_some_and(Identity::sealed) {
+        quarantined = true;
+        tracing::debug!(
+            tenant.id = %tenant_id,
+            "a departed identity presented a token; refusing every action"
+        );
+    }
     let principal_scopes = match &identity {
         // The FK pins the placement node, so it resolves; a missing chain
         // (mid-transaction delete) just leaves the principal unplaced —

@@ -173,9 +173,31 @@ client, PKCE S256, redirect `http://127.0.0.1:8120/auth/callback`, scopes
 `openid profile email groups`.
 
 Group claims drive placement: `synveda-admins` grants tenant-wide org-admin,
-and `synveda-<department>-<team>` places by convention. Directory
-*synchronisation* — joiners, movers, leavers — is AUTH-4/5 and is not part of
-this; `init` configures an issuer, it does not sync a directory.
+and `synveda-<department>-<team>` places by convention. `init` configures an
+issuer; it does not sync a directory.
+
+Directory *synchronisation* — joiners, movers, leavers — is a separate,
+deliberate step (AUTH-4, ADR-0059). Once the instance is up:
+
+```sh
+synveda scim token issue --label entra
+```
+
+prints a provisioning credential **once**. Paste it into Entra
+(Provisioning → Admin Credentials → Secret Token) or Okta (Provisioning →
+Integration → API Token) with the tenant URL `https://<your-host>/scim/v2`,
+which is the same for every tenant — the credential names its own. Two
+credentials may be live at once, so rotation never stops provisioning.
+
+**For Entra, set `external_id_claim` to `oid` on the issuer.** Entra's `sub`
+is pairwise per application and never equals the object id its provisioning
+agent sends, so the default (`sub`) would match nothing and a person who
+logged in before the directory reached them would end up with a second
+identity. Okta needs no change.
+
+What synchronisation then does is placement and lifecycle only: it can put a
+person in the hierarchy, move them, and seal them. It cannot name a scope, a
+record, a role or a pack — those are not in the wire format.
 
 With a real issuer the gateway runs as the compose `gateway` container. With
 the bundled one it runs as a host process, because the bundled issuer's URL

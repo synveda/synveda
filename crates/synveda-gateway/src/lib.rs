@@ -52,7 +52,7 @@ pub mod packs;
 pub mod policy;
 pub mod prompts;
 pub mod proposals;
-mod provision;
+pub mod provision;
 pub mod quarantine;
 mod recall;
 pub mod roles;

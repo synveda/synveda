@@ -109,6 +109,17 @@ pub async fn reconcile(
         (seal(&mut tx, tenant, credential_id, existing).await?, true)
     } else {
         let groups = directory::group_names_for_user(&mut *tx, tenant.id, user.id).await?;
+        // A departed identity is never resurrected (ADR-0059 decision 12).
+        // `active: true` on somebody the directory previously deactivated is
+        // a **rehire**, and a rehire is a new person: a new identity, a new
+        // personal scope, and the sealed one left exactly as it was.
+        //
+        // Reached through the mirror row's own link, which is the one path
+        // that can hand back a sealed identity — the other two matches
+        // filter departed rows out. Without this the reconciler would carry
+        // on and try to move somebody who has left, and a seal that a
+        // reactivation could undo is not a retention hold.
+        let existing = existing.filter(|identity| !identity.sealed());
         match existing {
             None => (
                 place(state, &mut tx, tenant, credential_id, user, &groups).await?,
@@ -156,6 +167,18 @@ pub async fn reconcile(
 ///
 /// A **departed** identity is never adopted: the seal does not lift, and a
 /// rehire is a new person (decision 12).
+///
+/// The last match tries the **work address before the `userName`**, and
+/// that ordering is a correction the acceptance demo produced. ADR-0059
+/// decision 4 words this match as "`identities.email` = the mirror row's
+/// `userName`", which assumes the two are the same string — usually true,
+/// because a `userName` is normally a UPN. When they differ, the address is
+/// the better key: an identity's `email` was taken from `work_email` at
+/// placement, so comparing against `work_email` compares the same fact with
+/// itself. The case that exposed it is a directory record **re-created**
+/// with a new anchor and a new `userName` for somebody whose mailbox never
+/// changed — and matching only the `userName` gave that person a second
+/// identity and a second personal scope, silently.
 async fn find_identity(
     tx: &mut sqlx::PgConnection,
     tenant: &Tenant,
@@ -172,8 +195,60 @@ async fn find_identity(
     {
         return Ok(Some(identity));
     }
-    let by_email = identities::by_email(&mut *tx, tenant.id, &user.user_name).await?;
-    Ok(by_email.filter(|identity| !identity.sealed()))
+    for address in [user.work_email.as_deref(), Some(user.user_name.as_str())]
+        .into_iter()
+        .flatten()
+    {
+        if let Some(identity) = identities::by_email(&mut *tx, tenant.id, address).await?
+            && !identity.sealed()
+        {
+            return Ok(Some(identity));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether creating this record would make a **second live directory record
+/// for somebody the product already knows** — and if so, which record they
+/// already have.
+///
+/// Asked before the mirror row is written, deliberately. The projection is
+/// 1:1 in both directions (`scim_users_identity_unique`), so a second record
+/// for one person would otherwise be caught by the constraint *after* the
+/// create had committed: the client would get a `409` for a `POST` whose
+/// resource now exists, which is both a wart and a lie.
+///
+/// Refusing rather than merging is the safe answer. Two live records for one
+/// person is the directory being inconsistent with itself, and a product
+/// that quietly merged them would make somebody's identity depend on which
+/// record was touched last. `409 uniqueness` is the conformant way to say
+/// so, and an administrator can then fix the directory.
+pub async fn conflicting_record(
+    state: &AppState,
+    tenant: &Tenant,
+    attributes: &synveda_store::directory::UserAttributes,
+) -> Result<Option<synveda_types::DirectoryUserId>> {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
+    let candidate = DirectoryUser {
+        id: synveda_types::DirectoryUserId::new(),
+        tenant_id: tenant.id,
+        external_id: attributes.external_id.clone(),
+        user_name: attributes.user_name.clone(),
+        active: attributes.active,
+        display_name: None,
+        given_name: None,
+        family_name: None,
+        work_email: attributes.work_email.clone(),
+        identity_id: None,
+        version: 1,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    let Some(identity) = find_identity(&mut tx, tenant, &candidate).await? else {
+        return Ok(None);
+    };
+    let held = directory::user_for_identity(&mut *tx, tenant.id, identity.id).await?;
+    Ok(held.map(|row| row.id))
 }
 
 /// `active: false` — the leaver (ADR-0059 decision 8).
@@ -306,12 +381,41 @@ async fn apply_placement(
         None => None,
     };
 
+    // **A move with quarantine at either end never seals**, whatever the
+    // packs there say. This is not in ADR-0059 and it should be (amendment
+    // 2 to decision 10).
+    //
+    // Quarantine is not a placement — it is where somebody waits for a
+    // mapping to be fixed, or where they sit for the moment between being
+    // created and being put in a group. Material is never *written under*
+    // its pack, so a hop through it is not a policy boundary being crossed
+    // and there is nothing for a pack to have an opinion about.
+    //
+    // Both ends matter and each has its own real shape. A directory that
+    // removes somebody from one group before adding the next passes them
+    // **into** quarantine; a directory that creates a person and *then*
+    // puts them in a group — which is the ordinary joiner sequence both AC
+    // clients use — takes them **out** of it. Without this rule a tenant
+    // whose org root runs a different pack from its departments would seal
+    // a scope on either of those, permanently, on a technicality of
+    // request ordering: in the joiner's case sealing a scope that was
+    // seconds old and empty.
+    //
+    // Decision 11 already says losing every group is quarantine rather
+    // than departure. This is that sentence applied to the material as
+    // well as to the person.
+    let into_quarantine = label == "quarantined";
+    let out_of_quarantine = source_parent.as_ref().is_some_and(|parent| {
+        parent.slug == synveda_store::identities::QUARANTINE_SLUG && parent.depth == 1
+    });
+    let touches_quarantine = into_quarantine || out_of_quarantine;
+
     // Whose pack decides, and whether there is anything to decide: a move
     // inside one pack's governance re-prices nothing (decision 10).
     let source_pack = effective_pack_name(state, tx, tenant, source_parent.as_ref()).await?;
     let destination_pack = effective_pack_name(state, tx, tenant, Some(&destination)).await?;
     let crosses_boundary = source_pack.0 != destination_pack.0;
-    let seals = crosses_boundary && source_pack.1;
+    let seals = crosses_boundary && source_pack.1 && !touches_quarantine;
 
     let outcome = if seals {
         // Seal and restart: the live row lets go of the old node first,
@@ -360,6 +464,7 @@ async fn apply_placement(
             // move crossed a policy boundary at all, and what the source
             // pack said about material when it did.
             "crossed_policy_boundary": crosses_boundary,
+            "touches_quarantine": touches_quarantine,
             "personal_memory": if seals { "sealed_and_restarted" } else { "followed" },
             "credential_id": credential_id,
         }),

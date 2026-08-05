@@ -125,6 +125,20 @@ pub async fn create(
 ) -> Result<Response, ScimError> {
     let attributes = attributes_of(&body)?;
     let tenant_id = auth.tenant.id;
+    // Asked before anything is written: a second live record for somebody
+    // the product already knows is the directory disagreeing with itself,
+    // and a `409` after the create had committed would be a refusal for a
+    // resource that now exists.
+    if let Some(held) = reconcile::conflicting_record(&state, &auth.tenant, &attributes).await? {
+        return Err(ScimError::typed(
+            StatusCode::CONFLICT,
+            "uniqueness",
+            format!(
+                "this person already has a directory record here ({held}); \
+                 update that one rather than creating a second"
+            ),
+        ));
+    }
     let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let created = directory::create_user(&mut *tx, DirectoryUserId::new(), tenant_id, &attributes)
         .await

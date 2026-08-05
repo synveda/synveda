@@ -28,7 +28,7 @@ use synveda_audit::{Actor, AuditAction, Outcome};
 use synveda_identity::{
     ProvisioningClaims, contains_admin_group, convention_candidates, personal_slug,
 };
-use synveda_store::{group_mappings, hierarchy, identities, rls, role_bindings};
+use synveda_store::{directory, group_mappings, hierarchy, identities, rls, role_bindings};
 use synveda_types::{
     Error, HierarchyNode, Identity, IdentityId, IdentityKind, Result, Role, ScopeId, ScopeKind,
     Tenant,
@@ -40,7 +40,7 @@ use crate::telemetry::JIT_PROVISIONS_TOTAL;
 
 /// A provisioned login: the identity and the scope its personal node sits
 /// under (the mapped scope, or the quarantine scope).
-pub(crate) struct Provisioned {
+pub struct Provisioned {
     /// The subject's identity — existing on repeat logins, fresh on first.
     pub identity: Identity,
     /// The identity's personal scope node.
@@ -48,7 +48,13 @@ pub(crate) struct Provisioned {
 }
 
 /// Provisions `subject` into `tenant`'s hierarchy if this is its first
-/// login, and returns the identity either way. Runs in one tenant
+/// login, and returns the identity either way.
+///
+/// Public because it is the login path's whole entry point and AUTH-4's
+/// acceptance suite drives it directly: the correspondence rule (ADR-0059
+/// decision 4) is a claim about what happens when a person arrives, and a
+/// test that could only reach it through a mock IdP's redirect chain would
+/// be testing the redirect chain. Runs in one tenant
 /// transaction; the first-login race (two concurrent callbacks) surfaces
 /// as a unique-constraint conflict, retried once to adopt the winner's
 /// identity (ADR-0013 decision 2).
@@ -62,7 +68,7 @@ pub(crate) struct Provisioned {
     ),
     err(Display)
 )]
-pub(crate) async fn provision(
+pub async fn provision(
     state: &AppState,
     tenant: &Tenant,
     subject: &str,
@@ -133,6 +139,17 @@ async fn provision_once(
     }
 
     if let Some(identity) = identities::by_subject(&mut *tx, tenant.id, subject).await? {
+        // A departed identity does not log in (AUTH-4, ADR-0059
+        // decision 8). The enforcement seam would refuse every subsequent
+        // action anyway, but refusing here means the person is told at the
+        // door rather than handed a session that can do nothing — and the
+        // subject stays bound, so nothing re-provisions them through the
+        // JIT path below.
+        if identity.sealed() {
+            return Err(Error::Unauthenticated {
+                message: "this identity has been deprovisioned".to_owned(),
+            });
+        }
         let scope = hierarchy::node(&mut *tx, identity.scope_id)
             .await?
             .ok_or_else(|| Error::Internal {
@@ -144,6 +161,50 @@ async fn provision_once(
             })?;
         }
         return Ok((Provisioned { identity, scope }, "existing"));
+    }
+
+    // The other half of the correspondence rule (AUTH-4, ADR-0059
+    // decision 4): a directory may have created this person before they
+    // ever logged in, and binding the subject to *that* identity is what
+    // stops one person from having two — each with its own personal scope
+    // and half their memory in it.
+    if let Some(adopted) = adopt_directory_identity(&mut tx, tenant, subject, claims).await? {
+        let scope = hierarchy::node(&mut *tx, adopted.scope_id)
+            .await?
+            .ok_or_else(|| Error::Internal {
+                message: format!("identity {} lost its scope node", adopted.id),
+            })?;
+        audit::record_as(
+            &mut tx,
+            tenant.id,
+            Actor::subject(subject),
+            AuditAction::IdentityProvisioned,
+            format!("scope {}", scope.id),
+            Outcome::Success,
+            json!({
+                "placement": "directory",
+                "identity": {"id": adopted.id, "subject": adopted.subject},
+                "parent": {"slug": scope.slug, "path": scope.path},
+                "groups": claims.groups,
+                "origin": "login-bind",
+            }),
+        )
+        .await?;
+        tx.commit().await.map_err(|err| Error::Storage {
+            message: format!("commit subject binding: {err}"),
+        })?;
+        tracing::info!(
+            identity.id = %adopted.id,
+            scope.path = %scope.path,
+            "first login bound its subject to a directory-created identity"
+        );
+        return Ok((
+            Provisioned {
+                identity: adopted,
+                scope,
+            },
+            "bound",
+        ));
     }
 
     let (parent, label) = match resolve_mapping(&mut tx, tenant.id, &claims.groups).await? {
@@ -321,4 +382,56 @@ pub(crate) async fn ensure_quarantine(
             .await
         }
     }
+}
+
+/// Finds the identity a directory created for this subject, if any, and
+/// binds the subject to it (AUTH-4, ADR-0059 decisions 4 and 5).
+///
+/// The lookup is the mirror's, in the ADR's order: the issuer's configured
+/// anchor claim against `externalId`, then the verified email against
+/// `userName`, case-folded. Both are conservative — a mirror row that
+/// already projected onto somebody is never re-bound, and a departed
+/// identity is never adopted (decision 12).
+///
+/// **Why the anchor is a per-issuer claim.** Entra issues a pairwise `sub`
+/// — unique per (application, user) — so it will never equal the directory
+/// object id its provisioning agent sends. A server that joined on `sub`
+/// alone would give every Entra user two identities and half their memory
+/// in each. `IssuerConfig::external_id_claim` is set to `oid` for Entra,
+/// beside `groups_claim`, which is the per-issuer seam ADR-0010 built for
+/// exactly this class of vendor difference.
+async fn adopt_directory_identity(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant: &Tenant,
+    subject: &str,
+    claims: &ProvisioningClaims,
+) -> Result<Option<Identity>> {
+    let mut candidate = None;
+    if let Some(anchor) = claims.external_id.as_deref() {
+        candidate = directory::user_by_external_id(&mut **tx, tenant.id, anchor).await?;
+    }
+    if candidate.is_none()
+        && let Some(email) = claims.email.as_deref()
+    {
+        candidate = directory::user_by_user_name(&mut **tx, tenant.id, email).await?;
+    }
+    let Some(row) = candidate else {
+        return Ok(None);
+    };
+    let Some(identity_id) = row.identity_id else {
+        // A mirror row the reconciler has not projected yet holds no
+        // placement to adopt. Falling through to JIT would create the
+        // second identity this whole rule exists to prevent, so the login
+        // provisions nothing and the next reconciliation resolves it.
+        return Ok(None);
+    };
+    let Some(identity) = identities::by_id(&mut **tx, tenant.id, identity_id).await? else {
+        return Ok(None);
+    };
+    if identity.sealed() || identity.subject.is_some() {
+        return Ok(None);
+    }
+    identities::bind_subject(tx, tenant.id, identity.id, subject)
+        .await
+        .map(Some)
 }
