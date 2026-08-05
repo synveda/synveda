@@ -154,14 +154,14 @@ fn render(node: &HierarchyNode, anchor_depth: i32) {
 
 /// One pack, and where it came from.
 #[derive(serde::Deserialize)]
-struct EffectivePackView {
+pub struct EffectivePackView {
     name: String,
     version: i64,
     origin: OriginView,
 }
 
 #[derive(serde::Deserialize)]
-struct OriginView {
+pub struct OriginView {
     kind: String,
     scope_id: Option<ScopeId>,
 }
@@ -193,31 +193,47 @@ pub async fn policy(profile: &str, id: ScopeId, json_out: bool) -> Result<(), St
         return Ok(());
     }
     let effective: EffectivePackView = api.get_as(&path).await?;
-    println!("{}@{}", effective.name, effective.version);
-    println!("  origin  {}", effective.origin.describe(id));
+    println!("{}", render_policy(&effective, id));
     Ok(())
 }
 
+/// The policy block, as a value.
+///
+/// A `String` rather than a `println!` because the parity corpus has to be
+/// able to *read* it: ADR-0058 decision 10 asserts that both renderers name
+/// the same facts about one recorded payload, and a renderer that only
+/// exists as a side effect on stdout cannot be asserted against anything.
+/// `proposal.rs::render_detail` established the shape (ADR-0056 decision 7).
+pub fn render_policy(effective: &EffectivePackView, asked_about: ScopeId) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("{}@{}\n", effective.name, effective.version));
+    out.push_str(&format!(
+        "  origin  {}\n",
+        effective.origin.describe(asked_about)
+    ));
+    out
+}
+
 #[derive(serde::Deserialize)]
-struct EffectiveBindingsView {
+pub struct EffectiveBindingsView {
     bindings: Vec<EffectiveBindingView>,
     chain: Vec<ScopeId>,
 }
 
 #[derive(serde::Deserialize)]
-struct EffectiveBindingView {
+pub struct EffectiveBindingView {
     subject: String,
     role: String,
     origin: OriginView,
 }
 
 #[derive(serde::Deserialize)]
-struct BindingsView {
+pub struct BindingsView {
     bindings: Vec<BindingView>,
 }
 
 #[derive(serde::Deserialize)]
-struct BindingView {
+pub struct BindingView {
     subject: String,
     role: String,
 }
@@ -253,27 +269,36 @@ pub async fn roles(
         return Ok(());
     }
     let view: EffectiveBindingsView = api.get_as(&path).await?;
+    println!("{}", render_effective_roles(&view, id));
+    Ok(())
+}
+
+/// The effective-roles block, as a value (see [`render_policy`]).
+pub fn render_effective_roles(view: &EffectiveBindingsView, asked_about: ScopeId) -> String {
     if view.bindings.is_empty() {
-        println!("no roles in force here");
-        return Ok(());
+        return "no roles in force here\n".to_owned();
     }
+    let mut out = String::new();
     for binding in &view.bindings {
-        println!(
-            "{:<12} {:<40} {}",
+        out.push_str(&format!(
+            "{:<12} {:<40} {}\n",
             binding.role,
             binding.subject,
-            binding.origin.describe(id),
-        );
+            binding.origin.describe(asked_about),
+        ));
     }
     // The chain is printed because it is the *reason* the answer has the
     // rows it has — a reader who cannot see the chain is being asked to
     // take the inheritance on trust.
-    println!("\nin force over the chain: {} scope(s)", view.chain.len());
-    Ok(())
+    out.push_str(&format!(
+        "\nin force over the chain: {} scope(s)\n",
+        view.chain.len()
+    ));
+    out
 }
 
 #[derive(serde::Deserialize)]
-struct CapabilitiesView {
+pub struct CapabilitiesView {
     scope_path: String,
     pack: EffectivePackView,
     roles: Vec<String>,
@@ -283,10 +308,6 @@ struct CapabilitiesView {
 }
 
 /// `synveda hierarchy capabilities <id>` — what *this caller* may do here.
-///
-/// Prints the forecast disclaimer rather than leaving it to a reader to
-/// infer, because "you may: channel.publish" in a terminal reads exactly
-/// like a permission and is not one (ADR-0058 decision 2).
 pub async fn capabilities(profile: &str, id: ScopeId, json_out: bool) -> Result<(), String> {
     let (api, origin) = Api::connect(profile).await?;
     announce(&api, &origin, "probing");
@@ -296,21 +317,32 @@ pub async fn capabilities(profile: &str, id: ScopeId, json_out: bool) -> Result<
         return Ok(());
     }
     let view: CapabilitiesView = api.get_as(&path).await?;
-    println!("{}", view.scope_path);
-    println!(
-        "  pack    {}@{} ({})",
+    println!("{}", render_capabilities(&view, id));
+    Ok(())
+}
+
+/// The capability block, as a value (see [`render_policy`]).
+///
+/// Ends with the forecast sentence rather than leaving a reader to infer
+/// it, because "may: channel.publish" in a terminal reads exactly like a
+/// permission and is not one (ADR-0058 decision 2).
+pub fn render_capabilities(view: &CapabilitiesView, asked_about: ScopeId) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("{}\n", view.scope_path));
+    out.push_str(&format!(
+        "  pack    {}@{} ({})\n",
         view.pack.name,
         view.pack.version,
-        view.pack.origin.describe(id),
-    );
-    println!(
-        "  roles   {}",
+        view.pack.origin.describe(asked_about),
+    ));
+    out.push_str(&format!(
+        "  roles   {}\n",
         if view.roles.is_empty() {
             "—".to_owned()
         } else {
             view.roles.join(", ")
         }
-    );
+    ));
 
     let allowed: Vec<&String> = view
         .actions
@@ -319,12 +351,12 @@ pub async fn capabilities(profile: &str, id: ScopeId, json_out: bool) -> Result<
         .map(|(name, _)| name)
         .collect();
     let denied = view.actions.len() - allowed.len();
-    println!("\nmay:");
+    out.push_str("\nmay:\n");
     if allowed.is_empty() {
-        println!("  — nothing at this scope");
+        out.push_str("  — nothing at this scope\n");
     }
-    for name in allowed {
-        println!("  {name}");
+    for name in &allowed {
+        out.push_str(&format!("  {name}\n"));
     }
 
     let readable: Vec<String> = view
@@ -334,9 +366,9 @@ pub async fn capabilities(profile: &str, id: ScopeId, json_out: bool) -> Result<
         .map(|(name, tiers)| format!("  {name:<20} {}", tiers.join(", ")))
         .collect();
     if !readable.is_empty() {
-        println!("\nmay read, to these tiers:");
+        out.push_str("\nmay read, to these tiers:\n");
         for line in readable {
-            println!("{line}");
+            out.push_str(&format!("{line}\n"));
         }
     }
 
@@ -347,15 +379,15 @@ pub async fn capabilities(profile: &str, id: ScopeId, json_out: bool) -> Result<
         .map(|(name, _)| name)
         .collect();
     if !bindable.is_empty() {
-        println!("\nmay bind: {}", comma(&bindable));
+        out.push_str(&format!("\nmay bind: {}\n", comma(&bindable)));
     }
 
-    println!(
+    out.push_str(&format!(
         "\n{denied} action(s) denied. Decided under {}@{} — a forecast, not a grant: \
-         every act decides again at its own seam.",
+         every act decides again at its own seam.\n",
         view.pack.name, view.pack.version,
-    );
-    Ok(())
+    ));
+    out
 }
 
 fn comma(names: &[&String]) -> String {

@@ -20,7 +20,7 @@ use synveda_types::ScopeId;
 use crate::api::{Api, Origin};
 
 #[derive(Deserialize)]
-struct Listing {
+pub struct Listing {
     lapses: Vec<LapseView>,
     /// Present only on the scope-free form.
     #[serde(default)]
@@ -33,7 +33,7 @@ struct Listing {
 }
 
 #[derive(Deserialize)]
-struct LapseView {
+pub struct LapseView {
     id: String,
     grantee_scope_id: ScopeId,
     target_scope_id: ScopeId,
@@ -91,40 +91,55 @@ pub async fn list(
         return Ok(());
     }
     let listing: Listing = api.get_as(&path).await?;
+    println!("{}", render_lapses(&listing, all));
+    Ok(())
+}
+
+/// The listing, as a value.
+///
+/// A `String` rather than a `println!` so the parity corpus can read it —
+/// ADR-0058 decision 10 asserts both renderers name the same facts about
+/// one payload, and a renderer that exists only as a side effect on stdout
+/// cannot be asserted against anything.
+pub fn render_lapses(listing: &Listing, all: bool) -> String {
+    let mut out = String::new();
     if let Some(scope_path) = &listing.scope_path {
-        println!("grants over {scope_path}\n");
+        out.push_str(&format!("grants over {scope_path}\n\n"));
     }
     if listing.lapses.is_empty() {
-        println!("no grants{}", if all { "" } else { " standing" });
-        return Ok(());
+        out.push_str(&format!(
+            "no grants{}\n",
+            if all { "" } else { " standing" }
+        ));
+        return out;
     }
     for lapse in &listing.lapses {
         // The reason is the point of a lapse — a grant with no reason is
         // the thing ADR-0037 exists to make impossible — so it is on the
         // line rather than behind `--json`.
-        println!(
-            "{}  {:<9}  {} → {}",
+        out.push_str(&format!(
+            "{}  {:<9}  {} → {}\n",
             &lapse.id[..8.min(lapse.id.len())],
             lapse.outcome,
             lapse.grantee(),
             lapse.target(),
-        );
-        println!(
-            "  {} until {}  — {}",
+        ));
+        out.push_str(&format!(
+            "  {} until {}  — {}\n",
             lapse.action,
             lapse.expires_at.format("%Y-%m-%d %H:%M UTC"),
             lapse.reason,
-        );
+        ));
     }
-    println!("\n{} grant(s)", listing.lapses.len());
+    out.push_str(&format!("\n{} grant(s)\n", listing.lapses.len()));
     if listing.truncated {
         // Never a silent cap (ADR-0058 decision 5).
-        println!(
-            "warning: truncated at {} — narrow with --scope",
+        out.push_str(&format!(
+            "warning: truncated at {} — narrow with --scope\n",
             listing.max_lapses.unwrap_or_default(),
-        );
+        ));
     }
-    Ok(())
+    out
 }
 
 fn announce(api: &Api, origin: &Origin) {
