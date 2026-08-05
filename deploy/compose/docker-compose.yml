@@ -126,7 +126,38 @@ services:
       - "4317:4317" # OTLP gRPC
       - "4318:4318" # OTLP HTTP
 
+  gateway:
+    # The product itself (OPS-1, ADR-0055) — the "single gateway binary" of
+    # tech plan §4's SMB profile. Not started by `make dev-up`, which is the
+    # contributor's loop and runs the gateway from `cargo run`; this is what
+    # an installed deployment runs, and `synveda init` brings it up.
+    profiles: ["deployed"]
+    build:
+      context: ../..
+      dockerfile: deploy/compose/gateway/Dockerfile
+    image: synveda/gateway:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Written by `synveda init`: the issuer, the tenant it resolves to, and
+    # the embedder chosen at install time. Absent, the gateway starts with
+    # no issuer configured and refuses every request — which is the correct
+    # failure for an uninitialised deployment, not a reason to default one.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://synveda:synveda-dev@postgres:5432/synveda
+      # gRPC, not HTTP: telemetry.rs builds the exporter `.with_tonic()`.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "8120:8120"
+    volumes:
+      - gateway-search:/var/lib/synveda/search
+
 volumes:
   pg-data:
   rauthy-data:
   tei-cache:
+  gateway-search:

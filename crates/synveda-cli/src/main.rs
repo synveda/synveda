@@ -20,6 +20,8 @@ mod api;
 mod channel;
 mod credentials;
 mod diff;
+mod hierarchy;
+mod init;
 mod login;
 mod pack;
 mod prompt;
@@ -52,6 +54,65 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Bring up a single-node deployment and admit its first tenant
+    /// (OPS-1, ADR-0055) — the SMB profile of tech plan §4.
+    ///
+    /// What it does is deliberately small, because everything else the
+    /// product has a governed surface for is created *through* that
+    /// surface: `init` applies migrations, admits the tenant, configures
+    /// the issuer, and starts the stack. The org root, the operator's
+    /// identity and their `org-admin` binding all arrive on the first
+    /// `synveda login`, from AUTH-2's provisioning transaction, chained
+    /// under the operator's own subject. Departments and teams are
+    /// `synveda hierarchy create` after that.
+    ///
+    /// There is no path in here that writes a scope, an identity, a role
+    /// binding or a record behind the PDP's back — an installer runs once,
+    /// as root-equivalent, before anybody is watching, which makes it the
+    /// worst place in the product to keep a shortcut (seed §2.2).
+    Init {
+        /// Tenant slug to admit: lowercase, hyphenated. Also becomes the
+        /// org root's slug when the first admin logs in.
+        #[arg(long, default_value = "acme")]
+        slug: String,
+        /// Tenant display name; becomes the org root's name.
+        #[arg(long, default_value = "ACME")]
+        name: String,
+        /// Which embedder the corpus will be written with. Permanent in
+        /// practice: `record_embeddings` stores the model, embed-or-fail
+        /// is unconditional, and nothing re-embeds a corpus that changed
+        /// its mind (ADR-0055 decision 5). `deterministic` needs no model
+        /// download; `tei` serves BGE-M3 and downloads ~2.3 GB once.
+        #[arg(long, value_parser = ["deterministic", "tei"], default_value = "deterministic")]
+        embedder: String,
+        /// An external OIDC issuer URL. Omitted, the bundled Rauthy is
+        /// configured for you; given, nothing is created in your directory
+        /// and the client registration you must perform there is printed
+        /// (ADR-0055 decision 4).
+        #[arg(long)]
+        issuer: Option<String>,
+        /// Also build the ACME demo organisation — two departments, three
+        /// teams, four people, and material that arrives through the
+        /// observe → extract → embed pipeline like anybody else's. Never
+        /// use on a deployment that will hold real memory.
+        #[arg(long)]
+        demo: bool,
+        /// Print what would happen and change nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// The scopes an organisation is made of (OPS-1, ADR-0055 decision 3).
+    ///
+    /// Gateway calls under the bearer `synveda login` stored, like
+    /// `proposal` and `recall`: creating a department is a governed act
+    /// whose `HierarchyCreate` decision the PDP takes at the parent scope
+    /// and whose event the gateway chains under your own identity.
+    ///
+    /// The org root is not creatable here — it arrives with the first
+    /// admin login, from the tenant's own slug and name (ADR-0055
+    /// decision 2), so every `create` has a parent.
+    #[command(subcommand)]
+    Hierarchy(HierarchyCommand),
     /// Log in to a gateway through your browser (AUTH-1 end to end,
     /// ADR-0027 decision 5) and store the session under a profile. This
     /// is the whole of "zero-config": every other Synveda client on this
@@ -855,6 +916,84 @@ enum DbCommand {
 }
 
 #[derive(Subcommand)]
+enum HierarchyCommand {
+    /// Create a scope under a parent you may write to.
+    Create {
+        /// Parent scope UUID. Required — the org root is provisioned by
+        /// the first admin login, not created here.
+        #[arg(long)]
+        parent: ScopeId,
+        /// Level: division, department, team. (`org` is the root, and
+        /// `user` scopes are provisioned per person, never authored.)
+        #[arg(long, value_parser = scope_kind_below_root)]
+        kind: ScopeKind,
+        /// Human-stable handle, unique among siblings, immutable.
+        #[arg(long)]
+        slug: String,
+        /// Display name.
+        #[arg(long)]
+        name: String,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Print the gateway's JSON rather than a line.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Draw the subtree under a scope, or under the org root.
+    List {
+        /// Anchor scope UUID. Defaults to the tenant's org root.
+        #[arg(long)]
+        under: Option<ScopeId>,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// One scope, in full.
+    Show {
+        /// Scope UUID.
+        id: ScopeId,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The org root's id — the parent every first `create` needs.
+    Root {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Refuses `org` and `user` at the surface (ADR-0011's rank rule and
+/// ADR-0055 decision 2): the root has no parent to pass, and a personal
+/// scope is provisioned with its identity — an authored one would be a
+/// leaf nobody is placed at.
+fn scope_kind_below_root(value: &str) -> Result<ScopeKind, String> {
+    match value {
+        "division" => Ok(ScopeKind::Division),
+        "department" => Ok(ScopeKind::Department),
+        "team" => Ok(ScopeKind::Team),
+        "org" => Err(
+            "the org root is created by the first admin login, from the tenant's \
+                      own slug and name — there is nothing to create here"
+                .to_owned(),
+        ),
+        "user" => Err(
+            "personal scopes are provisioned with their identity at login, \
+                       never authored"
+                .to_owned(),
+        ),
+        other => Err(format!(
+            "unknown scope kind `{other}` (division, department, team)"
+        )),
+    }
+}
+
+#[derive(Subcommand)]
 enum TenantCommand {
     /// Admit a tenant; prints the created tenant as JSON.
     Create {
@@ -1121,6 +1260,55 @@ fn profile_name(flag: Option<String>) -> String {
 #[tokio::main(flavor = "current_thread")]
 async fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
+        Command::Init {
+            slug,
+            name,
+            embedder,
+            issuer,
+            demo,
+            dry_run,
+        } => {
+            init::init(init::Plan {
+                slug,
+                name,
+                embedder,
+                issuer,
+                demo,
+                dry_run,
+            })
+            .await
+        }
+        Command::Hierarchy(HierarchyCommand::Create {
+            parent,
+            kind,
+            slug,
+            name,
+            profile,
+            json,
+        }) => {
+            hierarchy::create(
+                &profile_name(profile),
+                hierarchy::NewNode {
+                    parent,
+                    kind,
+                    slug: &slug,
+                    name: &name,
+                },
+                json,
+            )
+            .await
+        }
+        Command::Hierarchy(HierarchyCommand::List {
+            under,
+            profile,
+            json,
+        }) => hierarchy::list(&profile_name(profile), under, json).await,
+        Command::Hierarchy(HierarchyCommand::Show { id, profile, json }) => {
+            hierarchy::show(&profile_name(profile), id, json).await
+        }
+        Command::Hierarchy(HierarchyCommand::Root { profile, json }) => {
+            hierarchy::root(&profile_name(profile), json).await
+        }
         Command::Login {
             gateway,
             issuer,
@@ -1179,22 +1367,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 TenantStatus::Active
             };
             let pool = connect().await?;
-            let tenant_id = TenantId::new();
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant_id)
-                .await
-                .map_err(|err| err.to_string())?;
-            let tenant = synveda_store::tenants::create(&mut *tx, tenant_id, &slug, &name, status)
-                .await
-                .map_err(|err| err.to_string())?;
-            record_break_glass(
-                &mut tx,
-                tenant_id,
-                AuditAction::TenantCreated,
-                format!("tenant {tenant_id}"),
-                json!({"slug": tenant.slug, "name": tenant.name, "status": tenant.status}),
-            )
-            .await?;
-            tx.commit().await.map_err(|err| err.to_string())?;
+            let tenant = create_tenant(&pool, &slug, &name, status).await?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&tenant).map_err(|err| err.to_string())?
@@ -1971,6 +2144,38 @@ fn break_glass() -> Actor {
         .or_else(|_| std::env::var("USER"))
         .unwrap_or_else(|_| "unknown".to_owned());
     Actor::break_glass(user)
+}
+
+/// Admits a tenant and chains `tenant.created` in the same transaction.
+///
+/// Shared by `synveda tenant create` and `synveda init` (OPS-1, ADR-0055
+/// decision 1) so that the installer takes the *existing* audited
+/// break-glass path rather than a second one that could drift from it —
+/// this and `db migrate` are the only store-level writes on the install
+/// path, and both predate it.
+pub(crate) async fn create_tenant(
+    pool: &sqlx::PgPool,
+    slug: &str,
+    name: &str,
+    status: TenantStatus,
+) -> Result<synveda_types::Tenant, String> {
+    let tenant_id = TenantId::new();
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant_id)
+        .await
+        .map_err(|err| err.to_string())?;
+    let tenant = synveda_store::tenants::create(&mut *tx, tenant_id, slug, name, status)
+        .await
+        .map_err(|err| err.to_string())?;
+    record_break_glass(
+        &mut tx,
+        tenant_id,
+        AuditAction::TenantCreated,
+        format!("tenant {tenant_id}"),
+        json!({"slug": tenant.slug, "name": tenant.name, "status": tenant.status}),
+    )
+    .await?;
+    tx.commit().await.map_err(|err| err.to_string())?;
+    Ok(tenant)
 }
 
 /// Chains a break-glass event in the same transaction as the mutation it

@@ -784,8 +784,24 @@ Phase 1 spine (wk 2–5):  TEN-1,2 · AUTH-1 · HIER-1 · AUTHZ-1 · AUTH-2 · A
 Phase 2 governance (wk 6–10): FLOW-1..7 · AUTHZ-4,5 · MEM-5,6 · CTX-4,5 · GRPH-1,2,4 ·
                          AUD-2 · EVAL-2,4,5 · PRMT-1,2
    → Demo: promotion pipeline, lapse lifecycle, as-of inject, bank-mode switch.
-Phase 3 enterprise (wk 11–16): AUTH-4,5 · TEN-3,4,5,6 · SKIL-1..4 · GRPH-3 · AUD-3,4 ·
-                         EVAL-3,6 · OPS-1..4 · CNSL-1,2 · ADPT-2,3 · CTX-6 · FLOW-8
+Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-2 ·
+                         AUTH-4,5 · EVAL-3 · OPS-2 · TEN-3,4,5,6 · AUD-3,4 · GRPH-3 ·
+                         EVAL-6 · OPS-3,4 · ADPT-3 · CTX-6 · FLOW-8
+   (Reordered 2026-08-04. Order within the phase is by demo-readiness, not epic-grouped
+   and — unlike Phase 1's — not topological, because nothing here blocks anything else:
+   every dependency Phase 3 has was met by Phase 2. The original order scattered this
+   phase's own demo goal across slots 1, 2, 10, 13 and 18, so the phase could not run
+   its demo until the phase was nearly over. The five features that goal names —
+   AUTH-4,5 (Entra/Okta), ADPT-2 (Cursor), EVAL-3 (published scores), OPS-2 (Helm) —
+   now sit in the front block with the two that make any of it showable at all: OPS-1,
+   because until `synveda init` exists there is no instance that survives a restart and
+   every demo is a script that seeds its own scratch state and tears it down; and
+   CNSL-1, the hero screen (tech plan §5), because FLOW-6 gave the review flow full CLI
+   parity and a terminal undersells a governance product to the people who buy it.
+   CNSL-2 rides directly behind CNSL-1 while the frontend toolchain CNSL-1 must choose
+   is warm. What moved back is the block a customer asks for at procurement rather than
+   at a demo — TEN-3..6, AUD-3,4 — plus GRPH-3, EVAL-6, OPS-3,4, ADPT-3, CTX-6 and
+   FLOW-8. Nothing is cut and the phase's contents are unchanged.)
    → Demo: Entra/Okta live, spec-compliant governed skills into Claude Code + Cursor,
      LoCoMo/LongMemEval scores published, Helm install.
 Phase 4 ecosystem: ADPT-4,5 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6 · CNSL-3,4 · AUD-5 · AUTHZ-6
