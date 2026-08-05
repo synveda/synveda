@@ -8,6 +8,10 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use synveda_types::{Error, Result};
 use tracing_subscriber::EnvFilter;
+// `with_filter` is the per-layer form; without this import both layers
+// would share one registry-level filter — see `init`'s doc comment for why
+// that is not merely a style choice.
+use tracing_subscriber::Layer as _;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -257,6 +261,26 @@ pub struct Telemetry {
 /// (default `info`) plus an OTLP/gRPC span exporter reading the standard
 /// `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4317` — Jaeger in
 /// the dev compose). Call once, from `main`, inside the Tokio runtime.
+///
+/// # `RUST_LOG` quietens the console and nothing else
+///
+/// The two filters are per-layer on purpose, and it is worth saying why,
+/// because the obvious arrangement — one `EnvFilter` on the registry — is
+/// what was here and it had a trap in it. A registry-level filter applies
+/// to *every* layer, so `RUST_LOG=warn` did not merely quieten the log: it
+/// stopped `info`-level spans being recorded at all, and with them every
+/// exported trace. FND-5's acceptance criterion ("a single trace visible in
+/// Jaeger") silently stopped holding for anyone who turned their logs down,
+/// which is a thing operators do to *production*. Measured before the fix:
+/// at `RUST_LOG=warn` a request carrying a `traceparent` reached Jaeger not
+/// at all; at `info`, it arrived.
+///
+/// So the span exporter takes a fixed `INFO` floor of its own and the
+/// console keeps `RUST_LOG`. The trade-off, stated rather than discovered:
+/// `RUST_LOG=debug` no longer deepens what is *traced*, only what is
+/// printed. Traces are an operational contract with an SLO attached; log
+/// verbosity is a knob. Widening the contract should be a decision, not a
+/// side effect of an environment variable.
 pub fn init(service_name: &'static str) -> Result<Telemetry> {
     install_propagator();
     let exporter = opentelemetry_otlp::SpanExporter::builder()
@@ -272,11 +296,14 @@ pub fn init(service_name: &'static str) -> Result<Telemetry> {
         .build();
     let tracer = provider.tracer(service_name);
 
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let console = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer())
-        .with(tracing_opentelemetry::layer().with_tracer(tracer))
+        .with(tracing_subscriber::fmt::layer().with_filter(console))
+        .with(
+            tracing_opentelemetry::layer()
+                .with_tracer(tracer)
+                .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
+        )
         .try_init()
         .map_err(|err| Error::Internal {
             message: format!("tracing subscriber already installed: {err}"),

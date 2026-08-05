@@ -28,6 +28,68 @@ pub struct Api {
     /// identity is about to approve something.
     pub subject: String,
     http: reqwest::Client,
+    /// The W3C trace context every call from this client carries
+    /// (ADR-0007's deferred clause; see [`Api::traceparent`]).
+    trace: TraceContext,
+}
+
+/// The `traceparent` this client sends, minted once and reused.
+///
+/// # One trace per client, which is one trace per thing the user asked for
+///
+/// [`Api::connect`] is called once per command — and, in `synveda mcp`, once
+/// per tool call, because a long-lived server resolves its bearer per call
+/// so a session outliving a token refreshes instead of failing. So tying
+/// the trace to the client, rather than to a process or to a request, lands
+/// on exactly the right unit at both call sites for free: `synveda proposal
+/// review` making five calls is one trace, and one `recall` tool call is
+/// one trace rather than a session's worth.
+///
+/// # The root is synthetic, and that is worth knowing before you look
+///
+/// The CLI installs no OTel exporter — `synveda mcp` deliberately does not
+/// (see `mcp::subscribe`), and the one-shot verbs have no subscriber at
+/// all — so the span this names as the parent is never reported to a
+/// collector. In Jaeger the gateway's spans appear under a root that is
+/// not there, which renders fine and is exactly what ADPT-1's hooks have
+/// always produced. Do not go looking for the missing span; nothing lost
+/// it.
+///
+/// What this buys is real all the same: every call from one command shares
+/// an id, the gateway now continues that trace rather than starting its
+/// own (FND-5, ADR-0007's deferred clause), and the id is printed where a
+/// person can paste it into Jaeger.
+struct TraceContext {
+    trace_id: String,
+    parent_span_id: String,
+}
+
+impl TraceContext {
+    /// A fresh context from the system CSPRNG. 16 bytes of trace id and 8
+    /// of span id, lowercase hex, which is what W3C version `00` fixes.
+    fn new() -> Result<Self, String> {
+        Ok(Self {
+            trace_id: hex(16)?,
+            parent_span_id: hex(8)?,
+        })
+    }
+
+    /// The header value. Sampled (`01`) because a caller that did not want
+    /// this trace would not have sent one: the CLI makes a handful of calls
+    /// per command, so there is nothing here worth sampling away.
+    fn header(&self) -> String {
+        format!("00-{}-{}-01", self.trace_id, self.parent_span_id)
+    }
+}
+
+fn hex(bytes: usize) -> Result<String, String> {
+    let mut buffer = vec![0u8; bytes];
+    getrandom::fill(&mut buffer).map_err(|err| format!("system CSPRNG unavailable: {err}"))?;
+    Ok(buffer.iter().fold(String::new(), |mut out, byte| {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+        out
+    }))
 }
 
 /// Where a bearer came from. `synveda proposal` prints it once, because
@@ -59,6 +121,8 @@ impl Api {
             .build()
             .map_err(|err| format!("build the HTTP client: {err}"))?;
 
+        let trace = TraceContext::new()?;
+
         if let Some(token) = std::env::var("SYNVEDA_TOKEN")
             .ok()
             .filter(|token| !token.is_empty())
@@ -69,6 +133,7 @@ impl Api {
                     bearer: token,
                     subject: "SYNVEDA_TOKEN".to_owned(),
                     http,
+                    trace,
                 },
                 Origin::Environment,
             ));
@@ -81,6 +146,7 @@ impl Api {
                 bearer: profile.access_token.clone(),
                 subject: profile.subject.clone(),
                 http,
+                trace,
             },
             Origin::Profile(profile_name.to_owned()),
         ))
@@ -89,6 +155,12 @@ impl Api {
     /// The gateway this client talks to.
     pub fn gateway(&self) -> &str {
         &self.base
+    }
+
+    /// The trace id every call from this client carries — the one to paste
+    /// into Jaeger to see what the gateway did with them.
+    pub fn trace_id(&self) -> &str {
+        &self.trace.trace_id
     }
 
     /// `GET path`, as a JSON value.
@@ -128,6 +200,10 @@ impl Api {
     ) -> Result<Value, String> {
         let response = request
             .bearer_auth(&self.bearer)
+            // Every governed verb goes through here, so this one line is
+            // what makes a `synveda proposal publish` and the gateway work
+            // it triggers one trace instead of two unconnected halves.
+            .header("traceparent", self.trace.header())
             .send()
             .await
             .map_err(|err| format!("{method} {}{path}: {err}", self.base))?;
@@ -168,6 +244,135 @@ fn decode<T: DeserializeOwned>(value: Value, path: &str) -> Result<T, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The header shape W3C version `00` fixes: four hyphen-separated
+    /// fields, 32 lowercase hex of trace id, 16 of parent span id, and
+    /// flags. The gateway's propagator rejects anything else outright, so
+    /// getting this wrong means every call silently stops being traced —
+    /// which looks exactly like nothing being wrong.
+    #[test]
+    fn the_traceparent_is_the_shape_the_gateway_will_accept() {
+        let trace = TraceContext::new().expect("a context");
+        let header = trace.header();
+        let parts: Vec<&str> = header.split('-').collect();
+        assert_eq!(parts.len(), 4, "{header}");
+        assert_eq!(parts[0], "00");
+        assert_eq!(parts[1].len(), 32, "trace id is 16 bytes of hex: {header}");
+        assert_eq!(parts[2].len(), 16, "span id is 8 bytes of hex: {header}");
+        assert_eq!(parts[3], "01");
+        assert!(
+            header
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase() || c == '-'),
+            "W3C requires lowercase hex; uppercase is rejected outright: {header}",
+        );
+        // All-zero ids are the spec's own "invalid" values and extract to
+        // nothing. A CSPRNG will not produce them, but a future refactor
+        // that forgot to fill the buffer would.
+        assert_ne!(parts[1], "0".repeat(32));
+        assert_ne!(parts[2], "0".repeat(16));
+    }
+
+    /// One trace per client, which is one trace per thing the user asked
+    /// for: every call a command makes shares an id, and two commands do
+    /// not. Reusing across clients would merge unrelated work into one
+    /// Jaeger view; minting per *call* would scatter one command across
+    /// several.
+    #[test]
+    fn one_client_is_one_trace_and_two_clients_are_two() {
+        let first = TraceContext::new().expect("a context");
+        assert_eq!(first.header(), first.header(), "stable within a client");
+
+        let second = TraceContext::new().expect("a context");
+        assert_ne!(
+            first.trace_id, second.trace_id,
+            "a second command must not land in the first command trace",
+        );
+    }
+
+    /// The header shape tests above prove a string; this proves it reaches
+    /// a socket, on **every** call, from the choke point every governed verb
+    /// goes through. Without it, deleting one line in `send` leaves all the
+    /// unit tests green and every trace silently unjoined.
+    ///
+    /// A real listener rather than a mock: the subject is what a gateway
+    /// receives, and `reqwest` is between here and that.
+    #[tokio::test]
+    async fn every_call_carries_the_same_traceparent_to_the_wire() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        // `Api::connect` reads the environment; this is the credentials
+        // tests' lock discipline, in the async-aware form this test needs —
+        // a `std::sync::MutexGuard` held across an await is what clippy
+        // rejects, and rightly: it parks a thread the runtime wanted.
+        static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let _guard = LOCK.lock().await;
+
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind a loopback listener");
+        let port = listener.local_addr().expect("addr").port();
+
+        // Two requests, so the test can say whether the trace is stable
+        // across a command rather than minted per call.
+        let seen = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
+        let server = tokio::spawn({
+            let seen = std::sync::Arc::clone(&seen);
+            async move {
+                for _ in 0..2 {
+                    let (mut stream, _) = listener.accept().await.expect("accept");
+                    let mut buffer = vec![0u8; 4096];
+                    let read = stream.read(&mut buffer).await.expect("read");
+                    let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+                    let header = request
+                        .lines()
+                        .find_map(|line| {
+                            line.strip_prefix("traceparent: ")
+                                .map(str::trim)
+                                .map(str::to_owned)
+                        })
+                        .unwrap_or_else(|| format!("ABSENT in:\n{request}"));
+                    seen.lock().await.push(header);
+                    stream
+                        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}")
+                        .await
+                        .expect("write");
+                }
+            }
+        });
+
+        // SAFETY: the lock above makes this the only thread touching the
+        // environment for the duration of the test.
+        unsafe {
+            std::env::set_var("SYNVEDA_TOKEN", "test-bearer");
+            std::env::set_var("SYNVEDA_GATEWAY", format!("http://127.0.0.1:{port}"));
+        }
+        let (api, _origin) = Api::connect("default").await.expect("connect");
+        api.get("/v1/whoami").await.expect("first call");
+        api.post("/v1/recall", None).await.expect("second call");
+        unsafe {
+            std::env::remove_var("SYNVEDA_TOKEN");
+            std::env::remove_var("SYNVEDA_GATEWAY");
+        }
+        server.await.expect("server task");
+
+        let seen = seen.lock().await;
+        assert_eq!(seen.len(), 2);
+        assert!(
+            seen[0].starts_with("00-") && seen[0].ends_with("-01"),
+            "no usable traceparent on the wire: {:?}",
+            seen[0],
+        );
+        assert_eq!(
+            seen[0], seen[1],
+            "both calls of one command must land in one trace",
+        );
+        assert!(
+            seen[0].contains(api.trace_id()),
+            "the id the header carries must be the one `trace_id()` reports, or the \
+             number printed for a human to paste into Jaeger names a different trace",
+        );
+    }
 
     #[test]
     fn a_refusal_is_rendered_in_the_gateways_own_words() {

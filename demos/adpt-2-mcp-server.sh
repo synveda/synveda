@@ -40,7 +40,10 @@ set -eu
 cd "$(dirname "$0")/.."
 
 COMPOSE="docker compose -f deploy/compose/docker-compose.yml"
-$COMPOSE up --detach --wait postgres
+# Jaeger as well as postgres: since FND-5 landed ADR-0007 deferred
+# traceparent clause, a tool call and the gateway work it triggers are
+# one trace, and this demo shows that rather than asserting it.
+$COMPOSE up --detach --wait postgres jaeger
 
 # A scratch database per run — the CTX-5/EVAL-1/MEM-6 discipline: the
 # sidecar indexer and the pack refresher visit every active tenant per
@@ -77,6 +80,11 @@ SYNVEDA_SEARCH_POLL_MS=300
 export SYNVEDA_SEARCH_POLL_MS
 SYNVEDA_POLICY_REFRESH_SECS=2
 export SYNVEDA_POLICY_REFRESH_SECS
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export OTEL_EXPORTER_OTLP_ENDPOINT
+# Export on a demo cadence rather than the 5s batch default.
+OTEL_BSP_SCHEDULE_DELAY=500
+export OTEL_BSP_SCHEDULE_DELAY
 
 cargo build -p synveda-gateway -p synveda-cli
 ( cd adapters/claude-code && npm run build >/dev/null )
@@ -456,6 +464,55 @@ gen_tools=$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params
 [ "$gen_tools" = "recall,remember" ] || {
   echo "demo FAILED: the generated config launched [$gen_tools]" >&2; exit 1; }
 echo "    running that line verbatim serves [$gen_tools]"
+
+echo
+echo "==> ONE TRACE: the tool call and the gateway work it triggered"
+# The MCP server mints a W3C traceparent per gateway client, and it resolves
+# one per tool call — so a `recall` through the tool is one trace, and the
+# gateway continues it rather than starting its own (FND-5, ADR-0007). The
+# id is on the server stderr, which is where an MCP client collects it.
+RUST_LOG=synveda=info client modern tool '[
+  {"tool":"recall","args":{"query":"settlement reconciliation nightly batch"},"contains":"Watermark:"}
+]' 2>"$SCRATCH/traced.err" >/dev/null
+tool_trace=$(sed -n 's/.*trace_id="\([0-9a-f]\{32\}\)".*/\1/p' "$SCRATCH/traced.err" | head -1)
+[ -n "$tool_trace" ] || {
+  echo "demo FAILED: the tool call logged no trace id" >&2
+  sed 's/^/      /' "$SCRATCH/traced.err" >&2; exit 1; }
+echo "    the tool call logged trace $tool_trace"
+node -e '
+  const caller = process.argv[1];
+  // Fetched by id rather than scanned out of a recent-traces list: a busy
+  // Jaeger holds more traces than any page size, and a demo that failed
+  // because its trace fell off the end of a list would be a demo about
+  // pagination.
+  const url = `http://localhost:16686/api/traces/${caller}`;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  (async () => {
+    for (let attempt = 0; attempt < 30; attempt++) {
+      try {
+        const body = await (await fetch(url)).json();
+        const hit = (body.data ?? [])[0];
+        if (hit) {
+          const ops = [...new Set(hit.spans.map((s) => s.operationName))];
+          console.log(`    Jaeger holds trace ${caller}: ${ops.join(", ")}`);
+          console.log(`    view it: http://localhost:16686/trace/${caller}`);
+          process.exit(0);
+        }
+      } catch {
+        // Jaeger may still be ingesting; keep polling.
+      }
+      await sleep(1000);
+    }
+    console.error(
+      `demo FAILED: the gateway did not continue trace ${caller} — a model tool call and ` +
+        `the work it caused are still two unconnected halves`,
+    );
+    process.exit(1);
+  })();
+' "$tool_trace"
+echo "    ADR-0027 promised this from ADPT-1 and ADR-0007 deferred the other"
+echo "    half to Phase 1; the adapter has been sending a traceparent since"
+echo "    it shipped and nothing read it. Both halves are joined now."
 
 echo
 echo "==> the trail: every call chained under alice, never under a tool"

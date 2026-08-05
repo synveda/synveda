@@ -36,6 +36,21 @@ digits is accepted and zero-padded, and a `traceparent` from a future
 revision is parsed forward (which W3C asks for). Both are pinned so a
 tightened propagator fails a test rather than changing behaviour silently.
 
+**A second defect surfaced while demonstrating the first, and it was the
+larger one.** The single `EnvFilter` this ADR's init block put on the
+registry applied to the span exporter as well as the console, so
+`RUST_LOG=warn` — a thing operators do to production — stopped `info`-level
+spans being recorded at all and with them every exported trace. Measured:
+at `warn`, a request carrying a `traceparent` reached Jaeger not at all; at
+`info`, it arrived. This ADR's own acceptance criterion, "a single trace
+visible in Jaeger spanning an end-to-end request", silently stopped holding
+for anyone who turned their logs down, and nothing said so. The filters are
+now per-layer: the console keeps `RUST_LOG`, and the exporter carries a
+fixed `INFO` floor. Trade-off stated rather than discovered — `RUST_LOG=debug`
+no longer deepens what is *traced*, only what is printed, because a trace is
+an operational contract with an SLO attached and widening it should be a
+decision rather than a side effect of an environment variable.
+
 **A caller's trace id is caller-controlled and therefore not evidence.**
 This ADR's compliance note already fixes what that can cost — "traces are
 plumbing for the audit story, not a substitute for it: AUD-1's

@@ -410,3 +410,55 @@ async fn a_traceparent_from_a_future_revision_is_parsed_forward() {
     );
     assert_eq!(request_span.parent_span_id.to_string(), CALLER_SPAN);
 }
+
+/// The trap that hid inside a single registry-level `EnvFilter`: it applied
+/// to the span exporter too, so `RUST_LOG=warn` — a thing operators do to
+/// production — silently stopped every trace being recorded, and FND-5's
+/// acceptance criterion quietly stopped holding.
+///
+/// This asserts the arrangement rather than the symptom, because the
+/// symptom needs a live collector: the OTel layer must carry its own floor
+/// so that an `info` span is still *recorded* when the console filter is
+/// `error`. If this fails, check `telemetry::init` for a filter that moved
+/// back onto the registry.
+#[tokio::test]
+async fn a_quiet_console_still_records_spans_for_export() {
+    let _serial = serial().await;
+    use opentelemetry::trace::TracerProvider as _;
+    use tracing_subscriber::Layer as _;
+
+    let exporter = opentelemetry_sdk::trace::InMemorySpanExporter::default();
+    let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+        .with_simple_exporter(exporter.clone())
+        .build();
+    // The shape `telemetry::init` builds: the console filter belongs to the
+    // fmt layer, and the exporter keeps its own floor.
+    let subscriber = tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::sink)
+                .with_filter(tracing_subscriber::EnvFilter::new("error")),
+        )
+        .with(
+            tracing_opentelemetry::layer()
+                .with_tracer(provider.tracer("test"))
+                .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
+        );
+    let guard = tracing::subscriber::set_default(subscriber);
+
+    let response = router(state(UNREACHABLE_URL))
+        .oneshot(Request::get("/healthz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_text(response).await, "ok");
+
+    provider.force_flush().expect("flush spans");
+    drop(guard);
+    let spans = exporter.get_finished_spans().expect("exported spans");
+    assert!(
+        spans.iter().any(|span| span.name == "GET /healthz"),
+        "a console filter of `error` suppressed the exported span; traces must not \
+         depend on log verbosity — see telemetry::init",
+    );
+}

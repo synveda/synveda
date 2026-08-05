@@ -674,6 +674,10 @@ impl ServerHandler for Server {
             client = context
                 .client_info()
                 .map_or_else(|| "unknown".to_owned(), |info| info.name),
+            // Filled in by `connect` once a gateway client exists — absent
+            // when the call was refused before one was needed, which is
+            // itself the useful fact that no request was made.
+            trace_id = tracing::field::Empty,
             outcome = tracing::field::Empty,
         );
         let _entered = span.enter();
@@ -803,11 +807,14 @@ pub async fn serve(profile: String, writes: Writes) -> Result<(), String> {
 /// Jaeger. The tool call's own timing is recorded below, which is the part
 /// a person debugging this actually needs.
 ///
-/// **No `traceparent` on the gateway calls.** ADR-0027's observability note
-/// promises one from the Claude Code adapter, and the adapter sends one —
-/// but nothing on the gateway extracts it today, so a header added here
-/// would join no trace and mean nothing. Worth doing when the gateway
-/// grows a propagator; cargo-culted before then.
+/// **No OTel span ids of our own**, even though the calls now carry a
+/// `traceparent` (FND-5 landed ADR-0007's extraction clause, so the gateway
+/// continues the trace rather than starting one). `api::Api` mints that
+/// context per client — which here is per tool call — and the id is
+/// recorded on the span below, so a person reads it out of this log and
+/// pastes it into Jaeger. Making the root a *real* exported span would
+/// need the exporter this paragraph's neighbour declines; a synthetic root
+/// is what ADPT-1's hooks have always produced and it renders fine.
 ///
 /// **No metrics recorder.** `metrics` without a recorder is a no-op, and a
 /// stdio subprocess has no scrape endpoint to expose one on. The gateway
@@ -843,7 +850,15 @@ fn subscribe() {
 /// request, and this one is about the machine.
 async fn connect(server: &Server) -> Result<Api, String> {
     match Api::connect(&server.profile).await {
-        Ok((api, _origin)) => Ok(api),
+        Ok((api, _origin)) => {
+            // Recorded on the enclosing `mcp.tools/call` span, so the id
+            // this tool call sends as its `traceparent` is the id in the
+            // log line beside it — which is how somebody debugging a slow
+            // recall gets from this server's stderr to the gateway's trace
+            // in Jaeger without correlating by wall clock.
+            tracing::Span::current().record("trace_id", api.trace_id());
+            Ok(api)
+        }
         Err(error) => {
             eprintln!("synveda mcp: {error}");
             Err(SIGN_IN_MESSAGE.to_owned())
