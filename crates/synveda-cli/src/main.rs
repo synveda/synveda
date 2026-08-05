@@ -23,6 +23,7 @@ mod diff;
 mod hierarchy;
 mod init;
 mod login;
+mod mcp;
 mod pack;
 mod prompt;
 mod proposal;
@@ -138,6 +139,35 @@ enum Command {
     /// Stored credentials (ADR-0027 decisions 4 and 6).
     #[command(subcommand)]
     Auth(AuthCommand),
+    /// Serve governed memory to any MCP client over stdio (ADPT-2,
+    /// ADR-0057 as amended).
+    ///
+    /// Two tools — `recall` and `remember` — for clients that have no hook
+    /// seam and whose only extension point is a tool the model chooses to
+    /// call. A client launches this as a subprocess and speaks JSON-RPC on
+    /// its stdin and stdout, so nothing here listens on a port and no
+    /// credential leaves the machine.
+    ///
+    /// It is an adapter that happens to live in this binary: a gateway
+    /// client over `/v1` holding the bearer `synveda login` stored, three
+    /// primitives only, no database connection and no core-crate call.
+    Mcp {
+        /// Who owns the write at this host. `tool` advertises `remember`
+        /// as well as `recall`, because nothing else writes; `host`
+        /// advertises `recall` only, because the harness or framework
+        /// launching this already observes its own turns.
+        ///
+        /// Get it wrong towards `tool` on a harness with hooks and the
+        /// same turn is stored twice — once as the model composed it, once
+        /// as the hook saw it — with different payloads, so nothing
+        /// downstream can tell they were the same turn.
+        #[arg(long, value_enum, default_value_t = mcp::Writes::Tool)]
+        writes: mcp::Writes,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
     /// Database administration (dev bootstrap).
     #[command(subcommand)]
     Db(DbCommand),
@@ -1326,6 +1356,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Auth(AuthCommand::Token { profile, json }) => {
             login::auth_token(profile_name(profile), json).await
         }
+        Command::Mcp { writes, profile } => mcp::serve(profile_name(profile), writes).await,
         Command::Auth(AuthCommand::Logout { profile, all }) => {
             let mut stored = credentials::load()?;
             if all {
