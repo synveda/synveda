@@ -200,6 +200,7 @@ const COVERED: &[&str] = &[
     "context_pack_chunks",
     "context_pack_documents",
     "context_packs",
+    "directory_sync_state",
     "graph_edges",
     "graph_edges_history",
     "graph_vertices",
