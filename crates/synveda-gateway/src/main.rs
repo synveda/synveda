@@ -46,6 +46,18 @@
 //! (default 100): expiry or failure degrades that inject to the sparse
 //! leg (marked in `X-Synveda-Degraded`), never fails it.
 //!
+//! The directory pull sync (AUTH-5, ADR-0060) runs only for issuers that
+//! carry a `directory_sync` entry in `SYNVEDA_OIDC_ISSUERS`, and only when
+//! that issuer binds its tenant statically — a pull runs on a timer with no
+//! request to read a `tid` claim from. It paces on
+//! `SYNVEDA_DIRECTORY_SYNC_INTERVAL_SECS` (default 3600) and is tuned by
+//! `SYNVEDA_DIRECTORY_ABSENCE_PASSES` (default 2 — consecutive *complete*
+//! passes an absence must survive before anybody is sealed),
+//! `SYNVEDA_DIRECTORY_BREAKER_FRACTION` (default 0.10) and
+//! `SYNVEDA_DIRECTORY_BREAKER_FLOOR` (default 5). The last two are the
+//! circuit breaker: a pass proposing more than that share of a tenant, above
+//! that floor, seals nobody until a human authorises it.
+//!
 //! The standard `OTEL_*` variables configure the OTLP exporter (default
 //! endpoint `http://localhost:4317` — Jaeger in the dev compose).
 
@@ -95,6 +107,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .ok_or("SYNVEDA_PUBLIC_URL must be an absolute http(s) URL")?;
 
+    // Populated only in OIDC mode: a pull sync reads the directory behind
+    // an issuer, and the dev HS256 mode has no issuer to read.
+    let mut directory_connectors: std::collections::HashMap<
+        synveda_types::TenantId,
+        Box<dyn synveda_identity::directory::DirectoryConnector>,
+    > = std::collections::HashMap::new();
+
     // One auth mode, never two (ADR-0010); fail closed when neither is
     // configured (ADR-0008).
     let oidc_issuers = std::env::var("SYNVEDA_OIDC_ISSUERS")
@@ -114,6 +133,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             (Some(json), None) => {
                 let issuers = synveda_identity::parse_issuers(&json)?;
+                // Built before the verifier consumes the list, and refused
+                // at boot rather than at the first tick: a directory sync
+                // that is misconfigured must not look like a directory that
+                // has nobody in it (AUTH-5, ADR-0060).
+                directory_connectors = build_directory_connectors(&issuers)?;
                 let redirect_uri = format!("{public_url}/auth/callback");
                 let oidc = Arc::new(OidcVerifier::new(issuers)?);
                 tracing::info!(
@@ -286,33 +310,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|ms| *ms > 0)
         .unwrap_or(100);
 
+    // Built before the background loops that share it: the directory pull
+    // sync reaches the product only through the same `AppState` a request
+    // does, which is what keeps it on the reconciler's side of the PDP
+    // rather than beside it.
+    let app_state = AppState {
+        pool,
+        metrics,
+        verifier,
+        login,
+        public_origin,
+        pdp,
+        scope_chains,
+        service_token_max_ttl: Duration::from_secs(service_token_max_ttl_secs),
+        search_index,
+        embedder,
+        inject_embed_timeout: Duration::from_millis(inject_embed_timeout_ms),
+    };
+
+    // The directory pull sync (AUTH-5, ADR-0060). Spawned only when an
+    // issuer configures one, because an empty connector map is a loop that
+    // wakes up to do nothing — and because "no tenant is being pulled"
+    // should be visible as a missing log line rather than as a sweep
+    // reporting zero every hour.
+    let directory_sync = if directory_connectors.is_empty() {
+        None
+    } else {
+        let config = directory_sync_config_from_env()?;
+        tracing::info!(
+            tenants = directory_connectors.len(),
+            interval_secs = config.interval.as_secs(),
+            absence_passes = config.absence_passes,
+            breaker_fraction = config.breaker_fraction,
+            breaker_floor = config.breaker_floor,
+            "directory pull sync starting (AUTH-5, ADR-0060): absence needs \
+             this many consecutive complete passes before anybody is sealed"
+        );
+        Some(synveda_gateway::directory_sync::spawn(
+            app_state.clone(),
+            directory_connectors,
+            config,
+        ))
+    };
+
     let addr = std::env::var("SYNVEDA_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8120".to_owned());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(%addr, "synveda-gateway listening");
 
-    axum::serve(
-        listener,
-        app::router(AppState {
-            pool,
-            metrics,
-            verifier,
-            login,
-            public_origin,
-            pdp,
-            scope_chains,
-            service_token_max_ttl: Duration::from_secs(service_token_max_ttl_secs),
-            search_index,
-            embedder,
-            inject_embed_timeout: Duration::from_millis(inject_embed_timeout_ms),
-        }),
-    )
-    .with_graceful_shutdown(shutdown_signal())
-    .await?;
+    axum::serve(listener, app::router(app_state))
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     refresher.abort();
     search_indexer.abort();
     promotion_engine.abort();
     retention_sweep.abort();
     lapse_sweep.abort();
+    if let Some(sync) = directory_sync {
+        sync.abort();
+    }
     if let Some(worker) = extraction_worker {
         worker.abort();
     }
@@ -430,6 +485,116 @@ fn promotion_config_from_env() -> synveda_ingest::promotion::SweepConfig {
     }
 }
 
+/// Which tenant each configured connector reads for (AUTH-5, ADR-0060).
+///
+/// **A pull sync requires a statically bound issuer**, and this is the one
+/// place that rule is enforced. `TenantBinding::Claim` resolves a tenant from
+/// a token presented on a request; a pull sync runs on a timer with no
+/// request in front of it, so there is no claim to read and no way to know
+/// which tenants that issuer serves without one. The alternatives to
+/// refusing are both worse: guessing a tenant, or booting into a sync that
+/// silently pulls nobody — and a directory sync that reads nothing looks
+/// exactly like a directory that has nobody in it, which is the state that
+/// would eventually seal a company.
+///
+/// # Errors
+/// A claim-bound issuer configuring a pull sync, two issuers claiming one
+/// tenant, or a connector that cannot be constructed.
+fn build_directory_connectors(
+    issuers: &[synveda_identity::IssuerConfig],
+) -> Result<
+    std::collections::HashMap<
+        synveda_types::TenantId,
+        Box<dyn synveda_identity::directory::DirectoryConnector>,
+    >,
+    Box<dyn std::error::Error>,
+> {
+    let mut connectors = std::collections::HashMap::new();
+    for issuer in issuers {
+        let Some(config) = &issuer.directory_sync else {
+            continue;
+        };
+        let synveda_identity::TenantBinding::Static { tenant_id } = &issuer.tenant else {
+            return Err(format!(
+                "issuer {} configures `directory_sync` with a claim-bound tenant: a \
+                 pull sync runs on a timer with no request to read a claim from, so \
+                 it needs `tenant: {{\"static\": ...}}` (AUTH-5, ADR-0060)",
+                issuer.issuer
+            )
+            .into());
+        };
+        let connector = synveda_identity::directory::connector(config)?;
+        tracing::info!(
+            issuer = issuer.issuer,
+            tenant.id = %tenant_id,
+            connector = connector.name(),
+            "directory pull sync configured"
+        );
+        if connectors.insert(*tenant_id, connector).is_some() {
+            return Err(format!(
+                "tenant {tenant_id} is pull-synced by two issuers: one directory is \
+                 the authority for one tenant (ADR-0060 decision 5)"
+            )
+            .into());
+        }
+    }
+    Ok(connectors)
+}
+
+/// The pass's tuning. Every knob has a default that is safe rather than
+/// eager, because the thing being tuned decides whether people get sealed.
+///
+/// # Errors
+/// A value that parses but cannot mean anything — a fraction outside `0..=1`
+/// or a non-positive absence threshold. Refused at boot rather than clamped:
+/// somebody who wrote `SYNVEDA_DIRECTORY_ABSENCE_PASSES=0` meant something,
+/// and it was not "seal on the first missed page".
+fn directory_sync_config_from_env()
+-> Result<synveda_gateway::directory_sync::SyncConfig, Box<dyn std::error::Error>> {
+    let defaults = synveda_gateway::directory_sync::SyncConfig::default();
+    let absence_passes = match std::env::var("SYNVEDA_DIRECTORY_ABSENCE_PASSES") {
+        Ok(value) => {
+            let parsed: i32 = value
+                .parse()
+                .map_err(|_| "SYNVEDA_DIRECTORY_ABSENCE_PASSES must be an integer")?;
+            if parsed < 1 {
+                return Err("SYNVEDA_DIRECTORY_ABSENCE_PASSES must be at least 1: a \
+                            threshold of zero seals somebody the first time one page \
+                            of a directory read is throttled (ADR-0060 decision 3.2)"
+                    .into());
+            }
+            parsed
+        }
+        Err(_) => defaults.absence_passes,
+    };
+    let breaker_fraction = match std::env::var("SYNVEDA_DIRECTORY_BREAKER_FRACTION") {
+        Ok(value) => {
+            let parsed: f64 = value
+                .parse()
+                .map_err(|_| "SYNVEDA_DIRECTORY_BREAKER_FRACTION must be a number")?;
+            if !(0.0..=1.0).contains(&parsed) {
+                return Err("SYNVEDA_DIRECTORY_BREAKER_FRACTION must be between 0 and 1".into());
+            }
+            parsed
+        }
+        Err(_) => defaults.breaker_fraction,
+    };
+    Ok(synveda_gateway::directory_sync::SyncConfig {
+        interval: std::env::var("SYNVEDA_DIRECTORY_SYNC_INTERVAL_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|secs| *secs > 0)
+            .map_or(defaults.interval, Duration::from_secs),
+        absence_passes,
+        breaker_fraction,
+        breaker_floor: std::env::var("SYNVEDA_DIRECTORY_BREAKER_FLOOR")
+            .ok()
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|floor| *floor >= 0)
+            .unwrap_or(defaults.breaker_floor),
+    })
+}
+
 fn retention_config_from_env() -> synveda_ingest::retention::SweepConfig {
     let defaults = synveda_ingest::retention::SweepConfig::default();
     synveda_ingest::retention::SweepConfig {
@@ -467,5 +632,98 @@ fn extraction_config_from_env() -> synveda_ingest::worker::WorkerConfig {
         max_reads: parse("SYNVEDA_EXTRACTION_MAX_READS")
             .and_then(|value| i32::try_from(value).ok())
             .unwrap_or(defaults.max_reads),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use synveda_identity::directory::{DirectorySyncConfig, Secret};
+
+    fn issuer(tenant: synveda_identity::TenantBinding) -> synveda_identity::IssuerConfig {
+        let json = r#"[{"issuer":"https://idp.example","client_id":"c"}]"#;
+        let mut parsed = synveda_identity::parse_issuers(json).expect("parse");
+        let mut config = parsed.remove(0);
+        config.tenant = tenant;
+        config
+    }
+
+    fn okta() -> DirectorySyncConfig {
+        DirectorySyncConfig::Okta {
+            org_url: "https://example.okta.com".to_owned(),
+            api_token: Secret::new("token"),
+        }
+    }
+
+    #[test]
+    fn a_pull_sync_needs_a_statically_bound_issuer() {
+        // A claim-bound issuer resolves its tenant from a token on a
+        // request. A pull sync has no request, so there is no claim and no
+        // way to know which tenants it serves — and the two ways of
+        // carrying on regardless are both worse than refusing: guess a
+        // tenant, or boot into a sync that pulls nobody. The second is the
+        // dangerous one, because a directory read that returns nothing
+        // looks exactly like a directory with nobody in it.
+        let mut claim_bound = issuer(synveda_identity::TenantBinding::Claim {
+            name: "tid".to_owned(),
+        });
+        claim_bound.directory_sync = Some(okta());
+        // `.err()` rather than `expect_err`: the Ok side holds boxed trait
+        // objects and is not `Debug`.
+        let message = build_directory_connectors(std::slice::from_ref(&claim_bound))
+            .err()
+            .expect("a claim-bound pull sync is refused")
+            .to_string();
+        assert!(
+            message.contains("static"),
+            "and the error says what to do about it: {message}"
+        );
+
+        let tenant_id = synveda_types::TenantId::new();
+        let mut bound = issuer(synveda_identity::TenantBinding::Static { tenant_id });
+        bound.directory_sync = Some(okta());
+        let built = build_directory_connectors(std::slice::from_ref(&bound)).expect("built");
+        assert_eq!(built.len(), 1);
+        assert_eq!(built[&tenant_id].name(), "okta");
+    }
+
+    #[test]
+    fn an_issuer_with_no_directory_sync_contributes_no_connector() {
+        // The common case: OIDC login configured, nothing pulled. It must
+        // not produce an empty-but-present sync that wakes hourly to do
+        // nothing.
+        let plain = issuer(synveda_identity::TenantBinding::Static {
+            tenant_id: synveda_types::TenantId::new(),
+        });
+        assert!(
+            build_directory_connectors(std::slice::from_ref(&plain))
+                .expect("built")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn two_issuers_cannot_pull_one_tenant() {
+        // One directory is the authority for one tenant (ADR-0060 decision
+        // 5). Two would race to decide who has left.
+        let tenant_id = synveda_types::TenantId::new();
+        let mut first = issuer(synveda_identity::TenantBinding::Static { tenant_id });
+        first.directory_sync = Some(okta());
+        let mut second = issuer(synveda_identity::TenantBinding::Static { tenant_id });
+        second.issuer = "https://other.example".to_owned();
+        second.directory_sync = Some(okta());
+        let refused = build_directory_connectors(&[first, second]);
+        assert!(refused.is_err(), "one tenant, one directory authority");
+    }
+
+    #[test]
+    fn an_absence_threshold_of_zero_is_refused_rather_than_clamped() {
+        // Somebody who wrote this meant something, and it was not "seal on
+        // the first missed page" — which is what a silent clamp to 1 would
+        // have given them.
+        unsafe { std::env::set_var("SYNVEDA_DIRECTORY_ABSENCE_PASSES", "0") };
+        let refused = directory_sync_config_from_env();
+        unsafe { std::env::remove_var("SYNVEDA_DIRECTORY_ABSENCE_PASSES") };
+        assert!(refused.is_err(), "a threshold of zero is refused at boot");
     }
 }

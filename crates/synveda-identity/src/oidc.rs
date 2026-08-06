@@ -121,6 +121,24 @@ pub struct IssuerConfig {
     /// ADR-0013). Defaults to `groups`.
     #[serde(default = "default_groups_claim")]
     pub groups_claim: String,
+    /// How this issuer's directory is **read**, when it cannot push
+    /// (AUTH-5, ADR-0060 decision 7).
+    ///
+    /// Beside the issuer rather than in a per-tenant table because the
+    /// outbound credential is the first secret in this product that has to
+    /// be recoverable, and a table holding one would want TEN-4's keys —
+    /// which do not exist yet. The issuer whose tokens this entry already
+    /// verifies is the issuer this connector reads, so it adds no new
+    /// configuration surface and inherits the deployment-level scope the
+    /// issuer list already has.
+    ///
+    /// Only meaningful with [`TenantBinding::Static`]: a pull sync runs on
+    /// a timer with no request in front of it, so there is no token whose
+    /// claim could say which tenant it is for. The gateway refuses to boot
+    /// on the other combination rather than syncing the wrong tenant or
+    /// silently syncing none.
+    #[serde(default)]
+    pub directory_sync: Option<crate::directory::DirectorySyncConfig>,
     /// The claim carrying this issuer's stable directory anchor (AUTH-4,
     /// ADR-0059 decision 4) — matched against a SCIM mirror row's
     /// `externalId` at first login. Defaults to `sub`.
