@@ -1,6 +1,6 @@
 # ADR-0060: Directory pull sync — absence is a hypothesis, and the first secret we have to keep
 
-- **Status**: Proposed
+- **Status**: Proposed (amended 2026-08-06, before any connector code existed)
 - **Date**: 2026-08-06
 - **Feature(s)**: AUTH-5
 - **Deciders**: sujitn
@@ -108,9 +108,14 @@ Forces at play:
       refuses to make a delta feed the authority.
    2. **Absence must persist across `N` consecutive complete passes**
       (default 2) before it is offered to the reconciler. `scim_users` gains
-      `missing_since`; the count, not the wall-clock, is the condition, so a
-      long interval does not become a long exposure and a short one does not
-      become a hair trigger.
+      `missing_passes` and `missing_since` — the count is the condition and
+      the timestamp is the record, because passes fail and wall-clock cannot
+      tell three complete passes from one complete pass and two outages. A
+      count also means a long interval does not become a long exposure and a
+      short one does not become a hair trigger. (**[2026-08-06]** As first
+      written this named only `missing_since` while calling the count the
+      condition; migration 0037 carries both, paired by a check constraint
+      so a half-reset cannot leave them disagreeing.)
    3. **A bulk-change circuit breaker.** If a pass would seal more than a
       configured fraction of the tenant's live users (default 10%, with a
       small absolute floor so a 6-person tenant does not trip on one
@@ -120,6 +125,14 @@ Forces at play:
       precisely the case where a person should push the button, and a
       directory that merely changed its assignment filter looks identical
       from here.
+
+      **[Amended 2026-08-06]** As first written this clause refused and
+      never released, which made the layoff it exists to catch the one
+      event it could never let through. **Decision 10** is the button, and
+      it is a decision rather than a paragraph here because what releases a
+      breaker turned out to be a policy question with its own action, its
+      own custody rule and its own reason for not being reachable from the
+      plane it protects.
 
    An explicitly deactivated user — `active: false` present in a complete
    pass — seals **immediately**, on the first pass, exactly as the push
@@ -147,6 +160,26 @@ Forces at play:
    worse, because the authority that infers from absence would be
    deprovisioning people the authority that *knows* never deprovisioned. The
    push plane wins because it carries acts.
+
+   **[Amended 2026-08-06] An expired credential does not hand over
+   authority; only an explicit revocation does.** "Live" here means issued
+   and not revoked, and deliberately not "unexpired". Every SCIM credential
+   carries a required expiry (ADR-0059 decision 13) and rotation exists so
+   that two are live at once, so a credential reaching its expiry
+   unrotated is an operational lapse rather than a decision — and the
+   response to "the push plane broke" must not be "start inferring
+   departures from a directory we have never enumerated for this tenant".
+   That handover would arrive at 3am, on a mirror the push plane built,
+   which is exactly the state that trips the breaker and now exactly the
+   trip somebody could wave through (decision 10) without realising the
+   plane had changed underneath them.
+
+   So an expired-but-unrevoked credential leaves the tenant push-managed
+   and un-synced, loudly: a metric and a warning per pass, naming the
+   tenant. That failure mode is drift, which is bounded and reversible; the
+   other is inferred mass sealing, which is neither. Choosing the one that
+   cannot destroy anything is this ADR's own decision 3 and ADR-0040
+   decision 13's sentence, applied to a question about credentials.
 
 6. **The first cut enumerates fully; delta is an optimisation for presence
    and never the authority for absence.** Graph's `delta` and Okta's
@@ -199,6 +232,75 @@ Forces at play:
    an auditor must not have to notice. Every pass is traced and metered
    regardless.
 
+10. **[Added 2026-08-06] A breaker trip is released by a reasoned,
+    time-boxed, one-shot authorisation from a `/v1` principal — never by the
+    directory, its credential, or the connector.**
+
+    Decision 3.3 as first written refuses and never releases. The next pass
+    re-evaluates the same facts and reaches the same conclusion, so the 30%
+    layoff the breaker exists to catch is also the event it can never let
+    through. The only escape this ADR offered was raising the threshold in
+    deployment configuration: deployment-wide, applied to every tenant,
+    invisible on the chain, and to be remembered and put back afterwards.
+
+    Waiting is not the answer either. "The same 300 people are still absent
+    after ten complete passes" is equally consistent with a real layoff and
+    a broken assignment filter — persistence does not discriminate. That is
+    decision 3.2's argument about one person, and the breaker exists
+    precisely because that argument stops carrying at scale; letting the
+    breaker clear itself on persistence would delete its whole reason for
+    being.
+
+    So the release is a human act with four properties, three of them the
+    lapse's (`policy_lapses`, migration 0022, ADR-0037): a **reason**, an
+    **expiry**, a **named grantor**, and — not the lapse's — a **ceiling**.
+    It authorises the next complete pass to seal *at most M* people for this
+    tenant before time X, and it is **spent by the first complete pass that
+    consults it**.
+
+    The ceiling is a bound and not a hint: a pass that finds 305 where the
+    operator sized 300 trips again. That is inconvenient exactly once, and
+    it is what stops "authorise 300, the directory degrades further, seal
+    5,000". One-shot for the reason MEM-2's quarantine release is one-shot
+    (ADR-0021): an authorisation that outlives the situation it was granted
+    for is a standing window in which the *next* directory failure is
+    pre-approved, which is the event this whole decision exists to catch.
+
+    **It is not reachable from the SCIM plane, from a provisioning
+    credential, or from the connector.** This is ADR-0059 decision 12 read
+    in a mirror. That decision refuses to let the directory lift a seal,
+    because after a directory compromise the party holding the provisioning
+    credential is the attacker, and "a hold that the directory can release
+    is not a hold". The same sentence holds with the sign flipped: a breaker
+    the directory can wave through is not a breaker, and waving it through
+    is exactly how somebody who owns a directory converts a read into mass
+    deprovisioning. The release is a `/v1` act by an authenticated human
+    principal, PDP-gated and chained.
+
+    It takes its **own action** rather than reusing `Action::DirectoryManage`
+    (ADR-0059 decision 13's, which gates issuing provisioning credentials).
+    The magnitudes are not comparable — one hands out a token, the other
+    authorises irreversible bulk sealing — and a customer who wants their IT
+    team to run provisioning while somebody else signs off on mass
+    deprovisioning cannot say so if the two share an action. That is SKIL-1
+    decision 18's finding in its general form: separating two authorities
+    has no content beyond their being two people, and it is worth what it
+    costs. What it costs is recorded in the consequences rather than
+    discovered later: `Action::ALL` goes from 33 to 34 and the new action
+    must be classified in `crates/synveda-policy/src/request.rs` or the
+    build fails (CNSL-2's guard), the embedded packs go to `@16`, and every
+    role×action golden is re-recorded with the diff required to be only the
+    new rows.
+
+    In force, the authorisation is four columns on `directory_sync_state`
+    (`seal_authorised_until`, `_ceiling`, `_by`, `_reason`), paired by a
+    check constraint the way the breaker's own pair is. Its **history is the
+    chain's, not the table's**: the state row is rewritten every pass, and
+    "who authorised 300 seals, when, and why" is a question a hash-linked
+    chain answers better than a mutable row. That is the division decision 9
+    already draws, applied to the one event on this plane that most needs to
+    survive being overwritten.
+
 ## Options considered
 
 1. **Gateway-hosted full-enumeration ticker; absence confirmed over N
@@ -243,9 +345,28 @@ Forces at play:
    stated, and every version of that rule is either "the pull cannot seal"
    — which is decision 5 with more code — or a directory quietly
    deprovisioning people.
-9. **Do nothing** — joiner/mover/leaver stays manual for every IdP without
-   SCIM push. Fails the AC, and leaves ADR-0059 decision 3's "AUTH-5 drives
-   the same reconcile" as an untested claim about a seam.
+9. **[2026-08-06] A raised threshold as the breaker's release** — no new
+   action, no new columns, no new surface; it is what the first draft of
+   decision 3.3 implied without saying. Rejected: it is deployment-wide when
+   the event is one tenant's, invisible on that tenant's chain, and it has
+   to be put back afterwards — which makes an operator's memory a safety
+   control and turns "we had a layoff in March" into a permanently wider
+   breaker.
+10. **[2026-08-06] The breaker clearing itself once absence persists long
+    enough** — no human in the loop, and it converges without anybody being
+    on call. Rejected: persistence does not discriminate between a layoff
+    and a broken assignment filter, so this is decision 3.2's bound with a
+    larger number on it, and the case it would eventually permit is the
+    exact case the breaker was added to refuse.
+11. **[2026-08-06] Reusing `Action::DirectoryManage` for the release** —
+    free, in a product where a new action costs a pack version and every
+    golden. Rejected: it would mean whoever can issue a provisioning
+    credential can also authorise irreversible bulk sealing, which is the
+    separation a customer is most likely to want and the one ADR-0059
+    decision 12 already spends a decision defending from the other side.
+12. **Do nothing** — joiner/mover/leaver stays manual for every IdP without
+    SCIM push. Fails the AC, and leaves ADR-0059 decision 3's "AUTH-5 drives
+    the same reconcile" as an untested claim about a seam.
 
 ## Consequences
 
@@ -269,22 +390,49 @@ Forces at play:
   a caller presents, which is a property nobody wrote down because nothing
   had tested it. Naming it in decision 7 is what makes TEN-4 the place it
   gets fixed rather than a thing discovered during TEN-4.
+- **The third finding, and the one this ADR got wrong on its first pass: a
+  refusal with no release is not a control, it is an outage with a
+  justification.** Decision 3.3 was written as though refusing were the hard
+  part, and the release were an operational detail that could be left to a
+  configuration knob. It is the other way round. Refusing is one comparison;
+  what a refusal *costs* is decided entirely by how somebody overrides it,
+  and an override with no ceiling, no expiry, no reason and no chain entry
+  would have handed back everything the breaker was protecting — at exactly
+  the moment, mid-incident, when nobody is reading carefully. Found while
+  building migration 0037 and the suite around it, before any connector code
+  existed, which is the cheapest place it could have been found and still
+  later than it should have been.
 - Negative / accepted trade-offs: absence-derived leavers converge slower
   than the AC's bound, deliberately and measurably (decision 4); the gateway
   process gains an outbound network dependency on a vendor API, on a loop,
   with the failure taxonomy that implies; a recoverable secret exists in the
   deployment environment; a genuine mass departure needs an administrator to
-  clear the circuit breaker, which is friction on the worst day a customer's
-  HR department has; and one deployment cannot pull two tenants from two
-  directories until TEN-4.
+  authorise the seals (decision 10), which is friction on the worst day a
+  customer's HR department has, and a second authorisation if the count
+  moved between passes; the release costs a new action, so `Action::ALL`
+  grows, the packs go to `@16` and every golden is re-recorded; a tenant
+  whose only SCIM credential expires unrotated stops syncing altogether
+  rather than falling back (decision 5), which is drift nobody asked for in
+  exchange for a handover nobody authorised; and one deployment cannot pull
+  two tenants from two directories until TEN-4.
 - Reversal triggers:
   - Full enumeration costing more than the interval at a real tenant's user
     count → delta lands for presence, with full enumeration retained as the
     absence authority on a slower cadence (decision 6 is written to be
     extended in exactly this direction).
   - The circuit breaker firing on a legitimate reorganisation more than once
-    → the threshold is wrong, or it wants a pre-authorisation from an
-    administrator rather than a refusal after the fact.
+    → the threshold is wrong for that customer's shape, and it becomes
+    per-tenant configuration rather than a deployment constant. (What this
+    trigger said before 2026-08-06 — "it wants a pre-authorisation from an
+    administrator" — is decision 10, and is no longer a trigger.)
+  - An authorisation being granted and then immediately re-granted because
+    the count moved → the ceiling wants to be a band rather than a number,
+    or the pass wants to offer the operator its exact proposed set to sign
+    rather than a size to bound.
+  - Operators routinely authorising seals without reading the set → the
+    ceiling is doing no work and the release has become a formality, which
+    is worse than no breaker because it looks like a control. The answer is
+    the proposed set in the request, not a bigger number.
   - A customer needing two directories in one deployment → the credential
     moves to a per-tenant table, and that is TEN-4's trigger, not this
     feature's.
@@ -301,11 +449,26 @@ Forces at play:
   source in the payload. Quiet passes are deliberately unchained, with the
   reason recorded here rather than left as an omission — the same bounding
   ADR-0059 decision 14 applied, for the same reason, one plane over.
+  **[2026-08-06]** The seal authorisation and its use are both chained
+  (decision 10), and they are two events rather than one on purpose: the
+  grant carries the reason, the ceiling, the expiry and the human who signed
+  it, and the pass that spends it carries how many it actually sealed
+  against the ceiling it was given. One event could not answer "was the
+  authorisation used, and for how many" without the pass rewriting a record
+  of somebody else's decision.
+- **The release's custody.** Decision 10's authorisation is the one act on
+  this feature's surface that a `/v1` principal takes and neither the
+  connector, the SCIM plane nor a provisioning credential can reach. That
+  boundary is asserted rather than documented: the acceptance suite drives
+  it from a SCIM credential and from the sync job's own `ActorKind::System`
+  actor and requires both to be refused, because a control whose custody is
+  only described is one nobody has checked.
 - **Multi-tenancy.** The mirror tables are already tenant-scoped with forced
-  RLS. The new per-tenant sync state — cursor, last complete pass, counts,
-  breaker status — ships in migration 0037 with forced RLS, policies and
-  least-privilege grants in its own migration per the ADR-0009 structural
-  rule, and joins the TEN-2 adversarial suite and its completeness guard.
+  RLS. The new per-tenant sync state — last complete pass, counts, breaker
+  status, and the in-force authorisation of decision 10 — ships in migration
+  0037 with forced RLS, policies and least-privilege grants in its own
+  migration per the ADR-0009 structural rule, and joins the TEN-2
+  adversarial suite and its completeness guard.
   `scim_users.missing_since` is a column on a table already in that suite.
   The sync loop iterates tenants and opens one tenant transaction per pass,
   so a pass cannot see across the boundary any more than a request can.
