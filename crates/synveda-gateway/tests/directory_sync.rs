@@ -140,7 +140,14 @@ async fn world() -> Option<World> {
         );
         return None;
     };
-    let pool = shared_pool(&url).clone();
+    // One pool per test, created inside that test's own runtime, and
+    // shared with its `AppState` by clone rather than opened twice.
+    let pool = PgPoolOptions::new()
+        .max_connections(3)
+        .acquire_timeout(Duration::from_secs(20))
+        .connect(&url)
+        .await
+        .expect("connect to DATABASE_URL");
     synveda_store::migrate(&pool)
         .await
         .expect("apply migrations");
@@ -596,23 +603,20 @@ fn index_root() -> PathBuf {
     root
 }
 
-/// One pool for the whole binary.
+/// The `AppState` a test drives, over the pool that test already opened.
 ///
-/// Every test used to open its own, and `AppState` opened a second — so
-/// eight parallel tests wanted sixty-four connections and got `PoolTimedOut`
-/// instead. The pool is shared and lazily connected, which is also what the
-/// gateway itself does.
-fn shared_pool(url: &str) -> &'static PgPool {
-    static POOL: std::sync::OnceLock<PgPool> = std::sync::OnceLock::new();
-    POOL.get_or_init(|| {
-        PgPoolOptions::new()
-            .max_connections(8)
-            .acquire_timeout(Duration::from_secs(20))
-            .connect_lazy(url)
-            .expect("parse database url")
-    })
-}
-
+/// Sharing the pool by clone rather than opening a second is what keeps the
+/// binary inside Postgres' connection limit: eight parallel tests once
+/// wanted two pools each and got `PoolTimedOut`.
+///
+/// A single `static` pool for the whole binary would be fewer connections
+/// still, and is **wrong here**: every `#[tokio::test]` gets its own
+/// runtime, a sqlx pool binds its background tasks to whichever runtime
+/// first drove it, and the first test to finish then tears that runtime down
+/// underneath everybody else — "a Tokio 1.x context was found, but it is
+/// being shutdown". The store's suites share a pool safely because they
+/// share one runtime too (`#[test]` plus `block_on`), which is a different
+/// harness from this one.
 fn app_state(pool: PgPool, pdp: Arc<Pdp>) -> AppState {
     AppState {
         pool,
