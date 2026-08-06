@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update scim_users set missing_since = null where tenant_id = $1 and id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "67bc024032116824e649aa5c17b81a5a96b39a4dda70716600c9ecb6342af4ba"
+}

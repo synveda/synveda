@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            update directory_sync_state\n               set passes_completed = passes_completed + 1,\n                   last_complete_pass_at = now(),\n                   updated_at = now()\n             where tenant_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2c82ba2976906e8f59c94cff68a638a3309521a83cce161d2bebb4869cd2436c"
+}
