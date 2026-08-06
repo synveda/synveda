@@ -53,20 +53,23 @@ fn storage_error(err: sqlx::Error) -> Error {
     }
 }
 
-struct UserRow {
-    id: Uuid,
-    tenant_id: Uuid,
-    external_id: Option<String>,
-    user_name: String,
-    active: bool,
-    display_name: Option<String>,
-    given_name: Option<String>,
-    family_name: Option<String>,
-    work_email: Option<String>,
-    identity_id: Option<Uuid>,
-    version: i64,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+/// Visible to the crate so [`crate::directory_sync`] can select mirror rows
+/// into the same shape rather than keeping a second copy of thirteen columns
+/// and the conversion below — two structs for one table is how they drift.
+pub(crate) struct UserRow {
+    pub(crate) id: Uuid,
+    pub(crate) tenant_id: Uuid,
+    pub(crate) external_id: Option<String>,
+    pub(crate) user_name: String,
+    pub(crate) active: bool,
+    pub(crate) display_name: Option<String>,
+    pub(crate) given_name: Option<String>,
+    pub(crate) family_name: Option<String>,
+    pub(crate) work_email: Option<String>,
+    pub(crate) identity_id: Option<Uuid>,
+    pub(crate) version: i64,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) updated_at: DateTime<Utc>,
 }
 
 impl From<UserRow> for DirectoryUser {

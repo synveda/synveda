@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select tenant_id, connector, passes_completed, last_pass_at,\n               last_complete_pass_at, breaker_tripped_at, breaker_would_have_sealed,\n               seal_authorised_at, seal_authorised_until, seal_authorised_ceiling,\n               seal_authorised_by, seal_authorised_reason, created_at, updated_at\n        from directory_sync_state\n        where tenant_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "connector",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "passes_completed",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_pass_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_complete_pass_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "breaker_tripped_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "breaker_would_have_sealed",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "seal_authorised_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "seal_authorised_until",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "seal_authorised_ceiling",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "seal_authorised_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "seal_authorised_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "a3972583f1cc306e9f80f47f6c307a1cbaa41d9574d2eea6311a8cee9341ea22"
+}

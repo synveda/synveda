@@ -200,6 +200,7 @@ const COVERED: &[&str] = &[
     "context_pack_chunks",
     "context_pack_documents",
     "context_packs",
+    "directory_sync_state",
     "graph_edges",
     "graph_edges_history",
     "graph_vertices",
@@ -4973,6 +4974,468 @@ fn a_credential_can_be_revoked_but_never_erased() {
         assert!(
             deleted.is_err(),
             "no DELETE grant: a credential's history is the point"
+        );
+        tx.rollback().await.expect("rollback");
+    });
+}
+
+// ── AUTH-5: the pull sync's own state (migration 0037, ADR-0060) ─────────────
+
+/// A tenant with a directory mirror and one sync-state row.
+///
+/// The insert is direct SQL because AUTH-5's store module does not exist
+/// yet: migration 0037 lands the schema and its invariants ahead of the loop
+/// that will write them, so until that loop arrives this suite is the only
+/// thing holding them.
+async fn seed_sync_state(pool: &PgPool) -> (TenantId, synveda_types::DirectoryUserId) {
+    let (tenant, _) = seed_directory(pool).await;
+    let mut tx = rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin tenant tx");
+    let user = synveda_store::directory::user_by_user_name(&mut *tx, tenant, "person@example.test")
+        .await
+        .expect("read mirror user")
+        .expect("the directory fixture's user");
+    sqlx::query!(
+        r#"
+        insert into directory_sync_state
+            (tenant_id, connector, passes_completed, last_pass_at, last_complete_pass_at)
+        values ($1, 'entra', 3, now(), now())
+        "#,
+        tenant.as_uuid(),
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("seed sync state");
+    tx.commit().await.expect("commit sync fixture");
+    (tenant, user.id)
+}
+
+/// The pull sync's state is tenant-confidential, and for a sharper reason
+/// than "it is a table with a `tenant_id`".
+///
+/// `passes_completed` and `last_complete_pass_at` are the completeness proof
+/// ADR-0060 decision 3.1 rests on — they are what says a pass is entitled to
+/// conclude that somebody has left. Read across tenants they disclose a
+/// customer's directory health and their headcount churn; the write half is
+/// the next test, and it is worse.
+#[test]
+fn wrong_tenant_guc_sees_no_directory_sync_state() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _) = seed_sync_state(&db.pool).await;
+        let (adversary, _) = seed_sync_state(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let visible = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from directory_sync_state where tenant_id = $1"#,
+            victim.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count directory_sync_state");
+        assert_eq!(visible, 0, "another tenant's sync state is invisible");
+
+        let own = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from directory_sync_state where tenant_id = $1"#,
+            adversary.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count own directory_sync_state");
+        assert_eq!(own, 1, "its own is not");
+        tx.rollback().await.expect("rollback");
+    });
+}
+
+/// A forged sync-state row is ADR-0060 decision 3 defeated from outside the
+/// tenant it protects.
+///
+/// `passes_completed` counts passes that **completed**, and nothing else may
+/// advance it. An adversary who could insert or update one in somebody
+/// else's tenant would be handing their next pass a completeness proof it
+/// never earned — and a pass that believes it enumerated the whole directory
+/// is precisely the pass that seals everyone it did not see.
+#[test]
+fn cross_tenant_sync_state_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _) = seed_sync_state(&db.pool).await;
+        let (adversary, _) = seed_sync_state(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged = sqlx::query!(
+            r#"
+            insert into directory_sync_state (tenant_id, connector, passes_completed)
+            values ($1, 'forged', 99)
+            "#,
+            victim.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a sync state forged into another tenant must be refused"
+        );
+        tx.rollback().await.expect("rollback");
+
+        // The update half fails differently and the difference is the point:
+        // the `using` clause hides the row rather than refusing the
+        // statement, so an attacker learns nothing about whether it existed.
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let touched = sqlx::query!(
+            "update directory_sync_state set passes_completed = 99 where tenant_id = $1",
+            victim.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("an update over invisible rows is not an error");
+        assert_eq!(
+            touched.rows_affected(),
+            0,
+            "another tenant's completeness proof is not advanceable"
+        );
+        tx.rollback().await.expect("rollback");
+    });
+}
+
+/// The grant migration 0037 withheld, asserted as behaviour.
+///
+/// "Why has nobody been sealed for three days" is answerable only from a row
+/// that outlives the passes it describes. A loop that could delete its own
+/// state could also delete the evidence that it had stopped working — the
+/// silence would look exactly like a directory in which nobody had left. So
+/// the app role advances this row and never removes it, which is
+/// `scim_credentials`' rule (migration 0036) reached by a different route.
+#[test]
+fn sync_state_advances_but_is_never_erased() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed_sync_state(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let advanced = sqlx::query!(
+            r#"
+            update directory_sync_state
+               set passes_completed = passes_completed + 1,
+                   last_complete_pass_at = now(),
+                   updated_at = now()
+             where tenant_id = $1
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("advancing a pass count is an update the app role holds");
+        assert_eq!(advanced.rows_affected(), 1);
+        tx.commit().await.expect("commit advance");
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let deleted = sqlx::query!(
+            "delete from directory_sync_state where tenant_id = $1",
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            deleted.is_err(),
+            "no DELETE grant: a sync state that can vanish takes the record \
+             of a stalled connector with it"
+        );
+        tx.rollback().await.expect("rollback");
+    });
+}
+
+/// An absence hypothesis cannot be half-reset.
+///
+/// `missing_passes` is the condition and `missing_since` is the record
+/// (ADR-0060 decision 3.2). A write that cleared one and left the other
+/// standing would leave somebody who is present by the counter and gone
+/// since Tuesday by the timestamp — and because the counter is what seals,
+/// the disagreement would surface much later as a seal nobody can account
+/// for, or as a leaver nobody ever seals. The constraint is what makes "the
+/// two columns say one thing" a property of the schema rather than a
+/// convention every future writer is trusted to keep.
+#[test]
+fn an_absence_hypothesis_cannot_be_half_reset() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, user) = seed_sync_state(&db.pool).await;
+
+        // A complete pass that did not list this person: both columns move.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        sqlx::query!(
+            r#"
+            update scim_users
+               set missing_passes = 1, missing_since = now()
+             where tenant_id = $1 and id = $2
+            "#,
+            tenant.as_uuid(),
+            user.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("an absence is recordable");
+        tx.commit().await.expect("commit absence");
+
+        // Clearing the counter alone says present-and-missing at once.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let half = sqlx::query!(
+            "update scim_users set missing_passes = 0 where tenant_id = $1 and id = $2",
+            tenant.as_uuid(),
+            user.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            half.is_err(),
+            "clearing the condition without the record must be refused"
+        );
+        tx.rollback().await.expect("rollback");
+
+        // And clearing the record alone says the same thing the other way.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let half = sqlx::query!(
+            "update scim_users set missing_since = null where tenant_id = $1 and id = $2",
+            tenant.as_uuid(),
+            user.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            half.is_err(),
+            "clearing the record without the condition must be refused"
+        );
+        tx.rollback().await.expect("rollback");
+
+        // The directory listing them again clears both, which is the only
+        // shape a reset comes in.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        sqlx::query!(
+            r#"
+            update scim_users
+               set missing_passes = 0, missing_since = null
+             where tenant_id = $1 and id = $2
+            "#,
+            tenant.as_uuid(),
+            user.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("a person the directory lists again is present");
+        tx.commit().await.expect("commit reset");
+
+        // A negative count is not a smaller hypothesis; it is a broken one.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let negative = sqlx::query!(
+            "update scim_users set missing_passes = -1 where tenant_id = $1 and id = $2",
+            tenant.as_uuid(),
+            user.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(negative.is_err(), "a negative absence count is refused");
+        tx.rollback().await.expect("rollback");
+    });
+}
+
+/// A pass that did not complete cannot claim to have completed, and a
+/// breaker trip that sealed nobody cannot claim to have tripped.
+///
+/// Both constraints guard a value that decides whether anybody is sealed. A
+/// `last_complete_pass_at` with no completed pass behind it is an incomplete
+/// pass wearing the completeness proof of decision 3.1; a breaker trip
+/// recorded without the count it refused is a refusal an operator cannot
+/// size, which is the one thing decision 3.3 exists to tell them.
+#[test]
+fn an_incomplete_pass_cannot_claim_the_completeness_proof() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed_directory(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let forged = sqlx::query!(
+            r#"
+            insert into directory_sync_state
+                (tenant_id, connector, passes_completed, last_complete_pass_at)
+            values ($1, 'entra', 0, now())
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a completed-pass timestamp with no completed pass behind it is refused"
+        );
+        tx.rollback().await.expect("rollback");
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let unsized_trip = sqlx::query!(
+            r#"
+            insert into directory_sync_state
+                (tenant_id, connector, passes_completed, breaker_tripped_at)
+            values ($1, 'entra', 1, now())
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            unsized_trip.is_err(),
+            "a breaker trip without the count it refused is refused"
+        );
+        tx.rollback().await.expect("rollback");
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let countless = sqlx::query!(
+            r#"
+            insert into directory_sync_state
+                (tenant_id, connector, passes_completed, breaker_would_have_sealed)
+            values ($1, 'entra', 1, 5)
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            countless.is_err(),
+            "a count with no trip behind it is refused"
+        );
+        tx.rollback().await.expect("rollback");
+
+        // A trip that would have sealed nobody is not a trip; it is a pass
+        // in which nobody had left, and recording it as a refusal would put
+        // a breaker event in front of an operator on a quiet week.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let empty_trip = sqlx::query!(
+            r#"
+            insert into directory_sync_state
+                (tenant_id, connector, passes_completed,
+                 breaker_tripped_at, breaker_would_have_sealed)
+            values ($1, 'entra', 1, now(), 0)
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            empty_trip.is_err(),
+            "a trip that would have sealed nobody is refused"
+        );
+        tx.rollback().await.expect("rollback");
+    });
+}
+
+/// A seal authorisation arrives whole or not at all.
+///
+/// ADR-0060 decision 10: releasing a breaker trip is reasoned, time-boxed,
+/// bounded by a ceiling and signed by a named human. A row able to carry
+/// three of those five would be an authorisation with no ceiling, or with
+/// nobody's name against it — assembled by whichever writer got halfway, at
+/// the one moment it matters, which is mid-incident with a mass departure on
+/// the wire and nobody reading carefully. This is where "whole or not at
+/// all" stops depending on the writer.
+///
+/// The two malformed-but-complete cases go in with all five columns set, so
+/// each is refused by the constraint written for it rather than swallowed by
+/// the pair check.
+#[test]
+fn a_seal_authorisation_arrives_whole_or_not_at_all() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed_sync_state(&db.pool).await;
+
+        // Whole: a future window, a positive ceiling, a name and a reason.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        sqlx::query!(
+            r#"
+            update directory_sync_state
+               set seal_authorised_at = now(),
+                   seal_authorised_until = now() + interval '2 hours',
+                   seal_authorised_ceiling = 300,
+                   seal_authorised_by = 'alice@example.test',
+                   seal_authorised_reason = 'Q3 restructure, ticket OPS-1123'
+             where tenant_id = $1
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("a complete authorisation is storable");
+        tx.commit().await.expect("commit authorisation");
+
+        // Spending it clears all five, which is the only other legal shape.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        sqlx::query!(
+            r#"
+            update directory_sync_state
+               set seal_authorised_at = null, seal_authorised_until = null,
+                   seal_authorised_ceiling = null, seal_authorised_by = null,
+                   seal_authorised_reason = null
+             where tenant_id = $1
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("a spent authorisation clears whole");
+        tx.commit().await.expect("commit spend");
+
+        // A ceiling on its own permits a number and names nobody for it.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let partial = sqlx::query!(
+            "update directory_sync_state set seal_authorised_ceiling = 300 where tenant_id = $1",
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            partial.is_err(),
+            "a ceiling with no grantor, reason or window is refused"
+        );
+        tx.rollback().await.expect("rollback");
+
+        // A ceiling of zero permits no seals, so it is not permission —
+        // and a pass that consulted it would clear it having done nothing.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let empty = sqlx::query!(
+            r#"
+            update directory_sync_state
+               set seal_authorised_at = now(),
+                   seal_authorised_until = now() + interval '2 hours',
+                   seal_authorised_ceiling = 0,
+                   seal_authorised_by = 'alice@example.test',
+                   seal_authorised_reason = 'authorising nothing'
+             where tenant_id = $1
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(empty.is_err(), "a ceiling of zero is not an authorisation");
+        tx.rollback().await.expect("rollback");
+
+        // An authorisation that expired before it was granted is refused
+        // rather than left sitting there looking like permission.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let expired = sqlx::query!(
+            r#"
+            update directory_sync_state
+               set seal_authorised_at = now(),
+                   seal_authorised_until = now() - interval '1 minute',
+                   seal_authorised_ceiling = 300,
+                   seal_authorised_by = 'alice@example.test',
+                   seal_authorised_reason = 'window closed before it opened'
+             where tenant_id = $1
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            expired.is_err(),
+            "an authorisation expiring before it is granted is refused"
         );
         tx.rollback().await.expect("rollback");
     });

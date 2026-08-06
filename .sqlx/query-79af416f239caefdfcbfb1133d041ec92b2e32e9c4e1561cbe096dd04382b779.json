@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into directory_sync_state (tenant_id, connector, last_pass_at)\n        values ($1, $2, now())\n        on conflict (tenant_id) do update\n           set connector = excluded.connector,\n               last_pass_at = now(),\n               updated_at = now()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "79af416f239caefdfcbfb1133d041ec92b2e32e9c4e1561cbe096dd04382b779"
+}

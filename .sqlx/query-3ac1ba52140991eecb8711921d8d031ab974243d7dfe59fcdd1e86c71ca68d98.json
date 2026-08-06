@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            update directory_sync_state\n               set seal_authorised_at = null, seal_authorised_until = null,\n                   seal_authorised_ceiling = null, seal_authorised_by = null,\n                   seal_authorised_reason = null\n             where tenant_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3ac1ba52140991eecb8711921d8d031ab974243d7dfe59fcdd1e86c71ca68d98"
+}
