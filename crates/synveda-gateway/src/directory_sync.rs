@@ -254,7 +254,13 @@ pub async fn run_once(
                 "connector": connector.name(),
                 "would_have_sealed": proposed_count,
                 "live_users": live,
-                "fraction": config.breaker_fraction,
+                // Basis points, because an audit payload may hold no
+                // non-integer number: jsonb re-renders floats and the
+                // chain's hash is over the rendered bytes (ADR-0019,
+                // `synveda_audit::canonical`). A `0.1` here would have
+                // failed the first time a breaker tripped in production,
+                // which is the worst possible moment to discover it.
+                "fraction_bps": (config.breaker_fraction * 10_000.0).round() as i64,
                 "floor": config.breaker_floor,
                 "note": "no seal authorisation in force covered this many",
             }),

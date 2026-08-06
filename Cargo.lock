@@ -3775,6 +3775,7 @@ dependencies = [
 name = "synveda-gateway"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "base64",
  "blake3",

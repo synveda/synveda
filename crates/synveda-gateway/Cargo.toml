@@ -57,3 +57,6 @@ reqwest = { workspace = true }
 sha2 = { workspace = true }
 tower = { workspace = true }
 url = { workspace = true }
+# AUTH-5's AC suite implements `DirectoryConnector` with a scripted
+# directory, so it needs the same attribute the trait is declared with.
+async-trait = { workspace = true }
