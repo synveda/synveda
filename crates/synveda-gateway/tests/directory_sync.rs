@@ -38,8 +38,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use chrono::Utc;
+use http_body_util::BodyExt as _;
 use metrics_exporter_prometheus::PrometheusHandle;
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::AppState;
@@ -53,9 +58,9 @@ use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::{
-    directory, directory_sync, group_mappings, hierarchy, identities, rls, tenants,
+    directory, directory_sync, group_mappings, hierarchy, identities, rls, role_bindings, tenants,
 };
-use synveda_types::{ScimCredentialId, ScopeId, ScopeKind, Tenant, TenantId, TenantStatus};
+use synveda_types::{Role, ScimCredentialId, ScopeId, ScopeKind, Tenant, TenantId, TenantStatus};
 
 const SECRET: &[u8] = b"auth-5-directory-sync-suite-secret";
 
@@ -135,11 +140,7 @@ async fn world() -> Option<World> {
         );
         return None;
     };
-    let pool = PgPoolOptions::new()
-        .max_connections(4)
-        .connect(&url)
-        .await
-        .expect("connect to DATABASE_URL");
+    let pool = shared_pool(&url).clone();
     synveda_store::migrate(&pool)
         .await
         .expect("apply migrations");
@@ -204,7 +205,7 @@ async fn world() -> Option<World> {
     tx.commit().await.expect("commit mapping");
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
-    let state = app_state(&url, pdp);
+    let state = app_state(pool.clone(), pdp);
     let tenant_row = tenants::by_id(&pool, tenant)
         .await
         .expect("read tenant")
@@ -595,13 +596,26 @@ fn index_root() -> PathBuf {
     root
 }
 
-fn app_state(url: &str, pdp: Arc<Pdp>) -> AppState {
-    AppState {
-        pool: PgPoolOptions::new()
-            .max_connections(4)
-            .acquire_timeout(Duration::from_secs(5))
+/// One pool for the whole binary.
+///
+/// Every test used to open its own, and `AppState` opened a second — so
+/// eight parallel tests wanted sixty-four connections and got `PoolTimedOut`
+/// instead. The pool is shared and lazily connected, which is also what the
+/// gateway itself does.
+fn shared_pool(url: &str) -> &'static PgPool {
+    static POOL: std::sync::OnceLock<PgPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        PgPoolOptions::new()
+            .max_connections(8)
+            .acquire_timeout(Duration::from_secs(20))
             .connect_lazy(url)
-            .expect("parse database url"),
+            .expect("parse database url")
+    })
+}
+
+fn app_state(pool: PgPool, pdp: Arc<Pdp>) -> AppState {
+    AppState {
+        pool,
         metrics: metrics_handle(),
         verifier: Arc::new(Hs256Verifier::new(SECRET)),
         login: None,
@@ -613,4 +627,191 @@ fn app_state(url: &str, pdp: Arc<Pdp>) -> AppState {
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
         inject_embed_timeout: Duration::from_millis(100),
     }
+}
+
+// ── 7. The release's own surface, and its custody ───────────────────────────
+
+/// The breaker's release is an act of the product's authority and reachable
+/// from nowhere else (ADR-0060 decision 10).
+///
+/// The custody half is asserted rather than described, because a control
+/// whose custody is only written down is one nobody has checked. ADR-0059
+/// decision 12 refuses to let the directory lift a seal — after a directory
+/// compromise the party holding the provisioning credential is the attacker.
+/// The same sentence with its sign flipped is this route's reason for being
+/// on `/v1`: a breaker the directory can wave through is not a breaker.
+///
+/// So the suite drives it three ways. An `org-admin` bearer signs and the
+/// authorisation stands. A **SCIM provisioning credential** — the exact
+/// principal ADR-0059 decision 12 is afraid of — is refused. And a caller
+/// with no role at all is refused by the PDP, which is what makes the new
+/// action's separation from `DirectoryManage` real rather than nominal.
+#[tokio::test]
+async fn the_release_is_signed_on_v1_and_never_by_the_directory() {
+    let Some(w) = world().await else { return };
+    // A pass has to have run for there to be anything to authorise.
+    let directory = ScriptedDirectory::new(vec![complete(vec![person(
+        "u1",
+        "alice@example.test",
+        "synveda-eng-core",
+    )])]);
+    pass(&w, &directory).await;
+
+    let app = synveda_gateway::app::router(w.state.clone());
+
+    // 1. Nobody in particular: the PDP refuses. If this passed, the new
+    //    action would be decorative.
+    let (status, _) = call(
+        &app,
+        authorise_request(
+            &bearer(&w, "nobody"),
+            &w,
+            json!({"ceiling": 5, "reason": "x"}),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "DirectorySealAuthorise is a real gate"
+    );
+
+    // 2. The provisioning credential. This is the one that matters: it is
+    //    the principal that owns the directory plane, and it must not be
+    //    able to release the control that exists to bound the directory.
+    let minted = synveda_identity::scim::mint(w.tenant).expect("mint");
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
+        .await
+        .expect("begin");
+    directory::issue_credential(
+        &mut *tx,
+        ScimCredentialId::new(),
+        w.tenant,
+        &minted.hash,
+        "the directory's own key",
+        Utc::now() + chrono::Duration::days(1),
+        "test-operator",
+    )
+    .await
+    .expect("issue credential");
+    tx.commit().await.expect("commit");
+
+    let (status, _) = call(
+        &app,
+        authorise_request(&minted.token, &w, json!({"ceiling": 5, "reason": "x"})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "a SCIM credential is refused by the /v1 router before any handler \
+         runs: the plane that opens the directory cannot release the brake \
+         on it (ADR-0059 decision 12, mirrored)"
+    );
+
+    // 3. An org-admin signs, and the authorisation stands with their name
+    //    and their reason on it — which is the record decision 10 exists to
+    //    produce.
+    bind_org_admin(&w, "signer").await;
+    let (status, _) = call(
+        &app,
+        authorise_request(
+            &bearer(&w, "signer"),
+            &w,
+            json!({"ceiling": 12, "reason": "Q3 restructure, ticket OPS-1123"}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
+        .await
+        .expect("begin");
+    let standing = directory_sync::state(&mut *tx, w.tenant)
+        .await
+        .expect("state")
+        .expect("a state row")
+        .authorisation
+        .expect("an authorisation in force");
+    tx.commit().await.expect("commit");
+    assert_eq!(standing.ceiling, 12);
+    assert_eq!(standing.granted_by, "signer");
+    assert_eq!(standing.reason, "Q3 restructure, ticket OPS-1123");
+}
+
+/// A ceiling of zero is refused before the PDP is asked.
+///
+/// It is a malformed request rather than a forbidden one — and it matters
+/// more than the usual validation, because a zero-ceiling authorisation
+/// would be *spent* by the first pass that consulted it, clearing the
+/// standing permission having sealed nobody. From the outside that reads as
+/// the breaker misbehaving.
+#[tokio::test]
+async fn an_authorisation_to_seal_nobody_is_refused() {
+    let Some(w) = world().await else { return };
+    let directory = ScriptedDirectory::new(vec![complete(vec![person(
+        "u1",
+        "alice@example.test",
+        "synveda-eng-core",
+    )])]);
+    pass(&w, &directory).await;
+    bind_org_admin(&w, "signer").await;
+    let app = synveda_gateway::app::router(w.state.clone());
+
+    for body in [
+        json!({"ceiling": 0, "reason": "nothing at all"}),
+        json!({"ceiling": 5, "reason": "   "}),
+    ] {
+        let (status, _) = call(&app, authorise_request(&bearer(&w, "signer"), &w, body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+}
+
+/// An HS256 bearer for `subject`, the dev verifier this suite's `AppState`
+/// is built with.
+fn bearer(w: &World, subject: &str) -> String {
+    let _ = w;
+    Hs256Verifier::new(SECRET).issue(subject, w.tenant, Duration::from_secs(600))
+}
+
+/// Binds `org-admin` at the tenant, which is where every embedded pack puts
+/// `DirectorySealAuthorise`.
+async fn bind_org_admin(w: &World, subject: &str) {
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
+        .await
+        .expect("begin");
+    role_bindings::bind(&mut *tx, w.tenant, subject, None, Role::OrgAdmin)
+        .await
+        .expect("bind org-admin");
+    tx.commit().await.expect("commit binding");
+}
+
+fn authorise_request(token: &str, w: &World, body: Value) -> Request<Body> {
+    let _ = w;
+    Request::builder()
+        .method("POST")
+        .uri("/v1/directory/seal-authorisations")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("request")
+}
+
+async fn call(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
+    let response = tower::ServiceExt::oneshot(app.clone(), request)
+        .await
+        .expect("route");
+    let status = response.status();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    };
+    (status, value)
 }

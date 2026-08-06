@@ -364,6 +364,24 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
+    // The pull sync's circuit breaker, and the human who releases it
+    // (AUTH-5, ADR-0060 decision 10). Separate from DirectoryManage
+    // because the magnitudes are not comparable: one hands out a
+    // provisioning token, this one authorises irreversible bulk sealing of
+    // personal scopes that do not unseal. A customer who wants those two
+    // held by two people can only say so if they are two actions.
+    //
+    // Seeing the refusal and signing for it are one action, unlike the
+    // service-identity plane's pair: a signer who cannot see the number
+    // they are bounding is signing blind, which is what the ceiling exists
+    // to prevent.
+    action DirectorySealAuthorise
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant],
+            context: { roles: Set<String> },
+        };
+
     // The audit query plane (/v1/audit/*, AUD-2, ADR-0045 decision 1):
     // searching the chain, the two questions the feature exists for, and
     // the chain check itself. One action, not four — verification returns a
