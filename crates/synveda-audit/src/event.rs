@@ -116,6 +116,24 @@ pub enum AuditAction {
     /// A provisioning credential was revoked. A stamp rather than a
     /// delete: which credential sealed which identity stays answerable.
     ScimCredentialRevoked,
+    /// A scheduled pull pass changed something: what it saw, how many it
+    /// counted absent, and how many it sealed (AUTH-5, ADR-0060 decision 9).
+    /// A pass that changed nothing chains nothing — a quiet tenant's chain
+    /// must not become a record of the product reading a directory that had
+    /// not changed.
+    DirectorySyncCompleted,
+    /// A pull pass declined to seal a bulk departure because no
+    /// authorisation in force covered it (ADR-0060 decision 3.3). Chained
+    /// because a refusal to act is the one thing on this plane an auditor
+    /// must not have to notice.
+    DirectorySyncBreakerTripped,
+    /// A human authorised a pull pass to seal past the breaker: reasoned,
+    /// time-boxed and bounded by a ceiling (ADR-0060 decision 10).
+    DirectorySealAuthorised,
+    /// A pass spent that authorisation. Two events rather than one so the
+    /// chain answers both what was permitted and what was actually done
+    /// with it — the grant cannot describe a use that had not happened yet.
+    DirectorySealAuthorisationUsed,
     /// A directory said somebody has left: their personal scope is sealed
     /// — unreadable under the base layer's forbid, and exempt from every
     /// retention horizon (AUTH-4, ADR-0059 decision 8).
@@ -452,7 +470,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 54] = [
+    pub const ALL: [AuditAction; 58] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -462,6 +480,10 @@ impl AuditAction {
         AuditAction::IdentitySealed,
         AuditAction::ScimCredentialIssued,
         AuditAction::ScimCredentialRevoked,
+        AuditAction::DirectorySyncCompleted,
+        AuditAction::DirectorySyncBreakerTripped,
+        AuditAction::DirectorySealAuthorised,
+        AuditAction::DirectorySealAuthorisationUsed,
         AuditAction::HierarchyNodeCreated,
         AuditAction::HierarchyNodeUpdated,
         AuditAction::HierarchyNodeDeleted,
@@ -523,6 +545,10 @@ impl AuditAction {
             AuditAction::IdentitySealed => "identity.sealed",
             AuditAction::ScimCredentialIssued => "scim.credential.issued",
             AuditAction::ScimCredentialRevoked => "scim.credential.revoked",
+            AuditAction::DirectorySyncCompleted => "directory.sync.completed",
+            AuditAction::DirectorySyncBreakerTripped => "directory.sync.breaker_tripped",
+            AuditAction::DirectorySealAuthorised => "directory.seal.authorised",
+            AuditAction::DirectorySealAuthorisationUsed => "directory.seal.authorisation_used",
             AuditAction::HierarchyNodeCreated => "hierarchy.node.created",
             AuditAction::HierarchyNodeUpdated => "hierarchy.node.updated",
             AuditAction::HierarchyNodeDeleted => "hierarchy.node.deleted",
