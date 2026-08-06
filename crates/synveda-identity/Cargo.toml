@@ -22,3 +22,10 @@ sha2 = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 url = { workspace = true }
+
+[dev-dependencies]
+# The connector tests stand up mock Graph and Okta servers in-process — the
+# MockIdp discipline this crate already follows, and the extractor/embedder
+# HTTP suites' shape: never a network dependency in a test.
+axum = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros"] }

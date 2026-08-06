@@ -16,6 +16,7 @@
 
 pub mod console;
 mod context;
+pub mod directory;
 mod flow;
 mod mapping;
 mod oidc;
