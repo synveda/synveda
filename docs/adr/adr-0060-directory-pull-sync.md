@@ -292,9 +292,19 @@ Forces at play:
     role×action golden is re-recorded with the diff required to be only the
     new rows.
 
-    In force, the authorisation is four columns on `directory_sync_state`
-    (`seal_authorised_until`, `_ceiling`, `_by`, `_reason`), paired by a
-    check constraint the way the breaker's own pair is. Its **history is the
+    In force, the authorisation is five columns on `directory_sync_state`
+    (`seal_authorised_at`, `_until`, `_ceiling`, `_by`, `_reason`), paired by
+    a check constraint the way the breaker's own pair is.
+
+    **[Implementation note, 2026-08-06]** This decision was written naming
+    four, without `seal_authorised_at`. A CHECK constraint cannot call
+    `now()`, so an expiry is only checkable against a *stored* grant time
+    (`scim_credentials_expiry_check`'s shape); and it cannot be compared
+    against `updated_at` instead, because that column moves every pass and
+    the constraint would begin failing the moment a pass ran after the
+    window closed. Without the fifth column "expires" would be a value
+    nothing verifies, on the row that decides whether 300 people are
+    sealed. Its **history is the
     chain's, not the table's**: the state row is rewritten every pass, and
     "who authorised 300 seals, when, and why" is a question a hash-linked
     chain answers better than a mutable row. That is the division decision 9

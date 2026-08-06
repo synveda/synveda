@@ -24,6 +24,12 @@
 --    circuit breaker, recorded in `breaker_tripped_at` /
 --    `breaker_would_have_sealed` so that a refusal to seal is a fact an
 --    operator is told rather than a silence they have to notice.
+-- 4. **Or a human authorised the seals anyway** — the `seal_authorised_*`
+--    columns (ADR-0060 decision 10), reasoned, time-boxed, bounded by a
+--    ceiling and spent by the first pass that uses them. Condition 3
+--    without condition 4 is not a circuit breaker; it is a refusal with no
+--    way back, and the mass departure it is built to catch would be the
+--    one event it could never process.
 --
 -- An explicitly deactivated user still seals on the first complete pass that
 -- sees `active: false`. That is an act, and it gets an act's treatment. Only
@@ -111,6 +117,37 @@ create table directory_sync_state (
     breaker_tripped_at        timestamptz,
     breaker_would_have_sealed integer,
 
+    -- The breaker's release, in force (ADR-0060 decision 10). A refusal
+    -- with no release is not a control but an outage with a justification:
+    -- the next pass re-evaluates the same facts and refuses again, so the
+    -- layoff the breaker exists to catch is the one event it can never let
+    -- through.
+    --
+    -- Three of these are the lapse's (`policy_lapses`, migration 0022):
+    -- a reason, a window, and the human who signed it. The fourth is not,
+    -- and it is the one that makes this bounded — a **ceiling**, so the
+    -- authorisation permits at most this many seals and a pass that finds
+    -- more trips again instead of proceeding. What that refuses is
+    -- "authorise 300, the directory degrades further, seal 5,000".
+    --
+    -- Spent by the first complete pass that consults it, which clears all
+    -- five back to null. The history is the **chain's**: this row is
+    -- rewritten every pass, and "who authorised 300 seals, when, and why"
+    -- is a question a hash-linked log answers better than a mutable row.
+    --
+    -- `seal_authorised_at` is not in ADR-0060 decision 10's list of four
+    -- and is an elaboration rather than a departure: a CHECK cannot call
+    -- `now()`, so an expiry is only checkable against a stored grant time
+    -- (`scim_credentials_expiry_check`'s shape, migration 0036). It cannot
+    -- be compared against `updated_at` instead — that column moves every
+    -- pass, so the constraint would start failing the moment a pass ran
+    -- after the authorisation's window closed.
+    seal_authorised_at        timestamptz,
+    seal_authorised_until     timestamptz,
+    seal_authorised_ceiling   integer,
+    seal_authorised_by        text,
+    seal_authorised_reason    text,
+
     created_at                timestamptz not null default now(),
     updated_at                timestamptz not null default now(),
 
@@ -132,7 +169,39 @@ create table directory_sync_state (
         check ((breaker_tripped_at is null) = (breaker_would_have_sealed is null)),
     -- A trip that would have sealed nobody is not a trip; it is a pass.
     constraint directory_sync_state_breaker_count_check
-        check (breaker_would_have_sealed is null or breaker_would_have_sealed > 0)
+        check (breaker_would_have_sealed is null or breaker_would_have_sealed > 0),
+
+    -- An authorisation arrives whole or not at all. `num_nonnulls` rather
+    -- than a ten-line boolean because it says exactly this and nothing
+    -- else: five columns, none set or all five. A partial one would be an
+    -- authorisation with no ceiling, or with nobody's name on it, at the
+    -- moment mid-incident when nobody is reading carefully.
+    constraint directory_sync_state_authorisation_pair_check
+        check (num_nonnulls(
+            seal_authorised_at, seal_authorised_until, seal_authorised_ceiling,
+            seal_authorised_by, seal_authorised_reason
+        ) in (0, 5)),
+
+    -- An authorisation that expired before it was granted authorises
+    -- nothing and would sit there looking like permission.
+    constraint directory_sync_state_authorisation_window_check
+        check (seal_authorised_until is null
+               or seal_authorised_until > seal_authorised_at),
+
+    -- A ceiling of zero permits no seals, so it is not an authorisation;
+    -- the breaker's own count check, on the other side of the same event.
+    constraint directory_sync_state_authorisation_ceiling_check
+        check (seal_authorised_ceiling is null or seal_authorised_ceiling > 0),
+
+    -- Bounded like the lapse's reason (0022) and the credential's issuer
+    -- (0036). An unbounded reason on a row a pass rewrites is a place for
+    -- something else to end up.
+    constraint directory_sync_state_authorisation_reason_check
+        check (seal_authorised_reason is null
+               or length(seal_authorised_reason) between 1 and 512),
+    constraint directory_sync_state_authorisation_by_check
+        check (seal_authorised_by is null
+               or length(seal_authorised_by) between 1 and 255)
 );
 
 -- ── What is deliberately not here ─────────────────────────────────────

@@ -5326,3 +5326,117 @@ fn an_incomplete_pass_cannot_claim_the_completeness_proof() {
         tx.rollback().await.expect("rollback");
     });
 }
+
+/// A seal authorisation arrives whole or not at all.
+///
+/// ADR-0060 decision 10: releasing a breaker trip is reasoned, time-boxed,
+/// bounded by a ceiling and signed by a named human. A row able to carry
+/// three of those five would be an authorisation with no ceiling, or with
+/// nobody's name against it — assembled by whichever writer got halfway, at
+/// the one moment it matters, which is mid-incident with a mass departure on
+/// the wire and nobody reading carefully. This is where "whole or not at
+/// all" stops depending on the writer.
+///
+/// The two malformed-but-complete cases go in with all five columns set, so
+/// each is refused by the constraint written for it rather than swallowed by
+/// the pair check.
+#[test]
+fn a_seal_authorisation_arrives_whole_or_not_at_all() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed_sync_state(&db.pool).await;
+
+        // Whole: a future window, a positive ceiling, a name and a reason.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        sqlx::query!(
+            r#"
+            update directory_sync_state
+               set seal_authorised_at = now(),
+                   seal_authorised_until = now() + interval '2 hours',
+                   seal_authorised_ceiling = 300,
+                   seal_authorised_by = 'alice@example.test',
+                   seal_authorised_reason = 'Q3 restructure, ticket OPS-1123'
+             where tenant_id = $1
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("a complete authorisation is storable");
+        tx.commit().await.expect("commit authorisation");
+
+        // Spending it clears all five, which is the only other legal shape.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        sqlx::query!(
+            r#"
+            update directory_sync_state
+               set seal_authorised_at = null, seal_authorised_until = null,
+                   seal_authorised_ceiling = null, seal_authorised_by = null,
+                   seal_authorised_reason = null
+             where tenant_id = $1
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("a spent authorisation clears whole");
+        tx.commit().await.expect("commit spend");
+
+        // A ceiling on its own permits a number and names nobody for it.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let partial = sqlx::query!(
+            "update directory_sync_state set seal_authorised_ceiling = 300 where tenant_id = $1",
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            partial.is_err(),
+            "a ceiling with no grantor, reason or window is refused"
+        );
+        tx.rollback().await.expect("rollback");
+
+        // A ceiling of zero permits no seals, so it is not permission —
+        // and a pass that consulted it would clear it having done nothing.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let empty = sqlx::query!(
+            r#"
+            update directory_sync_state
+               set seal_authorised_at = now(),
+                   seal_authorised_until = now() + interval '2 hours',
+                   seal_authorised_ceiling = 0,
+                   seal_authorised_by = 'alice@example.test',
+                   seal_authorised_reason = 'authorising nothing'
+             where tenant_id = $1
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(empty.is_err(), "a ceiling of zero is not an authorisation");
+        tx.rollback().await.expect("rollback");
+
+        // An authorisation that expired before it was granted is refused
+        // rather than left sitting there looking like permission.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let expired = sqlx::query!(
+            r#"
+            update directory_sync_state
+               set seal_authorised_at = now(),
+                   seal_authorised_until = now() - interval '1 minute',
+                   seal_authorised_ceiling = 300,
+                   seal_authorised_by = 'alice@example.test',
+                   seal_authorised_reason = 'window closed before it opened'
+             where tenant_id = $1
+            "#,
+            tenant.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            expired.is_err(),
+            "an authorisation expiring before it is granted is refused"
+        );
+        tx.rollback().await.expect("rollback");
+    });
+}
