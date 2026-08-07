@@ -35,8 +35,8 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 
 ## Current phase
 Phase 3 — Enterprise (wk 11–16). Phases 0, 1 and 2 are complete; SKIL-1
-through SKIL-4, OPS-1, CNSL-1, ADPT-2, CNSL-2 and AUTH-4 are the Phase 3
-features done so far. 58 of 89 features delivered — see docs/backlog/STATUS.md for what each
+through SKIL-4, OPS-1, CNSL-1, ADPT-2, CNSL-2, AUTH-4 and AUTH-5 are the
+Phase 3 features done so far. 59 of 89 features delivered — see docs/backlog/STATUS.md for what each
 one proved and what it left standing. (The total read 86 until 2026-08-05,
 when it was corrected to the 88 STATUS.md and `make check-backlog` had both
 said for some time; AUTHZ-7 was filed the same day by CNSL-2/ADR-0058, making
