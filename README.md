@@ -153,7 +153,9 @@ Being explicit, so nothing here misleads:
   mem0 (ADPT-5).
 - **No per-tenant encryption keys, WORM export or SIEM streaming**
   (TEN-4, AUD-3, AUD-4).
-- **No published benchmark scores** — LoCoMo/LongMemEval adapters are EVAL-3.
+- **No published benchmark scores** — the LongMemEval adapter is EVAL-3. LoCoMo is
+  EVAL-7 and is blocked on a licence, not on effort: its corpus is CC BY-NC 4.0,
+  which withholds the published commercial claim a score would be.
 - **No LICENSE file yet.** Dependencies are constrained to MIT / Apache-2.0 /
   PostgreSQL in the core path (enforced by `cargo-deny`), but the project's own
   licence is not yet declared.

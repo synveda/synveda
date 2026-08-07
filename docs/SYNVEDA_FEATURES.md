@@ -52,8 +52,12 @@ temporal, open-domain), LongMemEval (~115k-token histories; 10 categories incl. 
 update, temporal reasoning, abstention, contradiction resolution), DMR (saturated, legacy),
 HaluMem (hallucinated-memory detection). Eval frameworks score five dimensions jointly:
 accuracy, latency, tokens, recall, abstention.
-→ **Synveda ships an eval harness that runs LoCoMo + LongMemEval against the whole pipeline,
+→ **Synveda ships an eval harness that runs LongMemEval against the whole pipeline,
    plus enterprise-specific evals (policy-leak tests, cross-tenant isolation tests).**
+   (Read "LoCoMo + LongMemEval" until 2026-08-07. LoCoMo remains a benchmark that matters —
+   the paragraph above is unchanged and still true — but its corpus is CC BY-NC 4.0, so we
+   may not publish a score from it. That is EVAL-7, not EVAL-3. A licence bounds what we can
+   claim, not what the field measures.)
 
 ## A2. Context engineering
 
@@ -633,9 +637,39 @@ EVAL-2 Extraction quality suite (M)
   but no axis, no path, and no artefact. The lens is the load-bearing part — extraction
   quality is a property of a record set, and an inject block cannot express one.
 EVAL-3 Public benchmark adapters (L)
-  LoCoMo + LongMemEval run end-to-end through Synveda (observe→inject/recall→judge).
+  LongMemEval runs end-to-end through Synveda (observe→inject/recall→judge). LoCoMo was
+  named here until 2026-08-07 and is now EVAL-7: its LICENSE.txt is CC BY-NC 4.0, which
+  withholds exactly the use this AC's own parenthetical describes, so a score we may not
+  quote has no acceptance criterion. LongMemEval is MIT.
   AC: reproducible scores published in repo; tracked per release. (Marketing artefact too —
-  every credible 2026 memory system publishes these.)
+  every credible 2026 memory system publishes these.) Two tiers, because the benchmark
+  publishes two metrics with different reproducibility: a DETERMINISTIC retrieval gate —
+  did the block bind the evidence sessions the instance names in answer_session_ids, graded
+  by record identity as EVAL-4 grades, reproducible from bytes, on the nightly, failing with
+  the axis, the baseline, the measurement and the delta — and a MODEL-JUDGED end-to-end QA
+  accuracy that is the published figure and gates nothing, run on demand against its own
+  baseline, off the merge path because a gate that fails when a model changed rather than
+  when the code changed is an alarm nobody keeps (ADR-0028 decision 6); the judge is a
+  `Judge` seam with a deterministic default, the shape `Extractor` already has, which is
+  also the seam ADR-0053 option 9's SkillJudge becomes an implementation of; THE JUDGE IS
+  MEASURED BEFORE IT MEASURES — scored against EVAL-2's unmatched-record list (the labelled
+  set ADR-0046 option 6 named when it deferred this) and LongMemEval's 500 reference
+  answers, with its agreement rate published as a first-class axis beside the product's
+  score, because a number produced by an unmeasured judge is a second opinion with a decimal
+  point; the baseline is keyed to BOTH models the score depends on — the reader that answers
+  from the block and the judge that grades the answer — recorded from what the API served
+  rather than the alias requested, since a memory benchmark figure quoted without its reader
+  model is reproducible by nobody including us; a declared slice on the routine path and the
+  full 500 behind its own target, with the instance count, slice interval, abstention
+  exclusion and skip count stated on every run; one actor per instance, because the
+  32-record sweep cap is a rule and not a limit to raise; everything at the `user` tier,
+  because LongMemEval has no teams and synthesising a hierarchy would measure a fiction;
+  scores accumulate as rows in evals/scores/ and docs/BENCHMARKS.md, each carrying both
+  model versions and the commit.
+  Written 2026-08-07 (EVAL-3, ADR-0061): the feature arrived with five other ADRs' deferrals
+  already naming its judge, so most of its design was written before it started. The
+  load-bearing decisions are the two that were not — that the judge owes its own measurement
+  first, and that a benchmark score is never a measurement of the memory system alone.
 EVAL-4 Retrieval & injection quality (M)
   Fixture Q&A per scope; probe-based compression eval (CTX-6); tokens-per-inject trend.
   AC: one Q&A corpus under evals/fixtures/qa/ whose material sits at four scope tiers because
@@ -737,6 +771,23 @@ EVAL-5 Security evals (M)
 EVAL-6 Load & latency suite (M)
   k6/vegeta profiles for inject/observe/recall SLOs at SMB and enterprise shapes.
   AC: SLO report per release.
+EVAL-7 A second public benchmark (M)
+  Filed 2026-08-07 by EVAL-3/ADR-0061 decision 1. LoCoMo was named in EVAL-3 until that ADR
+  read its licence: snap-research/locomo's LICENSE.txt is Creative Commons
+  Attribution-NonCommercial 4.0 International, which grants rights "for NonCommercial
+  purposes only" and defines NonCommercial as not "primarily intended for or directed
+  towards commercial advantage" — which is precisely what EVAL-3's own AC calls the score
+  ("Marketing artefact too"). Nothing in the build would have caught it: CLAUDE.md's licence
+  rule covers the core path and cargo-deny enforces it over crates, and a corpus is data.
+  ADR-0061's compliance note closes that gap with `make check-corpus-licences`; this feature
+  is the corpus it cost us. Two paths, either sufficient: written permission from Snap
+  Research for commercial benchmark use, recorded beside the corpus — or a
+  permissively-licensed substitute in LoCoMo's slot, which needs finding and licence-checking
+  before this feature can commit to one.
+  AC: a second published benchmark score under EVAL-3's two-tier discipline, arriving in
+  EVAL-3's corpus format or with the reason it cannot recorded (ADR-0047 trigger (f),
+  inherited rather than escaped); its licence permits the use, and the permission is in the
+  repository rather than in somebody's memory of an email.
 
 ──────────────────────────────────────────────
 EPIC ADPT — Adapters & SDKs
@@ -890,11 +941,19 @@ Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-
    at a demo — TEN-3..6, AUD-3,4 — plus GRPH-3, EVAL-6, OPS-3,4, ADPT-3, CTX-6 and
    FLOW-8. Nothing is cut and the phase's contents are unchanged.)
    → Demo: Entra/Okta live, spec-compliant governed skills into Claude Code + Cursor,
-     LoCoMo/LongMemEval scores published, Helm install.
-Phase 4 ecosystem: ADPT-4,5,6,7 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6 · CNSL-3,4 · AUD-5 · AUTHZ-6,7
+     LongMemEval scores published, Helm install.
+     (Read "LoCoMo/LongMemEval" until 2026-08-07. EVAL-3/ADR-0061 decision 1 found LoCoMo's
+     corpus is CC BY-NC 4.0 and cannot back a published commercial claim; the second
+     benchmark is EVAL-7. A goal naming a score we may not quote is a goal that cannot be
+     met, so the goal moved rather than the honesty.)
+Phase 4 ecosystem: ADPT-4,5,6,7 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6 · CNSL-3,4 · AUD-5 · AUTHZ-6,7 · EVAL-7
    (AUTHZ-7 added 2026-08-05 by CNSL-2/ADR-0058 decision 9, which found the asymmetry it
    names while building the explorer. Placed here rather than in Phase 3 because its two
    bounds hold — a pack flip widens no candidate universe and cannot reach below the
    invariant floor — so it is a governance question rather than a hole; if that reading is
-   ever wrong, it belongs in front of the Phase 3 procurement block, not behind it.)
+   ever wrong, it belongs in front of the Phase 3 procurement block, not behind it.
+   EVAL-7 added 2026-08-07 by EVAL-3/ADR-0061 decision 1. Here rather than Phase 3 because
+   neither of its two paths is work we control: one waits on a grant from a third party, the
+   other on a corpus that may not exist yet. EVAL-3 publishes a benchmark score without it,
+   so the phase's demo goal is met — this is the second data point, not the first.)
 ──────────────────────────────────────────────

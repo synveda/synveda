@@ -1,6 +1,6 @@
 # Backlog status
 
-89 features parsed from docs/SYNVEDA_FEATURES.md — one file per
+90 features parsed from docs/SYNVEDA_FEATURES.md — one file per
 feature in this directory. Phases per the Sequencing section. This file and the
 per-feature files are **hand-maintained**; `node scripts/check-backlog.mjs`
 (in `make ci`) asserts that the three agree, and writes nothing.
@@ -2885,7 +2885,7 @@ rather than by a dedicated one._
 
 ## Phase 3 — Enterprise (wk 11–16)
 
-_Phase demo goal: Entra/Okta live, spec-compliant governed skills into Claude Code + Cursor, LoCoMo/LongMemEval scores published, Helm install._
+_Phase demo goal: Entra/Okta live, spec-compliant governed skills into Claude Code + Cursor, LongMemEval scores published, Helm install. (Read "LoCoMo/LongMemEval" until 2026-08-07, when EVAL-3/ADR-0061 decision 1 found LoCoMo's corpus is CC BY-NC 4.0 — a licence that withholds exactly the published commercial claim this goal names. The second benchmark is EVAL-7.)_
 
 _Reordered 2026-08-04 (see the Sequencing note in SYNVEDA_FEATURES.md). The
 original order scattered this phase's own demo goal across slots 1, 2, 10, 13
@@ -3714,6 +3714,7 @@ produce._
 - [ ] [AUD-5: Compliance mapping doc](AUD-5.md)
 - [ ] [AUTHZ-6: OpenFGA adapter spike](AUTHZ-6.md)
 - [ ] [AUTHZ-7: Governed admin-plane mutation](AUTHZ-7.md) — filed 2026-08-05 by CNSL-2 (ADR-0058 decision 9): pack assignment and role binding are direct `PUT`s while every content act is proposal-gated, so one steward replaces a subtree's pack with one call and one signature, permanently, where the lapse that relaxes far less needs a reasoned, time-boxed, dual-approved proposal. Phase 4 because both bounds hold — a pack flip widens no candidate universe (ADR-0037 decision 13) and cannot reach below the invariant floor.
+- [ ] [EVAL-7: A second public benchmark](EVAL-7.md) — filed 2026-08-07 by EVAL-3 (ADR-0061 decision 1): LoCoMo's LICENSE.txt is CC BY-NC 4.0, granting rights "for NonCommercial purposes only", which is precisely the use EVAL-3's own AC describes ("Marketing artefact too"). Nothing in the build would have caught it — cargo-deny enforces the licence rule over crates and a corpus is data — so it reached a feature specification and a published phase demo goal untouched by any check; ADR-0061 closes that with `make check-corpus-licences`, and this feature is the corpus it cost. Two paths, either sufficient: written permission from Snap Research recorded in the repository, or a permissively-licensed substitute. Phase 4 because neither is work we control — one waits on a third party's grant, the other on a corpus that may not exist yet — and EVAL-3 publishes a score without it.
 
 ## Unscheduled — not listed in the Sequencing section
 
