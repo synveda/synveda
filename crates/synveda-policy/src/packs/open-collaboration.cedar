@@ -594,3 +594,18 @@ permit (
     resource in principal.tenant
         && context.roles.contains("org-admin")
 };
+
+// The breaker's release (AUTH-5, ADR-0060 decision 10). `org-admin` here as
+// well, and the separation is about what a *stored* pack can now express
+// rather than about these three saying anything different: a tenant that
+// wants their IT team to run provisioning while somebody else signs off on
+// mass deprovisioning can say so, which was unsayable while the two shared
+// an action.
+permit (
+    principal,
+    action == Synveda::Action::"DirectorySealAuthorise",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.contains("org-admin")
+};

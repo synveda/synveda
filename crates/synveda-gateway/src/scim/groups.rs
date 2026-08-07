@@ -315,7 +315,13 @@ async fn reconcile_members(
         let Some(user) = directory::user(&state.pool, auth.tenant.id, *member).await? else {
             continue;
         };
-        reconcile::reconcile(state, &auth.tenant, auth.credential.id, &user).await?;
+        reconcile::reconcile(
+            state,
+            &auth.tenant,
+            reconcile::DirectorySource::Scim(auth.credential.id),
+            &user,
+        )
+        .await?;
     }
     Ok(())
 }

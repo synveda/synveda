@@ -3599,7 +3599,89 @@ at a department. The vendor conformance corpus is transcribed from
 Microsoft's and Okta's published tables; **nothing here has replayed a frame
 from a live Entra or Okta tenant**, which is ADPT-2's honesty applied to
 this feature's own claim._
-- [ ] [AUTH-5: Directory sync fallback](AUTH-5.md)
+- [x] [AUTH-5: Directory sync fallback](AUTH-5.md) — done 2026-08-07, ADR-0060 (**amended before implementation, and again during it**), migration 0037, packs `@16`, AC tests: crates/synveda-gateway/tests/directory_sync.rs (**the AC's one clause asserted as two bounds, because collapsing them is how the widening gets lost**: `a_joiner_converges_in_a_single_complete_pass` is the feature text's "≤ sync interval" as written, and `a_directory_deletion_becomes_a_leaver_after_two_complete_passes` is the other half — asserted as a *sequence* rather than an endpoint, since pass 2 counting the absence and sealing nobody is the claim, and a suite that only checked the endpoint would pass just as happily against code that sealed on the first missed page; `an_incomplete_pass_records_presence_and_concludes_nothing`, the contrast that makes the first two mean anything — three incomplete passes miss the same person and never reach the threshold, while somebody first seen in a *failed* pass is still placed; `an_explicit_deactivation_seals_on_the_first_complete_pass`, the asymmetry an act gets and an inference does not; `the_breaker_refuses_a_bulk_departure_until_somebody_authorises_it`, the whole of decision 10 in one arc — refused, sized, signed, spent, and not standing afterwards; `the_release_is_signed_on_v1_and_never_by_the_directory`, the custody assertion driven three ways (403 with no role, **401 for a SCIM provisioning credential**, 201 for an org-admin with their name and reason on the row); and `a_tenant_the_push_plane_owns_is_not_pulled`), crates/synveda-store/tests/directory_sync.rs (7 behaviour tests over the store, including `an_absence_pass_never_touches_the_mirrors_own_clock` — checked by mutation, because `updated_at` is served as `meta.lastModified` and bumping it because *we* failed to see somebody would tell every SCIM client that every user changed, every pass), crates/synveda-store/tests/rls.rs (5 adversarial tests on 0037's invariants, each malformed row proved to name the constraint written for it rather than a grant or a foreign key), crates/synveda-identity/tests/directory_connectors.rs (5 against in-process mock Graph and Okta servers: paging followed as the vendor gives it, a mid-pagination failure keeping what it read, and **a refused token whose error carries no credential** — checked by mutation against a hostile mock that echoes the grant back), crates/synveda-gateway/src/main.rs (4 boot-config tests, including that a claim-bound issuer configuring a pull sync is refused at boot), crates/synveda-cli/src/directory.rs (4 renderer tests), demo: demos/auth-5-directory-sync.sh (the arc from a terminal against a mock directory this demo rewrites between passes: a joiner in one pass, a deletion in two, three *failed* passes concluding nothing while still placing a newcomer, the breaker refusing twelve of twenty, `synveda directory status` leading with the refusal and printing the command that clears it, the release sealing exactly twelve and not surviving, `chain valid (49 events)` and a credential sweep at 0 rows and 0 log lines), new: `synveda-identity::directory` (the connector trait, Entra and Okta), `crates/synveda-gateway/src/directory_sync.rs`, `crates/synveda-gateway/src/directory_admin.rs`, `GET /v1/directory/sync`, `POST /v1/directory/seal-authorisations`, `synveda directory status|authorise-seals`, `Action::DirectorySealAuthorise`, four chained actions
+
+_AUTH-5 notes (ADR-0060): the feature is a loop around a function that
+already existed, exactly as ADR-0059 decision 3 predicted — and what it
+cost was not the loop. **Absence is a hypothesis, and that is the whole
+feature.** On the push plane a leaver is an act; here it is somebody who
+was on page 3 last hour and is on no page now, which is also what a
+throttled response, a truncated page and a narrowed assignment filter look
+like. Since the seal does not lift (ADR-0059 decision 12), treating that
+silence as a departure would let one bad afternoon at a vendor permanently
+deprovision a tenant. So a conclusion about absence needs a pass that
+**completed**, and needs to survive N of them, and even then a bulk one
+needs a human.
+
+**The sharpest finding is the ADR's own, and it arrived before any
+connector code existed.** Decision 3.3 refused a mass seal and never
+released it: the next pass re-evaluated the same facts and refused again,
+so the layoff the breaker exists to catch was the one event it could never
+process. A refusal with no release is not a control — it is an outage with
+a justification. Decision 10 is the release, and three of its four
+properties are the lapse's (reason, expiry, named grantor); the fourth is
+not, and is the one that bounds it: a **ceiling**, so a pass finding 305
+where an operator sized 300 refuses again rather than rounding down. Its
+custody is the load-bearing half and is ADR-0059 decision 12 read in a
+mirror — a breaker the directory can wave through is not a breaker, and
+waving it through is exactly how somebody who owns a directory converts a
+read into mass deprovisioning. Hence its own action rather than
+`DirectoryManage`'s, and hence the suite driving the route from a SCIM
+credential and requiring a refusal.
+
+**Enforcement is an omission rather than a check.** An incomplete pass
+records presence for everybody it listed and then returns *before*
+`complete_pass`, so `passes_completed` never moves and the pass cannot
+contribute to anybody's absence count. There is no branch reading "if
+incomplete, do not seal" — there is no path from an incomplete pass to the
+sealing code at all. The connector's own type says the same thing one layer
+down: `enumerate` returns `Enumeration` and not `Result<Enumeration>`,
+because a `Result` invites `?` and `?` discards the users already read, so
+a failing second page would silently throw away the first and the next pass
+would see those people as newly missing.
+
+**Two defects the tests found rather than the design.** The breaker's
+chained payload carried `fraction: 0.1`, and an audit payload may hold no
+non-integer number — jsonb re-renders floats and the chain's hash is over
+the rendered bytes. It would have failed at the first breaker trip in
+production, and no unit test would have reached it: the guard lives in the
+audit canonicaliser, three layers below where the payload is written. And
+Postgres `now()` is `transaction_timestamp()` and does not advance inside a
+transaction, so the first expiry test slept over its own window and watched
+the spend succeed — the semantics the lapse store also wants, now documented
+where the next person will need it.
+
+**The connector's placement does more than tidy.** `synveda-identity` is
+`synveda-store`'s *sibling* under seed §8 rather than its dependent, so
+decision 8 — a connector has no vocabulary for a scope, a role, a pack or a
+record — stops being a promise and becomes a fact about what is reachable
+from where it compiles. A connector that wanted to express a product
+instruction would have to violate the layering rule first, which
+`check-crate-deps` fails the build over.
+
+Deferrals and standing limitations. **No delta feed** (decision 6): a
+change feed states what changed and never what still exists, so it cannot
+carry the completeness proof absence is built from; delta arrives as a
+presence optimisation with full enumeration retained as the authority. The
+outbound credential lives in deployment configuration because it is the
+first secret in this product that has to be **recoverable**, and a
+per-tenant table holding one wants TEN-4's keys — so one deployment cannot
+pull two tenants from two directories until TEN-4. An **expired** SCIM
+credential does not hand authority to the pull, only an explicit revocation
+does, so a tenant whose credential lapses unrotated stops syncing loudly
+rather than silently changing which plane decides who has left. And the
+demo surfaced one nobody had written down: **the pull sync exists only in
+OIDC mode**, because its connector is configured on an issuer and ADR-0010
+makes the auth modes exclusive — `synveda init` deployments are fine, and a
+dev-secret deployment cannot run one, which is why that demo runs the same
+binary twice.
+
+As with AUTH-4, **nothing here has spoken to a live Entra or Okta tenant**.
+The connectors are exercised against in-process mocks built from the
+vendors' documented shapes and the pass against a scripted directory, which
+is ADPT-2's honesty applied to this feature's own claim — and ADPT-2's five
+recorded falsifications are exactly the class of thing a mock cannot
+produce._
 - [ ] [EVAL-3: Public benchmark adapters](EVAL-3.md)
 - [ ] [OPS-2: Helm chart / enterprise profile](OPS-2.md)
 - [ ] [TEN-3: Tenant-partitioned storage layout](TEN-3.md)

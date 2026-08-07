@@ -261,7 +261,13 @@ async fn project(
     auth: &ScimAuth,
     user: DirectoryUser,
 ) -> Result<DirectoryUser, ScimError> {
-    reconcile::reconcile(state, &auth.tenant, auth.credential.id, &user).await?;
+    reconcile::reconcile(
+        state,
+        &auth.tenant,
+        reconcile::DirectorySource::Scim(auth.credential.id),
+        &user,
+    )
+    .await?;
     Ok(directory::user(&state.pool, auth.tenant.id, user.id)
         .await
         .ok()

@@ -87,11 +87,19 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// done to this material. Every pack's own policies are **byte-identical**
 /// across this bump, which is what makes the golden diff checkable: the
 /// only cells that move are the ones a seal turns off (ADR-0059
-/// decisions 8 and 9).
+/// decisions 8 and 9). `@16`: AUTH-5 added `DirectorySealAuthorise`, the
+/// human release of a pull sync's circuit breaker, as its **own** action
+/// rather than widening `DirectoryManage` — one hands out a provisioning
+/// token, the other authorises irreversible bulk sealing, and a tenant that
+/// wants those two held by two people could not say so while they shared an
+/// action (ADR-0060 decision 10). All three packs grant it to `org-admin`,
+/// so the golden diff is exactly one new row per pack per scope kind and
+/// nothing else moves: the separation's value is what a *stored* pack can
+/// now express, not what these three say differently.
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 15),
-    (STANDARD, 15),
-    (OPEN_COLLABORATION, 15),
+    (REGULATED_STRICT, 16),
+    (STANDARD, 16),
+    (OPEN_COLLABORATION, 16),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the

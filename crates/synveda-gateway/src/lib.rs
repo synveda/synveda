@@ -43,6 +43,8 @@ pub mod capabilities;
 pub mod channels;
 pub mod console;
 pub mod curators;
+pub mod directory_admin;
+pub mod directory_sync;
 pub mod error;
 pub mod hierarchy;
 mod inject;

@@ -20,6 +20,7 @@ mod api;
 mod channel;
 mod credentials;
 mod diff;
+mod directory;
 mod hierarchy;
 mod init;
 mod lapse;
@@ -141,6 +142,10 @@ enum Command {
     /// in the trail.
     #[command(subcommand)]
     Scim(ScimCommand),
+    /// The scheduled directory pull sync: what the last pass did, and the
+    /// authorisation that releases its circuit breaker (AUTH-5, ADR-0060).
+    #[command(subcommand)]
+    Directory(DirectoryCommand),
     /// What is currently relaxed, and over what (AUTHZ-4's grants).
     ///
     /// The lapse machinery is this product's answer to "strict by default,
@@ -1119,6 +1124,39 @@ enum HierarchyCommand {
 }
 
 #[derive(Subcommand)]
+enum DirectoryCommand {
+    /// What the last pull pass did — and, when the circuit breaker
+    /// refused, how many people it declined to seal.
+    Status {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Authorise the next complete pass to seal past the breaker.
+    ///
+    /// Bounded by `--ceiling`, and spent by the first pass that uses it: a
+    /// pass proposing more than the ceiling refuses again rather than
+    /// rounding down, and the authorisation does not survive into the next
+    /// directory failure.
+    AuthoriseSeals {
+        /// The most this authorisation permits a pass to seal.
+        #[arg(long)]
+        ceiling: i32,
+        /// Why. Recorded on the chain with your name against it.
+        #[arg(long)]
+        reason: String,
+        /// How long it stands, in hours. Capped at 24; defaults to 2.
+        #[arg(long)]
+        hours: Option<f64>,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum ScimCommand {
     /// Issue, list and revoke provisioning credentials.
     #[command(subcommand)]
@@ -1541,6 +1579,18 @@ async fn run(cli: Cli) -> Result<(), String> {
             profile,
             json,
         } => whoami::show(&profile_name(profile), capabilities, json).await,
+        Command::Directory(DirectoryCommand::Status { profile, json }) => {
+            directory::status(&profile_name(profile), json).await
+        }
+        Command::Directory(DirectoryCommand::AuthoriseSeals {
+            ceiling,
+            reason,
+            hours,
+            profile,
+            json,
+        }) => {
+            directory::authorise_seals(&profile_name(profile), ceiling, &reason, hours, json).await
+        }
         Command::Scim(ScimCommand::Token(ScimTokenCommand::Issue {
             label,
             days,

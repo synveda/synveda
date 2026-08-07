@@ -215,9 +215,28 @@ Forces at play:
 
 8. **The pull takes no PDP decision, and the connector has no vocabulary for
    one.** ADR-0059 decision 2's reachability argument is preserved on the
-   read side by the connector's *output type*: `UserAttributes` plus group
-   names, with no field for a scope, a role, a pack, a channel or a record,
-   and none to be added. The job runs as `ActorKind::System` named by
+   read side by the connector's *output type*: directory attributes plus
+   group names, with no field for a scope, a role, a pack, a channel or a
+   record, and none to be added.
+
+   **[Implementation note, 2026-08-06]** The connector lives in
+   `synveda-identity`, beside `oidc.rs`. The crate already holds
+   `IssuerConfig` — which decision 7 makes the connector's configuration
+   seam — already does outbound HTTP for discovery and JWKS, and sits in the
+   tier the gateway imports, which the loop needs because `scim::reconcile`
+   takes `AppState` and cannot move (decision 1). The crate's own
+   description has read "OIDC, SCIM, **directory sync**, and hierarchy
+   provisioning" since it was created.
+
+   The placement turns out to do more than tidy: it makes this decision
+   **structural instead of a promise**. `synveda-identity` is
+   `synveda-store`'s *sibling* under seed §8, not its dependent, so a
+   connector cannot name a scope, a role, a pack or a record — those types
+   are not reachable from where it is compiled. That is why the connector
+   emits its own `DirectoryUserRecord` rather than `UserAttributes`, and why
+   the projection onto product state stays the gateway's. A connector that
+   wanted to express a product instruction would first have to violate the
+   dependency rule, which `check-crate-deps` fails the build over. The job runs as `ActorKind::System` named by
    component — the kind ADR-0022 minted for "sweeps and AUTH-4/5 sync jobs",
    which this discharges in the direction it named.
 

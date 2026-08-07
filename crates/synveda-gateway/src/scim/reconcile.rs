@@ -44,6 +44,59 @@ use crate::audit;
 use crate::provision;
 use crate::telemetry::SCIM_RECONCILES_TOTAL;
 
+/// Which door a directory fact arrived through.
+///
+/// AUTH-4 threaded a `ScimCredentialId` here because there was one plane and
+/// it always had one. AUTH-5's pull sync has no credential — it holds an
+/// outbound one, which is a different thing and must never appear in an audit
+/// payload (ADR-0060 decision 7) — so the parameter becomes the *source*.
+///
+/// This is ADR-0060 decision 2 made concrete: the two planes produce the same
+/// lifecycle through the same reconciler, and the only thing that
+/// distinguishes them on the chain is which one it was. A chain consumer that
+/// asked "who deprovisioned this person" still gets an answer from either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectorySource {
+    /// A provisioning agent pushed it, authenticated by this credential.
+    Scim(synveda_types::ScimCredentialId),
+    /// A scheduled pass read it from the directory itself.
+    Pull {
+        /// The connector that read it — `entra`, `okta`.
+        connector: &'static str,
+    },
+}
+
+impl DirectorySource {
+    /// The audit payload fragment naming this source.
+    ///
+    /// `credential_id` keeps the key and the shape AUTH-4's consumers already
+    /// read, and is `null` for a pull. Dropping the key on one plane would
+    /// make a chain query that filters on it silently miss half the events.
+    fn payload(self) -> serde_json::Value {
+        match self {
+            DirectorySource::Scim(id) => json!({"source": "scim", "credential_id": id}),
+            DirectorySource::Pull { connector } => {
+                json!({"source": "pull", "credential_id": null, "connector": connector})
+            }
+        }
+    }
+}
+
+/// Folds a source's identifying fields into an event payload.
+///
+/// A function rather than a repeated literal so the two planes cannot drift
+/// into describing themselves differently — which is the whole content of
+/// "the chain cannot tell the two doors apart" (ADR-0060 decision 2).
+fn with_source(mut payload: serde_json::Value, source: DirectorySource) -> serde_json::Value {
+    let fragment = source.payload();
+    if let (Some(payload), Some(fragment)) = (payload.as_object_mut(), fragment.as_object()) {
+        for (key, value) in fragment {
+            payload.insert(key.clone(), value.clone());
+        }
+    }
+    payload
+}
+
 /// What a reconciliation did — the metric label, and what the caller logs.
 ///
 /// Named for the result rather than for the verb so it does not read as a
@@ -99,14 +152,14 @@ impl Reconciled {
 pub async fn reconcile(
     state: &AppState,
     tenant: &Tenant,
-    credential_id: synveda_types::ScimCredentialId,
+    source: DirectorySource,
     user: &DirectoryUser,
 ) -> Result<Reconciled> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
     let existing = find_identity(&mut tx, tenant, user).await?;
 
     let (outcome, structural) = if !user.active {
-        (seal(&mut tx, tenant, credential_id, existing).await?, true)
+        (seal(&mut tx, tenant, source, existing).await?, true)
     } else {
         let groups = directory::group_names_for_user(&mut *tx, tenant.id, user.id).await?;
         // A departed identity is never resurrected (ADR-0059 decision 12).
@@ -122,7 +175,7 @@ pub async fn reconcile(
         let existing = existing.filter(|identity| !identity.sealed());
         match existing {
             None => (
-                place(state, &mut tx, tenant, credential_id, user, &groups).await?,
+                place(state, &mut tx, tenant, source, user, &groups).await?,
                 true,
             ),
             Some(identity) => {
@@ -133,8 +186,7 @@ pub async fn reconcile(
                     directory::link_identity(&mut *tx, tenant.id, user.id, identity.id).await?;
                 }
                 let moved =
-                    apply_placement(state, &mut tx, tenant, credential_id, &identity, &groups)
-                        .await?;
+                    apply_placement(state, &mut tx, tenant, source, &identity, &groups).await?;
                 match (moved, user.identity_id) {
                     (Some(outcome), _) => (outcome, true),
                     (None, None) => (Reconciled::Adopted, false),
@@ -255,7 +307,7 @@ pub async fn conflicting_record(
 async fn seal(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant: &Tenant,
-    credential_id: synveda_types::ScimCredentialId,
+    source: DirectorySource,
     existing: Option<Identity>,
 ) -> Result<Reconciled> {
     // Somebody the directory deactivated before they ever reached us has
@@ -275,12 +327,14 @@ async fn seal(
         AuditAction::IdentitySealed,
         format!("scope {}", sealed.scope_id),
         Outcome::Success,
-        json!({
-            "identity": {"id": sealed.id, "subject": sealed.subject},
-            "scope_id": sealed.scope_id,
-            "reason": "directory deactivation",
-            "credential_id": credential_id,
-        }),
+        with_source(
+            json!({
+                "identity": {"id": sealed.id, "subject": sealed.subject},
+                "scope_id": sealed.scope_id,
+                "reason": "directory deactivation",
+            }),
+            source,
+        ),
     )
     .await?;
     Ok(Reconciled::Sealed)
@@ -292,7 +346,7 @@ async fn place(
     state: &AppState,
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant: &Tenant,
-    credential_id: synveda_types::ScimCredentialId,
+    source: DirectorySource,
     user: &DirectoryUser,
     groups: &[String],
 ) -> Result<Reconciled> {
@@ -341,14 +395,16 @@ async fn place(
         AuditAction::IdentityProvisioned,
         format!("scope {}", scope.id),
         Outcome::Success,
-        json!({
-            "placement": label,
-            "identity": {"id": identity.id, "subject": identity.subject},
-            "parent": {"slug": parent.slug, "path": parent.path},
-            "groups": groups,
-            "origin": "scim",
-            "credential_id": credential_id,
-        }),
+        with_source(
+            json!({
+                "placement": label,
+                "identity": {"id": identity.id, "subject": identity.subject},
+                "parent": {"slug": parent.slug, "path": parent.path},
+                "groups": groups,
+                "origin": "scim",
+            }),
+            source,
+        ),
     )
     .await?;
     let _ = state;
@@ -363,7 +419,7 @@ async fn apply_placement(
     state: &AppState,
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant: &Tenant,
-    credential_id: synveda_types::ScimCredentialId,
+    source: DirectorySource,
     identity: &Identity,
     groups: &[String],
 ) -> Result<Option<Reconciled>> {
@@ -455,19 +511,21 @@ async fn apply_placement(
         AuditAction::IdentityMoved,
         format!("scope {}", home.id),
         Outcome::Success,
-        json!({
-            "identity": {"id": identity.id, "subject": identity.subject},
-            "placement": label,
-            "from": {"scope_id": home.parent_id, "pack": source_pack.0},
-            "to": {"scope_id": destination.id, "slug": destination.slug, "pack": destination_pack.0},
-            // The two facts that make the effect reviewable: whether the
-            // move crossed a policy boundary at all, and what the source
-            // pack said about material when it did.
-            "crossed_policy_boundary": crosses_boundary,
-            "touches_quarantine": touches_quarantine,
-            "personal_memory": if seals { "sealed_and_restarted" } else { "followed" },
-            "credential_id": credential_id,
-        }),
+        with_source(
+            json!({
+                "identity": {"id": identity.id, "subject": identity.subject},
+                "placement": label,
+                "from": {"scope_id": home.parent_id, "pack": source_pack.0},
+                "to": {"scope_id": destination.id, "slug": destination.slug, "pack": destination_pack.0},
+                // The two facts that make the effect reviewable: whether the
+                // move crossed a policy boundary at all, and what the source
+                // pack said about material when it did.
+                "crossed_policy_boundary": crosses_boundary,
+                "touches_quarantine": touches_quarantine,
+                "personal_memory": if seals { "sealed_and_restarted" } else { "followed" },
+            }),
+            source,
+        ),
     )
     .await?;
     Ok(Some(outcome))

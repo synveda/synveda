@@ -31,6 +31,7 @@ use crate::auth;
 use crate::capabilities;
 use crate::channels;
 use crate::curators;
+use crate::directory_admin;
 use crate::error::ApiError;
 use crate::hierarchy;
 use crate::inject;
@@ -302,6 +303,19 @@ pub fn router(state: AppState) -> Router {
         // and a credential that could mint another would make the
         // directory the authority on its own access.
         .merge(crate::scim::credential_routes())
+        // The pull sync's operator surface (AUTH-5, ADR-0060 decision 10).
+        // On `/v1` and reachable from nowhere else: a breaker the directory
+        // can wave through is not a breaker, so releasing one is an act of
+        // the product's own authority and never the provisioning
+        // credential's. It takes its own action rather than
+        // `DirectoryManage`'s, because handing out a token and authorising
+        // irreversible bulk sealing are not the same magnitude and a tenant
+        // must be able to hold them apart.
+        .route("/v1/directory/sync", get(directory_admin::status))
+        .route(
+            "/v1/directory/seal-authorisations",
+            post(directory_admin::authorise),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             tenant::resolve_tenant,

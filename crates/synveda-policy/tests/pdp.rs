@@ -153,7 +153,7 @@ fn the_default_pack_is_regulated_strict_and_admits_bound_admins() {
             .expect("authorize");
         assert!(decision.allowed, "{action} must be allowed on own scope");
         assert_eq!(decision.pack_name, REGULATED_STRICT);
-        assert_eq!(decision.pack_version, 15);
+        assert_eq!(decision.pack_version, 16);
         assert!(
             !decision.determining.is_empty(),
             "an allow must name its permitting policies"
@@ -277,7 +277,7 @@ fn the_default_pack_denies_a_foreign_principal_everything() {
             assert_eq!(action, "hierarchy.read");
             assert_eq!(resource, format!("tenant {victim}"));
             assert!(
-                reason.contains(&format!("{REGULATED_STRICT}@15")),
+                reason.contains(&format!("{REGULATED_STRICT}@16")),
                 "denial must name pack@version, got: {reason}"
             );
         }

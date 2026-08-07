@@ -234,6 +234,29 @@ pub enum Action {
     /// exist without being able to rotate them would hold nothing but
     /// reconnaissance.
     DirectoryManage,
+    /// See what a pull sync's circuit breaker refused, and authorise it to
+    /// seal past it — `GET /v1/directory/sync` and
+    /// `POST /v1/directory/seal-authorisations` (AUTH-5, ADR-0060 decision
+    /// 10).
+    ///
+    /// **Its own action rather than `DirectoryManage`'s**, and the split is
+    /// the decision rather than a tidying. One hands out a provisioning
+    /// token; this one authorises irreversible bulk sealing of personal
+    /// scopes that do not unseal. A customer who wants their IT team to run
+    /// provisioning while somebody else signs off on mass deprovisioning
+    /// has no way to say so if the two share an action — SKIL-1 decision
+    /// 18's finding in its general form, that separating two authorities
+    /// has no content beyond their being two people.
+    ///
+    /// The read and the signature are **one** action, unlike the
+    /// service-identity plane's pair and for the opposite reason to
+    /// `DirectoryManage`'s: a signer who cannot see the number they are
+    /// bounding is being asked to sign blind, which is precisely what
+    /// decision 10's ceiling exists to prevent.
+    ///
+    /// Tenant-scoped, because a breaker trip is about a whole directory and
+    /// a subtree-bounded authority over one would be a fiction.
+    DirectorySealAuthorise,
     /// Read the VedaFlow channels standing at the resource scope —
     /// `GET /v1/channels/{scope}` (FLOW-2, ADR-0031 decision 12).
     ChannelRead,
@@ -311,7 +334,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 33] = [
+    pub const ALL: [Action; 34] = [
         Action::HierarchyCreate,
         Action::HierarchyRead,
         Action::HierarchyUpdate,
@@ -336,6 +359,7 @@ impl Action {
         Action::ServiceIdentityManage,
         Action::AuditRead,
         Action::DirectoryManage,
+        Action::DirectorySealAuthorise,
         Action::ChannelRead,
         Action::ChannelPublish,
         Action::ChannelRollback,
@@ -456,6 +480,7 @@ impl Action {
             Action::ServiceIdentityManage => "service_identity.manage",
             Action::AuditRead => "audit.read",
             Action::DirectoryManage => "directory.manage",
+            Action::DirectorySealAuthorise => "directory.seal.authorise",
             Action::ChannelRead => "channel.read",
             Action::ChannelPublish => "channel.publish",
             Action::ChannelRollback => "channel.rollback",
@@ -495,6 +520,7 @@ impl Action {
             Action::ServiceIdentityManage => "ServiceIdentityManage",
             Action::AuditRead => "AuditRead",
             Action::DirectoryManage => "DirectoryManage",
+            Action::DirectorySealAuthorise => "DirectorySealAuthorise",
             Action::ChannelRead => "ChannelRead",
             Action::ChannelPublish => "ChannelPublish",
             Action::ChannelRollback => "ChannelRollback",
@@ -667,6 +693,7 @@ mod probe_vocabulary_tests {
             // question the model refuses to represent.
             .chain(std::iter::once(&Action::AuditRead))
             .chain(std::iter::once(&Action::DirectoryManage))
+            .chain(std::iter::once(&Action::DirectorySealAuthorise))
         {
             if !seen.insert(action.as_str()) {
                 twice.push(action.as_str());
