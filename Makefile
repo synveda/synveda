@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-backlog ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-backlog ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -88,6 +88,17 @@ eval-extraction-live:
 # nothing or a fixture whose label can never match.
 eval-check:
 	cargo run -q -p synveda-eval -- check
+
+# The judge measured before it measures (EVAL-3, ADR-0061 decision 4):
+# the configured judge over the labelled sets, with no gateway and no
+# database. The default judge is the lexical rubric and reaches no
+# network, so this is free and runnable anywhere; SYNVEDA_JUDGE=claude
+# plus ANTHROPIC_API_KEY runs the model judge, which costs money per
+# pair. Off `ci` for that reason and because it gates nothing — a judge
+# measurement that failed a build would be decision 5's gate through a
+# side door.
+eval-judge:
+	cargo run -q -p synveda-eval -- judge
 
 # The full suite against a scratch database of its own, dropped afterwards
 # (kept on failure, and by KEEP_TEST_DB=1). It used to run against the

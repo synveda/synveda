@@ -3762,6 +3762,7 @@ dependencies = [
 name = "synveda-eval"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "chrono",
  "clap",
  "reqwest",
