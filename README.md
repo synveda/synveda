@@ -94,6 +94,8 @@ One further feature (AUTH-6, session and token hygiene) is unscheduled — 86 in
 total. The one Phase 3 item finished so far is SKIL-1, the skills registry.
 
 Full detail, feature by feature: [`docs/backlog/STATUS.md`](docs/backlog/STATUS.md).
+Published benchmark scores, and what they do and do not measure:
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ### What works today
 
