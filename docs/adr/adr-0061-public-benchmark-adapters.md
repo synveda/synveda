@@ -1,6 +1,6 @@
 # ADR-0061: LongMemEval through the governed path — a judge measured before it measures, and a score that names everything it depends on
 
-- **Status**: Proposed, **amended 2026-08-08** (decision 10; every other
+- **Status**: Accepted, **amended 2026-08-08** (decision 10; every other
   decision stands unchanged)
 - **Date**: 2026-08-07
 - **Feature(s)**: EVAL-3
