@@ -26,6 +26,7 @@ mod extraction;
 mod fixtures;
 mod judge;
 mod longmemeval;
+mod longmemeval_runner;
 mod qa;
 mod qa_runner;
 mod reader;
@@ -168,6 +169,48 @@ enum Command {
         /// Where to write the JSON report. Defaults to stdout.
         #[arg(long)]
         report: Option<PathBuf>,
+    },
+    /// LongMemEval's deterministic retrieval tier against a live stack
+    /// (ADR-0061 decision 5).
+    ///
+    /// The half of the benchmark this product is responsible for, and the
+    /// half that is reproducible from bytes: did the block bind the
+    /// evidence sessions the instance names? It reaches no model, costs
+    /// nothing per run, and gates against its own baseline. The QA
+    /// accuracy LongMemEval is better known for is the other tier —
+    /// published, gated by nothing, and dependent on two external models.
+    Longmemeval {
+        /// The environment `evals/lib.sh` printed. Needs one `lme-*` actor
+        /// per instance (decision 8) and the `auditor`.
+        #[arg(long)]
+        env: PathBuf,
+        /// The corpus, in upstream's own format. Fetched rather than
+        /// committed — see evals/fixtures/longmemeval/NOTICE.md.
+        #[arg(long, default_value = longmemeval::DEFAULT_PATH)]
+        corpus: PathBuf,
+        /// How many instances to measure. The declared slice (decision 7):
+        /// every report states it, because a suite that bounds its
+        /// coverage says what it bounded.
+        #[arg(long, default_value_t = longmemeval::DEFAULT_INSTANCES)]
+        instances: usize,
+        /// The caller-side budget. Absent is the pack's own default, which
+        /// is the honest shape for a published number — a budget tuned
+        /// until the score improved would be a benchmark measuring its own
+        /// tuning.
+        #[arg(long)]
+        budget_tokens: Option<u32>,
+        #[arg(long, default_value = "evals/baseline-longmemeval.json")]
+        baseline: PathBuf,
+        /// Where to write the JSON report. Defaults to stdout.
+        #[arg(long)]
+        report: Option<PathBuf>,
+        /// Rewrite the baseline from this run instead of gating against
+        /// it. Deliberate, and a diff someone has to review.
+        #[arg(long)]
+        update_baseline: bool,
+        /// How long a seeded instance gets to become rankable.
+        #[arg(long, default_value_t = runner::DEFAULT_SEED_TIMEOUT.as_secs())]
+        seed_timeout_secs: u64,
     },
     /// Measure the configured reader against its probes, graded by the
     /// configured judge (ADR-0061 decision 6).
@@ -349,6 +392,104 @@ async fn run(cli: Cli) -> Result<bool, String> {
                 ));
             }
             Ok(true)
+        }
+        Command::Longmemeval {
+            env,
+            corpus: corpus_path,
+            instances,
+            budget_tokens,
+            baseline: baseline_file,
+            report: report_path,
+            update_baseline,
+            seed_timeout_secs,
+        } => {
+            let environment = Environment::load(&env)?;
+            let corpus = longmemeval::load(&corpus_path)?;
+            let (picked, slice) = longmemeval::slice(&corpus, instances);
+            let baseline = Baseline::load(&baseline_file)?;
+            let client = Client::new(&environment.gateway_url)?;
+            let options = longmemeval_runner::Options {
+                seed_timeout: Duration::from_secs(seed_timeout_secs),
+                budget_tokens,
+            };
+
+            // One actor per instance, and the pool is the environment's
+            // rather than this binary's (decision 8). Refused by name
+            // rather than wrapped around: two instances on one identity
+            // would put one haystack inside the other, and the run would
+            // measure retrieval over a corpus twice the size the benchmark
+            // specifies while reporting the benchmark's name.
+            let pool = longmemeval_runner::actors(&environment);
+            if pool.len() < picked.len() {
+                return Err(format!(
+                    "this run measures {} instance(s) and the environment registers {} `{}` \
+                     actor(s); one actor per instance is what keeps the haystacks apart, so \
+                     register more in evals/lib.sh (EVAL_LONGMEMEVAL_ACTORS) or ask for fewer \
+                     instances",
+                    picked.len(),
+                    pool.len(),
+                    longmemeval_runner::ACTOR_PREFIX
+                ));
+            }
+            eprintln!("synveda-eval: longmemeval {}", slice.describe());
+
+            let started_at = chrono::Utc::now().to_rfc3339();
+            let mut outcomes = Vec::with_capacity(picked.len());
+            for (index, instance) in picked.iter().enumerate() {
+                eprintln!(
+                    "synveda-eval: longmemeval/{} ({} of {}, {} session(s) as {})",
+                    instance.question_id,
+                    index + 1,
+                    picked.len(),
+                    instance.haystack_session_ids.len(),
+                    pool[index]
+                );
+                outcomes.push(
+                    longmemeval_runner::run_instance(
+                        &client,
+                        &environment,
+                        instance,
+                        &pool[index],
+                        &options,
+                    )
+                    .await?,
+                );
+            }
+
+            let metrics = longmemeval_runner::metrics(&outcomes);
+            let gate = report::gate(&baseline, &metrics);
+            let run = longmemeval_runner::Run {
+                started_at,
+                gateway_url: environment.gateway_url.clone(),
+                tenant_id: environment.tenant_id.clone(),
+                slice,
+                instances: outcomes,
+                metrics,
+                gate,
+            };
+
+            let json = serde_json::to_string_pretty(&run)
+                .map_err(|err| format!("serialise the report: {err}"))?;
+            match &report_path {
+                Some(path) => std::fs::write(path, format!("{json}\n"))
+                    .map_err(|err| format!("write {}: {err}", path.display()))?,
+                None => println!("{json}"),
+            }
+            eprint!("{}", longmemeval_runner::summarise(&run));
+
+            if update_baseline {
+                let updated = baseline.updated(&run.metrics);
+                let body = serde_json::to_string_pretty(&updated)
+                    .map_err(|err| format!("serialise the baseline: {err}"))?;
+                std::fs::write(&baseline_file, format!("{body}\n"))
+                    .map_err(|err| format!("write {}: {err}", baseline_file.display()))?;
+                eprintln!(
+                    "\n  baseline rewritten at {} — review the diff",
+                    baseline_file.display()
+                );
+                return Ok(true);
+            }
+            Ok(run.gate.passed)
         }
         Command::Read {
             probes: probes_dir,

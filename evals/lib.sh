@@ -202,6 +202,23 @@ eval_up() {
   ./target/debug/synveda service register --tenant "$EVAL_TENANT_B" \
     --subject xt-reader --scope "$clearing" >/dev/null
 
+  # One actor per LongMemEval instance (EVAL-3, ADR-0061 decision 8). The
+  # same rule EVAL-2 set and EVAL-4 restated — a corpus grows by adding
+  # actors, never by adding records past the 32-record arithmetic — and
+  # here it is load-bearing for a second reason: LongMemEval's instances
+  # are independent by construction, so two of them sharing an identity
+  # would put one instance's forty-session haystack inside the other's and
+  # measure retrieval over a corpus twice the size the benchmark specifies.
+  # Zero by default, because every other suite pays for identities it does
+  # not use otherwise; `evals/run-longmemeval.sh` sets it to the instance
+  # count.
+  eval_lme=0
+  while [ "$eval_lme" -lt "${EVAL_LONGMEMEVAL_ACTORS:-0}" ]; do
+    ./target/debug/synveda service register --tenant "$EVAL_TENANT" \
+      --subject "$(printf 'lme-%03d' "$eval_lme")" --scope "$payments" >/dev/null
+    eval_lme=$((eval_lme + 1))
+  done
+
   # The reviewers every Q&A promotion goes through. Which roles a
   # publication needs is the target scope's pack answer and not this
   # script's: under the zero-config `regulated-strict` a team publication
@@ -276,6 +293,19 @@ eval_up() {
   done
   # The one bearer in this file that carries a different tenant.
   xt_reader=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject xt-reader)
+  # The LongMemEval pool, as a JSON fragment rather than as fixed lines:
+  # how many exist is a run's decision, and the harness discovers them by
+  # the `lme-` prefix rather than by a count written in two places.
+  eval_lme_actors=""
+  eval_lme=0
+  while [ "$eval_lme" -lt "${EVAL_LONGMEMEVAL_ACTORS:-0}" ]; do
+    eval_lme_subject=$(printf 'lme-%03d' "$eval_lme")
+    eval_lme_token=$(./target/debug/synveda token issue \
+      --tenant "$EVAL_TENANT" --subject "$eval_lme_subject")
+    eval_lme_actors="$eval_lme_actors,
+    \"$eval_lme_subject\": { \"token\": \"$eval_lme_token\", \"scope\": \"acme/eng/payments\" }"
+    eval_lme=$((eval_lme + 1))
+  done
   # The auditor carries no scope, because it sits at none. `scopes` is the
   # one thing a Q&A corpus has to say in UUIDs — where a promotion lands
   # (EVAL-4, ADR-0047 decision 3) — so a fixture names `payments` and this
@@ -318,10 +348,26 @@ eval_up() {
       "token": "$xt_reader",
       "scope": "northwind/clearing",
       "tenant": "$EVAL_TENANT_B"
-    }
+    }$eval_lme_actors
   }
 }
 EOF
+}
+
+# eval_longmemeval [extra args…] — the deterministic retrieval tier
+# (EVAL-3, ADR-0061 decision 5) against the stack eval_up made. Its own
+# baseline and its own report, because it grades a different predicate
+# from the four suites `eval_run` carries: those ask what a block did with
+# a corpus this repository wrote, and this one asks whether a block bound
+# the evidence sessions somebody else's benchmark names.
+eval_longmemeval() {
+  ./target/debug/synveda-eval longmemeval \
+    --env "$EVAL_ENV" \
+    --corpus "${EVAL_LONGMEMEVAL_CORPUS:-evals/fixtures/longmemeval/longmemeval_s.json}" \
+    --instances "${EVAL_LONGMEMEVAL_INSTANCES:-10}" \
+    --baseline "${EVAL_BASELINE:-evals/baseline-longmemeval.json}" \
+    --report "${EVAL_REPORT:-$EVAL_STATE/longmemeval.json}" \
+    "$@"
 }
 
 # eval_run [extra args…] — the harness against the stack eval_up made.

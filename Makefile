@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-backlog check-corpus-licences check-npm-licences ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-backlog check-corpus-licences check-npm-licences ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -99,6 +99,33 @@ eval-check:
 # side door.
 eval-judge:
 	cargo run -q -p synveda-eval -- judge
+
+# LongMemEval's deterministic retrieval tier (EVAL-3, ADR-0061
+# decision 5): did the block bind the evidence sessions the instance names
+# in `answer_session_ids`? Record identity — the predicate EVAL-4 already
+# grades and the one reproducible from bytes — so it gates, against
+# `evals/baseline-longmemeval.json`, and it reaches no model and costs
+# nothing per run.
+#
+# The declared slice, per decision 7: a suite that bounds its coverage
+# says what it bounded, and every report states the corpus digest, the
+# instance count, the slice rule and the abstention instances excluded.
+# The actor pool is sized to the slice — one actor per instance is what
+# keeps forty-session haystacks from landing inside each other.
+#
+# Needs the corpus fetched into evals/fixtures/longmemeval (NOTICE.md says
+# why it is not committed). The model-judged tier — the published QA
+# accuracy, gated by nothing — is the other half of decision 5 and lands
+# with the reader and the judge already built.
+eval-longmemeval:
+	sh evals/run-longmemeval.sh
+
+# All 500 instances. A target somebody schedules rather than one they wait
+# on: seeding an instance is ~40 sessions through the whole pipeline, and
+# ADR-0061's reversal trigger (f) is already written for the day this
+# outgrows a single ordered pass.
+eval-longmemeval-full:
+	EVAL_LONGMEMEVAL_INSTANCES=500 sh evals/run-longmemeval.sh
 
 # The reader measured against its probes, graded by the configured judge
 # (EVAL-3, ADR-0061 decision 6). The blocks come from a file rather than

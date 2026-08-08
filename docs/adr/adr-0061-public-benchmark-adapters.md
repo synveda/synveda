@@ -1,9 +1,45 @@
 # ADR-0061: LongMemEval through the governed path — a judge measured before it measures, and a score that names everything it depends on
 
-- **Status**: Proposed
+- **Status**: Proposed, **amended 2026-08-08** (decision 10; every other
+  decision stands unchanged)
 - **Date**: 2026-08-07
 - **Feature(s)**: EVAL-3
 - **Deciders**: sujitn
+
+## Amendment (2026-08-08): the abstention instances are not gradeable at the retrieval tier
+
+Decision 10 placed LongMemEval's 30 abstention questions on EVAL-1's
+abstention axis and claimed they are "deterministically gradeable at the
+retrieval tier: the correct block binds nothing". **The first live run of
+the deterministic tier measured that claim and it is false.**
+
+The reasoning behind it does not survive contact with what a haystack
+actually is. An abstention instance's haystack is forty sessions of
+ordinary chat — it simply never discusses the thing the question asks
+about. There is no scope in which it is empty, and `POST /v1/inject`
+composes the reader's own material against a budget; it has no relevance
+floor below which it declines to compose (ADR-0025, ADR-0041). So the
+correct block for an abstention question binds exactly what the correct
+block for any other question binds: whatever ranks and fits.
+
+Measured, four instances of a synthetic corpus in LongMemEval's shape, two
+of them abstention: `longmemeval_abstention_empty_blocks` = **0.0**. Every
+abstention block carried fourteen records. Not one bound nothing.
+
+*This replaces* the second sentence of decision 10. What stands: the
+abstention instances belong on EVAL-1's axis, and they are excluded from
+the retrieval rates by upstream's own convention (decision 5), with the
+count stated rather than implied. What changes: **abstention is a property
+of the answer, not of the block, so it is graded at the model-judged tier**
+— the reader must say the haystack does not discuss it, and the judge must
+agree. `crates/synveda-eval/src/reader/` already carries three abstention
+probes for exactly that behaviour, which is where this measurement was
+always going to land.
+
+The axis stays in the report, unbounded, because it is now evidence for a
+different question: if a future composition change ever *does* make an
+abstention block empty, that is a product change worth seeing rather than
+one worth asserting in advance.
 
 ## Context
 
@@ -210,13 +246,18 @@ Decisions, specifically:
    temporal reasoning, knowledge update, abstention) at a single scope. The
    two suites are not redundant and neither subsumes the other.
 
-10. **The abstention instances land on an axis that already exists.**
-    EVAL-1 decision 4 made abstention first-class — "of the scenarios that
-    must compose nothing, the fraction that did" — because "a memory system
-    that invents context is worse than one that stays quiet". LongMemEval's
-    30 abstention questions are that axis with an external corpus behind it,
-    and they are deterministically gradeable at the retrieval tier: the
-    correct block binds nothing.
+10. **[Amended 2026-08-08]** **The abstention instances land on an axis
+    that already exists.** EVAL-1 decision 4 made abstention first-class —
+    "of the scenarios that must compose nothing, the fraction that did" —
+    because "a memory system that invents context is worse than one that
+    stays quiet". LongMemEval's 30 abstention questions are that axis with
+    an external corpus behind it, and they are graded at the **model-judged
+    tier**: the correct *answer* says the haystack does not discuss it.
+
+    *This replaces:* "they are deterministically gradeable at the retrieval
+    tier: the correct block binds nothing." Measured at 0.0 on the first
+    live run — see the amendment above for why the block was never going to
+    be empty.
 
 11. **Published scores live in the repo and are stamped per release.**
     `evals/scores/longmemeval-<version>.json` plus a rendered table in
