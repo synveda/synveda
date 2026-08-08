@@ -1,0 +1,86 @@
+{
+  "set": "starter",
+  "note": "Hand-written by sujitn on 2026-08-07 to exercise the Judge seam (EVAL-3, ADR-0061 decision 3). This is NOT the labelled corpus decision 4 names — that is EVAL-2's unmatched-record list plus LongMemEval's own 500 references, and neither has landed. Ten rows cannot support a published agreement rate, and ADR-0039 decision 14 already refused to let four hand-written scenarios be described as a benchmark score. What it is good for: the rows are chosen so the lexical rubric and a model judge must disagree, which is the comparison ADR-0053 option 9 asked to be able to make. The rubric is expected to score around 0.4 here by construction; that number is a property of this set, not of the rubric.",
+  "pairs": [
+    {
+      "name": "paraphrase-duration",
+      "question": "How long did the kitchen renovation take?",
+      "reference": "three weeks",
+      "candidate": "Going by your messages it ran about 21 days.",
+      "label": true,
+      "note": "the rubric shares no token with its own reference and calls this wrong"
+    },
+    {
+      "name": "numeral-form",
+      "question": "How many espresso machines did I end up buying for the office?",
+      "reference": "3 espresso machines",
+      "candidate": "You bought three espresso machines in the end.",
+      "label": true,
+      "note": "`3` and `three` are different tokens to the rubric"
+    },
+    {
+      "name": "different-unit",
+      "question": "How long is the Thursday design review?",
+      "reference": "90 minutes",
+      "candidate": "An hour and a half.",
+      "label": true,
+      "note": "same duration, no shared token"
+    },
+    {
+      "name": "negation",
+      "question": "When did my lease end?",
+      "reference": "March",
+      "candidate": "Definitely not March — you moved out in June.",
+      "label": false,
+      "note": "containment cannot see a negation, so the rubric accepts a contradiction"
+    },
+    {
+      "name": "wrong-entity",
+      "question": "Who approved the conference expense?",
+      "reference": "Priya",
+      "candidate": "Priya's manager, Dan, approved it.",
+      "label": false,
+      "note": "the reference appears in the candidate while naming someone else as the answer"
+    },
+    {
+      "name": "exact-restated",
+      "question": "Which standing desk did I settle on?",
+      "reference": "the standing desk from Fully",
+      "candidate": "You settled on the standing desk from Fully.",
+      "label": true,
+      "note": "both judges should agree; the set needs rows that separate nothing"
+    },
+    {
+      "name": "extra-detail",
+      "question": "When did I switch to the payments team?",
+      "reference": "June 2025",
+      "candidate": "June 2025, right after the reorg you mentioned.",
+      "label": true,
+      "note": "extra correct context is not a wrong answer, and containment runs one way"
+    },
+    {
+      "name": "abstention-correct",
+      "question": "What did I decide about the Berlin office lease?",
+      "reference": "the record holds no answer",
+      "candidate": "I don't have anything in your history about a Berlin office lease.",
+      "label": true,
+      "note": "EVAL-1 decision 4's axis with an external corpus behind it: declining is the right answer here"
+    },
+    {
+      "name": "abstention-invented",
+      "question": "What did I decide about the Berlin office lease?",
+      "reference": "the record holds no answer",
+      "candidate": "You decided to sign it on the 14th of April.",
+      "label": false,
+      "note": "a memory system that invents context is worse than one that stays quiet (seed §4.4, EVAL-1 decision 4)"
+    },
+    {
+      "name": "declines-when-it-should-answer",
+      "question": "Which recurring meeting did I ask to move?",
+      "reference": "the Tuesday standup",
+      "candidate": "I'm not sure which meeting you mean.",
+      "label": false,
+      "note": "both judges should agree; a non-answer is not a correct answer"
+    }
+  ]
+}

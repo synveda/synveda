@@ -1,0 +1,59 @@
+{
+  "set": "starter",
+  "note": "Hand-written by sujitn on 2026-08-07 to exercise the Reader seam (EVAL-3, ADR-0061 decision 6). The blocks are written in the renderer's own vocabulary (crates/synveda-retrieval/src/compose.rs) — scope headings, one line per entry, legend, watermark — but they came from this file, not from /v1/inject. So nothing here is a QA accuracy or a measurement of Synveda; it measures the reader and the judge. Seven probes chosen so the extractive default and a model reader must diverge: three the selector cannot do (synthesis, paraphrase, supersession) and two lures it should fall for (a lexical match that answers a different question, and a fact the model knows but the block does not hold).",
+  "probes": [
+    {
+      "name": "direct-line",
+      "question": "How many attempts are payments retries capped at?",
+      "block": "## acme (org)\n- [decision] Payments retries are capped at three attempts.\n- [fact] The on-call rota is public.\n\nSummarised entries end with a recall handle; `synveda recall <id>` fetches the full text.\n\n<!-- synveda:watermark v1 blake3=aa01 records=r1,r2 -->",
+      "reference": "three attempts",
+      "note": "both readers should get this; a set where every probe separates them would not notice a reader that had stopped working"
+    },
+    {
+      "name": "synthesis-across-entries",
+      "question": "How long did the kitchen renovation take?",
+      "block": "## alice (user)\n- [episode] The kitchen renovation started on 3 March.\n- [episode] The kitchen renovation was signed off on 24 March.\n\n<!-- synveda:watermark v1 blake3=aa02 records=r3,r4 -->",
+      "reference": "about three weeks",
+      "answer_form": "derived",
+      "note": "24 March minus 3 March is three weeks; neither line says it, so a reader that selects a line cannot answer and a reader that reads can"
+    },
+    {
+      "name": "paraphrased-question",
+      "question": "How do we handle unsuccessful charge reattempts?",
+      "block": "## acme (org)\n- [decision] Payments retries are capped at three attempts.\n\n<!-- synveda:watermark v1 blake3=aa03 records=r1 -->",
+      "reference": "three attempts",
+      "note": "the question shares no content word with the entry, so selection abstains where a model reads it — EVAL-4's `semantic` case, on the reading side"
+    },
+    {
+      "name": "supersession",
+      "question": "Which replica does the reconciliation job run against?",
+      "block": "## acme (org)\n- [decision] The payment reconciliation job runs against the ledger-archive replica.\n- [decision] The payment reconciliation job now runs against the ledger-live replica.\n\n<!-- synveda:watermark v1 blake3=aa04 records=r5,r6 -->",
+      "reference": "the ledger-live replica",
+      "note": "both lines match the question equally; selection has no way to prefer the later one, which is ADR-0039's knowledge_update category as a reading problem rather than a retrieval one"
+    },
+    {
+      "name": "abstain-on-silence",
+      "question": "Which vendor supplies the espresso beans?",
+      "block": "## alice (user)\n- [episode] The kitchen renovation was signed off on 24 March.\n- [preference] Alice runs cargo nextest before pushing.\n\n<!-- synveda:watermark v1 blake3=aa05 records=r4,r7 -->",
+      "reference": "the block holds no answer",
+      "expect_abstention": true,
+      "note": "no overlap at all; both readers should decline, and a reader that does not here is inventing outright"
+    },
+    {
+      "name": "abstain-on-lexical-lure",
+      "question": "Which vendor supplies the espresso beans?",
+      "block": "## alice (user)\n- [fact] The espresso beans are stored in the third cupboard.\n\n<!-- synveda:watermark v1 blake3=aa06 records=r8 -->",
+      "reference": "the block holds no answer",
+      "expect_abstention": true,
+      "note": "the entry shares `espresso beans` with the question and answers a different question about them; selection is expected to return it, which is precisely the invention the abstention axis exists to catch"
+    },
+    {
+      "name": "abstain-on-world-knowledge",
+      "question": "How tall is the Eiffel Tower?",
+      "block": "## alice (user)\n- [episode] Alice's team went up the Eiffel Tower on the Paris offsite.\n\n<!-- synveda:watermark v1 blake3=aa07 records=r9 -->",
+      "reference": "the block holds no answer",
+      "expect_abstention": true,
+      "note": "the model knows this and the block does not hold it; answering from training rather than from the block is the failure that would put a number on Synveda's name that Synveda did not earn"
+    }
+  ]
+}

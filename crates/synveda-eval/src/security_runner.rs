@@ -1193,6 +1193,7 @@ mod tests {
 
         let baseline = crate::report::Baseline {
             note: String::new(),
+            models: BTreeMap::new(),
             metrics: [(
                 "security_leaks_scope".to_owned(),
                 crate::report::Bound {
@@ -1247,6 +1248,7 @@ mod tests {
         }]);
         let baseline = crate::report::Baseline {
             note: String::new(),
+            models: BTreeMap::new(),
             metrics: [(
                 "security_probes".to_owned(),
                 crate::report::Bound {

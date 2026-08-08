@@ -1,0 +1,10 @@
+# The corpus is fetched, not committed — NOTICE.md says why, and every run
+# records the file's BLAKE3 so a published score still identifies the bytes
+# it was computed from (EVAL-3, ADR-0061 decision 11).
+longmemeval_*.json
+
+# Upstream's own licence file arrives with the data and is ignored for the
+# same reason the data is. `scripts/check-corpus-licences.mjs` asserts it is
+# present whenever the corpus is; NOTICE.md is the committed record.
+LICENSE
+LICENSE.*

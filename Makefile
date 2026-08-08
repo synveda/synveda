@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-backlog ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-backlog check-benchmarks check-corpus-licences check-npm-licences ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -89,6 +89,74 @@ eval-extraction-live:
 eval-check:
 	cargo run -q -p synveda-eval -- check
 
+# The judge measured before it measures (EVAL-3, ADR-0061 decision 4):
+# the configured judge over the labelled sets, with no gateway and no
+# database. The default judge is the lexical rubric and reaches no
+# network, so this is free and runnable anywhere; SYNVEDA_JUDGE=claude
+# plus ANTHROPIC_API_KEY runs the model judge, which costs money per
+# pair. Off `ci` for that reason and because it gates nothing — a judge
+# measurement that failed a build would be decision 5's gate through a
+# side door.
+eval-judge:
+	cargo run -q -p synveda-eval -- judge
+
+# LongMemEval's deterministic retrieval tier (EVAL-3, ADR-0061
+# decision 5): did the block bind the evidence sessions the instance names
+# in `answer_session_ids`? Record identity — the predicate EVAL-4 already
+# grades and the one reproducible from bytes — so it gates, against
+# `evals/baseline-longmemeval.json`, and it reaches no model and costs
+# nothing per run.
+#
+# The declared slice, per decision 7: a suite that bounds its coverage
+# says what it bounded, and every report states the corpus digest, the
+# instance count, the slice rule and the abstention instances excluded.
+# The actor pool is sized to the slice — one actor per instance is what
+# keeps forty-session haystacks from landing inside each other.
+#
+# Needs the corpus fetched into evals/fixtures/longmemeval (NOTICE.md says
+# why it is not committed). The model-judged tier — the published QA
+# accuracy, gated by nothing — is the other half of decision 5 and lands
+# with the reader and the judge already built.
+eval-longmemeval:
+	sh evals/run-longmemeval.sh
+
+# All 500 instances. A target somebody schedules rather than one they wait
+# on: seeding an instance is ~40 sessions through the whole pipeline, and
+# ADR-0061's reversal trigger (f) is already written for the day this
+# outgrows a single ordered pass.
+eval-longmemeval-full:
+	EVAL_LONGMEMEVAL_INSTANCES=500 sh evals/run-longmemeval.sh
+
+# The model-judged tier (decision 5): the same run, plus a reader that
+# answers each question out of the block and a judge that grades the
+# answer against the corpus's reference. This is the published figure and
+# the marketing artefact — and it gates nothing, deliberately. A gate that
+# fails when a model changes rather than when the code changes is the
+# alarm ADR-0028 decision 6 already refused; breaches print, the exit
+# status stays success, and `eval-longmemeval` is where a regression stops
+# a build.
+#
+# It costs money per instance and the reader is the expensive half: its
+# prompt is a whole governed block. The judge's own agreement is measured
+# inside the run rather than beside it (decision 4), so a score cannot be
+# published without the number that bounds what it can claim. Needs
+# ANTHROPIC_API_KEY; SYNVEDA_READER/SYNVEDA_JUDGE=extractive/lexical runs
+# the whole shape for free, which is what a dry run wants and not what a
+# published figure is.
+eval-longmemeval-judged:
+	SYNVEDA_READER=$${SYNVEDA_READER:-claude} \
+	SYNVEDA_JUDGE=$${SYNVEDA_JUDGE:-claude} \
+	EVAL_LONGMEMEVAL_JUDGED=1 sh evals/run-longmemeval.sh
+
+# The reader measured against its probes, graded by the configured judge
+# (EVAL-3, ADR-0061 decision 6). The blocks come from a file rather than
+# from /v1/inject, so this measures the reader and the judge and NOT
+# Synveda — the axes are named probe_* rather than qa_* to keep that
+# impossible to mistake. SYNVEDA_READER=claude plus ANTHROPIC_API_KEY
+# runs the model reader; the default selects a line and costs nothing.
+eval-read:
+	cargo run -q -p synveda-eval -- read
+
 # The full suite against a scratch database of its own, dropped afterwards
 # (kept on failure, and by KEEP_TEST_DB=1). It used to run against the
 # long-lived dev database and leave every tenant it admitted behind — see
@@ -125,6 +193,24 @@ check-backlog:
 check-npm-licences:
 	node scripts/check-npm-licences.mjs
 
+# The same rule on the corpus side (EVAL-3, ADR-0061 compliance notes).
+# `cargo deny` governs crates and check-npm-licences governs packages; a
+# corpus is data, which is how a CC BY-NC one reached a feature
+# specification, the phase demo goal and CLAUDE.md before anyone read its
+# LICENSE.txt. Needs nothing but node, so it runs early in `ci` — and it
+# also fires on a developer's machine that fetched a corpus, which is
+# where the licence file actually lands.
+check-corpus-licences:
+	node scripts/check-corpus-licences.mjs
+
+# docs/BENCHMARKS.md's table is generated from evals/scores/*.json (EVAL-3,
+# ADR-0061 decision 11); this asserts the two still agree. "Tracked per
+# release is a file that accumulates rows, not a number somebody edits" —
+# and this is what makes the second half of that sentence enforceable. To
+# publish a row: `node scripts/publish-benchmark.mjs <report.json>`.
+check-benchmarks:
+	node scripts/publish-benchmark.mjs
+
 ts-build:
 	pnpm install --frozen-lockfile
 	pnpm -r build
@@ -133,4 +219,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-backlog eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-backlog check-corpus-licences check-benchmarks eval-check ts-build check-npm-licences ts-test

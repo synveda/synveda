@@ -421,7 +421,57 @@ pub struct Baseline {
     /// updating them should read.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub note: String,
+    /// Every model these numbers depend on, as the API *served* it rather
+    /// than as an alias requested (EVAL-3, ADR-0061 decision 6).
+    ///
+    /// Empty for every suite that reaches no model, which is all of them
+    /// but one. LongMemEval's judged tier has two — a reader that answers
+    /// from the block and a judge that grades the answer — and its score
+    /// is a joint property of both plus the product. A memory benchmark
+    /// figure quoted without its reader model is not reproducible by
+    /// anyone including us, and the industry convention of quoting one
+    /// anyway is not a reason to adopt it.
+    ///
+    /// It keys rather than gates. A run whose served models differ from
+    /// these is not a regression, it is a different measurement, and it
+    /// says so loudly — ADR-0028 decision 6's "a nightly failure should
+    /// mean someone changed the code, not that a model drifted", applied
+    /// where the drift is legible instead of fatal.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub models: BTreeMap<String, String>,
     pub metrics: BTreeMap<String, Bound>,
+}
+
+impl Baseline {
+    /// Where this baseline's models disagree with what a run was served,
+    /// one line each. Empty when they agree or when neither names any.
+    #[must_use]
+    pub fn model_drift(&self, served: &BTreeMap<String, String>) -> Vec<String> {
+        let mut drift = Vec::new();
+        for (role, expected) in &self.models {
+            match served.get(role) {
+                Some(actual) if actual == expected => {}
+                Some(actual) => drift.push(format!(
+                    "the {role} was `{actual}` and this baseline's numbers were measured with \
+                     `{expected}` — the two are not comparable, and the published figure names \
+                     whichever produced it"
+                )),
+                None => drift.push(format!(
+                    "this baseline's numbers were measured with {role} `{expected}` and this run \
+                     recorded no {role} at all"
+                )),
+            }
+        }
+        for (role, actual) in served {
+            if !self.models.contains_key(role) {
+                drift.push(format!(
+                    "this run's {role} was `{actual}` and the baseline names none, so its numbers \
+                     were measured against something unrecorded"
+                ));
+            }
+        }
+        drift
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
@@ -465,6 +515,9 @@ impl Baseline {
     pub fn updated(&self, metrics: &BTreeMap<String, f64>) -> Self {
         let mut updated = Baseline {
             note: self.note.clone(),
+            // Carried, not recomputed: only a caller that knows what the
+            // API served can key these, and it overwrites them after.
+            models: self.models.clone(),
             metrics: BTreeMap::new(),
         };
         for (metric, bound) in &self.metrics {
@@ -1081,6 +1134,7 @@ mod tests {
     fn baseline(metrics: &[(&str, Bound)]) -> Baseline {
         Baseline {
             note: String::new(),
+            models: BTreeMap::new(),
             metrics: metrics
                 .iter()
                 .map(|(name, bound)| ((*name).to_owned(), *bound))
@@ -1138,6 +1192,56 @@ mod tests {
 
     fn metrics_of_plain() -> BTreeMap<String, f64> {
         metrics(&[outcome(1.0, Some(1.0), None, 100)])
+    }
+
+    /// Decision 6's keying, in all three directions it can disagree. It
+    /// reports and never gates: a model that moved is a different
+    /// measurement, not a regression, and ADR-0028 decision 6 already
+    /// refused a gate that fails for that.
+    #[test]
+    fn a_baseline_says_where_its_models_and_a_runs_disagree() {
+        let keyed = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(role, model)| ((*role).to_owned(), (*model).to_owned()))
+                .collect()
+        };
+        let baseline = Baseline {
+            note: String::new(),
+            models: keyed(&[("reader", "opus-a"), ("judge", "opus-b")]),
+            metrics: BTreeMap::new(),
+        };
+
+        assert!(
+            baseline
+                .model_drift(&keyed(&[("reader", "opus-a"), ("judge", "opus-b")]))
+                .is_empty(),
+            "the same models are no drift"
+        );
+
+        let moved = baseline.model_drift(&keyed(&[("reader", "opus-c"), ("judge", "opus-b")]));
+        assert_eq!(moved.len(), 1);
+        assert!(
+            moved[0].contains("opus-c") && moved[0].contains("opus-a"),
+            "{moved:?}"
+        );
+
+        // A judged baseline compared against a run that reached no model,
+        // and its opposite: a run that used one the baseline never named.
+        let none = baseline.model_drift(&BTreeMap::new());
+        assert_eq!(none.len(), 2, "{none:?}");
+        assert!(
+            none.iter().any(|line| line.contains("no reader at all")),
+            "{none:?}"
+        );
+
+        // A ruleset version lands here too — `selection@1` is as
+        // load-bearing on the numbers as a model id is, so it is recorded
+        // and named rather than described as a model it is not.
+        let unrecorded = Baseline::default().model_drift(&keyed(&[("reader", "selection@1")]));
+        assert_eq!(unrecorded.len(), 1);
+        assert!(unrecorded[0].contains("selection@1"), "{unrecorded:?}");
+        assert!(unrecorded[0].contains("unrecorded"), "{unrecorded:?}");
     }
 
     /// The gate names the category, which is the whole reason a category
