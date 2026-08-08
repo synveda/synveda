@@ -1,6 +1,6 @@
 # ADR-0060: Directory pull sync — absence is a hypothesis, and the first secret we have to keep
 
-- **Status**: Proposed (amended 2026-08-06, before any connector code existed)
+- **Status**: Accepted (amended 2026-08-06, before any connector code existed)
 - **Date**: 2026-08-06
 - **Feature(s)**: AUTH-5
 - **Deciders**: sujitn
