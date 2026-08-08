@@ -25,6 +25,7 @@ mod client;
 mod extraction;
 mod fixtures;
 mod judge;
+mod longmemeval;
 mod qa;
 mod qa_runner;
 mod reader;
@@ -139,6 +140,17 @@ enum Command {
         /// reader that cannot read.
         #[arg(long, default_value = "evals/fixtures/reader")]
         probes: PathBuf,
+        /// The LongMemEval corpus, in upstream's own format (ADR-0061
+        /// decision 2). Fetched rather than committed, so an absent file
+        /// is reported and skipped rather than failing — which is what CI
+        /// does, every time.
+        #[arg(long, default_value = longmemeval::DEFAULT_PATH)]
+        longmemeval: PathBuf,
+        /// How many instances a run would measure, so `check` can say what
+        /// the slice covers before anyone spends a nightly finding out
+        /// (decision 7).
+        #[arg(long, default_value_t = longmemeval::DEFAULT_INSTANCES)]
+        instances: usize,
         #[arg(long, default_value = "evals/baseline.json")]
         baseline: PathBuf,
     },
@@ -196,6 +208,8 @@ async fn run(cli: Cli) -> Result<bool, String> {
             security: security_dir,
             labels: labels_dir,
             probes: probes_dir,
+            longmemeval: longmemeval_path,
+            instances,
             baseline,
         } => {
             let scenarios = scenario::load_suite(&suite)?;
@@ -271,6 +285,23 @@ async fn run(cli: Cli) -> Result<bool, String> {
             );
             if let Some(note) = reader::independence_note(&reader, &judge) {
                 eprintln!("synveda-eval: {note}");
+            }
+            // The benchmark corpus is fetched rather than committed, so
+            // its absence is the ordinary case here and in CI. It is
+            // stated rather than skipped quietly: decision 7's rule is
+            // that a run says what it did not cover, and a `check` that
+            // validated no benchmark while printing nothing reads as a
+            // `check` that validated one.
+            match longmemeval::load_if_present(&longmemeval_path)? {
+                Some(corpus) => {
+                    let (_, slice) = longmemeval::slice(&corpus, instances);
+                    eprintln!("synveda-eval: longmemeval {}", slice.describe());
+                }
+                None => eprintln!(
+                    "synveda-eval: no LongMemEval corpus at {} — nothing was validated against \
+                     it; see evals/fixtures/longmemeval/NOTICE.md for how to fetch it",
+                    longmemeval_path.display()
+                ),
             }
             Ok(true)
         }

@@ -17,6 +17,12 @@ path = "src/main.rs"
 # also what lets it be pointed at a deployment whose source it does not
 # have.
 [dependencies]
+# The LongMemEval corpus is fetched rather than committed — it is far too
+# large for a git history — so a published score has no bytes in the repo
+# to point at. Every run digests the file it read instead (EVAL-3,
+# ADR-0061 decision 11), in the same hash the product watermarks blocks
+# with.
+blake3 = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
 reqwest = { workspace = true }

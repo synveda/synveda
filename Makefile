@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-backlog ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-backlog check-corpus-licences check-npm-licences ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -145,6 +145,16 @@ check-backlog:
 check-npm-licences:
 	node scripts/check-npm-licences.mjs
 
+# The same rule on the corpus side (EVAL-3, ADR-0061 compliance notes).
+# `cargo deny` governs crates and check-npm-licences governs packages; a
+# corpus is data, which is how a CC BY-NC one reached a feature
+# specification, the phase demo goal and CLAUDE.md before anyone read its
+# LICENSE.txt. Needs nothing but node, so it runs early in `ci` — and it
+# also fires on a developer's machine that fetched a corpus, which is
+# where the licence file actually lands.
+check-corpus-licences:
+	node scripts/check-corpus-licences.mjs
+
 ts-build:
 	pnpm install --frozen-lockfile
 	pnpm -r build
@@ -153,4 +163,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-backlog eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-backlog check-corpus-licences eval-check ts-build check-npm-licences ts-test
