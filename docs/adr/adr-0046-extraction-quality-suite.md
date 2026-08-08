@@ -1,6 +1,6 @@
 # ADR-0046: The extraction quality suite — the recall sweep as the lens, one corpus with two readers, and a gate with declared slack
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-07-30
 - **Feature(s)**: EVAL-2
 - **Deciders**: sujitn
