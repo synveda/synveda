@@ -199,8 +199,24 @@ enum Command {
         /// tuning.
         #[arg(long)]
         budget_tokens: Option<u32>,
-        #[arg(long, default_value = "evals/baseline-longmemeval.json")]
-        baseline: PathBuf,
+        /// Also read each block with the configured reader and grade the
+        /// answer with the configured judge — the model-judged tier
+        /// (decision 5). This is the published figure and it gates
+        /// nothing; it costs money per instance, and the reader's prompt
+        /// is a whole block, which is the expensive half.
+        #[arg(long)]
+        judged: bool,
+        /// The labelled sets the judge is measured against, on the judged
+        /// tier (decision 4). Run inside the judged run rather than beside
+        /// it, so publishing a score without its judge's agreement rate is
+        /// structurally impossible.
+        #[arg(long, default_value = "evals/fixtures/judge")]
+        labels: PathBuf,
+        /// The committed gate. Defaults to whichever file belongs to the
+        /// tier this run measures, so a judged run cannot be gated against
+        /// the deterministic tier's numbers by forgetting a flag.
+        #[arg(long)]
+        baseline: Option<PathBuf>,
         /// Where to write the JSON report. Defaults to stdout.
         #[arg(long)]
         report: Option<PathBuf>,
@@ -398,7 +414,9 @@ async fn run(cli: Cli) -> Result<bool, String> {
             corpus: corpus_path,
             instances,
             budget_tokens,
-            baseline: baseline_file,
+            judged,
+            labels: labels_dir,
+            baseline,
             report: report_path,
             update_baseline,
             seed_timeout_secs,
@@ -406,11 +424,34 @@ async fn run(cli: Cli) -> Result<bool, String> {
             let environment = Environment::load(&env)?;
             let corpus = longmemeval::load(&corpus_path)?;
             let (picked, slice) = longmemeval::slice(&corpus, instances);
+            let baseline_file = baseline.unwrap_or_else(|| {
+                PathBuf::from(if judged {
+                    longmemeval_runner::JUDGED_BASELINE
+                } else {
+                    longmemeval_runner::RETRIEVAL_BASELINE
+                })
+            });
             let baseline = Baseline::load(&baseline_file)?;
             let client = Client::new(&environment.gateway_url)?;
             let options = longmemeval_runner::Options {
                 seed_timeout: Duration::from_secs(seed_timeout_secs),
                 budget_tokens,
+            };
+
+            // The seams, resolved before anything is seeded. A
+            // misconfigured `SYNVEDA_READER` should fail here rather than
+            // forty sessions into a run that costs money — the gateway's
+            // own startup discipline, applied to a client.
+            let seams = judged
+                .then(|| Ok::<_, String>((reader::from_env()?, judge::from_env()?)))
+                .transpose()?;
+            let suite = longmemeval_runner::Suite {
+                client: &client,
+                environment: &environment,
+                options: &options,
+                graders: seams
+                    .as_ref()
+                    .map(|(reader, judge)| longmemeval_runner::Graders { reader, judge }),
             };
 
             // One actor per instance, and the pool is the environment's
@@ -432,8 +473,45 @@ async fn run(cli: Cli) -> Result<bool, String> {
                 ));
             }
             eprintln!("synveda-eval: longmemeval {}", slice.describe());
+            let independence = suite
+                .graders
+                .as_ref()
+                .and_then(|graders| reader::independence_note(graders.reader, graders.judge));
+            if let Some(note) = &independence {
+                eprintln!("synveda-eval: {note}");
+            }
 
             let started_at = chrono::Utc::now().to_rfc3339();
+            let mut tallies = longmemeval_runner::Tallies::default();
+
+            // The judge, measured before it measures — and *inside* the run
+            // that uses it, which is decision 4 made structural rather than
+            // procedural. It runs first because a judge whose agreement
+            // cannot be established is one whose score should not be paid
+            // for, and because the labelled sets are ten pairs against N
+            // instances of a 115k-token block.
+            let judge_agreement = match &suite.graders {
+                Some(graders) => {
+                    let sets = agreement::load_sets(&labels_dir)?;
+                    let mut measured = Vec::with_capacity(sets.len());
+                    for set in &sets {
+                        eprintln!("synveda-eval: longmemeval/judge/{}", set.set);
+                        measured
+                            .push(agreement::measure(graders.judge, set, &mut tallies.judge).await);
+                    }
+                    Some(agreement::JudgeReport {
+                        method: graders.judge.method().to_owned(),
+                        started_at: started_at.clone(),
+                        metrics: agreement::metrics(&measured),
+                        sets: measured,
+                        tally: std::mem::take(&mut tallies.judge),
+                    })
+                }
+                None => None,
+            };
+            // The agreement pass owns the judge tally it produced; the
+            // instances start their own, so a per-instance cost is not the
+            // agreement pass's cost added to it.
             let mut outcomes = Vec::with_capacity(picked.len());
             for (index, instance) in picked.iter().enumerate() {
                 eprintln!(
@@ -445,25 +523,33 @@ async fn run(cli: Cli) -> Result<bool, String> {
                     pool[index]
                 );
                 outcomes.push(
-                    longmemeval_runner::run_instance(
-                        &client,
-                        &environment,
-                        instance,
-                        &pool[index],
-                        &options,
-                    )
-                    .await?,
+                    longmemeval_runner::run_instance(&suite, instance, &pool[index], &mut tallies)
+                        .await?,
                 );
             }
 
-            let metrics = longmemeval_runner::metrics(&outcomes);
+            let mut metrics = longmemeval_runner::metrics(&outcomes);
+            if let Some(agreement) = &judge_agreement {
+                // The judge's own axes ride beside the product's, under
+                // their own names rather than a `longmemeval_` prefix: they
+                // are a property of the judge, and decision 4 says no claim
+                // this feature publishes may be tighter than they are.
+                metrics.extend(agreement.metrics.clone());
+            }
+            let models = longmemeval_runner::served_models(&outcomes);
             let gate = report::gate(&baseline, &metrics);
-            let run = longmemeval_runner::Run {
+            let run = longmemeval_runner::Report {
                 started_at,
                 gateway_url: environment.gateway_url.clone(),
                 tenant_id: environment.tenant_id.clone(),
                 slice,
+                tier: if judged { "judged" } else { "retrieval" }.to_owned(),
+                model_drift: baseline.model_drift(&models),
+                models,
+                independence,
+                judge_agreement,
                 instances: outcomes,
+                tallies,
                 metrics,
                 gate,
             };
@@ -478,7 +564,11 @@ async fn run(cli: Cli) -> Result<bool, String> {
             eprint!("{}", longmemeval_runner::summarise(&run));
 
             if update_baseline {
-                let updated = baseline.updated(&run.metrics);
+                let mut updated = baseline.updated(&run.metrics);
+                // Keyed to what the API served, never to the alias asked
+                // for (decision 6). Writing the floors without this would
+                // commit numbers whose provenance is a guess.
+                updated.models = run.models.clone();
                 let body = serde_json::to_string_pretty(&updated)
                     .map_err(|err| format!("serialise the baseline: {err}"))?;
                 std::fs::write(&baseline_file, format!("{body}\n"))
@@ -489,7 +579,13 @@ async fn run(cli: Cli) -> Result<bool, String> {
                 );
                 return Ok(true);
             }
-            Ok(run.gate.passed)
+            // The judged tier gates nothing (decision 5): it is off the
+            // merge path and off the nightly because a gate that fails when
+            // a model changes rather than when the code changes is an alarm
+            // nobody keeps. Its breaches are printed and its exit status is
+            // success — the deterministic tier is where a regression stops
+            // a build.
+            Ok(judged || run.gate.passed)
         }
         Command::Read {
             probes: probes_dir,

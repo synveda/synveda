@@ -215,8 +215,16 @@ Decisions, specifically:
    **reader** model that answers from it, and the **judge** model that grades
    the answer. Both are recorded from what the API *served* rather than from
    the alias requested — ADR-0046 decision 12's mechanism, applied twice —
-   and both are keyed into `evals/baseline-longmemeval.json`. The published
-   artefact names both alongside the score. A memory benchmark figure quoted
+   and both are keyed into the judged tier's baseline. The published
+   artefact names both alongside the score.
+
+   *In practice this is two files, not the one this decision named:*
+   `evals/baseline-longmemeval-retrieval.json` and
+   `-judged.json`. `report::gate` treats a bounded metric a run did not
+   measure as a breach — the rule that stops a suite losing coverage
+   quietly — so a single file bounding both tiers would fail whichever tier
+   ran. Decision 7 gave the tiers separate targets; separate baselines
+   follow from that rather than from a preference. A memory benchmark figure quoted
    without its reader model is not reproducible by anyone, including us, and
    the industry convention of quoting one anyway is not a reason to adopt it.
 

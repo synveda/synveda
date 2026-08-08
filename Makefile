@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-backlog check-corpus-licences check-npm-licences ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-backlog check-corpus-licences check-npm-licences ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -126,6 +126,27 @@ eval-longmemeval:
 # outgrows a single ordered pass.
 eval-longmemeval-full:
 	EVAL_LONGMEMEVAL_INSTANCES=500 sh evals/run-longmemeval.sh
+
+# The model-judged tier (decision 5): the same run, plus a reader that
+# answers each question out of the block and a judge that grades the
+# answer against the corpus's reference. This is the published figure and
+# the marketing artefact — and it gates nothing, deliberately. A gate that
+# fails when a model changes rather than when the code changes is the
+# alarm ADR-0028 decision 6 already refused; breaches print, the exit
+# status stays success, and `eval-longmemeval` is where a regression stops
+# a build.
+#
+# It costs money per instance and the reader is the expensive half: its
+# prompt is a whole governed block. The judge's own agreement is measured
+# inside the run rather than beside it (decision 4), so a score cannot be
+# published without the number that bounds what it can claim. Needs
+# ANTHROPIC_API_KEY; SYNVEDA_READER/SYNVEDA_JUDGE=extractive/lexical runs
+# the whole shape for free, which is what a dry run wants and not what a
+# published figure is.
+eval-longmemeval-judged:
+	SYNVEDA_READER=$${SYNVEDA_READER:-claude} \
+	SYNVEDA_JUDGE=$${SYNVEDA_JUDGE:-claude} \
+	EVAL_LONGMEMEVAL_JUDGED=1 sh evals/run-longmemeval.sh
 
 # The reader measured against its probes, graded by the configured judge
 # (EVAL-3, ADR-0061 decision 6). The blocks come from a file rather than

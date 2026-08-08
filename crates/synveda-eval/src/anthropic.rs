@@ -95,6 +95,16 @@ pub struct Usage {
 }
 
 impl Usage {
+    /// Nothing was spent. A borrowable stand-in for a tally that does not
+    /// exist, so a cost summary can list a phase that did not run rather
+    /// than omit the row and leave a reader to notice the absence.
+    pub const ZERO: Self = Self {
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+    };
+
     /// Accumulates another call's usage into this one.
     pub fn add(&mut self, other: Usage) {
         self.input_tokens += other.input_tokens;

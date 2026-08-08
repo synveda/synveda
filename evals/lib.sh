@@ -365,7 +365,8 @@ eval_longmemeval() {
     --env "$EVAL_ENV" \
     --corpus "${EVAL_LONGMEMEVAL_CORPUS:-evals/fixtures/longmemeval/longmemeval_s.json}" \
     --instances "${EVAL_LONGMEMEVAL_INSTANCES:-10}" \
-    --baseline "${EVAL_BASELINE:-evals/baseline-longmemeval.json}" \
+    ${EVAL_LONGMEMEVAL_JUDGED:+--judged} \
+    ${EVAL_BASELINE:+--baseline "$EVAL_BASELINE"} \
     --report "${EVAL_REPORT:-$EVAL_STATE/longmemeval.json}" \
     "$@"
 }
