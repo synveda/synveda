@@ -57,6 +57,11 @@ jobs:
       # nothing but node — and because a licence failure should not wait
       # behind a database.
       - run: node scripts/check-corpus-licences.mjs
+      # docs/BENCHMARKS.md's table is generated from evals/scores/*.json
+      # (EVAL-3, ADR-0061 decision 11). This asserts they still agree, so
+      # a hand-typed cell in the published artefact fails a build rather
+      # than becoming a claim.
+      - run: node scripts/publish-benchmark.mjs
 
   # The gate that can block a merge (EVAL-4, ADR-0047 decision 7), which is
   # ADR-0028 option 5's own reversal trigger fired by name: it declined this

@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-backlog check-corpus-licences check-npm-licences ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-backlog check-benchmarks check-corpus-licences check-npm-licences ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -203,6 +203,14 @@ check-npm-licences:
 check-corpus-licences:
 	node scripts/check-corpus-licences.mjs
 
+# docs/BENCHMARKS.md's table is generated from evals/scores/*.json (EVAL-3,
+# ADR-0061 decision 11); this asserts the two still agree. "Tracked per
+# release is a file that accumulates rows, not a number somebody edits" —
+# and this is what makes the second half of that sentence enforceable. To
+# publish a row: `node scripts/publish-benchmark.mjs <report.json>`.
+check-benchmarks:
+	node scripts/publish-benchmark.mjs
+
 ts-build:
 	pnpm install --frozen-lockfile
 	pnpm -r build
@@ -211,4 +219,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-backlog check-corpus-licences eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-backlog check-corpus-licences check-benchmarks eval-check ts-build check-npm-licences ts-test
