@@ -100,6 +100,10 @@ impl Judge for LexicalJudge {
             rationale,
             method: METHOD.to_owned(),
             model_version: RULESET.to_owned(),
+            // A rubric has no effort to record, and an invented one would
+            // read as a setting somebody could change. Same for tokens.
+            effort: None,
+            usage: None,
         })
     }
 }

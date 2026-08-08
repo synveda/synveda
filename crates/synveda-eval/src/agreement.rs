@@ -184,6 +184,23 @@ pub struct Agreement {
     /// rather than dropped: an unreachable model and a disagreeing one
     /// mean opposite things.
     pub ungraded: Vec<String>,
+    /// Every verdict the judge reached, whatever the outcome.
+    ///
+    /// The lists above are the finding; this is the evidence. Without it
+    /// a run at perfect agreement records nothing the judge actually
+    /// said, and a judge agreeing for bad reasons is indistinguishable
+    /// from one that read the pair — which is the whole property
+    /// decision 4 exists to establish.
+    pub transcript: Vec<Graded>,
+}
+
+/// One pair's verdict, beside the human label it was measured against.
+#[derive(Debug, Serialize)]
+pub struct Graded {
+    pub pair: String,
+    pub label: bool,
+    pub correct: bool,
+    pub rationale: String,
 }
 
 /// Runs one labelled set through the configured judge.
@@ -203,6 +220,7 @@ pub async fn measure(judge: &AnyJudge, set: &LabelSet, tally: &mut Tally) -> Agr
         false_accepts: Vec::new(),
         false_rejects: Vec::new(),
         ungraded: Vec::new(),
+        transcript: Vec::new(),
     };
 
     for pair in &set.pairs {
@@ -216,6 +234,12 @@ pub async fn measure(judge: &AnyJudge, set: &LabelSet, tally: &mut Tally) -> Agr
                 {
                     outcome.model_versions.push(verdict.model_version.clone());
                 }
+                outcome.transcript.push(Graded {
+                    pair: pair.name.clone(),
+                    label: pair.label,
+                    correct: verdict.correct,
+                    rationale: verdict.rationale.clone(),
+                });
                 if verdict.correct == pair.label {
                     outcome.agreed += 1;
                 } else {
@@ -355,10 +379,29 @@ pub fn summarise(report: &JudgeReport) -> String {
             .map(|(outcome, count)| format!(", {count} {outcome}"))
             .collect::<String>()
     ));
+    out.push_str(&tokens_line("  judge", &report.tally.tokens));
     out.push_str(
         "  This measures the judge, not the product, and gates nothing (ADR-0061 decision 5).\n",
     );
     out
+}
+
+/// One seam's token line, or nothing at all when no model was reached —
+/// a row of zeroes would read as a measured cost rather than an absent
+/// one.
+#[must_use]
+pub fn tokens_line(label: &str, tokens: &crate::anthropic::Usage) -> String {
+    if tokens.prompt_tokens() == 0 && tokens.output_tokens == 0 {
+        return String::new();
+    }
+    format!(
+        "{label} tokens: {} prompt ({} uncached, {} cache-read, {} cache-write), {} output\n",
+        tokens.prompt_tokens(),
+        tokens.input_tokens,
+        tokens.cache_read_input_tokens,
+        tokens.cache_creation_input_tokens,
+        tokens.output_tokens
+    )
 }
 
 fn round(value: f64) -> f64 {

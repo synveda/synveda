@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-backlog ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-backlog ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -99,6 +99,15 @@ eval-check:
 # side door.
 eval-judge:
 	cargo run -q -p synveda-eval -- judge
+
+# The reader measured against its probes, graded by the configured judge
+# (EVAL-3, ADR-0061 decision 6). The blocks come from a file rather than
+# from /v1/inject, so this measures the reader and the judge and NOT
+# Synveda — the axes are named probe_* rather than qa_* to keep that
+# impossible to mistake. SYNVEDA_READER=claude plus ANTHROPIC_API_KEY
+# runs the model reader; the default selects a line and costs nothing.
+eval-read:
+	cargo run -q -p synveda-eval -- read
 
 # The full suite against a scratch database of its own, dropped afterwards
 # (kept on failure, and by KEEP_TEST_DB=1). It used to run against the

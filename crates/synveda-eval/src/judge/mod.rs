@@ -70,6 +70,21 @@ pub struct Verdict {
     /// what the API *served*, never the alias requested (decision 6, which
     /// is ADR-0046 decision 12's mechanism applied to the judge).
     pub model_version: String,
+    /// The effort the verdict was produced at, for a model-backed judge;
+    /// absent for a rubric that has none.
+    ///
+    /// Decision 6 keys the baseline to every model the number depends on,
+    /// and a model's effort changes how it behaves as surely as its
+    /// version does — the same request at `low` and at `high` is two
+    /// judges. A figure quoted with the version and not the effort is
+    /// half a provenance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// What the verdict cost, for a model-backed judge. `None` for a
+    /// rubric, which costs nothing and should not report a zero that
+    /// reads like a measured one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::anthropic::Usage>,
 }
 
 /// The grading seam. Failures are `Err` with a named reason rather than a
@@ -172,6 +187,10 @@ pub struct Tally {
     /// than an incorrect verdict, because the two mean opposite things
     /// about the product.
     pub calls: BTreeMap<String, usize>,
+    /// `synveda_eval_judge_tokens`, summed over every call that reached a
+    /// model. This path bills per pair, and decision 7's slice-versus-full
+    /// choice cannot be made from a call count alone.
+    pub tokens: crate::anthropic::Usage,
     /// `synveda_eval_judge_seconds`, summed over every call including the
     /// ones that failed — a judge that is slow to fail still costs the
     /// run its wall clock.
@@ -190,6 +209,11 @@ impl Tally {
         let started = Instant::now();
         let outcome = judge.grade(input).await;
         self.seconds = round(self.seconds + started.elapsed().as_secs_f64());
+        if let Ok(verdict) = &outcome
+            && let Some(usage) = verdict.usage
+        {
+            self.tokens.add(usage);
+        }
         let label = match &outcome {
             Ok(verdict) if verdict.correct => "correct",
             Ok(_) => "incorrect",

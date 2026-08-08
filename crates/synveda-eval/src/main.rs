@@ -20,12 +20,15 @@
 #![forbid(unsafe_code)]
 
 mod agreement;
+mod anthropic;
 mod client;
 mod extraction;
 mod fixtures;
 mod judge;
 mod qa;
 mod qa_runner;
+mod reader;
+mod reading;
 mod report;
 mod runner;
 mod scenario;
@@ -39,7 +42,8 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 
 use crate::client::Client;
-use crate::judge::{Judge, Tally};
+use crate::judge::Judge;
+use crate::reader::Reader;
 use crate::report::{Baseline, Report};
 use crate::runner::Options;
 use crate::scenario::Environment;
@@ -129,6 +133,12 @@ enum Command {
         /// scores perfect agreement for a judge that read nothing.
         #[arg(long, default_value = "evals/fixtures/judge")]
         labels: PathBuf,
+        /// Directory of `*.json` reader probes (EVAL-3, ADR-0061
+        /// decision 6). Parsed here because its support guard is the one
+        /// that stops a probe nothing could answer from reading as a
+        /// reader that cannot read.
+        #[arg(long, default_value = "evals/fixtures/reader")]
+        probes: PathBuf,
         #[arg(long, default_value = "evals/baseline.json")]
         baseline: PathBuf,
     },
@@ -143,6 +153,21 @@ enum Command {
     Judge {
         #[arg(long, default_value = "evals/fixtures/judge")]
         labels: PathBuf,
+        /// Where to write the JSON report. Defaults to stdout.
+        #[arg(long)]
+        report: Option<PathBuf>,
+    },
+    /// Measure the configured reader against its probes, graded by the
+    /// configured judge (ADR-0061 decision 6).
+    ///
+    /// The blocks come from a file rather than from `/v1/inject`, so this
+    /// measures the reader and the judge and **not** Synveda — the axes
+    /// are named `probe_*` rather than `qa_*` for exactly that reason.
+    /// Needs no gateway and no database; only `=claude` reaches a
+    /// network, and it gates nothing.
+    Read {
+        #[arg(long, default_value = "evals/fixtures/reader")]
+        probes: PathBuf,
         /// Where to write the JSON report. Defaults to stdout.
         #[arg(long)]
         report: Option<PathBuf>,
@@ -170,6 +195,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
             qa: qa_dir,
             security: security_dir,
             labels: labels_dir,
+            probes: probes_dir,
             baseline,
         } => {
             let scenarios = scenario::load_suite(&suite)?;
@@ -197,6 +223,8 @@ async fn run(cli: Cli) -> Result<bool, String> {
             // partway through one (the gateway's startup discipline).
             let labels = agreement::load_sets(&labels_dir)?;
             let judge = judge::from_env()?;
+            let probes = reading::load_sets(&probes_dir)?;
+            let reader = reader::from_env()?;
             let baseline = Baseline::load(&baseline)?;
             eprintln!(
                 "synveda-eval: {} scenario(s), {} fixture(s) across {} group(s), {} \
@@ -232,12 +260,18 @@ async fn run(cli: Cli) -> Result<bool, String> {
                     .join(", ")
             );
             eprintln!(
-                "synveda-eval: {} labelled judge pair(s) across {} set(s) parse; the configured \
-                 judge is `{}`",
+                "synveda-eval: {} labelled judge pair(s) across {} set(s) and {} reader probe(s) \
+                 across {} set(s) parse; the configured reader is `{}` and judge is `{}`",
                 labels.iter().map(|set| set.pairs.len()).sum::<usize>(),
                 labels.len(),
+                probes.iter().map(|set| set.probes.len()).sum::<usize>(),
+                probes.len(),
+                reader.method(),
                 judge.method()
             );
+            if let Some(note) = reader::independence_note(&reader, &judge) {
+                eprintln!("synveda-eval: {note}");
+            }
             Ok(true)
         }
         Command::Judge {
@@ -247,7 +281,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
             let sets = agreement::load_sets(&labels_dir)?;
             let judge = judge::from_env()?;
             let started_at = chrono::Utc::now().to_rfc3339();
-            let mut tally = Tally::default();
+            let mut tally = judge::Tally::default();
             let mut measured = Vec::with_capacity(sets.len());
             for set in &sets {
                 eprintln!("synveda-eval: judge/{}", set.set);
@@ -281,6 +315,61 @@ async fn run(cli: Cli) -> Result<bool, String> {
                     "the judge graded none of {} pair(s); an agreement rate over nothing is not a \
                      measurement",
                     report.sets.iter().map(|set| set.pairs).sum::<usize>()
+                ));
+            }
+            Ok(true)
+        }
+        Command::Read {
+            probes: probes_dir,
+            report: report_path,
+        } => {
+            let sets = reading::load_sets(&probes_dir)?;
+            let reader = reader::from_env()?;
+            let judge = judge::from_env()?;
+            let started_at = chrono::Utc::now().to_rfc3339();
+            let mut reader_tally = reader::Tally::default();
+            let mut judge_tally = judge::Tally::default();
+            let mut measured = Vec::with_capacity(sets.len());
+            for set in &sets {
+                eprintln!("synveda-eval: read/{}", set.set);
+                measured.push(
+                    reading::measure(&reader, &judge, set, &mut reader_tally, &mut judge_tally)
+                        .await,
+                );
+            }
+
+            let report = reading::ReadingReport {
+                reader: reader.method().to_owned(),
+                judge: judge.method().to_owned(),
+                independence: reader::independence_note(&reader, &judge),
+                started_at,
+                metrics: reading::metrics(&measured),
+                sets: measured,
+                reader_tally,
+                judge_tally,
+            };
+            let json = serde_json::to_string_pretty(&report)
+                .map_err(|err| format!("serialise the report: {err}"))?;
+            match &report_path {
+                Some(path) => std::fs::write(path, format!("{json}\n"))
+                    .map_err(|err| format!("write {}: {err}", path.display()))?,
+                None => println!("{json}"),
+            }
+            eprint!("{}", reading::summarise(&report));
+
+            // The only failure is having measured nothing. A reader that
+            // read badly is a finding; a reader that never ran is a
+            // broken harness, and the two must not exit the same way.
+            let read: usize = report
+                .sets
+                .iter()
+                .map(|set| set.probes - set.unread.len())
+                .sum();
+            if read == 0 {
+                return Err(format!(
+                    "the reader answered none of {} probe(s); a rate over nothing is not a \
+                     measurement",
+                    report.sets.iter().map(|set| set.probes).sum::<usize>()
                 ));
             }
             Ok(true)
