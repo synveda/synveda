@@ -87,11 +87,15 @@ see [docs/INSTALL.md](docs/INSTALL.md).
 | **0 — Foundation** | Workspace, dev environment, types, bitemporal schema, observability | ✅ 6/6 |
 | **1 — The spine** | SSO → auto-provisioned hierarchy → observe → extraction → inject → audit, live in Claude Code | ✅ 21/21 |
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
-| **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, residency, Qdrant | 🚧 1/25 |
-| **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR | ⬜ 0/11 |
+| **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, residency, Qdrant | 🚧 10/25 |
+| **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR | ⬜ 0/15 |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — 86 in
-total. The one Phase 3 item finished so far is SKIL-1, the skills registry.
+One further feature (AUTH-6, session and token hygiene) is unscheduled — 90 in
+total, 59 delivered. The ten Phase 3 items finished are the skills registry and
+its governance (SKIL-1 through SKIL-4), the installable single binary (OPS-1),
+the admin console's proposals inbox and hierarchy explorer (CNSL-1, CNSL-2), the
+generic MCP server (ADPT-2), and the SCIM server with its directory-sync
+fallback (AUTH-4, AUTH-5).
 
 Full detail, feature by feature: [`docs/backlog/STATUS.md`](docs/backlog/STATUS.md).
 Published benchmark scores, and what they do and do not measure:
@@ -144,20 +148,29 @@ treat them as shape, not as an SLO.
 
 Being explicit, so nothing here misleads:
 
-- **No production deployment.** Docker Compose dev environment only — the
-  single-binary SMB profile and the Helm chart are Phase 3 (OPS-1, OPS-2).
-- **No admin console.** API and CLI only (CNSL-1..4 are Phase 3/4).
-- **No SCIM, no live Entra/Okta.** OIDC works against bundled Rauthy and a mock
-  Entra; the real integrations are AUTH-4/AUTH-5.
-- **No standalone MCP server** (ADPT-2). The recall MCP tool currently ships
-  inside the Claude Code adapter.
+- **No Kubernetes deployment.** `synveda init` installs the single-binary
+  profile (OPS-1) and Docker Compose runs the dev environment; the Helm chart is
+  OPS-2.
+- **No live Entra or Okta tenant has been replayed.** The SCIM 2.0 server is
+  built (AUTH-4) and `synveda directory` syncs from a terminal (AUTH-5), but the
+  vendor corpus both are tested against is transcribed from Microsoft's and
+  Okta's published tables — nothing has yet handled a frame from a real tenant.
+- **No real Cursor frame either.** The generic MCP server ships as `synveda mcp`
+  (ADPT-2), and its acceptance corpus was recorded from Claude Desktop and Zed.
+  Cursor remains an install target rather than a measured one.
+- **Only two of the four console screens.** The proposals inbox (CNSL-1) and the
+  hierarchy and policy explorer (CNSL-2) are served from the gateway's own origin
+  at `/console/`; CNSL-3 and CNSL-4 are not built.
 - **No Python/TS SDKs** (ADPT-4) and **no importers** from claude-mem, Cognee or
   mem0 (ADPT-5).
 - **No per-tenant encryption keys, WORM export or SIEM streaming**
   (TEN-4, AUD-3, AUD-4).
-- **No published benchmark scores** — the LongMemEval adapter is EVAL-3. LoCoMo is
-  EVAL-7 and is blocked on a licence, not on effort: its corpus is CC BY-NC 4.0,
-  which withholds the published commercial claim a score would be.
+- **No published benchmark scores.** The LongMemEval harness is built (EVAL-3)
+  and [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) is its page, but the table is
+  empty: the corpus is fetched rather than committed and nothing has run against
+  it yet. LoCoMo is EVAL-7 and is blocked on a licence, not on effort: its corpus
+  is CC BY-NC 4.0, which withholds the published commercial claim a score would
+  be.
 - **No LICENSE file yet.** Dependencies are constrained to MIT / Apache-2.0 /
   PostgreSQL in the core path (enforced by `cargo-deny`), but the project's own
   licence is not yet declared.
@@ -177,7 +190,7 @@ make dev-down # stop; state persists in named volumes
 The first `dev-up` builds the Postgres image and downloads the BGE-M3 embedding
 model (~2.3 GB), so allow a few minutes.
 
-Then run any of the 49 demos in [`demos/`](demos/). Each one is self-contained —
+Then run any of the 58 demos in [`demos/`](demos/). Each one is self-contained —
 it brings up what it needs, seeds a scratch database, and prints what it proves.
 Good places to start:
 
@@ -221,9 +234,9 @@ adapters/
 sdks/                 rust, typescript, python — stubs, Phase 4
 policies/             Cedar policy packs
 deploy/compose/       the dev environment
-demos/                55 runnable acceptance demos, one per feature
+demos/                58 runnable acceptance demos, one per feature
 evals/                corpora, scenarios, and the committed baselines CI gates on
-docs/                 the seed, the tech plan, the backlog, and 58 ADRs
+docs/                 the seed, the tech plan, the backlog, and 61 ADRs
 ```
 
 **Dependency rule:** `types ← {policy, store, identity, audit} ← retrieval/ingest
@@ -266,7 +279,7 @@ Read in this order:
    Every piece of work maps to a feature ID.
 4. **[docs/backlog/STATUS.md](docs/backlog/STATUS.md)** — where everything stands,
    including what each finished feature actually proved and what it left standing.
-5. **[docs/adr/](docs/adr/)** — 51 architecture decision records. Every
+5. **[docs/adr/](docs/adr/)** — 61 architecture decision records. Every
    architectural choice is written down *before* it is implemented.
 
 ---
