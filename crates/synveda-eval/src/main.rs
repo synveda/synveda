@@ -228,6 +228,29 @@ enum Command {
         #[arg(long, default_value_t = runner::DEFAULT_SEED_TIMEOUT.as_secs())]
         seed_timeout_secs: u64,
     },
+    /// Rewrite a baseline from a report a run already produced, without
+    /// measuring again.
+    ///
+    /// `--update-baseline` can only rewrite during a run, which is fine
+    /// for a suite that takes seconds and free for a suite that reaches no
+    /// model. LongMemEval is neither: a slice is twenty-five minutes of
+    /// seeding and the judged tier bills per instance, so re-measuring
+    /// purely to write floors would pay twice for one measurement.
+    ///
+    /// The floors are a function of a report's metrics and nothing else,
+    /// so this applies exactly what `--update-baseline` would have — same
+    /// `Baseline::updated`, same slack, same ceiling headroom — to a
+    /// report on disk. It is not a shortcut around measuring; it is the
+    /// same arithmetic over a measurement that already happened, and the
+    /// report it came from is named in the diff.
+    Rebaseline {
+        /// The run report to take the measurements from.
+        #[arg(long)]
+        report: PathBuf,
+        /// The baseline to rewrite.
+        #[arg(long)]
+        baseline: PathBuf,
+    },
     /// Measure the configured reader against its probes, graded by the
     /// configured judge (ADR-0061 decision 6).
     ///
@@ -620,6 +643,57 @@ async fn run(cli: Cli) -> Result<bool, String> {
             // success — the deterministic tier is where a regression stops
             // a build.
             Ok(judged || run.gate.passed)
+        }
+        Command::Rebaseline {
+            report: report_path,
+            baseline: baseline_file,
+        } => {
+            let raw = std::fs::read_to_string(&report_path)
+                .map_err(|err| format!("read {}: {err}", report_path.display()))?;
+            let run: serde_json::Value = serde_json::from_str(&raw)
+                .map_err(|err| format!("{} is not a report: {err}", report_path.display()))?;
+            let metrics: std::collections::BTreeMap<String, f64> = serde_json::from_value(
+                run.get("metrics").cloned().unwrap_or_default(),
+            )
+            .map_err(|err| format!("{} carries no metrics map: {err}", report_path.display()))?;
+            if metrics.is_empty() {
+                return Err(format!(
+                    "{} measured nothing, so there are no floors to write from it",
+                    report_path.display()
+                ));
+            }
+            // A gate that breached is a run that says the product is worse
+            // than the committed floor. Writing *that* in as the new floor
+            // is how a regression becomes the baseline, so it takes a
+            // second look rather than a flag nobody re-reads.
+            if run.pointer("/gate/passed") == Some(&serde_json::Value::Bool(false)) {
+                eprintln!(
+                    "synveda-eval: warning — {} breached its gate, so these floors are being \
+                     written from a run the committed baseline called a regression",
+                    report_path.display()
+                );
+            }
+
+            let baseline = Baseline::load(&baseline_file)?;
+            let mut updated = baseline.updated(&metrics);
+            // Keyed to what the API served on that run (ADR-0061
+            // decision 6), taken from the report rather than assumed.
+            if let Some(models) = run.get("models") {
+                updated.models = serde_json::from_value(models.clone()).unwrap_or_default();
+            }
+            let body = serde_json::to_string_pretty(&updated)
+                .map_err(|err| format!("serialise the baseline: {err}"))?;
+            std::fs::write(&baseline_file, format!("{body}\n"))
+                .map_err(|err| format!("write {}: {err}", baseline_file.display()))?;
+            eprintln!(
+                "synveda-eval: rewrote {} from {} ({} bounded metric(s), {} model(s) keyed) — \
+                 review the diff",
+                baseline_file.display(),
+                report_path.display(),
+                updated.metrics.len(),
+                updated.models.len()
+            );
+            Ok(true)
         }
         Command::Read {
             probes: probes_dir,
