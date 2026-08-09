@@ -219,6 +219,14 @@ function render(scores) {
 const [, , reportPath] = process.argv;
 
 if (reportPath) {
+  // The report is judged before the environment is. Both refusals are
+  // real, but a report that is the wrong tier is wrong on any machine,
+  // while a dirty tree is a fact about this one — and checking the tree
+  // first made every other refusal print "dirty working tree" instead of
+  // its own reason, which is a check that looks like coverage and is not.
+  const report = JSON.parse(readFileSync(reportPath, "utf8"));
+  const published = row(report);
+
   // A published score names a commit, so the working tree has to *be*
   // that commit. Otherwise the row attributes a number to code that was
   // never what produced it — which is the one lie a reproducibility
@@ -230,8 +238,6 @@ if (reportPath) {
         `produced the score:\n${dirty}\nCommit first, then publish.`,
     );
   }
-  const report = JSON.parse(readFileSync(reportPath, "utf8"));
-  const published = row(report);
   const name = `longmemeval-${published.version}-${published.commit.slice(0, 12)}.json`;
   mkdirSync(SCORES, { recursive: true });
   writeFileSync(join(SCORES, name), `${JSON.stringify(published, null, 2)}\n`);
