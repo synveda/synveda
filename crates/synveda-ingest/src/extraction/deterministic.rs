@@ -335,19 +335,79 @@ fn bare(token: &str) -> String {
 
 /// Truncates on a word boundary with an ellipsis marker; never splits a
 /// `[REDACTED:*]` placeholder because it never splits a word.
+///
+/// Counted in **characters**, which is what the constant has always been
+/// called and was not what this measured. It compared `text.len()` —
+/// bytes — and then sliced at that byte index, so any transcript whose
+/// three-hundredth byte landed inside a multi-byte character panicked the
+/// extraction worker and stalled the pipeline behind it. A LongMemEval
+/// haystack found it on the first run: `end byte index 300 is not a char
+/// boundary; it is inside '💡'`. Real chat has emoji in it.
+///
+/// The byte reading also truncated non-ASCII content early and silently —
+/// three hundred bytes of accented text is well under three hundred
+/// characters — so a record in one language kept less than the same record
+/// in another.
 fn truncate(text: &str) -> String {
-    if text.len() <= MAX_CONTENT_CHARS {
+    let mut boundaries = text.char_indices().map(|(index, _)| index);
+    let Some(limit) = boundaries.nth(MAX_CONTENT_CHARS) else {
         return text.to_owned();
-    }
-    let cut = text[..MAX_CONTENT_CHARS]
-        .rfind(' ')
-        .unwrap_or(MAX_CONTENT_CHARS);
+    };
+    // `limit` is a character boundary by construction, and so is the
+    // result of `rfind(' ')` within it — a space is one byte and cannot
+    // sit inside another character.
+    let cut = text[..limit].rfind(' ').unwrap_or(limit);
     format!("{}…", &text[..cut])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The panic a LongMemEval haystack found on the first real run: the
+    /// three-hundredth *byte* landing inside a multi-byte character.
+    /// `truncate` sliced there and took the extraction worker with it,
+    /// stalling every event queued behind it.
+    #[test]
+    fn a_multi_byte_character_on_the_boundary_does_not_panic() {
+        // 299 bytes of ASCII, then an emoji straddling byte 300.
+        let text = format!("{}💡 and then some more text after it", "a".repeat(299));
+        let out = truncate(&text);
+        assert!(out.ends_with('…'));
+        assert!(out.chars().count() <= MAX_CONTENT_CHARS + 1);
+    }
+
+    /// Counted in characters, as the constant has always been named. Under
+    /// the byte reading, three hundred characters of accented text was
+    /// nearly six hundred bytes and got cut in half — a record kept less
+    /// for being written in one language rather than another.
+    #[test]
+    fn the_limit_counts_characters_rather_than_bytes() {
+        let short = "é".repeat(MAX_CONTENT_CHARS);
+        assert_eq!(
+            truncate(&short),
+            short,
+            "{} characters is under the limit however many bytes it is",
+            MAX_CONTENT_CHARS
+        );
+        assert!(
+            short.len() > MAX_CONTENT_CHARS,
+            "and it is over it in bytes"
+        );
+
+        let long = "é".repeat(MAX_CONTENT_CHARS + 50);
+        let out = truncate(&long);
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().count(), MAX_CONTENT_CHARS + 1);
+    }
+
+    #[test]
+    fn a_word_boundary_is_still_preferred_and_nothing_short_is_touched() {
+        assert_eq!(truncate("short enough"), "short enough");
+        let text = format!("{} tail", "word ".repeat(80));
+        let out = truncate(&text);
+        assert!(out.ends_with('…') && !out.contains("wor…"), "{out}");
+    }
 
     /// The kinds whose class the client effectively told us, and the class
     /// each one means. `assertion` is absent by design — see below.
