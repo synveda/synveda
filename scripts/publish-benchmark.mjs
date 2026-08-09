@@ -48,8 +48,8 @@ const END = "<!-- benchmarks:end -->";
 ///
 /// EVAL-7's second corpus adds a line here, in a diff somebody reviews.
 const PUBLISHABLE = {
-  "longmemeval_s.json": "full haystacks, ~115k tokens each — the benchmark as published",
-  "longmemeval_m.json": "longer haystacks, the same questions under a harder retrieval load",
+  "longmemeval_s_cleaned.json": "full haystacks, ~115k tokens each — the benchmark as published",
+  "longmemeval_m_cleaned.json": "longer haystacks, the same questions under a harder retrieval load",
   "longmemeval_oracle.json": "evidence sessions only — reading and judging with retrieval removed",
 };
 const CORPUS_INSTANCES = 500;

@@ -82,6 +82,15 @@ const KIND: &str = "transcript_delta";
 /// the one shape where paging is exact rather than ambiguous.
 const MAX_RECALL_IDS: usize = 32;
 
+/// What a readiness query may carry. `POST /v1/recall` caps a query at
+/// `MAX_QUERY_CHARS` (4,000) and refuses anything longer with a 400
+/// (`crates/synveda-gateway/src/recall.rs`), and a real haystack session
+/// runs well past that — the first run against the fetched corpus died on
+/// the first instance, forty-seven sessions in. Held below the cap rather
+/// than at it: the surface's bound is the surface's to change, and a
+/// client sitting exactly on it breaks when it moves by one.
+const MAX_QUERY_CHARS: usize = 2_000;
+
 const POLL: Duration = Duration::from_millis(500);
 
 /// Where each tier's gate lives. Two files rather than decision 6's one,
@@ -177,6 +186,13 @@ pub struct InstanceOutcome {
     pub actor: String,
     pub sessions: usize,
     pub turns: usize,
+    /// Turns skipped for being blank, and sessions skipped for repeating
+    /// an id already planted. Both are properties of the real corpus, both
+    /// are tiny, and both are counted rather than dropped quietly — a
+    /// haystack that shrank without saying so is a denominator nobody can
+    /// check (decision 7).
+    pub empty_turns: usize,
+    pub duplicate_sessions: usize,
     /// How far the corpus's clock was moved to meet this run's, in hours.
     pub clock_offset_hours: i64,
     pub seed_ms: f64,
@@ -241,25 +257,36 @@ pub fn actors(environment: &Environment) -> Vec<String> {
         .collect()
 }
 
-/// Seeds, waits, asks and grades one instance as one actor.
-pub async fn run_instance(
+/// One instance seeded and not yet measured.
+pub struct Seeded {
+    pub outcome: InstanceOutcome,
+    /// Every acked event id, mapped to the haystack session it came from.
+    pub events: BTreeMap<String, String>,
+}
+
+/// Plants one instance's haystack as one actor, and stops there.
+///
+/// Seeding is separated from measuring because the first run against the
+/// real corpus proved they cannot be interleaved. Instances 1–3 seeded in
+/// 6–14 seconds and measured fine; from instance 4 on, the extraction
+/// queue those three had filled was still draining, every per-instance
+/// wait burned its whole timeout, six blocks came back empty, and the run
+/// reported `retrieval_recall 0.214` — a number about queue depth wearing
+/// the name of retrieval.
+///
+/// This is EVAL-2's finding, which EVAL-4 already paid for once: "two
+/// byte-identical runs measured `tokens_mean` 129.8 and then 157 with no
+/// product change", because a suite that seeds and probes in the same loop
+/// measures a different corpus each time. The Q&A suite fixed it by
+/// seeding once, waiting for all of it, and only then probing. So does
+/// this one now.
+pub async fn seed_instance(
     suite: &Suite<'_>,
     instance: &Instance,
     actor: &str,
-    tallies: &mut Tallies,
-) -> Result<InstanceOutcome, String> {
-    let (client, environment, options) = (suite.client, suite.environment, suite.options);
+) -> Result<Seeded, String> {
+    let (client, environment) = (suite.client, suite.environment);
     let bearer = &environment.actor(actor)?.token;
-    let auditor = &environment
-        .actors
-        .get(AUDITOR_ACTOR)
-        .ok_or_else(|| {
-            format!(
-                "the environment names no `{AUDITOR_ACTOR}` actor; this suite waits on \
-                 `GET /v1/audit/events` for the pipeline to be done with every seeded session"
-            )
-        })?
-        .token;
 
     let mut outcome = InstanceOutcome {
         question_id: instance.question_id.clone(),
@@ -268,6 +295,8 @@ pub async fn run_instance(
         actor: actor.to_owned(),
         sessions: instance.haystack_session_ids.len(),
         turns: instance.turns(),
+        empty_turns: 0,
+        duplicate_sessions: 0,
         clock_offset_hours: 0,
         seed_ms: 0.0,
         evidence: instance.answer_session_ids.clone(),
@@ -295,10 +324,56 @@ pub async fn run_instance(
     outcome.clock_offset_hours = offset.num_hours();
 
     let started = Instant::now();
-    let seeded = seed(client, bearer, instance, offset, &mut outcome).await?;
-    wait_for_pipeline(client, auditor, &seeded, options, &mut outcome).await?;
-    wait_for_index(client, bearer, instance, options, &mut outcome).await?;
+    let events = seed(client, bearer, instance, offset, &mut outcome).await?;
     outcome.seed_ms = round(started.elapsed().as_secs_f64() * 1000.0);
+    Ok(Seeded { outcome, events })
+}
+
+/// Waits for the pipeline to be done with **every** instance's events, in
+/// one wait rather than ten (see `seed_instance`).
+pub async fn wait_for_all(
+    suite: &Suite<'_>,
+    seeded: &mut [Seeded],
+    started: Instant,
+) -> Result<(), String> {
+    let auditor = &suite
+        .environment
+        .actors
+        .get(AUDITOR_ACTOR)
+        .ok_or_else(|| {
+            format!(
+                "the environment names no `{AUDITOR_ACTOR}` actor; this suite waits on \
+                 `GET /v1/audit/events` for the pipeline to be done with every seeded turn"
+            )
+        })?
+        .token;
+    let all: BTreeMap<String, String> = seeded
+        .iter()
+        .flat_map(|entry| entry.events.iter().map(|(id, s)| (id.clone(), s.clone())))
+        .collect();
+    let mut shared = Vec::new();
+    wait_for_pipeline(suite.client, auditor, &all, suite.options, &mut shared).await?;
+    // A pipeline that never finished is every instance's problem, so it is
+    // recorded on every instance rather than on whichever one was asked
+    // last.
+    for entry in seeded.iter_mut() {
+        entry.outcome.failures.extend(shared.iter().cloned());
+        entry.outcome.seed_ms = round(started.elapsed().as_secs_f64() * 1000.0);
+    }
+    Ok(())
+}
+
+/// Asks one seeded instance its question and grades the block.
+pub async fn measure_instance(
+    suite: &Suite<'_>,
+    instance: &Instance,
+    actor: &str,
+    outcome: &mut InstanceOutcome,
+    tallies: &mut Tallies,
+) -> Result<(), String> {
+    let (client, environment, options) = (suite.client, suite.environment, suite.options);
+    let bearer = &environment.actor(actor)?.token;
+    wait_for_index(client, bearer, instance, options, outcome).await?;
 
     // The measurement. The question is the task, which is the whole point:
     // a memory system is being asked to bring back what a reader would
@@ -320,9 +395,14 @@ pub async fn run_instance(
     outcome.block_hash = block.block_hash.clone();
     outcome.latency_ms = round(probe.elapsed_ms);
 
-    let bound = bound_sessions(client, bearer, instance, &block.record_ids, &mut outcome).await?;
+    let bound = bound_sessions(client, bearer, instance, &block.record_ids, outcome).await?;
     outcome.block_sessions = bound.len();
-    outcome.bound = bound.len() < instance.haystack_session_ids.len();
+    // An empty block trivially carries fewer sessions than its haystack,
+    // so the first version of this reported `bound = true` for six blocks
+    // that held nothing at all — a validity guard that passed precisely
+    // when there was nothing to validate. A block has ranked something
+    // only if it carried something.
+    outcome.bound = !bound.is_empty() && bound.len() < instance.haystack_session_ids.len();
     outcome.bound_evidence = instance
         .answer_session_ids
         .iter()
@@ -345,7 +425,7 @@ pub async fn run_instance(
     // composed, so the QA number and the retrieval number are properties
     // of the same block rather than of two runs somebody compared.
     if let Some(graders) = &suite.graders {
-        grade(graders, instance, &block.text, tallies, &mut outcome).await;
+        grade(graders, instance, &block.text, tallies, outcome).await;
     }
 
     // An abstention instance has no evidence to bind, so binding none of
@@ -355,7 +435,7 @@ pub async fn run_instance(
     outcome.passed = outcome.failures.is_empty()
         && (outcome.abstention || outcome.bound_evidence.len() == outcome.evidence.len())
         && outcome.correct != Some(false);
-    Ok(outcome)
+    Ok(())
 }
 
 /// Reads the block and grades the answer.
@@ -431,7 +511,7 @@ async fn grade(
             graders.judge,
             &crate::judge::JudgeInput {
                 question: &instance.question,
-                reference: &instance.answer,
+                reference: &instance.answer(),
                 candidate: &answer.text,
             },
         )
@@ -496,13 +576,38 @@ async fn seed(
     outcome: &mut InstanceOutcome,
 ) -> Result<BTreeMap<String, String>, String> {
     let mut seeded: BTreeMap<String, String> = BTreeMap::new();
+    let mut planted: BTreeSet<&str> = BTreeSet::new();
     for session in instance.sessions() {
+        // The real corpus repeats thirteen session ids across
+        // `longmemeval_s`, each duplicate byte-identical to its twin
+        // (`validate` refuses any that differ). Planting one twice would
+        // send the same idempotency keys again and measure the pipeline's
+        // deduplication rather than the benchmark, so the id is planted
+        // once and the skip is counted.
+        if !planted.insert(session.session_id) {
+            outcome.duplicate_sessions += 1;
+            continue;
+        }
         let session_id = seeded_id(instance, session.session_id);
         let started = parse_date(session.date)? + offset;
-        let events: Vec<ObserveEvent<'_>> = session
+        // Twelve of the corpus's 246,750 turns are blank, none of them in
+        // a session any instance names. An event carrying nothing is not
+        // worth a round trip, and the count rides into the report so the
+        // haystack does not shrink in silence. The surviving indices are
+        // kept because the idempotency key is built from the turn's
+        // position, and the ack loop below has to ask for exactly the keys
+        // that were sent.
+        let sent: Vec<usize> = session
             .turns
             .iter()
             .enumerate()
+            .filter(|(_, turn)| !turn.content.trim().is_empty())
+            .map(|(index, _)| index)
+            .collect();
+        outcome.empty_turns += session.turns.len() - sent.len();
+        let events: Vec<ObserveEvent<'_>> = sent
+            .iter()
+            .map(|&index| (index, &session.turns[index]))
             .map(|(index, turn)| ObserveEvent {
                 idempotency_key: turn_key(session.session_id, index),
                 kind: KIND,
@@ -537,7 +642,7 @@ async fn seed(
             ));
             continue;
         }
-        for index in 0..session.turns.len() {
+        for index in sent {
             let key = turn_key(session.session_id, index);
             let Some(event_id) = acked
                 .events
@@ -571,7 +676,7 @@ async fn wait_for_pipeline(
     auditor: &str,
     seeded: &BTreeMap<String, String>,
     options: &Options,
-    outcome: &mut InstanceOutcome,
+    failures: &mut Vec<String>,
 ) -> Result<(), String> {
     let started = Instant::now();
     loop {
@@ -587,7 +692,7 @@ async fn wait_for_pipeline(
                     .get(event_id.as_str())
                     .is_some_and(|entry| entry.dead_lettered)
                 {
-                    outcome.failures.push(format!(
+                    failures.push(format!(
                         "the pipeline dead-lettered session `{session}`: the event was lost \
                          rather than found empty, and grading this instance would blame \
                          retrieval for a broken pipeline"
@@ -597,8 +702,13 @@ async fn wait_for_pipeline(
             return Ok(());
         }
         if started.elapsed() >= options.seed_timeout {
-            outcome.failures.push(format!(
-                "the pipeline never finished with {} of {} session(s) within {}s",
+            // Turns, not sessions: `seeded` is keyed by event and an
+            // event is one turn. The first real run said "544 of 560
+            // session(s)" for a 47-session instance, which is how a
+            // message can be both alarming and wrong.
+            failures.push(format!(
+                "the pipeline never finished with {} of {} turn(s) within {}s — every block \
+                 composed now is missing material the corpus planted",
                 missing.len(),
                 seeded.len(),
                 options.seed_timeout.as_secs()
@@ -757,21 +867,34 @@ fn haystack_id<'a>(instance: &Instance, seeded: &'a str) -> Option<&'a str> {
         .then_some(rest)
 }
 
-/// A whole session as one string — the readiness query, and nothing else.
-/// It carries every term the session's turns did, so any one of their
-/// records ranking is enough to say the session reached the index.
+/// A session's opening turns as one string — the readiness query, and
+/// nothing else.
+///
+/// Bounded at `MAX_QUERY_CHARS` because the surface bounds it, and the
+/// truncation costs nothing here: the check asks whether *any* record from
+/// this session has reached the sparse index, one record is written per
+/// turn, and the early turns' terms rank their own records. It is not the
+/// measurement — whether the *question* ranks is what the block is graded
+/// on, and that goes through `inject` untouched.
 ///
 /// The speaker prefix is the same one `seed` writes onto each turn: a
 /// preference stated by the user and one suggested by the assistant are
 /// different facts, and three of LongMemEval's six question types turn on
 /// which is which.
 fn render(session: &Session<'_>) -> String {
-    session
-        .turns
-        .iter()
-        .map(|turn| format!("{}: {}", turn.role, turn.content))
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut out = String::new();
+    for turn in session.turns {
+        if out.chars().count() >= MAX_QUERY_CHARS {
+            break;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&format!("{}: {}", turn.role, turn.content));
+    }
+    // A turn can exceed the bound on its own, so the whole is clipped on a
+    // character boundary rather than trusting the per-turn break.
+    out.chars().take(MAX_QUERY_CHARS).collect()
 }
 
 /// The deterministic tier's axes.
@@ -822,10 +945,24 @@ pub fn metrics(outcomes: &[InstanceOutcome]) -> BTreeMap<String, f64> {
         );
     }
 
-    // The axis that says whether any of the above measured retrieval at
-    // all. A block that carried every session of its haystack ranked
-    // nothing; a suite where that is common reports the budget under the
-    // name of recall.
+    // The axis that says whether there was anything to measure at all,
+    // and it exists because the first run against the real corpus needed
+    // it: six of ten blocks came back empty because the extraction queue
+    // had not drained, and the run still reported a recall. An empty block
+    // is not a retrieval result, it is a run that asked too early.
+    let empty = outcomes
+        .iter()
+        .filter(|outcome| outcome.block_records == 0)
+        .count();
+    metrics.insert(
+        "longmemeval_empty_blocks".to_owned(),
+        round(empty as f64 / outcomes.len() as f64),
+    );
+
+    // And the axis that says whether any of the above measured *retrieval*
+    // rather than budget. A block that carried every session of its
+    // haystack ranked nothing; a suite where that is common reports the
+    // budget under the name of recall.
     let bound = outcomes.iter().filter(|outcome| outcome.bound).count();
     metrics.insert(
         "longmemeval_bound_instances".to_owned(),
@@ -1177,6 +1314,8 @@ mod tests {
             actor: "lme-000".to_owned(),
             sessions: 4,
             turns: 8,
+            empty_turns: 0,
+            duplicate_sessions: 0,
             clock_offset_hours: 27_000,
             seed_ms: 10.0,
             evidence: evidence.iter().map(|id| (*id).to_owned()).collect(),
@@ -1261,10 +1400,33 @@ mod tests {
     }
 
     #[test]
-    fn a_session_renders_with_its_speakers_kept() {
+    fn a_session_renders_with_its_speakers_kept_and_within_the_surfaces_bound() {
         let instance = instance("aa11", "single-session-preference", &["s1"]);
         let session = instance.sessions().next().expect("a session");
         assert_eq!(render(&session), "user: packing\nassistant: noted");
+
+        // The bound the first real run died on: a 47-session instance's
+        // turns run far past `POST /v1/recall`'s 4,000-character cap.
+        let long = serde_json::from_value::<crate::longmemeval::Instance>(serde_json::json!({
+            "question_id": "aa11", "question_type": "multi-session",
+            "question": "q", "answer": "a",
+            "question_date": "2023/05/20 (Sat) 02:29",
+            "haystack_dates": ["2023/04/01 (Sat) 10:00"],
+            "haystack_session_ids": ["s0"],
+            "haystack_sessions": [[
+                {"role": "user", "content": "packing ".repeat(900)},
+                {"role": "assistant", "content": "noted"},
+            ]],
+            "answer_session_ids": ["s0"],
+        }))
+        .expect("an instance");
+        let rendered = render(&long.sessions().next().expect("a session"));
+        // Clipped, and clipped below the surface's own 4,000-character
+        // cap rather than at it — a client sitting exactly on a bound
+        // breaks when the bound moves by one.
+        assert_eq!(rendered.chars().count(), MAX_QUERY_CHARS);
+        const SURFACE_CAP: usize = 4_000;
+        assert!(rendered.chars().count() < SURFACE_CAP);
     }
 
     #[test]
@@ -1311,6 +1473,24 @@ mod tests {
             Some(&0.5),
             "half the run ranked nothing, and the recall alone does not say so"
         );
+    }
+
+    /// The axis the first real run needed and did not have. Six of ten
+    /// blocks came back with no records because the extraction queue had
+    /// not drained, and the suite reported a retrieval recall anyway.
+    #[test]
+    fn an_empty_block_is_a_run_that_asked_too_early_rather_than_a_result() {
+        let mut empty = outcome("a", "multi-session", &["s1"], &[]);
+        empty.block_records = 0;
+        empty.block_sessions = 0;
+        let metrics = metrics(&[empty, outcome("b", "multi-session", &["s1"], &["s1"])]);
+        assert_eq!(
+            metrics.get("longmemeval_empty_blocks"),
+            Some(&0.5),
+            "half the run composed nothing at all"
+        );
+        // …and the recall it would otherwise have published quietly.
+        assert_eq!(metrics.get("longmemeval_retrieval_recall"), Some(&0.5));
     }
 
     #[test]

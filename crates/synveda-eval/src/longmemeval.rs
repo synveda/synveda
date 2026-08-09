@@ -17,10 +17,31 @@
 //! `needs` rules are instructions to whoever writes the next question, and
 //! an external corpus cannot be expected to satisfy them. What *can* be
 //! demanded is internal consistency: that the three haystack arrays line
-//! up, that every evidence session named is a session that exists, that
-//! the abstention marker and the evidence list agree. When one of those
+//! up, that every session named as bearing on a question exists, that a
+//! repeated session id is not two different sessions. When one of those
 //! fails the answer is never to edit the corpus — it is that this corpus
 //! cannot be scored until upstream is asked about it.
+//!
+//! **What the first fetch of the real corpus changed.** Three of these
+//! guards were written from the published format and met the actual file
+//! only afterwards, which is where a transcription earns or loses its
+//! keep. Two were wrong and one was too strict:
+//!
+//! - `answer` is not always a string. Thirty-two of the five hundred are
+//!   bare integers, because "how many" has a number for an answer.
+//! - Every instance names a session in `answer_session_ids`, **abstention
+//!   instances included** — the guard here asserted the opposite. An
+//!   abstention question asks about something half discussed, so its named
+//!   sessions are the partial evidence that establishes the absence.
+//! - Thirteen session ids repeat inside a haystack, every duplicate
+//!   byte-identical to its twin, and twelve of 246,750 turns are blank.
+//!   Refusing either would be a harness weakened into uselessness by rules
+//!   that sounded right, so the first is fatal only when the sessions
+//!   *differ* and the second is skipped and counted at seed time.
+//!
+//! Everything else held: the nine field names, the three turn keys, the
+//! two roles, the six question types, the thirty abstention instances, and
+//! the `has_answer` annotation never marking a session outside the list.
 //!
 //! **It is not vendored, and the score names its digest instead.** A
 //! 500-instance haystack is hundreds of megabytes; `longmemeval_s` alone
@@ -32,12 +53,12 @@
 //! whose corpus cannot be identified is a benchmark score nobody can
 //! reproduce, including us.
 //!
-//! One caveat, recorded here because it is the kind that is worse when
-//! discovered later: the schema below is transcribed from LongMemEval's
-//! published format, and nothing has parsed the real file yet — the same
-//! standing AUTH-4's vendor corpus has in CLAUDE.md. If upstream spells a
-//! field differently the loader refuses the corpus loudly and one line
-//! fixes it, which is the failure this shape was chosen to have.
+//! The schema was transcribed from the published format before the corpus
+//! was fetched, and refusing the file loudly is exactly how the three
+//! mistakes above were found rather than absorbed. Verified against
+//! `longmemeval_oracle` (500 instances, 10,960 turns) and
+//! `longmemeval_s_cleaned` (500 instances, 246,750 turns across 23,867
+//! sessions) on 2026-08-09.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -63,18 +84,20 @@ pub const QUESTION_TYPES: [&str; 6] = [
 /// else.
 pub const ROLES: [&str; 2] = ["assistant", "user"];
 
-/// LongMemEval's own marker for an abstention instance — a question whose
-/// answer is nowhere in the haystack, and whose correct behaviour is to
-/// say so. Their eval splits on this suffix and excludes those instances
-/// from retrieval scoring; decision 5 keeps both halves of that, and the
-/// guard below asserts the suffix and the evidence list agree rather than
-/// trusting either one alone.
+/// LongMemEval's own marker for an abstention instance — a question the
+/// haystack does not answer, whose correct behaviour is to say so. Their
+/// eval splits on this suffix and excludes those instances from retrieval
+/// scoring; decision 5 keeps both halves.
+///
+/// The suffix is the *only* thing that marks one. `answer_session_ids`
+/// does not: all thirty name sessions, and the guard that assumed
+/// otherwise was removed when the real corpus arrived.
 pub const ABSTENTION_SUFFIX: &str = "_abs";
 
 /// Where the fetched corpus is expected to be. The directory is committed
 /// — licence, attribution and the instructions for fetching — and the data
 /// file inside it is not.
-pub const DEFAULT_PATH: &str = "evals/fixtures/longmemeval/longmemeval_s.json";
+pub const DEFAULT_PATH: &str = "evals/fixtures/longmemeval/longmemeval_s_cleaned.json";
 
 /// How many instances a routine run measures (decision 7).
 ///
@@ -102,7 +125,11 @@ pub struct Instance {
     pub question_id: String,
     pub question_type: String,
     pub question: String,
-    pub answer: String,
+    /// The reference answer, as a **scalar** rather than a string: 32 of
+    /// the 500 are bare integers, because a question like "how many
+    /// sessions did I book" has a number for an answer and the corpus
+    /// stores it as one. Read `answer()` for the text a judge grades.
+    pub answer: serde_json::Value,
     /// When the question is asked. Load-bearing rather than decorative:
     /// it is what makes the temporal-reasoning questions answerable, and
     /// a run that dropped it would be grading "when" against no now.
@@ -110,16 +137,26 @@ pub struct Instance {
     pub haystack_dates: Vec<String>,
     pub haystack_session_ids: Vec<String>,
     pub haystack_sessions: Vec<Vec<Turn>>,
-    /// The evidence sessions — the deterministic tier's entire expectation
-    /// (decision 5). Defaulted rather than required because an abstention
-    /// instance has no evidence to name, and an absent list and an empty
-    /// one say the same thing there.
-    #[serde(default)]
+    /// The sessions bearing on the question — the deterministic tier's
+    /// entire expectation (decision 5).
+    ///
+    /// Every instance names at least one, **including all thirty
+    /// abstention instances**, which is the opposite of what this harness
+    /// first assumed. An abstention question asks about something half
+    /// discussed — *"which did I do first, fix the fence or buy three cows
+    /// from Peter?"* where the fence was mentioned and the cows never were
+    /// — so its named sessions are the partial evidence a reader needs in
+    /// order to establish the absence. They are not "the answer is here";
+    /// they are "this is what bears on it".
     pub answer_session_ids: Vec<String>,
 }
 
 /// One turn of one haystack session.
-#[derive(Debug, Deserialize)]
+///
+/// `PartialEq` so a repeated session id can be checked for whether the two
+/// sessions actually differ, which is the only case that makes the join
+/// ambiguous.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Turn {
     pub role: String,
@@ -133,13 +170,25 @@ pub struct Turn {
 }
 
 impl Instance {
-    /// Whether this is one of the 30 abstention instances. Read from the
-    /// id because that is what upstream's own eval splits on; `validate`
-    /// asserts the evidence list agrees, so this is never the only thing
-    /// deciding it.
+    /// Whether this is one of the 30 abstention instances, read from the
+    /// id — which is what upstream's own eval splits on, and the only
+    /// thing that marks one. The evidence list does not: an abstention
+    /// instance names sessions like any other (see `answer_session_ids`).
     #[must_use]
     pub fn is_abstention(&self) -> bool {
         self.question_id.ends_with(ABSTENTION_SUFFIX)
+    }
+
+    /// The reference answer as text for the judge. Numbers render as
+    /// themselves; anything else is passed through as written, because a
+    /// reference the harness reworded is a reference the score is no
+    /// longer against.
+    #[must_use]
+    pub fn answer(&self) -> String {
+        match &self.answer {
+            serde_json::Value::String(text) => text.clone(),
+            other => other.to_string(),
+        }
     }
 
     /// The haystack, joined. `validate` has already established that the
@@ -282,7 +331,7 @@ fn validate(corpus: &Corpus) -> Result<(), String> {
                 instance.question_type
             )));
         }
-        if instance.question.trim().is_empty() || instance.answer.trim().is_empty() {
+        if instance.question.trim().is_empty() || instance.answer().trim().is_empty() {
             return Err(at(
                 "an instance with no question or no answer grades nothing",
             ));
@@ -312,15 +361,27 @@ fn validate(corpus: &Corpus) -> Result<(), String> {
             ));
         }
 
-        let mut seen: BTreeSet<&str> = BTreeSet::new();
-        for session_id in &instance.haystack_session_ids {
-            if !seen.insert(session_id.as_str()) {
+        // A repeated session id is only fatal when the two sessions
+        // *differ*, because then "did the block bind session X" genuinely
+        // has two answers. The real corpus repeats thirteen ids across
+        // `longmemeval_s`, every one of them byte-identical to its twin
+        // and none of them named as evidence — duplication in the
+        // haystack, not ambiguity in the join. Refusing those would have
+        // been a harness weakened into uselessness by a rule that sounded
+        // right; grading them is safe, and `seed` plants each id once.
+        let mut seen: BTreeMap<&str, &[Turn]> = BTreeMap::new();
+        for session in instance.sessions() {
+            if let Some(first) = seen.insert(session.session_id, session.turns)
+                && first != session.turns
+            {
                 return Err(at(&format!(
-                    "session id `{session_id}` appears twice in one haystack, so \"did the block \
-                     bind it\" has two answers"
+                    "session id `{}` appears twice in one haystack with different turns, so \
+                     \"did the block bind it\" has two answers",
+                    session.session_id
                 )));
             }
         }
+        let seen: BTreeSet<&str> = seen.into_keys().collect();
         for session in instance.sessions() {
             if session.turns.is_empty() {
                 return Err(at(&format!(
@@ -337,13 +398,13 @@ fn validate(corpus: &Corpus) -> Result<(), String> {
                         session.session_id, turn.role
                     )));
                 }
-                if turn.content.trim().is_empty() {
-                    return Err(at(&format!(
-                        "session `{}` has an empty turn by `{}`, which would be seeded as an \
-                         event carrying nothing and shrink the haystack silently",
-                        session.session_id, turn.role
-                    )));
-                }
+                // An empty turn is skipped at seed time and counted, not
+                // refused. The real corpus holds twelve of them across
+                // 246,750 turns, none in an evidence session, and a
+                // benchmark that will not run over 0.005% of blank
+                // content is a benchmark nobody runs. What matters is that
+                // the count is stated rather than the turn vanishing —
+                // `InstanceOutcome::empty_turns` carries it.
             }
         }
 
@@ -363,22 +424,23 @@ fn validate(corpus: &Corpus) -> Result<(), String> {
         // of one fact, and the retrieval denominator depends on which is
         // true. Trusting either alone is how 30 instances quietly enter or
         // leave a published rate.
-        match (instance.is_abstention(), instance.answer_session_ids.len()) {
-            (true, count) if count > 0 => {
-                return Err(at(&format!(
-                    "the id marks this as an abstention instance but it names {count} evidence \
-                     session(s); the retrieval tier excludes abstention instances and cannot do \
-                     both"
-                )));
-            }
-            (false, 0) => {
-                return Err(at(
-                    "no evidence session is named and the id does not mark this as an abstention \
-                     instance, so the retrieval tier would score it zero for having nothing to \
-                     find",
-                ));
-            }
-            _ => {}
+        // Every instance names at least one session bearing on its
+        // question — all 500 in both released variants, abstention
+        // instances included.
+        //
+        // This guard used to assert the opposite for abstention instances,
+        // on the reasoning that a question the haystack never answers has
+        // no evidence to name. The corpus says otherwise, and the reason
+        // is better than the guess: an abstention question asks about
+        // something *half* discussed, so its named sessions are the
+        // partial evidence a reader needs in order to establish the
+        // absence. All thirty of them name one, and the first fetch of the
+        // real corpus is what found it.
+        if instance.answer_session_ids.is_empty() {
+            return Err(at(
+                "no session is named as bearing on this question, so the retrieval tier would \
+                 score it zero for having nothing to find",
+            ));
         }
 
         // Upstream's per-turn annotation, checked in the one direction
@@ -541,13 +603,13 @@ mod tests {
         {
             "question_id": "bb22_abs",
             "question_type": "single-session-user",
-            "question": "what did the surveyor charge",
-            "answer": "never mentioned",
+            "question": "did the surveyor or the solicitor bill me first",
+            "answer": "The information provided is not enough. You mentioned the solicitor but never the surveyor.",
             "question_date": "2023/05/20 (Sat) 02:31",
             "haystack_dates": ["2023/04/01 (Sat) 10:00"],
             "haystack_session_ids": ["s-three"],
-            "haystack_sessions": [[{"role": "user", "content": "we start packing tomorrow"}]],
-            "answer_session_ids": []
+            "haystack_sessions": [[{"role": "user", "content": "the solicitor invoiced today", "has_answer": true}]],
+            "answer_session_ids": ["s-three"]
         }
     ]"#;
 
@@ -609,23 +671,75 @@ mod tests {
         assert!(err.contains("report it rather than editing"), "{err}");
     }
 
-    /// Both halves, because the retrieval denominator depends on which of
-    /// upstream's two statements is true.
+    /// The guard this one replaced asserted that an abstention instance
+    /// names no evidence. The real corpus says all thirty of them do —
+    /// their named sessions are the partial evidence that establishes the
+    /// absence — so what is actually required is that *every* instance
+    /// names something bearing on its question.
     #[test]
-    fn the_abstention_marker_and_the_evidence_list_must_agree() {
-        let evidence_on_abstention = CLEAN.replace(
-            r#""answer_session_ids": []"#,
-            r#""answer_session_ids": ["s-three"]"#,
-        );
-        let err = parse(&evidence_on_abstention).expect_err("an abstention with evidence");
-        assert!(err.contains("abstention"), "unhelpful error: {err}");
-
-        let no_evidence = CLEAN.replace(
+    fn every_instance_must_name_a_session_bearing_on_its_question() {
+        for empty in [
             r#""answer_session_ids": ["s-two"]"#,
-            r#""answer_session_ids": []"#,
+            r#""answer_session_ids": ["s-three"]"#,
+        ] {
+            let err = parse(&CLEAN.replace(empty, r#""answer_session_ids": []"#))
+                .expect_err("an instance naming nothing must not validate");
+            assert!(err.contains("nothing to find"), "unhelpful error: {err}");
+        }
+
+        // …and an abstention instance naming evidence is ordinary, which
+        // is the half that was wrong before.
+        let corpus = parse(CLEAN).expect("parses");
+        let abstention = &corpus.instances[1];
+        assert!(abstention.is_abstention());
+        assert_eq!(abstention.answer_session_ids, ["s-three"]);
+    }
+
+    /// Thirty-two of the corpus's 500 answers are bare integers — "how
+    /// many" questions — and a `String` field rejected the whole file.
+    #[test]
+    fn a_numeric_answer_is_read_as_its_own_text() {
+        let json = CLEAN.replace(r#""answer": "three weeks""#, r#""answer": 3"#);
+        let corpus = parse(&json).expect("a numeric answer parses");
+        assert_eq!(corpus.instances[0].answer(), "3");
+        assert_eq!(corpus.instances[1].answer().split(' ').next(), Some("The"));
+
+        // Still refused when there is nothing to grade against.
+        let err = parse(&CLEAN.replace(r#""answer": "three weeks""#, r#""answer": "  ""#))
+            .expect_err("an empty answer grades nothing");
+        assert!(err.contains("grades nothing"), "unhelpful error: {err}");
+    }
+
+    /// The real corpus repeats thirteen session ids, every duplicate
+    /// byte-identical to its twin. Identical is duplication in the
+    /// haystack; differing would be ambiguity in the join, and only the
+    /// second is fatal.
+    #[test]
+    fn a_repeated_session_id_is_fatal_only_when_the_sessions_differ() {
+        let identical = CLEAN
+            .replace(
+                r#""haystack_session_ids": ["s-one", "s-two"]"#,
+                r#""haystack_session_ids": ["s-two", "s-two"]"#,
+            )
+            .replace(
+                r#"[{"role": "user", "content": "we start packing tomorrow"}],
+                [{"role": "user", "content": "keys handed over today", "has_answer": true},"#,
+                r#"[{"role": "user", "content": "keys handed over today", "has_answer": true},
+                 {"role": "assistant", "content": "three weeks door to door"}],
+                [{"role": "user", "content": "keys handed over today", "has_answer": true},"#,
+            );
+        assert!(
+            parse(&identical).is_ok(),
+            "a byte-identical duplicate is not ambiguous: {:?}",
+            parse(&identical).err()
         );
-        let err = parse(&no_evidence).expect_err("a graded instance with no evidence");
-        assert!(err.contains("nothing to find"), "unhelpful error: {err}");
+
+        let differing = CLEAN.replace(
+            r#""haystack_session_ids": ["s-one", "s-two"]"#,
+            r#""haystack_session_ids": ["s-two", "s-two"]"#,
+        );
+        let err = parse(&differing).expect_err("two different sessions under one id");
+        assert!(err.contains("different turns"), "unhelpful error: {err}");
     }
 
     /// Upstream's two annotations, cross-checked in the direction that can
@@ -674,11 +788,18 @@ mod tests {
         assert!(err.contains("s-two"), "unhelpful error: {err}");
     }
 
+    /// Twelve of the corpus's 246,750 turns are blank. Refusing the
+    /// corpus over 0.005% of blank content would be a harness nobody can
+    /// run; the turn loads here and `seed` skips and counts it.
     #[test]
-    fn an_empty_turn_is_refused_rather_than_seeded() {
+    fn an_empty_turn_loads_and_is_left_for_the_seeder_to_count() {
         let json = CLEAN.replace(r#""we start packing tomorrow""#, r#""   ""#);
-        let err = parse(&json).expect_err("an empty turn must not validate");
-        assert!(err.contains("shrink the haystack silently"), "{err}");
+        let corpus = parse(&json).expect("a blank turn does not refuse the corpus");
+        assert_eq!(
+            corpus.instances[0].turns(),
+            3,
+            "the turn is still in the haystack"
+        );
     }
 
     #[test]
@@ -715,13 +836,10 @@ mod tests {
                          "haystack_dates": ["2023/04/01 (Sat) 10:00"],
                          "haystack_session_ids": ["s-{question_type}-{index}"],
                          "haystack_sessions": [[{{"role": "user", "content": "c"}}]],
-                         "answer_session_ids": [{evidence}]}}"#,
+                         "answer_session_ids": ["s-{question_type}-{index}"]}}"#,
+                    // Every instance names one, abstention included — the
+                    // corpus's own shape.
                     suffix = if abstention { ABSTENTION_SUFFIX } else { "" },
-                    evidence = if abstention {
-                        String::new()
-                    } else {
-                        format!(r#""s-{question_type}-{index}""#)
-                    },
                 );
                 instances.push(serde_json::from_str::<Instance>(&json).expect("parses"));
             }

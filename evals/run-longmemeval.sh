@@ -9,6 +9,13 @@
 # is sized to match it — one actor per instance is what keeps the
 # haystacks apart (decision 8), so the two numbers are one number.
 #
+# EVAL_LONGMEMEVAL_SEED_TIMEOUT bounds the one wait for the extraction
+# pipeline, and defaults to 1800s rather than the 90s EVAL-1 sized for a
+# handful of scenario events. Ten instances of longmemeval_s is ~5,000
+# turns; the first run against the real corpus gave the pipeline 90s per
+# instance, six blocks came back empty, and the suite reported a retrieval
+# recall that was really a throughput measurement.
+#
 # EVAL_LONGMEMEVAL_JUDGED=1 adds the model-judged tier: each block is read
 # by SYNVEDA_READER and the answer graded by SYNVEDA_JUDGE, against
 # evals/baseline-longmemeval-judged.json. That tier is the published

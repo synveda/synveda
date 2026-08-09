@@ -363,8 +363,9 @@ EOF
 eval_longmemeval() {
   ./target/debug/synveda-eval longmemeval \
     --env "$EVAL_ENV" \
-    --corpus "${EVAL_LONGMEMEVAL_CORPUS:-evals/fixtures/longmemeval/longmemeval_s.json}" \
+    ${EVAL_LONGMEMEVAL_CORPUS:+--corpus "$EVAL_LONGMEMEVAL_CORPUS"} \
     --instances "${EVAL_LONGMEMEVAL_INSTANCES:-10}" \
+    --seed-timeout-secs "${EVAL_LONGMEMEVAL_SEED_TIMEOUT:-1800}" \
     ${EVAL_LONGMEMEVAL_JUDGED:+--judged} \
     ${EVAL_BASELINE:+--baseline "$EVAL_BASELINE"} \
     --report "${EVAL_REPORT:-$EVAL_STATE/longmemeval.json}" \

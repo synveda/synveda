@@ -512,20 +512,54 @@ async fn run(cli: Cli) -> Result<bool, String> {
             // The agreement pass owns the judge tally it produced; the
             // instances start their own, so a per-instance cost is not the
             // agreement pass's cost added to it.
-            let mut outcomes = Vec::with_capacity(picked.len());
+            // Seed everything, wait once, then probe — never a loop that
+            // interleaves the three. The first run against the real corpus
+            // did interleave them and measured its own extraction queue:
+            // instances 1-3 seeded in seconds and graded fine, and from
+            // instance 4 on every wait burned its whole timeout against
+            // the backlog the first three had built, six blocks came back
+            // empty, and the run reported a retrieval recall of 0.214 that
+            // was about throughput. EVAL-2 found this and EVAL-4 paid for
+            // it; the Q&A suite seeds once, waits for all of it, and only
+            // then probes.
+            let seeding = std::time::Instant::now();
+            let mut seeded = Vec::with_capacity(picked.len());
             for (index, instance) in picked.iter().enumerate() {
                 eprintln!(
-                    "synveda-eval: longmemeval/{} ({} of {}, {} session(s) as {})",
+                    "synveda-eval: longmemeval/{} seed ({} of {}, {} session(s), {} turn(s) as {})",
                     instance.question_id,
                     index + 1,
                     picked.len(),
                     instance.haystack_session_ids.len(),
+                    instance.turns(),
                     pool[index]
                 );
-                outcomes.push(
-                    longmemeval_runner::run_instance(&suite, instance, &pool[index], &mut tallies)
-                        .await?,
+                seeded
+                    .push(longmemeval_runner::seed_instance(&suite, instance, &pool[index]).await?);
+            }
+            eprintln!(
+                "synveda-eval: longmemeval waiting for the pipeline to finish with {} turn(s)",
+                seeded.iter().map(|entry| entry.events.len()).sum::<usize>()
+            );
+            longmemeval_runner::wait_for_all(&suite, &mut seeded, seeding).await?;
+
+            let mut outcomes = Vec::with_capacity(picked.len());
+            for ((index, instance), mut entry) in picked.iter().enumerate().zip(seeded) {
+                eprintln!(
+                    "synveda-eval: longmemeval/{} measure ({} of {})",
+                    instance.question_id,
+                    index + 1,
+                    picked.len()
                 );
+                longmemeval_runner::measure_instance(
+                    &suite,
+                    instance,
+                    &pool[index],
+                    &mut entry.outcome,
+                    &mut tallies,
+                )
+                .await?;
+                outcomes.push(entry.outcome);
             }
 
             let mut metrics = longmemeval_runner::metrics(&outcomes);
