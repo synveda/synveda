@@ -49,6 +49,13 @@ jobs:
       # STATUS.md's hand-written narrative), so nothing writes them now and
       # a feature added to one file and forgotten in another fails here.
       - run: node scripts/check-backlog.mjs
+      # check-backlog reconciles those three files with each other and
+      # never reads an ADR header. Two ADRs drifted through that gap —
+      # still reading `Proposed` after their features shipped — and this
+      # closes it in that one direction. The mirror check is deliberately
+      # absent: CLAUDE.md requires the ADR before implementation, so
+      # `Accepted` ahead of delivery is the normal state.
+      - run: node scripts/check-adr-status.mjs
       # CLAUDE.md's licence rule on the corpus side (EVAL-3, ADR-0061).
       # cargo-deny governs crates and check-npm-licences governs packages;
       # a corpus is data, which is how a CC BY-NC one reached a feature

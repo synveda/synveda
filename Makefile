@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-backlog check-benchmarks check-corpus-licences check-npm-licences ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-backlog check-benchmarks check-corpus-licences check-npm-licences ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -188,6 +188,14 @@ check-deps:
 check-backlog:
 	node scripts/check-backlog.mjs
 
+# check-backlog reconciles those three files with each other and never
+# reads an ADR header; this closes that gap in the one direction worth
+# gating — an ADR still reading `Proposed` after its feature shipped. The
+# mirror check would fire on every feature in flight, because CLAUDE.md
+# requires the ADR first.
+check-adr-status:
+	node scripts/check-adr-status.mjs
+
 # CLAUDE.md's licence rule on the npm side (CNSL-1, ADR-0056 decision 8).
 # Needs the workspace installed, so it runs after ts-build in `ci`.
 check-npm-licences:
@@ -219,4 +227,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-backlog check-corpus-licences check-benchmarks eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-backlog check-adr-status check-corpus-licences check-benchmarks eval-check ts-build check-npm-licences ts-test
