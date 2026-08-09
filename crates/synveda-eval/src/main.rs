@@ -564,7 +564,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
                 "synveda-eval: longmemeval waiting for the pipeline to finish with {} turn(s)",
                 seeded.iter().map(|entry| entry.events.len()).sum::<usize>()
             );
-            longmemeval_runner::wait_for_all(&suite, &mut seeded, seeding).await?;
+            longmemeval_runner::wait_for_all(&suite, &picked, &mut seeded, seeding).await?;
 
             let mut outcomes = Vec::with_capacity(picked.len());
             for ((index, instance), mut entry) in picked.iter().enumerate().zip(seeded) {
@@ -595,12 +595,27 @@ async fn run(cli: Cli) -> Result<bool, String> {
             }
             let models = longmemeval_runner::served_models(&outcomes);
             let gate = report::gate(&baseline, &metrics);
+            // A judged run measures every retrieval axis on its way to the
+            // QA one — same seeding, same blocks — so running the two
+            // tiers as two runs seeds ~5,000 turns twice for one
+            // measurement. It does not any more: the judged run also
+            // checks the deterministic tier's committed floors, and *that*
+            // is the gate its exit status honours. Decision 5 stands
+            // exactly as written — the judged half still gates nothing;
+            // the half that always gated still does.
+            let retrieval_gate = judged
+                .then(|| {
+                    Baseline::load(std::path::Path::new(longmemeval_runner::RETRIEVAL_BASELINE))
+                        .map(|retrieval| report::gate(&retrieval, &metrics))
+                })
+                .transpose()?;
             let run = longmemeval_runner::Report {
                 started_at,
                 gateway_url: environment.gateway_url.clone(),
                 tenant_id: environment.tenant_id.clone(),
                 slice,
                 tier: if judged { "judged" } else { "retrieval" }.to_owned(),
+                retrieval_gate,
                 model_drift: baseline.model_drift(&models),
                 models,
                 independence,
@@ -636,13 +651,16 @@ async fn run(cli: Cli) -> Result<bool, String> {
                 );
                 return Ok(true);
             }
-            // The judged tier gates nothing (decision 5): it is off the
-            // merge path and off the nightly because a gate that fails when
-            // a model changes rather than when the code changes is an alarm
-            // nobody keeps. Its breaches are printed and its exit status is
-            // success — the deterministic tier is where a regression stops
-            // a build.
-            Ok(judged || run.gate.passed)
+            // The judged tier's own bounds gate nothing (decision 5): a
+            // gate that fails when a model changes rather than when the
+            // code changes is an alarm nobody keeps, so its breaches print
+            // and do not fail. The retrieval floors it also measured are a
+            // different matter — those are the ones that have always
+            // gated, and a judged run is not a way to avoid them.
+            Ok(match &run.retrieval_gate {
+                Some(retrieval) => retrieval.passed,
+                None => run.gate.passed,
+            })
         }
         Command::Rebaseline {
             report: report_path,

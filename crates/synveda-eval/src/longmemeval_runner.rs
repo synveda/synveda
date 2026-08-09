@@ -172,6 +172,11 @@ pub struct Report {
     pub tallies: Tallies,
     pub metrics: BTreeMap<String, f64>,
     pub gate: Gate,
+    /// The deterministic tier's floors, checked by a judged run against
+    /// the same measurements. Absent on a deterministic run, where `gate`
+    /// already is them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retrieval_gate: Option<Gate>,
 }
 
 /// One instance's measurement.
@@ -333,6 +338,7 @@ pub async fn seed_instance(
 /// one wait rather than ten (see `seed_instance`).
 pub async fn wait_for_all(
     suite: &Suite<'_>,
+    instances: &[&Instance],
     seeded: &mut [Seeded],
     started: Instant,
 ) -> Result<(), String> {
@@ -358,6 +364,18 @@ pub async fn wait_for_all(
     // last.
     for entry in seeded.iter_mut() {
         entry.outcome.failures.extend(shared.iter().cloned());
+    }
+
+    // …and then one index catch-up for the whole run, for the same reason
+    // the pipeline wait is shared. The sparse leg is a sidecar sweeping on
+    // a one-second timer (ADR-0024), and after ~5,000 new records every
+    // instance is waiting on the *same* sweeper to catch up. Waiting per
+    // instance made ten sequential waits out of one shared condition: the
+    // first real run spent two minutes seeding and then twenty-six minutes
+    // here, about 2.6 per instance, while the injects it was waiting to
+    // make totalled 0.6 seconds.
+    wait_for_index(suite, instances, seeded, started).await?;
+    for entry in seeded.iter_mut() {
         entry.outcome.seed_ms = round(started.elapsed().as_secs_f64() * 1000.0);
     }
     Ok(())
@@ -373,7 +391,6 @@ pub async fn measure_instance(
 ) -> Result<(), String> {
     let (client, environment, options) = (suite.client, suite.environment, suite.options);
     let bearer = &environment.actor(actor)?.token;
-    wait_for_index(client, bearer, instance, options, outcome).await?;
 
     // The measurement. The question is the task, which is the whole point:
     // a memory system is being asked to bring back what a reader would
@@ -719,51 +736,61 @@ async fn wait_for_pipeline(
     }
 }
 
-/// Waits until the material is *rankable*, not merely composable. The
-/// sparse leg is a sidecar that sweeps on a timer (ADR-0024), so a record
-/// is retrievable by recency seconds before it can be ranked, and a
-/// question asked in that window measures the sweep — EVAL-4 learned this
-/// by getting it wrong, and the lesson is inherited rather than relearned.
+/// Waits until the material is *rankable*, not merely composable — for
+/// every instance at once.
 ///
-/// It asks about the evidence sessions, or about the first session when
-/// there is no evidence, and it asks with each session's own seeded text
-/// rather than with the instance's question: whether the *question* ranks
-/// is the thing being graded.
+/// The sparse leg is a sidecar that sweeps on a timer (ADR-0024), so a
+/// record is retrievable by recency seconds before it can be ranked, and a
+/// question asked in that window measures the sweep. EVAL-4 learned that
+/// and this inherits it; what this does *not* inherit is waiting per
+/// probe, because every instance here waits on one shared sweeper and
+/// doing it ten times in sequence multiplies one wait by ten.
+///
+/// It asks about each instance's evidence sessions — or its first session
+/// where it names none — with that session's own opening turns as the
+/// query, never the instance's question: whether the *question* ranks is
+/// the thing being graded.
 async fn wait_for_index(
-    client: &Client,
-    bearer: &str,
-    instance: &Instance,
-    options: &Options,
-    outcome: &mut InstanceOutcome,
+    suite: &Suite<'_>,
+    instances: &[&Instance],
+    seeded: &mut [Seeded],
+    started: Instant,
 ) -> Result<(), String> {
-    let wanted: BTreeSet<&str> = if instance.answer_session_ids.is_empty() {
-        instance
-            .haystack_session_ids
-            .first()
-            .map(String::as_str)
-            .into_iter()
-            .collect()
-    } else {
-        instance
-            .answer_session_ids
-            .iter()
-            .map(String::as_str)
-            .collect()
-    };
+    // One flat worklist over the whole run, so a round of polling covers
+    // every instance rather than one.
+    let mut pending: Vec<(usize, &str)> = Vec::new();
+    for (index, instance) in instances.iter().enumerate() {
+        if instance.answer_session_ids.is_empty() {
+            pending.extend(
+                instance
+                    .haystack_session_ids
+                    .first()
+                    .map(|id| (index, id.as_str())),
+            );
+        } else {
+            pending.extend(
+                instance
+                    .answer_session_ids
+                    .iter()
+                    .map(|id| (index, id.as_str())),
+            );
+        }
+    }
 
-    let started = Instant::now();
-    let mut pending: Vec<&str> = wanted.into_iter().collect();
     loop {
         let mut still = Vec::new();
-        for session_id in pending {
+        for (index, session_id) in pending {
+            let instance = instances[index];
+            let bearer = &suite.environment.actor(&seeded[index].outcome.actor)?.token;
             let Some(session) = instance
                 .sessions()
                 .find(|session| session.session_id == session_id)
             else {
                 continue;
             };
-            let seeded = seeded_id(instance, session_id);
-            let found = client
+            let planted = seeded_id(instance, session_id);
+            let found = suite
+                .client
                 .recall_query(
                     bearer,
                     &RecallQueryRequest {
@@ -780,22 +807,24 @@ async fn wait_for_index(
                 .value
                 .entries
                 .iter()
-                .any(|entry| entry.source_session_id() == Some(seeded.as_str()));
+                .any(|entry| entry.source_session_id() == Some(planted.as_str()));
             if !indexed {
-                still.push(session_id);
+                still.push((index, session_id));
             }
         }
         if still.is_empty() {
             return Ok(());
         }
-        if started.elapsed() >= options.seed_timeout {
-            outcome.failures.push(format!(
-                "{} evidence session(s) never became rankable within {}s: {} — a question asked \
-                 now measures the sparse sidecar rather than retrieval",
-                still.len(),
-                options.seed_timeout.as_secs(),
-                still.join(", ")
-            ));
+        if started.elapsed() >= suite.options.seed_timeout {
+            // Recorded against the instance that owns each session, so a
+            // run that timed out says which measurements it spoiled.
+            for (index, session_id) in &still {
+                seeded[*index].outcome.failures.push(format!(
+                    "evidence session `{session_id}` never became rankable within {}s — a \
+                     question asked now measures the sparse sidecar rather than retrieval",
+                    suite.options.seed_timeout.as_secs()
+                ));
+            }
             return Ok(());
         }
         pending = still;
@@ -1246,20 +1275,37 @@ pub fn summarise(run: &Report) -> String {
     for (metric, value) in &run.metrics {
         out.push_str(&format!("    {metric:<36} {value}\n"));
     }
-    if !run.gate.breaches.is_empty() {
-        out.push_str("\n  gate\n");
-        for breach in &run.gate.breaches {
-            out.push_str(&format!("    {}\n", breach.reason));
+    for (label, gate) in [
+        (run.tier.as_str(), &run.gate),
+        (
+            "retrieval floors",
+            run.retrieval_gate.as_ref().unwrap_or(&run.gate),
+        ),
+    ] {
+        if run.retrieval_gate.is_none() && label == "retrieval floors" {
+            continue;
+        }
+        if !gate.breaches.is_empty() {
+            out.push_str(&format!("\n  gate ({label})\n"));
+            for breach in &gate.breaches {
+                out.push_str(&format!("    {}\n", breach.reason));
+            }
         }
     }
+    // The exit status follows the retrieval floors on a judged run, so
+    // the summary names which gate decided it rather than leaving a reader
+    // to work out that the judged bounds are advisory.
+    let (deciding, passed) = match &run.retrieval_gate {
+        Some(retrieval) => ("retrieval floors", retrieval.passed),
+        None => (run.tier.as_str(), run.gate.passed),
+    };
     out.push_str(&format!(
-        "\n  {}\n",
-        if run.gate.passed {
-            "gate held"
-        } else {
-            "GATE BREACHED"
-        }
+        "\n  {} ({deciding})\n",
+        if passed { "gate held" } else { "GATE BREACHED" }
     ));
+    if run.retrieval_gate.is_some() && !run.gate.passed {
+        out.push_str("  judged bounds breached, reported and not gating (decision 5)\n");
+    }
     out
 }
 

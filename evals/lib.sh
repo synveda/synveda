@@ -78,6 +78,22 @@ eval_up() {
   $COMPOSE exec -T postgres \
     psql -v ON_ERROR_STOP=1 -U synveda -d synveda \
     -c "create database $EVAL_DB" >/dev/null
+  # This database is created for one run and dropped at the end of it, so
+  # its durability is worth nothing — and on a Docker Desktop volume it
+  # costs a great deal. EVAL-3's LongMemEval run measured checkpoints
+  # writing 58 MB in 270 seconds, about 0.2 MB/s; Postgres then stalled for
+  # minutes at a stretch, connections died inside the stall, the gateway's
+  # pool could not re-establish them, and every `/v1` surface answered 503
+  # until the run was killed. Five attempts died that way before the
+  # checkpoint timings said why.
+  #
+  # Per-database rather than cluster-wide: `synchronous_commit` can be set
+  # with `ALTER DATABASE` and `fsync` cannot, and a scratch database
+  # relaxing its own commits is a very different thing from a dev
+  # container relaxing them for everybody's data.
+  $COMPOSE exec -T postgres \
+    psql -v ON_ERROR_STOP=1 -U synveda -d synveda \
+    -c "alter database $EVAL_DB set synchronous_commit = off" >/dev/null
   $COMPOSE exec -T postgres \
     psql -v ON_ERROR_STOP=1 -U synveda -d "$EVAL_DB" -c \
     "create extension if not exists vector;

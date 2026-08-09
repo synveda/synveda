@@ -116,6 +116,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_connections(max_connections)
         .connect_lazy(&database_url)?;
 
+    // The pool says nothing about itself, and an operator watching every
+    // `/v1` surface answer 503 has no way to learn that this is why. That
+    // gap cost EVAL-3 five runs: the wedge is only visible from inside the
+    // process, and by the time it happens the database is too busy to be
+    // asked from outside.
+    //
+    // Silent while there is headroom — a periodic line nobody needs is a
+    // line nobody reads — and one warning per interval once the pool is
+    // full with nothing idle, which is the condition that precedes the
+    // timeouts rather than the timeouts themselves.
+    tokio::spawn({
+        let pool = pool.clone();
+        async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(5));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                let (size, idle) = (pool.size(), pool.num_idle());
+                if size >= max_connections && idle == 0 {
+                    tracing::warn!(
+                        size,
+                        idle,
+                        max = max_connections,
+                        "database pool saturated: every connection is checked out, so requests \
+                         are queueing on acquire and will time out"
+                    );
+                } else {
+                    tracing::debug!(size, idle, max = max_connections, "database pool");
+                }
+            }
+        }
+    });
+
     // The gateway's own public URL. Read once here rather than inside the
     // OIDC arm, because CNSL-1's Origin check needs it in every auth mode:
     // a console session is refused under a dev verifier too, and it is
