@@ -87,15 +87,16 @@ see [docs/INSTALL.md](docs/INSTALL.md).
 | **0 — Foundation** | Workspace, dev environment, types, bitemporal schema, observability | ✅ 6/6 |
 | **1 — The spine** | SSO → auto-provisioned hierarchy → observe → extraction → inject → audit, live in Claude Code | ✅ 21/21 |
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
-| **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, residency, Qdrant | 🚧 10/25 |
+| **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, residency, Qdrant | 🚧 11/25 |
 | **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR | ⬜ 0/15 |
 
 One further feature (AUTH-6, session and token hygiene) is unscheduled — 90 in
-total, 59 delivered. The ten Phase 3 items finished are the skills registry and
-its governance (SKIL-1 through SKIL-4), the installable single binary (OPS-1),
-the admin console's proposals inbox and hierarchy explorer (CNSL-1, CNSL-2), the
-generic MCP server (ADPT-2), and the SCIM server with its directory-sync
-fallback (AUTH-4, AUTH-5).
+total, 60 delivered. The eleven Phase 3 items finished are the skills registry
+and its governance (SKIL-1 through SKIL-4), the installable single binary
+(OPS-1), the admin console's proposals inbox and hierarchy explorer (CNSL-1,
+CNSL-2), the generic MCP server (ADPT-2), the SCIM server with its
+directory-sync fallback (AUTH-4, AUTH-5), and the LongMemEval benchmark adapter
+(EVAL-3).
 
 Full detail, feature by feature: [`docs/backlog/STATUS.md`](docs/backlog/STATUS.md).
 Published benchmark scores, and what they do and do not measure:
@@ -165,12 +166,12 @@ Being explicit, so nothing here misleads:
   mem0 (ADPT-5).
 - **No per-tenant encryption keys, WORM export or SIEM streaming**
   (TEN-4, AUD-3, AUD-4).
-- **No published benchmark scores.** The LongMemEval harness is built (EVAL-3)
-  and [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) is its page, but the table is
-  empty: the corpus is fetched rather than committed and nothing has run against
-  it yet. LoCoMo is EVAL-7 and is blocked on a licence, not on effort: its corpus
-  is CC BY-NC 4.0, which withholds the published commercial claim a score would
-  be.
+- **One published benchmark score, over 10 of LongMemEval's 500 instances**
+  ([`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)) — a first data point rather than a
+  benchmark claim, and the row says which slice it covers.
+  `make eval-longmemeval-full` is the run somebody schedules. LoCoMo is EVAL-7
+  and is blocked on a licence, not on effort: its corpus is CC BY-NC 4.0, which
+  withholds the published commercial claim a score would be.
 - **No LICENSE file yet.** Dependencies are constrained to MIT / Apache-2.0 /
   PostgreSQL in the core path (enforced by `cargo-deny`), but the project's own
   licence is not yet declared.
