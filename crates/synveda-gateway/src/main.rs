@@ -1,5 +1,8 @@
 //! Gateway entry point. Configuration is environment-only for now:
-//! `DATABASE_URL` (required), `SYNVEDA_LISTEN_ADDR` (default `127.0.0.1:8120`),
+//! `DATABASE_URL` (required), `SYNVEDA_DB_MAX_CONNECTIONS` (default 8 —
+//! one pool shared by the request handlers *and* the background workers,
+//! so sustained ingestion can starve reads; see the comment at the call
+//! site), `SYNVEDA_LISTEN_ADDR` (default `127.0.0.1:8120`),
 //! and one auth mode (ADR-0010 — setting both is a startup error):
 //! `SYNVEDA_OIDC_ISSUERS` (JSON trust-entry array; enables OIDC verification
 //! and `/auth/*`, with `SYNVEDA_PUBLIC_URL` naming this gateway in redirect
@@ -79,10 +82,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let database_url = std::env::var("DATABASE_URL")
         .map_err(|_| "DATABASE_URL must be set (dev default is in the Makefile)")?;
+    // Eight was the number from the first day and it is still the default,
+    // but it can no longer only be changed by recompiling. EVAL-3's
+    // LongMemEval run wedged the gateway on it: ~4,900 events of sustained
+    // ingestion, and the extraction worker and the index sweeper — which
+    // draw from this same pool as the request handlers — took all eight.
+    // Every `/v1` surface then answered 503 for seventeen minutes with one
+    // request sitting thirty seconds on `acquire`, and it did not recover.
+    //
+    // Raising a default is not the fix for that; the fix is that
+    // background work and request serving should not compete for one pool
+    // at all, which is a change with an ADR in front of it. What this does
+    // is stop the number being unreachable to the operator who is watching
+    // it happen.
+    let max_connections = std::env::var("SYNVEDA_DB_MAX_CONNECTIONS")
+        .ok()
+        .map(|raw| {
+            raw.parse::<u32>()
+                .map_err(|_| {
+                    format!("SYNVEDA_DB_MAX_CONNECTIONS must be a positive integer, got `{raw}`")
+                })
+                .and_then(|value| {
+                    (value > 0)
+                        .then_some(value)
+                        .ok_or_else(|| "SYNVEDA_DB_MAX_CONNECTIONS must be at least 1".to_owned())
+                })
+        })
+        .transpose()?
+        .unwrap_or(8);
     // connect_lazy: the gateway boots without a database so /readyz can
     // report the outage instead of the process crash-looping.
     let pool = PgPoolOptions::new()
-        .max_connections(8)
+        .max_connections(max_connections)
         .connect_lazy(&database_url)?;
 
     // The gateway's own public URL. Read once here rather than inside the

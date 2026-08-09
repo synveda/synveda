@@ -266,6 +266,16 @@ eval_up() {
   # Phase 2: the gateway under measurement.
   SYNVEDA_LISTEN_ADDR=${EVAL_GATEWAY_URL#http://}
   export SYNVEDA_LISTEN_ADDR
+  # The gateway's pool is shared between request handlers and the
+  # background workers, and its default of eight wedged this stack on
+  # EVAL-3's LongMemEval run: ~4,900 events of sustained ingestion, the
+  # extraction worker and index sweeper holding every connection, and
+  # seventeen minutes of 503 on every `/v1` surface with no recovery.
+  # Raised here rather than in the product, because the product's default
+  # is a deployment decision and this is a laptop seeding a benchmark.
+  # Postgres admits 100; two gateways at 32 leaves room.
+  SYNVEDA_DB_MAX_CONNECTIONS=${SYNVEDA_DB_MAX_CONNECTIONS:-32}
+  export SYNVEDA_DB_MAX_CONNECTIONS
   eval_port_free "$EVAL_GATEWAY_URL"
   ./target/debug/synveda-gateway >"$EVAL_STATE/gateway.log" 2>&1 &
   EVAL_PID=$!
