@@ -78,6 +78,22 @@ eval_up() {
   $COMPOSE exec -T postgres \
     psql -v ON_ERROR_STOP=1 -U synveda -d synveda \
     -c "create database $EVAL_DB" >/dev/null
+  # This database is created for one run and dropped at the end of it, so
+  # its durability is worth nothing — and on a Docker Desktop volume it
+  # costs a great deal. EVAL-3's LongMemEval run measured checkpoints
+  # writing 58 MB in 270 seconds, about 0.2 MB/s; Postgres then stalled for
+  # minutes at a stretch, connections died inside the stall, the gateway's
+  # pool could not re-establish them, and every `/v1` surface answered 503
+  # until the run was killed. Five attempts died that way before the
+  # checkpoint timings said why.
+  #
+  # Per-database rather than cluster-wide: `synchronous_commit` can be set
+  # with `ALTER DATABASE` and `fsync` cannot, and a scratch database
+  # relaxing its own commits is a very different thing from a dev
+  # container relaxing them for everybody's data.
+  $COMPOSE exec -T postgres \
+    psql -v ON_ERROR_STOP=1 -U synveda -d synveda \
+    -c "alter database $EVAL_DB set synchronous_commit = off" >/dev/null
   $COMPOSE exec -T postgres \
     psql -v ON_ERROR_STOP=1 -U synveda -d "$EVAL_DB" -c \
     "create extension if not exists vector;
@@ -266,6 +282,16 @@ eval_up() {
   # Phase 2: the gateway under measurement.
   SYNVEDA_LISTEN_ADDR=${EVAL_GATEWAY_URL#http://}
   export SYNVEDA_LISTEN_ADDR
+  # The gateway's pool is shared between request handlers and the
+  # background workers, and its default of eight wedged this stack on
+  # EVAL-3's LongMemEval run: ~4,900 events of sustained ingestion, the
+  # extraction worker and index sweeper holding every connection, and
+  # seventeen minutes of 503 on every `/v1` surface with no recovery.
+  # Raised here rather than in the product, because the product's default
+  # is a deployment decision and this is a laptop seeding a benchmark.
+  # Postgres admits 100; two gateways at 32 leaves room.
+  SYNVEDA_DB_MAX_CONNECTIONS=${SYNVEDA_DB_MAX_CONNECTIONS:-32}
+  export SYNVEDA_DB_MAX_CONNECTIONS
   eval_port_free "$EVAL_GATEWAY_URL"
   ./target/debug/synveda-gateway >"$EVAL_STATE/gateway.log" 2>&1 &
   EVAL_PID=$!
@@ -363,8 +389,9 @@ EOF
 eval_longmemeval() {
   ./target/debug/synveda-eval longmemeval \
     --env "$EVAL_ENV" \
-    --corpus "${EVAL_LONGMEMEVAL_CORPUS:-evals/fixtures/longmemeval/longmemeval_s.json}" \
+    ${EVAL_LONGMEMEVAL_CORPUS:+--corpus "$EVAL_LONGMEMEVAL_CORPUS"} \
     --instances "${EVAL_LONGMEMEVAL_INSTANCES:-10}" \
+    --seed-timeout-secs "${EVAL_LONGMEMEVAL_SEED_TIMEOUT:-1800}" \
     ${EVAL_LONGMEMEVAL_JUDGED:+--judged} \
     ${EVAL_BASELINE:+--baseline "$EVAL_BASELINE"} \
     --report "${EVAL_REPORT:-$EVAL_STATE/longmemeval.json}" \

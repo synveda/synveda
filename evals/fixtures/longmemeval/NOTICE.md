@@ -35,15 +35,15 @@ corpus is identified by its hash rather than by its presence.
 
 ## Fetching it
 
-Follow the upstream repository's own instructions — it distributes the data
-separately from the code, and the download location is stated in its README
-rather than here, because a URL copied into a second repository is a URL
-that goes stale silently.
+Upstream distributes the data separately from the code, on Hugging Face.
+Verified 2026-08-09:
 
-Place two things in this directory:
-
-- the corpus file, e.g. `longmemeval_s.json`
-- upstream's own `LICENSE` file, unmodified
+```sh
+cd evals/fixtures/longmemeval
+B=https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main
+curl -sLO "$B/longmemeval_s_cleaned.json"          # 264.5 MiB — the default
+curl -sL -o LICENSE https://raw.githubusercontent.com/xiaowu0162/LongMemEval/main/LICENSE
+```
 
 Both are ignored by git (see `.gitignore`). The licence gate asserts the
 second is present whenever the first is: a vendored corpus keeps its licence
@@ -51,15 +51,50 @@ file intact, and a fetched one is no different.
 
 ## Which variant to fetch
 
-| File | What it holds | What it measures |
+**Mind the `_cleaned` suffix.** A 2025/09 release "further cleaned up the
+history sessions to prevent interference on answer correctness", and the
+files were renamed with it. The older `longmemeval_s.json` and
+`longmemeval_m.json` names this directory first assumed no longer exist,
+which is worth knowing before a run reports a missing file.
+
+| File | Size | What it measures |
 | --- | --- | --- |
-| `longmemeval_s` | full haystacks, ~115k tokens each | the benchmark as published — this is the default |
-| `longmemeval_m` | much longer haystacks | the same questions under a harder retrieval load |
-| `longmemeval_oracle` | evidence sessions only | reading and judging with retrieval removed |
+| `longmemeval_s_cleaned.json` | 264.5 MiB | the benchmark as published — this is the default |
+| `longmemeval_m_cleaned.json` | larger | the same questions under a harder retrieval load |
+| `longmemeval_oracle.json` | 14.7 MiB | evidence sessions only — reading and judging with retrieval removed |
 
 `crates/synveda-eval/src/longmemeval.rs` reads all three — they share one
 format — and the report names which file and which digest, because
-`longmemeval_s` and `longmemeval_oracle` are very different claims.
+`longmemeval_s_cleaned` and `longmemeval_oracle` are very different claims.
+`scripts/publish-benchmark.mjs` will only publish a score computed from one
+of these three names.
+
+## What the corpus turned out to be
+
+Measured on fetch, and recorded because three of this harness's guards were
+written from the published format and met the file only afterwards:
+
+| | `longmemeval_oracle` | `longmemeval_s_cleaned` |
+| --- | --- | --- |
+| instances | 500 | 500 |
+| sessions | 948 | 23,867 |
+| turns | 10,960 | 246,750 |
+| abstention instances | 30 | 30 |
+
+Three things the transcription got wrong, all found by the loader refusing
+the file rather than absorbing it:
+
+1. **`answer` is not always a string** — 32 of the 500 are bare integers,
+   because "how many" has a number for an answer.
+2. **Every instance names `answer_session_ids`, abstention included.** The
+   guard here asserted the opposite. An abstention question asks about
+   something *half* discussed, so its named sessions are the partial
+   evidence a reader needs in order to establish the absence.
+3. **Thirteen session ids repeat inside a haystack and twelve turns are
+   blank.** Every duplicate is byte-identical to its twin and none of
+   either is in a session an instance names, so a repeat is fatal only
+   when the two sessions differ, and blank turns are skipped and counted
+   at seed time.
 
 ## What is read, and what is never written
 

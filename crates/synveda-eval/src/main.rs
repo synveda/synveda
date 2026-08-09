@@ -228,6 +228,29 @@ enum Command {
         #[arg(long, default_value_t = runner::DEFAULT_SEED_TIMEOUT.as_secs())]
         seed_timeout_secs: u64,
     },
+    /// Rewrite a baseline from a report a run already produced, without
+    /// measuring again.
+    ///
+    /// `--update-baseline` can only rewrite during a run, which is fine
+    /// for a suite that takes seconds and free for a suite that reaches no
+    /// model. LongMemEval is neither: a slice is twenty-five minutes of
+    /// seeding and the judged tier bills per instance, so re-measuring
+    /// purely to write floors would pay twice for one measurement.
+    ///
+    /// The floors are a function of a report's metrics and nothing else,
+    /// so this applies exactly what `--update-baseline` would have — same
+    /// `Baseline::updated`, same slack, same ceiling headroom — to a
+    /// report on disk. It is not a shortcut around measuring; it is the
+    /// same arithmetic over a measurement that already happened, and the
+    /// report it came from is named in the diff.
+    Rebaseline {
+        /// The run report to take the measurements from.
+        #[arg(long)]
+        report: PathBuf,
+        /// The baseline to rewrite.
+        #[arg(long)]
+        baseline: PathBuf,
+    },
     /// Measure the configured reader against its probes, graded by the
     /// configured judge (ADR-0061 decision 6).
     ///
@@ -512,20 +535,54 @@ async fn run(cli: Cli) -> Result<bool, String> {
             // The agreement pass owns the judge tally it produced; the
             // instances start their own, so a per-instance cost is not the
             // agreement pass's cost added to it.
-            let mut outcomes = Vec::with_capacity(picked.len());
+            // Seed everything, wait once, then probe — never a loop that
+            // interleaves the three. The first run against the real corpus
+            // did interleave them and measured its own extraction queue:
+            // instances 1-3 seeded in seconds and graded fine, and from
+            // instance 4 on every wait burned its whole timeout against
+            // the backlog the first three had built, six blocks came back
+            // empty, and the run reported a retrieval recall of 0.214 that
+            // was about throughput. EVAL-2 found this and EVAL-4 paid for
+            // it; the Q&A suite seeds once, waits for all of it, and only
+            // then probes.
+            let seeding = std::time::Instant::now();
+            let mut seeded = Vec::with_capacity(picked.len());
             for (index, instance) in picked.iter().enumerate() {
                 eprintln!(
-                    "synveda-eval: longmemeval/{} ({} of {}, {} session(s) as {})",
+                    "synveda-eval: longmemeval/{} seed ({} of {}, {} session(s), {} turn(s) as {})",
                     instance.question_id,
                     index + 1,
                     picked.len(),
                     instance.haystack_session_ids.len(),
+                    instance.turns(),
                     pool[index]
                 );
-                outcomes.push(
-                    longmemeval_runner::run_instance(&suite, instance, &pool[index], &mut tallies)
-                        .await?,
+                seeded
+                    .push(longmemeval_runner::seed_instance(&suite, instance, &pool[index]).await?);
+            }
+            eprintln!(
+                "synveda-eval: longmemeval waiting for the pipeline to finish with {} turn(s)",
+                seeded.iter().map(|entry| entry.events.len()).sum::<usize>()
+            );
+            longmemeval_runner::wait_for_all(&suite, &picked, &mut seeded, seeding).await?;
+
+            let mut outcomes = Vec::with_capacity(picked.len());
+            for ((index, instance), mut entry) in picked.iter().enumerate().zip(seeded) {
+                eprintln!(
+                    "synveda-eval: longmemeval/{} measure ({} of {})",
+                    instance.question_id,
+                    index + 1,
+                    picked.len()
                 );
+                longmemeval_runner::measure_instance(
+                    &suite,
+                    instance,
+                    &pool[index],
+                    &mut entry.outcome,
+                    &mut tallies,
+                )
+                .await?;
+                outcomes.push(entry.outcome);
             }
 
             let mut metrics = longmemeval_runner::metrics(&outcomes);
@@ -538,12 +595,27 @@ async fn run(cli: Cli) -> Result<bool, String> {
             }
             let models = longmemeval_runner::served_models(&outcomes);
             let gate = report::gate(&baseline, &metrics);
+            // A judged run measures every retrieval axis on its way to the
+            // QA one — same seeding, same blocks — so running the two
+            // tiers as two runs seeds ~5,000 turns twice for one
+            // measurement. It does not any more: the judged run also
+            // checks the deterministic tier's committed floors, and *that*
+            // is the gate its exit status honours. Decision 5 stands
+            // exactly as written — the judged half still gates nothing;
+            // the half that always gated still does.
+            let retrieval_gate = judged
+                .then(|| {
+                    Baseline::load(std::path::Path::new(longmemeval_runner::RETRIEVAL_BASELINE))
+                        .map(|retrieval| report::gate(&retrieval, &metrics))
+                })
+                .transpose()?;
             let run = longmemeval_runner::Report {
                 started_at,
                 gateway_url: environment.gateway_url.clone(),
                 tenant_id: environment.tenant_id.clone(),
                 slice,
                 tier: if judged { "judged" } else { "retrieval" }.to_owned(),
+                retrieval_gate,
                 model_drift: baseline.model_drift(&models),
                 models,
                 independence,
@@ -579,13 +651,67 @@ async fn run(cli: Cli) -> Result<bool, String> {
                 );
                 return Ok(true);
             }
-            // The judged tier gates nothing (decision 5): it is off the
-            // merge path and off the nightly because a gate that fails when
-            // a model changes rather than when the code changes is an alarm
-            // nobody keeps. Its breaches are printed and its exit status is
-            // success — the deterministic tier is where a regression stops
-            // a build.
-            Ok(judged || run.gate.passed)
+            // The judged tier's own bounds gate nothing (decision 5): a
+            // gate that fails when a model changes rather than when the
+            // code changes is an alarm nobody keeps, so its breaches print
+            // and do not fail. The retrieval floors it also measured are a
+            // different matter — those are the ones that have always
+            // gated, and a judged run is not a way to avoid them.
+            Ok(match &run.retrieval_gate {
+                Some(retrieval) => retrieval.passed,
+                None => run.gate.passed,
+            })
+        }
+        Command::Rebaseline {
+            report: report_path,
+            baseline: baseline_file,
+        } => {
+            let raw = std::fs::read_to_string(&report_path)
+                .map_err(|err| format!("read {}: {err}", report_path.display()))?;
+            let run: serde_json::Value = serde_json::from_str(&raw)
+                .map_err(|err| format!("{} is not a report: {err}", report_path.display()))?;
+            let metrics: std::collections::BTreeMap<String, f64> = serde_json::from_value(
+                run.get("metrics").cloned().unwrap_or_default(),
+            )
+            .map_err(|err| format!("{} carries no metrics map: {err}", report_path.display()))?;
+            if metrics.is_empty() {
+                return Err(format!(
+                    "{} measured nothing, so there are no floors to write from it",
+                    report_path.display()
+                ));
+            }
+            // A gate that breached is a run that says the product is worse
+            // than the committed floor. Writing *that* in as the new floor
+            // is how a regression becomes the baseline, so it takes a
+            // second look rather than a flag nobody re-reads.
+            if run.pointer("/gate/passed") == Some(&serde_json::Value::Bool(false)) {
+                eprintln!(
+                    "synveda-eval: warning — {} breached its gate, so these floors are being \
+                     written from a run the committed baseline called a regression",
+                    report_path.display()
+                );
+            }
+
+            let baseline = Baseline::load(&baseline_file)?;
+            let mut updated = baseline.updated(&metrics);
+            // Keyed to what the API served on that run (ADR-0061
+            // decision 6), taken from the report rather than assumed.
+            if let Some(models) = run.get("models") {
+                updated.models = serde_json::from_value(models.clone()).unwrap_or_default();
+            }
+            let body = serde_json::to_string_pretty(&updated)
+                .map_err(|err| format!("serialise the baseline: {err}"))?;
+            std::fs::write(&baseline_file, format!("{body}\n"))
+                .map_err(|err| format!("write {}: {err}", baseline_file.display()))?;
+            eprintln!(
+                "synveda-eval: rewrote {} from {} ({} bounded metric(s), {} model(s) keyed) — \
+                 review the diff",
+                baseline_file.display(),
+                report_path.display(),
+                updated.metrics.len(),
+                updated.models.len()
+            );
+            Ok(true)
         }
         Command::Read {
             probes: probes_dir,
