@@ -68,11 +68,9 @@ memory one; the two columns apart cannot say that.
 
 <!-- benchmarks:begin -->
 
-_No score has been published yet._ The corpus is fetched rather than committed
-(`evals/fixtures/longmemeval/NOTICE.md`), and `scripts/publish-benchmark.mjs` refuses
-any run that did not measure a LongMemEval release — so this table stays empty until
-somebody runs the real thing, rather than filling with numbers from a corpus that
-merely has the right shape.
+| Release | QA accuracy | Retrieval recall | Judge agreement | Reader | Judge | Instances | Corpus | Commit | Measured |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| [0.1.0](../evals/scores/longmemeval-0.1.0-29ae21f388b7.json) | 0.300 | 0.357 | 1.000 | claude-opus-5 (high) | claude-opus-5 (high) | 10 of 500 | `longmemeval_s_cleaned.json` `cd766d50fe98` | `29ae21f388b7` | 2026-08-09 |
 
 <!-- benchmarks:end -->
 

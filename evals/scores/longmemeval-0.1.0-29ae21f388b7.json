@@ -1,0 +1,65 @@
+{
+  "benchmark": "longmemeval",
+  "version": "0.1.0",
+  "commit": "29ae21f388b735c951016bc325f52a76d954aa09",
+  "measured_at": "2026-08-09T20:51:05.104760+00:00",
+  "corpus": {
+    "file": "longmemeval_s_cleaned.json",
+    "digest": "cd766d50fe982186db24cea5d73ffaccdda7e0fc1e6eac52bc1318898b4ad7f2",
+    "instances": 500
+  },
+  "slice": {
+    "file": "longmemeval_s_cleaned.json",
+    "digest": "cd766d50fe982186db24cea5d73ffaccdda7e0fc1e6eac52bc1318898b4ad7f2",
+    "corpus_bytes": 277383467,
+    "corpus_instances": 500,
+    "instances": 10,
+    "rule": "10 of 500 instance(s), evenly spread over (question_type, question_id)",
+    "abstention_instances": 2,
+    "types": {
+      "knowledge-update": 2,
+      "multi-session": 3,
+      "single-session-assistant": 1,
+      "single-session-user": 2,
+      "temporal-reasoning": 2
+    },
+    "turns": 4927
+  },
+  "models": {
+    "judge": "claude-opus-5",
+    "judge_effort": "high",
+    "reader": "claude-opus-5",
+    "reader_effort": "high"
+  },
+  "reader": "claude-opus-5 (high)",
+  "judge": "claude-opus-5 (high)",
+  "judge_agreement": 1,
+  "judge_false_accept_rate": 0,
+  "judge_false_reject_rate": 0,
+  "qa_accuracy": 0.3,
+  "qa_per_type": 0.267,
+  "retrieval_recall": 0.357,
+  "bound_instances": 1,
+  "independence": "reader `claude-api` and judge `claude-api` are both model-backed; ADR-0061 option 7 keeps them separate calls but allows the same family, so a shared model id means the grade carries a known self-reading bias with no bound on it (reader model: claude-opus-5)",
+  "metrics": {
+    "judge_agreement": 1,
+    "judge_agreement_starter": 1,
+    "judge_false_accept_rate": 0,
+    "judge_false_reject_rate": 0,
+    "judge_ungraded": 0,
+    "longmemeval_abstention_accuracy": 1,
+    "longmemeval_abstention_empty_blocks": 0,
+    "longmemeval_bound_instances": 1,
+    "longmemeval_empty_blocks": 0,
+    "longmemeval_instances_complete": 0.125,
+    "longmemeval_latency_p95_ms": 58.394,
+    "longmemeval_over_abstention": 0.75,
+    "longmemeval_per_type": 0.263,
+    "longmemeval_qa_accuracy": 0.3,
+    "longmemeval_qa_per_type": 0.267,
+    "longmemeval_qa_ungraded": 0,
+    "longmemeval_retrieval_recall": 0.357,
+    "longmemeval_tokens_mean": 973,
+    "longmemeval_unattributed_records": 0
+  }
+}

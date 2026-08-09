@@ -1,29 +1,32 @@
 {
-  "note": "LongMemEval's model-judged tier (EVAL-3, ADR-0061 decision 5) — `make eval-longmemeval-judged`. The published figure, and the one that gates nothing: it is off the merge path and off the nightly for ADR-0028 decision 6's reason, restated — a gate that fails when a model changes rather than when the code changes is an alarm nobody keeps. The command exits successfully even when a bound here is breached; breaches are printed, and the deterministic tier (evals/baseline-longmemeval-retrieval.json) is where a regression stops a build.\n\nTwo files rather than decision 6's one, and the reason is mechanical rather than a preference: `report::gate` treats a bounded metric a run did not measure as a breach — which is what stops a suite losing coverage quietly — so a single file bounding both tiers would fail whichever tier ran. Decision 7 gave the tiers separate targets; separate baselines follow from that.\n\n`models` is the point of this file. The score is a joint property of three things: Synveda's block, the reader model that answers from it, and the judge model that grades the answer. Both are recorded from what the API *served* rather than from the alias requested (ADR-0046 decision 12's mechanism, applied twice), both are written here by `--update-baseline`, and a run whose served models differ says so under `model_drift` in its report. It keys; it does not gate. A memory benchmark figure quoted without its reader model is not reproducible by anyone including us, and the industry convention of quoting one anyway is not a reason to adopt it.\n\nThe reader's *effort* is keyed beside its version, and for a reason a version alone would hide: a reader that reasons harder can paper over a worse block, so a score measured at high effort and one measured at low are not the same claim about this product.\n\nEvery quality floor here is 0.0, which gates nothing and is the point: the axis and its *direction* are declared so `--update-baseline` knows which way to write it, and the number lands from the first run against the real corpus. A floor invented before anything measured it would be a number somebody made up, in the one file a published marketing artefact is computed against.\n\njudge_agreement comes from the labelled sets measured *inside* this run (decision 4), not from a separate `make eval-judge`, so publishing a score without its judge's agreement rate is structurally impossible. No claim EVAL-3 publishes may be tighter than that number, and when reversal trigger (a) fires — the agreement too low for the differences we want to claim — the judge is the finding rather than the score.\n\nExpect `longmemeval_abstention_accuracy` to breach as \"measured nowhere\" on small slices: 30 of LongMemEval's 500 instances are abstention instances, so a ten-instance slice may contain none. That is the coverage rule working — a bounded axis this run did not measure is reported rather than passed over — and it is the same statement the slice line makes when it says how many abstention instances were in the slice.\n\nTwo axes carry real bounds already because neither needs a measurement to justify. longmemeval_qa_ungraded is max 0 like the retrieval tier's unattributed records: an accuracy whose denominator shrank because the reader or the judge errored is an accuracy over the easy half. longmemeval_over_abstention is max 1 as a placeholder for a ceiling — it is the axis that stops a reader gaming longmemeval_abstention_accuracy by declining everything, so it is written as a ceiling and `--update-baseline` will tighten it to what a run measured plus headroom.",
+  "note": "LongMemEval's model-judged tier (EVAL-3, ADR-0061 decision 5) \u2014 `make eval-longmemeval-judged`. The published figure, and the one that gates nothing: it is off the merge path and off the nightly for ADR-0028 decision 6's reason, restated \u2014 a gate that fails when a model changes rather than when the code changes is an alarm nobody keeps. The command exits successfully even when a bound here is breached; breaches are printed, and the deterministic tier (evals/baseline-longmemeval-retrieval.json) is where a regression stops a build.\n\nTwo files rather than decision 6's one, and the reason is mechanical rather than a preference: `report::gate` treats a bounded metric a run did not measure as a breach \u2014 which is what stops a suite losing coverage quietly \u2014 so a single file bounding both tiers would fail whichever tier ran. Decision 7 gave the tiers separate targets; separate baselines follow from that.\n\n`models` is the point of this file. The score is a joint property of three things: Synveda's block, the reader model that answers from it, and the judge model that grades the answer. Both are recorded from what the API *served* rather than from the alias requested (ADR-0046 decision 12's mechanism, applied twice), both are written here by `--update-baseline`, and a run whose served models differ says so under `model_drift` in its report. It keys; it does not gate. A memory benchmark figure quoted without its reader model is not reproducible by anyone including us, and the industry convention of quoting one anyway is not a reason to adopt it.\n\nThe reader's *effort* is keyed beside its version, and for a reason a version alone would hide: a reader that reasons harder can paper over a worse block, so a score measured at high effort and one measured at low are not the same claim about this product.\n\nEvery quality floor here is 0.0, which gates nothing and is the point: the axis and its *direction* are declared so `--update-baseline` knows which way to write it, and the number lands from the first run against the real corpus. A floor invented before anything measured it would be a number somebody made up, in the one file a published marketing artefact is computed against.\n\njudge_agreement comes from the labelled sets measured *inside* this run (decision 4), not from a separate `make eval-judge`, so publishing a score without its judge's agreement rate is structurally impossible. No claim EVAL-3 publishes may be tighter than that number, and when reversal trigger (a) fires \u2014 the agreement too low for the differences we want to claim \u2014 the judge is the finding rather than the score.\n\nExpect `longmemeval_abstention_accuracy` to breach as \"measured nowhere\" on small slices: 30 of LongMemEval's 500 instances are abstention instances, so a ten-instance slice may contain none. That is the coverage rule working \u2014 a bounded axis this run did not measure is reported rather than passed over \u2014 and it is the same statement the slice line makes when it says how many abstention instances were in the slice.\n\nTwo axes carry real bounds already because neither needs a measurement to justify. longmemeval_qa_ungraded is max 0 like the retrieval tier's unattributed records: an accuracy whose denominator shrank because the reader or the judge errored is an accuracy over the easy half. longmemeval_over_abstention is max 1 as a placeholder for a ceiling \u2014 it is the axis that stops a reader gaming longmemeval_abstention_accuracy by declining everything, so it is written as a ceiling and `--update-baseline` will tighten it to what a run measured plus headroom.\n\nlongmemeval_over_abstention is reported and deliberately NOT bounded, having briefly been bounded at max 1.125 \u2014 the measured 0.75 with the standard 1.5x ceiling headroom applied to a rate that cannot exceed 1.0. A bound no run can breach is worse than no bound, because it reads as coverage. It is unbounded for a second and better reason too: at 0.75 it does not currently measure what its name says. Six of the eight answerable instances were declined because retrieval bound only 36% of their evidence sessions and the block genuinely did not contain the answer \u2014 the reader declining there is the behaviour EVAL-1 decision 4 calls correct, not timidity. Until the axis can separate 'the reader was cautious' from 'the block was empty', gating it would fail runs for a retrieval change under a reader's name.",
+  "models": {
+    "judge": "claude-opus-5",
+    "judge_effort": "high",
+    "reader": "claude-opus-5",
+    "reader_effort": "high"
+  },
   "metrics": {
-    "longmemeval_qa_accuracy": {
-      "min": 0.0,
-      "slack": 0.03
-    },
-    "longmemeval_qa_per_type": {
-      "min": 0.0,
-      "slack": 0.03
-    },
-    "longmemeval_abstention_accuracy": {
-      "min": 0.0,
-      "slack": 0.05
-    },
-    "longmemeval_over_abstention": {
-      "max": 1.0
-    },
-    "longmemeval_qa_ungraded": {
-      "max": 0.0
-    },
     "judge_agreement": {
-      "min": 0.0,
+      "min": 0.95,
       "slack": 0.05
     },
     "judge_ungraded": {
+      "max": 0.0
+    },
+    "longmemeval_abstention_accuracy": {
+      "min": 0.95,
+      "slack": 0.05
+    },
+    "longmemeval_qa_accuracy": {
+      "min": 0.27,
+      "slack": 0.03
+    },
+    "longmemeval_qa_per_type": {
+      "min": 0.237,
+      "slack": 0.03
+    },
+    "longmemeval_qa_ungraded": {
       "max": 0.0
     }
   }
