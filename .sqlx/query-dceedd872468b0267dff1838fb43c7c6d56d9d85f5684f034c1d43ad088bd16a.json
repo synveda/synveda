@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select e.record_id as \"record_id!\"\n        from record_embeddings e\n        join records r on r.id = e.record_id\n        where e.tenant_id = $1\n          and e.dim = 1024\n          and e.model = $3\n          and r.tenant_id = $1\n          and (r.scope_id, r.sensitivity)\n              in (select * from unnest($4::uuid[], $5::text[]))\n        order by e.embedding::vector(1024) <=> $2::real[]::vector(1024)\n        limit $6\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "record_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float4Array",
+        "Text",
+        "UuidArray",
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "dceedd872468b0267dff1838fb43c7c6d56d9d85f5684f034c1d43ad088bd16a"
+}
