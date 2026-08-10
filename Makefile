@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-backlog check-benchmarks check-corpus-licences check-npm-licences ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-backlog check-benchmarks check-chart-images check-corpus-licences check-npm-licences chart-lint ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
