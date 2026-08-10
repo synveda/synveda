@@ -160,6 +160,30 @@ fn plan_cache_mode_from_env() -> PlanCacheMode {
     }
 }
 
+/// Which pgvector produced these numbers, and which PostgreSQL.
+///
+/// The harness records it because the harness is what talked to the
+/// server — the same reason EVAL-3's reports carry their model versions
+/// "as served" rather than having the publisher guess them afterwards.
+/// Without it a row cannot honour ADR-0063's own reversal trigger, "the
+/// harness is re-run on a pgvector major bump", and
+/// `scripts/publish-ann-bench.mjs` refuses to publish one — by hand least
+/// of all, which is the edit that would make the field decorative.
+async fn server_versions(pool: &PgPool) -> (String, String) {
+    let row = sqlx::query!(
+        r#"select (select extversion from pg_extension where extname = 'vector')
+                    as "pgvector",
+                  current_setting('server_version') as "postgres!""#
+    )
+    .fetch_one(pool)
+    .await
+    .expect("read the server versions");
+    let pgvector = row.pgvector.expect(
+        "pgvector is not installed in this database — the dense leg has no index to measure",
+    );
+    (pgvector, row.postgres)
+}
+
 /// Set transaction-locally, the way `dense_candidates` sets its own GUCs
 /// — so nothing an arm chooses can outlive its transaction into the pool.
 async fn set_plan_cache_mode(conn: &mut sqlx::PgConnection, mode: PlanCacheMode) {
@@ -660,6 +684,9 @@ async fn dense_leg_recall_and_latency() {
         .await
         .expect("migrate the scratch database");
 
+    let (pgvector_version, postgres_version) = server_versions(&pool).await;
+    eprintln!("=== pgvector {pgvector_version} on PostgreSQL {postgres_version} ===");
+
     eprintln!("=== seeding {records_total} records over {tenant_count} tenants ===");
     let corpus = seed(&pool, records_total, tenant_count, scope_count).await;
 
@@ -835,6 +862,10 @@ async fn dense_leg_recall_and_latency() {
             // leaving it alone let the planner choose a different index
             // part-way through a run.
             "plan_cache_mode": plan_cache.as_guc(),
+            // The engine that produced the numbers, recorded where it was
+            // read rather than reconstructed at publish time.
+            "pgvector_version": pgvector_version,
+            "postgres_version": postgres_version,
             "k": K,
             "dim": DIM,
             "corpus": {
