@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select set_config('hnsw.iterative_scan', 'relaxed_order', true) as \"a!\",\n                  set_config('hnsw.ef_search', '100', true) as \"b!\"",
+  "query": "\n        select set_config('hnsw.iterative_scan', $1, true) as \"a!\",\n               set_config('hnsw.ef_search', $2, true) as \"b!\"\n        ",
   "describe": {
     "columns": [
       {
@@ -15,12 +15,15 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Text",
+        "Text"
+      ]
     },
     "nullable": [
       null,
       null
     ]
   },
-  "hash": "b2502b8901af06b43d6a78fbf29d0bd0fae40f3ddb61c49b5c17c038ec263f69"
+  "hash": "2f59d2899930761a7418ff8cca878c1fbd12ada2ba4f32fd2caa4b8ce05bb217"
 }

@@ -182,6 +182,64 @@ pub struct IndexableRecord {
     pub content: String,
 }
 
+/// How pgvector is asked to walk the HNSW graph for one dense query.
+///
+/// These were constants inside the query until TEN-3 measured them
+/// (ADR-0063 arm B): `relaxed_order` and an `ef_search` of 100, set
+/// transaction-locally so tuning never leaks into a pooled connection.
+/// They are parameters rather than environment reads because
+/// configuration belongs at the edge — the gateway reads its settings and
+/// passes them down (ADR-0007's shape, and what `SYNVEDA_SEARCH_POLL_MS`
+/// already does for the indexer); a store that read its own environment
+/// would put deployment config below the seam that owns it.
+///
+/// The defaults are exactly what the query hardcoded, so
+/// `DenseTuning::default()` is the behaviour every caller had before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DenseTuning {
+    /// Candidate-list size per HNSW layer. Raising it trades latency for
+    /// recall, which is the whole of arm B.
+    pub ef_search: u32,
+    /// Whether the scan continues past the first batch when the filter
+    /// eats it.
+    pub iterative_scan: IterativeScan,
+}
+
+impl Default for DenseTuning {
+    fn default() -> Self {
+        Self {
+            ef_search: 100,
+            iterative_scan: IterativeScan::RelaxedOrder,
+        }
+    }
+}
+
+/// pgvector's `hnsw.iterative_scan` modes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IterativeScan {
+    /// No iteration: one batch, then the filter. The pre-0.8 behaviour,
+    /// here so a benchmark can measure what iterative scanning buys.
+    Off,
+    /// Keep scanning; results may not be in exact distance order.
+    RelaxedOrder,
+    /// Keep scanning, preserving distance order.
+    StrictOrder,
+}
+
+impl IterativeScan {
+    /// The GUC value. A `&'static str` bound as a parameter, never
+    /// interpolated — `set_config` takes its value as an argument, so
+    /// this stays inside the compile-checked-queries rule.
+    #[must_use]
+    pub fn as_guc(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::RelaxedOrder => "relaxed_order",
+            Self::StrictOrder => "strict_order",
+        }
+    }
+}
+
 /// One dense-leg hit: a candidate id and its cosine distance, nearest
 /// first.
 #[derive(Debug)]
@@ -308,6 +366,7 @@ pub async fn dense_candidates(
     query_vector: &[f32],
     allowed: &[ScopeTier],
     limit: i64,
+    tuning: DenseTuning,
 ) -> Result<Vec<DenseHit>> {
     let (scopes, sensitivities) = pair_arrays(allowed);
     // Iterative scanning (pgvector ≥0.8) is what makes predicate
@@ -315,9 +374,11 @@ pub async fn dense_candidates(
     // starves the LIMIT after ef_search candidates (ADR-0024 decision 5).
     sqlx::query!(
         r#"
-        select set_config('hnsw.iterative_scan', 'relaxed_order', true) as "a!",
-               set_config('hnsw.ef_search', '100', true) as "b!"
-        "#
+        select set_config('hnsw.iterative_scan', $1, true) as "a!",
+               set_config('hnsw.ef_search', $2, true) as "b!"
+        "#,
+        tuning.iterative_scan.as_guc(),
+        tuning.ef_search.to_string(),
     )
     .fetch_one(&mut *conn)
     .await

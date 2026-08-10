@@ -78,6 +78,28 @@ const TIERS: [Sensitivity; 4] = [
     Sensitivity::Restricted,
 ];
 
+/// The arm, from the environment. Arms are separate process runs rather
+/// than a loop, so nothing an arm sets can leak into the next one — and
+/// so a sweep is a shell loop somebody can read.
+fn tuning_from_env() -> search::DenseTuning {
+    let default = search::DenseTuning::default();
+    search::DenseTuning {
+        ef_search: std::env::var("SYNVEDA_BENCH_EF_SEARCH")
+            .ok()
+            .and_then(|raw| raw.parse().ok())
+            .unwrap_or(default.ef_search),
+        iterative_scan: match std::env::var("SYNVEDA_BENCH_ITERATIVE").as_deref() {
+            Ok("off") => search::IterativeScan::Off,
+            Ok("strict_order") => search::IterativeScan::StrictOrder,
+            Ok("relaxed_order") => search::IterativeScan::RelaxedOrder,
+            Ok(other) => panic!(
+                "SYNVEDA_BENCH_ITERATIVE must be off|relaxed_order|strict_order, got {other}"
+            ),
+            Err(_) => default.iterative_scan,
+        },
+    }
+}
+
 fn env_usize(name: &str, default: usize) -> usize {
     std::env::var(name)
         .ok()
@@ -284,14 +306,17 @@ async fn explain_dense(
     tenant: TenantId,
     query: &[f32],
     allowed: &[ScopeTier],
+    tuning: search::DenseTuning,
 ) -> String {
     let scopes: Vec<Uuid> = allowed.iter().map(|a| a.scope_id.into()).collect();
     let tiers: Vec<String> = allowed.iter().map(|a| a.sensitivity.to_string()).collect();
     // The same transaction-local tuning `search::dense_candidates` sets,
     // so this explains the query the product runs and not a cousin.
     sqlx::query!(
-        r#"select set_config('hnsw.iterative_scan', 'relaxed_order', true) as "a!",
-                  set_config('hnsw.ef_search', '100', true) as "b!""#
+        r#"select set_config('hnsw.iterative_scan', $1, true) as "a!",
+                  set_config('hnsw.ef_search', $2, true) as "b!""#,
+        tuning.iterative_scan.as_guc(),
+        tuning.ef_search.to_string(),
     )
     .fetch_one(&mut *conn)
     .await
@@ -389,6 +414,7 @@ async fn dense_leg_recall_and_latency() {
     let tenant_count = env_usize("SYNVEDA_BENCH_TENANTS", 8);
     let scope_count = env_usize("SYNVEDA_BENCH_SCOPES", 16);
     let queries = env_usize("SYNVEDA_BENCH_QUERIES", 100);
+    let tuning = tuning_from_env();
 
     // Seeding runs a task per tenant; measurement is deliberately serial
     // on one connection, so a latency number is engine cost rather than
@@ -441,9 +467,10 @@ async fn dense_leg_recall_and_latency() {
                 .await
                 .expect("tenant tx");
             let started = Instant::now();
-            let approx = search::dense_candidates(&mut tx, tenant, MODEL, &query, &allowed, K)
-                .await
-                .expect("dense candidates");
+            let approx =
+                search::dense_candidates(&mut tx, tenant, MODEL, &query, &allowed, K, tuning)
+                    .await
+                    .expect("dense candidates");
             timings.push(started.elapsed());
             tx.rollback().await.expect("close the measuring tx");
 
@@ -463,7 +490,7 @@ async fn dense_leg_recall_and_latency() {
                 let mut tx = rls::begin_tenant_tx(&pool, tenant)
                     .await
                     .expect("tenant tx");
-                plan = explain_dense(&mut tx, tenant, &query, &allowed).await;
+                plan = explain_dense(&mut tx, tenant, &query, &allowed, tuning).await;
                 tx.rollback().await.expect("close the explain tx");
             }
 
@@ -493,7 +520,11 @@ async fn dense_leg_recall_and_latency() {
         });
     }
 
-    eprintln!("\n=== TEN-3 arm A (as shipped: iterative_scan=relaxed_order, ef_search=100) ===");
+    eprintln!(
+        "\n=== TEN-3 dense leg: iterative_scan={} ef_search={} ===",
+        tuning.iterative_scan.as_guc(),
+        tuning.ef_search
+    );
     eprintln!(
         "corpus {records_total} records / {tenant_count} tenants / {scope_count} scopes, dim {DIM}"
     );
@@ -535,8 +566,11 @@ async fn dense_leg_recall_and_latency() {
             .collect();
         let report = serde_json::json!({
             "benchmark": "ten3-dense-leg",
-            "arm": "A",
-            "arm_description": "as shipped: hnsw.iterative_scan=relaxed_order, hnsw.ef_search=100",
+            "tuning": {
+                "iterative_scan": tuning.iterative_scan.as_guc(),
+                "ef_search": tuning.ef_search,
+                "is_shipped_default": tuning == search::DenseTuning::default(),
+            },
             "k": K,
             "dim": DIM,
             "corpus": {
