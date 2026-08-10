@@ -45,6 +45,51 @@ none of those three has ever been measured against a corpus. That is the
 cheap arm now — a session setting and a sweep, against a schema change that
 costs `records` its primary key.
 
+## Measurements (2026-08-10): arms A and B
+
+64,000 records over 8 tenants, 16 scopes, dim 1024, recall@10 against exact
+search, 100 queries per regime. `demos/ten-3-dense-leg-sweep.sh`, fresh
+database per arm.
+
+| iterative_scan | ef_search | broad recall | broad p50 | selective recall | selective p50 |
+|---|---|---|---|---|---|
+| off | 100 | 0.341 | 5.91ms | 0.990 | 1.31ms |
+| relaxed_order | 100 *(shipped)* | 0.878 | 50.87ms | 1.000 | 1.33ms |
+| relaxed_order | 400 | **0.939** | 50.16ms | 1.000 | 1.24ms |
+| relaxed_order | 1000 | 0.761 | 30.48ms | 0.998 | 1.19ms |
+
+Four things, in the order they matter.
+
+1. **The selective regime never touches HNSW.** Its plan is
+   `records_tenant_scope_idx` → 125 rows → exact sort: perfect recall, 1.3ms,
+   and unmoved by every tuning above. Migration 0016 predicted this in
+   prose; it is now measured. **Nothing in this table is a reason to
+   partition**, because partitioning by tenant cannot reach the regime that
+   is already exact and cannot improve the one number it could touch by more
+   than tuning already does.
+2. **Iterative scanning is worth 2.6x recall and 8.6x latency** (0.341 →
+   0.878, 5.9ms → 50.9ms). ADR-0024 decision 5 adopted it on reasoning in
+   Phase 1; this is the first number against it, and it is a large one in
+   both directions. Anything that later trades it away has to price both.
+3. **`ef_search` 100 → 400 is six points of recall for free** — 0.878 →
+   0.939 at 50.9ms → 50.2ms. The scan is already running past `ef_search`,
+   so raising it changes the batch size rather than the work. The shipped
+   default is leaving that on the table.
+4. **And it is not monotonic: 1000 is *worse* than 100** (0.761) while also
+   being *faster* (30.5ms p50, 51.9ms p95). Faster and worse together means
+   the scan is stopping early — pgvector bounds an iterative scan with
+   `hnsw.max_scan_tuples` and `hnsw.scan_mem_multiplier`, and a large first
+   batch spends that budget sooner. So arm B is a two-dimensional sweep, not
+   a one-dimensional one, and the amendment above under-specified it: the
+   third unmeasured constant is a bound nobody has set at all.
+
+**What these numbers do not yet support.** Recall carries ±3 points of
+run-to-run variance at this corpus size (the shipped default measured 0.847
+and then 0.878), because record ids are UUIDv7 and each run builds a
+different graph. The 0.878 → 0.939 gap is about twice that and the 1000-arm
+gap larger still, but every row here is n=1. Repeats, and a `max_scan_tuples`
+axis, come before the gate in decision 3 is applied to anything.
+
 ## Context
 
 TEN-3's text is "Declarative partitioning by tenant hash for
