@@ -64,6 +64,22 @@ jobs:
       # nothing but node — and because a licence failure should not wait
       # behind a database.
       - run: node scripts/check-corpus-licences.mjs
+      # And one class further out (OPS-2, ADR-0062 decision 11). A chart
+      # references container images, which cargo-deny, check-npm-licences
+      # and check-corpus-licences all miss between them. Tags are matched
+      # too: bumping an image is the moment to re-read its licence, and a
+      # check that ignored tags would let that moment pass.
+      - run: node scripts/check-chart-images.mjs
+      # The chart renders in both shapes CI covers — the minimum a real
+      # install must state, and every optional path at once. Here rather
+      # than in a job of its own because it needs one binary and no
+      # cluster; the kind-cluster install test is the separate, slow one.
+      # Pinned to the version the chart was authored and verified against,
+      # so `make chart-lint` here is the run that happened there.
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.3
+      - run: make chart-lint
       # docs/BENCHMARKS.md's table is generated from evals/scores/*.json
       # (EVAL-3, ADR-0061 decision 11). This asserts they still agree, so
       # a hand-typed cell in the published artefact fails a build rather
@@ -120,6 +136,46 @@ jobs:
           name: eval-report-pr
           path: eval-report/
           if-no-files-found: warn
+
+  # OPS-2's acceptance criterion (ADR-0062 decision 7). The only job that
+  # asks the gateway *image* to serve: ADR-0055 built it and could not
+  # exercise it, because the bundled IdP's issuer is a `localhost` URL and
+  # RFC 6761 makes that the caller's own loopback. A Service DNS name is a
+  # real name, so in a cluster the gateway and the client resolve the
+  # issuer to the same place.
+  #
+  # It asserts a governed round trip, a CloudNativePG failover and a live
+  # RLS backstop — never readiness. "Every pod is Ready" is the shape
+  # EVAL-3's first complete run had: a validity guard that passed when
+  # there was nothing to validate.
+  #
+  # Budget: 20 minutes, of which the cold Rust release build inside the
+  # image is most. If it cannot hold that once layer caching settles, the
+  # split is chart-lint on every PR (it already runs in `layering`) and
+  # this on a nightly — the same division `eval` makes between its
+  # deterministic half and its retrieval half, for the same reason.
+  kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.3
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+      - run: demos/ops-2-helm-install.sh
+      - name: What the cluster looked like
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl get cluster -n synveda-test -o yaml || true
+          kubectl logs -n synveda-test deployment/synveda --all-containers --tail=200 || true
+          kubectl logs -n synveda-test synveda-install-test --all-containers --tail=200 || true
 
   typescript:
     runs-on: ubuntu-latest

@@ -1,0 +1,149 @@
+{{- if .Values.install.enabled }}
+{{- /*
+The install job — the enterprise profile's equivalent of `synveda init`,
+and deliberately the same two store-level writes ADR-0055 decision 1
+allowed an installer: the migrations, and one tenant row. Both are existing
+audited break-glass paths. Everything else in an initialised deployment —
+the org root, identities, role bindings, records — still arrives through
+the gateway under a real bearer and a PDP decision, which is what makes a
+second installer cheap enough to be a Job.
+
+Not a Helm hook. A pre-install hook runs before the release's own
+resources, so the Cluster it needs would not exist yet; the ordering that
+matters is enforced instead by the gateway's own wait — see the sentinel in
+gateway-deployment.yaml, which tests exactly the condition this job
+establishes. Named per revision because a Job's spec is immutable and an
+upgrade has to be able to run it again.
+
+Three steps, in order:
+  1. migrate  — `synveda db migrate` as the superuser (it creates a role
+                and an extension)
+  2. grant    — hand the gateway's login role membership of `synveda_app`,
+                the least-privilege role every migration has been granting
+                since 0003. Membership rather than a second grant set: one
+                place to be wrong is better than two that must agree.
+  3. tenant   — optional, install only, and convergent.
+*/ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "synveda.fullname" . }}-install-{{ .Release.Revision }}
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: install
+spec:
+  backoffLimit: {{ .Values.install.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.install.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "synveda.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: install
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "synveda.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        # CNPG has a cluster to bootstrap and a primary to elect, and
+        # `synveda db migrate` connects eagerly. Without this wait the job
+        # would exhaust its backoffLimit racing a database that was always
+        # going to arrive — a fresh install failing on its own start-up
+        # order. The secret this reads may not exist yet either; a pod
+        # waiting on a missing secret is pending, not failed, which is the
+        # behaviour we want.
+        - name: wait-for-postgres
+          image: {{ .Values.postgres.image }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command:
+            - sh
+            - -ec
+            - |
+              until psql "$DATABASE_URL" -tAc 'select 1' >/dev/null 2>&1; do
+                echo "waiting for {{ include "synveda.clusterName" . }} to accept connections"
+                sleep 3
+              done
+          env:
+            {{- include "synveda.adminDsnEnv" . | nindent 12 }}
+        - name: migrate
+          image: {{ include "synveda.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command: ["/usr/local/bin/synveda", "db", "migrate"]
+          env:
+            {{- include "synveda.adminDsnEnv" . | nindent 12 }}
+        - name: grant
+          image: {{ .Values.postgres.image }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command:
+            - sh
+            - -ec
+            - |
+              # `synveda_app` is NOLOGIN and holds exactly the grants the
+              # migrations gave it. The gateway's role inherits them by
+              # membership, so nothing here has to be kept in sync with a
+              # migration. Re-granting is a no-op, which is what makes the
+              # job safe to run on every upgrade.
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+                -c 'grant synveda_app to "{{ include "synveda.appRole" . }}"'
+              # Prove it, rather than assume it: this is the exact read the
+              # gateway's sentinel waits on.
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
+                "select pg_has_role('{{ include "synveda.appRole" . }}', 'synveda_app', 'member')" \
+                | grep -qx t
+          env:
+            {{- include "synveda.adminDsnEnv" . | nindent 12 }}
+      containers:
+        - name: tenant
+          image: {{ include "synveda.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if and .Release.IsInstall .Values.install.tenant.slug }}
+          command:
+            - sh
+            - -ec
+            - |
+              # Convergent, for ADR-0055 decision 7's reason: a second run
+              # against an initialised deployment reports what is there and
+              # changes nothing. Admission is an owner-role operation —
+              # `synveda_app` holds SELECT on `tenants` and nothing more —
+              # so this step runs under the admin identity too.
+              if out=$(synveda tenant create --slug "$SYNVEDA_TENANT_SLUG" --name "$SYNVEDA_TENANT_NAME" 2>&1); then
+                echo "$out"
+              else
+                case "$out" in
+                  *duplicate*|*"already exists"*)
+                    echo "tenant $SYNVEDA_TENANT_SLUG is already admitted; leaving it alone" ;;
+                  *)
+                    echo "$out" >&2; exit 1 ;;
+                esac
+              fi
+          env:
+            - name: SYNVEDA_TENANT_SLUG
+              value: {{ .Values.install.tenant.slug | quote }}
+            - name: SYNVEDA_TENANT_NAME
+              value: {{ default .Values.install.tenant.slug .Values.install.tenant.name | quote }}
+            {{- include "synveda.adminDsnEnv" . | nindent 12 }}
+          {{- else }}
+          command:
+            - sh
+            - -ec
+            - |
+              echo "schema migrated and the gateway role granted."
+              {{- if .Values.install.tenant.slug }}
+              echo "tenant admission runs on install only; this is revision {{ .Release.Revision }}."
+              {{- else }}
+              echo "no tenant requested (install.tenant.slug is empty)."
+              echo "admitting one needs the admin credential, not the gateway's —"
+              echo "see 'admitting a tenant' in the chart's NOTES."
+              {{- end }}
+          {{- end }}
+{{- end }}

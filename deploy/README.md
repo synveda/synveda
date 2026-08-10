@@ -3,7 +3,53 @@
 - `compose/` — SMB single-node profile (Postgres+pgvector+AGE+PGMQ, Rauthy,
   Temporal, TEI, Jaeger; FND-2) plus the gateway itself (`gateway/Dockerfile`,
   OPS-1). Installed with `synveda init` — see [docs/INSTALL.md](../docs/INSTALL.md).
-- `helm/` — enterprise multi-region profile. Lands with OPS-2 (Phase 3).
+- `helm/` — enterprise profile (OPS-2, ADR-0062): the gateway, an HA
+  Postgres cluster under CloudNativePG, and the wiring for a customer's
+  IdP. `helm/synveda/` is the chart, `helm/postgres/Dockerfile` builds its
+  Postgres image, and `helm/IMAGES.md` is the inventory every image in it
+  has to appear in (`make check-chart-images`).
+
+## The enterprise profile installs what has a consumer
+
+CloudNativePG is a dependency and ships. **Temporal and Qdrant do not**:
+nothing in this workspace links a Temporal client (VedaFlow went into
+Postgres, ADR-0003, and the Rust SDK's licence graph is inadmissible), and
+`VectorIndex` — the trait a Qdrant would sit behind — is OPS-4's and does
+not exist yet. Both are named in OPS-2's feature text; ADR-0062 decision 1
+records the triggers that put them in the chart.
+
+The **CloudNativePG operator is not installed by this chart**. It is
+cluster-scoped, and a product chart that owns cluster-scoped CRDs fights
+the next chart that wants them. Install it first; the chart renders a
+`Cluster` for it.
+
+## One gateway replica, and the chart refuses to render a second
+
+Not a default — a rendering error, with the reason. Two things in the
+gateway are process-local and both fail *silently* with more than one:
+pending logins live in memory (a callback landing on another pod is a 401
+for a login the IdP completed), and the scope-chain cache is invalidated
+in-process with no TTL (a hierarchy move handled by one replica leaves the
+others composing against the ancestry the mover left, which reads as a
+policy decision rather than a stale cache). OPS-7 is the feature that
+fixes both.
+
+What needed no work, because it was already done in the database: the
+audit chain's per-tenant head lock, the promotion sweep's watermark lock,
+the lapse sweep's idempotency stamp, PGMQ's archive-lock, and console
+sessions in a table. ADR-0062 decision 4 has the inventory.
+
+## The gateway stops being a superuser here
+
+The compose profile's gateway connects as `POSTGRES_USER`, which is the
+bootstrap superuser, and a superuser bypasses row-level security even where
+it is FORCED — so TEN-2's isolation backstop has been inert in every
+deployment that exists. In this profile the install job migrates under
+CNPG's superuser (migrations create a role and an extension) and then
+grants the gateway's own login role membership of `synveda_app`, the
+least-privilege role every migration has been granting since 0003. The
+gateway never holds an admin credential, and `values.yaml` has no key that
+can give it one.
 
 ## The gateway service is behind a profile
 

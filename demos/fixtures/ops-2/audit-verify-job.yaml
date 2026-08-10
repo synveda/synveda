@@ -1,0 +1,35 @@
+# `synveda audit verify` over everything the round trip produced.
+#
+# A pod of its own because chain verification walks the database and
+# recomputes every hash — an operator's check, not an API call — and the
+# test client deliberately holds no database credential.
+#
+# It runs under the **gateway's own least-privilege role**, not the admin
+# one: `synveda_app` holds SELECT on `audit_log` and no UPDATE or DELETE on
+# it at all (migration 0011), so this both verifies the chain and
+# demonstrates that verifying it needs nothing more than the role the
+# product already runs as.
+#
+# __TENANT_ID__ is substituted by demos/ops-2-helm-install.sh.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: audit-verify
+  namespace: synveda-test
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: verify
+          image: synveda/gateway:0.1.0
+          imagePullPolicy: Never
+          command: ["/usr/local/bin/synveda", "audit", "verify", "--tenant", "__TENANT_ID__"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: synveda-pg-app
+                  key: uri

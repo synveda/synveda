@@ -1,0 +1,229 @@
+{{- /*
+The gateway: one replica, on purpose and not as a starting point
+(ADR-0062 decision 4 — the chart refuses a values file that says
+otherwise, in _helpers.tpl). `Recreate` follows from the same fact: two
+gateways must not overlap even for the length of a rolling update, and the
+search-index volume is RWO.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "synveda.fullname" . }}
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "synveda.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        {{- include "synveda.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: gateway
+      {{- with .Values.gateway.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "synveda.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        # The sentinel. `/readyz` cannot serve this purpose: it is
+        # `select 1`, so it answers "the pool reached Postgres", which is
+        # true of an unmigrated database and of a role with no grants
+        # alike. This asks the question that actually gates the gateway —
+        # does the schema exist, and may this role read it — using only the
+        # gateway's own credential, so nothing here holds an admin one.
+        #
+        # `tenants` is the right table to ask about: `synveda_app` holds
+        # SELECT on it (ADR-0009 decision 5) and it is not tenant-scoped,
+        # so no RLS GUC is needed to read zero rows from it.
+        - name: wait-for-schema
+          image: {{ .Values.postgres.image }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command:
+            - sh
+            - -ec
+            - |
+              until psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc 'select 1 from tenants limit 1' >/dev/null 2>&1; do
+                echo "waiting for the install job: schema and the synveda_app grant"
+                sleep 3
+              done
+              echo "schema present and readable by this role"
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "synveda.appSecret" . }}
+                  key: uri
+      containers:
+        - name: gateway
+          image: {{ include "synveda.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8120
+          env:
+            # CNPG's app secret: not a superuser, no BYPASSRLS, and a
+            # member of `synveda_app` since the install job ran. This is
+            # the first deployment in which TEN-2's forced row-level
+            # security is enforced against the gateway rather than
+            # bypassed by it (ADR-0062 decision 2).
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "synveda.appSecret" . }}
+                  key: uri
+            # The image's default is 127.0.0.1:8120. A pod that binds
+            # loopback is a pod no Service can reach.
+            - name: SYNVEDA_LISTEN_ADDR
+              value: 0.0.0.0:8120
+            - name: SYNVEDA_PUBLIC_URL
+              value: {{ .Values.gateway.publicUrl | quote }}
+            - name: SYNVEDA_DB_MAX_CONNECTIONS
+              value: {{ .Values.gateway.dbMaxConnections | quote }}
+            - name: SYNVEDA_OIDC_ISSUERS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.existingSecret }}
+                  key: {{ .Values.oidc.secretKey }}
+            - name: SYNVEDA_EMBEDDER
+              value: {{ .Values.embedder | quote }}
+            {{- with .Values.embedderModel }}
+            - name: SYNVEDA_EMBEDDER_MODEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if eq .Values.embedder "tei" }}
+            - name: SYNVEDA_TEI_URL
+              value: {{ if .Values.tei.enabled }}http://{{ include "synveda.fullname" . }}-tei:80{{ else }}{{ .Values.tei.url }}{{ end }}
+            {{- end }}
+            - name: SYNVEDA_EXTRACTOR
+              value: {{ .Values.extractor.kind | quote }}
+            {{- with .Values.extractor.model }}
+            - name: SYNVEDA_EXTRACTOR_MODEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if eq .Values.extractor.kind "claude" }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.extractor.existingSecret }}
+                  key: ANTHROPIC_API_KEY
+            {{- end }}
+            {{- if eq .Values.extractor.kind "vllm" }}
+            - name: SYNVEDA_VLLM_BASE_URL
+              value: {{ .Values.extractor.baseUrl | quote }}
+            {{- end }}
+            {{- with .Values.otel.endpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+            - name: RUST_LOG
+              value: {{ .Values.gateway.logLevel | quote }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            # `select 1` against the pool. It is honest about a database
+            # outage — which is the property CNPG failover needs, since the
+            # pool is `connect_lazy` and a lost primary must take this pod
+            # out of the Service rather than crash-loop it — and it says
+            # nothing about the schema. The initContainer above covers
+            # that, once, at start.
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: search-index
+              mountPath: /var/lib/synveda/search
+            - name: tmp
+              mountPath: /tmp
+          {{- with .Values.gateway.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: search-index
+          persistentVolumeClaim:
+            claimName: {{ include "synveda.fullname" . }}-search
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.gateway.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.gateway.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.gateway.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+{{/*
+The Tantivy sidecar's storage. A cache with a rebuild cost, not a system of
+record: each tenant's index carries a state file and a watermark and heals
+from Postgres, and deleting a directory is the documented rebuild
+procedure. It gets a volume so a pod replacement is not a re-index of every
+tenant's corpus. RWO, which composes with the single replica above.
+*/ -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "synveda.fullname" . }}-search
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.gateway.searchIndex.size }}
+  {{- with .Values.gateway.searchIndex.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "synveda.fullname" . }}
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+  selector:
+    {{- include "synveda.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+{{- if .Values.serviceAccount.create }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "synveda.serviceAccountName" . }}
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

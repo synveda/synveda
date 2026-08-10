@@ -1,0 +1,38 @@
+{{- if .Values.ingress.enabled }}
+{{- /*
+Off by default. When it is on, its host must be the host in
+gateway.publicUrl — the chart refuses to render if they disagree, because
+the IdP's registered redirect URI and the console's Origin check are both
+derived from publicUrl and an ingress that answers on a different name
+produces two failures that look like neither.
+*/ -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "synveda.fullname" . }}
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "synveda.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

@@ -1,0 +1,27 @@
+apiVersion: v2
+name: synveda
+description: |
+  Synveda's enterprise profile — the gateway, an HA Postgres cluster under
+  CloudNativePG, and the wiring for a customer's IdP. OPS-2, ADR-0062.
+type: application
+
+# The chart's own version, and the product release it deploys. appVersion
+# tracks the workspace version in Cargo.toml; the image tag defaults to it,
+# so `helm upgrade` without an explicit tag deploys what the chart says it
+# deploys.
+version: 0.1.0
+appVersion: "0.1.0"
+
+kubeVersion: ">=1.29.0-0"
+
+home: https://github.com/synveda/synveda
+sources:
+  - https://github.com/synveda/synveda
+
+# No dependencies, deliberately. CloudNativePG is required and is *not* a
+# subchart: its operator is cluster-scoped, and a product chart that
+# installs cluster-scoped CRDs fights the next chart that wants them
+# (ADR-0062 decision 1). Install the operator first; this chart renders a
+# `Cluster` for it and fails with that instruction if the CRD is absent.
+annotations:
+  synveda.io/requires-operator: "cloudnative-pg"

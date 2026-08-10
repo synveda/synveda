@@ -1,0 +1,116 @@
+# The test issuer (OPS-2, ADR-0062 decision 8).
+#
+# Rauthy, at a Service DNS name. It is test scaffolding and not part of the
+# chart: an enterprise deployment wires a customer's directory, and a chart
+# that ships an IdP has invented a trust relationship (ADR-0055 decision 4,
+# one profile up).
+#
+# What makes the bundled IdP usable here when a laptop could not use it:
+# an OIDC issuer identifier is one URL that both the client and the gateway
+# must resolve to the same place, compared byte-for-byte against the
+# discovery document and the `iss` claim. On a laptop Rauthy's is
+# `http://localhost:8100/...`, and RFC 6761 makes every resolver answer
+# `localhost` with the *caller's own* loopback — so inside a container that
+# URL is the container. `idp.synveda-test.svc.cluster.local:8080` is a real
+# name: cluster DNS gives the gateway pod and the test client pod the same
+# answer, and the comparison holds.
+#
+# Dev-shaped secrets throughout, copied from deploy/compose/rauthy — this
+# IdP exists for the length of one CI job.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: synveda-test
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: idp-config
+  namespace: synveda-test
+data:
+  config.toml: |
+    [server]
+    listen_address = '0.0.0.0'
+    port_http = 8080
+    scheme = 'http'
+    # The Service, by the name everything in the cluster reaches it by.
+    # This is what Rauthy publishes as its issuer, and therefore what the
+    # gateway's trust entry has to say.
+    pub_url = 'idp.synveda-test.svc.cluster.local:8080'
+    proxy_mode = false
+
+    [encryption]
+    keys = ['fnd2dev1/LPieGaJQiyIJlTuMq4x5myh78LIEmnOoim9ipdsGspM=']
+    key_active = 'fnd2dev1'
+
+    [bootstrap]
+    admin_email = 'admin@localhost'
+    password_plain = 'synveda-dev-admin'
+    api_key = 'eyJuYW1lIjoic3ludmVkYS1kZXYiLCJhY2Nlc3MiOlt7Imdyb3VwIjoiQ2xpZW50cyIsImFjY2Vzc19yaWdodHMiOlsicmVhZCIsImNyZWF0ZSIsInVwZGF0ZSIsImRlbGV0ZSJdfSx7Imdyb3VwIjoiVXNlcnMiLCJhY2Nlc3NfcmlnaHRzIjpbInJlYWQiLCJjcmVhdGUiLCJ1cGRhdGUiLCJkZWxldGUiXX0seyJncm91cCI6Ikdyb3VwcyIsImFjY2Vzc19yaWdodHMiOlsicmVhZCIsImNyZWF0ZSIsInVwZGF0ZSIsImRlbGV0ZSJdfSx7Imdyb3VwIjoiU2VjcmV0cyIsImFjY2Vzc19yaWdodHMiOlsicmVhZCIsImNyZWF0ZSIsInVwZGF0ZSIsImRlbGV0ZSJdfV19'
+    api_key_secret = '6xxmjZD7Wqe9zWN1fWzOW1jA4uxAkFQ9rYlVFpxBzVgJ0xEj2KWSLiaRTZzKV1oz'
+
+    [cluster]
+    node_id = 1
+    nodes = ["1 localhost:8100 localhost:8200"]
+    secret_raft = "9eac18e182caa3221e72df4b19eb176f"
+    secret_api = "b93648de6c934d2a8975921745f902db"
+
+    [database]
+    hiqlite = true
+
+    [webauthn]
+    rp_id = 'idp.synveda-test.svc.cluster.local'
+    rp_origin = 'http://idp.synveda-test.svc.cluster.local:8080'
+    rp_name = 'Synveda install test'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: idp
+  namespace: synveda-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: idp
+  template:
+    metadata:
+      labels:
+        app: idp
+    spec:
+      containers:
+        - name: rauthy
+          image: ghcr.io/sebadob/rauthy:0.35.2
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.toml
+              subPath: config.toml
+              readOnly: true
+            - name: data
+              mountPath: /app/data
+          readinessProbe:
+            httpGet:
+              path: /auth/v1/health
+              port: 8080
+            periodSeconds: 3
+            failureThreshold: 60
+      volumes:
+        - name: config
+          configMap:
+            name: idp-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: idp
+  namespace: synveda-test
+spec:
+  selector:
+    app: idp
+  ports:
+    - port: 8080
+      targetPort: 8080

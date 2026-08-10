@@ -63,14 +63,14 @@ RUN set -eux; \
 # sqlx macros compile against the committed query cache; this image has no
 # database, exactly like CI.
 ENV SQLX_OFFLINE=true
-RUN cargo build --release -p synveda-gateway || true
+RUN cargo build --release -p synveda-gateway -p synveda-cli || true
 
 # The real sources. Touching them invalidates only from here down.
 COPY .sqlx .sqlx
 COPY crates crates
 RUN set -eux; \
     find crates -name '*.rs' -newermt '1970-01-01' -exec touch {} +; \
-    cargo build --release -p synveda-gateway
+    cargo build --release -p synveda-gateway -p synveda-cli
 
 FROM debian:bookworm-slim AS runtime
 # ca-certificates for OIDC discovery against an external issuer over TLS;
@@ -78,11 +78,21 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
  && apt-get install --no-install-recommends --yes ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
-# One binary and nothing else: the Cedar schema, the base layer and all
-# three product packs are `include_str!`d into synveda-policy, so there is
-# no policy directory to ship and no way for the image's policy to differ
-# from the binary's.
+# Two binaries and no data: the Cedar schema, the base layer and all three
+# product packs are `include_str!`d into synveda-policy, so there is no
+# policy directory to ship and no way for the image's policy to differ from
+# the binary's.
+#
+# The CLI joined the image with OPS-2 (ADR-0062 amendment). In the SMB
+# profile it is on the operator's laptop and only the gateway is a
+# container, so one binary was right; in a cluster there is no laptop with
+# a route to the database, and the two things an enterprise install has to
+# run — `synveda db migrate` under an admin identity, and
+# `synveda scim token issue` to wire Entra or Okta (AUTH-4, ADR-0059) —
+# are CLI verbs. A second image for them would double the build for one
+# `cargo build -p` that shares this stage's dependency compilation anyway.
 COPY --from=build /src/target/release/synveda-gateway /usr/local/bin/synveda-gateway
+COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
 
 # The console bundle: static files the binary serves from its own origin
 # (CNSL-1, ADR-0056 decision 1). No Node in this stage — the build stage

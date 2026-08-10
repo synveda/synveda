@@ -1,8 +1,8 @@
 //! Gateway entry point. Configuration is environment-only for now:
 //! `DATABASE_URL` (required), `SYNVEDA_DB_MAX_CONNECTIONS` (default 8 —
-//! one pool shared by the request handlers *and* the background workers,
-//! so sustained ingestion can starve reads; see the comment at the call
-//! site), `SYNVEDA_LISTEN_ADDR` (default `127.0.0.1:8120`),
+//! one pool shared by the request handlers *and* the background workers;
+//! see the comment at the call site for what that has and has not been
+//! measured to cost), `SYNVEDA_LISTEN_ADDR` (default `127.0.0.1:8120`),
 //! and one auth mode (ADR-0010 — setting both is a startup error):
 //! `SYNVEDA_OIDC_ISSUERS` (JSON trust-entry array; enables OIDC verification
 //! and `/auth/*`, with `SYNVEDA_PUBLIC_URL` naming this gateway in redirect
@@ -82,19 +82,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let database_url = std::env::var("DATABASE_URL")
         .map_err(|_| "DATABASE_URL must be set (dev default is in the Makefile)")?;
-    // Eight was the number from the first day and it is still the default,
-    // but it can no longer only be changed by recompiling. EVAL-3's
-    // LongMemEval run wedged the gateway on it: ~4,900 events of sustained
-    // ingestion, and the extraction worker and the index sweeper — which
-    // draw from this same pool as the request handlers — took all eight.
-    // Every `/v1` surface then answered 503 for seventeen minutes with one
-    // request sitting thirty seconds on `acquire`, and it did not recover.
+    // Eight was the number from the first day and it is still the default;
+    // what changed is that it can no longer only be changed by recompiling.
     //
-    // Raising a default is not the fix for that; the fix is that
-    // background work and request serving should not compete for one pool
-    // at all, which is a change with an ADR in front of it. What this does
-    // is stop the number being unreachable to the operator who is watching
-    // it happen.
+    // 233bca9 added this setting on the finding that EVAL-3's LongMemEval
+    // run had wedged the gateway on a pool the background workers share
+    // with the request handlers. **29ae21f withdrew that finding.** The
+    // machine was sleeping — unattended runs, `pmset` `sleep 1` — the VM
+    // froze with it, and `acquire` timed out while no code was running at
+    // all; two observers on opposite sides of the container boundary froze
+    // in lockstep for 7m45s and resumed to report a healthy database. A
+    // larger pool "helped" only by coasting longer on connections opened
+    // before the freeze. There is no evidence in this repository that this
+    // pool wedges under sustained ingestion.
+    //
+    // The setting stays on its own merits. The workers and the handlers do
+    // draw from one pool, and a deployment-shaped number an operator can
+    // only change by recompiling is one that will be wrong where nobody
+    // can look — OPS-2 (ADR-0062 decision 6) makes it a chart value, sized
+    // against the server's own `max_connections`.
     let max_connections = std::env::var("SYNVEDA_DB_MAX_CONNECTIONS")
         .ok()
         .map(|raw| {
@@ -117,10 +123,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .connect_lazy(&database_url)?;
 
     // The pool says nothing about itself, and an operator watching every
-    // `/v1` surface answer 503 has no way to learn that this is why. That
-    // gap cost EVAL-3 five runs: the wedge is only visible from inside the
-    // process, and by the time it happens the database is too busy to be
-    // asked from outside.
+    // `/v1` surface answer 503 has no way to learn whether this is why.
+    // Added on the diagnosis 29ae21f withdrew, and kept because it is what
+    // made the real failure legible: a per-interval line is also a clock,
+    // and this one ticks whether or not a request does, so a gap in it is
+    // a statement about the process that no request-path log can make.
     //
     // Silent while there is headroom — a periodic line nobody needs is a
     // line nobody reads — and one warning per interval once the pool is

@@ -838,6 +838,27 @@ OPS-5  Backup/restore & DR (M)
   PITR playbook; restore drill in CI monthly. AC: RPO/RTO documented and tested.
 OPS-6  Zero-downtime migration discipline (S)
   Expand/contract migration checklist enforced by CI lint. AC: demo migration under load.
+OPS-7  Gateway horizontal scale (L)
+  Filed 2026-08-10 by OPS-2/ADR-0062 decision 5, which found that the chart could not
+  honestly offer a second gateway replica. Most of what one needs is already there and in
+  the database: the audit chain appends under a `for update` on `audit_chain_heads`, the
+  promotion sweep takes `watermark_for_update` against exactly two sweepers, the lapse
+  sweep's stamp is an idempotency key, PGMQ's archive-lock makes racing extraction
+  consumers safe, and console sessions are a table. Two things are not. `LoginFlow` parks
+  pending logins and CLI handoff codes in memory and says "single-replica only until
+  OPS-2" in its own module doc, so a callback landing on another pod is a 401 for a login
+  the IdP completed. `ScopeChainCache` is invalidated in-process, tenant-wide, with no TTL
+  and no eviction, so a hierarchy move handled by one replica leaves every other replica
+  composing against the ancestry the mover left — indefinitely, and looking exactly like a
+  policy decision rather than a stale one. Three parts: the login and handoff store moves
+  to Postgres beside the console sessions already there; scope-chain invalidation gets a
+  cross-process transport (LISTEN/NOTIFY, or a generation column polled beside the pack
+  refresher that already polls); and the writing loops get a ruling — they are safe on
+  every replica, but N replicas is N times the sweep load on one database. Until this
+  lands, ADR-0062 pins the chart at one replica and refuses an override.
+  AC: a kind-cluster test at three replicas — a login that completes across pods, and a
+  hierarchy move visible to every replica's composition within a stated bound — plus the
+  retention sweep's concurrency verified rather than assumed.
 
 ──────────────────────────────────────────────
 EPIC CNSL — Admin console (Phase 3)
@@ -946,7 +967,7 @@ Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-
      corpus is CC BY-NC 4.0 and cannot back a published commercial claim; the second
      benchmark is EVAL-7. A goal naming a score we may not quote is a goal that cannot be
      met, so the goal moved rather than the honesty.)
-Phase 4 ecosystem: ADPT-4,5,6,7 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6 · CNSL-3,4 · AUD-5 · AUTHZ-6,7 · EVAL-7
+Phase 4 ecosystem: ADPT-4,5,6,7 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · CNSL-3,4 · AUD-5 · AUTHZ-6,7 · EVAL-7
    (AUTHZ-7 added 2026-08-05 by CNSL-2/ADR-0058 decision 9, which found the asymmetry it
    names while building the explorer. Placed here rather than in Phase 3 because its two
    bounds hold — a pack flip widens no candidate universe and cannot reach below the
@@ -955,5 +976,12 @@ Phase 4 ecosystem: ADPT-4,5,6,7 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6 · CNSL-
    EVAL-7 added 2026-08-07 by EVAL-3/ADR-0061 decision 1. Here rather than Phase 3 because
    neither of its two paths is work we control: one waits on a grant from a third party, the
    other on a corpus that may not exist yet. EVAL-3 publishes a benchmark score without it,
-   so the phase's demo goal is met — this is the second data point, not the first.)
+   so the phase's demo goal is met — this is the second data point, not the first.
+   OPS-7 added 2026-08-10 by OPS-2/ADR-0062 decision 5. Here rather than in Phase 3 because
+   the phase's demo goal asks for a Helm install and OPS-2 is one: the enterprise profile's
+   HA is the data plane's, which is what the feature text says, and the chart refuses the
+   configuration it cannot honour rather than offering it with a warning. It moves forward
+   the moment a deployment cannot serve its request rate from one gateway, or cannot accept
+   a restart-shaped upgrade — and if it moves, it belongs beside OPS-6, since both are
+   about an upgrade nobody notices.)
 ──────────────────────────────────────────────

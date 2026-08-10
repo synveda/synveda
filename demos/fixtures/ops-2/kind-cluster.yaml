@@ -1,0 +1,18 @@
+# The cluster the OPS-2 install test runs in.
+#
+# One node. The point of this test is not scheduling — it is that the
+# gateway image serves, that the chart's ordering holds, and that a
+# CloudNativePG failover is survivable; CNPG elects a new primary among
+# pods on one node exactly as it does across three, and a multi-node kind
+# cluster costs minutes of CI for a property this test does not assert.
+#
+# No extraPortMappings, deliberately. Everything that logs in runs inside
+# the cluster, because the whole reason a bundled IdP works here and could
+# not work on a laptop (ADR-0055 decision 8) is that a Service DNS name
+# resolves to the same address for the gateway and for the client. A port
+# mapping would reintroduce the two-URL problem this test exists to show is
+# gone.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane

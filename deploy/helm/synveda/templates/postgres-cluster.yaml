@@ -1,0 +1,61 @@
+{{- /*
+The HA data plane (OPS-2, ADR-0062 decision 1). CloudNativePG runs the
+cluster, elects the primary and publishes two secrets:
+
+  <cluster>-app         the gateway's identity — not a superuser, no
+                        BYPASSRLS, so TEN-2's forced row-level security is
+                        actually enforced against it (ADR-0009, decision 2)
+  <cluster>-superuser   the install job's identity, and nothing else's
+
+`enableSuperuserAccess` is set on purpose: migration 0003 creates a role
+and 0015 creates an extension, neither of which the app role may do. It is
+the one credential in this deployment that can bypass RLS, which is why the
+gateway never sees it.
+*/ -}}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "synveda.clusterName" . }}
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgres.instances }}
+  imageName: {{ .Values.postgres.image }}
+  enableSuperuserAccess: true
+
+  bootstrap:
+    initdb:
+      database: {{ include "synveda.dbName" . }}
+      owner: {{ include "synveda.appRole" . }}
+      # The extension binaries are in the image; creating them is a
+      # bootstrap act because it needs a superuser.
+      #
+      # Only PGMQ is here, and the reason is ordering rather than taste
+      # (ADR-0062 decision 3, as amended). Migration 0012 calls
+      # `pgmq.create('observe')`, so the extension has to exist *before*
+      # the migrator runs — and a migration cannot supply it: appended at
+      # the end it runs 25 migrations too late on a fresh database, and
+      # added to 0012 it changes an applied migration's checksum, which
+      # sqlx refuses on every database that already has it. `vector`
+      # (0015) and `btree_gin` (0028) create themselves and are not
+      # repeated here.
+      postInitApplicationSQL:
+        - create extension if not exists pgmq;
+
+  postgresql:
+    parameters:
+      max_connections: {{ .Values.postgres.maxConnections | quote }}
+      {{- with .Values.postgres.parameters }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+
+  storage:
+    size: {{ .Values.postgres.storage.size }}
+    {{- with .Values.postgres.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+
+  {{- with .Values.postgres.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}

@@ -1,0 +1,6 @@
+{{- /*
+Renders nothing. Its job is to run the refusals in _helpers.tpl before any
+manifest exists, so a configuration this product cannot honour fails at
+`helm template` rather than at 3am. ADR-0062 decisions 4, 6 and 10.
+*/ -}}
+{{- include "synveda.validate" . -}}
