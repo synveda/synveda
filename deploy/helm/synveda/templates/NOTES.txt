@@ -16,6 +16,11 @@ Synveda {{ .Chart.AppVersion }} — enterprise profile (OPS-2, ADR-0062)
 
      {{ .Values.gateway.publicUrl }}/auth/callback
 
+   A trust entry binds an issuer to a tenant id, so `{{ .Values.oidc.existingSecret }}`
+   can only be complete once a tenant exists. The gateway pod pends on a
+   missing secret rather than starting without one, which is the right
+   failure for an uninitialised deployment — see step 3.
+
    The org root, the first admin's identity and its role binding are not
    created by this chart. They arrive when a person in your directory's
    admin group logs in for the first time (AUTH-2), which is what puts the

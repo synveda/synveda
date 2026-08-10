@@ -1,0 +1,62 @@
+# The test client: two containers, one pod, one network namespace.
+#
+# `client` runs the product's own CLI — `synveda login` binds a loopback
+# listener and waits, exactly as it does on a laptop. `browser` plays the
+# part a browser plays, and can only reach that listener because pods share
+# a network namespace. Neither container invents a path to a bearer.
+#
+# A Pod rather than a Job: it stays up after the round trip so the demo can
+# exec back in once the database's primary has been deleted. Re-acquiring a
+# bearer after a failover would be testing the IdP.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: synveda-install-test
+  namespace: synveda-test
+  labels:
+    app: synveda-install-test
+spec:
+  restartPolicy: Never
+  volumes:
+    - name: work
+      emptyDir: {}
+    - name: home
+      emptyDir: {}
+    - name: scripts
+      configMap:
+        name: install-test-scripts
+        # 0755, in the decimal Kubernetes wants for a file mode.
+        defaultMode: 493
+  containers:
+    - name: client
+      image: synveda/gateway:0.1.0
+      imagePullPolicy: Never
+      command: ["/bin/sh", "/scripts/client.sh"]
+      env:
+        - name: SYNVEDA_GATEWAY
+          value: http://synveda.synveda-test.svc.cluster.local:8120
+        - name: HOME
+          value: /home/tester
+        - name: WORK_DIR
+          value: /work
+      volumeMounts:
+        - { name: work, mountPath: /work }
+        - { name: home, mountPath: /home/tester }
+        - { name: scripts, mountPath: /scripts }
+    - name: browser
+      image: node:22-bookworm-slim
+      # Pulled, unlike the product image beside it, which is kind-loaded.
+      imagePullPolicy: IfNotPresent
+      command: ["node", "/scripts/browser.mjs"]
+      env:
+        - name: IDP_URL
+          value: http://idp.synveda-test.svc.cluster.local:8080
+        - name: OPERATOR_EMAIL
+          value: operator@synveda.test
+        - name: OPERATOR_PASSWORD
+          value: install-test-Operator-1
+        - name: WORK_DIR
+          value: /work
+      volumeMounts:
+        - { name: work, mountPath: /work }
+        - { name: scripts, mountPath: /scripts }

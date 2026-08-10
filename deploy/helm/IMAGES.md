@@ -41,6 +41,19 @@ releases, and that image carries both a binary and a model.
 | `node:22-bookworm-slim` | gateway (console stage) | MIT | Builds the console bundle. Never in the runtime stage. |
 | `debian:bookworm-slim` | gateway (runtime stage) | various, all Debian-main | Runtime: `ca-certificates` for OIDC discovery, `curl` for the healthcheck. |
 
+## Images the install test runs, and the chart never does
+
+`make check-chart-images` does not scan `demos/` — the chart is what a
+customer installs, and the test's scaffolding is not shipped to anyone. They
+are recorded here anyway, because "not shipped" is a reason to hold a lower
+bar, not none.
+
+| Image | Where | Licence | Why it is here |
+|---|---|---|---|
+| `ghcr.io/sebadob/rauthy:0.35.2` | `demos/fixtures/ops-2/idp.yaml` | Apache-2.0 | The test issuer, at a Service DNS name. Same version the dev compose runs. |
+| `node:22-bookworm-slim` | `demos/fixtures/ops-2/client-pod.yaml` | MIT | Plays the browser half of `synveda login`. |
+| CloudNativePG operator | applied by the demo, version pinned in it | Apache-2.0 | Installed separately by design; the chart renders a `Cluster` for it. |
+
 ## Extensions compiled into `synveda/enterprise-postgres`
 
 Not images, and not covered by `cargo-deny` either, so they are recorded

@@ -38,10 +38,16 @@ const read = (path) => readFileSync(path, "utf8");
 // is the chart's appVersion, which the inventory writes as the literal
 // `<appVersion>` because pinning it here would mean editing this file on
 // every release for no reading.
+// The file also records the images the install test runs, which the chart
+// never references. Those count for *matching* — naming one is never an
+// error — but not for the orphan note at the end, or every run would
+// report them as unreferenced forever.
+const text = read(INVENTORY);
+const shippedText = text.split(/^## Images the install test runs/m)[0];
 const inventory = new Set();
-for (const [, ref] of read(INVENTORY).matchAll(/`([^`\s]+:[^`\s]+)`/g)) {
-  inventory.add(ref);
-}
+const shipped = new Set();
+for (const [, ref] of text.matchAll(/`([^`\s]+:[^`\s]+)`/g)) inventory.add(ref);
+for (const [, ref] of shippedText.matchAll(/`([^`\s]+:[^`\s]+)`/g)) shipped.add(ref);
 if (inventory.size === 0) fail(`${INVENTORY}: no image references found — the format changed`);
 
 // ── What the chart references ────────────────────────────────────────────
@@ -94,7 +100,7 @@ for (const [ref, where] of found) {
 // outlive the reference that needed it (a base image dropped from a
 // Dockerfile), and deleting the licence somebody read is worse than
 // carrying a stale row until they say so.
-const orphans = [...inventory].filter((ref) => !found.has(ref));
+const orphans = [...shipped].filter((ref) => !found.has(ref));
 
 if (orphans.length) {
   console.log(`note: in ${INVENTORY} but referenced by nothing: ${orphans.join(", ")}`);

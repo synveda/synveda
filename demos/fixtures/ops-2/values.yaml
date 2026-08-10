@@ -1,0 +1,52 @@
+# What the install test installs.
+#
+# `fullnameOverride` so the Service has a name the test client and the
+# IdP's registered redirect URI can both be written against; everything
+# else is the chart's own default except where a kind node's budget says
+# otherwise.
+fullnameOverride: synveda
+
+image:
+  # Both images are `kind load`ed, never pulled.
+  pullPolicy: Never
+
+gateway:
+  # The Service, by the name every pod in the cluster resolves it by. This
+  # is the redirect URI registered at the IdP and the Origin the console
+  # checks — one URL, resolving the same way for the gateway and for the
+  # client, which is the property this whole test turns on.
+  publicUrl: http://synveda.synveda-test.svc.cluster.local:8120
+  dbMaxConnections: 10
+  searchIndex:
+    size: 1Gi
+
+oidc:
+  # Written by the demo *after* the install job admits the tenant: a trust
+  # entry binds an issuer to a tenant id, and that id does not exist until
+  # the tenant does. The gateway pod pends on the missing secret until then,
+  # which is the correct shape — an uninitialised deployment that refuses
+  # rather than one that invents an issuer.
+  existingSecret: synveda-oidc
+
+# Deterministic, so CI never downloads 2.3 GB of BGE-M3. That is a real
+# choice about a corpus and not a shortcut around one: this deployment
+# lives for the length of one job.
+embedder: deterministic
+
+extractor:
+  kind: deterministic
+
+postgres:
+  instances: 3
+  storage:
+    size: 1Gi
+  maxConnections: 100
+  # No requests: three instances plus the gateway on one kind node, on a
+  # runner with four cores. Reserving what a production cluster reserves
+  # would make this unschedulable rather than realistic.
+  resources: {}
+
+install:
+  tenant:
+    slug: acme
+    name: ACME Corporation
