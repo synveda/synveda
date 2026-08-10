@@ -115,6 +115,89 @@ here. TEN-3 keeps the harness and the corrected arms.
 The gate in decision 3 remains unapplied. It is applied to the re-run, not to
 anything above.
 
+## Measurements (2026-08-10, corrected): the complete grid, and the gate applied
+
+pgvector 0.8.6 on PostgreSQL 17.10. 64,000 records over 8 tenants, 16 scopes,
+dim 1024, recall@10 against exact search, 100 queries per regime, **three runs
+per arm**, fresh database per run, `vacuum (analyze)` before measuring, on an
+otherwise idle machine. `demos/ten-3-dense-leg-sweep.sh`; rows in
+`evals/scores/ten3-dense-leg.json`.
+
+**Broad regime** (every scope and tier in the tenant):
+
+| iterative_scan | ef_search | max_scan_tuples | plan_cache | recall@10 | spread | p50 | p95 |
+|---|---|---|---|---|---|---|---|
+| off | 100 | default | force_custom | 0.345 | 0.341–0.350 | 6.03ms | 6.73ms |
+| relaxed_order | 100 *(shipped)* | default | **auto** | 0.856 | 0.852–0.857 | 50.03ms | 51.39ms |
+| relaxed_order | 100 *(shipped)* | default | force_custom | 0.355 | 0.344–0.509 | 6.14ms | 9.92ms |
+| relaxed_order | 100 *(shipped)* | default | force_generic | **1.000** | 1.000–1.000 | 51.08ms | 52.70ms |
+| relaxed_order | 100 | 128000 | force_custom | 0.365 | 0.346–0.373 | 6.06ms | 9.88ms |
+| relaxed_order | 400 | default | force_custom | 0.606 | 0.603–0.687 | 16.29ms | 17.61ms |
+| relaxed_order | 400 | 128000 | force_custom | 0.586 | 0.585–0.610 | 15.93ms | 16.55ms |
+| relaxed_order | 1000 | default | force_custom | 0.773 | 0.753–0.774 | 29.48ms | 30.98ms |
+| relaxed_order | 1000 | 128000 | force_custom | 0.775 | 0.767–0.779 | 29.72ms | 30.63ms |
+| strict_order | 100 | default | force_custom | 0.344 | 0.332–0.355 | 6.11ms | 9.94ms |
+
+**Selective regime** (one scope, one tier): recall@10 **1.000**, p50 ~1.33ms,
+p95 ~1.65ms — in **all ten arms**, unmoved by every knob, on
+`records_tenant_scope_idx` and never on the HNSW index.
+
+### The gate is not met, and could not have been
+
+Decision 3 fixed it before the numbers existed: partitioning ships only if, in
+the **selective** regime and against the better of A and B, it either raises
+recall@10 at equal-or-better p95, or cuts p95 by ≥25% at equal-or-better
+recall@10.
+
+Recall in that regime is already **1.000**. There is nothing to raise. And its
+p95 is 1.65ms for an exact scan of 125 rows reached through
+`records_tenant_scope_idx` — a query that never walks the HNSW index at all, so
+shrinking that index by `1/N` cannot touch it. A 25% cut would mean 1.24ms for
+work that is already a b-tree lookup and a top-N sort over 125 rows.
+
+**And the gate was stated in the wrong regime — which the measurement is what
+revealed.** Force 3 put it in the selective regime because that is where the
+PDP's slice bites, and migration 0016 had predicted the planner would prefer an
+exact scan there. Both were right, and the consequence is that the selective
+regime is the one place partitioning provably cannot help. Where hash
+partitioning *would* do something is the **broad** regime under a custom plan:
+the HNSW index holds every tenant's vectors, so ~7 of 8 candidates are
+discarded by the tenant predicate, and recall is 0.355 at `ef_search` 100.
+Splitting the index N ways is precisely a remedy for that — the "mitigates
+pgvector post-filtering" the feature text names.
+
+That does not rescue the feature, for a reason outside it: **the product does
+not use the HNSW index on that path today.** What ships is the `auto` row —
+0.856 at 50.03ms, a blend that is mostly the generic plan's exact scan. Whether
+the dense leg should use HNSW at all is CTX-7's ruling, and partitioning cannot
+be justified against a plan the product may stop using or may never have been
+using. So the honest order is CTX-7 first, partitioning after, and only if the
+tuning that is already free proves insufficient.
+
+### What the two new axes settled, both negative
+
+- **`max_scan_tuples` is not what stops the scan.** At twice the corpus it
+  moves nothing at any `ef_search`: 0.355→0.365, 0.606→0.586, 0.773→0.775 —
+  one of them the wrong way, all inside the spread. The amendment above
+  proposed this bound as the explanation for the backwards row; it is not.
+- **`strict_order` is not separable from `relaxed_order`** at equal latency
+  (0.344 against 0.355, spreads overlapping). Decision 2 named it and nothing
+  had measured it; the shipped choice stands, now on evidence.
+- And `ef_search` is **monotonic** once the plan is held still — 0.355, 0.606,
+  0.773 at 6.14ms, 16.29ms, 29.48ms. The withdrawn finding 4's non-monotonicity
+  was the blend, entirely.
+
+### Decision 4 therefore fires
+
+The AC's first half — "filtered ANN query plan shows partition pruning" —
+cannot be shown by a deployment that does not partition, so it is amended
+rather than satisfied. TEN-3 delivers the harness, the recorded rows and the
+plan evidence for the arm that won; SYNVEDA_FEATURES.md records the measurement
+as the reason its text changed; and the partitioning half is **TEN-7**, as
+`LIST` rather than the `HASH` this feature's text asked for, because force 5's
+beneficiaries all want a per-tenant boundary and option 3 already called that
+the more likely long-term layout.
+
 ## Measurements (2026-08-10, WITHDRAWN — see the correction above): arms A and B
 
 64,000 records over 8 tenants, 16 scopes, dim 1024, recall@10 against exact
