@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select current_setting('hnsw.iterative_scan') as \"iterative!\",\n                  current_setting('hnsw.ef_search') as \"ef_search!\",\n                  current_setting('hnsw.max_scan_tuples') as \"bound!\",\n                  current_setting('plan_cache_mode') as \"plan_cache!\",\n                  (select reset_val from pg_settings\n                    where name = 'hnsw.max_scan_tuples') as \"bound_reset!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "iterative!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "ef_search!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "bound!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "plan_cache!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "bound_reset!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "343940b73f408e0582ca155b21f7424e96f7ffd9b5aa716d2a20dc2ad4505381"
+}

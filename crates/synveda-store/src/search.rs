@@ -203,6 +203,19 @@ pub struct DenseTuning {
     /// Whether the scan continues past the first batch when the filter
     /// eats it.
     pub iterative_scan: IterativeScan,
+    /// How many index tuples an iterative scan may visit before it stops,
+    /// or `None` for whatever the server has (pgvector ships 20,000).
+    ///
+    /// `None` is what every deployment has run so far, and this axis
+    /// exists because of one row in ADR-0063's table: `ef_search` 1000
+    /// measured *faster* than 100 and also *worse*, and
+    /// cheaper-and-less-accurate is the signature of a scan that stopped
+    /// early rather than one that converged. This is the bound it would
+    /// have stopped against — the HNSW index holds every tenant's vectors,
+    /// so a scan can spend its whole tuple budget on rows the filter is
+    /// about to discard. Whether that is the explanation is what arm B
+    /// measures; the knob is here so it can be asked.
+    pub max_scan_tuples: Option<u32>,
 }
 
 impl Default for DenseTuning {
@@ -210,6 +223,7 @@ impl Default for DenseTuning {
         Self {
             ef_search: 100,
             iterative_scan: IterativeScan::RelaxedOrder,
+            max_scan_tuples: None,
         }
     }
 }
@@ -372,13 +386,21 @@ pub async fn dense_candidates(
     // Iterative scanning (pgvector ≥0.8) is what makes predicate
     // pushdown real for HNSW: without it, a selective scope filter
     // starves the LIMIT after ef_search candidates (ADR-0024 decision 5).
+    //
+    // A `None` bound binds SQL NULL, and `set_config(name, NULL, …)` is a
+    // reset rather than an error — so leaving the bound alone costs no
+    // extra round trip on the hot path, and an operator's own
+    // `hnsw.max_scan_tuples` keeps standing. Writing pgvector's 20,000
+    // literally instead would silently overwrite it.
     sqlx::query!(
         r#"
         select set_config('hnsw.iterative_scan', $1, true) as "a!",
-               set_config('hnsw.ef_search', $2, true) as "b!"
+               set_config('hnsw.ef_search', $2, true) as "b!",
+               set_config('hnsw.max_scan_tuples', $3, true) as "c!"
         "#,
         tuning.iterative_scan.as_guc(),
         tuning.ef_search.to_string(),
+        tuning.max_scan_tuples.map(|bound| bound.to_string()),
     )
     .fetch_one(&mut *conn)
     .await
