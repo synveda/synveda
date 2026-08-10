@@ -26,6 +26,14 @@
 // first table was n=1 in every row and three of its four findings have
 // since been withdrawn. That is the mistake this file exists to make
 // unrepeatable.
+//
+// It grew its second guard the way it grew the first — by failing. A
+// per-arm minimum run count cannot see a sweep that stopped half way,
+// because arms run to completion one at a time and a directory caught mid
+// sweep holds nothing but *complete* arms. This script published six arms
+// of ten and reported success. Hence the manifest: the sweep declares its
+// grid before the first arm runs, and publishing requires every declared
+// arm to be present.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -33,6 +41,8 @@ import { join } from "node:path";
 
 const SCORES = "evals/scores";
 const FILE = join(SCORES, "ten3-dense-leg.json");
+/// Written by the sweep before its first arm runs — see the publish path.
+const MANIFEST = "sweep.json";
 
 /// Three, not two. The median of two runs is their mean, and a mean is the
 /// statistic this file exists to avoid: recall carries ±3 points of
@@ -157,6 +167,37 @@ function publish(dir) {
   }
   if (files.length === 0) fail(`${dir} holds no reports`);
 
+  // The manifest the sweep declares before its first arm runs. Without it
+  // an interrupted sweep is publishable and indistinguishable from a whole
+  // one: arms run to completion one at a time, so a directory caught mid
+  // sweep holds only *complete* arms and the per-arm run count has nothing
+  // to object to. That is not hypothetical — it published six arms of ten
+  // and reported success.
+  const manifestPath = join(dir, MANIFEST);
+  if (!existsSync(manifestPath)) {
+    fail(
+      `${dir} has no ${MANIFEST}, so there is no way to tell a finished sweep from an ` +
+        `abandoned one. demos/ten-3-dense-leg-sweep.sh writes it before the first arm runs; ` +
+        `a directory without one predates that and should be re-swept rather than described ` +
+        `by a manifest written after the fact, which would agree with whatever happens to be ` +
+        `there.`,
+    );
+  }
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (manifest.benchmark !== "ten3-dense-leg") {
+    fail(`${manifestPath}: not a ten3-dense-leg manifest (benchmark: ${manifest.benchmark})`);
+  }
+  if (!Array.isArray(manifest.arms) || manifest.arms.length === 0) {
+    fail(`${manifestPath}: declares no arms`);
+  }
+  if (manifest.repeats < MIN_RUNS) {
+    fail(
+      `${manifestPath}: the sweep was run with REPEATS=${manifest.repeats} and a published ` +
+        `row needs ${MIN_RUNS}.`,
+    );
+  }
+  files = files.filter((name) => name !== MANIFEST);
+
   const reports = files.map((name) => {
     const report = JSON.parse(readFileSync(join(dir, name), "utf8"));
     if (report.benchmark !== "ten3-dense-leg") {
@@ -194,6 +235,30 @@ function publish(dir) {
     const key = armId(arm);
     if (!byArm.has(key)) byArm.set(key, { arm, reports: [] });
     byArm.get(key).reports.push(report);
+  }
+
+  // Both directions. A declared arm with no reports is a sweep that did not
+  // finish; an undeclared arm with reports is two sweeps sharing a
+  // directory, and folding those into one publication would put rows from
+  // different grids under one commit.
+  const declared = new Set(manifest.arms.map(armId));
+  for (const arm of manifest.arms) {
+    const ran = byArm.get(armId(arm))?.reports.length ?? 0;
+    if (ran < MIN_RUNS) {
+      fail(
+        `the sweep declared arm ${armId(arm)} and ${dir} holds ${ran} run(s) of it. This ` +
+          `sweep did not finish — publishing now would record part of a grid as though it ` +
+          `were the grid.`,
+      );
+    }
+  }
+  for (const key of byArm.keys()) {
+    if (!declared.has(key)) {
+      fail(
+        `${dir} holds runs of arm ${key}, which ${MANIFEST} does not declare. Two sweeps have ` +
+          `shared a directory; publish them from directories of their own.`,
+      );
+    }
   }
 
   const published = readPublished();

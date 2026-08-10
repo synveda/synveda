@@ -91,19 +91,57 @@ UNBOUNDED=$((RECORDS * 2))
 # Half one therefore holds the tuning still and moves only the plan mode:
 # three arms that price what the product does today against what it would
 # do if it kept its own index.
-arm relaxed_order 100 default auto                 # arm A: exactly what ships
-arm relaxed_order 100 default force_custom_plan    # ...the same, keeping HNSW
-arm relaxed_order 100 default force_generic_plan   # ...the steady state a warm pool reaches
+ARMS=(
+  "relaxed_order 100 default auto"               # arm A: exactly what ships
+  "relaxed_order 100 default force_custom_plan"  # ...the same, keeping HNSW
+  "relaxed_order 100 default force_generic_plan" # ...the steady state a warm pool reaches
 
-# Half two is arm B proper, and it runs under force_custom_plan because
-# that is the only mode where an HNSW knob is the thing being varied.
-arm off           100 default  force_custom_plan   # what ADR-0024 decision 5 bought
-arm relaxed_order 400 default  force_custom_plan
-arm relaxed_order 1000 default force_custom_plan   # the row that ran backwards
-arm strict_order  100 default  force_custom_plan   # decision 2 names it; never measured
-arm relaxed_order 100 "$UNBOUNDED" force_custom_plan
-arm relaxed_order 400 "$UNBOUNDED" force_custom_plan
-arm relaxed_order 1000 "$UNBOUNDED" force_custom_plan
+  # Half two is arm B proper, and it runs under force_custom_plan because
+  # that is the only mode where an HNSW knob is the thing being varied.
+  "off           100 default  force_custom_plan"   # what ADR-0024 decision 5 bought
+  "relaxed_order 400 default  force_custom_plan"
+  "relaxed_order 1000 default force_custom_plan"   # the row that ran backwards
+  "strict_order  100 default  force_custom_plan"   # decision 2 names it; never measured
+  "relaxed_order 100 $UNBOUNDED force_custom_plan"
+  "relaxed_order 400 $UNBOUNDED force_custom_plan"
+  "relaxed_order 1000 $UNBOUNDED force_custom_plan"
+)
+
+# The manifest, written **before** the first arm runs and not as they go.
+#
+# It is what makes an interrupted sweep detectable. Publishing enforces a
+# minimum run count per arm, and that alone cannot see a sweep that stopped
+# half way: arms run to completion one at a time, so a directory caught mid
+# sweep holds nothing but *complete* arms, and the publisher cheerfully
+# published six of ten as though they were the sweep. A declaration made up
+# front is the only version of this file that can be short of what actually
+# ran — one written as arms finish would agree with any prefix, which is
+# the property that made the guard useless.
+#
+# Boring string assembly rather than a JSON tool: every value here comes
+# from the literal array above and is alphanumeric, so there is nothing to
+# quote and nothing to escape.
+{
+  echo '{'
+  echo '  "benchmark": "ten3-dense-leg",'
+  echo "  \"repeats\": $REPEATS,"
+  echo '  "arms": ['
+  for i in "${!ARMS[@]}"; do
+    read -r a_mode a_ef a_bound a_plan <<<"${ARMS[$i]}"
+    if [ "$a_bound" = default ]; then a_bound_json=null; else a_bound_json=$a_bound; fi
+    if [ "$i" -eq $((${#ARMS[@]} - 1)) ]; then a_comma=; else a_comma=,; fi
+    echo "    {\"iterative_scan\": \"$a_mode\", \"ef_search\": $a_ef," \
+      "\"max_scan_tuples\": $a_bound_json, \"plan_cache_mode\": \"$a_plan\"}$a_comma"
+  done
+  echo '  ]'
+  echo '}'
+} >"$RUNS/sweep.json"
+
+for spec in "${ARMS[@]}"; do
+  # Deliberately unquoted: each entry is four whitespace-separated fields.
+  # shellcheck disable=SC2086
+  arm $spec
+done
 
 echo | tee -a "$OUT"
 node scripts/summarise-ann-bench.mjs "$RUNS" | tee -a "$OUT"
