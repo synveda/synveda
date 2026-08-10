@@ -33,9 +33,15 @@ import { join } from "node:path";
 
 const dir = process.argv[2] ?? "/tmp/ten3-runs";
 
+/// The sweep's manifest lives in the run directory and is not a report.
+/// It carries `benchmark: "ten3-dense-leg"` like everything else here, so
+/// the benchmark check below waves it through — it has to be excluded by
+/// name, the way the publisher excludes it.
+const MANIFEST = "sweep.json";
+
 let files;
 try {
-  files = readdirSync(dir).filter((name) => name.endsWith(".json"));
+  files = readdirSync(dir).filter((name) => name.endsWith(".json") && name !== MANIFEST);
 } catch {
   console.error(`no run directory at ${dir} — run demos/ten-3-dense-leg-sweep.sh first`);
   process.exit(1);
@@ -51,6 +57,13 @@ const runs = files.map((name) => {
   // a conclusion. Name it and stop, rather than skipping it quietly.
   if (report.benchmark !== "ten3-dense-leg") {
     console.error(`${name}: not a ten3-dense-leg report (benchmark: ${report.benchmark})`);
+    process.exit(1);
+  }
+  // Belt and braces after the manifest slipped past the check above: a
+  // report is a thing with measurements, and saying so beats a TypeError
+  // thirty runs later.
+  if (!Array.isArray(report.measurements) || !report.corpus) {
+    console.error(`${name}: carries no measurements — it is not a run report`);
     process.exit(1);
   }
   return report;
