@@ -1,6 +1,6 @@
 # Backlog status
 
-90 features parsed from docs/SYNVEDA_FEATURES.md — one file per
+91 features parsed from docs/SYNVEDA_FEATURES.md — one file per
 feature in this directory. Phases per the Sequencing section. This file and the
 per-feature files are **hand-maintained**; `node scripts/check-backlog.mjs`
 (in `make ci`) asserts that the three agree, and writes nothing.
@@ -3709,6 +3709,7 @@ produce._
 - [ ] [MEM-7: Identity stitching](MEM-7.md)
 - [ ] [OPS-5: Backup/restore & DR](OPS-5.md)
 - [ ] [OPS-6: Zero-downtime migration discipline](OPS-6.md)
+- [ ] [OPS-7: Gateway horizontal scale](OPS-7.md) — filed 2026-08-10 by OPS-2 (ADR-0062 decision 5): a chart that offers a second gateway replica offers two silent failures. `LoginFlow` parks pending logins and CLI handoff codes in memory — "single-replica only until OPS-2", in its own module doc — so a callback on the wrong pod is a 401 for a login the IdP completed; and `ScopeChainCache` is invalidated in-process, tenant-wide, with no TTL and no eviction, so a hierarchy move handled by one replica leaves the others composing against the ancestry the mover left, indefinitely, looking exactly like a policy decision. What is *not* a blocker is the interesting half and the reason this is L rather than XL: the audit chain serializes on `for update` over `audit_chain_heads`, the promotion sweep takes `watermark_for_update` against exactly two sweepers, the lapse sweep's stamp is an idempotency key, PGMQ's archive-lock makes racing extraction consumers safe, and console sessions are already a table. Three parts — the login/handoff store into Postgres, a cross-process invalidation transport with a stated staleness bound, and a ruling on whether the writing loops run everywhere or behind a leader (which also settles the retention sweep, the one loop with no visible guard). Phase 4 because the phase demo goal asks for a Helm install and OPS-2 is one; ADR-0062 pins `replicas: 1` and refuses an override rather than shipping the configuration with a warning.
 - [ ] [CNSL-3: Audit explorer](CNSL-3.md)
 - [ ] [CNSL-4: Memory browser](CNSL-4.md)
 - [ ] [AUD-5: Compliance mapping doc](AUD-5.md)
