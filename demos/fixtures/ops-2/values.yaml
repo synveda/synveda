@@ -37,13 +37,23 @@ extractor:
   kind: deterministic
 
 postgres:
-  instances: 3
+  # Two, not the chart's three. A failover needs exactly one replica to
+  # promote, and the third instance is what a production cluster wants for
+  # quorum during maintenance — not what this assertion needs.
+  #
+  # The first CI run proved the difference matters: `synveda-pg-3-join` sat
+  # Pending and unscheduled for nine minutes on a single-node runner that
+  # had just built two container images, and the readiness gate timed out
+  # while the round trip it was gating had already passed. The chart still
+  # defaults to 3; a test that asks a runner for a production topology is
+  # measuring the runner.
+  instances: 2
   storage:
     size: 1Gi
   maxConnections: 100
-  # No requests: three instances plus the gateway on one kind node, on a
-  # runner with four cores. Reserving what a production cluster reserves
-  # would make this unschedulable rather than realistic.
+  # No requests: the instances plus the gateway share one kind node.
+  # Reserving what a production cluster reserves would make this
+  # unschedulable rather than realistic.
   resources: {}
 
 install:

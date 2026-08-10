@@ -55,6 +55,16 @@ diagnostics() {
   echo "--- what the cluster looked like ---" >&2
   kubectl get pods -n "$NS" -o wide 2>&1 | sed 's/^/  /' >&2 || true
   kubectl get cluster -n "$NS" 2>&1 | sed 's/^/  /' >&2 || true
+  # Why a pod is not running is the question a pod list never answers. The
+  # first CI failure was a Pending pod with no node, and `Pending` alone
+  # does not distinguish "no CPU" from "disk pressure" from "no volume".
+  for pod in $(kubectl get pods -n "$NS" \
+    --field-selector=status.phase!=Running,status.phase!=Succeeded \
+    -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+    echo "--- why $pod is not running ---" >&2
+    kubectl describe pod -n "$NS" "$pod" 2>&1 | sed -n '/^Events:/,$p' | sed 's/^/  /' >&2 || true
+  done
+  kubectl describe node 2>&1 | sed -n '/^Conditions:/,/^Addresses:/p' | sed 's/^/  /' >&2 || true
 }
 
 cleanup() {
@@ -91,6 +101,11 @@ echo "==> building the enterprise Postgres image (CNPG base + pgvector + PGMQ, n
 docker build -t synveda/enterprise-postgres:17 deploy/helm/postgres
 echo "==> loading both into the cluster"
 kind load docker-image --name "$CLUSTER" "synveda/gateway:$IMAGE_TAG" synveda/enterprise-postgres:17
+# Two multi-stage Rust builds leave a build cache the size of the images
+# themselves, on a runner that then has to hold a Postgres cluster's
+# volumes. Reclaiming it is free here and is the difference between a
+# scheduled pod and a Pending one.
+docker builder prune --force >/dev/null 2>&1 || true
 
 # ── the operator ─────────────────────────────────────────────────────────
 # Cluster-scoped, and installed separately for the reason ADR-0062
