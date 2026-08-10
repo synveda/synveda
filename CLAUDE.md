@@ -35,8 +35,8 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 
 ## Current phase
 Phase 3 — Enterprise (wk 11–16). Phases 0, 1 and 2 are complete; SKIL-1
-through SKIL-4, OPS-1, CNSL-1, ADPT-2, CNSL-2, AUTH-4, AUTH-5 and EVAL-3
-are the Phase 3 features done so far. 60 of 91 features delivered — see docs/backlog/STATUS.md for what each
+through SKIL-4, OPS-1, CNSL-1, ADPT-2, CNSL-2, AUTH-4, AUTH-5, EVAL-3 and
+OPS-2 are the Phase 3 features done so far. 61 of 91 features delivered — see docs/backlog/STATUS.md for what each
 one proved and what it left standing. (The total read 86 until 2026-08-05,
 when it was corrected to the 88 STATUS.md and `make check-backlog` had both
 said for some time; AUTHZ-7 was filed the same day by CNSL-2/ADR-0058, making
@@ -71,6 +71,15 @@ published commercial claim this goal names. The second benchmark is EVAL-7.)
 (ADPT-2 recorded its acceptance corpus from Claude Desktop and **Zed** —
 Cursor stays an `install` target because this goal names it, but nothing has
 replayed a real Cursor frame. See ADR-0057 amendment 2.)
+(Helm install IS done since 2026-08-10 — `deploy/helm/synveda`, installed
+into a kind cluster by `demos/ops-2-helm-install.sh`, which asserts a
+governed round trip, a CloudNativePG failover and a live RLS backstop
+rather than readiness. Two limits belong beside the claim: the gateway is
+**one replica** and the chart refuses to render a second until OPS-7, and
+the test's issuer is the bundled Rauthy at a Service DNS name — so this
+profile has not met a live Entra or Okta tenant either. It is also the
+first thing that ever asked the gateway *image* to serve, which closes
+ADR-0055 decision 8's open residue.)
 
 ## Commands
 - make dev-up      — start Postgres(+pgvector+PGMQ), Rauthy, Temporal, TEI, Jaeger

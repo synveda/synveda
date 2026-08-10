@@ -76,7 +76,7 @@ consuming agent heals on its next session start.
 ## Project status
 
 **Phases 0–2 are complete. Phase 3 (enterprise surface) is in progress.**
-60 of 91 planned features are done, each one demonstrated by a runnable script in
+61 of 91 planned features are done, each one demonstrated by a runnable script in
 [`demos/`](demos/) and covered by an acceptance test.
 
 It installs: `synveda init` takes a laptop to working governed memory —
@@ -87,16 +87,19 @@ see [docs/INSTALL.md](docs/INSTALL.md).
 | **0 — Foundation** | Workspace, dev environment, types, bitemporal schema, observability | ✅ 6/6 |
 | **1 — The spine** | SSO → auto-provisioned hierarchy → observe → extraction → inject → audit, live in Claude Code | ✅ 21/21 |
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
-| **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, residency, Qdrant | 🚧 11/25 |
+| **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, residency, Qdrant | 🚧 12/25 |
 | **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR, gateway scale | ⬜ 0/16 |
 
 One further feature (AUTH-6, session and token hygiene) is unscheduled — 91 in
-total, 60 delivered. The eleven Phase 3 items finished are the skills registry
+total, 61 delivered. The twelve Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
 (OPS-1), the admin console's proposals inbox and hierarchy explorer (CNSL-1,
 CNSL-2), the generic MCP server (ADPT-2), the SCIM server with its
-directory-sync fallback (AUTH-4, AUTH-5), and the LongMemEval benchmark adapter
-(EVAL-3).
+directory-sync fallback (AUTH-4, AUTH-5), the LongMemEval benchmark adapter
+(EVAL-3), and the Helm chart and enterprise profile (OPS-2) — which is where
+the gateway stopped connecting to Postgres as a superuser, so the tenant
+isolation backstop is enforced against a deployment rather than bypassed by
+one.
 
 Full detail, feature by feature: [`docs/backlog/STATUS.md`](docs/backlog/STATUS.md).
 Published benchmark scores, and what they do and do not measure:
