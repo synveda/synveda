@@ -1,6 +1,6 @@
 # Backlog status
 
-91 features parsed from docs/SYNVEDA_FEATURES.md — one file per
+92 features parsed from docs/SYNVEDA_FEATURES.md — one file per
 feature in this directory. Phases per the Sequencing section. This file and the
 per-feature files are **hand-maintained**; `node scripts/check-backlog.mjs`
 (in `make ci`) asserts that the three agree, and writes nothing.
@@ -3692,6 +3692,7 @@ produce._
 - [ ] [AUD-4: SIEM streaming](AUD-4.md)
 - [ ] [GRPH-3: Graph-augmented recall](GRPH-3.md)
 - [ ] [EVAL-6: Load & latency suite](EVAL-6.md)
+- [ ] [CTX-7: Dense-leg plan stability](CTX-7.md) — filed 2026-08-10 by TEN-3 (ADR-0063), whose benchmark found it by disagreeing with itself: the same arm, same corpus, measured recall 0.341 at p50 5.91ms on one run and 0.868 at 50.91ms on another, and the variable was not the arm. The dense leg is a prepared statement on a long-lived pool, so PostgreSQL plans it against real parameters for five executions per connection and then substitutes a **generic** plan built without them — and the generic plan does not use `record_embeddings_hnsw_1024` at all, scanning the tenant's whole allowed slice through `records_tenant_scope_idx` and sorting exactly. Holding statistics fixed, the same statement with the same arguments takes HNSW on execution 1 and the exact scan on execution 6; `plan_cache_mode = force_custom_plan` keeps HNSW. Measured at 64k records / 8 tenants / dim 1024 on the shipped `DenseTuning`, varying only that GUC: `auto` gives recall 0.871 at p50 51.44ms, `force_custom_plan` gives 0.526 at 6.69ms. **The sign is not the usual one — the generic plan is exact, so it returns better answers**; what it costs is latency (~8x here) and, more seriously, scaling, because an exact scan over a tenant's slice is O(tenant), which is the cost an ANN index exists to avoid. So the product's most loaded tenant is its worst case, and the gap widens with every record a customer adds. The selective regime is unaffected and exact under both plans. Phase 3, beside EVAL-6, because this is a performance claim the product has **already published** rather than one it has yet to make: CTX-1's AC is "p99 <80ms at 1M records/tenant", its test runs 200 queries through a pool at dim 16 where an exact scan is cheap, and nothing has established which plan that number was measured against. Not a governance hole — no answer is wrong, and the PDP's slice is applied identically by both plans.
 - [ ] [OPS-3: Residency routing](OPS-3.md)
 - [ ] [OPS-4: Qdrant adapter behind VectorIndex trait](OPS-4.md)
 - [ ] [ADPT-3: REST/gRPC API + OpenAPI](ADPT-3.md)

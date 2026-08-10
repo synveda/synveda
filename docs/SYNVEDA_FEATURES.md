@@ -321,6 +321,13 @@ CTX-6  Session compression assist (M)
   Optional pre-compact hook support: hybrid sliding window summarisation of session history
   into observe events. AC: PreCompact in Claude Code produces derived memories; probe-based
   eval shows key facts survive compression.
+CTX-7  Dense-leg plan stability (M)
+  The dense leg is a prepared statement on a long-lived pool, so PostgreSQL plans it against
+  real parameters five times per connection and then substitutes a generic plan — which drops
+  the HNSW index and scans the whole allowed slice exactly. Rule on which plan the read path
+  should run, and make it a decision rather than a default. AC: the plan the dense leg runs is
+  asserted rather than assumed; recall and p50/p95 recorded for both plans at 1024 dimensions;
+  CTX-1's own latency AC re-read against whichever plan its test is actually measuring.
 
 ──────────────────────────────────────────────
 EPIC GRPH — Knowledge graph & relationships
@@ -945,7 +952,7 @@ Phase 2 governance (wk 6–10): FLOW-1..7 · AUTHZ-4,5 · MEM-5,6 · CTX-4,5 · 
    → Demo: promotion pipeline, lapse lifecycle, as-of inject, bank-mode switch.
 Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-2 ·
                          AUTH-4,5 · EVAL-3 · OPS-2 · TEN-3,4,5,6 · AUD-3,4 · GRPH-3 ·
-                         EVAL-6 · OPS-3,4 · ADPT-3 · CTX-6 · FLOW-8
+                         EVAL-6 · CTX-7 · OPS-3,4 · ADPT-3 · CTX-6 · FLOW-8
    (Reordered 2026-08-04. Order within the phase is by demo-readiness, not epic-grouped
    and — unlike Phase 1's — not topological, because nothing here blocks anything else:
    every dependency Phase 3 has was met by Phase 2. The original order scattered this
@@ -961,6 +968,13 @@ Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-
    is warm. What moved back is the block a customer asks for at procurement rather than
    at a demo — TEN-3..6, AUD-3,4 — plus GRPH-3, EVAL-6, OPS-3,4, ADPT-3, CTX-6 and
    FLOW-8. Nothing is cut and the phase's contents are unchanged.)
+   (CTX-7 added 2026-08-10 by TEN-3/ADR-0063, whose benchmark found it by disagreeing with
+   itself: the same arm measured 0.341 recall at 5.9ms and 0.878 at 50.9ms on two runs, and
+   the variable was not the arm. Placed in Phase 3, beside EVAL-6, because it is a
+   performance claim this product has already published rather than one it has yet to make —
+   CTX-1's AC is "p99 <80ms at 1M records/tenant" and nothing has established which plan
+   that number was measured against. It is not a governance hole: the generic plan is exact,
+   so it returns *better* answers, more slowly and with worse scaling.)
    → Demo: Entra/Okta live, spec-compliant governed skills into Claude Code + Cursor,
      LongMemEval scores published, Helm install.
      (Read "LoCoMo/LongMemEval" until 2026-08-07. EVAL-3/ADR-0061 decision 1 found LoCoMo's
