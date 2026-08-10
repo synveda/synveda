@@ -45,7 +45,77 @@ none of those three has ever been measured against a corpus. That is the
 cheap arm now — a session setting and a sweep, against a schema change that
 costs `records` its primary key.
 
-## Measurements (2026-08-10): arms A and B
+## Correction (2026-08-10): three of the four findings below measured the planner, not the tuning
+
+**The table in the next section is withdrawn except for finding 1.** It was
+not measuring what its column headings say.
+
+The benchmark disagreed with itself first. Re-running the `off` / `ef_search
+100` arm on the same 64,000-record corpus produced recall **0.868** at p50
+**50.91ms**, where the table records **0.341** at **5.91ms** for that same arm.
+Both runs were honest. The variable was not the arm.
+
+Two things move the dense leg's plan, and a harness that recorded one plan per
+run could see neither.
+
+**Statistics.** A freshly seeded corpus has none, and autoanalyze arrives
+part-way through the measuring loop — the probe corpus recorded
+`last_autoanalyze` timestamps *during* its own run. Holding the plan cache
+fixed and deleting `pg_statistic` on a settled corpus reproduces it exactly:
+with statistics the planner takes `record_embeddings_hnsw_1024`, without them
+it takes `records_tenant_scope_idx` and sorts the whole slice, and `ANALYZE`
+puts it back. So every arm's early queries planned against a table PostgreSQL
+believed was empty, and its later ones did not, with the crossover set by the
+autovacuum naptime.
+
+**Plan caching.** Holding statistics constant, the same prepared statement with
+the same arguments takes `record_embeddings_hnsw_1024` on execution 1 and
+`records_tenant_scope_idx` on execution 6 — PostgreSQL's custom-to-generic plan
+switch. `plan_cache_mode = force_custom_plan` keeps HNSW at execution 6. The
+generic plan is *exact*: it agrees with the enable_indexscan-off ground truth on
+all ten of ten.
+
+So the arms were blends of two different queries over two different indexes,
+mixed in a ratio set by the autovacuum naptime and by how many times each
+pooled connection had executed the statement. Neither is the arm.
+
+**What falls.** Finding 2 — "iterative scanning is worth 2.6x recall and 8.6x
+latency (0.341 → 0.878, 5.9ms → 50.9ms)" — is the clearest casualty, because
+that contrast is now reproducible with *iterative scanning held constant*.
+Varying only `plan_cache_mode` at the shipped `DenseTuning`: `auto` gives recall
+0.871 at p50 51.44ms, `force_custom_plan` gives 0.526 at 6.69ms. Same knob
+settings, same corpus; the 8.6x was the plan. Findings 3 and 4 — `ef_search`
+400's six free points, and 1000 being non-monotonically worse — are
+broad-regime numbers from the same blends and are unsupported rather than
+disproved. Finding 4's anomaly in particular needs no `max_scan_tuples`
+explanation once the blend ratio is free to vary between arms.
+
+**What survives, and is now stronger.** Finding 1. The selective regime is
+exact under **both** plan shapes — `records_tenant_scope_idx`, 125 rows, ~1.3ms,
+recall 1.000 — so no plan-cache or statistics subtlety can reach it. That is
+the finding decision 3's gate is written against, and it is the one that says
+hash-by-tenant cannot reach the regime that decides.
+
+**What it cost and what changed.** The harness now `vacuum (analyze)`s its
+corpus before measuring, carries `plan_cache_mode` as an arm dimension, and
+records the custom and generic plans side by side, flagging when they name
+different indexes. Two instruments that looked like they would show the generic
+plan and do not are documented in `explain_generic`, because both were written
+here first: `plan_cache_mode` around an EXPLAIN governs cached plans and EXPLAIN
+builds a one-shot plan, and executing an EXPLAIN six times does not reach the
+switch because EXPLAIN re-plans each time. `EXPLAIN (GENERIC_PLAN)` is the one
+that works.
+
+**And the product half is not this feature's.** That the dense leg abandons its
+ANN index after five executions on a pooled connection is a read-path question
+with a blast radius well beyond tenancy — it bears on CTX-1's published "p99
+<80ms at 1M records/tenant" — so it is filed as **CTX-7** rather than absorbed
+here. TEN-3 keeps the harness and the corrected arms.
+
+The gate in decision 3 remains unapplied. It is applied to the re-run, not to
+anything above.
+
+## Measurements (2026-08-10, WITHDRAWN — see the correction above): arms A and B
 
 64,000 records over 8 tenants, 16 scopes, dim 1024, recall@10 against exact
 search, 100 queries per regime. `demos/ten-3-dense-leg-sweep.sh`, fresh
