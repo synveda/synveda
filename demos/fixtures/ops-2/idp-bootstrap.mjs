@@ -72,33 +72,45 @@ const die = (message, detail) => {
 // ── the client ───────────────────────────────────────────────────────────
 // Public client with PKCE: the gateway is the OAuth client and holds no
 // secret for this one, which is what AUTH-1 configured in the dev IdP too.
+//
+// Create-then-always-update, which is the shape demos/auth-1-oidc-login.sh
+// uses and the reason it works. Rauthy's create takes the identity of a
+// client and defaults everything else — including **EdDSA tokens**, where
+// ADR-0010's trust entry allows RS256 — so a bootstrap that only creates
+// leaves a client whose tokens the gateway will refuse with "token
+// algorithm not allowed for issuer". The first run of this test failed
+// exactly there: the login completed at the IdP, the callback and the
+// handoff both succeeded, and the CLI's own bearer was then rejected.
 {
   const redirectUris = [`${gatewayPublicUrl}/auth/callback`];
   const existing = await api("GET", `/clients/${CLIENT_ID}`);
-  const desired = {
+  if (existing.status !== 200) {
+    const created = await api("POST", "/clients", {
+      id: CLIENT_ID,
+      name: "Synveda Gateway",
+      confidential: false,
+      redirect_uris: redirectUris,
+      post_logout_redirect_uris: [],
+    });
+    if (created.status >= 300) die("could not create the synveda client", created.text);
+  }
+  const desired = await api("PUT", `/clients/${CLIENT_ID}`, {
     id: CLIENT_ID,
-    name: "Synveda",
+    name: "Synveda Gateway",
+    enabled: true,
     confidential: false,
     redirect_uris: redirectUris,
-    post_logout_redirect_uris: [gatewayPublicUrl],
-    allowed_origins: [gatewayPublicUrl],
-    enabled: true,
     flows_enabled: ["authorization_code"],
     access_token_alg: "RS256",
     id_token_alg: "RS256",
     auth_code_lifetime: 60,
-    access_token_lifetime: 3600,
-    scopes: ["openid", "profile", "email", "groups"],
-    default_scopes: ["openid", "profile", "email", "groups"],
-    challenge: ["S256"],
-  };
-  if (existing.status === 200) {
-    const updated = await api("PUT", `/clients/${CLIENT_ID}`, desired);
-    if (updated.status >= 300) die("could not update the synveda client", updated.text);
-  } else {
-    const created = await api("POST", "/clients", desired);
-    if (created.status >= 300) die("could not create the synveda client", created.text);
-  }
+    access_token_lifetime: 1800,
+    scopes: ["openid", "email", "profile", "groups"],
+    default_scopes: ["openid"],
+    challenges: ["S256"],
+    force_mfa: false,
+  });
+  if (desired.status >= 300) die("could not configure the synveda client", desired.text);
 }
 
 // ── the operator ─────────────────────────────────────────────────────────

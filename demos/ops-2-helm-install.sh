@@ -142,17 +142,28 @@ done
 [ "${phase:-0}" = "1" ] || fail "the install job did not succeed" \
   "$(kubectl logs -n "$NS" -l app.kubernetes.io/component=install --all-containers --tail=50 2>&1 || true)"
 
-# `tenant create` prints the created tenant as JSON; the trust entry needs
-# its id. This is the ordering an operator meets too — an issuer binds to a
-# tenant, and the tenant is admitted by the install (NOTES.txt says so).
-TENANT_JSON=$(kubectl logs -n "$NS" -l app.kubernetes.io/component=install -c tenant --tail=20)
-TENANT_ID=$(printf '%s' "$TENANT_JSON" | node -e '
-  let d = ""; process.stdin.on("data", (c) => (d += c));
-  process.stdin.on("end", () => {
-    const m = d.match(/"id"\s*:\s*"([0-9a-f-]{36})"/i);
-    if (!m) { console.error(d); process.exit(1); }
-    console.log(m[1]);
-  });') || fail "could not read the admitted tenant id" "$TENANT_JSON"
+# The trust entry needs the tenant's id, and this is the ordering an
+# operator meets too: an issuer binds to a tenant, and the tenant is
+# admitted by the install (NOTES.txt says so).
+#
+# Asked of the database rather than scraped from the install job's log.
+# The first draft read the log, which worked once and then failed on the
+# second run of this demo for a good reason: tenant admission is an
+# install-only step, so an upgrade's job correctly prints that it skipped
+# it and there is no JSON to parse. A fact about the deployment should be
+# read from the deployment.
+PG_POD=$(kubectl get pods -n "$NS" -l cnpg.io/cluster=synveda-pg,role=primary \
+  -o jsonpath='{.items[0].metadata.name}') || fail "no Postgres primary to ask"
+TENANT_ID=""
+for _ in $(seq 1 30); do
+  TENANT_ID=$(kubectl exec -n "$NS" "$PG_POD" -c postgres -- \
+    psql -U postgres -d synveda -tAc \
+    "select id from tenants where slug = 'acme'" 2>/dev/null | tr -d '\r ' || true)
+  [ -n "$TENANT_ID" ] && break
+  sleep 2
+done
+[ -n "$TENANT_ID" ] || fail "the install job admitted no tenant with slug acme" \
+  "$(kubectl logs -n "$NS" -l app.kubernetes.io/component=install -c tenant --tail=20 2>&1 || true)"
 echo "    tenant $TENANT_ID"
 
 echo "==> the trust entry, now that there is a tenant to bind it to"
@@ -208,29 +219,67 @@ kubectl logs -n "$NS" synveda-install-test -c client --tail=100 2>/dev/null | se
 [ "$status" = "ready" ] || fail "the governed round trip did not complete" \
   "$(kubectl logs -n "$NS" synveda-install-test --all-containers --tail=60 2>&1 || true)"
 
+# ── and the chain over all of it ─────────────────────────────────────────
+echo "==> audit verify — under the gateway's own least-privilege role"
+kubectl delete job audit-verify -n "$NS" --ignore-not-found >/dev/null
+sed "s/__TENANT_ID__/$TENANT_ID/" "$FIXTURES/audit-verify-job.yaml" |
+  kubectl apply -f - >/dev/null
+kubectl wait --for=condition=complete --timeout=120s -n "$NS" job/audit-verify >/dev/null 2>&1 ||
+  fail "the audit chain did not verify" \
+    "$(kubectl logs -n "$NS" job/audit-verify --tail=20 2>&1 || true)"
+kubectl logs -n "$NS" job/audit-verify --tail=5 | sed 's/^/    /'
+
 # ── assertion 2: the failover ────────────────────────────────────────────
 # The gateway's pool is `connect_lazy` so that a database outage is a
 # /readyz report rather than a crash-loop. Nothing has ever tested that
 # claim against a real failover.
+# A cluster that has not finished building its replicas has nothing to
+# promote, and CloudNativePG's correct answer to that is to recreate the
+# instance rather than fail over. The first run of this assertion killed
+# the primary at `INSTANCES 2 … Creating a new replica` and then declared
+# that CNPG "did not elect a new primary" — it was asserting bootstrap and
+# calling it failover. The gateway is ready as soon as there is a primary,
+# so nothing earlier in this demo waits for the rest.
+echo "==> waiting for all ${POSTGRES_INSTANCES:-3} instances before killing one"
+kubectl wait --for=condition=Ready --timeout=600s -n "$NS" cluster/synveda-pg ||
+  fail "the Postgres cluster never became fully ready" \
+    "$(kubectl get cluster -n "$NS" synveda-pg -o wide 2>&1 || true)"
+kubectl get cluster -n "$NS" synveda-pg | sed 's/^/    /'
+
 echo "==> deleting the primary"
 PRIMARY=$(kubectl get pods -n "$NS" -l cnpg.io/cluster=synveda-pg,role=primary \
   -o jsonpath='{.items[0].metadata.name}') || fail "no primary to delete"
 echo "    $PRIMARY"
 kubectl delete pod -n "$NS" "$PRIMARY" --wait=false >/dev/null
 
-for _ in $(seq 1 60); do
-  NEW=$(kubectl get pods -n "$NS" -l cnpg.io/cluster=synveda-pg,role=primary \
-    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+# Wait for the promotion to have *happened* before asserting anything about
+# serving, and take CloudNativePG's own word for it (`status.currentPrimary`)
+# rather than a pod label — the label lagged the status by more than two
+# minutes in an earlier run.
+#
+# The order matters more than it looks. A first draft asserted the inject
+# straight after `kubectl delete pod`, and it passed on the first attempt:
+# the old primary was still `Terminating` and still serving, so the check
+# succeeded precisely because nothing had failed over yet. This is the
+# EVAL-3 failure mode wearing a different hat, and it was caught by the one
+# line that compared the new primary to the old one.
+echo "==> waiting for a different instance to be promoted"
+NEW=""
+for _ in $(seq 1 150); do
+  NEW=$(kubectl get cluster -n "$NS" synveda-pg \
+    -o jsonpath='{.status.currentPrimary}' 2>/dev/null || true)
   [ -n "$NEW" ] && [ "$NEW" != "$PRIMARY" ] && break
   sleep 2
 done
-[ -n "${NEW:-}" ] && [ "$NEW" != "$PRIMARY" ] || fail "CloudNativePG did not elect a new primary"
-echo "    new primary: $NEW"
+[ -n "$NEW" ] && [ "$NEW" != "$PRIMARY" ] ||
+  fail "CloudNativePG never promoted another instance" \
+    "$(kubectl get cluster -n "$NS" synveda-pg -o wide 2>&1 || true)"
+echo "    promoted $NEW (was $PRIMARY)"
 
 echo "==> the same inject, on the other side of the failover"
 kubectl exec -n "$NS" synveda-install-test -c client -- sh -ec '
   bearer=$(synveda auth token)
-  for i in $(seq 1 60); do
+  for i in $(seq 1 120); do
     code=$(curl -sS -o /work/failover-body -w "%{http_code}" \
       -X POST "$SYNVEDA_GATEWAY/v1/inject" \
       -H "Authorization: Bearer $bearer" -H "Content-Type: application/json" \
@@ -242,7 +291,8 @@ kubectl exec -n "$NS" synveda-install-test -c client -- sh -ec '
     sleep 2
   done
   echo "inject never recovered:"; cat /work/failover-body; exit 1
-' || fail "the deployment did not survive losing its primary"
+' || fail "the deployment did not survive losing its primary" \
+  "$(kubectl get cluster -n "$NS" synveda-pg -o wide 2>&1 || true)"
 
 echo
 echo "================================================================"

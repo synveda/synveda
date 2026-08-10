@@ -47,24 +47,45 @@ cat "$WORK/login.log"
 # chart's install job writes the migrations and one tenant row (ADR-0055
 # decision 1). This is the first assertion because everything after it
 # depends on a hierarchy that an installer never touched.
-echo "==> whoami — the org root was manufactured by logging in"
+echo "==> whoami — the tenant the issuer bound us to"
 whoami_json=$(synveda whoami --json) || fail "whoami failed"
 printf '%s\n' "$whoami_json"
-scope_path=$(printf '%s' "$whoami_json" | sed -n 's/.*"scope_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-scope_id=$(printf '%s' "$whoami_json" | sed -n 's/.*"scope_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-[ -n "$scope_path" ] || fail "whoami named no scope path" "$whoami_json"
-[ -n "$scope_id" ] || fail "whoami named no scope id" "$whoami_json"
 case "$whoami_json" in
-*'"quarantined":true'*) fail "the operator was quarantined — the admin group mapping did not hold" "$whoami_json" ;;
+*'"slug":"acme"'*) ;;
+*) fail "the bearer did not resolve to the admitted tenant" "$whoami_json" ;;
 esac
-echo "    placed at $scope_path"
+
+# Where AUTH-2 put us, which is the assertion that matters and is not in
+# whoami's answer: the CLI prints the placement the login produced. Under
+# `acme/` means the org root was manufactured from the tenant's own slug
+# and the admin-group subject landed beneath it rather than in quarantine
+# (ADR-0015 decision 6) — the whole reason this install seeds no hierarchy.
+grep -q "in tenant acme at acme/" "$WORK/login.log" ||
+  fail "the login did not place the operator under a manufactured org root" "$(cat "$WORK/login.log")"
+echo "    $(grep -o 'logged in as .*' "$WORK/login.log" | head -1)"
+
+echo "==> the org root's id — the parent every first create needs"
+root_json=$(synveda hierarchy root --json) || fail "hierarchy root failed"
+printf '%s\n' "$root_json"
+scope_id=$(printf '%s' "$root_json" |
+  sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([0-9a-f-]\{36\}\)".*/\1/p' | head -1)
+[ -n "$scope_id" ] || fail "could not read the org root's id" "$root_json"
 
 # ── a governed write ─────────────────────────────────────────────────────
 echo "==> synveda hierarchy create — a PDP decision, over HTTP, under our own bearer"
+# A fresh slug each run. A sibling slug is unique and immutable, so a
+# fixed one turns the second run of this demo into an assertion about a
+# uniqueness constraint instead of about authorisation — which is what the
+# first re-run proved by failing here.
+team_slug="platform-$(date +%s)"
 team=$(synveda hierarchy create \
-  --parent "$scope_id" --kind team --slug platform --name Platform 2>&1) ||
+  --parent "$scope_id" --kind team --slug "$team_slug" --name Platform 2>&1) ||
   fail "hierarchy create was refused" "$team"
 printf '%s\n' "$team"
+case "$team" in
+*"$team_slug"*) ;;
+*) fail "hierarchy create returned no node for $team_slug" "$team" ;;
+esac
 
 # ── the data path ────────────────────────────────────────────────────────
 # `synveda auth token` is the supported way to hand the stored bearer to
@@ -83,14 +104,22 @@ post() {
 }
 
 echo "==> observe — one signal, through /v1 and the PDP"
+# A fresh idempotency key each run, and `accepted` asserted rather than
+# just the status. A fixed key made the second run of this demo report
+# `accepted:0 duplicates:1` and pass anyway — which is the failure mode
+# this whole feature is written against: a check that holds when there is
+# nothing for it to hold about.
+key="ops2-$(date +%s)"
 status=$(post /v1/observe "{\"session_id\":\"$session\",\"events\":[
-  {\"idempotency_key\":\"ops2-1\",\"kind\":\"decision\",
+  {\"idempotency_key\":\"$key\",\"kind\":\"decision\",
    \"payload\":{\"decision\":\"$fact\"},\"occurred_at\":\"$now\"}]}")
 case "$status" in
 20*) ;;
 *) fail "observe answered $status" "$(cat "$WORK/body")" ;;
 esac
 cat "$WORK/body"; echo
+grep -q '"accepted":1' "$WORK/body" ||
+  fail "observe admitted nothing new" "$(cat "$WORK/body")"
 
 echo "==> inject — extraction, embedding and the sidecar, until the memory comes back"
 tries=0
@@ -107,10 +136,11 @@ while :; do
 done
 echo "    the block carries it after ${tries}s"
 
-# ── the chain ────────────────────────────────────────────────────────────
-echo "==> audit verify — everything above is on the tenant's hash chain"
-verify=$(synveda audit verify 2>&1) || fail "the audit chain did not verify" "$verify"
-printf '%s\n' "$verify"
+# The chain is verified too, but not from here. `synveda audit verify`
+# walks the chain in the database and recomputes every hash — an operator's
+# check with a database connection, not an API call — and this container
+# deliberately holds no database credential: everything above went through
+# `/v1` under a bearer. The demo runs it in a pod of its own.
 
 echo "ready" >"$WORK/status"
 echo
