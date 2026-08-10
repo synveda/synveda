@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-backlog check-benchmarks check-chart-images check-corpus-licences check-npm-licences chart-lint ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-ann-bench check-backlog check-benchmarks check-chart-images check-corpus-licences check-npm-licences chart-lint ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -219,6 +219,17 @@ check-corpus-licences:
 check-benchmarks:
 	node scripts/publish-benchmark.mjs
 
+# TEN-3's dense-leg rows (ADR-0063 decision 1), which are engineering
+# evidence for a gate rather than a published claim — hence a sibling of
+# check-benchmarks and not a branch inside it. What it asserts is narrower
+# and comes from that ADR's own history: every row carries the commit, the
+# pgvector version and the corpus it was measured over, and no row is a
+# single run. ADR-0063's first table was n=1 in every row, and three of its
+# four findings were withdrawn. To publish a sweep:
+# `node scripts/publish-ann-bench.mjs <run-dir>`.
+check-ann-bench:
+	node scripts/publish-ann-bench.mjs
+
 # The same rule again, one artefact class further out (OPS-2, ADR-0062
 # decision 11). cargo-deny governs crates, check-npm-licences packages and
 # check-corpus-licences corpora; a Helm chart references container images,
@@ -246,4 +257,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-backlog check-adr-status check-corpus-licences check-chart-images check-benchmarks chart-lint eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-backlog check-adr-status check-corpus-licences check-chart-images check-benchmarks check-ann-bench chart-lint eval-check ts-build check-npm-licences ts-test
