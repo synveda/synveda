@@ -46,34 +46,67 @@ its statements, the gateway's pool is long-lived, and `plan_cache_mode` is
 
 ## What it costs, measured
 
-At 64,000 records over 8 tenants, dim 1024, broad allowed-scope slice, the same
-`DenseTuning` the product ships, varying only `plan_cache_mode`:
+TEN-3's final sweep: pgvector 0.8.6 on PostgreSQL 17.10, 64,000 records over 8
+tenants, dim 1024, broad allowed-scope slice, three runs per arm on an idle
+machine. Rows in `evals/scores/ten3-dense-leg.json`.
 
-| plan_cache_mode | recall@10 | p50 | p95 |
-|---|---|---|---|
-| `auto` (what ships) | 0.871 | 51.44ms | 53.20ms |
-| `force_custom_plan` | 0.526 | 6.69ms | 25.18ms |
+| plan | tuning | recall@10 | p50 | p95 |
+|---|---|---|---|---|
+| generic (exact scan) | — | **1.000** | 51.08ms | 52.70ms |
+| **`auto`, what ships** | ef_search 100 | 0.856 | 50.03ms | 51.39ms |
+| custom (HNSW) | ef_search 1000 | 0.773 | 29.48ms | 30.98ms |
+| custom (HNSW) | ef_search 400 | 0.606 | 16.29ms | 17.61ms |
+| custom (HNSW) | ef_search 100 *(shipped)* | 0.355 | 6.14ms | 9.92ms |
 
-Read that carefully, because the sign is not the one a defect usually has.
-**The generic plan is exact, so it returns better answers.** What it costs is
-latency — roughly 8× here — and, more seriously, *scaling*: an exact scan over a
-tenant's allowed slice is O(tenant), which is the cost an ANN index exists to
-avoid. The gap therefore widens with every record a customer adds, and the
-product's most loaded tenant is its worst case.
+**This is a trade, not a defect with an obvious fix, and the first draft of this
+file got that wrong.** It described the generic plan as costing latency and
+scaling — true — and implied `force_custom_plan` was the remedy. At the tuning
+the product actually ships, forcing custom plans would trade **recall 1.000 for
+recall 0.355** to gain 8× on latency. That is the worst point on the curve, and
+nothing about the plan-cache setting alone would move it: `ef_search` is the
+knob that buys recall back, and it costs the latency again — 0.773 at 29.48ms is
+the best HNSW arm measured, still short of exact and only 1.7× faster than it.
 
-The selective regime is unaffected and stays exact under both plans: one scope,
-one tier, 125 rows, ~1.3ms, recall 1.000.
+So the exact plan **dominates on recall** and is not even especially slow here.
+Which reframes what is actually broken.
+
+### The defect is that nothing chooses
+
+The problem is not that the read path runs the wrong plan. It is that it runs
+**both, and which one is a function of how many times a pooled connection has
+executed the statement.** Two identical queries against the same corpus return
+different recall depending on the age of the connection they land on. The
+shipped `auto` row is not a behaviour anyone designed — 0.856 is the arithmetic
+of five custom executions per connection out of twelve, and it moves with the
+pool size, the request rate and the query count.
+
+That is the thing to fix, and it is worth fixing even if the ruling turns out to
+be "keep the exact plan", because a benchmark, an SLO and a customer's
+reproduction all mean something different when the plan is stable.
+
+### Two caveats that keep the exact plan from being the obvious answer
+
+- **Scaling.** An exact scan over a tenant's allowed slice is O(tenant), which
+  is the cost an ANN index exists to avoid. At 8,000 records per tenant it is
+  51ms; the shape of that number at 1M is not measured and cannot be
+  extrapolated from one corpus size. The product's most loaded tenant is its
+  worst case.
+- **The selective regime is already exact under both plans** — one scope, one
+  tier, 125 rows, ~1.33ms, recall 1.000 — so whatever is ruled here changes
+  nothing for the regime the PDP's slice makes narrow, which is the common one.
 
 ## What this feature has to settle
 
-1. **Which plan the dense leg should run**, stated as a decision. The cheap
-   candidate is `plan_cache_mode = force_custom_plan` set transaction-locally in
-   `dense_candidates`, alongside the `hnsw.*` GUCs it already sets — no extra
-   round trip, no leak into the pool. It is cheap enough to look obvious and
-   should not be taken on those grounds: forcing custom plans means re-planning
-   every dense query, which is real CPU on a hot path, and the numbers above say
-   the generic plan is *more accurate*. A product may legitimately prefer exact
-   answers at 51ms.
+1. **Which plan the dense leg should run**, stated as a decision and set
+   deliberately — `plan_cache_mode`, transaction-locally in `dense_candidates`
+   alongside the `hnsw.*` GUCs it already sets, so it costs no extra round trip
+   and cannot leak into the pool. The setting is one line; the ruling is not.
+   `force_custom_plan` is not a fix on its own — at the shipped `ef_search` it
+   is the worst point on the curve — so ruling for HNSW means ruling on
+   `ef_search` in the same breath, and paying re-planning CPU on a hot path.
+   Ruling for `force_generic_plan` is a legitimate answer that keeps today's
+   accuracy and makes it intentional, at the cost of an index the product
+   maintains and would then barely use.
 2. **Whether the answer is per-query or per-deployment.** A small tenant is
    better served by the exact scan; a large one cannot afford it. If the ruling
    is "it depends on corpus size", then it belongs in configuration and the
@@ -92,8 +125,10 @@ one tier, 125 rows, ~1.3ms, recall 1.000.
 
 ## Acceptance criteria
 
-- The plan the dense leg runs is **asserted rather than assumed**, by a test
-  that fails if the read path stops using the index it is supposed to use.
+- The plan the dense leg runs is **stable and asserted**, by a test that fails
+  if the read path stops using the plan the ruling chose — including after the
+  fifth execution on one connection, which is the case that would otherwise pass
+  every time a test opens a fresh pool.
   `EXPLAIN (GENERIC_PLAN)` is how to ask for the generic one; `plan_cache_mode`
   around an EXPLAIN does not work, because EXPLAIN builds a one-shot plan.
 - Recall and p50/p95 recorded for **both** plans at 1024 dimensions, on the
