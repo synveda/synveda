@@ -1,0 +1,8 @@
+# The minimum a real install must state. Every value here has no default
+# on purpose (ADR-0062 decisions 6 and 10), so this file is also the list
+# of decisions an operator cannot avoid making.
+gateway:
+  publicUrl: https://synveda.example.com
+oidc:
+  existingSecret: synveda-oidc
+embedder: deterministic

@@ -1,0 +1,93 @@
+{{- if .Values.tei.enabled }}
+{{- /*
+The embedder, when it runs here. One replica because the model cache is an
+RWO volume and a second pod would want its own copy of 2.3 GB; TEI is
+stateless otherwise, so this is a storage shape rather than a correctness
+one — unlike the gateway's single replica, raising it is a values change
+away once the cache is shared or duplicated on purpose.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "synveda.fullname" . }}-tei
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tei
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "synveda.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: tei
+  template:
+    metadata:
+      labels:
+        {{- include "synveda.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: tei
+    spec:
+      containers:
+        - name: tei
+          image: {{ .Values.tei.image }}
+          args:
+            - --model-id
+            - {{ .Values.tei.model }}
+            - --max-batch-tokens
+            - {{ .Values.tei.maxBatchTokens | quote }}
+            - --auto-truncate
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            # /health answers once the model is loaded. A first start
+            # downloads BGE-M3 (~2.3 GB) into the cache volume and a cold
+            # load measures ~2m after that, so the budget is generous by
+            # the same arithmetic the compose healthcheck uses.
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 180
+          volumeMounts:
+            - name: cache
+              mountPath: /data
+          {{- with .Values.tei.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: {{ include "synveda.fullname" . }}-tei-cache
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "synveda.fullname" . }}-tei-cache
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.tei.cache.size }}
+  {{- with .Values.tei.cache.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "synveda.fullname" . }}-tei
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    {{- include "synveda.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: tei
+{{- end }}

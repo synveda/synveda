@@ -1,0 +1,194 @@
+# Synveda enterprise profile (OPS-2, ADR-0062).
+#
+# Four values have no default and the chart refuses to render without them:
+# `gateway.publicUrl`, `embedder`, `oidc.existingSecret`, and — if the
+# embedder is `tei` — one of `tei.enabled` or `tei.url`. Each is a decision
+# somebody has to make on purpose; a default would make it silently.
+
+# ── The product image ────────────────────────────────────────────────────
+# Carries both binaries: the gateway serves, and the `synveda` CLI is what
+# the install job and an operator's `kubectl exec` use (ADR-0062 amendment).
+image:
+  repository: synveda/gateway
+  # Empty means Chart.appVersion — the chart deploys the release it names.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ── The gateway ──────────────────────────────────────────────────────────
+gateway:
+  # There is no `replicas` key, and setting one is an error rather than a
+  # no-op. One replica is a property of the process, not a starting point:
+  # pending logins live in memory (`LoginFlow` — a callback on the wrong pod
+  # is a 401 for a login the IdP completed) and the scope-chain cache is
+  # invalidated in-process with no TTL (a hierarchy move handled by one
+  # replica leaves the others composing against the ancestry the mover
+  # left). Both fail silently, which is why this is refused rather than
+  # discouraged. OPS-7 is the feature that lifts it; ADR-0062 decision 4
+  # has the full inventory of what *is* already safe across processes.
+
+  # The externally reachable origin — the ingress host, not the Service.
+  # SYNVEDA_PUBLIC_URL is where the gateway builds its /auth/callback
+  # redirect URI and the Origin it checks console sessions against, so a
+  # Service URL here is a console that refuses every session for a reason
+  # that reads like a bug. Required.
+  publicUrl: ""
+
+  # The pool the request handlers and the background loops share. Size it
+  # against postgres.maxConnections: this many per gateway, plus whatever
+  # else connects to the cluster, has to fit.
+  dbMaxConnections: 20
+
+  # The Tantivy BM25 sidecar (CTX-1). A cache, not a system of record — it
+  # carries a watermark and heals from Postgres, and deleting a tenant's
+  # directory is the documented rebuild — but losing it means re-indexing
+  # every tenant's corpus on the next sweep, so it gets a volume.
+  searchIndex:
+    size: 20Gi
+    storageClass: ""
+
+  logLevel: info
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+
+service:
+  type: ClusterIP
+  port: 8120
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Must be the host in gateway.publicUrl. The chart compares them and
+  # fails to render if they disagree — two settings that must agree are two
+  # settings that will not.
+  host: ""
+  tls: []
+
+# ── Postgres (CloudNativePG) ─────────────────────────────────────────────
+# The operator is not installed by this chart (ADR-0062 decision 1); this
+# renders a Cluster for an operator that is already there.
+postgres:
+  # Built from deploy/helm/postgres/Dockerfile: the CNPG base plus pgvector
+  # and PGMQ. No AGE — nothing in `crates/*/src` calls `cypher()`, it needs
+  # shared_preload_libraries, and it has no PG17 release (ADR-0062
+  # decision 3).
+  image: synveda/enterprise-postgres:17
+  instances: 3
+  storage:
+    size: 100Gi
+    storageClass: ""
+  maxConnections: 200
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+  # Passed through to the Cluster's postgresql.parameters.
+  parameters: {}
+  # Barman/object-store backup is OPS-5's, not this chart's. A `backup`
+  # stanza that exists and is empty reads like a backup that exists.
+
+# ── Identity ─────────────────────────────────────────────────────────────
+oidc:
+  # Name of an existing Secret holding the trust-entry JSON. The chart never
+  # generates it: an issuer configuration names a customer's directory, and
+  # a chart that writes one has invented a trust relationship.
+  #
+  #   kubectl create secret generic synveda-oidc \
+  #     --from-file=SYNVEDA_OIDC_ISSUERS=./issuers.json
+  #
+  # Required. There is deliberately no key for SYNVEDA_DEV_JWT_SECRET: the
+  # HS256 dev mode is not a deployment (ADR-0010 decision 3), and the chart
+  # cannot express it.
+  existingSecret: ""
+  secretKey: SYNVEDA_OIDC_ISSUERS
+
+# ── The embedder: a data decision, not a preference ──────────────────────
+# `record_embeddings` stores a model and a dim and the dense leg filters on
+# both, so a corpus written under one embedder and read under another does
+# not rank badly — it leaves the dense leg entirely and survives on BM25,
+# with no error and no degraded header. There is no re-embed command
+# (ADR-0055's first deferral), so this choice is permanent, and a default
+# that silently becomes permanent is not a default.
+#
+# `deterministic` | `tei`. Required.
+embedder: ""
+embedderModel: ""
+
+tei:
+  # Run TEI in-cluster. Off and unset is fine when embedder is
+  # `deterministic`; with `tei` you must set this or `tei.url`.
+  enabled: false
+  # An existing TEI endpoint instead (`http://host:port`).
+  url: ""
+  image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1
+  model: BAAI/bge-m3
+  maxBatchTokens: 4096
+  # BGE-M3 is ~2.3 GB. A pod that re-downloads it on every restart is a pod
+  # that is never ready, so the cache is a volume rather than emptyDir.
+  cache:
+    size: 20Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: "2"
+      memory: 4Gi
+
+# ── The extractor: a runtime choice, unlike the embedder ─────────────────
+# Changing it changes what future extraction produces and invalidates
+# nothing already written.
+extractor:
+  # `deterministic` | `claude` | `vllm` | `off`
+  kind: deterministic
+  model: ""
+  # For `claude`: a Secret with key ANTHROPIC_API_KEY. For `vllm`: baseUrl.
+  existingSecret: ""
+  baseUrl: ""
+
+# ── The install job ──────────────────────────────────────────────────────
+install:
+  # Runs `synveda db migrate` under the cluster's superuser, then grants the
+  # gateway's login role membership of `synveda_app` — the least-privilege
+  # role every migration has been granting since 0003. The gateway itself
+  # never holds an admin credential (ADR-0062 decision 2).
+  enabled: true
+  # Optionally admit the first tenant in the same job. Leave the slug empty
+  # and NOTES.txt prints the command instead; a chart that hardcodes one
+  # tenant into a multi-tenant product is guessing.
+  tenant:
+    slug: ""
+    name: ""
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+
+# ── Telemetry ────────────────────────────────────────────────────────────
+otel:
+  # OTLP gRPC endpoint. Empty means the gateway's own default
+  # (http://localhost:4317), which in a pod means nothing is collecting.
+  endpoint: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

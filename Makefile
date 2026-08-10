@@ -219,6 +219,25 @@ check-corpus-licences:
 check-benchmarks:
 	node scripts/publish-benchmark.mjs
 
+# The same rule again, one artefact class further out (OPS-2, ADR-0062
+# decision 11). cargo-deny governs crates, check-npm-licences packages and
+# check-corpus-licences corpora; a Helm chart references container images,
+# which none of those look at. Tags are matched too, so bumping an image is
+# a diff somebody reads — which is the point, because an inference server's
+# licence is exactly the kind that changes between releases.
+check-chart-images:
+	node scripts/check-chart-images.mjs
+
+# The enterprise chart renders, in both of the shapes CI covers: the
+# minimum a real install must state, and every optional path at once.
+# Needs helm. The chart's defaults deliberately do not render — four values
+# have no default because each is a decision somebody has to make on
+# purpose — so the lint values are also the list of those decisions.
+chart-lint:
+	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/lint-values.yaml
+	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/full-values.yaml
+	helm template synveda deploy/helm/synveda -f deploy/helm/synveda/ci/full-values.yaml >/dev/null
+
 ts-build:
 	pnpm install --frozen-lockfile
 	pnpm -r build
@@ -227,4 +246,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-backlog check-adr-status check-corpus-licences check-benchmarks eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-backlog check-adr-status check-corpus-licences check-chart-images check-benchmarks chart-lint eval-check ts-build check-npm-licences ts-test

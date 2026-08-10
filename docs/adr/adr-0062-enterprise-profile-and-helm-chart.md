@@ -1,9 +1,64 @@
 # ADR-0062: an enterprise profile that installs only what has a consumer — the chart refuses a second gateway replica and names the two things that break, and the deployed gateway stops being a superuser
 
-- **Status**: Accepted
+- **Status**: Accepted, **amended 2026-08-10** while writing the chart
+  (decision 3's mechanism; decision 9 gains the product image's second
+  binary; everything else stands)
 - **Date**: 2026-08-10
 - **Feature(s)**: OPS-2
 - **Deciders**: sujitn
+
+## Amendment (2026-08-10): a migration cannot create the extension a migration needs
+
+Decision 3 said `create extension if not exists pgmq` would "join the other
+two in a migration", on the observation that migration 0015 creates `vector`
+and 0028 creates `btree_gin` while `pgmq` and `age` are created by an initdb
+script in the dev image — a split it called accidental. **It is not
+accidental, and the tidier arrangement is unavailable.**
+
+Migration **0012** calls `select pgmq.create('observe')`. So the extension has
+to exist before the twelfth migration runs, and neither way of putting it in a
+migration works:
+
+- Appended as a new migration it runs twenty-five migrations too late, and a
+  fresh database — which is every enterprise install — fails at 0012.
+- Added to 0012 itself it changes an applied migration's checksum, and sqlx
+  validates those on every run. Every existing database, dev and CI included,
+  would refuse to migrate.
+
+So **creating an extension is a bootstrap act, not a schema act**, which is
+what the dev image was saying all along. The chart's CNPG `Cluster` carries
+`postInitApplicationSQL: [create extension if not exists pgmq]`, running once
+as superuser in the application database at bootstrap, before the migrator
+first connects. `vector` and `btree_gin` still create themselves in 0015 and
+0028 and are not repeated. The rest of decision 3 stands unchanged: the image
+supplies binaries, and AGE is not among them.
+
+The general form is worth keeping, because it will come up again in OPS-6: a
+migration series that is already applied somewhere is append-only in practice,
+so anything that must run *before* an existing migration is not a migration.
+
+**Decision 9 gains a sentence: the product image carries two binaries.** The
+runtime stage copied only `synveda-gateway`, which is right in the SMB profile
+— the CLI is on the operator's laptop and only the gateway is a container. In
+a cluster there is no laptop with a route to the database, and the two things
+an enterprise install must run are CLI verbs: `synveda db migrate` under the
+admin identity, and `synveda scim token issue` to wire Entra or Okta
+(ADR-0059). A second image was the alternative; it doubles a build to carry
+one binary that shares the first one's entire dependency compilation.
+
+**And one finding that changed the chart's shape rather than a decision.**
+`/readyz` is `synveda_store::ping`, which is `select 1`. It answers "the pool
+reached Postgres" — true of an unmigrated database and of a role holding no
+grants alike — so it cannot order an install behind the migration job, and a
+gateway pod would join its Service while every request 500s. That is the right
+probe for the failover assertion in decision 7 and the wrong one for start-up,
+so the chart waits in an initContainer instead, on the exact read the gateway
+needs: `select 1 from tenants limit 1` under the gateway's own credential,
+which is false until both the schema exists and the `synveda_app` grant has
+landed. Making `/readyz` itself mean "this process can serve" is a better
+answer and a product change with its own blast radius (every existing
+deployment's readiness semantics), so it is recorded here rather than taken
+on the way past.
 
 ## Context
 

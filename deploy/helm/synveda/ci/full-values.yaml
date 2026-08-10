@@ -1,0 +1,27 @@
+# Every optional path on at once, so `helm template` covers the branches a
+# minimal install never renders: the ingress, in-cluster TEI, a model-backed
+# extractor with its credential, and the install job admitting a tenant.
+gateway:
+  publicUrl: https://synveda.example.com
+  dbMaxConnections: 40
+ingress:
+  enabled: true
+  className: nginx
+  host: synveda.example.com
+  tls:
+    - secretName: synveda-tls
+      hosts: [synveda.example.com]
+oidc:
+  existingSecret: synveda-oidc
+embedder: tei
+tei:
+  enabled: true
+extractor:
+  kind: claude
+  existingSecret: synveda-anthropic
+install:
+  tenant:
+    slug: acme
+    name: ACME Corporation
+otel:
+  endpoint: http://otel-collector:4317
