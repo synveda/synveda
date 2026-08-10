@@ -190,6 +190,11 @@ pub async fn hybrid_search(
                 &query_vector.vector,
                 allowed,
                 per_leg as i64,
+                // The values this query hardcoded until TEN-3 made them
+                // measurable (ADR-0063 arm B). Unchanged behaviour; when
+                // the benchmark says what they should be, they become a
+                // gateway setting rather than a default here.
+                search::DenseTuning::default(),
             )
             .await?;
             metrics::histogram!(RETRIEVAL_LEG_SECONDS, "leg" => "dense")

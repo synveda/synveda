@@ -165,10 +165,21 @@ TEN-2  Postgres row-level security as backstop (M)
   RLS policies on every tenant-scoped table keyed to a session GUC set per connection.
   Defence-in-depth: app bug cannot cross tenants. AC: adversarial test suite — direct SQL
   with wrong tenant GUC returns zero rows on every table.
-TEN-3  Tenant-partitioned storage layout (M)
-  Declarative partitioning by tenant hash for records/embeddings; partial HNSW indexes per
-  partition (mitigates pgvector post-filtering). AC: filtered ANN query plan shows partition
-  pruning; benchmark vs unpartitioned recorded.
+TEN-3  Dense-leg retrieval benchmark (M)
+  (Amended 2026-08-10 by ADR-0063 decision 4, after the benchmark its own AC asked for came
+  back negative. Read "Tenant-partitioned storage layout — declarative partitioning by tenant
+  hash for records/embeddings; partial HNSW indexes per partition (mitigates pgvector
+  post-filtering). AC: filtered ANN query plan shows partition pruning; benchmark vs
+  unpartitioned recorded." The AC's second clause is a comparison, and a comparison allowed
+  to say no said no: in the regime the gate was written for, recall is already 1.000 at 1.65ms
+  p95 on an exact scan that never touches the HNSW index, so partitioning by tenant has
+  nothing there to improve. The first clause cannot be shown by a deployment that does not
+  partition, so it is amended rather than satisfied. The partitioning half is TEN-7, as LIST.)
+  A recall-and-latency harness for the dense leg over a seeded corpus, at stated sizes and
+  tenant counts, in both filter regimes; arms recorded with the corpus, the pgvector version
+  and the commit in each row. AC: recall@10 against exact search and p50/p95 for every arm,
+  three runs each, rows published and re-checked by CI; the plan each arm ran shown at
+  EXPLAIN rather than assumed.
 TEN-4  Per-tenant encryption keys (M)
   Envelope encryption; key ref per tenant; KMS trait (local dev impl + AWS/GCP/Vault impls
   later). AC: tenant export is unreadable without that tenant's key.
@@ -180,6 +191,16 @@ TEN-6  Cross-tenant isolation test harness (M) [continuous]
   Fuzzing suite that attempts cross-tenant reads via API, recall, inject composition, and
   graph traversal. AC: runs in CI nightly; any leak fails the build. (This is also an
   evaluation deliverable — see EVAL-5.)
+TEN-7  LIST partitioning per tenant (L)
+  The partitioning half TEN-3 measured and declined, as LIST rather than HASH — a hash
+  partition holds an arbitrary set of tenants, so it can be neither dropped for one nor
+  pinned for one, which is what every feature that wants partitioning actually wants. Costs
+  `records` the meaning of its own primary key (composite with tenant_id), drags the
+  bitemporal triple and both archive triggers with it, and is an operator-run offline
+  repartition rather than a migration. AC: whichever trigger reopened it, met and measured;
+  filtered ANN query plan shows partition pruning at EXPLAIN (ANALYZE) with partitions
+  actually removed; TEN-3's harness re-run across the change; every partition carries its own
+  enabled and forced RLS and ADR-0009's completeness guard covers relkind 'p'.
 
 ──────────────────────────────────────────────
 EPIC AUTH — Authentication & identity (functional requirement)
@@ -321,6 +342,13 @@ CTX-6  Session compression assist (M)
   Optional pre-compact hook support: hybrid sliding window summarisation of session history
   into observe events. AC: PreCompact in Claude Code produces derived memories; probe-based
   eval shows key facts survive compression.
+CTX-7  Dense-leg plan stability (M)
+  The dense leg is a prepared statement on a long-lived pool, so PostgreSQL plans it against
+  real parameters five times per connection and then substitutes a generic plan — which drops
+  the HNSW index and scans the whole allowed slice exactly. Rule on which plan the read path
+  should run, and make it a decision rather than a default. AC: the plan the dense leg runs is
+  asserted rather than assumed; recall and p50/p95 recorded for both plans at 1024 dimensions;
+  CTX-1's own latency AC re-read against whichever plan its test is actually measuring.
 
 ──────────────────────────────────────────────
 EPIC GRPH — Knowledge graph & relationships
@@ -945,7 +973,7 @@ Phase 2 governance (wk 6–10): FLOW-1..7 · AUTHZ-4,5 · MEM-5,6 · CTX-4,5 · 
    → Demo: promotion pipeline, lapse lifecycle, as-of inject, bank-mode switch.
 Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-2 ·
                          AUTH-4,5 · EVAL-3 · OPS-2 · TEN-3,4,5,6 · AUD-3,4 · GRPH-3 ·
-                         EVAL-6 · OPS-3,4 · ADPT-3 · CTX-6 · FLOW-8
+                         EVAL-6 · CTX-7 · OPS-3,4 · ADPT-3 · CTX-6 · FLOW-8
    (Reordered 2026-08-04. Order within the phase is by demo-readiness, not epic-grouped
    and — unlike Phase 1's — not topological, because nothing here blocks anything else:
    every dependency Phase 3 has was met by Phase 2. The original order scattered this
@@ -961,13 +989,20 @@ Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-
    is warm. What moved back is the block a customer asks for at procurement rather than
    at a demo — TEN-3..6, AUD-3,4 — plus GRPH-3, EVAL-6, OPS-3,4, ADPT-3, CTX-6 and
    FLOW-8. Nothing is cut and the phase's contents are unchanged.)
+   (CTX-7 added 2026-08-10 by TEN-3/ADR-0063, whose benchmark found it by disagreeing with
+   itself: the same arm measured 0.341 recall at 5.9ms and 0.878 at 50.9ms on two runs, and
+   the variable was not the arm. Placed in Phase 3, beside EVAL-6, because it is a
+   performance claim this product has already published rather than one it has yet to make —
+   CTX-1's AC is "p99 <80ms at 1M records/tenant" and nothing has established which plan
+   that number was measured against. It is not a governance hole: the generic plan is exact,
+   so it returns *better* answers, more slowly and with worse scaling.)
    → Demo: Entra/Okta live, spec-compliant governed skills into Claude Code + Cursor,
      LongMemEval scores published, Helm install.
      (Read "LoCoMo/LongMemEval" until 2026-08-07. EVAL-3/ADR-0061 decision 1 found LoCoMo's
      corpus is CC BY-NC 4.0 and cannot back a published commercial claim; the second
      benchmark is EVAL-7. A goal naming a score we may not quote is a goal that cannot be
      met, so the goal moved rather than the honesty.)
-Phase 4 ecosystem: ADPT-4,5,6,7 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · CNSL-3,4 · AUD-5 · AUTHZ-6,7 · EVAL-7
+Phase 4 ecosystem: ADPT-4,5,6,7 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · CNSL-3,4 · AUD-5 · AUTHZ-6,7 · EVAL-7 · TEN-7
    (AUTHZ-7 added 2026-08-05 by CNSL-2/ADR-0058 decision 9, which found the asymmetry it
    names while building the explorer. Placed here rather than in Phase 3 because its two
    bounds hold — a pack flip widens no candidate universe and cannot reach below the
