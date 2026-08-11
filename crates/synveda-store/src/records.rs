@@ -557,6 +557,45 @@ pub async fn current_at_scope(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// Every current record a tenant holds, for the sealed export (TEN-4,
+/// ADR-0064 decision 8).
+///
+/// Deliberately the *current* versions rather than the bitemporal history:
+/// this is the smallest body that makes "unreadable without that tenant's
+/// key" a testable claim, and TEN-5 — which owns export as a product — is
+/// where history, assets and a re-import belong. A caller shipping this as a
+/// portable archive today would be shipping half of TEN-5 under TEN-4's name.
+///
+/// Runs inside the caller's tenant transaction, so RLS applies and the query
+/// filters on `tenant_id` anyway: tenant correctness never rides on the
+/// backstop alone (ADR-0009).
+#[tracing::instrument(
+    name = "store.records.export_current",
+    skip_all,
+    fields(tenant.id = %tenant_id),
+    err(Display)
+)]
+pub async fn export_current(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+) -> Result<Vec<RecordVersion>> {
+    let rows = sqlx::query_as!(
+        RecordRow,
+        r#"
+        select id, tenant_id, scope_id, owner_id, kind, class, content,
+               sensitivity, provenance, valid_from, valid_to, tx_from, tx_to
+        from records
+        where tenant_id = $1
+        order by id
+        "#,
+        tenant_id.as_uuid(),
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
 /// The current versions of `ids`, wherever they live.
 ///
 /// The scope-blind sibling of [`current_at_scope`], for a caller that

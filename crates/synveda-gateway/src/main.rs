@@ -440,12 +440,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // wakes up to do nothing — and because "no tenant is being pulled"
     // should be visible as a missing log line rather than as a sweep
     // reporting zero every hour.
-    let directory_sync = if directory_connectors.is_empty() {
+    //
+    // Since TEN-4 a tenant's connector can also come from its own sealed
+    // `tenant_secrets` row (ADR-0064 decision 9), and a deployment whose
+    // credentials live *only* there configures no issuer connector at all —
+    // so it would fail the test above. `SYNVEDA_DIRECTORY_SYNC=on` is that
+    // deployment's switch. It is an explicit flag rather than a scan for
+    // stored rows because `tenant_secrets` is under forced RLS: asking "does
+    // any tenant have one" means one transaction per tenant, and a boot that
+    // is O(tenants) to answer a yes/no question is a boot that gets slower
+    // for the customers who have the most of them.
+    let force_directory_sync = std::env::var("SYNVEDA_DIRECTORY_SYNC")
+        .is_ok_and(|value| matches!(value.trim(), "on" | "true" | "1"));
+    let directory_sync = if directory_connectors.is_empty() && !force_directory_sync {
         None
     } else {
         let config = directory_sync_config_from_env()?;
         tracing::info!(
             tenants = directory_connectors.len(),
+            stored_credentials = force_directory_sync,
             interval_secs = config.interval.as_secs(),
             absence_passes = config.absence_passes,
             breaker_fraction = config.breaker_fraction,

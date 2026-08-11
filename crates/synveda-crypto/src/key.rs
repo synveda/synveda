@@ -4,7 +4,7 @@ use std::fmt;
 
 use synveda_types::{Error, Result, TenantId};
 use uuid::Uuid;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 /// The length of every key in this crate. XChaCha20-Poly1305 takes a 256-bit
 /// key and so does the local KEK that wraps one.
@@ -80,6 +80,26 @@ impl DataKey {
             }
         }
         Ok(DataKey(bytes))
+    }
+
+    /// Renders the key in the 64-character hex form configuration carries.
+    ///
+    /// **The one intentional way key material leaves this crate**, and it
+    /// exists for exactly one caller: `synveda kms keygen`. A key nobody can
+    /// write down is a key nobody can configure, and the alternative to
+    /// generating one is an operator inventing 32 bytes by hand. The string
+    /// is [`Zeroizing`], so it is wiped when the caller drops it — which is
+    /// as much as this crate can do once the bytes are on their way to a
+    /// terminal.
+    #[must_use]
+    pub fn to_hex(&self) -> Zeroizing<String> {
+        let mut hex = String::with_capacity(KEY_LEN * 2);
+        for byte in &self.0 {
+            use std::fmt::Write as _;
+            // Infallible: writing to a String cannot fail.
+            let _ = write!(hex, "{byte:02x}");
+        }
+        Zeroizing::new(hex)
     }
 
     /// The raw bytes, for the cipher and for wrapping. Crate-private: no
@@ -254,7 +274,8 @@ mod tests {
     #[test]
     fn hex_round_trips() {
         let key = DataKey::generate().expect("generate");
-        let hex: String = key.expose().iter().map(|b| format!("{b:02x}")).collect();
+        let hex = key.to_hex();
+        assert_eq!(hex.len(), KEY_LEN * 2);
         let parsed = DataKey::from_hex(&hex).expect("parse");
         assert_eq!(parsed.expose(), key.expose());
     }

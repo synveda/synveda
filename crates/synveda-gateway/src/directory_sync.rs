@@ -467,6 +467,75 @@ async fn seal(
     Ok(())
 }
 
+/// The tenant's own sealed connector, if it has one (TEN-4, ADR-0064
+/// decision 9).
+///
+/// The whole `DirectorySyncConfig` is sealed, not just its secret. Sealing
+/// only the credential and reading the endpoints from somewhere else would
+/// mean a tenant's credential and the host it is presented to could disagree,
+/// which is the one disagreement a directory integration must not have.
+///
+/// Built per pass rather than cached: a pass is hourly, an unwrap is one
+/// cached-key lookup, and a credential an operator rotated should be in use
+/// on the next pass rather than after a restart.
+#[tracing::instrument(
+    name = "directory_sync.stored_connector",
+    skip_all,
+    fields(tenant.id = %tenant_id),
+    err(Display)
+)]
+async fn stored_connector(
+    state: &AppState,
+    tenant_id: TenantId,
+) -> Result<Option<Box<dyn DirectoryConnector>>> {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let stored = synveda_store::tenant_secrets::get(
+        &mut *tx,
+        tenant_id,
+        synveda_identity::directory::CREDENTIAL_SECRET_NAME,
+    )
+    .await?;
+    tx.commit()
+        .await
+        .map_err(|err| synveda_types::Error::Storage {
+            message: format!("read a tenant's directory credential: {err}"),
+        })?;
+    let Some(stored) = stored else {
+        return Ok(None);
+    };
+
+    let opened = state
+        .keys
+        .opening_key(
+            &state.pool,
+            synveda_crypto::KeyScope::Tenant(tenant_id),
+            &stored.sealed,
+        )
+        .await?
+        .open(
+            synveda_crypto::Purpose::DirectoryCredential,
+            synveda_crypto::RowKey::Name(synveda_identity::directory::CREDENTIAL_SECRET_NAME),
+            &stored.sealed,
+        )
+        .inspect_err(|_| {
+            metrics::counter!(
+                synveda_store::keys::KEY_OPEN_FAILURES_TOTAL,
+                "scope" => "tenant",
+                "purpose" => synveda_crypto::Purpose::DirectoryCredential.as_str(),
+            )
+            .increment(1);
+        })?;
+    // The error deliberately carries no serde detail: a parse failure's
+    // message can quote the input, and the input is a credential.
+    let config: synveda_identity::directory::DirectorySyncConfig = serde_json::from_slice(&opened)
+        .map_err(|_| synveda_types::Error::Invalid {
+            message: "a tenant's stored directory credential is not a directory \
+                      configuration this build understands"
+                .to_string(),
+        })?;
+    synveda_identity::directory::connector(&config).map(Some)
+}
+
 /// One pass over every active tenant a connector serves.
 ///
 /// # Errors
@@ -480,10 +549,35 @@ pub async fn sweep(
 ) -> Result<()> {
     let tenants = tenants::active(&state.pool).await?;
     for tenant in tenants {
-        let Some(connector) = connectors.get(&tenant.id) else {
-            continue;
+        // Precedence, stated in one place (ADR-0064 decision 9): the tenant's
+        // own sealed credential, then the deployment's configuration.
+        //
+        // **A stored credential that fails to open skips the tenant rather
+        // than falling back.** Falling back would quietly re-point a customer
+        // at whatever directory the deployment happens to configure, on the
+        // day their key or their row broke — a different directory's answer
+        // to "who still works here", which is the input this feature turns
+        // into departures.
+        let stored = match stored_connector(state, tenant.id).await {
+            Ok(stored) => stored,
+            Err(error) => {
+                tracing::warn!(
+                    tenant.id = %tenant.id,
+                    %error,
+                    "a tenant's stored directory credential could not be used; \
+                     skipping rather than falling back to the deployment's"
+                );
+                continue;
+            }
         };
-        if let Err(error) = run_once(state, &tenant, connector.as_ref(), config).await {
+        let connector = match stored.as_deref() {
+            Some(connector) => connector,
+            None => match connectors.get(&tenant.id) {
+                Some(connector) => connector.as_ref(),
+                None => continue,
+            },
+        };
+        if let Err(error) = run_once(state, &tenant, connector, config).await {
             tracing::warn!(tenant.id = %tenant.id, error = %error, "directory sync pass failed");
         }
     }

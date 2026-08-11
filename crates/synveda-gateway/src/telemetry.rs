@@ -528,6 +528,29 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_store::scope_chain::SCOPE_CHAIN_INVALIDATIONS_TOTAL,
         "Tenant-wide scope-chain cache flushes after committed hierarchy mutations"
     );
+    // TEN-4 key plane (ADR-0064). Emitted in synveda-store and the gateway,
+    // described here where the recorder lives (ADR-0007).
+    metrics::describe_counter!(
+        synveda_store::keys::KEY_UNWRAPS_TOTAL,
+        "Data keys unwrapped through the KMS, by scope. A rate that tracks \
+         request rate rather than sitting near zero means the key cache is \
+         not working"
+    );
+    metrics::describe_counter!(
+        synveda_store::keys::KEY_CACHE_LOOKUPS_TOTAL,
+        "Key-ring lookups by scope and outcome (hit/miss)"
+    );
+    metrics::describe_counter!(
+        synveda_store::keys::KEYS_MINTED_TOTAL,
+        "Data keys minted, by scope and reason (provision/rotate)"
+    );
+    metrics::describe_counter!(
+        synveda_store::keys::KEY_OPEN_FAILURES_TOTAL,
+        "Sealed payloads that did not open, by scope and purpose. Nothing in \
+         normal operation fails to open: anything but zero is corruption, a \
+         missing key, or the cross-tenant transplant ADR-0064 decision 4 \
+         turns into a failure"
+    );
     // HIER-3 counters (ADR-0017): fragments in synveda-policy's entity
     // store; flushes at the gateway's unified hierarchy-invalidation seam.
     metrics::describe_counter!(

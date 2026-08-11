@@ -187,23 +187,13 @@ impl KeyManagement for LocalKms {
     #[tracing::instrument(name = "crypto.kms.wrap", skip_all, fields(kms.method = self.method(), key.scope = scope.label()), err(Display))]
     async fn wrap_key(&self, scope: KeyScope, key: &DataKey) -> Result<Vec<u8>> {
         self.kek_for(scope)
-            .seal(Purpose::DataKey, DATA_KEY_ROW, key.expose())
+            .seal_data_key(Purpose::DataKey, DATA_KEY_ROW, key)
     }
 
     #[tracing::instrument(name = "crypto.kms.unwrap", skip_all, fields(kms.method = self.method(), key.scope = scope.label()), err(Display))]
     async fn unwrap_key(&self, scope: KeyScope, wrapped: &[u8]) -> Result<DataKey> {
-        let opened = self
-            .kek_for(scope)
-            .open(Purpose::DataKey, DATA_KEY_ROW, wrapped)?;
-        let bytes: [u8; crate::key::KEY_LEN] =
-            opened.as_slice().try_into().map_err(|_| Error::Invalid {
-                message: format!(
-                    "unwrapped data key is {} bytes, not {}",
-                    opened.len(),
-                    crate::key::KEY_LEN
-                ),
-            })?;
-        Ok(DataKey::from_bytes(bytes))
+        self.kek_for(scope)
+            .open_data_key(Purpose::DataKey, DATA_KEY_ROW, wrapped)
     }
 }
 

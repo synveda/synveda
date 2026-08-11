@@ -3818,6 +3818,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "synveda-audit",
+ "synveda-crypto",
  "synveda-identity",
  "synveda-policy",
  "synveda-store",

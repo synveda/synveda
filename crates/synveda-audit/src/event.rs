@@ -210,6 +210,27 @@ pub enum AuditAction {
     /// A tenant was admitted (CLI break-glass; TEN-5 owns the product
     /// lifecycle surface).
     TenantCreated,
+    /// A tenant's encryption key was minted (TEN-4, ADR-0064). Carries the
+    /// generation and the KEK's name, never key material of any kind —
+    /// wrapped included, because a wrapped key in the chain is a wrapped key
+    /// in every copy of the chain.
+    TenantKeyProvisioned,
+    /// A tenant's encryption key was rotated: the current generation retired
+    /// and the next minted. Nothing is re-sealed by the act, so this event
+    /// means "new payloads move to generation N", not "everything is on
+    /// generation N".
+    TenantKeyRotated,
+    /// A sealed archive of a tenant was written (ADR-0064 decision 8).
+    /// Carries what left and under which generation, because an export is a
+    /// copy of a tenant's data leaving the deployment and the chain is where
+    /// that is answerable afterwards.
+    TenantExported,
+    /// A tenant's sealed secret was stored or replaced — its outbound
+    /// directory credential today (decision 9). Carries the name and never
+    /// the value.
+    TenantSecretStored,
+    /// A tenant's sealed secret was destroyed.
+    TenantSecretCleared,
     /// An inject composed a context block — one event per inject with
     /// the block's watermark and the per-scope `MemoryRead` decisions
     /// aggregated, never one row per candidate (CTX-3, ADR-0026
@@ -470,7 +491,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 58] = [
+    pub const ALL: [AuditAction; 63] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -504,6 +525,11 @@ impl AuditAction {
         AuditAction::MemorySuperseded,
         AuditAction::MemoryClassified,
         AuditAction::TenantCreated,
+        AuditAction::TenantKeyProvisioned,
+        AuditAction::TenantKeyRotated,
+        AuditAction::TenantExported,
+        AuditAction::TenantSecretStored,
+        AuditAction::TenantSecretCleared,
         AuditAction::ContextInjected,
         AuditAction::ContextRecalled,
         AuditAction::ChannelPublished,
@@ -569,6 +595,11 @@ impl AuditAction {
             AuditAction::MemorySuperseded => "memory.superseded",
             AuditAction::MemoryClassified => "memory.classified",
             AuditAction::TenantCreated => "tenant.created",
+            AuditAction::TenantKeyProvisioned => "tenant.key.provisioned",
+            AuditAction::TenantKeyRotated => "tenant.key.rotated",
+            AuditAction::TenantExported => "tenant.exported",
+            AuditAction::TenantSecretStored => "tenant.secret.stored",
+            AuditAction::TenantSecretCleared => "tenant.secret.cleared",
             AuditAction::ContextInjected => "context.injected",
             AuditAction::ContextRecalled => "context.recalled",
             AuditAction::ChannelPublished => "vedaflow.channel.published",

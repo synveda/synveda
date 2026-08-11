@@ -1,9 +1,54 @@
 # ADR-0064: per-tenant keys seal what leaves and what we have to read back — the retrieval substrate stays readable by design, and `console_sessions` cannot hold a tenant key because ADR-0056 was right to take its tenant away
 
-- **Status**: Proposed
+- **Status**: Accepted, **amended twice during implementation** (decision 12
+  named the wrong vocabulary; and decision 5 turned out to have a consequence
+  for decision 12 that neither of them noticed)
 - **Date**: 2026-08-11
 - **Feature(s)**: TEN-4
 - **Deciders**: sujitn
+
+## Amendment 1 (2026-08-11): decision 12 named the wrong vocabulary
+
+Decision 12 said rotation and export "take new `Action` variants (packs to
+`@17`, goldens re-recorded)". They do not, and should not.
+
+A Cedar `Action` exists for a surface the PDP authorizes. Both of these acts
+are **operator commands against the database** — `synveda tenant key rotate`
+and `synveda tenant export` — in the same category as `db migrate`,
+`tenant create` and `audit verify`, which reach no gateway route and pass no
+policy decision. Adding Cedar actions for them would have added two variants
+nothing evaluates, taken every pack to `@17`, and re-recorded every golden, to
+authorize a caller who is already holding the database credentials.
+
+What they take instead is **audit** actions: `tenant.key.provisioned`,
+`tenant.key.rotated`, `tenant.exported`, `tenant.secret.stored` and
+`tenant.secret.cleared`, chained as break-glass events under the operator's
+own name — which is what `tenant.created` has done since TEN-1. Packs stay at
+`@16` and no golden moved.
+
+The rest of decision 12 stands unchanged, including the part that turned out
+to matter most: a failed open is audited. With one exception the decision
+could not have anticipated and decision 5 makes unavoidable — see amendment 2.
+
+## Amendment 2 (2026-08-11): two things the tests found
+
+**A failed open on `console_sessions` cannot be a chain entry.** Decision 12
+says a failed open is an audit event; the audit chain is per-tenant (AUD-1);
+and decision 5's whole point is that a console session row is read *before*
+the tenant exists. So for exactly the table this feature was named after,
+there is no tenant to chain the failure to. It is a counter and a log line
+there (`synveda_key_open_failures_total{scope,purpose}`) and a chained event
+everywhere else. This is decision 5's consequence one step further out than
+decision 5 noticed.
+
+**`opening_key` selected a key by version and never checked the envelope's
+scope tag.** Asking a tenant's key ring to open a deployment-sealed payload
+read a row and spent a KMS unwrap before `SealingKey::open` refused it on the
+tag. The refusal inside `open` is the load-bearing one and stays; the ring now
+also compares the tag first, so the common mistake costs one comparison and
+produces an error that names the disagreement rather than the uniform "did not
+open". Found by a test asserting the wrong step, which is a better outcome
+than the test passing.
 
 ## Context
 
@@ -201,11 +246,14 @@ amended by tech plan §5, enforced by `scripts/check-crate-deps.mjs`.
     has and lands in the same place: OPS-7 owns cross-process invalidation,
     and this cache is named in it rather than inventing a second transport.
 
-12. **Key operations are governed acts, and a failed open is audited louder
-    than a successful one.** Rotation and export take new `Action` variants
+12. **Key operations are audited acts, and a failed open is audited louder
+    than a successful one.** ~~Rotation and export take new `Action` variants
     (packs to `@17`, goldens re-recorded — the cost ADR-0060 paid for
     `DirectorySealAuthorise` and the reason to add both in one diff rather
-    than two). Provisioning rides on `tenant create`. A **failed** open is an
+    than two).~~ **(Amended 2026-08-11 — see amendment 1: these are operator
+    commands against the database, not PDP-gated surfaces, so they take
+    *audit* actions and the packs stay at `@16`.)** Provisioning rides on
+    `tenant create`. A **failed** open is an
     audit event with its scope, purpose and key version, because under
     decision 4 it is either corruption or a cross-tenant transplant and both
     want to be visible; the payload carries integers and strings only, since

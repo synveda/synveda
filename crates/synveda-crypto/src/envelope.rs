@@ -182,6 +182,40 @@ impl SealingKey {
         Ok(envelope)
     }
 
+    /// Seals another key under this one.
+    ///
+    /// The KMS wraps a data key this way, and a tenant export wraps its own
+    /// per-archive key this way (ADR-0064 decision 8). It exists as its own
+    /// method so that key material never has to leave this crate to be
+    /// sealed — a caller with a `DataKey` can pass it, and cannot read it.
+    pub fn seal_data_key(
+        &self,
+        purpose: Purpose,
+        row: RowKey<'_>,
+        key: &DataKey,
+    ) -> Result<Vec<u8>> {
+        self.seal(purpose, row, key.expose())
+    }
+
+    /// Opens a key sealed by [`Self::seal_data_key`].
+    pub fn open_data_key(
+        &self,
+        purpose: Purpose,
+        row: RowKey<'_>,
+        envelope: &[u8],
+    ) -> Result<DataKey> {
+        let opened = self.open(purpose, row, envelope)?;
+        let bytes: [u8; crate::key::KEY_LEN] =
+            opened.as_slice().try_into().map_err(|_| Error::Invalid {
+                message: format!(
+                    "a sealed key opened to {} bytes, not {}",
+                    opened.len(),
+                    crate::key::KEY_LEN
+                ),
+            })?;
+        Ok(DataKey::from_bytes(bytes))
+    }
+
     /// Opens an envelope sealed by this key, under the same purpose and row.
     ///
     /// Fails — rather than returning the wrong plaintext — when the envelope

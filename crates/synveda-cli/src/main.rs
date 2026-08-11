@@ -23,6 +23,7 @@ mod diff;
 mod directory;
 mod hierarchy;
 mod init;
+mod keys;
 mod lapse;
 mod login;
 mod mcp;
@@ -214,6 +215,10 @@ enum Command {
     /// Database administration (dev bootstrap).
     #[command(subcommand)]
     Db(DbCommand),
+    /// The key-encryption key (TEN-4, ADR-0064). Everything else in the key
+    /// plane is wrapped by this one, and it lives outside the database.
+    #[command(subcommand)]
+    Kms(KmsCommand),
     /// Tenant administration (dev bootstrap).
     #[command(subcommand)]
     Tenant(TenantCommand),
@@ -1133,6 +1138,33 @@ enum DirectoryCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Store this tenant's directory configuration, sealed under its own
+    /// key (TEN-4, ADR-0064 decision 9).
+    ///
+    /// A tenant with one of these is pulled with it; a tenant without one
+    /// falls back to the deployment's `SYNVEDA_OIDC_ISSUERS` entry. This is
+    /// what lets one deployment pull two tenants from two directories, the
+    /// limitation AUTH-5 shipped with.
+    ///
+    /// The whole configuration is sealed, not only the secret, so a
+    /// credential and the host it is presented to cannot disagree.
+    SetCredential {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+        /// A file holding the connector JSON, or `-` for stdin. A path
+        /// rather than an argument, because an argument is in the shell
+        /// history and in `ps`.
+        #[arg(long)]
+        config: std::path::PathBuf,
+    },
+    /// Destroy this tenant's stored directory configuration. The sweep then
+    /// falls back to the deployment's, if it has one for this tenant.
+    ClearCredential {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+    },
     /// Authorise the next complete pass to seal past the breaker.
     ///
     /// Bounded by `--ceiling`, and spent by the first pass that uses it: a
@@ -1249,6 +1281,12 @@ fn scope_kind_below_root(value: &str) -> Result<ScopeKind, String> {
 #[derive(Subcommand)]
 enum TenantCommand {
     /// Admit a tenant; prints the created tenant as JSON.
+    ///
+    /// Provisions the tenant's encryption key in the same breath when a KEK
+    /// is configured (TEN-4, ADR-0064). A deployment with no `SYNVEDA_KMS_KEY`
+    /// still admits the tenant and says what is missing — the key plane is
+    /// fail-closed, not fail-to-admit — and `tenant key provision` fills it
+    /// in later.
     Create {
         /// Human-stable handle: lowercase, hyphenated, unique.
         #[arg(long)]
@@ -1260,6 +1298,71 @@ enum TenantCommand {
         #[arg(long)]
         suspended: bool,
     },
+    /// A tenant's encryption keys (TEN-4, ADR-0064).
+    #[command(subcommand)]
+    Key(TenantKeyCommand),
+    /// Write a sealed archive of a tenant's records and audit chain.
+    ///
+    /// The AC's artefact: unreadable without that tenant's key. Sealed under
+    /// a fresh per-archive key wrapped by the tenant's, so handing somebody
+    /// an export does not hand them the key to the tenant's live secrets.
+    ///
+    /// This is not TEN-5's portable archive — there is no re-import, no
+    /// assets and no destruction certificate here, and TEN-5 owns those.
+    Export {
+        /// Tenant UUID.
+        #[arg(long)]
+        tenant: TenantId,
+        /// Where to write the archive.
+        #[arg(long)]
+        out: std::path::PathBuf,
+    },
+    /// Open a sealed archive, printing its contents.
+    ExportOpen {
+        /// The archive to open.
+        #[arg(long)]
+        archive: std::path::PathBuf,
+    },
+    /// Print an archive's cleartext header without opening it: whose it is,
+    /// how big, which key generation. What a backup vault's index needs.
+    ExportDescribe {
+        /// The archive to describe.
+        #[arg(long)]
+        archive: std::path::PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum TenantKeyCommand {
+    /// Mint a tenant's first data key, or report the one already there.
+    Provision {
+        #[arg(long)]
+        tenant: TenantId,
+    },
+    /// Retire the current data key and mint the next generation.
+    ///
+    /// Re-seals nothing: payloads under the retired key keep opening under
+    /// it and move forward when their rows are next written, so this
+    /// returning does not mean every ciphertext is on the new key
+    /// (ADR-0064 decision 6).
+    Rotate {
+        #[arg(long)]
+        tenant: TenantId,
+    },
+    /// Which generation is current, and what sealed secrets the tenant holds.
+    Status {
+        #[arg(long)]
+        tenant: TenantId,
+    },
+}
+
+#[derive(Subcommand)]
+enum KmsCommand {
+    /// Mint a key-encryption key and print it as hex, and nothing else.
+    ///
+    /// Meant to be captured: `SYNVEDA_KMS_KEY=$(synveda kms keygen)`. Back it
+    /// up — every key in the database is wrapped by it.
+    Keygen,
 }
 
 #[derive(Subcommand)]
@@ -1504,6 +1607,24 @@ fn read_template(path: &str) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|err| format!("read {path}: {err}"))
 }
 
+/// Reads a connector configuration from a file, or from standard input for
+/// `-`.
+///
+/// A path rather than an inline argument because the document holds a
+/// credential, and an argument is in the shell history and visible in `ps`
+/// while the command runs.
+fn read_config_arg(path: &std::path::Path) -> Result<String, String> {
+    if path.as_os_str() == "-" {
+        use std::io::Read;
+        let mut text = String::new();
+        std::io::stdin()
+            .read_to_string(&mut text)
+            .map_err(|err| format!("read the configuration from stdin: {err}"))?;
+        return Ok(text);
+    }
+    std::fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))
+}
+
 fn profile_name(flag: Option<String>) -> String {
     flag.or_else(|| std::env::var("SYNVEDA_PROFILE").ok())
         .filter(|name| !name.is_empty())
@@ -1692,11 +1813,66 @@ async fn run(cli: Cli) -> Result<(), String> {
             };
             let pool = connect().await?;
             let tenant = create_tenant(&pool, &slug, &name, status).await?;
+            // The tenant's key, in the same command that admits it (TEN-4,
+            // ADR-0064). Not in `create_tenant`'s transaction: wrapping a key
+            // is a KMS call, and a network call inside the transaction that
+            // admits a tenant is a transaction held open by somebody else's
+            // outage. A failure here leaves an admitted tenant with no key,
+            // which `tenant key provision` fixes and which the message says.
+            let key = match keys::provision_quietly(&pool, tenant.id).await {
+                Ok(version) => serde_json::json!({ "version": version }),
+                Err(error) => {
+                    eprintln!(
+                        "tenant admitted, but its encryption key was not \
+                         provisioned: {error}\nrun `synveda tenant key \
+                         provision --tenant {}` once a KEK is configured",
+                        tenant.id
+                    );
+                    serde_json::Value::Null
+                }
+            };
+            let mut rendered = serde_json::to_value(&tenant).map_err(|err| err.to_string())?;
+            if let Some(object) = rendered.as_object_mut() {
+                object.insert("encryption_key".to_string(), key);
+            }
             println!(
                 "{}",
-                serde_json::to_string_pretty(&tenant).map_err(|err| err.to_string())?
+                serde_json::to_string_pretty(&rendered).map_err(|err| err.to_string())?
             );
             Ok(())
+        }
+        Command::Kms(KmsCommand::Keygen) => keys::keygen(),
+        Command::Tenant(TenantCommand::Key(TenantKeyCommand::Provision { tenant })) => {
+            let pool = connect().await?;
+            keys::provision(&pool, tenant).await
+        }
+        Command::Tenant(TenantCommand::Key(TenantKeyCommand::Rotate { tenant })) => {
+            let pool = connect().await?;
+            keys::rotate(&pool, tenant).await
+        }
+        Command::Tenant(TenantCommand::Key(TenantKeyCommand::Status { tenant })) => {
+            let pool = connect().await?;
+            keys::status(&pool, tenant).await
+        }
+        Command::Tenant(TenantCommand::Export { tenant, out }) => {
+            let pool = connect().await?;
+            keys::export(&pool, tenant, &out).await
+        }
+        Command::Tenant(TenantCommand::ExportOpen { archive }) => {
+            let pool = connect().await?;
+            keys::export_open(&pool, &archive).await
+        }
+        Command::Tenant(TenantCommand::ExportDescribe { archive }) => {
+            keys::export_describe(&archive)
+        }
+        Command::Directory(DirectoryCommand::SetCredential { tenant, config }) => {
+            let json = read_config_arg(&config)?;
+            let pool = connect().await?;
+            keys::set_directory_credential(&pool, tenant, &json).await
+        }
+        Command::Directory(DirectoryCommand::ClearCredential { tenant }) => {
+            let pool = connect().await?;
+            keys::clear_directory_credential(&pool, tenant).await
         }
         Command::Policy(PolicyCommand::Apply {
             tenant,
@@ -2505,7 +2681,12 @@ pub(crate) async fn create_tenant(
 /// Chains a break-glass event in the same transaction as the mutation it
 /// records: the CLI audits itself like the gateway does (ADR-0019
 /// decision 7) — a failed append fails the command.
-async fn record_break_glass(
+/// The break-glass audit seam, for the key plane's operator commands
+/// (TEN-4, ADR-0064 decision 12 as amended).
+///
+/// `pub(crate)` so `keys.rs` chains its own acts rather than every one of
+/// them being threaded back through `main`.
+pub(crate) async fn record_break_glass(
     tx: &mut sqlx::PgConnection,
     tenant: TenantId,
     action: AuditAction,

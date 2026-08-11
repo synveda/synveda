@@ -36,8 +36,8 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 
 ## Current phase
 Phase 3 — Enterprise (wk 11–16). Phases 0, 1 and 2 are complete; SKIL-1
-through SKIL-4, OPS-1, CNSL-1, ADPT-2, CNSL-2, AUTH-4, AUTH-5, EVAL-3 and
-OPS-2 and TEN-3 are the Phase 3 features done so far. 62 of 93 features delivered — see docs/backlog/STATUS.md for what each
+through SKIL-4, OPS-1, CNSL-1, ADPT-2, CNSL-2, AUTH-4, AUTH-5, EVAL-3,
+OPS-2, TEN-3 and TEN-4 are the Phase 3 features done so far. 63 of 93 features delivered — see docs/backlog/STATUS.md for what each
 one proved and what it left standing. (The total read 86 until 2026-08-05,
 when it was corrected to the 88 STATUS.md and `make check-backlog` had both
 said for some time; AUTHZ-7 was filed the same day by CNSL-2/ADR-0058, making
@@ -54,6 +54,17 @@ Since AUTH-4 it syncs a directory: `/scim/v2` for Entra and Okta, with
 `synveda scim token issue` for the credential (ADR-0059). Nothing has
 replayed a frame from a live Entra or Okta tenant yet — the vendor corpus is
 transcribed from their published tables.
+Since TEN-4 it has a key plane: `SYNVEDA_KMS_KEY` (mint one with `synveda kms
+keygen`) wraps a data key per tenant plus one for the deployment, and the
+console session tokens, the outbound directory credential and `synveda tenant
+export` are sealed under them (ADR-0064). Unset means `Kms::Disabled` — `/v1`
+serves exactly as before and only the surfaces needing a key refuse. Two
+things this does **not** do: `records`/`record_embeddings`/the Tantivy
+sidecars are not sealed (there is no BM25 or HNSW over ciphertext — that is
+the volume's job, decision 7), so destroying a tenant's key is not erasure;
+and the KEK lives in deployment configuration, so this defends a dumped table
+and a stolen archive rather than an operator who can read the environment.
+
 Since CNSL-1 it has a browser: the gateway serves the admin console from its
 own origin at `/console/`, which needs `pnpm --filter @synveda/console build`.
 A missing bundle is not a boot failure — the route 404s and the rest of the

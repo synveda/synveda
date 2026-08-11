@@ -227,12 +227,34 @@ impl fmt::Debug for Secret {
     }
 }
 
+/// The name a tenant's sealed directory credential is stored under
+/// (TEN-4, ADR-0064 decision 9).
+///
+/// Part of the sealed payload's AAD as well as its key, so renaming it makes
+/// existing ciphertext unopenable rather than silently re-pointing it — the
+/// safe direction.
+pub const CREDENTIAL_SECRET_NAME: &str = "directory.credential";
+
 /// How a deployment configures the pull sync for one issuer.
 ///
-/// Lives beside the issuer it syncs because that is where the credential
-/// belongs (ADR-0060 decision 7): the same environment JSON that already
-/// carries `SYNVEDA_OIDC_ISSUERS`, rather than a per-tenant table holding a
-/// recoverable secret with no key management until TEN-4.
+/// **Two sources since TEN-4, and the per-tenant one wins** (ADR-0064
+/// decision 9). A tenant with a sealed `directory.credential` in
+/// `tenant_secrets` is pulled with that; a tenant without one falls back to
+/// this, configured beside the issuer it syncs in the same environment JSON
+/// that carries `SYNVEDA_OIDC_ISSUERS`.
+///
+/// ADR-0060 decision 7 put the credential here alone and named the cost: one
+/// deployment could not pull two tenants from two directories, because one
+/// environment configures one connector per issuer and an issuer binds one
+/// tenant. The stored form removes that — each tenant's row carries a whole
+/// configuration of its own — and its reasoning for waiting was exactly this
+/// feature: "a per-tenant table holding a secret we can read back … wants
+/// TEN-4's per-tenant encryption keys".
+///
+/// The environment form is retained rather than migrated because it is the
+/// right shape for the single-tenant deployment that is most of the installed
+/// base, and because a deployment that has one working directory should not
+/// have to do anything on upgrade.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "connector", rename_all = "lowercase", deny_unknown_fields)]
 pub enum DirectorySyncConfig {
