@@ -6,6 +6,15 @@
 //! by the **hash** of the secret, never the secret itself, and the caller is
 //! responsible for hashing before it arrives (`synveda_identity::console`).
 //!
+//! Since TEN-4 the two token columns are **sealed** (ADR-0064 decision 5),
+//! and this module handles only the envelopes: it neither seals nor opens.
+//! The key is the *deployment's*, not a tenant's, and the reason is the
+//! reason this table has no `tenant_id` — a session is read before the
+//! tenant exists, so there is no tenant to select a key by. Sealing lives in
+//! the gateway, which is the one crate that may depend on both the key ring
+//! and this module; `synveda-identity` is this crate's sibling and cannot
+//! reach a `KeyRing` at all.
+//!
 //! Deliberately not tenant-scoped: see migration 0034's header. A session
 //! row carries no tenant because the tenant comes from verifying the access
 //! token it holds, which is what makes ADR-0056 decision 2's invariant —
@@ -17,24 +26,43 @@ use sqlx::PgExecutor;
 use synveda_types::{Error, Result};
 
 /// A stored console session. Carries no tenant and no subject on purpose
-/// (ADR-0056 decision 2): both come from verifying [`Self::access_token`].
-#[derive(Debug, Clone)]
+/// (ADR-0056 decision 2): both come from verifying the sealed access token.
+#[derive(Clone)]
 pub struct ConsoleSession {
     /// The issuer to refresh against.
     pub issuer: String,
-    /// The `/v1` bearer this session names.
-    pub access_token: String,
+    /// The `/v1` bearer this session names, sealed under the deployment key.
+    pub access_token_sealed: Vec<u8>,
     /// When that bearer expires, when the IdP reported a lifetime. `None`
     /// means "use it until the gateway rejects it" — the ADPT-1 rule.
     pub access_expires_at: Option<DateTime<Utc>>,
-    /// The refresh token, when the issuer granted one. Absence is what
-    /// makes a session eventually need a fresh login.
-    pub refresh_token: Option<String>,
+    /// The refresh token, when the issuer granted one, sealed. Absence is
+    /// what makes a session eventually need a fresh login.
+    pub refresh_token_sealed: Option<Vec<u8>>,
     /// The hard cap, past which no refresh is attempted.
     pub absolute_expires_at: DateTime<Utc>,
     /// When this session was last used, on the coarse cadence [`touch`]
     /// writes it.
     pub last_seen_at: DateTime<Utc>,
+}
+
+// Hand-written rather than derived: the derive would render two
+// credential-shaped byte vectors, and a ciphertext in a log is still a step
+// on the path to a plaintext in a log. Sizes and times only.
+impl std::fmt::Debug for ConsoleSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConsoleSession")
+            .field("issuer", &self.issuer)
+            .field("access_token_bytes", &self.access_token_sealed.len())
+            .field("access_expires_at", &self.access_expires_at)
+            .field(
+                "refresh_token_bytes",
+                &self.refresh_token_sealed.as_ref().map(Vec::len),
+            )
+            .field("absolute_expires_at", &self.absolute_expires_at)
+            .field("last_seen_at", &self.last_seen_at)
+            .finish()
+    }
 }
 
 fn storage_error(err: sqlx::Error) -> Error {
@@ -60,30 +88,31 @@ fn storage_error(err: sqlx::Error) -> Error {
 }
 
 /// Opens a session. `token_hash` is SHA-256 of the secret the browser will
-/// hold; the secret never reaches this crate.
+/// hold; the secret never reaches this crate, and neither do the tokens —
+/// the caller seals them first.
 #[tracing::instrument(name = "store.console_sessions.create", skip_all, err(Display))]
 #[allow(clippy::too_many_arguments)]
 pub async fn create(
     executor: impl PgExecutor<'_>,
     token_hash: &[u8; 32],
     issuer: &str,
-    access_token: &str,
+    access_token_sealed: &[u8],
     access_expires_at: Option<DateTime<Utc>>,
-    refresh_token: Option<&str>,
+    refresh_token_sealed: Option<&[u8]>,
     absolute_expires_at: DateTime<Utc>,
 ) -> Result<()> {
     sqlx::query!(
         r#"
         insert into console_sessions
-            (token_hash, issuer, access_token, access_expires_at,
-             refresh_token, absolute_expires_at)
+            (token_hash, issuer, access_token_sealed, access_expires_at,
+             refresh_token_sealed, absolute_expires_at)
         values ($1, $2, $3, $4, $5, $6)
         "#,
         &token_hash[..],
         issuer,
-        access_token,
+        access_token_sealed,
         access_expires_at,
-        refresh_token,
+        refresh_token_sealed,
         absolute_expires_at,
     )
     .execute(executor)
@@ -103,8 +132,8 @@ pub async fn by_hash(
 ) -> Result<Option<ConsoleSession>> {
     let row = sqlx::query!(
         r#"
-        select issuer, access_token, access_expires_at,
-               refresh_token, absolute_expires_at, last_seen_at
+        select issuer, access_token_sealed, access_expires_at,
+               refresh_token_sealed, absolute_expires_at, last_seen_at
         from console_sessions
         where token_hash = $1 and absolute_expires_at > now()
         "#,
@@ -115,39 +144,39 @@ pub async fn by_hash(
     .map_err(storage_error)?;
     Ok(row.map(|row| ConsoleSession {
         issuer: row.issuer,
-        access_token: row.access_token,
+        access_token_sealed: row.access_token_sealed,
         access_expires_at: row.access_expires_at,
-        refresh_token: row.refresh_token,
+        refresh_token_sealed: row.refresh_token_sealed,
         absolute_expires_at: row.absolute_expires_at,
         last_seen_at: row.last_seen_at,
     }))
 }
 
 /// Writes a renewed access token back, after the gateway refreshed it
-/// against the issuer. `refresh_token` is `None` for an issuer that does not
-/// rotate — the stored one is then left alone rather than nulled, which is
-/// the bug this signature exists to make hard to write.
+/// against the issuer and re-sealed it. `refresh_token_sealed` is `None` for
+/// an issuer that does not rotate — the stored one is then left alone rather
+/// than nulled, which is the bug this signature exists to make hard to write.
 #[tracing::instrument(name = "store.console_sessions.renew", skip_all, err(Display))]
 pub async fn renew(
     executor: impl PgExecutor<'_>,
     token_hash: &[u8; 32],
-    access_token: &str,
+    access_token_sealed: &[u8],
     access_expires_at: Option<DateTime<Utc>>,
-    refresh_token: Option<&str>,
+    refresh_token_sealed: Option<&[u8]>,
 ) -> Result<()> {
     sqlx::query!(
         r#"
         update console_sessions
-        set access_token = $2,
+        set access_token_sealed = $2,
             access_expires_at = $3,
-            refresh_token = coalesce($4, refresh_token),
+            refresh_token_sealed = coalesce($4, refresh_token_sealed),
             last_seen_at = now()
         where token_hash = $1
         "#,
         &token_hash[..],
-        access_token,
+        access_token_sealed,
         access_expires_at,
-        refresh_token,
+        refresh_token_sealed,
     )
     .execute(executor)
     .await

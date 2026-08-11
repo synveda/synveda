@@ -135,16 +135,38 @@ async fn console_bearer(state: &AppState, secret: &str) -> Result<String> {
         .is_some_and(|expires_at| expires_at <= Utc::now() + Duration::seconds(EXPIRY_SKEW_SECS));
     if !expiring {
         touch(state, &hash, &session).await;
-        return Ok(session.access_token);
+        // A token that does not open is the same 401 as a session that does
+        // not exist. The distinction is in the metric and the log
+        // (`AppState::open_console_token`), not in the response — a caller
+        // learning that a session id it guessed exists but is corrupt has
+        // still learned that it exists.
+        return state
+            .open_console_token(
+                &hash,
+                synveda_crypto::Purpose::ConsoleAccessToken,
+                &session.access_token_sealed,
+            )
+            .await
+            .map_err(|_| unauthenticated());
     }
 
-    let (Some(refresh_token), Some(flow)) = (session.refresh_token.as_deref(), &state.login) else {
+    let (Some(refresh_sealed), Some(flow)) =
+        (session.refresh_token_sealed.as_deref(), &state.login)
+    else {
         // Expired with no way to renew. Not an error worth distinguishing:
         // the operator logs in again either way.
         return Err(unauthenticated());
     };
+    let refresh_token = state
+        .open_console_token(
+            &hash,
+            synveda_crypto::Purpose::ConsoleRefreshToken,
+            refresh_sealed,
+        )
+        .await
+        .map_err(|_| unauthenticated())?;
     let renewed = flow
-        .refresh(Some(&session.issuer), refresh_token)
+        .refresh(Some(&session.issuer), &refresh_token)
         .await
         .map_err(|error| {
             tracing::debug!(%error, "console session refresh refused");
@@ -154,12 +176,31 @@ async fn console_bearer(state: &AppState, secret: &str) -> Result<String> {
         .expires_in
         .and_then(|seconds| i64::try_from(seconds).ok())
         .and_then(|seconds| Utc::now().checked_add_signed(Duration::seconds(seconds)));
+    // Re-sealed under whatever the *current* key generation is, which is how
+    // a rotation reaches this column without a rewrite pass: a session that
+    // refreshes moves forward, one that does not ages out under its own cap
+    // (ADR-0064 decision 6).
+    let access_token_sealed = state
+        .seal_console_token(
+            &hash,
+            synveda_crypto::Purpose::ConsoleAccessToken,
+            &renewed.access_token,
+        )
+        .await?;
+    let refresh_token_sealed = match renewed.refresh_token.as_deref() {
+        Some(token) => Some(
+            state
+                .seal_console_token(&hash, synveda_crypto::Purpose::ConsoleRefreshToken, token)
+                .await?,
+        ),
+        None => None,
+    };
     synveda_store::console_sessions::renew(
         &state.pool,
         &hash,
-        &renewed.access_token,
+        &access_token_sealed,
         access_expires_at,
-        renewed.refresh_token.as_deref(),
+        refresh_token_sealed.as_deref(),
     )
     .await?;
     metrics::counter!(crate::auth::CONSOLE_SESSIONS_TOTAL, "outcome" => "renewed").increment(1);

@@ -1,12 +1,21 @@
 #!/usr/bin/env node
-// Enforces the crate layering rule (seed §8; synveda-vedaflow added by tech plan §5):
+// Enforces the crate layering rule (seed §8; synveda-vedaflow added by tech plan §5,
+// synveda-crypto by TEN-4/ADR-0064 decision 13):
 //
-//   types ← {policy, store, identity, audit, vedaflow} ← retrieval/ingest ← gateway
+//   types ← crypto ← {policy, store, identity, audit, vedaflow} ← retrieval/ingest ← gateway
 //
 // Nothing imports upward. Fails if any synveda crate declares a dependency on a
 // synveda crate outside its allowed set, or if a workspace crate is unknown here
 // (new crates must be placed in a tier deliberately).
 import { execFileSync } from "node:child_process";
+
+// Below the middle band rather than in it: store, identity and vedaflow all
+// seal or open payloads, and the rule forbids middle-band crates depending on
+// each other. It takes synveda-types (and nothing else) because the AAD is
+// composed from typed arguments — a crypto crate dealing in `&[u8]` would sit
+// one tier purer and would let a caller seal a payload without binding it to a
+// tenant (ADR-0064 decisions 4 and 13).
+const BASE = ["synveda-types", "synveda-crypto"];
 
 const MIDDLE = [
   "synveda-policy",
@@ -18,14 +27,15 @@ const MIDDLE = [
 
 const ALLOWED = {
   "synveda-types": [],
-  "synveda-policy": ["synveda-types"],
-  "synveda-store": ["synveda-types"],
-  "synveda-identity": ["synveda-types"],
-  "synveda-audit": ["synveda-types"],
-  "synveda-vedaflow": ["synveda-types"],
-  "synveda-retrieval": ["synveda-types", ...MIDDLE],
-  "synveda-ingest": ["synveda-types", ...MIDDLE],
-  "synveda-gateway": ["synveda-types", ...MIDDLE, "synveda-retrieval", "synveda-ingest"],
+  "synveda-crypto": ["synveda-types"],
+  "synveda-policy": [...BASE],
+  "synveda-store": [...BASE],
+  "synveda-identity": [...BASE],
+  "synveda-audit": [...BASE],
+  "synveda-vedaflow": [...BASE],
+  "synveda-retrieval": [...BASE, ...MIDDLE],
+  "synveda-ingest": [...BASE, ...MIDDLE],
+  "synveda-gateway": [...BASE, ...MIDDLE, "synveda-retrieval", "synveda-ingest"],
   // The CLI is a client of the gateway API, plus direct store/identity access
   // for the dev-bootstrap commands (db migrate, tenant create, token issue)
   // that exist precisely when no usable gateway does. Reviewed in ADR-0008.
@@ -46,8 +56,13 @@ const ALLOWED = {
   // what a caller gets. It is the standing the seed gives adapters and SDKs,
   // applied to the thing that grades the product.
   "synveda-eval": [],
+  // Crypto added with TEN-4 (ADR-0064 decision 8): `synveda tenant export`
+  // seals an archive and `synveda tenant export open` is the tool that
+  // demonstrates the AC by needing the key. Both are operator commands run
+  // where the gateway is not the right party to hold a tenant's export.
   "synveda-cli": [
     "synveda-types",
+    "synveda-crypto",
     "synveda-store",
     "synveda-identity",
     "synveda-policy",

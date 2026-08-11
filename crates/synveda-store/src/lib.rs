@@ -31,6 +31,7 @@ pub mod graph;
 pub mod group_mappings;
 pub mod hierarchy;
 pub mod identities;
+pub mod keys;
 pub mod lapses;
 pub mod observe;
 pub mod packs;
@@ -47,6 +48,7 @@ pub mod scope_chain;
 pub mod search;
 pub mod skill_reviews;
 pub mod skills;
+pub mod tenant_secrets;
 pub mod tenants;
 
 pub use scope_chain::ScopeChainCache;

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select version, wrapped_dek, kek_ref, retired_at\n        from tenant_keys\n        where tenant_id = $1 and retired_at is null\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "wrapped_dek",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "kek_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "retired_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "1e7d2ce783f27f2452217be869c461cd44d0ac7f617eca31094d20fad095648e"
+}

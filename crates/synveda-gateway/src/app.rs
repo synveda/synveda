@@ -90,6 +90,11 @@ pub struct AppState {
     /// `SYNVEDA_INJECT_EMBED_TIMEOUT_MS`, default 100. Expiry drops the
     /// dense leg (sparse-only, marked degraded), never the request.
     pub inject_embed_timeout: Duration,
+    /// The key plane (TEN-4, ADR-0064): materialises the sealing keys the
+    /// console session columns and the per-tenant secrets need. Backed by
+    /// `Kms::Disabled` when `SYNVEDA_KMS_KEY` is unset, in which case the
+    /// surfaces that need a key fail closed and `/v1` is untouched.
+    pub keys: Arc<synveda_store::keys::KeyRing>,
 }
 
 impl AppState {
@@ -102,6 +107,71 @@ impl AppState {
     pub fn invalidate_hierarchy(&self, tenant_id: synveda_types::TenantId) {
         self.scope_chains.invalidate(tenant_id);
         self.pdp.flush_entities(tenant_id);
+    }
+
+    /// Seals one of a console session's tokens under the **deployment** key
+    /// (TEN-4, ADR-0064 decision 5).
+    ///
+    /// The deployment scope rather than a tenant one because the row this
+    /// belongs to has no tenant, on purpose: a session is read before the
+    /// tenant exists, so there is nothing to select a per-tenant key by. See
+    /// migration 0034's header for why that column is absent and migration
+    /// 0038's for why that makes a second key scope rather than an exemption.
+    ///
+    /// Bound to the session's own `token_hash`, so a sealed token moved to
+    /// another session's row does not open.
+    pub async fn seal_console_token(
+        &self,
+        token_hash: &[u8; 32],
+        purpose: synveda_crypto::Purpose,
+        token: &str,
+    ) -> synveda_types::Result<Vec<u8>> {
+        self.keys
+            .sealing_key(&self.pool, synveda_crypto::KeyScope::Deployment)
+            .await?
+            .seal(
+                purpose,
+                synveda_crypto::RowKey::Hash(token_hash),
+                token.as_bytes(),
+            )
+    }
+
+    /// Opens one of a console session's sealed tokens.
+    ///
+    /// A failure here is corruption, a transplanted ciphertext, or a key that
+    /// is gone — and it is counted rather than chained, because there is no
+    /// tenant to chain it to. That is the same fact decision 5 turns on: this
+    /// row is read before a tenant exists, and the audit chain is per-tenant
+    /// (AUD-1). The metric carries the purpose, the log carries the error,
+    /// and the caller turns it into the same uniform 401 an unknown session
+    /// gets.
+    pub async fn open_console_token(
+        &self,
+        token_hash: &[u8; 32],
+        purpose: synveda_crypto::Purpose,
+        sealed: &[u8],
+    ) -> synveda_types::Result<String> {
+        let opened = self
+            .keys
+            .opening_key(&self.pool, synveda_crypto::KeyScope::Deployment, sealed)
+            .await?
+            .open(purpose, synveda_crypto::RowKey::Hash(token_hash), sealed)
+            .inspect_err(|error| {
+                metrics::counter!(
+                    synveda_store::keys::KEY_OPEN_FAILURES_TOTAL,
+                    "scope" => "deployment",
+                    "purpose" => purpose.as_str(),
+                )
+                .increment(1);
+                tracing::warn!(
+                    %error,
+                    purpose = purpose.as_str(),
+                    "a sealed console token did not open"
+                );
+            })?;
+        String::from_utf8(opened.to_vec()).map_err(|_| synveda_types::Error::Internal {
+            message: "a sealed console token opened to bytes that are not a token".to_owned(),
+        })
     }
 }
 

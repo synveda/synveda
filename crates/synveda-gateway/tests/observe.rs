@@ -206,6 +206,15 @@ fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
         scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
+        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // sealed column seals rather than skipping. `Kms::Disabled` is the
+        // production default when no key is configured.
+        keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
+            synveda_crypto::Kms::Local(
+                synveda_crypto::LocalKms::from_hex(&"11".repeat(32), "local:test")
+                    .expect("test kek"),
+            ),
+        )),
         search_index: Arc::new(
             synveda_retrieval::SearchIndex::open(
                 std::env::temp_dir()
