@@ -231,6 +231,12 @@ const COVERED: &[&str] = &[
     "skill_quality_overrides",
     "skill_reviews",
     "skills",
+    // TEN-4 (ADR-0064). `deployment_keys` is deliberately absent: it carries
+    // no `tenant_id`, so this guard does not discover it and no exemption was
+    // needed — the same structural satisfaction `console_sessions` has, and
+    // for the same reason (decision 5).
+    "tenant_keys",
+    "tenant_secrets",
     "vedaflow_commit_parents",
     "vedaflow_commits",
     "vedaflow_objects",

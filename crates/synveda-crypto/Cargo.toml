@@ -1,0 +1,31 @@
+[package]
+name = "synveda-crypto"
+description = "Envelope encryption: per-tenant data keys, a KMS seam, and context-bound sealed payloads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The only Synveda dependency, and it is what makes decision 4 structural:
+# the AAD is composed here from typed arguments (a `KeyScope`, a `Purpose`, a
+# `RowKey`), so a caller cannot seal a payload without binding it to a tenant.
+# A crypto crate taking `&[u8]` AAD would be one tier purer and would let that
+# binding be forgotten (ADR-0064 decision 13).
+synveda-types = { workspace = true }
+
+# XChaCha20-Poly1305 (ADR-0064 decision 3). MIT/Apache-2.0, RustCrypto.
+# The 192-bit nonce is the reason: random nonces stay safe without a counter
+# anybody has to own, which matters because OPS-7 makes this multi-process.
+chacha20poly1305 = { workspace = true }
+# Nonces and data keys. The same primitive CNSL-1 uses for session secrets —
+# no `rand_core`, so nothing here can be seeded from anything but the OS.
+getrandom = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+# Key material and opened plaintext are wiped on drop rather than left for
+# the allocator to hand to the next caller.
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread"] }
