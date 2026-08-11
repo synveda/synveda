@@ -254,6 +254,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(_) => 3600,
     };
 
+    // The key plane (TEN-4, ADR-0064). `Kms::Disabled` when no KEK is
+    // configured, which is fail-closed rather than fail-to-boot: `/v1`
+    // bearer traffic never touches a sealed column, so a deployment that has
+    // not set a key keeps serving and the surfaces that need one say which
+    // key is missing.
+    let keys = Arc::new(synveda_store::keys::KeyRing::new(kms_from_env()?));
+    match keys.kms() {
+        synveda_crypto::Kms::Disabled => tracing::warn!(
+            "no SYNVEDA_KMS_KEY: console sessions and per-tenant secrets are \
+             unavailable (TEN-4, ADR-0064). `synveda kms keygen` mints one."
+        ),
+        kms => {
+            // Provisioning the deployment key at boot rather than on first
+            // use: a login is a bad moment to discover the key plane is
+            // empty, and this is idempotent.
+            let key_ref = synveda_crypto::KeyManagement::key_ref(kms).to_owned();
+            match keys
+                .provision(&pool, synveda_crypto::KeyScope::Deployment)
+                .await
+            {
+                Ok(version) => tracing::info!(
+                    key.version = version.get(),
+                    kek.ref = key_ref,
+                    "deployment encryption key ready (TEN-4, ADR-0064)"
+                ),
+                // Not fatal, and deliberately: a database that is not ready
+                // yet is what `/readyz` is for, and the next seal retries.
+                Err(error) => tracing::warn!(
+                    %error,
+                    "could not provision the deployment encryption key at boot"
+                ),
+            }
+        }
+    }
+
     // The extraction worker (MEM-3, ADR-0022 decision 1): the observe
     // queue's consumer, embedded so SMB mode stays one process. It shares
     // the gateway's scope-chain cache — hierarchy-move invalidations must
@@ -397,6 +432,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         search_index,
         embedder,
         inject_embed_timeout: Duration::from_millis(inject_embed_timeout_ms),
+        keys,
     };
 
     // The directory pull sync (AUTH-5, ADR-0060). Spawned only when an
@@ -454,6 +490,32 @@ async fn shutdown_signal() {
     if let Err(err) = tokio::signal::ctrl_c().await {
         tracing::error!(error = %err, "failed to install the Ctrl-C handler");
     }
+}
+
+/// Builds the KMS from `SYNVEDA_KMS_KEY` (64 hex characters) and
+/// `SYNVEDA_KMS_KEY_REF` (a name, default `local:default`).
+///
+/// Absent means [`synveda_crypto::Kms::Disabled`] — fail-closed, not
+/// fail-to-boot (ADR-0064; the `DisabledVerifier` shape). A KEK that is
+/// *present and malformed* is a startup error, because that is somebody
+/// trying to configure this and getting it wrong, and booting past it would
+/// hand them a deployment that looks configured and seals nothing.
+fn kms_from_env() -> Result<synveda_crypto::Kms, String> {
+    let Some(key) = std::env::var("SYNVEDA_KMS_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(synveda_crypto::Kms::Disabled);
+    };
+    let key_ref = std::env::var("SYNVEDA_KMS_KEY_REF")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "local:default".to_string());
+    // The error is rendered without the value: a malformed key is still a
+    // key somebody meant to keep.
+    synveda_crypto::LocalKms::from_hex(&key, key_ref)
+        .map(synveda_crypto::Kms::Local)
+        .map_err(|err| format!("SYNVEDA_KMS_KEY is not usable: {err}"))
 }
 
 /// Builds the configured extractor from `SYNVEDA_EXTRACTOR` and its

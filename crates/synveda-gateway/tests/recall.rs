@@ -94,6 +94,15 @@ fn state_with(url: &str, search_index: Arc<SearchIndex>, pdp: Arc<Pdp>) -> AppSt
         search_index,
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
         inject_embed_timeout: Duration::from_millis(100),
+        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // sealed column seals rather than skipping. `Kms::Disabled` is the
+        // production default when no key is configured.
+        keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
+            synveda_crypto::Kms::Local(
+                synveda_crypto::LocalKms::from_hex(&"11".repeat(32), "local:test")
+                    .expect("test kek"),
+            ),
+        )),
     }
 }
 

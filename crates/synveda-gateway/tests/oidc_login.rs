@@ -323,6 +323,15 @@ fn oidc_state(url: &str, issuer: &str, binding: &Binding, refresh_interval: Dura
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
         inject_embed_timeout: std::time::Duration::from_millis(100),
+        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // sealed column seals rather than skipping. `Kms::Disabled` is the
+        // production default when no key is configured.
+        keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
+            synveda_crypto::Kms::Local(
+                synveda_crypto::LocalKms::from_hex(&"11".repeat(32), "local:test")
+                    .expect("test kek"),
+            ),
+        )),
     }
 }
 
@@ -787,6 +796,15 @@ async fn auth_plane_is_404_when_oidc_is_not_configured() {
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
         inject_embed_timeout: std::time::Duration::from_millis(100),
+        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // sealed column seals rather than skipping. `Kms::Disabled` is the
+        // production default when no key is configured.
+        keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
+            synveda_crypto::Kms::Local(
+                synveda_crypto::LocalKms::from_hex(&"11".repeat(32), "local:test")
+                    .expect("test kek"),
+            ),
+        )),
     };
     for uri in ["/auth/login", "/auth/callback?code=x&state=y"] {
         let (status, kind) = status_and_kind(

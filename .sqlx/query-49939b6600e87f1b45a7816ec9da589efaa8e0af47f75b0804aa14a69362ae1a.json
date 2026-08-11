@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update tenant_keys set retired_at = now()\n        where tenant_id = $1 and version = $2 and retired_at is null\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "49939b6600e87f1b45a7816ec9da589efaa8e0af47f75b0804aa14a69362ae1a"
+}

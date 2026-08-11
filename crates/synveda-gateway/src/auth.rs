@@ -348,13 +348,49 @@ async fn open_console_session(
         .and_then(|seconds| Utc::now().checked_add_signed(Duration::seconds(seconds)));
     let absolute_expires_at = Utc::now() + Duration::seconds(CONSOLE_SESSION_MAX_SECS);
 
+    // Sealed before it is stored (TEN-4, ADR-0064): the deployment key, bound
+    // to this session's own hash. A key that is not configured fails the
+    // login rather than storing a plaintext credential — which is the whole
+    // reason `Kms::Disabled` refuses instead of passing bytes through.
+    let access_token_sealed = match state
+        .seal_console_token(
+            &secret.hash,
+            synveda_crypto::Purpose::ConsoleAccessToken,
+            &session.access_token,
+        )
+        .await
+    {
+        Ok(sealed) => sealed,
+        Err(error) => {
+            tracing::warn!(%error, "could not seal a console session's access token");
+            return console_error_redirect(&error);
+        }
+    };
+    let refresh_token_sealed = match refresh_token.as_deref() {
+        Some(token) => match state
+            .seal_console_token(
+                &secret.hash,
+                synveda_crypto::Purpose::ConsoleRefreshToken,
+                token,
+            )
+            .await
+        {
+            Ok(sealed) => Some(sealed),
+            Err(error) => {
+                tracing::warn!(%error, "could not seal a console session's refresh token");
+                return console_error_redirect(&error);
+            }
+        },
+        None => None,
+    };
+
     if let Err(error) = synveda_store::console_sessions::create(
         &state.pool,
         &secret.hash,
         &issuer,
-        &session.access_token,
+        &access_token_sealed,
         access_expires_at,
-        refresh_token.as_deref(),
+        refresh_token_sealed.as_deref(),
         absolute_expires_at,
     )
     .await

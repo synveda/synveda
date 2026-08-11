@@ -96,6 +96,15 @@ fn state(url: &str) -> AppState {
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
         inject_embed_timeout: Duration::from_millis(100),
+        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
+        // sealed column seals rather than skipping. `Kms::Disabled` is the
+        // production default when no key is configured.
+        keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
+            synveda_crypto::Kms::Local(
+                synveda_crypto::LocalKms::from_hex(&"11".repeat(32), "local:test")
+                    .expect("test kek"),
+            ),
+        )),
     }
 }
 
@@ -105,18 +114,41 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 
 /// Admits a tenant and opens a console session naming a freshly issued
 /// token for `subject`. Returns the cookie secret the browser would hold.
-async fn open_session(pool: &PgPool, subject: &str) -> (TenantId, String) {
+///
+/// Takes the whole state rather than the pool since TEN-4: the stored token
+/// is **sealed** under the deployment key (ADR-0064 decision 5), so a fixture
+/// that wrote plaintext would be writing a row the gateway cannot read.
+async fn open_session(state: &AppState, subject: &str) -> (TenantId, String) {
     let tenant_id = TenantId::new();
     let slug = format!("cnsl1-{}", &tenant_id.to_string()[24..]);
-    synveda_store::tenants::create(pool, tenant_id, &slug, "CNSL-1", TenantStatus::Active)
+    synveda_store::tenants::create(
+        &state.pool,
+        tenant_id,
+        &slug,
+        "CNSL-1",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("admit tenant");
+    state
+        .keys
+        .provision(&state.pool, synveda_crypto::KeyScope::Deployment)
         .await
-        .expect("admit tenant");
+        .expect("provision the deployment key");
     let secret = mint().expect("mint a session secret");
+    let sealed = state
+        .seal_console_token(
+            &secret.hash,
+            synveda_crypto::Purpose::ConsoleAccessToken,
+            &issue(subject, tenant_id),
+        )
+        .await
+        .expect("seal the access token");
     synveda_store::console_sessions::create(
-        pool,
+        &state.pool,
         &secret.hash,
         "http://idp.test",
-        &issue(subject, tenant_id),
+        &sealed,
         Some(Utc::now() + chrono::Duration::minutes(5)),
         None,
         Utc::now() + chrono::Duration::hours(12),
@@ -150,7 +182,7 @@ async fn a_cookie_resolves_to_exactly_what_its_stored_token_says() {
     let _guard = serial().await;
     let Some(url) = db_url() else { return };
     let state = state(&url);
-    let (tenant_id, secret) = open_session(&state.pool, "reviewer@example.test").await;
+    let (tenant_id, secret) = open_session(&state, "reviewer@example.test").await;
 
     let response = router(state)
         .oneshot(
@@ -177,7 +209,7 @@ async fn a_presented_bearer_wins_over_a_cookie() {
     let _guard = serial().await;
     let Some(url) = db_url() else { return };
     let state = state(&url);
-    let (_, secret) = open_session(&state.pool, "cookie-subject@example.test").await;
+    let (_, secret) = open_session(&state, "cookie-subject@example.test").await;
 
     // A second tenant, named only by the bearer.
     let bearer_tenant = TenantId::new();
@@ -254,17 +286,30 @@ async fn a_session_past_its_hard_cap_is_gone() {
     )
     .await
     .expect("admit tenant");
+    state
+        .keys
+        .provision(&state.pool, synveda_crypto::KeyScope::Deployment)
+        .await
+        .expect("provision the deployment key");
     let secret = mint().expect("mint");
+    let sealed = state
+        .seal_console_token(
+            &secret.hash,
+            synveda_crypto::Purpose::ConsoleAccessToken,
+            &issue("late@example.test", tenant_id),
+        )
+        .await
+        .expect("seal the access token");
     // Created in the past so the cap can be in the past too: the CHECK
     // refuses a cap that precedes creation, which is itself the point.
     sqlx::query(
-        "insert into console_sessions (token_hash, issuer, access_token, \
+        "insert into console_sessions (token_hash, issuer, access_token_sealed, \
          created_at, absolute_expires_at) values ($1, $2, $3, now() - interval '2 hours', \
          now() - interval '1 hour')",
     )
     .bind(&secret.hash[..])
     .bind("http://idp.test")
-    .bind(issue("late@example.test", tenant_id))
+    .bind(sealed)
     .execute(&state.pool)
     .await
     .expect("insert an expired session");
@@ -291,7 +336,7 @@ async fn a_cookie_mutation_from_another_origin_is_refused() {
     let _guard = serial().await;
     let Some(url) = db_url() else { return };
     let state = state(&url);
-    let (_, secret) = open_session(&state.pool, "reviewer@example.test").await;
+    let (_, secret) = open_session(&state, "reviewer@example.test").await;
 
     let response = router(state)
         .oneshot(
@@ -317,7 +362,7 @@ async fn a_cookie_mutation_without_an_origin_is_refused() {
     let _guard = serial().await;
     let Some(url) = db_url() else { return };
     let state = state(&url);
-    let (_, secret) = open_session(&state.pool, "reviewer@example.test").await;
+    let (_, secret) = open_session(&state, "reviewer@example.test").await;
 
     let response = router(state)
         .oneshot(
@@ -379,7 +424,7 @@ async fn a_cookie_read_needs_no_origin() {
     let _guard = serial().await;
     let Some(url) = db_url() else { return };
     let state = state(&url);
-    let (_, secret) = open_session(&state.pool, "reviewer@example.test").await;
+    let (_, secret) = open_session(&state, "reviewer@example.test").await;
 
     let response = router(state)
         .oneshot(
@@ -405,7 +450,7 @@ async fn signing_out_destroys_the_session_for_the_next_request() {
     let _guard = serial().await;
     let Some(url) = db_url() else { return };
     let state = state(&url);
-    let (_, secret) = open_session(&state.pool, "reviewer@example.test").await;
+    let (_, secret) = open_session(&state, "reviewer@example.test").await;
     let app = router(state);
 
     let logout = app

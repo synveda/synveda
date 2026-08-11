@@ -46,35 +46,62 @@ pub trait KeyManagement {
 }
 
 /// The configured KMS, dispatched statically.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum Kms {
+    /// No key configured: every wrap and unwrap refuses.
+    ///
+    /// The default, and fail-closed in the house sense — `DisabledVerifier`
+    /// (ADR-0008) and `Signer::Unsigned` (ADR-0030 decision 9) are the same
+    /// shape. A deployment with no KEK boots and serves `/v1` exactly as
+    /// before; what stops working is precisely what needs a key, with an
+    /// error that says which key is missing. The alternative — refusing to
+    /// boot — would make a feature nobody has configured yet into an outage,
+    /// and the alternative to *that* — a built-in default key — is not a key.
+    #[default]
+    Disabled,
     /// A KEK from deployment configuration. The dev default, and the
     /// single-node deployment's answer; AWS, GCP and Vault land behind the
     /// same two operations.
     Local(LocalKms),
 }
 
+fn no_key(operation: &str) -> Error {
+    Error::Dependency {
+        service: "kms".to_string(),
+        message: format!(
+            "cannot {operation}: no key-encryption key is configured \
+             (set SYNVEDA_KMS_KEY — `synveda kms keygen` mints one)"
+        ),
+    }
+}
+
 impl KeyManagement for Kms {
     fn method(&self) -> &'static str {
         match self {
+            Kms::Disabled => "disabled",
             Kms::Local(inner) => inner.method(),
         }
     }
 
     fn key_ref(&self) -> &str {
         match self {
+            // Empty, and migration 0038's `kek_ref` check refuses it — but
+            // `wrap_key` fails first, so no row ever reaches that constraint.
+            Kms::Disabled => "",
             Kms::Local(inner) => inner.key_ref(),
         }
     }
 
     async fn wrap_key(&self, scope: KeyScope, key: &DataKey) -> Result<Vec<u8>> {
         match self {
+            Kms::Disabled => Err(no_key("wrap a data key")),
             Kms::Local(inner) => inner.wrap_key(scope, key).await,
         }
     }
 
     async fn unwrap_key(&self, scope: KeyScope, wrapped: &[u8]) -> Result<DataKey> {
         match self {
+            Kms::Disabled => Err(no_key("unwrap a data key")),
             Kms::Local(inner) => inner.unwrap_key(scope, wrapped).await,
         }
     }
@@ -271,6 +298,25 @@ mod tests {
         let rendered = format!("{:?}", kms());
         assert!(rendered.contains("local:test"));
         assert!(!rendered.contains("kek"));
+    }
+
+    #[tokio::test]
+    async fn the_disabled_default_refuses_and_names_the_missing_key() {
+        let kms = Kms::default();
+        assert_eq!(kms.method(), "disabled");
+        let err = kms
+            .wrap_key(KeyScope::Deployment, &DataKey::generate().expect("dek"))
+            .await
+            .expect_err("must refuse");
+        assert!(
+            err.to_string().contains("SYNVEDA_KMS_KEY"),
+            "an operator reading this needs to know what to set: {err}"
+        );
+        assert!(
+            kms.unwrap_key(KeyScope::Deployment, &[0_u8; 82])
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
