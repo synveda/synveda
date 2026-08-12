@@ -35,7 +35,19 @@ NS=synveda-test
 RELEASE=synveda
 CNPG_VERSION=${CNPG_VERSION:-1.25.0}
 FIXTURES=demos/fixtures/ops-2
-IMAGE_TAG=0.1.0
+# The chart's own appVersion, never a copy of it. `values.yaml` leaves
+# `image.tag` empty so `_helpers.tpl` resolves it from appVersion, and this
+# demo builds the image the chart will then ask for by name — with
+# `pullPolicy: Never`, since nothing is published to a registry the kind
+# cluster can reach.
+#
+# It was `IMAGE_TAG=0.1.0`, hardcoded, and the first version bump after that
+# broke this demo rather than the chart: the pod stayed on
+# `ErrImageNeverPull` for "synveda/gateway:0.1.1 is not present" while a
+# perfectly good 0.1.0 image sat in the cluster. Two version sources for one
+# artefact, and the failure surfaces ten minutes downstream of the typo.
+IMAGE_TAG=$(awk -F'"' '/^appVersion:/{print $2; exit}' deploy/helm/synveda/Chart.yaml)
+[ -n "$IMAGE_TAG" ] || { echo "no appVersion in deploy/helm/synveda/Chart.yaml" >&2; exit 1; }
 KEEP=${KEEP:-0}
 REUSE=${REUSE:-0}
 
@@ -220,7 +232,12 @@ kubectl create configmap install-test-scripts -n "$NS" \
   --from-file="$FIXTURES/client.sh" --from-file="$FIXTURES/browser.mjs" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl delete pod synveda-install-test -n "$NS" --ignore-not-found >/dev/null
-kubectl apply -f "$FIXTURES/client-pod.yaml" >/dev/null
+# `__IMAGE_TAG__` rather than a literal, for the reason IMAGE_TAG is
+# read from the chart: three copies of one version agreed only while
+# all three were hardcoded to the same value, and the first bump left
+# this pod on ErrImageNeverPull for an image the demo no longer builds.
+sed "s/__IMAGE_TAG__/$IMAGE_TAG/" "$FIXTURES/client-pod.yaml" |
+  kubectl apply -f - >/dev/null
 
 status=""
 for _ in $(seq 1 180); do
@@ -237,7 +254,8 @@ kubectl logs -n "$NS" synveda-install-test -c client --tail=100 2>/dev/null | se
 # ── and the chain over all of it ─────────────────────────────────────────
 echo "==> audit verify — under the gateway's own least-privilege role"
 kubectl delete job audit-verify -n "$NS" --ignore-not-found >/dev/null
-sed "s/__TENANT_ID__/$TENANT_ID/" "$FIXTURES/audit-verify-job.yaml" |
+sed -e "s/__TENANT_ID__/$TENANT_ID/" -e "s/__IMAGE_TAG__/$IMAGE_TAG/" \
+  "$FIXTURES/audit-verify-job.yaml" |
   kubectl apply -f - >/dev/null
 kubectl wait --for=condition=complete --timeout=120s -n "$NS" job/audit-verify >/dev/null 2>&1 ||
   fail "the audit chain did not verify" \

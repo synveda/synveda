@@ -160,6 +160,48 @@ fn exchange(case: &Value) -> Vec<Value> {
     answers
 }
 
+/// Replaces every `serverInfo.version` in a tree with a placeholder, and
+/// returns what was there.
+///
+/// `serverInfo.version` is `CARGO_PKG_VERSION`, so it changes on every
+/// release and on nothing else. Left in the byte comparison it makes a
+/// version bump fail this corpus with a one-line diff — and a golden corpus
+/// whose only routine diff is uninteresting is one people re-record without
+/// reading, which is the whole of what it is for. The caller asserts the
+/// live value against this binary's own version instead, which is a
+/// stronger claim than a recorded string can make.
+fn normalise_version(value: &mut Value) -> Vec<String> {
+    let mut seen = Vec::new();
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map.iter_mut() {
+                // `serverInfo` on the classic handshake, and
+                // `io.modelcontextprotocol/serverInfo` under `_meta` on the
+                // 2026-07-28 one — matched by suffix so the next namespace
+                // does not need a third arm here.
+                let is_server_info = key == "serverInfo" || key.ends_with("/serverInfo");
+                if is_server_info
+                    && let Some(info) = child.as_object_mut()
+                    && let Some(version) = info.get_mut("version")
+                    && let Some(text) = version.as_str()
+                {
+                    seen.push(text.to_owned());
+                    *version = Value::String("<CARGO_PKG_VERSION>".to_owned());
+                    continue;
+                }
+                seen.extend(normalise_version(child));
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                seen.extend(normalise_version(item));
+            }
+        }
+        _ => {}
+    }
+    seen
+}
+
 /// Settles one case's answers against the fixture, or re-records them.
 fn settle(name: &str) {
     let mut case = read_case(name);
@@ -179,7 +221,32 @@ fn settle(name: &str) {
         }
         settled.push(frame);
     }
-    let recorded = Value::Array(settled);
+    let mut recorded = Value::Array(settled);
+
+    // `serverInfo.version` is `CARGO_PKG_VERSION`, so it changes on every
+    // release and on nothing else. Left in the byte comparison it made a
+    // version bump fail this test with a one-line diff — and a golden
+    // corpus whose only routine diff is uninteresting is one people
+    // re-record without reading, which is the whole of what it is for.
+    //
+    // So it is asserted *harder* here than a recorded string could: the
+    // server must report exactly the version this binary was built as. Then
+    // both sides are normalised and everything else stays byte-exact.
+    // Wherever it appears, not at a fixed path: `initialize` carries it at
+    // `result.serverInfo` and `server/discover` somewhere else again, and a
+    // normaliser that knows one handshake fails the other.
+    let live = normalise_version(&mut recorded);
+    normalise_version(&mut case["exchange"]);
+    for reported in live {
+        assert_eq!(
+            reported.as_str(),
+            env!("CARGO_PKG_VERSION"),
+            "\n{name}: the server reports version {reported} but this binary is {}. \
+             `serverInfo.version` is what an MCP client shows a user and what a bug \
+             report quotes.\n",
+            env!("CARGO_PKG_VERSION"),
+        );
+    }
 
     let path = fixtures().join(format!("{name}.json"));
     if std::env::var(RECORD).is_ok() {
