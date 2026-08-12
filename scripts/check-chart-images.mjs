@@ -1,7 +1,14 @@
 #!/usr/bin/env node
-// Asserts that every container image the Helm chart can reference — and
-// every base image the two images we build are built from — appears in
-// deploy/helm/IMAGES.md, tag included. Writes nothing, ever.
+// Asserts that every container image we ship — the Helm chart's, the
+// released single-node profile's, and every base image the images we build
+// are built from — appears in deploy/helm/IMAGES.md, tag included. Writes
+// nothing, ever.
+//
+// The release profile joined the chart as a surface with OPS-8 (ADR-0065
+// decision 9): those are images a *customer installs*, which is a stronger
+// reason to know their licences than the chart's, not a weaker one. The
+// file and this script keep their chart-shaped names — renaming both plus
+// every reference is churn against OPS-2's artefacts for no reading.
 //
 // Why (OPS-2, ADR-0062 decision 11): CLAUDE.md's licence rule is enforced
 // by cargo-deny over crates, check-npm-licences over packages and
@@ -23,6 +30,12 @@ import { readFileSync } from "node:fs";
 const INVENTORY = "deploy/helm/IMAGES.md";
 const CHART = "deploy/helm/synveda/Chart.yaml";
 const VALUES = "deploy/helm/synveda/values.yaml";
+const RELEASE_COMPOSE = "deploy/release/docker-compose.yml";
+// The per-architecture TEI pins. They are declared here, in the one place
+// that resolves them, and `synveda init` carries the same table for an
+// installed operator who has no Makefile — so this is where the inventory
+// learns about the arm64 build, which no compose file names.
+const MAKEFILE = "Makefile";
 const DOCKERFILES = [
   "deploy/helm/postgres/Dockerfile",
   "deploy/compose/gateway/Dockerfile",
@@ -69,6 +82,29 @@ if (repository) {
   found.set(`${repository}:${tag === "" ? "<appVersion>" : tag}`, `${VALUES} (image.repository)`);
 }
 
+// ── What the released single-node profile runs ───────────────────────────
+// `image: <ref>`, where <ref> may be `${VAR:-default}` (the TEI image, which
+// `synveda init` overrides per architecture) and may carry the packager's
+// `__SYNVEDA_VERSION__` placeholder. The placeholder is inventoried as
+// `<version>` for the same reason the chart's tag is inventoried as
+// `<appVersion>`: pinning it here would mean editing the inventory on every
+// release for no reading.
+const release = read(RELEASE_COMPOSE);
+for (const [, raw] of release.matchAll(/^\s*image:\s+(\S+)\s*$/gm)) {
+  const defaulted = raw.match(/^\$\{[A-Z_]+:-(.+)\}$/);
+  const ref = (defaulted ? defaulted[1] : raw).replace("__SYNVEDA_VERSION__", "<version>");
+  if (ref.includes("$")) {
+    fail(`${RELEASE_COMPOSE}: image ${raw} has no default, so it cannot be inventoried`);
+    continue;
+  }
+  found.set(ref, `${RELEASE_COMPOSE} (image:)`);
+}
+
+// ── The per-architecture TEI pins ────────────────────────────────────────
+for (const [, ref] of read(MAKEFILE).matchAll(/^TEI_IMAGE_\w+\s*=\s*(\S+:\S+)\s*$/gm)) {
+  found.set(ref, `${MAKEFILE} (TEI_IMAGE_*)`);
+}
+
 // ── What the images we build are built from ──────────────────────────────
 for (const path of DOCKERFILES) {
   const text = read(path);
@@ -107,7 +143,7 @@ if (orphans.length) {
 }
 if (problems.length) {
   for (const p of problems) console.error(`FAIL ${p}`);
-  console.error(`\n${problems.length} problem(s); the chart references images the inventory does not name.`);
+  console.error(`\n${problems.length} problem(s); we ship images the inventory does not name.`);
   process.exit(1);
 }
-console.log(`ok: ${found.size} image reference(s) across the chart and its Dockerfiles, all inventoried in ${INVENTORY}.`);
+console.log(`ok: ${found.size} image reference(s) across the chart, the release profile and their Dockerfiles, all inventoried in ${INVENTORY}.`);

@@ -154,6 +154,42 @@ jobs:
   # split is chart-lint on every PR (it already runs in `layering`) and
   # this on a nightly — the same division `eval` makes between its
   # deterministic half and its retrieval half, for the same reason.
+  # OPS-8's acceptance criterion (ADR-0065). The only job that exercises
+  # the *installer* — `scripts/install.sh` itself, against packaged release
+  # artefacts, with `cargo`, `rustc` and `rustup` shadowed by shims that
+  # exit 127. That last part is what makes "no Rust toolchain" a property of
+  # the run rather than a sentence in a README.
+  #
+  # It is also the only job that would notice `deploy/release/` drifting
+  # from the product: it installs from the tarball `scripts/package-release.sh`
+  # produces, not from the tree (ADR-0065 decision 3 chose this over a lint,
+  # because a checker comparing two compose files can only prove they are
+  # similar).
+  #
+  # Budget: 45 minutes, and **unmeasured on a GitHub runner** — the same
+  # honesty OPS-2 recorded about its own. The variables are a cold Rust
+  # release build and the Postgres image, which compiles AGE from source.
+  # If it cannot hold, this moves to a nightly and the unit tests around
+  # `Profile` stay on every PR.
+  release-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile --filter @synveda/console...
+      - run: demos/ops-8-release-install.sh
+      - name: What the install looked like
+        if: failure()
+        run: docker ps -a || true
+
   kind:
     runs-on: ubuntu-latest
     timeout-minutes: 30

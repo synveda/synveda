@@ -1,0 +1,129 @@
+# The single-node profile, as a released artefact (OPS-8, ADR-0065).
+#
+# This is what a tester installs: every image is pulled from a public
+# registry and there is no `build:` stanza anywhere, so the machine running
+# it needs Docker and nothing else — no source tree, no Rust toolchain, no
+# pnpm. `deploy/compose/docker-compose.yml` remains what its own header
+# calls it, the contributor's loop, and keeps the build contexts, AGE and
+# Temporal that only make sense next to a checkout.
+#
+# `__SYNVEDA_VERSION__` is a placeholder. `scripts/package-release.sh`
+# replaces it with the release tag when it assembles the bundle, so the
+# packaged file is self-contained and depends on no environment variable —
+# which matters because `synveda init` writes `.env` beside it, and compose
+# reads that same file for substitution.
+#
+# Two services the dev compose has are deliberately absent:
+#
+#   temporal, temporal-admin-tools — VedaFlow runs in Postgres (ADR-0003).
+#     `synveda init` has never started them and nothing in this profile
+#     consumes them; shipping a cluster nobody calls is 700 MB of pull and
+#     a second thing to explain when it is unhealthy.
+name: synveda
+
+services:
+  postgres:
+    # Published rather than built. Same Dockerfile as the dev image
+    # (deploy/compose/postgres/Dockerfile), which bakes the initdb script
+    # in — so unlike the dev compose there is nothing to bind-mount here.
+    image: ghcr.io/synveda/postgres:__SYNVEDA_VERSION__
+    # Preload AGE so every session can run cypher() without a per-session LOAD.
+    command: ["postgres", "-c", "shared_preload_libraries=age"]
+    environment:
+      POSTGRES_USER: synveda
+      POSTGRES_PASSWORD: synveda-dev
+      POSTGRES_DB: synveda
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synveda -d synveda"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  rauthy:
+    # The bundled OIDC provider. Its config is a bind mount rather than a
+    # baked layer, and the packager copies the dev one in verbatim so the
+    # two cannot drift — there is exactly one Rauthy configuration in this
+    # repository and this is it.
+    #
+    # Its issuer is `http://localhost:8100/auth/v1/`, which is why the
+    # gateway below is not what serves a default install: RFC 6761 makes
+    # that URL the *container's* own loopback, and ADR-0010 compares the
+    # issuer byte-for-byte. ADR-0055 decision 8 has the measurements.
+    image: ghcr.io/sebadob/rauthy:0.35.2
+    ports:
+      - "8100:8080"
+    volumes:
+      - ./rauthy/config.toml:/app/config.toml:ro
+      - rauthy-data:/app/data
+
+  tei:
+    # text-embeddings-inference serving BGE-M3, started only when the
+    # embedder is `tei`. A first start downloads ~2.3 GB into tei-cache.
+    #
+    # The image is per-architecture because upstream publishes two builds
+    # and versions only one of them; `synveda init` sets SYNVEDA_TEI_IMAGE
+    # from the host's architecture, the same table the Makefile uses for
+    # `make dev-up`. The default here is the amd64 release, which is what
+    # CI runs. See deploy/compose/docker-compose.yml for the measurement
+    # that says the two agree to float32 rounding.
+    image: ${SYNVEDA_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1}
+    command:
+      ["--model-id", "BAAI/bge-m3", "--max-batch-tokens", "4096", "--auto-truncate"]
+    ports:
+      - "8110:80"
+    volumes:
+      - tei-cache:/data
+    # A container with no healthcheck is "healthy" the moment it starts, and
+    # on a cold cache that is 2.3 GB of download before it answers anything.
+    # 180 × 10s is the same 1800s budget scripts/smoke.sh allows a first
+    # start, written as retries because `start_period` semantics have varied
+    # across Compose versions and this number should not.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 180
+
+  jaeger:
+    image: jaegertracing/jaeger:2.19.0
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+
+  gateway:
+    # The product, for the `--issuer` path only. A default install runs the
+    # gateway binary on the host instead — see the rauthy comment above —
+    # so this service stays behind a profile and `synveda init` brings it
+    # up by name when, and only when, it is serving a real directory.
+    profiles: ["deployed"]
+    image: ghcr.io/synveda/gateway:__SYNVEDA_VERSION__
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Written by `synveda init`: the issuer, the tenant it resolves to, and
+    # the embedder chosen at install time. Absent, the gateway starts with
+    # no issuer configured and refuses every request — the correct failure
+    # for an uninitialised deployment, not a reason to default one.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://synveda:synveda-dev@postgres:5432/synveda
+      # gRPC, not HTTP: telemetry.rs builds the exporter `.with_tonic()`.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "8120:8120"
+    volumes:
+      - gateway-search:/var/lib/synveda/search
+
+volumes:
+  pg-data:
+  rauthy-data:
+  tei-cache:
+  gateway-search:
