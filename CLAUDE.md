@@ -37,19 +37,38 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 ## Current phase
 Phase 3 — Enterprise (wk 11–16). Phases 0, 1 and 2 are complete; SKIL-1
 through SKIL-4, OPS-1, CNSL-1, ADPT-2, CNSL-2, AUTH-4, AUTH-5, EVAL-3,
-OPS-2, TEN-3 and TEN-4 are the Phase 3 features done so far. 63 of 93 features delivered — see docs/backlog/STATUS.md for what each
+OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3 features done so far. 64 of 94 features delivered — see docs/backlog/STATUS.md for what each
 one proved and what it left standing. (The total read 86 until 2026-08-05,
 when it was corrected to the 88 STATUS.md and `make check-backlog` had both
 said for some time; AUTHZ-7 was filed the same day by CNSL-2/ADR-0058, making
 it 89, EVAL-7 on 2026-08-07 by EVAL-3/ADR-0061, making it 90, OPS-7 on
-2026-08-10 by OPS-2/ADR-0062, making it 91, and CTX-7 and TEN-7 the same
-day by TEN-3/ADR-0063, making it 93.)
+2026-08-10 by OPS-2/ADR-0062, making it 91, CTX-7 and TEN-7 the same
+day by TEN-3/ADR-0063, making it 93, and OPS-8 filed and delivered on
+2026-08-11, making it 94.)
 
 Phase 3 was reordered on 2026-08-04 by demo-readiness (see the Sequencing
 note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4,5, EVAL-3, OPS-2 — and TEN-3..6, AUD-3,4 and the rest follow.
 
 The product is installable since OPS-1: `synveda init` — see docs/INSTALL.md.
+Since OPS-8 it is installable **by somebody else**: `curl … install.sh | sh`
+puts a release's CLI, gateway binary, console and compose profile on a
+machine whose only prerequisite is Docker (ADR-0065). It ships binaries as
+well as images because ADR-0055 decision 8 forecloses the Docker-only shape
+— the bundled issuer is a `localhost` URL and RFC 6761 makes that the
+container itself — so the default install runs the gateway on the host.
+`init` now finds its profile by explicit > checkout > installed bundle, so a
+contributor's tree still wins. The release also carries the **Claude Code
+plugin** as a marketplace — `synveda plugin install` drives `claude plugin`
+rather than editing its state — which found that the plugin had **never
+loaded** in Claude Code: `plugin.json` declared `hooks` (a duplicate load)
+and an inline `mcpServers` (silently ignored), and `~/.claude/plugins/<name>/`
+is not a path Claude Code reads. ADPT-1's demo could not see any of it
+because it is its own harness (ADR-0027 amendment). The installer itself
+touches nothing under `~/.claude` or any client's config. Not signed, not
+notarized, no Windows, no upgrade path: reinstalling is how you upgrade, and
+the release workflow is the one thing that can break without a red build to
+say so.
 Since AUTH-4 it syncs a directory: `/scim/v2` for Entra and Okta, with
 `synveda scim token issue` for the credential (ADR-0059). Nothing has
 replayed a frame from a live Entra or Okta tenant yet — the vendor corpus is

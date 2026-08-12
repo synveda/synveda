@@ -1,0 +1,309 @@
+# Release (OPS-8, ADR-0065) — turns a tag into something somebody else can
+# install. Everything here is downloaded by `scripts/install.sh`; nothing
+# here is used by `make ci`, which is what makes this the one workflow that
+# can break without a red build to say so.
+#
+# On `v*`:
+#
+#   binaries   synveda + synveda-gateway for darwin-arm64 and linux-x86_64,
+#              built SQLX_OFFLINE=true against the committed query cache
+#   console    the CNSL-1 bundle, so `/console/` serves on the host-gateway
+#              path — which is the default install (ADR-0055 decision 8)
+#   profile    the self-contained compose bundle `synveda init` runs from
+#   images     ghcr.io/synveda/{gateway,postgres}, multi-arch, public
+#   SHA256SUMS over every asset above
+#
+# Two targets rather than four: ADR-0065 decision 7. Adding one is a matrix
+# row here plus a case in scripts/install.sh, and the installer refuses an
+# unsupported platform by name so a missing row is never a silent wrong
+# download.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # A dry run against a branch: builds and packages everything, publishes
+  # nothing. This is how the workflow gets tested without minting a tag,
+  # since nothing in `make ci` exercises it.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (no leading v). Publishes nothing."
+        required: true
+        default: "0.0.0-dev"
+
+permissions:
+  contents: write   # the release and its assets
+  packages: write   # ghcr.io
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.pick.outputs.version }}
+      publish: ${{ steps.pick.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        name: Resolve the version, and refuse a tag the crates disagree with
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            version="${GITHUB_REF_NAME#v}"
+            publish=true
+          else
+            version="${{ inputs.version }}"
+            publish=false
+          fi
+          # `synveda init` refuses a profile whose version is not the CLI's
+          # (ADR-0065 decision 5), and the CLI's is CARGO_PKG_VERSION. A tag
+          # that disagrees with the workspace would ship a release that
+          # refuses to run — so it fails here instead.
+          crate="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [ "$publish" = "true" ] && [ "$version" != "$crate" ]; then
+            echo "tag v$version does not match the workspace version $crate." >&2
+            echo "They ship together: synveda init compares a profile's version" >&2
+            echo "against CARGO_PKG_VERSION and refuses a mismatch." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "building $version (publish=$publish)"
+
+  binaries:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runs-on: macos-14        # Apple Silicon
+            rust-target: aarch64-apple-darwin
+          - target: linux-x86_64
+            runs-on: ubuntu-latest
+            rust-target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 60
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - run: rustup target add ${{ matrix.rust-target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Build
+        run: |
+          cargo build --release --locked \
+            --target ${{ matrix.rust-target }} \
+            -p synveda-cli -p synveda-gateway
+      - name: Package
+        run: |
+          set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
+          out="target/${{ matrix.rust-target }}/release"
+          stage="$(mktemp -d)"
+          cp "$out/synveda" "$out/synveda-gateway" "$stage/"
+          # Stripped: these are release binaries a tester downloads, and the
+          # debug info is tens of megabytes of a download nobody symbolises.
+          strip "$stage/synveda" "$stage/synveda-gateway" || true
+          tar -czf "synveda-$version-${{ matrix.target }}.tar.gz" -C "$stage" \
+            synveda synveda-gateway
+          ls -lh "synveda-$version-${{ matrix.target }}.tar.gz"
+      - name: It runs, and it is the version it claims
+        run: |
+          set -euo pipefail
+          out="target/${{ matrix.rust-target }}/release"
+          # Both targets are native to their runner, so a smoke test is free
+          # and catches a binary that will not dynamically link.
+          "$out/synveda" --version
+          # Only on a tag. A `workflow_dispatch` dry run names its own
+          # version and the binary still reports CARGO_PKG_VERSION, so
+          # asserting agreement there would fail every dry run — and the
+          # tag/crate agreement is the `version` job's, which refuses the
+          # mismatch before anything is built.
+          if [ "${{ needs.version.outputs.publish }}" = "true" ]; then
+            "$out/synveda" --version | grep -q "${{ needs.version.outputs.version }}" \
+              || { echo "the binary does not report ${{ needs.version.outputs.version }}" >&2; exit 1; }
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: synveda-*.tar.gz
+          if-no-files-found: error
+
+  bundles:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: The console bundle
+        # CNSL-1's static assets. The image has carried them since ADR-0056;
+        # this is the copy the *host* gateway serves, which is the default
+        # install and has been 404ing at `/console/` until OPS-8.
+        run: |
+          set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
+          pnpm install --frozen-lockfile --filter @synveda/console...
+          pnpm --filter @synveda/console build
+          test -f console/dist/index.html
+          # Staged rather than renamed inside the archive: install.sh copies
+          # a top-level `console/` out of it, and one layout that is obvious
+          # beats two that depend on which tar built it.
+          stage="$(mktemp -d)"
+          mkdir -p "$stage/console"
+          cp -R console/dist/. "$stage/console/"
+          test -f "$stage/console/index.html"
+          tar -czf "synveda-console-$version.tar.gz" -C "$stage" console
+          tar -tzf "synveda-console-$version.tar.gz" | head -n 3
+      - name: The profile bundle
+        run: scripts/package-release.sh "${{ needs.version.outputs.version }}" .
+      - name: The Claude Code plugin
+        # A marketplace, not a plugin directory — that is the unit Claude
+        # Code installs, and dropping a plugin under `~/.claude/plugins/`
+        # (which is what this repository's docs said to do) installs
+        # nothing. `synveda plugin install` adds this and asks Claude Code's
+        # own CLI to install from it.
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile --filter @synveda/claude-code-adapter...
+          pnpm --filter @synveda/claude-code-adapter build
+          scripts/package-plugin.sh "${{ needs.version.outputs.version }}" .
+      - name: The plugin manifest is one Claude Code accepts
+        # `claude plugin validate` is the vendor's own check. It is advisory
+        # here rather than required: the runner may not have the CLI, and a
+        # release must not fail because a linter was unavailable. What it
+        # cannot catch is a manifest that validates and still fails to load
+        # — which is exactly what shipped — so `package-plugin.sh` asserts
+        # the two keys responsible, and the OPS-8 demo installs it for real.
+        run: |
+          set -uo pipefail
+          if command -v claude >/dev/null 2>&1; then
+            mkdir -p /tmp/validate && tar -xzf "synveda-plugin-${{ needs.version.outputs.version }}.tar.gz" -C /tmp/validate
+            claude plugin validate /tmp/validate/plugin || echo "::warning::claude plugin validate reported problems"
+            claude plugin validate /tmp/validate/plugin/synveda || echo "::warning::claude plugin validate reported problems"
+          else
+            echo "::notice::claude CLI not present on this runner — manifest not validated here"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundles
+          path: synveda-*.tar.gz
+          if-no-files-found: error
+
+  images:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: needs.version.outputs.publish == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: The gateway
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/compose/gateway/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ needs.version.outputs.publish == 'true' }}
+          tags: ghcr.io/synveda/gateway:${{ needs.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Postgres
+        # Same Dockerfile the dev compose builds, published under a name that
+        # is not "dev-" because this one is what a customer installs.
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/compose/postgres
+          platforms: linux/amd64,linux/arm64
+          push: ${{ needs.version.outputs.publish == 'true' }}
+          tags: ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  publish:
+    needs: [version, binaries, bundles, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Checksums
+        # Unsigned (ADR-0065 decision 8): this proves a download arrived
+        # intact, not who built it. install.sh says so in those words.
+        run: |
+          set -euo pipefail
+          cd assets
+          ls -lh
+          sha256sum synveda-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+      - name: Every asset install.sh asks for is present
+        # The installer fetches three archives by exact name. A release
+        # missing one fails on a tester's laptop, which is the last place
+        # anybody should find out.
+        run: |
+          set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
+          for asset in \
+            "synveda-$version-darwin-arm64.tar.gz" \
+            "synveda-$version-linux-x86_64.tar.gz" \
+            "synveda-console-$version.tar.gz" \
+            "synveda-profile-$version.tar.gz" \
+            "synveda-plugin-$version.tar.gz"; do
+            test -f "assets/$asset" || { echo "missing asset: $asset" >&2; exit 1; }
+          done
+          echo "all five assets present"
+      - name: Publish
+        if: needs.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Notes in a file rather than an argument: the body is markdown
+          # with fenced code in it, and quoting that through a shell is the
+          # kind of cleverness that ships a release note full of backslashes.
+          cat > notes.md <<NOTES
+          Install — Docker is the only prerequisite:
+
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${GITHUB_REF_NAME}/scripts/install.sh | sh
+          synveda init --demo
+          synveda login
+          \`\`\`
+
+          Then give an AI client your team's governed memory:
+
+          \`\`\`sh
+          synveda plugin install                        # Claude Code
+          synveda mcp install --client claude-desktop   # or cursor, or zed
+          \`\`\`
+
+          macOS arm64 and Linux x86_64. The binaries are **unsigned and not
+          notarized** — the checksums prove a download arrived intact, not who
+          built it (ADR-0065 decision 8).
+
+          Images: \`ghcr.io/synveda/gateway:${{ needs.version.outputs.version }}\`
+          and \`ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}\`.
+
+          See [docs/INSTALL.md](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/docs/INSTALL.md).
+          NOTES
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Synveda ${GITHUB_REF_NAME}" \
+            --notes-file notes.md \
+            assets/*

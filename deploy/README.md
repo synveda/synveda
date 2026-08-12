@@ -1,13 +1,30 @@
 # Deployment
 
-- `compose/` — SMB single-node profile (Postgres+pgvector+AGE+PGMQ, Rauthy,
-  Temporal, TEI, Jaeger; FND-2) plus the gateway itself (`gateway/Dockerfile`,
-  OPS-1). Installed with `synveda init` — see [docs/INSTALL.md](../docs/INSTALL.md).
+- `compose/` — **the contributor's loop** (Postgres+pgvector+AGE+PGMQ,
+  Rauthy, Temporal, TEI, Jaeger; FND-2) plus the gateway itself
+  (`gateway/Dockerfile`, OPS-1). Build contexts, AGE and Temporal, none of
+  which make sense away from a source tree. `make dev-up` runs it.
+- `release/` — **what a tester installs** (OPS-8, ADR-0065): the same
+  single-node profile with every image pulled from a public registry and no
+  `build:` stanza anywhere. `scripts/package-release.sh` turns it into the
+  bundle `scripts/install.sh` unpacks under `~/.synveda/profile`, and
+  `synveda init` runs from there. See [docs/INSTALL.md](../docs/INSTALL.md).
 - `helm/` — enterprise profile (OPS-2, ADR-0062): the gateway, an HA
   Postgres cluster under CloudNativePG, and the wiring for a customer's
   IdP. `helm/synveda/` is the chart, `helm/postgres/Dockerfile` builds its
-  Postgres image, and `helm/IMAGES.md` is the inventory every image in it
-  has to appear in (`make check-chart-images`).
+  Postgres image, and `helm/IMAGES.md` is the inventory every image in the
+  chart *and* the release profile has to appear in
+  (`make check-chart-images`).
+
+## Two compose files, and a test rather than a lint
+
+`compose/` and `release/` describe the same profile for different readers,
+and the drift risk is real. The answer is `demos/ops-8-release-install.sh`,
+which installs from the **packaged** bundle rather than from `release/` in
+place — so a bundle that has stopped matching the product fails the demo the
+same way it would fail a tester. A checker comparing the two files could
+only prove they are similar, which is not the property anybody wants
+(ADR-0065 decision 3).
 
 ## The enterprise profile installs what has a consumer
 
@@ -77,6 +94,12 @@ rather than following `latest`.
 `make dev-up` selects the image from `uname -m`; the compose default is the
 amd64 release, which is what CI runs. Override with `SYNVEDA_TEI_IMAGE` to
 pin something else.
+
+`synveda init` carries the same table, for an operator who installed a
+release and has no Makefile. It did not until OPS-8, so `init --embedder
+tei` on an Apple Silicon laptop took the compose default and ran the amd64
+image — which nothing caught while every install was a contributor's, and a
+contributor runs `make dev-up`.
 
 The two builds are interchangeable where it matters. Measured 2026-07-26 on
 the same inputs: same model (BAAI/bge-m3), same dimension (1024), vectors

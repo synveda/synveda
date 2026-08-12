@@ -5,26 +5,45 @@ provider, and optionally TEI for real embeddings. Laptop to working governed
 memory in under ten minutes (OPS-1; the measured run is 5 seconds once the
 images are present).
 
-For the enterprise profile — HA Postgres, Temporal cluster, your own IdP,
-Helm — see OPS-2, which is not built yet.
+For the enterprise profile — HA Postgres, CloudNativePG, your own IdP, Helm —
+see [the chart](../deploy/helm/synveda) (OPS-2).
 
 ## Prerequisites
 
-- **Docker** (Docker Desktop or OrbStack), running.
-- **A Synveda checkout** and a Rust toolchain, until there is a release to
-  download. `cargo build -p synveda-cli -p synveda-gateway` produces the two
-  binaries this guide uses; a release would ship them.
+**Docker** (Docker Desktop or OrbStack), running. That is the whole list.
 
 ## Install
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
+synveda init --slug acme --name "ACME"
+```
+
+The installer downloads one release — the `synveda` CLI, the gateway binary,
+the admin console and a self-contained compose profile — and puts the CLI on
+your `PATH` and the rest under `~/.synveda`. macOS arm64 and Linux x86_64;
+the binaries are unsigned, and the checksums prove a download arrived intact
+rather than who built it (OPS-8, ADR-0065).
+
+`init` starts Postgres, Jaeger and the bundled Rauthy; applies the
+migrations; admits one tenant; registers the OIDC client and your operator
+login; and starts the gateway on `http://127.0.0.1:8120`.
+
+<details>
+<summary>From a checkout instead</summary>
+
+Contributors, and anyone on a platform the release does not ship:
+
+```sh
 cargo build -p synveda-cli -p synveda-gateway
+pnpm --filter @synveda/console build     # optional; without it /console/ 404s
 ./target/debug/synveda init --slug acme --name "ACME"
 ```
 
-That is the whole installation. It starts Postgres, Jaeger and the bundled
-Rauthy; applies the migrations; admits one tenant; registers the OIDC client
-and your operator login; and starts the gateway on `http://127.0.0.1:8120`.
+`init` prefers a checkout in the working directory over an installed
+release, so having both is fine and the tree you are editing wins.
+`SYNVEDA_COMPOSE_FILE` overrides both.
+</details>
 
 `init` converges — run it again as often as you like. It never drops a
 database, a volume or a tenant, and if you change something it restarts the
@@ -48,7 +67,7 @@ product to keep a shortcut past the policy engine (seed §2.2). See ADR-0055.
 ## Log in — this is where the organisation starts to exist
 
 ```sh
-./target/debug/synveda login --gateway http://127.0.0.1:8120
+synveda login --gateway http://127.0.0.1:8120
 ```
 
 `init` printed your operator's email and password. The browser opens, you
@@ -98,6 +117,35 @@ Traces are at <http://localhost:16686>.
 
 ## Connect an AI client
 
+Two commands, because the two kinds of client are genuinely different.
+
+### Claude Code
+
+```sh
+synveda plugin install              # --dry-run to see it first
+```
+
+The release carries a plugin — a **marketplace**, which is the unit Claude
+Code installs — and this adds it and installs the one plugin in it by running
+`claude plugin` itself. That gets you more than an MCP server: four hooks, so
+a session composes a watermarked context block at `SessionStart` and every
+turn is observed back at `Stop`, `PreCompact` and `SessionEnd`. Start a new
+session to pick it up, and check it loaded:
+
+```sh
+claude plugin list          # synveda@synveda … Status: ✔ enabled
+```
+
+`--force` reinstalls over an existing one; a second install without it leaves
+what is there alone. Nothing is written outside Claude Code's own plugin
+state, and the `claude` CLI has to be on your `PATH` — this drives it rather
+than editing the three JSON files it keeps.
+
+It needs a login to do anything: `synveda login` stores the bearer, and the
+plugin reads it per call. There is no other configuration.
+
+### Everything else — Claude Desktop, Cursor, Zed
+
 `synveda mcp` serves governed memory to any MCP client over stdio: `recall` to
 search or fetch, and `remember` to store one durable fact in your own personal
 scope. You do not have to write the config by hand —
@@ -116,9 +164,10 @@ For a client this release does not know, `synveda mcp install --print` gives you
 the entry to place yourself, and `--config <path>` writes a config kept
 somewhere unusual — a project-level `.cursor/mcp.json`, say.
 
-**Claude Code needs none of this.** Its plugin already carries the entry, and it
-launches the server with the write tool switched off, because its `Stop` hook is
-already recording your turns — the tool would store each one a second time.
+**Claude Code needs none of this** — use `synveda plugin install` above. Its
+plugin carries its own MCP entry, and launches the server with the write tool
+switched off, because its `Stop` hook is already recording your turns and the
+tool would store each one a second time.
 
 If a client will not connect, the server's diagnostics are on its stderr, which
 is where clients collect them — Claude Desktop keeps them in
@@ -220,22 +269,66 @@ them until somebody logs in.
 
 Never use `--demo` on a deployment that will hold real memory.
 
+## The admin console
+
+`http://127.0.0.1:8120/console/`, served by the gateway from its own origin —
+no second process and no second port. It ships with the release; from a
+checkout it needs `pnpm --filter @synveda/console build` first, and without a
+bundle the route 404s rather than failing the boot, because a static asset
+must not be a dependency of the audit log (CNSL-1, ADR-0056).
+
 ## Stopping and starting
 
 ```sh
-docker compose -f deploy/compose/docker-compose.yml down   # state persists in volumes
-docker compose -f deploy/compose/docker-compose.yml down -v # wipe everything
+docker compose -f ~/.synveda/profile/docker-compose.yml down     # state persists in volumes
+docker compose -f ~/.synveda/profile/docker-compose.yml down -v  # wipe everything
 ```
 
-The gateway's pid and log are under `data/gateway.pid` and `data/gateway.log`.
-`synveda init` restarts it when the configuration changes.
+From a checkout, the compose file is `deploy/compose/docker-compose.yml`
+instead.
+
+The gateway's pid and log are under `~/.synveda/data/` (`data/` in a
+checkout). `synveda init` restarts it when the configuration changes.
+
+## What an install is made of
+
+| | |
+|---|---|
+| `synveda` | the CLI, on your `PATH` |
+| `~/.synveda/bin/synveda-gateway` | the gateway, run as a host process |
+| `~/.synveda/console/` | the admin console bundle |
+| `~/.synveda/profile/` | the compose file, the Rauthy config, the version |
+| `~/.synveda/plugin/` | the Claude Code marketplace, installed into no client |
+| `~/.synveda/data/` | the gateway's pidfile, log and rendered configuration |
+
+`SYNVEDA_HOME` moves all of it; `SYNVEDA_BIN` moves the CLI.
+
+**The installer touches nothing belonging to an editor or an AI client.** No
+`~/.claude`, no Claude Desktop config, no `~/.cursor`. Hooking one up is the
+separate, explicit step above, and the OPS-8 demo asserts the absence rather
+than trusting it.
+
+The gateway runs on the host rather than in a container **only** on the
+bundled-issuer path, and that is a measurement rather than a preference —
+see the note under "Using your own IdP" above. With `--issuer` it runs as the
+`gateway` container from `ghcr.io/synveda/gateway`.
+
+The CLI and the profile ship together and `init` refuses to mix them: a
+profile from another release stops the install with the two versions named,
+because the alternative presents as a service that will not start.
 
 ## Verifying the whole thing
 
 ```sh
-sh demos/ops-1-smb-profile.sh
+sh demos/ops-1-smb-profile.sh       # from a checkout
+sh demos/ops-8-release-install.sh   # from a downloaded release
 ```
 
-Runs the acceptance criterion end to end on a scratch HOME: install, log in,
-build a hierarchy, observe a turn, recall it, and assert the chain shows
+Both run the acceptance criterion end to end on a scratch HOME: install, log
+in, build a hierarchy, observe a turn, recall it, and assert the chain shows
 exactly one break-glass event with everything else attributed to a person.
+The OPS-8 one additionally installs from packaged release artefacts with
+`cargo`, `rustc` and `rustup` shadowed by shims that exit 127 — so "no Rust
+toolchain" is a property of the run rather than a claim about it. It wants
+ports 5432, 8100 and 8120 free, and tears its deployment down at the end
+unless you set `OPS8_KEEP=1`.
