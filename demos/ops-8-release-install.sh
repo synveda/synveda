@@ -147,6 +147,16 @@ done
 echo "==> the release: what a tag produces and a tester downloads"
 mkdir -p "$ASSETS" "$DEMO_HOME" "$ELSEWHERE" "$BIN_DIR" "$SHIMS"
 
+# The workspace dependencies both bundles need, installed by the demo rather
+# than assumed of whoever runs it. Assuming them is what broke this on its
+# first CI run: the job installed the console's filter only, the adapter's
+# `typescript` was absent, and the plugin build failed four minutes in — on
+# a machine where `node_modules` had made it invisible.
+pnpm install --frozen-lockfile \
+  --filter @synveda/console... \
+  --filter @synveda/claude-code-adapter... >/dev/null 2>&1 ||
+  fail "pnpm install --frozen-lockfile failed — is pnpm on PATH?"
+
 cargo build --release -q -p synveda-cli -p synveda-gateway
 stage="$SCRATCH/stage-bin"
 mkdir -p "$stage"

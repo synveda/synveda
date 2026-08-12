@@ -184,7 +184,15 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - run: pnpm install --frozen-lockfile --filter @synveda/console...
+      # The demo installs what it needs itself, so it runs on a fresh clone
+      # rather than only where a job happened to prime the store. This step
+      # stays because a warm store is most of its untimed half — and it
+      # names *both* filters, which the first run did not: the adapter's
+      # `typescript` was missing and the plugin build failed inside the demo.
+      - run: >
+          pnpm install --frozen-lockfile
+          --filter @synveda/console...
+          --filter @synveda/claude-code-adapter...
       - run: demos/ops-8-release-install.sh
       - name: What the install looked like
         if: failure()
