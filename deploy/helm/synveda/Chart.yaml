@@ -9,8 +9,8 @@ type: application
 # tracks the workspace version in Cargo.toml; the image tag defaults to it,
 # so `helm upgrade` without an explicit tag deploys what the chart says it
 # deploys.
-version: 0.1.1
-appVersion: "0.1.1"
+version: 0.1.2
+appVersion: "0.1.2"
 
 kubeVersion: ">=1.29.0-0"
 
