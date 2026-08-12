@@ -407,6 +407,69 @@ console_status=$(curl -s -o "$SCRATCH/console.html" -w '%{http_code}' "$GATEWAY_
 grep -qi '<title' "$SCRATCH/console.html" || fail "/console/ served something that is not the console"
 echo "    GET /console/ → 200, $(wc -c < "$SCRATCH/console.html" | tr -d ' ') bytes"
 
+# Serving the bundle is not being usable, and stopping at 200 is how the
+# console shipped unusable. A console session seals its tokens under the
+# deployment-scope key (TEN-4, ADR-0064); with no key `/auth/callback`
+# fails and redirects to `/console/?error=server_error`, while the static
+# page above keeps returning 200 exactly as it does now. So the assertion
+# is a *sign-in*: complete the OIDC flow, take the cookie, and use it.
+echo "    signing in, because a bundle that serves is not a console you can use"
+c_auth=$(curl -si "$GATEWAY_URL/auth/login?console=true" | grep -i '^location:' |
+  sed 's/^[Ll]ocation: //' | tr -d '\r')
+case "$c_auth" in
+"$RAUTHY_URL"/auth/v1/oidc/authorize\?*) ;;
+*) fail "/auth/login?console=true did not redirect to the IdP: $c_auth" ;;
+esac
+c_state=$(printf '%s\n' "$c_auth" | grep -o 'state=[^&]*' | cut -d= -f2)
+c_nonce=$(printf '%s\n' "$c_auth" | grep -o 'nonce=[^&]*' | cut -d= -f2)
+c_chal=$(printf '%s\n' "$c_auth" | grep -o 'code_challenge=[^&]*' | cut -d= -f2)
+c_page=$(curl -si "$c_auth")
+c_cookies=$(printf '%s\n' "$c_page" | grep -i '^set-cookie:' | sed 's/^[Ss]et-[Cc]ookie: //' |
+  cut -d';' -f1 | tr -d '\r' | paste -sd'; ' -)
+c_csrf=$(printf '%s\n' "$c_page" | grep -o '<template id="tpl_csrf_token">[^<]*' | sed 's/.*>//')
+c_pow=$(curl -s -X POST "$RAUTHY_URL/auth/v1/pow" | node -e '
+  const crypto = require("crypto");
+  let challenge = "";
+  process.stdin.on("data", (c) => (challenge += c));
+  process.stdin.on("end", () => {
+    const difficulty = parseInt(challenge.split(":")[1], 10);
+    const zeros = (buf) => { let bits = 0; for (const b of buf) { if (b === 0) { bits += 8; continue } bits += Math.clz32(b) - 24; break } return bits };
+    for (let n = 0; ; n++) {
+      if (zeros(crypto.createHash("sha256").update(challenge).update(String(n)).digest()) >= difficulty) {
+        process.stdout.write(challenge + n); break;
+      }
+    }
+  });
+')
+c_resp=$(curl -si -X POST "$RAUTHY_URL/auth/v1/oidc/authorize" \
+  -H 'Content-Type: application/json' -H "Cookie: $c_cookies" -H "x-csrf-token: $c_csrf" \
+  -d "{\"email\":\"$OPERATOR\",\"password\":\"$PASSWORD\",
+       \"client_id\":\"synveda\",\"redirect_uri\":\"$GATEWAY_URL/auth/callback\",
+       \"state\":\"$c_state\",\"nonce\":\"$c_nonce\",
+       \"code_challenge\":\"$c_chal\",\"code_challenge_method\":\"S256\",
+       \"scopes\":[\"openid\",\"profile\",\"email\",\"groups\"],\"pow\":\"$c_pow\"}")
+c_cb=$(printf '%s\n' "$c_resp" | grep -i '^location:' | sed 's/^[Ll]ocation: //' | tr -d '\r')
+[ -n "$c_cb" ] || fail "the IdP returned no callback for the console login"
+c_final=$(curl -si "$c_cb")
+c_loc=$(printf '%s\n' "$c_final" | grep -i '^location:' | sed 's/^[Ll]ocation: //' | tr -d '\r')
+case "$c_loc" in
+*error=*) fail "console sign-in failed: the callback redirected to $c_loc
+  (a deployment with no key plane cannot seal a console session — TEN-4)" ;;
+esac
+c_cookie=$(printf '%s\n' "$c_final" | grep -i '^set-cookie:' | sed 's/^[Ss]et-[Cc]ookie: //' |
+  cut -d';' -f1 | tr -d '\r' | head -1)
+[ -n "$c_cookie" ] || fail "the console callback set no session cookie"
+case "$c_cookie" in
+__Host-*) ;;
+*) fail "the console cookie is not __Host- prefixed: $c_cookie" ;;
+esac
+# The cookie has to actually authenticate a `/v1` call — the console holds
+# no data of its own and every fact it shows comes from one of these.
+who=$(curl -s -H "Cookie: $c_cookie" "$GATEWAY_URL/v1/whoami")
+printf '%s' "$who" | grep -q "$TENANT" ||
+  fail "the console session does not resolve to this tenant: $(printf '%s' "$who" | head -c 200)"
+echo "    signed in: $c_loc, cookie set, /v1/whoami resolves the tenant"
+
 echo ""
 echo "==> the Claude Code plugin, installed into the harness that runs it"
 # What this feature exists for. The gap OPS-8 opened with was that the
