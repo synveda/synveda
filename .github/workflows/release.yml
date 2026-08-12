@@ -207,13 +207,38 @@ jobs:
           path: synveda-*.tar.gz
           if-no-files-found: error
 
+  # One architecture per **native** runner, never QEMU.
+  #
+  # This was one `ubuntu-latest` job building `linux/amd64,linux/arm64`
+  # through `setup-qemu-action`, and the first real dispatch killed it: the
+  # gateway image alone consumed the whole 90-minute budget and never
+  # finished, so Postgres never started and `publish` never ran. Emulating a
+  # Rust release build of Cedar, Tantivy and sqlx is not a slow path, it is
+  # an unusable one.
+  #
+  # Dropping arm64 was the other option and it is worse than it sounds:
+  # `ghcr.io/synveda/postgres` is pulled by *every* install, not only the
+  # `--issuer` path, so an amd64-only image would put every Apple Silicon
+  # tester under emulation — in the one feature whose whole subject is that
+  # installing should be easy.
+  #
+  # `ubuntu-24.04-arm` is free for public repositories, which this is.
   images:
     needs: version
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runs-on: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         if: needs.version.outputs.publish == 'true'
@@ -221,27 +246,32 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Per-architecture tags. A dry run builds and pushes nothing; a real
+      # release pushes these, and `manifest` below joins them into the one
+      # tag `deploy/release/docker-compose.yml` names. Cache scopes are
+      # per-arch because two architectures sharing one scope evict each
+      # other on every run.
       - name: The gateway
         uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/compose/gateway/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: ghcr.io/synveda/gateway:${{ needs.version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ghcr.io/synveda/gateway:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=gateway-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=gateway-${{ matrix.arch }}
       - name: Postgres
         # Same Dockerfile the dev compose builds, published under a name that
         # is not "dev-" because this one is what a customer installs.
         uses: docker/build-push-action@v6
         with:
           context: deploy/compose/postgres
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: ${{ needs.version.outputs.publish == 'true' }}
-          tags: ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=postgres-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=postgres-${{ matrix.arch }}
 
   publish:
     needs: [version, binaries, bundles, images]
@@ -278,6 +308,33 @@ jobs:
             test -f "assets/$asset" || { echo "missing asset: $asset" >&2; exit 1; }
           done
           echo "all five assets present"
+      # The multi-arch tag, joined from the per-architecture ones `images`
+      # pushed. A step here rather than a job of its own: a job would be
+      # skipped on a dry run, and a `publish` that needed it would be
+      # skipped too — taking the asset checks above with it, which are the
+      # part of this job a dry run exists to exercise.
+      #
+      # So a dry run proves both architectures **build** and never reaches
+      # this. Joining the manifest is the one part of the release path that
+      # only a real tag covers.
+      - uses: docker/login-action@v3
+        if: needs.version.outputs.publish == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Join the per-architecture image tags
+        if: needs.version.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
+          for image in gateway postgres; do
+            docker buildx imagetools create \
+              --tag "ghcr.io/synveda/$image:$version" \
+              "ghcr.io/synveda/$image:$version-amd64" \
+              "ghcr.io/synveda/$image:$version-arm64"
+            docker buildx imagetools inspect "ghcr.io/synveda/$image:$version"
+          done
       - name: Publish
         if: needs.version.outputs.publish == 'true'
         env:
