@@ -218,7 +218,7 @@ pub async fn init(plan: Plan) -> Result<(), String> {
     let env_file = compose_file.with_file_name(".env");
     write_env_file(&env_file, &plan, tenant_id, &issuer, &kek)?;
     println!("    configuration: {}", env_file.display());
-    if containerised(&plan) {
+    let gateway = if containerised(&plan) {
         // `--build` only where there is something to build from. A release
         // bundle's compose file has no build context by construction, and
         // asking compose to build one is an error rather than a no-op.
@@ -228,10 +228,20 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         }
         up.push("gateway");
         compose(&compose_file, &up)?;
+        // Compose owns liveness here: `--wait` already gates on the
+        // container's own health check, and there is no host pid to watch.
+        None
     } else {
-        start_host_gateway(&profile, &plan, tenant_id, &issuer, &kek)?;
-    }
-    wait_for_health(&format!("{GATEWAY_URL}/healthz"), Duration::from_secs(90)).await?;
+        Some(start_host_gateway(
+            &profile, &plan, tenant_id, &issuer, &kek,
+        )?)
+    };
+    wait_for_health(
+        &format!("{GATEWAY_URL}/healthz"),
+        Duration::from_secs(90),
+        gateway.as_ref(),
+    )
+    .await?;
     println!("    {GATEWAY_URL} healthy");
 
     // ── 6. the demo organisation, if asked for ──────────────────────────
@@ -383,6 +393,8 @@ async fn converge_rauthy(plan: &Plan) -> Result<(), String> {
     wait_for_health(
         &format!("{RAUTHY_URL}/auth/v1/.well-known/openid-configuration"),
         Duration::from_secs(120),
+        // Rauthy is compose's container, not a process this CLI spawned.
+        None,
     )
     .await?;
 
@@ -652,7 +664,7 @@ fn start_host_gateway(
     tenant_id: TenantId,
     issuer: &str,
     kek: &str,
-) -> Result<(), String> {
+) -> Result<Started, String> {
     let state = profile.state_dir();
     std::fs::create_dir_all(&state).map_err(|err| format!("create {}: {err}", state.display()))?;
     let pidfile = state.join("gateway.pid");
@@ -702,17 +714,39 @@ fn start_host_gateway(
     ) {
         (Some(pid), Some(current)) if current == desired => {
             println!("    already running with this configuration (pid {pid})");
-            return Ok(());
+            return Ok(Started {
+                pid,
+                logfile: logfile.clone(),
+            });
         }
         (Some(pid), _) => {
             println!("    configuration changed — restarting (pid {pid})");
             let _ = Command::new("kill").arg(pid.to_string()).status();
-            // Give it the moment it needs to release port 8120; a fresh
-            // process that cannot bind is a worse failure than a slow one.
-            std::thread::sleep(Duration::from_millis(500));
+            // Wait for it to let go of the port rather than guess how long
+            // that takes. A fixed sleep is wrong in both directions: too
+            // short and the replacement cannot bind, too long and every
+            // restart pays for the worst case. This mattered more once the
+            // pre-flight below became a refusal — a gateway still shutting
+            // down would have been reported as a stranger holding the port.
+            wait_for_port_release(GATEWAY_URL, Duration::from_secs(10));
         }
         (None, _) => {}
     }
+
+    // Nothing of ours holds the port, so it has to be free before we spawn
+    // into it. When it is not, the occupant is another deployment — most
+    // often the *installed* release while this is a checkout, a pair
+    // ADR-0065 decision 5 deliberately lets coexist, or the reverse.
+    //
+    // This is a pre-flight rather than a liveness check because liveness
+    // loses the race. The gateway connects to Postgres, reads its key and
+    // starts five workers before it binds, so the child is still alive for
+    // the first second — while the *stranger* answers `/healthz`
+    // immediately. Measured: `init` printed `pid 51544`, `healthy` and
+    // `initialised in 6s`, exit 0, for a process that died with
+    // `AddrInUse` and never bound anything. Watching our own pid narrows
+    // that window; only asking for the port closes it.
+    port_available(GATEWAY_URL)?;
 
     let binary = gateway_binary(profile)?;
     let log = std::fs::File::create(&logfile)
@@ -767,19 +801,123 @@ fn start_host_gateway(
     std::fs::write(&configfile, &desired)
         .map_err(|err| format!("write {}: {err}", configfile.display()))?;
     println!("    pid {} · log {}", child.id(), logfile.display());
-    Ok(())
+    Ok(Started {
+        pid: child.id(),
+        logfile,
+    })
+}
+
+/// A host gateway this `init` is responsible for: the pid to watch while
+/// waiting for health, and the log to quote when it turns out to be gone.
+struct Started {
+    pid: u32,
+    logfile: PathBuf,
+}
+
+impl Started {
+    /// `Ok` while the process exists; otherwise an error carrying the reason
+    /// out of its own log. "The gateway exited" on its own sends somebody to
+    /// open a file we already know the path of, and the line that explains
+    /// it is the last one in there.
+    fn still_alive(&self) -> Result<(), String> {
+        if pid_alive(self.pid) {
+            return Ok(());
+        }
+        Err(format!(
+            "the gateway (pid {}) exited while starting up:\n{}",
+            self.pid,
+            log_tail(&self.logfile, 8)
+        ))
+    }
+}
+
+/// Refuses when something that is not this deployment already holds the
+/// gateway's port.
+///
+/// Binding it ourselves and letting go is the whole test: it needs no
+/// `lsof`, no `/proc`, and it answers the question the health check cannot
+/// — whether the port is *ours to take*, rather than whether somebody is
+/// answering on it.
+fn port_available(url: &str) -> Result<(), String> {
+    let authority = url
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .trim_end_matches('/');
+    match std::net::TcpListener::bind(authority) {
+        Ok(listener) => {
+            drop(listener);
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => Err(format!(
+            "{authority} is already in use.\n\
+             \n\
+             This deployment has no gateway of its own running, so the port\n\
+             belongs to something else — most often the other half of a\n\
+             checkout / installed-release pair, which share it by default.\n\
+             Stop whatever holds it (its pid is in that deployment's\n\
+             `data/gateway.pid`) and run this again.\n\
+             \n\
+             Starting anyway is worse than refusing: the new gateway exits with\n\
+             `AddrInUse` while the old one keeps answering /healthz, which reads\n\
+             as an init that worked."
+        )),
+        Err(err) => Err(format!("check whether {authority} is free: {err}")),
+    }
+}
+
+/// Waits for a gateway we just signalled to release the port.
+///
+/// Silent about failure on purpose: if the port is still held when the
+/// budget runs out, the pre-flight that follows says so properly, and says
+/// it once.
+fn wait_for_port_release(url: &str, budget: Duration) {
+    let deadline = Instant::now() + budget;
+    while Instant::now() < deadline {
+        if port_available(url).is_ok() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Does this pid exist and may we signal it — `kill -0`.
+///
+/// Silenced, because the answer we want is the exit status: `kill -0` on a
+/// pid that is gone writes "No such process" to stderr, and a stale pidfile
+/// is the ordinary case here rather than a fault. It printed that line in
+/// the middle of an otherwise clean `init`, where it read as the failure
+/// instead of as the normal way of finding out.
+fn pid_alive(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+/// The last `lines` lines of a log, indented, for an error that would
+/// otherwise report only that a process is missing. `Address already in
+/// use` is the line this exists to put in front of somebody.
+fn log_tail(path: &Path, lines: usize) -> String {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return format!("  (no log at {})", path.display());
+    };
+    let tail: Vec<&str> = text.lines().rev().take(lines).collect();
+    if tail.is_empty() {
+        return format!("  ({} is empty)", path.display());
+    }
+    tail.into_iter()
+        .rev()
+        .map(|line| format!("  {line}\n"))
+        .collect()
 }
 
 /// The pid in `pidfile`, if that process is alive.
 fn running_gateway(pidfile: &Path) -> Option<u32> {
     let pid: u32 = std::fs::read_to_string(pidfile).ok()?.trim().parse().ok()?;
-    // `kill -0`: does this pid exist and may we signal it.
-    let alive = Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .status()
-        .ok()?
-        .success();
-    alive.then_some(pid)
+    pid_alive(pid).then_some(pid)
 }
 
 /// What the gateway binary is, for the convergence fingerprint.
@@ -927,8 +1065,31 @@ fn issuers_json(tenant_id: TenantId, issuer: &str) -> String {
     .to_string()
 }
 
-/// Polls a health endpoint until it answers or the budget runs out.
-async fn wait_for_health(url: &str, budget: Duration) -> Result<(), String> {
+/// Polls a health endpoint until it answers or the budget runs out — and,
+/// when we started the process ourselves, until *that process* stops
+/// existing.
+///
+/// Asking the port whether something answers is a different question from
+/// asking whether the gateway this `init` started is serving, and the two
+/// diverge exactly where it matters. Measured on a machine holding a release
+/// install and a checkout at once: `init` from the checkout spawned a
+/// gateway that died in milliseconds with `AddrInUse`, because the installed
+/// deployment already held 8120 — and then the *installed* gateway answered
+/// `/healthz`, so `init` printed `pid 51544`, `healthy` and `initialised in
+/// 6s`, and exited 0. The pid it named had never lived long enough to bind.
+///
+/// This is the same shape as the upgrade that left the previous release
+/// serving (ADR-0065 amendment 5) and the console that returned 200 while
+/// nobody could sign in (amendment 4): a check standing one layer shallower
+/// than the claim it is made to support. The liveness test goes *before* the
+/// probe so a dead process is reported rather than a stranger's success, and
+/// again *after* a success, so the answer cannot have come from a gateway
+/// that outlived ours by the width of one HTTP round trip.
+async fn wait_for_health(
+    url: &str,
+    budget: Duration,
+    started: Option<&Started>,
+) -> Result<(), String> {
     let http = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(2))
         .timeout(Duration::from_secs(5))
@@ -937,8 +1098,16 @@ async fn wait_for_health(url: &str, budget: Duration) -> Result<(), String> {
     let deadline = Instant::now() + budget;
     let mut last = String::new();
     while Instant::now() < deadline {
+        if let Some(started) = started {
+            started.still_alive()?;
+        }
         match http.get(url).send().await {
-            Ok(response) if response.status().is_success() => return Ok(()),
+            Ok(response) if response.status().is_success() => {
+                if let Some(started) = started {
+                    started.still_alive()?;
+                }
+                return Ok(());
+            }
             Ok(response) => last = format!("HTTP {}", response.status()),
             Err(err) => last = err.to_string(),
         }
@@ -1285,6 +1454,106 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// A gateway that died on startup names the pid *and* the reason.
+    ///
+    /// The failure this covers: a checkout `init` beside an installed one
+    /// spawned a gateway that exited in milliseconds with `AddrInUse`,
+    /// the installed gateway answered `/healthz`, and `init` reported
+    /// `pid 51544`, `healthy` and exit 0 for a process that had never
+    /// bound the port. Liveness is asked of the pid we started, and the
+    /// answer carries the log line that explains it.
+    #[test]
+    fn a_gateway_that_exited_reports_the_reason_from_its_own_log() {
+        let dir = scratch("exited");
+        let logfile = dir.join("gateway.log");
+        std::fs::write(
+            &logfile,
+            "INFO search indexer starting\n\
+             Error: Os { code: 48, kind: AddrInUse, message: \"Address already in use\" }\n",
+        )
+        .unwrap();
+
+        // A pid that has certainly exited: our own child, waited on.
+        let mut child = Command::new("true").spawn().unwrap();
+        child.wait().unwrap();
+        let started = Started {
+            pid: child.id(),
+            logfile,
+        };
+
+        let err = started.still_alive().unwrap_err();
+        assert!(err.contains(&format!("pid {}", child.id())), "{err}");
+        assert!(
+            err.contains("Address already in use"),
+            "the reason has to come with the failure, not be left in a file: {err}"
+        );
+    }
+
+    /// A port somebody else holds is refused before anything is spawned.
+    ///
+    /// The pre-flight rather than the liveness check is what closes this,
+    /// and the reason is timing: the gateway talks to Postgres, reads its
+    /// key and starts five workers before it binds, so a child that is
+    /// doomed to `AddrInUse` is still alive for the first second — while
+    /// the process already on the port answers `/healthz` at once. Watching
+    /// our own pid narrows the window; asking for the port closes it.
+    #[test]
+    fn a_port_somebody_else_holds_is_refused() {
+        // An ephemeral port, held for the length of the test, standing in
+        // for the other deployment's gateway.
+        let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", held.local_addr().unwrap());
+
+        let err = port_available(&url).unwrap_err();
+        assert!(err.contains("already in use"), "{err}");
+        assert!(
+            err.contains("as an init that worked"),
+            "the refusal has to say why starting anyway is worse, not just that it stopped: {err}"
+        );
+
+        // The other direction, so the check cannot pass by always refusing.
+        // Port 0 is "any free port", which always binds — asserting on a
+        // port we just released instead would be a race against every other
+        // test in this binary, since the kernel is free to hand the number
+        // straight to one of them. It failed that way once here.
+        assert!(port_available("http://127.0.0.1:0").is_ok());
+    }
+
+    /// The other direction, so the check cannot pass by always failing.
+    #[test]
+    fn a_live_gateway_is_alive() {
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let started = Started {
+            pid: child.id(),
+            logfile: scratch("alive").join("gateway.log"),
+        };
+        let alive = started.still_alive();
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(alive.is_ok(), "{alive:?}");
+    }
+
+    /// `log_tail` is the error's evidence, so it has to survive the states a
+    /// log is actually in — including not existing, which is what a gateway
+    /// that failed before opening one leaves behind.
+    #[test]
+    fn log_tail_quotes_the_end_and_survives_a_missing_file() {
+        let dir = scratch("logtail");
+        let logfile = dir.join("gateway.log");
+        std::fs::write(&logfile, "one\ntwo\nthree\nfour\n").unwrap();
+        let tail = log_tail(&logfile, 2);
+        assert!(tail.contains("three") && tail.contains("four"), "{tail}");
+        assert!(!tail.contains("one"), "took more than asked for: {tail}");
+        // Order preserved, not reversed by the way the last lines are taken.
+        assert!(tail.find("three") < tail.find("four"), "{tail}");
+
+        let missing = log_tail(&dir.join("absent.log"), 4);
+        assert!(missing.contains("no log at"), "{missing}");
+
+        std::fs::write(&logfile, "").unwrap();
+        assert!(log_tail(&logfile, 4).contains("is empty"));
     }
 
     /// Lays out an installed release the way `install.sh` does, minus the

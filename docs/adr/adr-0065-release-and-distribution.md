@@ -1,13 +1,54 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted, **amended six times** — two on 2026-08-11 while
-  building it, four on 2026-08-12 by the first dry runs, the first console
-  sign-in, the first upgrade and the first install that could not write its
-  own bin directory. Each amendment below says what it changed and what
-  still stands; none reverses a decision.
+- **Status**: Accepted, **amended seven times** — two on 2026-08-11 while
+  building it, five on 2026-08-12, each by running the previous release on a
+  real machine rather than by review. Every amendment below says what it
+  changed and what still stands; none reverses a decision.
 - **Date**: 2026-08-11
 - **Feature(s)**: OPS-8
 - **Deciders**: sujitn
+
+## Amendment 7 (2026-08-12): a health check answered by a stranger
+
+Decision 5 lets a checkout and an installed release coexist, and `Profile`
+resolves explicit > checkout > bundle so a contributor's tree wins. Both
+still hold. What neither anticipated is that the two share port 8120, and
+that `init` could not tell whose gateway was on it.
+
+Run from a checkout on a machine with an installed release up: `init`
+spawned a gateway, that process died in milliseconds with `AddrInUse`, and
+`wait_for_health` then asked `127.0.0.1:8120/healthz` — which the
+**installed** gateway answered. `init` printed `pid 51544`, `healthy` and
+`initialised in 6s`, wrote that pid to `gateway.pid`, and exited **0**. The
+pid it named had never lived long enough to bind anything.
+
+That is the same fault as amendment 5's upgrade and amendment 4's console,
+and it is worth naming precisely rather than as "a shallow check": the
+health probe asks *is something answering here*, and every claim built on it
+reads as *is the thing I just started answering here*. Those are the same
+sentence only when nothing else can be on the port, which is exactly the
+assumption decision 5 broke.
+
+The first fix tried was to watch the pid we spawned, and it **did not work** —
+worth recording, because it looks sufficient. The gateway connects to
+Postgres, reads its key and starts five workers before it binds, so a child
+doomed to `AddrInUse` is still alive for the first second, while the
+stranger answers immediately. Liveness narrows the race; it does not close
+it. What closes it is asking for the port itself: `init` binds
+`127.0.0.1:8120` and releases it before spawning, and refuses when it
+cannot. The liveness check stays, because it catches the *other* startup
+failures — a gateway that dies on a bad migration or an unreadable key —
+and it carries the tail of the gateway's own log into the error, so
+`Address already in use` reaches the person rather than staying in a file.
+
+The restart path gained the other half. It killed the old gateway and slept
+500ms, which was a guess in both directions; with a refusal now waiting
+downstream, a gateway slow to shut down would have been reported as a
+stranger holding the port. It waits for release, up to ten seconds.
+
+What stands: the port is still 8120 for both profiles, and a checkout still
+wins over a bundle. Coexisting was always allowed — running *at the same
+time* never was, and now says so.
 
 ## Amendment 6 (2026-08-12): the default install path is the one nothing had run
 
