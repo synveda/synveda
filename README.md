@@ -76,30 +76,40 @@ consuming agent heals on its next session start.
 ## Project status
 
 **Phases 0–2 are complete. Phase 3 (enterprise surface) is in progress.**
-61 of 91 planned features are done, each one demonstrated by a runnable script in
+63 of 94 planned features are done, each one demonstrated by a runnable script in
 [`demos/`](demos/) and covered by an acceptance test.
 
-It installs: `synveda init` takes a laptop to working governed memory —
-see [docs/INSTALL.md](docs/INSTALL.md).
+It installs, on somebody else's machine, with Docker as the only prerequisite:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
+synveda init --demo
+synveda login
+synveda plugin install            # Claude Code: hooks + MCP, one command
+```
+
+An admin console comes with it, at `http://127.0.0.1:8120/console/`. See
+[docs/INSTALL.md](docs/INSTALL.md).
 
 | Phase | Scope | State |
 |---|---|---|
 | **0 — Foundation** | Workspace, dev environment, types, bitemporal schema, observability | ✅ 6/6 |
 | **1 — The spine** | SSO → auto-provisioned hierarchy → observe → extraction → inject → audit, live in Claude Code | ✅ 21/21 |
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
-| **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, residency, Qdrant | 🚧 12/25 |
-| **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR, gateway scale | ⬜ 0/16 |
+| **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
+| **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR, gateway scale | ⬜ 0/17 |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — 91 in
-total, 61 delivered. The twelve Phase 3 items finished are the skills registry
+One further feature (AUTH-6, session and token hygiene) is unscheduled — 94 in
+total, 63 delivered. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
 (OPS-1), the admin console's proposals inbox and hierarchy explorer (CNSL-1,
 CNSL-2), the generic MCP server (ADPT-2), the SCIM server with its
 directory-sync fallback (AUTH-4, AUTH-5), the LongMemEval benchmark adapter
-(EVAL-3), and the Helm chart and enterprise profile (OPS-2) — which is where
-the gateway stopped connecting to Postgres as a superuser, so the tenant
-isolation backstop is enforced against a deployment rather than bypassed by
-one.
+(EVAL-3), the Helm chart and enterprise profile (OPS-2) — which is where the
+gateway stopped connecting to Postgres as a superuser, so the tenant isolation
+backstop is enforced against a deployment rather than bypassed by one — the
+dense-leg retrieval benchmark that declined its own proposal (TEN-3), and
+per-tenant envelope keys (TEN-4).
 
 Full detail, feature by feature: [`docs/backlog/STATUS.md`](docs/backlog/STATUS.md).
 Published benchmark scores, and what they do and do not measure:
@@ -152,9 +162,16 @@ treat them as shape, not as an SLO.
 
 Being explicit, so nothing here misleads:
 
-- **No Kubernetes deployment.** `synveda init` installs the single-binary
-  profile (OPS-1) and Docker Compose runs the dev environment; the Helm chart is
-  OPS-2.
+- **The Kubernetes deployment is one gateway replica.** The Helm chart installs
+  into a kind cluster and asserts a governed round trip, a CloudNativePG
+  failover and a live RLS backstop (OPS-2) — but it refuses to render a second
+  gateway replica, by a rendering error rather than a warning, until OPS-7
+  moves login state out of process memory. Its upgrade is therefore
+  restart-shaped.
+- **No signed binaries, and no Windows.** The release ships macOS arm64 and
+  Linux x86_64, unsigned and un-notarized (OPS-8); the checksums prove a
+  download arrived intact, not who built it. There is no upgrade path and no
+  package manager — reinstalling is how you upgrade.
 - **No live Entra or Okta tenant has been replayed.** The SCIM 2.0 server is
   built (AUTH-4) and `synveda directory` syncs from a terminal (AUTH-5), but the
   vendor corpus both are tested against is transcribed from Microsoft's and
@@ -162,6 +179,13 @@ Being explicit, so nothing here misleads:
 - **No real Cursor frame either.** The generic MCP server ships as `synveda mcp`
   (ADPT-2), and its acceptance corpus was recorded from Claude Desktop and Zed.
   Cursor remains an install target rather than a measured one.
+- **No live Claude Code session has injected or observed.** The plugin now
+  installs into Claude Code and is proven to *load* there — `✔ enabled`, four
+  hooks, one MCP server (OPS-8). What runs the hooks in ADPT-1's acceptance
+  demo is still that demo's own driver, replaying recorded payloads. Until
+  OPS-8 the plugin had never loaded at all: its manifest declared two keys
+  Claude Code discovers on its own, and nothing noticed because a harness that
+  replaces the harness cannot.
 - **Only two of the four console screens.** The proposals inbox (CNSL-1) and the
   hierarchy and policy explorer (CNSL-2) are served from the gateway's own origin
   at `/console/`; CNSL-3 and CNSL-4 are not built.

@@ -412,11 +412,22 @@ session_id="0198f100-adp1-7000-8000-$(date +%s)"
 started=$(now_ms)
 
 echo
-echo "==> [timed] the fresh machine: enabling the prebuilt plugin"
+echo "==> [timed] the fresh machine: staging the prebuilt plugin"
+# $PLUGIN_ROOT is **this demo's own** scratch root, not a place Claude Code
+# reads. Nothing below asks Claude Code to load anything: the driver a few
+# lines down reads `hooks/hooks.json` itself, substitutes
+# `${CLAUDE_PLUGIN_ROOT}`, and invokes node — which is what makes this a test
+# of the hook contract, and what makes it blind to whether the real harness
+# would ever have loaded the plugin. It was blind to exactly that for a year
+# (ADR-0027 amendment, 2026-08-11): the manifest declared two keys Claude
+# Code discovers on its own, and the plugin never loaded.
+#
+# The real install is `synveda plugin install`, and
+# `demos/ops-8-release-install.sh` is what asserts Claude Code loads it.
 mkdir -p "$PLUGIN_ROOT"
 cp -R adapters/claude-code/.claude-plugin adapters/claude-code/hooks \
   adapters/claude-code/dist "$PLUGIN_ROOT/"
-echo "    $(cat "$PLUGIN_ROOT/.claude-plugin/plugin.json" | json_field name) plugin in place; no install step, no dependencies"
+echo "    $(cat "$PLUGIN_ROOT/.claude-plugin/plugin.json" | json_field name) plugin staged for this demo's driver; no dependencies to install"
 
 echo "==> [timed] synveda login (the browser half driven headlessly here)"
 LOGIN_LOG="$DEMO_HOME/login.log"
