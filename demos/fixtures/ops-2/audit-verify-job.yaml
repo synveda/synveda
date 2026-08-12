@@ -24,7 +24,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: verify
-          image: synveda/gateway:0.1.0
+          image: synveda/gateway:__IMAGE_TAG__
           imagePullPolicy: Never
           command: ["/usr/local/bin/synveda", "audit", "verify", "--tenant", "__TENANT_ID__"]
           env:
