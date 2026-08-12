@@ -887,6 +887,30 @@ OPS-7  Gateway horizontal scale (L)
   AC: a kind-cluster test at three replicas — a login that completes across pods, and a
   hierarchy move visible to every replica's composition within a stated bound — plus the
   retention sweep's concurrency verified rather than assumed.
+OPS-8  Release & distribution (M)
+  Filed 2026-08-11. OPS-1 built an installer that cannot leave this laptop and said so in
+  its own source three times: `init` resolves its compose file relative to the working
+  directory and errors "run `synveda init` from a Synveda checkout"; `gateway_binary()`
+  looks only in `target/`, under a comment reading "a release ships this binary"; and
+  `repo_root()` carries the other half — "a released binary would carry its own profile".
+  Nothing is published: both our images build from source at install time, there is no
+  release job and no tag, and the Helm chart names two images nobody outside this laptop
+  can pull. A tagged GitHub Release with public GHCR images fixes all of it — prebuilt
+  `synveda` and `synveda-gateway` for darwin-arm64 and linux-x86_64, the console bundle,
+  a self-contained profile bundle under `deploy/release/`, and one `curl | sh` — so the
+  prerequisite list drops to Docker. It ships binaries *and* images rather than images
+  alone because ADR-0055 decision 8 forecloses the Docker-only shape: the bundled Rauthy's
+  issuer is a `localhost` URL, RFC 6761 makes that the container itself, and the default
+  install therefore runs the gateway as a host process by measurement rather than by
+  preference. It also closes a CNSL-1 gap nobody had reason to notice — the host-gateway
+  path never set `SYNVEDA_CONSOLE_DIR`, so `/console/` has 404'd for everyone without a
+  checkout and a `pnpm` build. No Windows, no upgrade path, no package manager, no code
+  signing; each has a reversal trigger in ADR-0065 rather than a plan.
+  AC: on a scratch HOME with no checkout and no Rust toolchain, install → `init --demo` →
+  `login` → a governed recall inside OPS-1's ten-minute budget with the image pull in the
+  clock; installed from the packaged bundle rather than the tree, so a drifted bundle
+  fails; OPS-1's break-glass invariant re-asserted from the installed path; `/console/`
+  serving; and an unsupported platform refused by name rather than guessed at.
 
 ──────────────────────────────────────────────
 EPIC CNSL — Admin console (Phase 3)
@@ -972,8 +996,9 @@ Phase 2 governance (wk 6–10): FLOW-1..7 · AUTHZ-4,5 · MEM-5,6 · CTX-4,5 · 
                          AUD-2 · EVAL-2,4,5 · PRMT-1,2
    → Demo: promotion pipeline, lapse lifecycle, as-of inject, bank-mode switch.
 Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-2 ·
-                         AUTH-4,5 · EVAL-3 · OPS-2 · TEN-3,4,5,6 · AUD-3,4 · GRPH-3 ·
-                         EVAL-6 · CTX-7 · OPS-3,4 · ADPT-3 · CTX-6 · FLOW-8
+                         AUTH-4,5 · EVAL-3 · OPS-2 · TEN-3,4 · OPS-8 · TEN-5,6 ·
+                         AUD-3,4 · GRPH-3 · EVAL-6 · CTX-7 · OPS-3,4 · ADPT-3 ·
+                         CTX-6 · FLOW-8
    (Reordered 2026-08-04. Order within the phase is by demo-readiness, not epic-grouped
    and — unlike Phase 1's — not topological, because nothing here blocks anything else:
    every dependency Phase 3 has was met by Phase 2. The original order scattered this
@@ -996,6 +1021,13 @@ Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-
    CTX-1's AC is "p99 <80ms at 1M records/tenant" and nothing has established which plan
    that number was measured against. It is not a governance hole: the generic plan is exact,
    so it returns *better* answers, more slowly and with worse scaling.)
+   (OPS-8 added 2026-08-11, and placed in this phase's demo block rather than in Phase 4
+   with the rest of OPS, because it is the only feature here whose absence stops the phase
+   demo from happening on anybody else's machine. Every goal this phase names is something
+   somebody is meant to *watch* — Entra and Okta live, skills into Claude Code and Cursor,
+   published scores, a Helm install — and until there is a release to download, watching it
+   costs a Rust toolchain and a cold release build of Cedar, Tantivy and sqlx. It sits
+   behind OPS-2 because the chart's images are two of the things a release publishes.)
    → Demo: Entra/Okta live, spec-compliant governed skills into Claude Code + Cursor,
      LongMemEval scores published, Helm install.
      (Read "LoCoMo/LongMemEval" until 2026-08-07. EVAL-3/ADR-0061 decision 1 found LoCoMo's
