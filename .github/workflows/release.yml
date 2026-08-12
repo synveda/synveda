@@ -237,6 +237,13 @@ jobs:
             runs-on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 60
+    env:
+      # `docker/build-push-action` uploads a `.dockerbuild` build record as a
+      # workflow artifact per build — four of them across this matrix. They
+      # are for the Actions build summary UI and nothing here reads them,
+      # but `publish` downloads artifacts and one of these is what failed
+      # its first run. Not produced at all is better than filtered later.
+      DOCKER_BUILD_SUMMARY: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -282,6 +289,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: assets
+          # Named rather than "everything this run produced". Belt to the
+          # `DOCKER_BUILD_SUMMARY: false` braces above: a future action that
+          # uploads an artifact of its own must not land in the directory
+          # this job checksums and publishes.
+          pattern: "{binaries-*,bundles}"
           merge-multiple: true
       - name: Checksums
         # Unsigned (ADR-0065 decision 8): this proves a download arrived

@@ -43,6 +43,16 @@ than the product.
   installing should be easy. The binaries already cover Apple Silicon
   natively; the images have to as well.
 
+- **`publish` was downloading four artefacts nobody asked for.**
+  `docker/build-push-action` uploads a `.dockerbuild` build record per build
+  — four across the images matrix — and the download step named no pattern,
+  so it took everything the run produced. One of those four failed its
+  download and took the job with it, on the first run that ever reached
+  `publish`. The records are not produced any more
+  (`DOCKER_BUILD_SUMMARY: false`) and the download names what it wants, so a
+  future action that uploads an artefact cannot land in the directory this
+  job checksums and publishes.
+
 **What a dry run still cannot cover**, and this is now stated rather than
 implied: the manifest join and `gh release create` are publish-only, so a
 dispatch proves both architectures build and never exercises the last step.
