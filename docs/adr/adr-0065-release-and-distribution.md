@@ -1,13 +1,53 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted, **amended twice on 2026-08-11** while building it
+- **Status**: Accepted, **amended three times** — twice on 2026-08-11 while building it, once on 2026-08-12 by the first dry runs
   (amendment 1: decision 4 gains a printed path, decision 6 gains two more
   defects of the same shape and a third about the messages themselves;
   amendment 2: the release gains a fifth artefact — the Claude Code plugin —
-  and decision 2's "two artefact kinds" becomes three; everything else stands)
+  and decision 2's "two artefact kinds" becomes three; amendment 3: images
+  build on native runners rather than under QEMU, and a dry run's residue is
+  named; everything else stands)
 - **Date**: 2026-08-11
 - **Feature(s)**: OPS-8
 - **Deciders**: sujitn
+
+## Amendment 3 (2026-08-12): what the dry runs measured, and why images build natively
+
+Decision 1's `workflow_dispatch` — "builds and publishes nothing" — existed
+because nothing in `make ci` runs this workflow. Two dispatches justified it
+before a tag was ever cut, and both failures were in the release path rather
+than the product.
+
+- **A reader that closed early failed the writer.** `bundles` built the
+  console tarball perfectly and died *listing* it: `tar -tzf … | head -n 3`
+  closes the pipe, `tar` takes EPIPE, and `set -euo pipefail` promotes that
+  to a failed job — taking the profile and plugin bundles, later steps in the
+  same job, with it. Worth keeping because it is **non-deterministic**: the
+  same pattern exits 0 locally against a *larger* listing, because `tar`
+  finishes writing into the pipe buffer before `head` closes. `sed -n '1,3p'`
+  reads to EOF and cannot lose that race.
+
+- **Multi-arch images under QEMU are not a slow path, they are an unusable
+  one.** One `ubuntu-latest` job building `linux/amd64,linux/arm64` through
+  `setup-qemu-action` hit its 90-minute timeout with the **gateway image
+  alone** unfinished; Postgres never started and `publish` never ran.
+  Emulating a Rust release build of Cedar, Tantivy and sqlx is the whole
+  cost. The fix is one architecture per **native** runner —
+  `ubuntu-24.04-arm` is free for public repositories, which this is — and a
+  manifest join at publish time.
+
+  **Dropping arm64 was the alternative and is worse than it sounds.**
+  `ghcr.io/synveda/postgres` is pulled by *every* install, not only the
+  `--issuer` path, so an amd64-only image would put every Apple Silicon
+  tester under emulation — in the one feature whose subject is that
+  installing should be easy. The binaries already cover Apple Silicon
+  natively; the images have to as well.
+
+**What a dry run still cannot cover**, and this is now stated rather than
+implied: the manifest join and `gh release create` are publish-only, so a
+dispatch proves both architectures build and never exercises the last step.
+That is the residue a first real tag carries, and it is the argument for
+cutting `v0.1.0` as a deliberate act rather than a formality.
 
 ## Amendment 2 (2026-08-11): the release shipped no way into the harness it is for
 
