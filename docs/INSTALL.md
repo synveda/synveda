@@ -329,6 +329,20 @@ new release on the port rather than reporting the old one as healthy.
 
 `SYNVEDA_HOME` moves all of it; `SYNVEDA_BIN` moves the CLI.
 
+The CLI goes to `/usr/local/bin` by default, which is root-owned on macOS and
+on most Linux. The installer asks `sudo` for that one file and, **if sudo is
+unavailable or refused — a managed machine where you are not an admin, a pipe
+with no terminal to prompt on, or you declining — it puts the CLI in
+`~/.synveda/bin` instead and tells you**, rather than failing an install whose
+other four parts are already in place. Nothing else here needs a privilege.
+If the directory it lands in is not on your `PATH`, the installer prints the
+`export` line to add. To choose up front and skip sudo entirely:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh \
+  | SYNVEDA_BIN="$HOME/.local/bin" sh
+```
+
 **The installer touches nothing belonging to an editor or an AI client.** No
 `~/.claude`, no Claude Desktop config, no `~/.cursor`. Hooking one up is the
 separate, explicit step above, and the OPS-8 demo asserts the absence rather
