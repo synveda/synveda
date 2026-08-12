@@ -30,15 +30,49 @@ contributes no context and returns success.
 
 ## Install
 
+From an installed release, one command — it carries this plugin already:
+
 ```sh
-pnpm install && pnpm --filter @synveda/claude-code-adapter build
+synveda plugin install          # --dry-run to see what it would run
 ```
 
-Then point Claude Code at this directory as a plugin, and log in once:
+From a checkout, build it, wrap it as a marketplace, and install that:
+
+```sh
+pnpm install && pnpm --filter @synveda/claude-code-adapter build
+scripts/package-plugin.sh 0.1.0 /tmp/synveda-plugin
+synveda plugin install --from /tmp/synveda-plugin/plugin
+```
+
+Then log in once:
 
 ```sh
 synveda login --gateway http://127.0.0.1:8120
 ```
+
+**Why a marketplace and not this directory.** Until 2026-08-11 this file said
+"point Claude Code at this directory as a plugin", and `demos/adpt-1-claude-code.sh`
+copies three directories into `~/.claude/plugins/synveda/`. Claude Code reads
+neither. It installs plugins from a *marketplace* — a directory carrying
+`.claude-plugin/marketplace.json` — into a cache it owns, tracked in
+`known_marketplaces.json` and `installed_plugins.json`. `package-plugin.sh`
+builds that wrapper; `synveda plugin install` hands it to `claude plugin`.
+
+Check it actually loaded, because installing and loading are different things:
+
+```sh
+claude plugin list                  # Status: ✔ enabled
+claude plugin details synveda@synveda   # Hooks (4) … MCP servers (1)
+```
+
+Two manifest keys are why that check matters. `hooks` must **not** name
+`./hooks/hooks.json` — the file is read automatically and declaring it too is
+a duplicate-load error that leaves the plugin `✘ failed to load` with the
+install looking perfectly healthy. And the MCP server belongs in `.mcp.json`
+at this directory's root, **not** as an inline `mcpServers` in `plugin.json`,
+where it is silently ignored. This plugin shipped with both mistakes for a
+year (ADR-0027 amendment, 2026-08-11); `package-plugin.sh` now refuses to
+build a bundle that reintroduces either.
 
 That is the whole configuration. `synveda login` opens your browser at
 the *gateway's* `/auth/login` — never the IdP's directly — so the login

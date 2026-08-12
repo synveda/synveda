@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 /**
- * The MCP entry point (ADPT-2, ADR-0057 decision 4) — named in
- * `.claude-plugin/plugin.json` as `mcpServers.synveda`.
+ * The MCP entry point (ADPT-2, ADR-0057 decision 4) — named in `.mcp.json`
+ * at the plugin root, which Claude Code discovers on its own.
+ *
+ * It was named in `.claude-plugin/plugin.json` as `mcpServers.synveda` until
+ * 2026-08-11, where Claude Code **silently ignores it**: the component
+ * inventory read `MCP servers (0)` and this file was never spawned. See the
+ * ADR-0027 amendment.
  *
  * # There is no protocol here any more
  *

@@ -28,6 +28,7 @@ mod lapse;
 mod login;
 mod mcp;
 mod pack;
+mod plugin;
 mod prompt;
 mod proposal;
 mod recall;
@@ -212,6 +213,14 @@ enum Command {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// The Claude Code plugin (ADPT-1, ADR-0027): session-start injection
+    /// and turn observation, installed into the harness that runs them.
+    ///
+    /// Separate from `mcp install` because Claude Code has its own CLI and
+    /// its own plugin state, so this drives `claude plugin` rather than
+    /// writing files another application owns.
+    #[command(subcommand)]
+    Plugin(PluginCommand),
     /// Database administration (dev bootstrap).
     #[command(subcommand)]
     Db(DbCommand),
@@ -986,6 +995,38 @@ enum McpCommand {
         /// $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
         profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PluginCommand {
+    /// Install the plugin into a client, through that client's own
+    /// installer.
+    ///
+    /// Claude Code reads plugins from *marketplaces* it has been told
+    /// about, not from a directory dropped under `~/.claude/plugins/`. This
+    /// adds the marketplace an installed release carries and installs the
+    /// one plugin in it, by running `claude plugin` — so its state stays
+    /// its own to manage.
+    Install {
+        /// Which client to install into. Pass an unknown name to be told
+        /// the ones this release knows.
+        #[arg(long, default_value = "claude-code")]
+        client: String,
+        /// A marketplace directory to install from, instead of the one an
+        /// installed release carries. `scripts/package-plugin.sh` produces
+        /// one from a checkout.
+        #[arg(long)]
+        from: Option<std::path::PathBuf>,
+        /// Report the commands that would run and run neither.
+        #[arg(long)]
+        dry_run: bool,
+        /// Reinstall over an existing `synveda@synveda`.
+        #[arg(long)]
+        force: bool,
+        /// Claude Code's installation scope.
+        #[arg(long, default_value = "user")]
+        scope: String,
     },
 }
 
@@ -1770,6 +1811,19 @@ async fn run(cli: Cli) -> Result<(), String> {
             dry_run,
             force,
             print,
+        }),
+        Command::Plugin(PluginCommand::Install {
+            client,
+            from,
+            dry_run,
+            force,
+            scope,
+        }) => plugin::install(&plugin::Plan {
+            client,
+            from,
+            dry_run,
+            force,
+            scope,
         }),
         Command::Auth(AuthCommand::Logout { profile, all }) => {
             let mut stored = credentials::load()?;
@@ -2712,11 +2766,24 @@ pub(crate) async fn record_break_glass(
 }
 
 async fn connect() -> Result<sqlx::PgPool, String> {
-    let url = std::env::var("DATABASE_URL")
-        .map_err(|_| "DATABASE_URL must be set (dev default is in the Makefile)")?;
+    // `DATABASE_URL`, or the single-node profile's own Postgres — which is
+    // the same default `synveda init` installs against, so the commands
+    // INSTALL.md tells a new operator to run next (`audit tail`, `audit
+    // verify`) work on a machine that has one deployment and no Makefile.
+    //
+    // The message this replaces named the Makefile, which is in a checkout
+    // an installed operator does not have (OPS-8). Erroring on a missing
+    // variable was right while a checkout was the only way to get here.
+    let url = init::database_url();
     PgPoolOptions::new()
         .max_connections(2)
         .connect(&url)
         .await
-        .map_err(|err| format!("connect to DATABASE_URL: {err}"))
+        .map_err(|err| {
+            format!(
+                "connect to {url}: {err}\n\
+                 (set DATABASE_URL to reach a database other than the one \
+                 `synveda init` installs)"
+            )
+        })
 }

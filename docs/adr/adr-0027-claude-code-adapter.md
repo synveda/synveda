@@ -1,9 +1,55 @@
 # ADR-0027: Claude Code adapter — hook seams, the CLI as credential authority, cursor-and-idempotency observe
 
-- **Status**: Accepted
+- **Status**: Accepted, **amended 2026-08-11** by OPS-8 (decision 1's
+  manifest was wrong in two places and the plugin never loaded in Claude
+  Code; the hook contract it describes is unchanged)
 - **Date**: 2026-07-24
 - **Feature(s)**: ADPT-1
 - **Deciders**: sujitn
+
+## Amendment (2026-08-11): the manifest was wrong, and the demo could not see it
+
+Decision 1 specifies `.claude-plugin/plugin.json` plus `hooks/hooks.json`,
+and adds that "the manifest reserves `mcpServers` for CTX-5/ADPT-2 … so both
+arrive as configuration rather than restructuring". Both halves of that
+sentence are wrong about the harness, and **the plugin as shipped did not
+load in Claude Code at all**. OPS-8 found it by installing the thing for the
+first time.
+
+- **`"hooks": "./hooks/hooks.json"` is a duplicate load.** Claude Code reads
+  `hooks/hooks.json` automatically; naming it in the manifest as well is an
+  error, and the plugin reports `✘ failed to load — Duplicate hooks file
+  detected`. Everything else about the install looks healthy, which is what
+  made it survivable.
+- **`mcpServers` in `plugin.json` is silently ignored.** The server map
+  belongs in `.mcp.json` at the plugin root, also auto-discovered. With the
+  inline key the component inventory read `MCP servers (0)` — the plugin
+  advertised a server it never registered, and nothing said so.
+- **`~/.claude/plugins/<name>/` is not a plugin location.** The adapter
+  README said "point Claude Code at this directory as a plugin" and
+  `demos/adpt-1-claude-code.sh` copies three directories there. Claude Code
+  installs from a **marketplace** — a directory carrying
+  `.claude-plugin/marketplace.json` — into a cache it owns, tracked in
+  `known_marketplaces.json` and `installed_plugins.json`. Files placed at
+  the old path are read by nothing.
+
+**Why nothing caught it, and this is the part worth keeping.** ADPT-1's
+acceptance demo *is its own harness*: it reads `hooks/hooks.json`,
+substitutes `${CLAUDE_PLUGIN_ROOT}` itself, and invokes node with the
+recorded payload. That is a good test of the hook contract and it is what
+the AC asks for — "a clean HOME to a personalised session in 1.5s" measures
+the adapter's own work. But a harness that replaces the harness cannot
+observe whether the real one would have loaded the plugin, and for a year
+the answer was no. The same shape as ADR-0057 decision 11's honesty about
+Cursor: a fixture is not a client.
+
+`synveda plugin install` (OPS-8, ADR-0065 amendment 2) now drives
+`claude plugin marketplace add` and `claude plugin install`, and
+`demos/ops-8-release-install.sh` asserts the vendor's own view — `✔ enabled`,
+four hooks, one MCP server — rather than the presence of files. The hook
+contract in decision 2, the credential authority in decision 4, and
+everything else here stand unchanged; what was wrong was the packaging
+around them.
 
 ## Context
 

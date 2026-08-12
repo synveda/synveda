@@ -39,6 +39,13 @@ const RAUTHY_ISSUER: &str = "http://localhost:8100/auth/v1/";
 const RAUTHY_API_KEY: &str =
     "API-Key synveda-dev$6xxmjZD7Wqe9zWN1fWzOW1jA4uxAkFQ9rYlVFpxBzVgJ0xEj2KWSLiaRTZzKV1oz";
 const GATEWAY_URL: &str = "http://127.0.0.1:8120";
+/// How to get an installed release, in the one place every message that
+/// suggests it reads from. A raw GitHub URL rather than a vanity domain:
+/// three of these messages pointed at `synveda.dev`, which does not
+/// resolve, and an error that names a dead URL is worse than one that names
+/// none (OPS-8).
+const INSTALL_COMMAND: &str =
+    "curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh";
 /// The group AUTHZ-3 binds tenant-wide `org-admin` from at login.
 const ADMIN_GROUP: &str = "synveda-admins";
 
@@ -91,13 +98,14 @@ const DEMO_PASSWORD: &str = "Synveda-Demo-Passw0rd!";
 
 pub async fn init(plan: Plan) -> Result<(), String> {
     let started = Instant::now();
-    let repo = repo_root()?;
-    let compose_file = repo.join("deploy/compose/docker-compose.yml");
+    let profile = Profile::discover()?;
+    profile.check_version()?;
+    let compose_file = profile.compose_file();
     if !compose_file.exists() {
         return Err(format!(
-            "no compose file at {} — run `synveda init` from a Synveda checkout, \
-             or set SYNVEDA_COMPOSE_FILE",
-            compose_file.display()
+            "no compose file at {} — the {} is incomplete",
+            compose_file.display(),
+            profile.describe(),
         ));
     }
 
@@ -108,7 +116,7 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         .unwrap_or_else(|| RAUTHY_ISSUER.to_owned());
 
     if plan.dry_run {
-        return dry_run(&plan, &compose_file, &issuer, bundled);
+        return dry_run(&plan, &profile, &issuer, bundled);
     }
 
     // ── 1. the stack ────────────────────────────────────────────────────
@@ -125,10 +133,21 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         services.push("tei");
     }
     step(1, "starting the stack");
+    println!("    {}", profile.describe());
     println!("    {}", services.join(", "));
-    compose(
+    // The architecture-correct TEI image, when this machine needs one and
+    // the operator has not already chosen. Set on the compose invocation
+    // rather than exported, so it cannot outlive the command that needed it.
+    let mut environment: Vec<(&str, &str)> = Vec::new();
+    if plan.embedder == "tei"
+        && let Some(image) = tei_image()
+    {
+        environment.push(("SYNVEDA_TEI_IMAGE", image));
+    }
+    compose_with_env(
         &compose_file,
         &[&["up", "--detach", "--wait"], &services[..]].concat(),
+        &environment,
     )?;
 
     // ── 2. schema ───────────────────────────────────────────────────────
@@ -193,16 +212,23 @@ pub async fn init(plan: Plan) -> Result<(), String> {
 
     // ── 5. the gateway ──────────────────────────────────────────────────
     step(5, "starting the gateway");
-    let env_file = repo.join("deploy/compose/.env");
+    // Beside the compose file, which is where compose's `env_file` looks
+    // and where its own variable substitution reads a `.env` from.
+    let env_file = compose_file.with_file_name(".env");
     write_env_file(&env_file, &plan, tenant_id, &issuer)?;
     println!("    configuration: {}", env_file.display());
     if containerised(&plan) {
-        compose(
-            &compose_file,
-            &["up", "--detach", "--wait", "--build", "gateway"],
-        )?;
+        // `--build` only where there is something to build from. A release
+        // bundle's compose file has no build context by construction, and
+        // asking compose to build one is an error rather than a no-op.
+        let mut up = vec!["up", "--detach", "--wait"];
+        if profile.may_build() {
+            up.push("--build");
+        }
+        up.push("gateway");
+        compose(&compose_file, &up)?;
     } else {
-        start_host_gateway(&repo, &plan, tenant_id, &issuer)?;
+        start_host_gateway(&profile, &plan, tenant_id, &issuer)?;
     }
     wait_for_health(&format!("{GATEWAY_URL}/healthz"), Duration::from_secs(90)).await?;
     println!("    {GATEWAY_URL} healthy");
@@ -262,10 +288,25 @@ pub async fn init(plan: Plan) -> Result<(), String> {
 /// rather than executed for the reason in ADR-0055 decision 1: these are
 /// governed creates that need the operator's own bearer, and the operator
 /// has not logged in yet when `init` runs.
-fn dry_run(plan: &Plan, compose_file: &Path, issuer: &str, bundled: bool) -> Result<(), String> {
+fn dry_run(plan: &Plan, profile: &Profile, issuer: &str, bundled: bool) -> Result<(), String> {
     println!("synveda init --dry-run");
     println!();
-    println!("  compose file   {}", compose_file.display());
+    println!("  profile        {}", profile.describe());
+    println!("  compose file   {}", profile.compose_file().display());
+    println!(
+        "  gateway        {}",
+        match gateway_binary(profile) {
+            Ok(path) => path.display().to_string(),
+            Err(_) => "none found — see the message `synveda init` would print".to_owned(),
+        }
+    );
+    println!(
+        "  console        {}",
+        match profile.console_dir() {
+            Some(path) => path.display().to_string(),
+            None => "no bundle — /console/ would 404 (ADR-0056 decision 1)".to_owned(),
+        }
+    );
     println!("  tenant         {} ({})", plan.slug, plan.name);
     println!("  embedder       {}", plan.embedder);
     println!(
@@ -605,12 +646,12 @@ fn containerised(plan: &Plan) -> bool {
 /// and on the day it needs to be, the answer is a launchd/systemd unit
 /// rather than more of this function.
 fn start_host_gateway(
-    repo: &Path,
+    profile: &Profile,
     plan: &Plan,
     tenant_id: TenantId,
     issuer: &str,
 ) -> Result<(), String> {
-    let state = repo.join("data");
+    let state = profile.state_dir();
     std::fs::create_dir_all(&state).map_err(|err| format!("create {}: {err}", state.display()))?;
     let pidfile = state.join("gateway.pid");
     let logfile = state.join("gateway.log");
@@ -642,7 +683,7 @@ fn start_host_gateway(
         (None, _) => {}
     }
 
-    let binary = gateway_binary(repo)?;
+    let binary = gateway_binary(profile)?;
     let log = std::fs::File::create(&logfile)
         .map_err(|err| format!("create {}: {err}", logfile.display()))?;
     let errors = log
@@ -651,7 +692,7 @@ fn start_host_gateway(
 
     let mut command = Command::new(&binary);
     command
-        .current_dir(repo)
+        .current_dir(profile.working_dir())
         .env("DATABASE_URL", database_url())
         .env("SYNVEDA_OIDC_ISSUERS", &issuers)
         .env("SYNVEDA_PUBLIC_URL", GATEWAY_URL)
@@ -665,6 +706,16 @@ fn start_host_gateway(
         .stderr(errors);
     if plan.embedder == "tei" {
         command.env("SYNVEDA_TEI_URL", "http://localhost:8110");
+    }
+    // The console bundle (CNSL-1). The image has set this since ADR-0056 and
+    // the host process never did, so it fell back to `console/dist` relative
+    // to the working directory — which resolves only inside a checkout where
+    // somebody has run `pnpm --filter @synveda/console build`. Every default
+    // install has therefore been serving a 404 at `/console/`; a missing
+    // bundle staying a 404 rather than a boot failure is what kept it quiet.
+    if let Some(console) = profile.console_dir() {
+        command.env("SYNVEDA_CONSOLE_DIR", &console);
+        println!("    console: {}", console.display());
     }
     #[cfg(unix)]
     {
@@ -696,30 +747,58 @@ fn running_gateway(pidfile: &Path) -> Option<u32> {
     alive.then_some(pid)
 }
 
-/// Finds a built gateway. Like the image build, producing one is the
-/// untimed part of the acceptance criterion — a release ships this binary.
-fn gateway_binary(repo: &Path) -> Result<PathBuf, String> {
-    for candidate in [
-        repo.join("target/release/synveda-gateway"),
-        repo.join("target/debug/synveda-gateway"),
-    ] {
+/// Finds a gateway to run. In a checkout that is a `cargo build` away and
+/// always was; in a release bundle it is a file the installer unpacked, which
+/// is the whole of what OPS-8 changed here.
+fn gateway_binary(profile: &Profile) -> Result<PathBuf, String> {
+    let candidates = profile.gateway_candidates();
+    for candidate in &candidates {
         if candidate.exists() {
-            return Ok(candidate);
+            return Ok(candidate.clone());
         }
     }
-    Err("no synveda-gateway binary — build one with \
-         `cargo build -p synveda-gateway` and re-run `synveda init`"
-        .to_owned())
+    let looked = candidates
+        .iter()
+        .map(|path| format!("\n\x20 {}", path.display()))
+        .collect::<String>();
+    match profile {
+        Profile::Checkout { .. } => Err(format!(
+            "no synveda-gateway binary. Looked in:{looked}\n\
+             \n\
+             Build one with `cargo build -p synveda-gateway` and re-run \
+             `synveda init`."
+        )),
+        Profile::Bundle { .. } => Err(format!(
+            "no synveda-gateway binary. Looked in:{looked}\n\
+             \n\
+             The installer unpacks it; a profile without one is a partial \
+             install. Re-run:\n\
+             \n\
+             \x20 {INSTALL_COMMAND}"
+        )),
+    }
 }
 
 /// `docker compose -f <file> <args...>`, inheriting stdout/stderr so a
 /// slow image pull is visible rather than silent.
 fn compose(compose_file: &Path, args: &[&str]) -> Result<(), String> {
+    compose_with_env(compose_file, args, &[])
+}
+
+/// The same, with variables compose substitutes into the file. Passed on
+/// the child rather than exported into this process, so a value chosen for
+/// one invocation cannot leak into the next.
+fn compose_with_env(
+    compose_file: &Path,
+    args: &[&str],
+    environment: &[(&str, &str)],
+) -> Result<(), String> {
     let status = Command::new("docker")
         .arg("compose")
         .arg("-f")
         .arg(compose_file)
         .args(args)
+        .envs(environment.iter().copied())
         .status()
         .map_err(|err| match err.kind() {
             std::io::ErrorKind::NotFound => {
@@ -804,30 +883,259 @@ async fn wait_for_health(url: &str, budget: Duration) -> Result<(), String> {
     ))
 }
 
-fn database_url() -> String {
+/// `DATABASE_URL`, or the single-node profile's own Postgres. Shared with
+/// `main::connect` so that an installed CLI and the installer it came with
+/// cannot disagree about which database this deployment is.
+pub fn database_url() -> String {
     std::env::var("DATABASE_URL")
         .ok()
         .filter(|url| !url.is_empty())
         .unwrap_or_else(|| "postgres://synveda:synveda-dev@localhost:5432/synveda".to_owned())
 }
 
-/// Where the compose file lives. `SYNVEDA_COMPOSE_FILE`'s directory wins;
-/// otherwise the current directory is assumed to be a checkout. A released
-/// binary would carry its own profile — see ADR-0055 decision 6's trigger.
-fn repo_root() -> Result<PathBuf, String> {
-    if let Some(file) = std::env::var("SYNVEDA_COMPOSE_FILE")
+/// Everything `init` needs that is not inside this binary: the compose file,
+/// a gateway to run, a console bundle to serve, and somewhere to keep the
+/// pidfile. ADR-0055 decision 6 said a released binary would carry its own
+/// profile; OPS-8 is that release, and this is what carrying it means.
+///
+/// Two shapes. A **checkout** is a source tree — the contributor's case, and
+/// the only one that existed before OPS-8. A **bundle** is what `install.sh`
+/// unpacks under `$SYNVEDA_HOME` (default `~/.synveda`) on a machine with no
+/// source and no Rust toolchain.
+enum Profile {
+    Checkout {
+        root: PathBuf,
+    },
+    Bundle {
+        home: PathBuf,
+        /// The release this bundle was packaged at, from its `version` file.
+        version: String,
+    },
+}
+
+impl Profile {
+    /// Explicit beats a checkout beats an installed bundle (ADR-0065
+    /// decision 4). The middle rung is the one that matters: a contributor
+    /// who has *also* installed a release must get the tree they are
+    /// editing, because the reverse is a debugging session that lies.
+    fn discover() -> Result<Self, String> {
+        if let Some(file) = std::env::var("SYNVEDA_COMPOSE_FILE")
+            .ok()
+            .filter(|value| !value.is_empty())
+        {
+            return Self::from_explicit_compose_file(&PathBuf::from(file));
+        }
+
+        let cwd = std::env::current_dir()
+            .map_err(|err| format!("resolve the working directory: {err}"))?;
+        if cwd.join("deploy/compose/docker-compose.yml").is_file() {
+            return Ok(Self::Checkout { root: cwd });
+        }
+
+        let home = synveda_home()?;
+        if home.join("profile/docker-compose.yml").is_file() {
+            let version = read_bundle_version(&home.join("profile"))?;
+            return Ok(Self::Bundle { home, version });
+        }
+
+        Err(format!(
+            "no Synveda profile to install from. Three places were looked in:\n\
+             \x20 SYNVEDA_COMPOSE_FILE — unset\n\
+             \x20 a checkout           — no deploy/compose/docker-compose.yml under {}\n\
+             \x20 an installed release — no profile under {}\n\
+             \n\
+             Install one with:  {INSTALL_COMMAND}",
+            cwd.display(),
+            home.display(),
+        ))
+    }
+
+    /// `SYNVEDA_COMPOSE_FILE`, which predates OPS-8 and keeps working. It
+    /// can now name either shape: a bundle's directory holds a `version`
+    /// file, and a checkout's compose file is three levels below its root.
+    fn from_explicit_compose_file(path: &Path) -> Result<Self, String> {
+        let directory = path.parent().ok_or_else(|| {
+            "SYNVEDA_COMPOSE_FILE must be a path to a compose file, not a directory".to_owned()
+        })?;
+        if directory.join("version").is_file() {
+            return Ok(Self::Bundle {
+                home: directory.parent().unwrap_or(directory).to_path_buf(),
+                version: read_bundle_version(directory)?,
+            });
+        }
+        directory
+            .parent()
+            .and_then(Path::parent)
+            .map(|root| Self::Checkout {
+                root: root.to_path_buf(),
+            })
+            .ok_or_else(|| {
+                format!(
+                    "SYNVEDA_COMPOSE_FILE names {}, which is neither a release bundle \
+                     (no `version` file beside it) nor <root>/deploy/compose/<file> in a checkout",
+                    path.display()
+                )
+            })
+    }
+
+    fn compose_file(&self) -> PathBuf {
+        match self {
+            Self::Checkout { root } => root.join("deploy/compose/docker-compose.yml"),
+            Self::Bundle { home, .. } => home.join("profile/docker-compose.yml"),
+        }
+    }
+
+    /// The gateway's pidfile, log and rendered configuration. Beside the
+    /// compose file in a checkout, because that is where `data/` has always
+    /// been; under the install root in a bundle, so that unpacking a new
+    /// profile over an old one does not delete the record of what is running.
+    fn state_dir(&self) -> PathBuf {
+        match self {
+            Self::Checkout { root } => root.join("data"),
+            Self::Bundle { home, .. } => home.join("data"),
+        }
+    }
+
+    /// The directory the gateway process is given as its own. A checkout so
+    /// that relative paths behave as they do under `cargo run`; the install
+    /// root otherwise.
+    fn working_dir(&self) -> PathBuf {
+        match self {
+            Self::Checkout { root } => root.clone(),
+            Self::Bundle { home, .. } => home.clone(),
+        }
+    }
+
+    /// The console bundle CNSL-1 serves from `/console/`, if this profile
+    /// has one. `None` is not an error — ADR-0056 decision 1 makes a missing
+    /// bundle a 404 rather than a boot failure, because a static asset must
+    /// not be a dependency of the audit log.
+    fn console_dir(&self) -> Option<PathBuf> {
+        let candidate = match self {
+            Self::Checkout { root } => root.join("console/dist"),
+            Self::Bundle { home, .. } => home.join("console"),
+        };
+        candidate.join("index.html").is_file().then_some(candidate)
+    }
+
+    /// Where to look for a gateway to run, in order.
+    fn gateway_candidates(&self) -> Vec<PathBuf> {
+        match self {
+            Self::Checkout { root } => vec![
+                root.join("target/release/synveda-gateway"),
+                root.join("target/debug/synveda-gateway"),
+            ],
+            Self::Bundle { home, .. } => {
+                let mut candidates = vec![home.join("bin/synveda-gateway")];
+                // Beside the CLI that is running, which is where somebody
+                // who unpacked the archive by hand would have put both.
+                if let Some(beside) = std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|dir| dir.join("synveda-gateway")))
+                {
+                    candidates.push(beside);
+                }
+                candidates
+            }
+        }
+    }
+
+    /// Whether `docker compose up gateway` may build. Only a checkout can:
+    /// a bundle's compose file has no build context, by construction
+    /// (ADR-0065 decision 3, asserted by `scripts/package-release.sh`).
+    fn may_build(&self) -> bool {
+        matches!(self, Self::Checkout { .. })
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            Self::Checkout { root } => format!("checkout at {}", root.display()),
+            Self::Bundle { home, version } => {
+                format!("release {version} installed at {}", home.display())
+            }
+        }
+    }
+
+    /// A bundle packaged at one release, driven by a CLI from another, is
+    /// the failure ADR-0065 decision 5 exists to prevent: it presents as a
+    /// service that will not start or an environment variable the gateway
+    /// does not read, and both look like product bugs. A checkout is exempt
+    /// — its profile and its binaries come from the same tree by
+    /// construction, and a contributor's `git status` is the check.
+    fn check_version(&self) -> Result<(), String> {
+        let Self::Bundle { home, version } = self else {
+            return Ok(());
+        };
+        let cli = env!("CARGO_PKG_VERSION");
+        if version == cli {
+            return Ok(());
+        }
+        Err(format!(
+            "this CLI is {cli} and the installed profile at {} is {version}.\n\
+             They ship together and are not mixed — re-run the installer:\n\
+             \n\
+             \x20 {INSTALL_COMMAND}",
+            home.join("profile").display(),
+        ))
+    }
+}
+
+/// Where an installed release lives. `SYNVEDA_HOME` wins so that a demo, a
+/// second deployment or a CI job can keep its own, which is exactly what
+/// `demos/ops-8-release-install.sh` does.
+pub fn synveda_home() -> Result<PathBuf, String> {
+    if let Some(home) = std::env::var("SYNVEDA_HOME")
         .ok()
         .filter(|value| !value.is_empty())
     {
-        let path = PathBuf::from(file);
-        return path
-            .parent()
-            .and_then(Path::parent)
-            .and_then(Path::parent)
-            .map(Path::to_path_buf)
-            .ok_or_else(|| "SYNVEDA_COMPOSE_FILE must be a path to a compose file".to_owned());
+        return Ok(PathBuf::from(home));
     }
-    std::env::current_dir().map_err(|err| format!("resolve the working directory: {err}"))
+    std::env::var("HOME")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(|home| PathBuf::from(home).join(".synveda"))
+        .ok_or_else(|| "neither SYNVEDA_HOME nor HOME is set, so there is nowhere to look for an installed release".to_owned())
+}
+
+fn read_bundle_version(profile_dir: &Path) -> Result<String, String> {
+    let path = profile_dir.join("version");
+    let raw =
+        std::fs::read_to_string(&path).map_err(|err| format!("read {}: {err}", path.display()))?;
+    let version = raw.trim().to_owned();
+    if version.is_empty() {
+        return Err(format!("{} is empty", path.display()));
+    }
+    Ok(version)
+}
+
+/// The TEI image for this machine's architecture.
+///
+/// Upstream publishes two builds and versions only one of them, so the
+/// arm64 side is pinned by commit; the two serve the same model at the same
+/// dimension and agree to float32 rounding (deploy/compose/docker-compose.yml
+/// has the measurement). The Makefile has done this for `make dev-up` since
+/// FND-2 and `init` did not, so `init --embedder tei` on an Apple Silicon
+/// laptop — half of what OPS-8 ships binaries for — pulled the amd64 image
+/// and ran the embedder under emulation.
+fn tei_image() -> Option<&'static str> {
+    tei_image_for(
+        std::env::consts::ARCH,
+        std::env::var("SYNVEDA_TEI_IMAGE").is_ok_and(|value| !value.is_empty()),
+    )
+}
+
+/// The decision, with both inputs passed in so it can be tested on the
+/// architecture that is not this one.
+fn tei_image_for(arch: &str, chosen_by_operator: bool) -> Option<&'static str> {
+    if chosen_by_operator {
+        return None; // an explicit choice wins, and needs no help from us
+    }
+    match arch {
+        "aarch64" | "arm" => {
+            Some("ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-sha-4150561")
+        }
+        _ => None, // the compose default is the amd64 release
+    }
 }
 
 fn step(number: u8, what: &str) {
@@ -837,6 +1145,146 @@ fn step(number: u8, what: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A scratch directory of this test's own. Named for the test so two
+    /// running in parallel cannot share one, which the pid alone does not
+    /// guarantee.
+    fn scratch(what: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("synveda-init-{what}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Lays out an installed release the way `install.sh` does, minus the
+    /// binaries' contents.
+    fn installed_bundle(home: &Path, version: &str) {
+        std::fs::create_dir_all(home.join("profile/rauthy")).unwrap();
+        std::fs::create_dir_all(home.join("bin")).unwrap();
+        std::fs::write(home.join("profile/docker-compose.yml"), "name: synveda\n").unwrap();
+        std::fs::write(home.join("profile/version"), format!("{version}\n")).unwrap();
+        std::fs::write(home.join("bin/synveda-gateway"), "").unwrap();
+    }
+
+    #[test]
+    fn an_installed_bundle_resolves_every_path_init_needs() {
+        let home = scratch("bundle");
+        installed_bundle(&home, "9.9.9");
+        let profile = Profile::from_explicit_compose_file(&home.join("profile/docker-compose.yml"))
+            .expect("a bundle");
+
+        assert_eq!(
+            profile.compose_file(),
+            home.join("profile/docker-compose.yml")
+        );
+        // State lives under the install root, not inside the profile, so
+        // unpacking a new profile over an old one does not delete the
+        // record of what is running.
+        assert_eq!(profile.state_dir(), home.join("data"));
+        assert_eq!(
+            gateway_binary(&profile).unwrap(),
+            home.join("bin/synveda-gateway")
+        );
+        // A bundle's compose file has no build context, by construction.
+        assert!(!profile.may_build());
+        assert!(profile.describe().contains("9.9.9"));
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn a_checkouts_compose_file_still_resolves_the_way_it_always_did() {
+        let root = scratch("checkout");
+        std::fs::create_dir_all(root.join("deploy/compose")).unwrap();
+        std::fs::create_dir_all(root.join("target/release")).unwrap();
+        std::fs::write(
+            root.join("deploy/compose/docker-compose.yml"),
+            "name: synveda\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("target/release/synveda-gateway"), "").unwrap();
+
+        let profile =
+            Profile::from_explicit_compose_file(&root.join("deploy/compose/docker-compose.yml"))
+                .expect("a checkout");
+
+        assert_eq!(
+            profile.compose_file(),
+            root.join("deploy/compose/docker-compose.yml")
+        );
+        assert_eq!(profile.state_dir(), root.join("data"));
+        assert_eq!(
+            gateway_binary(&profile).unwrap(),
+            root.join("target/release/synveda-gateway")
+        );
+        // Only a source tree may be asked to build one.
+        assert!(profile.may_build());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_bundle_from_another_release_is_refused_rather_than_run() {
+        let home = scratch("mismatch");
+        installed_bundle(&home, "0.0.1-not-this-one");
+        let profile = Profile::from_explicit_compose_file(&home.join("profile/docker-compose.yml"))
+            .expect("a bundle");
+
+        // The failure this prevents does not look like a version problem:
+        // it looks like a service that will not start, or a variable the
+        // gateway does not read (ADR-0065 decision 5).
+        let refusal = profile.check_version().expect_err("a version mismatch");
+        assert!(refusal.contains("0.0.1-not-this-one"), "{refusal}");
+        assert!(refusal.contains(env!("CARGO_PKG_VERSION")), "{refusal}");
+
+        // And the same bundle at this CLI's own version is fine.
+        installed_bundle(&home, env!("CARGO_PKG_VERSION"));
+        Profile::from_explicit_compose_file(&home.join("profile/docker-compose.yml"))
+            .unwrap()
+            .check_version()
+            .expect("matching versions");
+
+        // A checkout is exempt: its profile and its binaries come from one
+        // tree, and `git status` is the check.
+        Profile::Checkout { root: home.clone() }
+            .check_version()
+            .expect("a checkout is never version-checked");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn a_console_bundle_is_found_when_built_and_absent_otherwise() {
+        let home = scratch("console");
+        installed_bundle(&home, env!("CARGO_PKG_VERSION"));
+        let profile = Profile::from_explicit_compose_file(&home.join("profile/docker-compose.yml"))
+            .expect("a bundle");
+
+        // No bundle is not an error — ADR-0056 decision 1 makes it a 404,
+        // because a static asset must not be a dependency of the audit log.
+        assert_eq!(profile.console_dir(), None);
+
+        // An empty directory is not a bundle either. The gateway serves
+        // `index.html`, so that is the file that decides.
+        std::fs::create_dir_all(home.join("console")).unwrap();
+        assert_eq!(profile.console_dir(), None);
+
+        std::fs::write(home.join("console/index.html"), "<!doctype html>").unwrap();
+        assert_eq!(profile.console_dir(), Some(home.join("console")));
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn the_tei_image_follows_the_architecture_the_makefile_has_always_followed() {
+        // Apple Silicon is half of what OPS-8 ships binaries for, and
+        // upstream versions only the amd64 tag — so arm64 is pinned by
+        // commit and amd64 falls through to the compose default.
+        assert_eq!(
+            tei_image_for("aarch64", false),
+            Some("ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-sha-4150561")
+        );
+        assert_eq!(tei_image_for("x86_64", false), None);
+        // An operator who pinned an image keeps it on every architecture.
+        assert_eq!(tei_image_for("aarch64", true), None);
+        assert_eq!(tei_image_for("x86_64", true), None);
+    }
 
     #[test]
     fn the_env_file_carries_json_without_quotes_compose_would_keep() {

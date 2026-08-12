@@ -1,0 +1,19 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "synveda",
+  "description": "Governed memory and context for Claude Code, from a Synveda deployment you run.",
+  "owner": {
+    "name": "Synveda"
+  },
+  "plugins": [
+    {
+      "name": "synveda",
+      "description": "Composes a watermarked context block at session start and observes each turn back through the gateway — every read and write a PDP decision, every action on the audit chain (ADPT-1, ADR-0027).",
+      "author": {
+        "name": "Synveda"
+      },
+      "category": "productivity",
+      "source": "./synveda"
+    }
+  ]
+}
