@@ -136,10 +136,16 @@ session to pick it up, and check it loaded:
 claude plugin list          # synveda@synveda … Status: ✔ enabled
 ```
 
-`--force` reinstalls over an existing one; a second install without it leaves
-what is there alone. Nothing is written outside Claude Code's own plugin
-state, and the `claude` CLI has to be on your `PATH` — this drives it rather
-than editing the three JSON files it keeps.
+Run it again after every upgrade. It compares what Claude Code has installed
+against the bundle the release put on disk: the same version is left alone,
+a different one is **replaced**, and `--force` replaces regardless. That
+comparison is the point — Claude Code keeps its own copy of a plugin, so
+until you re-run this an upgraded release still has the *old* plugin running,
+reporting itself enabled and healthy.
+
+Nothing is written outside Claude Code's own plugin state, and the `claude`
+CLI has to be on your `PATH` — this drives it rather than editing the three
+JSON files it keeps.
 
 It needs a login to do anything: `synveda login` stores the bearer, and the
 plugin reads it per call. There is no other configuration.
@@ -298,6 +304,20 @@ rather than replacing it, and the gateway restarts onto the new binary. There
 is no in-place upgrade and no migration story beyond that — reinstalling is
 how you upgrade (ADR-0065 decision 1's reversal trigger is somebody wanting
 more).
+
+**If you installed the Claude Code plugin, upgrade it too:**
+
+```sh
+synveda plugin install
+```
+
+The installer replaces the bundle under `~/.synveda/plugin`, but Claude Code
+copies a plugin into a cache of its own when you install it — so the plugin
+that actually *runs* stays on whatever release put it there until you say
+otherwise. `synveda plugin install` compares the two and replaces the
+installed one when they differ, so running it after every upgrade is right
+and doing it twice costs nothing. `claude plugin list` shows the version it
+ended on; start a new Claude Code session to pick it up.
 
 ## Stopping and starting
 
