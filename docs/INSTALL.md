@@ -272,7 +272,14 @@ Never use `--demo` on a deployment that will hold real memory.
 ## The admin console
 
 `http://127.0.0.1:8120/console/`, served by the gateway from its own origin —
-no second process and no second port. It ships with the release; from a
+no second process and no second port. Sign in with the operator `init`
+printed; the session is an `HttpOnly` cookie, so there is no token to paste.
+
+Signing in needs a **key plane**, because a console session seals its tokens
+under the deployment's encryption key (TEN-4). `init` mints one at
+`~/.synveda/data/kms.key` on first run and reuses it after — **back that file
+up**, since every tenant key in the database is wrapped by it. Set
+`SYNVEDA_KMS_KEY` and `init` uses yours instead. It ships with the release; from a
 checkout it needs `pnpm --filter @synveda/console build` first, and without a
 bundle the route 404s rather than failing the boot, because a static asset
 must not be a dependency of the audit log (CNSL-1, ADR-0056).
@@ -300,6 +307,7 @@ checkout). `synveda init` restarts it when the configuration changes.
 | `~/.synveda/profile/` | the compose file, the Rauthy config, the version |
 | `~/.synveda/plugin/` | the Claude Code marketplace, installed into no client |
 | `~/.synveda/data/` | the gateway's pidfile, log and rendered configuration |
+| `~/.synveda/data/kms.key` | the deployment's key-encryption key, `0600` — **back this up** |
 
 `SYNVEDA_HOME` moves all of it; `SYNVEDA_BIN` moves the CLI.
 

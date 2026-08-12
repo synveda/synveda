@@ -1,12 +1,13 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted, **amended three times** — twice on 2026-08-11 while building it, once on 2026-08-12 by the first dry runs
+- **Status**: Accepted, **amended four times** — twice on 2026-08-11 while building it, once on 2026-08-12 by the first dry runs
   (amendment 1: decision 4 gains a printed path, decision 6 gains two more
   defects of the same shape and a third about the messages themselves;
   amendment 2: the release gains a fifth artefact — the Claude Code plugin —
   and decision 2's "two artefact kinds" becomes three; amendment 3: images
   build on native runners rather than under QEMU, and a dry run's residue is
-  named; everything else stands)
+  named; amendment 4: `init` mints a key plane, because without one the
+  console cannot be signed in to; everything else stands)
 - **Date**: 2026-08-11
 - **Feature(s)**: OPS-8
 - **Deciders**: sujitn
@@ -58,6 +59,41 @@ implied: the manifest join and `gh release create` are publish-only, so a
 dispatch proves both architectures build and never exercises the last step.
 That is the residue a first real tag carries, and it is the argument for
 cutting `v0.1.0` as a deliberate act rather than a formality.
+
+## Amendment 4 (2026-08-12): the console has never been signed in to
+
+`init` now mints a key-encryption key when none is configured, keeps it at
+`<state>/kms.key` (0600), and passes it to the gateway on both start paths.
+
+Not a convenience. A console session seals its tokens under the
+**deployment-scope** key (TEN-4, ADR-0064), and `init` never minted one — so
+every install booted `Kms::Disabled`, warned that "console sessions and
+per-tenant secrets are unavailable", and then failed every sign-in with
+`not found: encryption key for deployment`, redirecting to
+`/console/?error=server_error`. **The admin console has been unusable on
+every fresh install since TEN-4 sealed console sessions.** CNSL-1 built it
+before that; TEN-4 gave it a dependency; nothing connected the two.
+
+Amendment 1's shape again, one turn further out: code on the install path
+that only a contributor had run, failing as something else. But the reason it
+survived *this* feature is the part worth keeping. OPS-8 fixed the console's
+404 and asserted the fix as `GET /console/ → 200` — and 200 is what a
+keyless deployment returns too, because the bundle is static and holds no
+data. **The assertion was one layer too shallow to see that nobody could get
+past the login**, exactly as `claude plugin list` had to replace "the files
+are in place" in amendment 2.
+
+So the demo signs in: `/auth/login?console=true`, the IdP round trip, the
+`__Host-` cookie, and a `/v1/whoami` that resolves the tenant. A deployment
+with no key plane fails it at the callback.
+
+Minting rather than prompting follows ADR-0055 decision 5's judgement about
+the embedder — an installer's job is to leave a working deployment, and a key
+the product needs for its own admin surface is not a decision worth
+interrupting an install for. `SYNVEDA_KMS_KEY` still wins where it is set,
+the same way `DATABASE_URL` does, and the file carries the backup warning
+`kms keygen` has always printed: every tenant key in that database is wrapped
+by it.
 
 ## Amendment 2 (2026-08-11): the release shipped no way into the harness it is for
 

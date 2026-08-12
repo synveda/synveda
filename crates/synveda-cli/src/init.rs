@@ -212,10 +212,11 @@ pub async fn init(plan: Plan) -> Result<(), String> {
 
     // ── 5. the gateway ──────────────────────────────────────────────────
     step(5, "starting the gateway");
+    let kek = ensure_kek(&profile)?;
     // Beside the compose file, which is where compose's `env_file` looks
     // and where its own variable substitution reads a `.env` from.
     let env_file = compose_file.with_file_name(".env");
-    write_env_file(&env_file, &plan, tenant_id, &issuer)?;
+    write_env_file(&env_file, &plan, tenant_id, &issuer, &kek)?;
     println!("    configuration: {}", env_file.display());
     if containerised(&plan) {
         // `--build` only where there is something to build from. A release
@@ -228,7 +229,7 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         up.push("gateway");
         compose(&compose_file, &up)?;
     } else {
-        start_host_gateway(&profile, &plan, tenant_id, &issuer)?;
+        start_host_gateway(&profile, &plan, tenant_id, &issuer, &kek)?;
     }
     wait_for_health(&format!("{GATEWAY_URL}/healthz"), Duration::from_secs(90)).await?;
     println!("    {GATEWAY_URL} healthy");
@@ -650,6 +651,7 @@ fn start_host_gateway(
     plan: &Plan,
     tenant_id: TenantId,
     issuer: &str,
+    kek: &str,
 ) -> Result<(), String> {
     let state = profile.state_dir();
     std::fs::create_dir_all(&state).map_err(|err| format!("create {}: {err}", state.display()))?;
@@ -664,7 +666,23 @@ fn start_host_gateway(
     // a re-run that admits a different tenant and then leaves the old
     // process up serves the old tenant, silently, and the login that
     // follows lands somewhere nobody asked for. Measured the hard way.
-    let desired = format!("{issuers}\n{}\n{GATEWAY_URL}\n", plan.embedder);
+    // The KEK joins the fingerprint as a *hash*, never as itself: this
+    // string is written to `gateway.config` beside the pidfile, and a
+    // second copy of the key on disk is a second place to lose it from.
+    // Not a cryptographic requirement — it only has to change when the key
+    // changes, so that a deployment which was running without one restarts
+    // to pick it up instead of reporting "already running with this
+    // configuration" and leaving the console unusable.
+    let desired = format!(
+        "{issuers}\n{}\n{GATEWAY_URL}\nkek:{:016x}\n",
+        plan.embedder,
+        {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            kek.hash(&mut hasher);
+            hasher.finish()
+        }
+    );
     match (
         running_gateway(&pidfile),
         std::fs::read_to_string(&configfile).ok(),
@@ -698,6 +716,10 @@ fn start_host_gateway(
         .env("SYNVEDA_PUBLIC_URL", GATEWAY_URL)
         .env("SYNVEDA_LISTEN_ADDR", "127.0.0.1:8120")
         .env("SYNVEDA_EMBEDDER", &plan.embedder)
+        // The key plane (TEN-4, ADR-0064). Without this the gateway boots
+        // `Kms::Disabled` and the console cannot be signed in to, because a
+        // console session seals its tokens under the deployment key.
+        .env("SYNVEDA_KMS_KEY", kek)
         // ADR-0010 decision 3: one auth mode, never two. The dev secret is
         // removed rather than merely not set, so an operator who exported
         // it in this shell does not get a gateway that trusts it.
@@ -824,6 +846,7 @@ fn write_env_file(
     plan: &Plan,
     tenant_id: TenantId,
     issuer: &str,
+    kek: &str,
 ) -> Result<(), String> {
     // One line, no quotes: compose's env_file takes the rest of the line
     // verbatim, and a quoted JSON value arrives at the gateway with the
@@ -842,10 +865,19 @@ fn write_env_file(
          SYNVEDA_PUBLIC_URL={GATEWAY_URL}\n\
          SYNVEDA_LISTEN_ADDR=0.0.0.0:8120\n\
          SYNVEDA_EMBEDDER={}\n\
+         SYNVEDA_KMS_KEY={kek}\n\
          {tei}",
         plan.embedder,
     );
-    std::fs::write(path, body).map_err(|err| format!("write {}: {err}", path.display()))
+    std::fs::write(path, body).map_err(|err| format!("write {}: {err}", path.display()))?;
+    // The KEK is in this file, so it is not a file to leave world-readable.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|err| format!("restrict {} to 0600: {err}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// The gateway's `SYNVEDA_OIDC_ISSUERS`, in one place so the host process
@@ -881,6 +913,70 @@ async fn wait_for_health(url: &str, budget: Duration) -> Result<(), String> {
         "{url} did not become healthy within {}s (last: {last})",
         budget.as_secs()
     ))
+}
+
+/// The deployment's key-encryption key: the operator's if they set one,
+/// otherwise this deployment's own, minted once and kept.
+///
+/// Without a KEK the gateway boots with `Kms::Disabled` and warns that
+/// "console sessions and per-tenant secrets are unavailable" — and then
+/// **signing in to the console is impossible**, because a console session
+/// seals its tokens under the deployment-scope key (TEN-4, ADR-0064) and
+/// `/auth/callback` fails with `not found: encryption key for deployment`.
+///
+/// That is what shipped: CNSL-1 built the console before TEN-4 sealed its
+/// sessions, TEN-4 made it need a key, and nothing minted one. The console
+/// served its bundle on every install and nobody could get past the login.
+///
+/// Minting one here rather than making the operator do it is the same
+/// judgement ADR-0055 decision 5 makes about the embedder: an installer's
+/// job is to leave a working deployment, and a key the product needs for
+/// its own admin surface is not a decision worth interrupting an install
+/// for. An operator who *has* opinions sets `SYNVEDA_KMS_KEY` and this
+/// defers to it, exactly as `DATABASE_URL` works.
+///
+/// The file sits in the state directory at `0600`. That is the same
+/// posture ADR-0064 already states — the KEK lives in deployment
+/// configuration, so this defends a dumped table and a stolen archive
+/// rather than somebody who can read this machine.
+fn ensure_kek(profile: &Profile) -> Result<String, String> {
+    if let Ok(from_env) = std::env::var("SYNVEDA_KMS_KEY")
+        && !from_env.is_empty()
+    {
+        println!("    key plane: SYNVEDA_KMS_KEY from your environment");
+        return Ok(from_env);
+    }
+
+    let state = profile.state_dir();
+    std::fs::create_dir_all(&state).map_err(|err| format!("create {}: {err}", state.display()))?;
+    let path = state.join("kms.key");
+
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let key = existing.trim().to_owned();
+        if !key.is_empty() {
+            println!("    key plane: {}", path.display());
+            return Ok(key);
+        }
+    }
+
+    let key = synveda_crypto::DataKey::generate()
+        .map_err(|err| format!("mint a key-encryption key: {err}"))?;
+    let hex = key.to_hex().to_string();
+    std::fs::write(&path, format!("{hex}\n"))
+        .map_err(|err| format!("write {}: {err}", path.display()))?;
+    // Written before the permissions are narrowed, so narrow them now and
+    // fail loudly if that cannot be done — a world-readable KEK is worse
+    // than no KEK, because it looks like one.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|err| format!("restrict {} to 0600: {err}", path.display()))?;
+    }
+    println!("    key plane: minted {}", path.display());
+    println!("    ** back this file up. Every tenant key in this database is");
+    println!("       wrapped by it, and losing it is losing them. **");
+    Ok(hex)
 }
 
 /// `DATABASE_URL`, or the single-node profile's own Postgres. Shared with
@@ -1272,6 +1368,74 @@ mod tests {
     }
 
     #[test]
+    fn a_deployment_gets_a_key_plane_and_keeps_the_same_one() {
+        // Without this the gateway boots `Kms::Disabled` and **the console
+        // cannot be signed in to**: a console session seals its tokens
+        // under the deployment key, so `/auth/callback` fails with
+        // "not found: encryption key for deployment". That is what shipped
+        // — CNSL-1 built the console before TEN-4 sealed its sessions, and
+        // nothing minted the key it started needing.
+        let home = scratch("kek");
+        let profile = Profile::Bundle {
+            home: home.clone(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+        };
+
+        let first = ensure_kek(&profile).expect("a minted key");
+        assert_eq!(first.len(), 64, "a 32-byte key as hex: {first}");
+        assert!(first.chars().all(|c| c.is_ascii_hexdigit()), "{first}");
+
+        // Idempotent: a second `init` must not mint a new one, or every
+        // re-run orphans every tenant key the previous one wrapped.
+        let second = ensure_kek(&profile).expect("the same key");
+        assert_eq!(first, second, "init minted a second KEK over the first");
+
+        let path = home.join("data/kms.key");
+        assert!(path.is_file(), "no key file at {}", path.display());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "a world-readable KEK looks like a KEK");
+        }
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn the_env_file_carries_the_key_the_container_path_needs() {
+        let dir = scratch("kek-env");
+        let path = dir.join(".env");
+        let kek = "ab".repeat(32);
+        write_env_file(
+            &path,
+            &Plan {
+                slug: "acme".to_owned(),
+                name: "ACME".to_owned(),
+                embedder: "deterministic".to_owned(),
+                issuer: None,
+                demo: false,
+                dry_run: false,
+            },
+            TenantId::new(),
+            RAUTHY_ISSUER,
+            &kek,
+        )
+        .unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains(&format!("SYNVEDA_KMS_KEY={kek}")),
+            "the compose gateway would boot without a key plane: {written}"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "this file now holds the KEK");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn the_tei_image_follows_the_architecture_the_makefile_has_always_followed() {
         // Apple Silicon is half of what OPS-8 ships binaries for, and
         // upstream versions only the amd64 tag — so arm64 is pinned by
@@ -1304,6 +1468,7 @@ mod tests {
             },
             tenant,
             RAUTHY_ISSUER,
+            "00".repeat(32).as_str(),
         )
         .unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
@@ -1349,6 +1514,7 @@ mod tests {
             },
             TenantId::new(),
             RAUTHY_ISSUER,
+            "00".repeat(32).as_str(),
         )
         .unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
