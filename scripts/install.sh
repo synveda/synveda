@@ -165,6 +165,22 @@ install_file() { # src dst — install(1) is not on every minimal image
   cp "$1" "$2.tmp" && chmod 755 "$2.tmp" && mv "$2.tmp" "$2"
 }
 
+sudo_install_file() { # src dst — install_file's rename dance, as root
+  # Not `sudo cp` onto the target. Writing over a Mach-O in place leaves a
+  # binary whose signature no longer matches its contents, and macOS kills
+  # the next run with SIGKILL — "Killed: 9", no explanation. Copy beside it
+  # and rename, which is atomic and leaves no window where the file on disk
+  # is half a binary. This is an upgrade's failure, not a first install's,
+  # so it is the path least likely to be noticed before a user hits it.
+  sudo cp "$1" "$2.tmp" || return 1
+  # Past the first sudo, the timestamp is cached: cleanup will not re-prompt.
+  if sudo chmod 755 "$2.tmp" && sudo mv -f "$2.tmp" "$2"; then
+    return 0
+  fi
+  sudo rm -f "$2.tmp" || true
+  return 1
+}
+
 install_file "$work/synveda-gateway" "$HOME_DIR/bin/synveda-gateway"
 rm -rf "$HOME_DIR/console"
 cp -R "$work/console" "$HOME_DIR/console"
@@ -197,16 +213,33 @@ if [ -f "$work/carried.env" ]; then
 fi
 
 step "installing the CLI to $BIN_DIR"
+cli_installed=""
 if [ -w "$BIN_DIR" ]; then
   install_file "$work/synveda" "$BIN_DIR/synveda"
+  cli_installed=yes
 elif command -v sudo >/dev/null 2>&1; then
-  say "    $BIN_DIR is not writable — using sudo"
-  sudo cp "$work/synveda" "$BIN_DIR/synveda"
-  sudo chmod 755 "$BIN_DIR/synveda"
-else
+  say "    $BIN_DIR is not writable — asking sudo"
+  if sudo_install_file "$work/synveda" "$BIN_DIR/synveda"; then
+    cli_installed=yes
+  fi
+fi
+
+if [ -z "$cli_installed" ]; then
+  # sudo being *absent* is not the only way this arrives here, and treating
+  # it as such is what this branch used to get wrong: it tested `command -v
+  # sudo` and let a sudo that ran and *refused* kill the script under
+  # `set -e`. Refusal is the ordinary case, not the exotic one — a managed
+  # machine where the user is not an admin, a pipe with no terminal to
+  # prompt on (CI, a Dockerfile, `ssh host 'curl … | sh'`), or somebody who
+  # simply declines. By then the gateway, console, profile and plugin are
+  # all installed, so dying here left a complete install with no CLI on
+  # PATH and a raw sudo error as the explanation.
+  #
+  # The CLI goes where this user can certainly write instead. An install
+  # that needs no privileges should not require them.
   install_file "$work/synveda" "$HOME_DIR/bin/synveda"
+  say "    could not write $BIN_DIR — installed to $HOME_DIR/bin instead"
   BIN_DIR="$HOME_DIR/bin"
-  say "    $BIN_DIR is not writable and sudo is absent — installed to $HOME_DIR/bin"
 fi
 
 # macOS quarantines anything a browser downloaded and refuses to run it.
@@ -232,6 +265,20 @@ if [ "$os" = "Darwin" ]; then
   say "  run one it did not see this script write."
   say ""
 fi
+# Every line below is a `synveda …` command, so all of them are wrong unless
+# the directory the CLI landed in is on PATH. That is routine after the
+# fallback above, and true of ~/.local/bin on plenty of machines besides —
+# so say it here rather than let somebody meet "command not found" on the
+# very first thing this script told them to run.
+case ":${PATH}:" in
+  *":$BIN_DIR:"*) ;;
+  *)
+    say "  $BIN_DIR is not on your PATH. Add it to your shell profile:"
+    say ""
+    say "    export PATH=\"$BIN_DIR:\$PATH\""
+    say ""
+    ;;
+esac
 say "Docker has to be running. Then:"
 say ""
 say "  synveda init --demo                # the stack, one tenant, a demo org"

@@ -1,12 +1,53 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted, **amended five times** — two on 2026-08-11 while
-  building it, three on 2026-08-12 by the first dry runs, the first console
-  sign-in and the first upgrade. Each amendment below says what it changed
-  and what still stands; none reverses a decision.
+- **Status**: Accepted, **amended six times** — two on 2026-08-11 while
+  building it, four on 2026-08-12 by the first dry runs, the first console
+  sign-in, the first upgrade and the first install that could not write its
+  own bin directory. Each amendment below says what it changed and what
+  still stands; none reverses a decision.
 - **Date**: 2026-08-11
 - **Feature(s)**: OPS-8
 - **Deciders**: sujitn
+
+## Amendment 6 (2026-08-12): the default install path is the one nothing had run
+
+Decision 7 says an installer refuses by name rather than guessing, and
+decision 1 says it writes only its own directories. Both held. What did not
+hold is what happens when it is allowed to write only *some* of them.
+
+`install.sh` puts the CLI in `$SYNVEDA_BIN`, default `/usr/local/bin` — which
+on macOS is root-owned. The branch for that case tested `command -v sudo` and
+then ran `sudo cp` unguarded, so **a sudo that ran and refused killed the
+script** under `set -e`. Refusal is the ordinary case, not the exotic one: a
+managed laptop where the user is not an admin, a pipe with no terminal to
+prompt on (CI, a Dockerfile, `ssh host 'curl … | sh'`), or somebody who
+declines. By the time it happened the gateway, console, profile and plugin
+were already on disk, so it left a **complete install with no CLI on PATH**
+and sudo's own error as the only explanation. The fallback to
+`$SYNVEDA_HOME/bin` existed and was unreachable — it was guarded on sudo
+being *absent*, never on it failing.
+
+Two smaller faults sat in the same block. `sudo cp` wrote **over** the target
+where `install_file` deliberately does temp → `chmod` → rename; overwriting a
+live Mach-O leaves a signature that no longer matches its contents and macOS
+kills the next run with `Killed: 9`, which is an *upgrade's* failure and so
+the one least likely to be met before a user meets it. And nothing checked
+whether the directory the CLI landed in was on `PATH`, while the next-steps
+block printed four `synveda …` commands regardless.
+
+Why no test caught it is the same shape this ADR has now recorded four times:
+**the check sat one layer shallower than the claim.** The OPS-8 demo hands
+`SYNVEDA_BIN` a directory it created itself, so it only ever took the
+writable branch. The default — the path every real `curl … | sh` takes on a
+Mac — was the one nothing had ever run. The demo now installs a `sudo` shim
+that refuses and asserts the install still completes, that the CLI is in the
+fallback, that it is *not* in the unwritable directory, and that the PATH
+hint was printed.
+
+What stands: the default is still `/usr/local/bin`, and sudo is still tried.
+An install that can use the conventional location should. It just must not
+*require* a privilege it never needed — the CLI is a single user-space
+binary, and the rest of the product already installs under `$HOME`.
 
 ## Amendment 5 (2026-08-12): an upgrade changes neither configuration nor liveness
 

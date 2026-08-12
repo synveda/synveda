@@ -258,6 +258,48 @@ for owned in .claude .cursor .config/zed "Library/Application Support/Claude"; d
 done
 echo "    installed, and no client's configuration was touched"
 
+# The same installer, on a machine where the CLI's directory is not writable
+# and sudo refuses. None of that is exotic: a managed laptop where the user
+# is not an admin, a pipe with no terminal to prompt on (CI, a Dockerfile,
+# `ssh host 'curl … | sh'`), or somebody who simply declines. Until this
+# case existed, install.sh tested `command -v sudo` and let a sudo that ran
+# and *refused* kill it under `set -e` — after the gateway, console, profile
+# and plugin were already on disk, leaving a complete install with no CLI on
+# PATH and sudo's own error as the only explanation.
+#
+# The block above cannot catch this, and that is the point: it hands
+# SYNVEDA_BIN a directory it created itself, so it only ever takes the
+# writable branch. The default — /usr/local/bin, root-owned on macOS — is
+# the one no test had run.
+echo ""
+echo "==> install.sh when the CLI's directory is not writable and sudo refuses"
+if [ "$(id -u)" = "0" ]; then
+  echo "    skipped: running as root, for whom an unwritable directory is writable"
+else
+  REFUSED_ROOT="$SCRATCH/refused-home"
+  REFUSED_BIN="$SCRATCH/refused-bin"
+  mkdir -p "$REFUSED_BIN"
+  chmod 555 "$REFUSED_BIN"
+  printf '#!/bin/sh\necho "sudo: a password is required" >&2\nexit 1\n' > "$SHIMS/sudo"
+  chmod +x "$SHIMS/sudo"
+  SYNVEDA_VERSION="$VERSION" \
+    SYNVEDA_BASE_URL="file://$ASSETS" \
+    SYNVEDA_HOME="$REFUSED_ROOT" \
+    SYNVEDA_BIN="$REFUSED_BIN" \
+    sh "$REPO/scripts/install.sh" >"$SCRATCH/install-refused.log" 2>&1 ||
+    { cat "$SCRATCH/install-refused.log" >&2
+      fail "install.sh died when sudo refused — it has to fall back, not give up"; }
+  [ -x "$REFUSED_ROOT/bin/synveda" ] ||
+    fail "sudo refused and the CLI went nowhere — expected $REFUSED_ROOT/bin/synveda"
+  [ ! -e "$REFUSED_BIN/synveda" ] ||
+    fail "the CLI landed in a directory this user cannot write, which cannot have happened"
+  grep -q 'is not on your PATH' "$SCRATCH/install-refused.log" ||
+    fail "the CLI went somewhere not on PATH and install.sh did not say so"
+  rm -f "$SHIMS/sudo"
+  chmod 755 "$REFUSED_BIN"
+  echo "    sudo refused; the CLI fell back to \$SYNVEDA_HOME/bin, and it said so"
+fi
+
 echo ""
 echo "==> [timed] synveda init --demo — from the installed bundle, not a checkout"
 synveda init --demo --slug "$SLUG" --name "ACME ($SLUG)" >"$SCRATCH/init.log" 2>&1 ||
