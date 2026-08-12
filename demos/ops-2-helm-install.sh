@@ -35,7 +35,19 @@ NS=synveda-test
 RELEASE=synveda
 CNPG_VERSION=${CNPG_VERSION:-1.25.0}
 FIXTURES=demos/fixtures/ops-2
-IMAGE_TAG=0.1.0
+# The chart's own appVersion, never a copy of it. `values.yaml` leaves
+# `image.tag` empty so `_helpers.tpl` resolves it from appVersion, and this
+# demo builds the image the chart will then ask for by name — with
+# `pullPolicy: Never`, since nothing is published to a registry the kind
+# cluster can reach.
+#
+# It was `IMAGE_TAG=0.1.0`, hardcoded, and the first version bump after that
+# broke this demo rather than the chart: the pod stayed on
+# `ErrImageNeverPull` for "synveda/gateway:0.1.1 is not present" while a
+# perfectly good 0.1.0 image sat in the cluster. Two version sources for one
+# artefact, and the failure surfaces ten minutes downstream of the typo.
+IMAGE_TAG=$(awk -F'"' '/^appVersion:/{print $2; exit}' deploy/helm/synveda/Chart.yaml)
+[ -n "$IMAGE_TAG" ] || { echo "no appVersion in deploy/helm/synveda/Chart.yaml" >&2; exit 1; }
 KEEP=${KEEP:-0}
 REUSE=${REUSE:-0}
 
