@@ -284,6 +284,21 @@ checkout it needs `pnpm --filter @synveda/console build` first, and without a
 bundle the route 404s rather than failing the boot, because a static asset
 must not be a dependency of the audit log (CNSL-1, ADR-0056).
 
+## Upgrading
+
+Re-run the installer and then `synveda init`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
+synveda init --slug <your slug> --name "<your name>"
+```
+
+The installer carries your `.env` across, `init` reuses the key it minted
+rather than replacing it, and the gateway restarts onto the new binary. There
+is no in-place upgrade and no migration story beyond that — reinstalling is
+how you upgrade (ADR-0065 decision 1's reversal trigger is somebody wanting
+more).
+
 ## Stopping and starting
 
 ```sh
@@ -295,7 +310,10 @@ From a checkout, the compose file is `deploy/compose/docker-compose.yml`
 instead.
 
 The gateway's pid and log are under `~/.synveda/data/` (`data/` in a
-checkout). `synveda init` restarts it when the configuration changes.
+checkout). `synveda init` restarts it when anything it was started with
+changes — the issuer, the tenant, the embedder, the key, **or the gateway
+binary itself**, so re-running `init` after an upgrade actually puts the
+new release on the port rather than reporting the old one as healthy.
 
 ## What an install is made of
 

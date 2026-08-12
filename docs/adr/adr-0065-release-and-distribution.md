@@ -1,16 +1,39 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted, **amended four times** — twice on 2026-08-11 while building it, once on 2026-08-12 by the first dry runs
-  (amendment 1: decision 4 gains a printed path, decision 6 gains two more
-  defects of the same shape and a third about the messages themselves;
-  amendment 2: the release gains a fifth artefact — the Claude Code plugin —
-  and decision 2's "two artefact kinds" becomes three; amendment 3: images
-  build on native runners rather than under QEMU, and a dry run's residue is
-  named; amendment 4: `init` mints a key plane, because without one the
-  console cannot be signed in to; everything else stands)
+- **Status**: Accepted, **amended five times** — two on 2026-08-11 while
+  building it, three on 2026-08-12 by the first dry runs, the first console
+  sign-in and the first upgrade. Each amendment below says what it changed
+  and what still stands; none reverses a decision.
 - **Date**: 2026-08-11
 - **Feature(s)**: OPS-8
 - **Deciders**: sujitn
+
+## Amendment 5 (2026-08-12): an upgrade changes neither configuration nor liveness
+
+ADR-0055 decision 10 established that convergence compares *configuration*,
+not liveness — a re-run that finds a gateway already up must check what it is
+running with. That was right, and it was not enough for the thing this
+feature added.
+
+Measured on the first real upgrade, `v0.1.0` → `v0.1.1`: `install.sh`
+replaced `bin/synveda-gateway`, `init` reported **"already running with this
+configuration"** and healthy, and the previous release kept serving. The
+process had been up for two hours; the binary under it was minutes old. An
+upgrade changes neither the configuration nor the liveness the comparison was
+built from — it changes the artefact, which nothing looked at.
+
+So the fingerprint carries the gateway's length and modification time.
+Reinstalling moves both. A digest would be tidier and costs a read of tens of
+megabytes on every `init` to answer a question that is "did this change",
+not "which one is this".
+
+The pattern is now three for three in this feature, and worth stating as a
+rule rather than a coincidence: **every check here that was one layer
+shallower than the claim it stood for passed against something broken.**
+`GET /console/ → 200` against a console nobody could sign into; "the plugin
+files are in place" against a plugin that never loaded; "already running"
+against a release that was no longer installed. The fix each time was to
+assert the thing itself — sign in, ask the harness, compare the artefact.
 
 ## Amendment 3 (2026-08-12): what the dry runs measured, and why images build natively
 

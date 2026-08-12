@@ -673,8 +673,21 @@ fn start_host_gateway(
     // changes, so that a deployment which was running without one restarts
     // to pick it up instead of reporting "already running with this
     // configuration" and leaving the console unusable.
+    // And the **binary**, because an upgrade changes neither the
+    // configuration nor the liveness this function was written to compare.
+    // `install.sh` replaces `bin/synveda-gateway` and the next `init`
+    // reported "already running with this configuration", healthy, while the
+    // *previous release* kept serving — an upgrade that looks like it worked
+    // and did not. Measured on the 0.1.0 → 0.1.1 upgrade: the process had
+    // been running for two hours and the binary under it was minutes old.
+    //
+    // Modification time and length rather than a digest of the file: this
+    // runs on every `init` and the gateway is tens of megabytes, so the
+    // question is "did this artefact change" rather than "which artefact is
+    // this". Reinstalling moves both.
+    let stamp = binary_stamp(profile);
     let desired = format!(
-        "{issuers}\n{}\n{GATEWAY_URL}\nkek:{:016x}\n",
+        "{issuers}\n{}\n{GATEWAY_URL}\nkek:{:016x}\ngateway:{stamp}\n",
         plan.embedder,
         {
             use std::hash::{Hash, Hasher};
@@ -767,6 +780,28 @@ fn running_gateway(pidfile: &Path) -> Option<u32> {
         .ok()?
         .success();
     alive.then_some(pid)
+}
+
+/// What the gateway binary is, for the convergence fingerprint.
+///
+/// Modification time and length rather than a digest: this runs on every
+/// `init` and the gateway is tens of megabytes, so the question is "did this
+/// artefact change" rather than "which artefact is this". Reinstalling moves
+/// both. `none` when there is no binary yet, which is a checkout before
+/// anybody has run `cargo build`.
+fn binary_stamp(profile: &Profile) -> String {
+    gateway_binary(profile)
+        .ok()
+        .and_then(|path| std::fs::metadata(path).ok())
+        .map(|meta| {
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |since| since.as_secs());
+            format!("{}:{modified}", meta.len())
+        })
+        .unwrap_or_else(|| "none".to_owned())
 }
 
 /// Finds a gateway to run. In a checkout that is a `cargo build` away and
@@ -1433,6 +1468,40 @@ mod tests {
             assert_eq!(mode, 0o600, "this file now holds the KEK");
         }
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_upgraded_binary_is_a_changed_configuration() {
+        // The upgrade path's own failure, measured on 0.1.0 → 0.1.1:
+        // `install.sh` replaced `bin/synveda-gateway`, the next `init`
+        // reported "already running with this configuration" and healthy,
+        // and the *previous release* kept serving. Convergence compared the
+        // configuration and the liveness, and an upgrade changes neither.
+        let home = scratch("upgrade");
+        std::fs::create_dir_all(home.join("bin")).unwrap();
+        let binary = home.join("bin/synveda-gateway");
+        let profile = Profile::Bundle {
+            home: home.clone(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+        };
+
+        std::fs::write(&binary, b"the 0.1.0 gateway").unwrap();
+        let before = binary_stamp(&profile);
+
+        // A reinstall: different bytes, and a modification time that moves.
+        std::fs::write(&binary, b"the 0.1.1 gateway, which is longer").unwrap();
+        let after = binary_stamp(&profile);
+        assert_ne!(
+            before, after,
+            "a replaced gateway must change the fingerprint, or `init` leaves \
+             the previous release serving and calls it healthy"
+        );
+
+        // And an absent binary is a stable answer rather than a panic: the
+        // checkout path reaches here before anybody has run `cargo build`.
+        std::fs::remove_file(&binary).unwrap();
+        assert_eq!(binary_stamp(&profile), "none");
+        std::fs::remove_dir_all(&home).ok();
     }
 
     #[test]
