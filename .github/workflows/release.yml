@@ -60,7 +60,11 @@ jobs:
           # (ADR-0065 decision 5), and the CLI's is CARGO_PKG_VERSION. A tag
           # that disagrees with the workspace would ship a release that
           # refuses to run — so it fails here instead.
-          crate="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          # awk rather than `sed | head`, for the reason the console step
+          # above now carries: under `pipefail`, a reader that closes early
+          # fails the writer. This one survived only because its output fits
+          # the pipe buffer, which is luck rather than design.
+          crate="$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
           if [ "$publish" = "true" ] && [ "$version" != "$crate" ]; then
             echo "tag v$version does not match the workspace version $crate." >&2
             echo "They ship together: synveda init compares a profile's version" >&2
@@ -162,7 +166,12 @@ jobs:
           cp -R console/dist/. "$stage/console/"
           test -f "$stage/console/index.html"
           tar -czf "synveda-console-$version.tar.gz" -C "$stage" console
-          tar -tzf "synveda-console-$version.tar.gz" | head -n 3
+          # `sed -n '1,3p'` rather than `head -n 3`: head closes the pipe
+          # after three lines, tar takes EPIPE, and `pipefail` promotes that
+          # to a failed job — which is exactly how this step died on its
+          # first dispatch, after building the bundle perfectly. sed reads
+          # to EOF, so tar always finishes writing.
+          tar -tzf "synveda-console-$version.tar.gz" | sed -n '1,3p'
       - name: The profile bundle
         run: scripts/package-release.sh "${{ needs.version.outputs.version }}" .
       - name: The Claude Code plugin
