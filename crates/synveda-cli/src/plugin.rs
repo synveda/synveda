@@ -32,10 +32,14 @@
 //!
 //! # Restraint, the same as `mcp install`'s
 //!
-//! - **It refuses to clobber.** An installed `synveda@synveda` is reported
-//!   rather than replaced; `--force` reinstalls.
-//! - **It can be asked first.** `--dry-run` prints the two commands and runs
-//!   neither.
+//! - **It refuses to clobber, but not to upgrade.** An installed
+//!   `synveda@synveda` *at the bundle's version* is reported rather than
+//!   replaced. A different version is replaced, because "already installed"
+//!   is not "installed at this version" and Claude Code caches its own copy
+//!   — so an upgraded release otherwise leaves the previous plugin running.
+//!   `--force` replaces regardless.
+//! - **It can be asked first.** `--dry-run` prints the commands and runs
+//!   none of them.
 //! - **Nothing secret is written.** The plugin reads its bearer from what
 //!   `synveda login` stored, per call.
 
@@ -48,6 +52,10 @@ use std::process::Command;
 /// and changing that file without changing this installs nothing — which a
 /// test below refuses to let happen quietly.
 const PLUGIN_ID: &str = "synveda@synveda";
+
+/// The marketplace's own name, which is the second half of [`PLUGIN_ID`] and
+/// what `claude plugin marketplace update` takes as its argument.
+const MARKETPLACE: &str = "synveda";
 
 /// The clients this knows how to install into.
 ///
@@ -92,16 +100,33 @@ pub fn install(plan: &Plan) -> Result<(), String> {
         "add".to_owned(),
         marketplace.display().to_string(),
     ];
-    let mut install = vec![
+    // Re-reads the marketplace manifest from the path it points at. `add` on
+    // a known marketplace re-points it and reports "already on disk" without
+    // re-reading, so an upgrade that replaced the bundle would otherwise be
+    // installed from the previous release's manifest.
+    let refresh = vec![
+        "plugin".to_owned(),
+        "marketplace".to_owned(),
+        "update".to_owned(),
+        MARKETPLACE.to_owned(),
+    ];
+    // No `--force` here: `claude plugin install` does not take one, and
+    // passing it made `synveda plugin install --force` fail outright with
+    // `error: unknown option '--force'` — the escape hatch our own message
+    // advertised. Replacing an installed plugin is `uninstall` then
+    // `install`, below.
+    let install = vec![
         "plugin".to_owned(),
         "install".to_owned(),
         PLUGIN_ID.to_owned(),
         "--scope".to_owned(),
         plan.scope.clone(),
     ];
-    if plan.force {
-        install.push("--force".to_owned());
-    }
+    let remove = vec![
+        "plugin".to_owned(),
+        "uninstall".to_owned(),
+        PLUGIN_ID.to_owned(),
+    ];
 
     if plan.dry_run {
         println!("synveda plugin install --dry-run");
@@ -117,6 +142,11 @@ pub fn install(plan: &Plan) -> Result<(), String> {
         println!("  scope        {}", plan.scope);
         println!();
         println!("  would run    claude {}", add.join(" "));
+        println!("               claude {}", refresh.join(" "));
+        println!(
+            "               claude {} (if a different version is installed)",
+            remove.join(" ")
+        );
         println!("               claude {}", install.join(" "));
         println!();
         println!("  writes nothing outside Claude Code's own plugin state");
@@ -141,14 +171,36 @@ pub fn install(plan: &Plan) -> Result<(), String> {
     // Adding a marketplace that is already known re-points it at this path,
     // which is what a reinstall from a new release should do.
     run(&claude, &add)?;
+    run(&claude, &refresh)?;
 
-    if !plan.force && installed(&claude) {
-        println!("    {PLUGIN_ID} is already installed — leaving it alone");
-        println!(
-            "    (`--force` reinstalls it from {})",
-            marketplace.display()
-        );
-        return Ok(());
+    // "Already installed" is not "installed at this version", and the
+    // difference is the whole upgrade story. Claude Code copies a plugin
+    // into a cache it owns at install time, so replacing
+    // `$SYNVEDA_HOME/plugin` leaves the *running* plugin on whatever
+    // release installed it. Measured after upgrading a machine 0.1.0 →
+    // 0.1.2: the bundle on disk said 0.1.2 and `claude plugin list` said
+    // **0.1.0**, two releases behind, reported healthy and enabled.
+    //
+    // This is the same fault `binary_stamp` fixed for the gateway one
+    // release earlier (ADR-0065 amendment 5): a convergence check that
+    // compares identity when it has to compare the artefact.
+    let want = bundle_version(&marketplace);
+    match installed_version(&claude) {
+        Some(have) if !plan.force && Some(&have) == want.as_ref() => {
+            println!("    {PLUGIN_ID} {have} is already installed — leaving it alone");
+            return Ok(());
+        }
+        Some(have) => {
+            match &want {
+                Some(want) => println!("    installed {have}, bundle {want} — replacing"),
+                None => println!("    installed {have} — replacing"),
+            }
+            // Claude Code has no update verb, and `install` on an installed
+            // plugin reports success while changing nothing — which is how
+            // this stayed invisible.
+            run(&claude, &remove)?;
+        }
+        None => {}
     }
     run(&claude, &install)?;
 
@@ -211,13 +263,49 @@ fn validate(path: &Path) -> Result<&Path, String> {
     ))
 }
 
-fn installed(claude: &Path) -> bool {
-    Command::new(claude)
+/// The version Claude Code has installed, if it has this plugin at all.
+///
+/// Parsed from `claude plugin list`, which prints an id line followed by
+/// indented `Key: value` lines:
+///
+/// ```text
+///   ❯ synveda@synveda
+///     Version: 0.1.2
+///     Scope: user
+/// ```
+///
+/// The presence of the id was all this used to look at, and presence is the
+/// wrong question after an upgrade — see the call site.
+fn installed_version(claude: &Path) -> Option<String> {
+    let out = Command::new(claude)
         .args(["plugin", "list"])
         .output()
         .ok()
-        .filter(|out| out.status.success())
-        .is_some_and(|out| String::from_utf8_lossy(&out.stdout).contains(PLUGIN_ID))
+        .filter(|out| out.status.success())?;
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let mut lines = text.lines().skip_while(|line| !line.contains(PLUGIN_ID));
+    // The id line itself, so the search starts at this plugin's own fields.
+    lines.next()?;
+    lines
+        // `@` starts the next plugin's id line, and stopping there keeps a
+        // plugin with no version from borrowing the following one's.
+        .take_while(|line| !line.contains('@'))
+        .find_map(|line| {
+            line.trim()
+                .strip_prefix("Version:")
+                .map(|version| version.trim().to_owned())
+        })
+}
+
+/// The version the bundle on disk carries, from the plugin manifest the
+/// marketplace points at.
+fn bundle_version(marketplace: &Path) -> Option<String> {
+    let manifest = marketplace
+        .join(MARKETPLACE)
+        .join(".claude-plugin/plugin.json");
+    let text = std::fs::read_to_string(manifest).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+    json.get("version")?.as_str().map(str::to_owned)
 }
 
 fn run(claude: &Path, args: &[String]) -> Result<(), String> {
@@ -290,6 +378,37 @@ mod tests {
         .expect_err("emacs has no Claude Code plugin system");
         assert!(err.contains("emacs"), "{err}");
         assert!(err.contains("claude-code"), "{err}");
+    }
+
+    /// `MARKETPLACE` is what `claude plugin marketplace update` is given, and
+    /// it is also where `bundle_version` looks for the manifest. Drift here
+    /// is silent in both: the refresh updates nothing by that name, and the
+    /// version read comes back `None`, which reads as "no version to compare"
+    /// rather than as a wrong path.
+    #[test]
+    fn the_marketplace_name_is_the_second_half_of_the_id() {
+        let (_, marketplace) = PLUGIN_ID.split_once('@').expect("an id of the right shape");
+        assert_eq!(MARKETPLACE, marketplace);
+    }
+
+    /// The version comparison that decides whether an upgrade replaces the
+    /// installed plugin, read from the manifest the marketplace points at.
+    #[test]
+    fn the_bundle_version_comes_from_the_plugin_manifest() {
+        let root = scratch("bundle-version");
+        let manifest = root.join(MARKETPLACE).join(".claude-plugin");
+        std::fs::create_dir_all(&manifest).unwrap();
+        std::fs::write(
+            manifest.join("plugin.json"),
+            r#"{"name": "synveda", "version": "9.9.9"}"#,
+        )
+        .unwrap();
+        assert_eq!(bundle_version(&root).as_deref(), Some("9.9.9"));
+
+        // A bundle with no manifest is `None` rather than a panic: it is
+        // what `--from` pointed at something wrong looks like, and the
+        // install still has to reach `validate`'s error rather than die here.
+        assert_eq!(bundle_version(&scratch("bundle-empty")), None);
     }
 
     #[test]

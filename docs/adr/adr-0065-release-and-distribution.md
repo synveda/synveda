@@ -1,12 +1,50 @@
 # ADR-0065: installing is a download, not a build — a tagged release ships binaries *and* images, because the bundled IdP forces a host process
 
-- **Status**: Accepted, **amended seven times** — two on 2026-08-11 while
-  building it, five on 2026-08-12, each by running the previous release on a
+- **Status**: Accepted, **amended eight times** — two on 2026-08-11 while
+  building it, six on 2026-08-12, each by running the previous release on a
   real machine rather than by review. Every amendment below says what it
   changed and what still stands; none reverses a decision.
 - **Date**: 2026-08-11
 - **Feature(s)**: OPS-8
 - **Deciders**: sujitn
+
+## Amendment 8 (2026-08-12): the upgrade that reached everything except the plugin
+
+Amendment 5 fixed the gateway: an upgrade changes the artefact, so the
+fingerprint has to compare the artefact. The fix shipped in v0.1.2 and
+works. The *same* fault was sitting one directory away and was not looked
+for, which is the part worth recording.
+
+`install.sh` replaces `$SYNVEDA_HOME/plugin`, the marketplace Claude Code
+installs from. Claude Code copies a plugin into a versioned cache **it**
+owns at install time, so replacing the marketplace leaves the running plugin
+on whatever release put it there. Measured on this machine after upgrading
+0.1.0 → 0.1.2: the bundle on disk said `0.1.2`, and `claude plugin list`
+said **`0.1.0`** — two releases behind, `✔ enabled`, reporting healthy.
+
+`synveda plugin install` could not fix it, in two separate ways:
+
+- It asked whether the plugin was **installed**, not at which version, and
+  reported "already installed — leaving it alone". Identity where the
+  question is the artefact: amendment 5 again, one release later.
+- `--force`, the escape hatch that same message advertised, **was broken**.
+  It appended `--force` to `claude plugin install`, which takes no such
+  flag, so it exited 1 with `error: unknown option '--force'`. The only
+  documented way out of the first problem could never have worked.
+
+Claude Code has no update verb — `install` on an installed plugin reports
+success and changes nothing, which is how this stayed invisible. Replacing
+one is `marketplace update` (so the manifest is re-read from the path,
+which `add` on a known marketplace does not do), then `uninstall`, then
+`install`. `synveda plugin install` now compares the installed version
+against the bundle's and does exactly that when they differ, leaves a
+matching one alone, and `--force` replaces regardless.
+
+The finding under the finding: the release that fixed an upgrade shipped
+with a second upgrade still broken, because the fix was aimed at the bug
+rather than at its shape. "Compare the artefact, not its identity" applies
+wherever this product caches somebody else's copy of something it ships —
+and the plugin was the one place it does.
 
 ## Amendment 7 (2026-08-12): a health check answered by a stranger
 
