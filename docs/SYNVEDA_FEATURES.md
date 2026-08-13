@@ -845,6 +845,18 @@ ADPT-7 Semantic Kernel memory connector (M) [Phase 4]
   surfaces over one governed corpus, writes host-owned on ADPT-6's rule.
   AC: example app persists and recalls across sessions on both surfaces, and the
   two answer the same corpus for one identity.
+ADPT-8 Observation that survives a session that does not wait (M) [Phase 4]
+  Filed 2026-08-13 by testing ADPT-1's plugin in a real Claude Code session on
+  v0.1.3. A headless run — `claude -p`, which is CI, a script, an agent harness —
+  **injects and never observes**. Every write hook is `async: true`, so the
+  harness does not wait, and the process exits first: three sessions produced
+  three `inject.ok` and zero `observe.done`, with no error and exit 0. The hook
+  is not broken — run by hand against the same transcript it accepted both turns
+  — and the turns are not destroyed, since the transcript stays on disk and the
+  spool holds no cursor. Nothing ever collects them, because flush is async too.
+  AC: a headless session's turns reach the chain without making an interactive
+  turn wait for them, demonstrated by a `claude -p` run whose `memory.observed`
+  the demo asserts.
 
 ──────────────────────────────────────────────
 EPIC OPS — Deployment & operations
@@ -1034,7 +1046,7 @@ Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-
      corpus is CC BY-NC 4.0 and cannot back a published commercial claim; the second
      benchmark is EVAL-7. A goal naming a score we may not quote is a goal that cannot be
      met, so the goal moved rather than the honesty.)
-Phase 4 ecosystem: ADPT-4,5,6,7 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · CNSL-3,4 · AUD-5 · AUTHZ-6,7 · EVAL-7 · TEN-7
+Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · CNSL-3,4 · AUD-5 · AUTHZ-6,7 · EVAL-7 · TEN-7
    (AUTHZ-7 added 2026-08-05 by CNSL-2/ADR-0058 decision 9, which found the asymmetry it
    names while building the explorer. Placed here rather than in Phase 3 because its two
    bounds hold — a pack flip widens no candidate universe and cannot reach below the
@@ -1050,5 +1062,13 @@ Phase 4 ecosystem: ADPT-4,5,6,7 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · CNS
    configuration it cannot honour rather than offering it with a warning. It moves forward
    the moment a deployment cannot serve its request rate from one gateway, or cannot accept
    a restart-shaped upgrade — and if it moves, it belongs beside OPS-6, since both are
-   about an upgrade nobody notices.)
+   about an upgrade nobody notices.
+   ADPT-8 added 2026-08-13 by running ADPT-1's plugin in a real Claude Code session on
+   v0.1.3. Here rather than in Phase 3 because the interactive path — the one the phase's
+   demo goal names, and the one a person uses — observes correctly, measured the same day:
+   `observe.done events=5 accepted=5`. It moves forward the moment anybody drives Claude
+   Code non-interactively and expects the chain to show it, which is CI, a scripted agent,
+   or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
+   is a script. What it must not become is a warning in a README: the gap is silent,
+   returns exit 0, and reads exactly like a session that was observed.)
 ──────────────────────────────────────────────

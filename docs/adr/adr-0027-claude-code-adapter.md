@@ -1,11 +1,58 @@
 # ADR-0027: Claude Code adapter — hook seams, the CLI as credential authority, cursor-and-idempotency observe
 
-- **Status**: Accepted, **amended 2026-08-11** by OPS-8 (decision 1's
+- **Status**: Accepted, **amended twice** — 2026-08-11 by OPS-8 (decision 1's
   manifest was wrong in two places and the plugin never loaded in Claude
-  Code; the hook contract it describes is unchanged)
+  Code) and 2026-08-13 by the first headless session (the hooks load and
+  fire, and only the *read* one completes). The hook contract itself is
+  unchanged by either.
 - **Date**: 2026-07-24
 - **Feature(s)**: ADPT-1
 - **Deciders**: sujitn
+
+## Amendment 2 (2026-08-13): the write hooks do not run where nobody is waiting
+
+Decision 4 makes observation asynchronous so that a turn is never held up by
+it, and decision 6 makes it safe to repeat with a cursor and an idempotency
+key. Both were right, and together they have a consequence neither states:
+**a session the harness does not stay alive for is never observed at all.**
+
+Measured on an installed v0.1.3 with real Claude Code 2.1.228. Three
+headless runs (`claude -p`) produced three `inject.ok` and zero
+`observe.done` — no error, exit 0 each time. Interactive sessions the day
+before, same machine, same plugin, observed normally:
+`observe.done hook=Stop events=5 accepted=5`.
+
+The manifest is the explanation: `session-start` is the only registration
+with `async: false`. `observe` and both `flush` registrations are
+`async: true`, so Claude Code does not wait for them, and under `-p` the
+process exits first.
+
+Two things this is *not*, and establishing them is what makes ADPT-8 a
+design question rather than a patch:
+
+- The hook is healthy. Invoked by hand against the same session's transcript
+  exactly as the harness would, it accepted both turns —
+  `observe.done events=2 accepted=2 duplicates=0` — and produced
+  `memory.observed` → `memory.extracted` on a chain that still verified.
+- The turns are not lost. The transcript stays in Claude Code's own
+  directory, and the spool holds no `cursor` — the field decision 6 advances
+  after a successful send — so an absent cursor means "nothing sent yet"
+  rather than "nothing to send". They are addressable; nothing addresses
+  them, because the only things that would are the async hooks that did not
+  run.
+
+Decision 4's reasoning is not reversed here. Making `Stop` synchronous would
+buy the headless case by taxing every interactive turn up to five seconds,
+which is the trade it exists to refuse. What is now on the record is that
+the trade has a second side, and that the side nobody was looking at is
+silent: exit 0, a clean `inject.ok`, and a chain with nothing on it.
+
+ADPT-8 carries the options — a catch-up flush at the next `SessionStart`, a
+synchronous `SessionEnd`, or both — and the two things still unverified:
+whether `Stop` fires at all under `-p` (a killed async hook logs nothing, so
+"fired and killed" is indistinguishable from "never fired"), and whether the
+spool is swept, given `prune()` runs on `SessionEnd` — one of the hooks that
+does not run here.
 
 ## Amendment (2026-08-11): the manifest was wrong, and the demo could not see it
 

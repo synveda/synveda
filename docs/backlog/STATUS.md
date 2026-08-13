@@ -1,6 +1,6 @@
 # Backlog status
 
-94 features parsed from docs/SYNVEDA_FEATURES.md — one file per
+95 features parsed from docs/SYNVEDA_FEATURES.md — one file per
 feature in this directory. Phases per the Sequencing section. This file and the
 per-feature files are **hand-maintained**; `node scripts/check-backlog.mjs`
 (in `make ci`) asserts that the three agree, and writes nothing.
@@ -3706,6 +3706,7 @@ produce._
 - [ ] [ADPT-5: Importers](ADPT-5.md)
 - [ ] [ADPT-6: LlamaIndex memory adapter](ADPT-6.md)
 - [ ] [ADPT-7: Semantic Kernel memory connector](ADPT-7.md)
+- [ ] [ADPT-8: Observation that survives a session that does not wait](ADPT-8.md) — filed 2026-08-13 by running ADPT-1's plugin in a **real** Claude Code session (2.1.228) against an installed v0.1.3. A headless run — `claude -p`, which is CI, a script, an agent harness — **injects and never observes**: three sessions, three `inject.ok` (3 records, 206 tokens), **zero** `observe.done`, no error, exit 0. Only `session-start` is synchronous in `hooks/hooks.json`; `observe` and both `flush` registrations are `async: true`, so the harness does not wait and the process exits first. Interactive sessions the previous day on the same machine observed correctly (`observe.done hook=Stop events=5 accepted=5`), which is why it had never been seen. **Neither the hook nor the data is at fault**, and establishing that is what makes the fix a design rather than a patch: invoked by hand against the same transcript exactly as Claude Code would, it accepted both turns (`events=2 accepted=2 duplicates=0`) and produced `memory.observed` → `memory.extracted` on a chain that still verified; and the turns survive, because Claude Code's transcript stays on disk while the session spool holds **no `cursor`** — the field observe advances after sending — so an absent cursor means "nothing sent yet" rather than "nothing to send". Nothing ever collects them, since the only things that would are the async hooks that did not run. The obvious fix inverts the trade-off the manifest deliberately makes: a synchronous `Stop` taxes every interactive turn up to 5s to protect the headless case. The candidates are a **catch-up flush at the next `SessionStart`** (free interactively, since that hook already runs synchronously and already calls the gateway, and eventually-consistent rather than lost), a **synchronous `SessionEnd`** (bounds the wait to once per session, but `SessionEnd` is not guaranteed on a killed process, which is how CI ends things), or a synchronous `Stop` — recorded so the decision says why it was not taken. The first two compose. Two things are unverified and named in the ticket rather than assumed: whether `Stop` fires at all under `-p` (a killed async hook logs nothing, so "fired and killed" and "never fired" are indistinguishable from today's evidence), and whether the spool is swept — `prune()` runs on `SessionEnd`, which is one of the hooks that does not run here, so its behaviour under this very failure is itself untested.
 - [ ] [PRMT-3: A/B channels for prompts](PRMT-3.md)
 - [ ] [SKIL-5: Skill usage telemetry](SKIL-5.md)
 - [ ] [MEM-7: Identity stitching](MEM-7.md)
