@@ -80,5 +80,58 @@
     "syntax": "jsonc",
     "restart": "restart Zed to pick this up",
     "path": { "any": "~/.config/zed/settings.json" }
+  },
+
+  // ── Added by OPS-9 (ADR-0066 decision 7) ─────────────────────────────
+  //
+  // Breadth, so the beta's answer to "does this work with my harness" is
+  // more often yes without anybody editing a file. Every entry below is
+  // transcribed from the vendor's documented path and **none has been
+  // replayed against a running client** — the same standing this table's
+  // `cursor` entry has carried since ADPT-2, and said so. ADR-0057
+  // decision 11 as amended names Claude Desktop and Zed as the only two
+  // whose real frames are on disk; that is still true.
+  //
+  // The honest read: a wrong path here fails at `install` with the path it
+  // tried, which is a bad minute for a tester. A wrong `key` fails
+  // *silently* — the client reads its config, finds nothing under the name
+  // it expects, and reports no server, which is the Zed lesson (it calls
+  // them context servers, so an entry under `mcpServers` is one it never
+  // sees). So `key` is the field to doubt first when one of these does not
+  // work.
+
+  // code.visualstudio.com/docs/copilot/chat/mcp-servers: per-workspace
+  // `.vscode/mcp.json` is the documented form, which `--config` reaches;
+  // the user-level file is the one below. VS Code nests the map under
+  // `servers` rather than `mcpServers`.
+  "vscode": {
+    "key": "servers",
+    "syntax": "jsonc",
+    "restart": "reload the VS Code window to pick this up",
+    "path": {
+      "macos": "~/Library/Application Support/Code/User/mcp.json",
+      "linux": "~/.config/Code/User/mcp.json",
+      "windows": "$APPDATA/Code/User/mcp.json"
+    }
+  },
+
+  // docs.windsurf.com — Cascade's MCP config. A Cursor-shaped fork, and it
+  // keeps Cursor's `mcpServers` key.
+  "windsurf": {
+    "key": "mcpServers",
+    "syntax": "json",
+    "restart": "restart Windsurf to pick this up",
+    "path": { "any": "~/.codeium/windsurf/mcp_config.json" }
+  },
+
+  // docs.continue.dev — Continue's own YAML config is its primary form and
+  // this is **not** it: this is the JSON block its docs give for MCP under
+  // `~/.continue`. If a tester's Continue reads YAML only, `--print` is the
+  // answer and this entry is the thing to fix.
+  "continue": {
+    "key": "mcpServers",
+    "syntax": "json",
+    "restart": "reload Continue to pick this up",
+    "path": { "any": "~/.continue/config.json" }
   }
 }

@@ -276,14 +276,24 @@ pub async fn init(plan: Plan) -> Result<(), String> {
     println!("    synveda hierarchy list");
     if plan.demo {
         println!();
-        println!("    # then build ACME's scopes, as yourself:");
-        println!("    synveda init --demo --dry-run   # prints the exact commands");
+        println!("    # then build ACME — scopes, packs, memory and a proposal —");
+        println!("    # as yourself, because every one of those is a governed act:");
+        match profile.demo_seeder() {
+            Some(path) => println!("    {}", path.display()),
+            // The bundle predates OPS-9, or a checkout has not got the file.
+            // Naming what is missing beats printing a path that is not there.
+            None => {
+                println!("    # (this profile carries no demo/seed.sh — it predates OPS-9)");
+            }
+        }
         println!();
         println!("    # demo logins (bundled IdP): password {DEMO_PASSWORD}");
         for (local, _, _, group) in DEMO_PEOPLE {
             let email = demo_email(local, &plan.slug);
             println!("    #   {email:<26} {group}");
         }
+        println!();
+        println!("    docs/BETA.md is the guided tour and the list of known gaps.");
     }
     if plan.embedder == "deterministic" {
         println!();
@@ -338,20 +348,23 @@ fn dry_run(plan: &Plan, profile: &Profile, issuer: &str, bundled: bool) -> Resul
     println!("  would NOT      write any scope, identity, role binding or record");
     if plan.demo {
         println!();
-        println!("  after `synveda login`, ACME is built by these governed creates:");
+        println!("  after `synveda login`, ACME is built by the demo seeder — the same");
+        println!("  governed creates, run under your own bearer (OPS-9, ADR-0066):");
         println!();
-        println!("    root=$(synveda hierarchy root)");
+        match profile.demo_seeder() {
+            Some(path) => {
+                println!("    {}", path.display());
+                println!("    {} --dry-run   # what it would do", path.display());
+            }
+            None => println!("    (this profile carries no demo/seed.sh — it predates OPS-9)"),
+        }
+        println!();
+        println!("  the scopes it creates, which are what the IdP groups resolve to:");
         for (slug, name) in DEMO_DEPARTMENTS {
-            println!(
-                "    synveda hierarchy create --parent $root --kind department \\\n\
-                 \x20     --slug {slug} --name '{name}'"
-            );
+            println!("    department  {slug:<10} ({name})");
         }
         for (department, slug, name) in DEMO_TEAMS {
-            println!(
-                "    synveda hierarchy create --parent ${department} --kind team \\\n\
-                 \x20     --slug {slug} --name '{name}'"
-            );
+            println!("    team        {slug:<10} ({name}, under {department})");
         }
     }
     Ok(())
@@ -1318,6 +1331,25 @@ impl Profile {
         candidate.join("index.html").is_file().then_some(candidate)
     }
 
+    /// The demo seeder (OPS-9, ADR-0066 decision 1), or `None` where this
+    /// profile does not carry one.
+    ///
+    /// `init --demo` prints it, so that neither a contributor nor a tester
+    /// has to know that a checkout and an installed bundle keep it in
+    /// different places — the same courtesy `console_dir` extends, and for
+    /// the same reason: the path is ours to resolve, not theirs to learn.
+    ///
+    /// Absent rather than fatal when missing, on `console_dir`'s precedent
+    /// (ADR-0056 decision 1): a demo affordance must never be a dependency
+    /// of starting the product.
+    fn demo_seeder(&self) -> Option<PathBuf> {
+        let candidate = match self {
+            Self::Checkout { root } => root.join("deploy/release/demo/seed.sh"),
+            Self::Bundle { home, .. } => home.join("profile/demo/seed.sh"),
+        };
+        candidate.is_file().then_some(candidate)
+    }
+
     /// Where to look for a gateway to run, in order.
     fn gateway_candidates(&self) -> Vec<PathBuf> {
         match self {
@@ -1919,5 +1951,109 @@ mod tests {
             .map(|(local, _, _, _)| demo_email(local, "acme"))
             .collect();
         assert!(!taken.contains(&operator_email("acme")), "{taken:?}");
+    }
+
+    /// The demo organisation's shape, as `deploy/release/demo/seed.sh` reads
+    /// it — comments and blanks out, one pipe-delimited record per line.
+    fn demo_shape() -> Vec<Vec<String>> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../deploy/release/demo/organisation.txt");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+        text.lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| line.split('|').map(str::to_owned).collect())
+            .collect()
+    }
+
+    /// Every group `--demo` creates in the IdP must resolve to a team the
+    /// seeder creates (OPS-9, ADR-0066 decision 5).
+    ///
+    /// This test is the whole reason the organisation's shape is a data file
+    /// rather than shell. Moving the seeder out of the binary moved it out of
+    /// `cargo test`, and this is the one check that could not wait for an
+    /// integration run: `--demo` puts people in `synveda-<department>-<team>`
+    /// groups and AUTH-2 places them by that convention, so a team missing
+    /// from the shape file is a group whose members land in **quarantine** on
+    /// first login — one person later, in a different command, looking like
+    /// an authorisation bug rather than a missing scope.
+    #[test]
+    fn every_demo_group_resolves_to_a_team_the_seeder_creates() {
+        let shape = demo_shape();
+        let teams: Vec<String> = shape
+            .iter()
+            .filter(|record| record.first().is_some_and(|kind| kind == "team"))
+            .map(|record| format!("synveda-{}-{}", record[1], record[2]))
+            .collect();
+        assert!(!teams.is_empty(), "the shape file defines no teams at all");
+        for (local, _, _, group) in DEMO_PEOPLE {
+            assert!(
+                teams.iter().any(|team| team == group),
+                "`init --demo` puts {local} in `{group}`, which no team in \
+                 deploy/release/demo/organisation.txt resolves — they would land \
+                 in quarantine on first login. Known: {teams:?}"
+            );
+        }
+    }
+
+    /// A team must name a department the seeder also creates, and a pack must
+    /// be assigned somewhere that exists. Both would fail against a live
+    /// gateway partway through seeding; they are constants, so they can fail
+    /// here instead.
+    #[test]
+    fn the_shape_file_is_internally_consistent() {
+        let shape = demo_shape();
+        let departments: Vec<&String> = shape
+            .iter()
+            .filter(|record| record[0] == "department")
+            .map(|record| &record[1])
+            .collect();
+        for record in shape.iter().filter(|record| record[0] == "team") {
+            assert!(
+                departments.contains(&&record[1]),
+                "team `{}` names department `{}`, which is not created",
+                record[2],
+                record[1]
+            );
+        }
+        for record in shape.iter().filter(|record| record[0] == "pack") {
+            assert!(
+                departments.contains(&&record[1]),
+                "pack `{}` is assigned at `{}`, which is not created",
+                record[2],
+                record[1]
+            );
+        }
+    }
+
+    /// The seeder polls `recall` with a fixed query while the extraction
+    /// worker catches up. The default embedder is a hash, so if no corpus
+    /// line carries one of those words the lexical leg returns nothing and
+    /// the seeder times out against a pipeline that worked perfectly.
+    #[test]
+    fn the_wait_query_can_retrieve_the_corpus_it_waits_for() {
+        let shape = demo_shape();
+        let corpus: Vec<String> = shape
+            .iter()
+            .filter(|record| record[0] == "corpus")
+            .map(|record| record[1].to_lowercase())
+            .collect();
+        let query = shape
+            .iter()
+            .find(|record| record[0] == "setting" && record[1] == "wait_query")
+            .map(|record| record[2].clone())
+            .expect("the shape file names no wait_query");
+        assert!(!corpus.is_empty(), "the shape file defines no corpus");
+        for term in query.split_whitespace() {
+            // Matched on a stem so `rollouts` answers `rollout`, which is
+            // what the lexical leg does and what the seeder relies on.
+            let stem = &term[..term.len().saturating_sub(1).max(1)];
+            assert!(
+                corpus.iter().any(|line| line.contains(stem)),
+                "the wait query names `{term}`, which no corpus line carries — \
+                 the seeder would poll until it timed out"
+            );
+        }
     }
 }

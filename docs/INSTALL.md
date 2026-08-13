@@ -263,17 +263,34 @@ it, by any configuration. ADR-0055 decision 8 has the measurements.
 ## A demo organisation to play with
 
 ```sh
-synveda init --demo
+synveda init --demo          # adds ACME's people to the bundled IdP
+synveda login                # …then become somebody who can build the org
+~/.synveda/profile/demo/seed.sh
 ```
 
-Adds ACME's people to the bundled IdP — four users in convention-shaped
-groups across `eng/platform`, `eng/payments` and `sales/emea` — so you can
-log in as different people and watch what each of them can and cannot see.
-The scopes themselves you create yourself, after logging in, with the
-commands above: they are governed objects and there is no operator to create
-them until somebody logs in.
+`--demo` adds four users in convention-shaped groups across `eng/platform`,
+`eng/payments` and `sales/emea`, so you can log in as different people and
+watch what each of them can and cannot see.
 
-Never use `--demo` on a deployment that will hold real memory.
+**It creates no scopes and no memory**, and the seeder is a separate step run
+after you log in, because these are governed objects: creating a department is
+an act the PDP decides and the audit chain attributes, and there is no
+operator to attribute it to until somebody has logged in. An installer that
+seeded your organisation would stand the whole hierarchy under a break-glass
+actor (ADR-0055 decisions 1 and 2).
+
+`seed.sh` builds the departments and teams those groups resolve to, assigns
+contrasting policy packs, observes a small corpus through the real extraction
+pipeline, and opens one proposal that needs two people — so the console has
+something in it and the governance has something to refuse. It is safe to
+re-run, takes `--dry-run`, and refuses a tenant that already holds an
+organisation it did not build. From a checkout it lives at
+`deploy/release/demo/seed.sh`, and `init` prints whichever path applies to you.
+
+Never use `--demo`, or the seeder, on a deployment that will hold real memory.
+
+**`docs/BETA.md` is the guided tour** — the same steps with what to look at and
+why, plus the standing list of what does not work yet.
 
 ## The admin console
 
@@ -326,6 +343,8 @@ docker compose -f ~/.synveda/profile/docker-compose.yml down     # state persist
 docker compose -f ~/.synveda/profile/docker-compose.yml down -v  # wipe everything
 ```
 
+To remove the product rather than stop it, see **Uninstalling** below.
+
 From a checkout, the compose file is `deploy/compose/docker-compose.yml`
 instead.
 
@@ -334,6 +353,48 @@ checkout). `synveda init` restarts it when anything it was started with
 changes — the issuer, the tenant, the embedder, the key, **or the gateway
 binary itself**, so re-running `init` after an upgrade actually puts the
 new release on the port rather than reporting the old one as healthy.
+
+## Uninstalling
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/uninstall.sh | sh
+```
+
+Fetched rather than installed on disk, for the reason a self-deleting script
+is a bad idea: it removes the directory it would have lived in. From a
+checkout it is `scripts/uninstall.sh`.
+
+It stops the gateway and the containers, and removes exactly what the
+installer wrote — the CLI from wherever the sudo fallback put it, plus
+`~/.synveda/{bin,console,profile,plugin,data}`. `--dry-run` lists every path
+and container it would touch and changes nothing.
+
+**Your data survives by default.** The four named volumes stay, and the
+output names them and the command that would remove them. `--purge` destroys
+them, which is the *only* way to remove a tenant's memory — a tenant row
+cannot be deleted yet (TEN-5), so the volume is the smallest unit of erasure
+this product has. That is a deployment-level wipe, not a GDPR erasure.
+
+`~/.synveda/data/kms.key` goes with a default uninstall even though the data
+stays. Records are not sealed under it and remain readable, but console
+sessions, tenant secrets and any `synveda tenant export` archive cannot be
+opened again without it — copy it first if you intend to come back to the
+same volumes.
+
+**It touches no editor or AI client config**, mirroring the promise the
+installer makes. Undo those explicitly, before removing the CLI:
+
+```sh
+synveda mcp uninstall --client cursor   # removes our entry, and only ours
+synveda plugin uninstall                # removes the Claude Code plugin
+```
+
+`mcp uninstall` is the exact mirror of `mcp install`: your other MCP servers
+survive, and a hand-maintained JSONC config keeps its comments and layout
+byte-for-byte. The uninstaller lists any client configs it finds mentioning
+us so you know which ones to run it for.
+
+Everything is idempotent — a second run finds nothing, says so, and exits 0.
 
 ## What an install is made of
 

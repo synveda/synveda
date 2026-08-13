@@ -1,0 +1,297 @@
+# Synveda beta — the tour, and what does not work yet
+
+Both halves are in one file on purpose. A demo is driven by whoever built it;
+a beta is driven by somebody who did not, so the limits stop being things we
+remember to mention and become something you can read before you hit them.
+
+**What this is.** Governed organisational memory for AI agents. Your sessions
+write memory, policy decides who may read it back, and every act is on an
+audit chain you can verify yourself.
+
+**What you need.** Docker. That is the whole list.
+
+**How long.** About fifteen minutes to the interesting part.
+
+---
+
+## 1. Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
+```
+
+Binaries are **unsigned and un-notarized** — the installer strips macOS's
+quarantine attribute and tells you it did. macOS arm64 and Linux x86_64 only;
+anything else is refused by name rather than guessed at. There is no Windows
+build and no package manager.
+
+## 2. Start it, with the demo people
+
+```sh
+synveda init --demo --embedder tei
+```
+
+`--demo` adds four people to the bundled identity provider — Alice, Bob, Carol
+and Dan, in convention-shaped groups across `eng/platform`, `eng/payments` and
+`sales/emea`. It creates no memory and no scopes, which is deliberate and
+explained in step 4.
+
+**On `--embedder tei`:** it pulls a 2.3GB embedding model once and gives you
+real semantic search. Without it you get `--embedder deterministic`, a hash —
+retrieval still works and is exact on the keyword leg, but "find me things
+*like* this" is not meaningful. **Choose now**: the model is recorded on every
+record written and nothing in the product re-embeds a corpus, so changing your
+mind later means starting over. If you only want to see the shape of the
+thing, drop the flag and save the download.
+
+## 3. Log in
+
+```sh
+synveda login
+```
+
+A browser opens against the bundled IdP. Use the operator credentials `init`
+printed.
+
+This login is where your organisation starts to exist: it provisions the org
+root from your tenant, places you under it, and binds you tenant-wide
+org-admin — all of it audited under **your** subject rather than an
+installer's.
+
+## 4. Build the demo organisation
+
+```sh
+~/.synveda/profile/demo/seed.sh
+```
+
+(From a checkout instead: `deploy/release/demo/seed.sh`. `init` prints the
+right path for you.)
+
+**Why this is a separate step, and not something `init` did.** Creating a
+department is a governed act. It needs a bearer, and it gets audited under
+whoever holds it — so an installer that seeded your organisation would stand
+the whole hierarchy under a break-glass actor, and the audit trail would say a
+robot built your company. The product refuses to do that. Everything the
+seeder makes is made by *you*, after you log in, through the same routes the
+CLI and any harness use, which is why step 7's chain verifies.
+
+It builds two departments and three teams, assigns contrasting policy packs,
+observes six turns of memory through the real extraction pipeline, and opens
+one proposal. It is safe to re-run — it asks what exists rather than keeping a
+list — and it refuses a tenant that already holds an organisation it did not
+build.
+
+`--dry-run` prints what it would do and changes nothing.
+
+## 5. Look at what you have
+
+```sh
+synveda hierarchy list
+synveda recall --query "how do we roll out payments"
+```
+
+The recall is going through the policy engine. You are seeing what *you* are
+allowed to see, decided per scope, not a database query with a filter on it.
+
+## 6. Meet the thing the product is actually for
+
+Open **http://127.0.0.1:8120/console/** and sign in with the same operator.
+
+There is a proposal in the inbox: memory climbing from your personal scope to
+the whole organisation. **Try to approve it.**
+
+You cannot. Publishing to the org root under `regulated-strict` takes a
+curator *and* a steward, two distinct people, and you are one person holding
+every role. That refusal is the product working correctly, and it is the thing
+worth showing somebody: the governance is not advisory, and it does not have
+an override for the person who installed it.
+
+While you are in the console, the explorer shows `eng` carrying `standard`
+where `sales` inherits the tenant default — that difference is what decides
+how expensive a publication is.
+
+## 7. Verify the whole thing
+
+The audit verbs take a tenant UUID and have no default, so get yours first —
+`synveda whoami` prints it on the `id` line, and the seeder printed the exact
+command when it finished:
+
+```sh
+synveda whoami
+synveda audit verify --tenant <your-tenant-uuid>
+synveda audit tail    --tenant <your-tenant-uuid>
+```
+
+The chain covers every act since installation and holds exactly **one**
+break-glass event: admitting the tenant, before any person existed to attribute
+it to. Everything after it — the org root, your role binding, each scope, each
+observed turn, the proposal — is attributed to you and hash-chained to what
+came before.
+
+## 8. Connect an agent
+
+**Claude Code:**
+
+```sh
+synveda plugin install
+```
+
+Then start an **interactive** session — see the ADPT-8 note in the limits
+below before you script anything. Your session gets a watermarked block of
+memory at start, and your turns are observed back at the end.
+
+**Anything else that speaks MCP:**
+
+```sh
+synveda mcp install --client claude-desktop
+synveda mcp install --client cursor
+synveda mcp install --client vscode        # also: windsurf, continue, zed
+synveda mcp install --client cursor --dry-run   # see it first
+```
+
+It edits one key in that client's own config and writes every other byte back
+as it found it. An existing `synveda` entry that differs is reported rather
+than replaced.
+
+**A client we have never heard of** does not need a release. Drop it into
+`~/.config/synveda/mcp-clients.jsonc`, which is read through the identical
+loader as the built-in table:
+
+```jsonc
+{
+  "my-editor": {
+    "key": "mcpServers",                       // the key IT looks under
+    "syntax": "jsonc",                         // "json" if the app rewrites the file
+    "restart": "restart My Editor to pick this up",
+    "path": { "any": "~/.my-editor/mcp.json" }
+  }
+}
+```
+
+Then `synveda mcp install --client my-editor`. If you would rather place the
+entry yourself, `--print` gives you it and writes nothing.
+
+## 9. Removing it
+
+Fetched the same way as the installer — it is not placed on disk by the
+install, because a script that lives inside the directory it deletes is a
+script that can vanish mid-run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/uninstall.sh | sh
+```
+
+From a checkout, it is `scripts/uninstall.sh`.
+
+**Your data survives by default.** It stops the containers and removes what
+the installer wrote — the CLI, the gateway, the console, the profile, the
+plugin marketplace and `~/.synveda/data` — and leaves the four Docker volumes
+in place, naming them. `--dry-run` lists everything it would touch and changes
+nothing. `--purge` also destroys the volumes, and says in the same breath that
+a tenant's memory is what it just removed.
+
+Two things it deliberately does **not** do:
+
+- **It does not touch your editor or AI client configs**, exactly as the
+  installer promised not to write them. Those were separate explicit steps and
+  so is their removal: `synveda mcp uninstall --client cursor` takes out our
+  entry and only ours, leaving your other MCP servers, your comments and your
+  layout byte-identical. `synveda plugin uninstall` removes the Claude Code
+  plugin. Run both *before* removing the CLI. The uninstaller lists any client
+  configs it finds mentioning us, so you know what to clean.
+- **It cannot delete a tenant**, because nothing can — see TEN-5 below. The
+  volume is this product's only unit of erasure today, which is why `--purge`
+  is all-or-nothing and why it is not GDPR erasure.
+
+One thing to know before you keep data: `~/.synveda/data/kms.key` goes with a
+default uninstall. Your records stay readable — they are not sealed under it —
+but console sessions, tenant secrets and any `synveda tenant export` archive
+can never be opened again without that file. Copy it first if you might come
+back to the same volumes.
+
+---
+
+# What does not work yet
+
+Written plainly because you will meet some of these, and finding out from a
+document beats finding out from behaviour.
+
+### Headless Claude Code sessions inject but never observe
+
+`claude -p` — CI, a script, an agent harness — receives its memory block and
+records **nothing** back. Exit code 0, no error, no warning. It looks exactly
+like a session that was observed.
+
+Only the session-start hook is synchronous; the observe hooks are async, so
+the process exits before they run. Your turns are not lost — they stay in the
+transcript and the spool holds no cursor — but nothing collects them.
+**Interactive sessions observe correctly.** Tracked as ADPT-8; use interactive
+sessions for anything you want recorded.
+
+### A tenant cannot be deleted
+
+`tenants` is referenced by 32 foreign keys, all `ON DELETE NO ACTION`, so a
+tenant anybody has logged into cannot be removed. To start over: `synveda
+tenant export` for anything you want to keep, then `docker compose down -v`.
+Tracked as TEN-5, which will make erasure a deliberate ordered traversal with
+a destruction certificate.
+
+### Nothing has spoken to a live Entra or Okta tenant
+
+SCIM and directory sync are built and tested against mocks transcribed from
+the vendors' published documentation. The bundled IdP is what has actually
+been exercised. If you point this at a real corporate directory, you are the
+first — please tell us what happens.
+
+### Retrieval recall varies run to run
+
+The dense retrieval leg is a prepared statement on a pooled connection, and
+PostgreSQL switches it to a generic plan after five executions — which stops
+using the vector index. Two identical queries can return different recall
+depending on how old the connection they landed on is. Measured between 0.355
+and 1.000 on the same corpus. Tracked as CTX-7. Keyword retrieval is
+unaffected.
+
+### One gateway, and restarts are visible
+
+The Helm chart refuses a second gateway replica, because login state and the
+scope-chain cache are in-process. Upgrades are a restart. Tracked as OPS-7.
+
+### Cursor is configured but unverified
+
+The Cursor entry is transcribed from Cursor's documentation and no real Cursor
+frame has been replayed against it. The same is true of the VS Code, Windsurf
+and Continue entries added for this beta. Claude Desktop and Zed are the two
+with recorded frames. A wrong path fails loudly at install; a wrong config
+*key* fails silently, with the client reporting no server — that is the field
+to doubt first.
+
+### Reinstalling is how you upgrade
+
+No upgrade path, no package manager. Re-run the installer and `synveda init`.
+Then run `synveda plugin install` again — Claude Code caches its own copy of
+the plugin and will keep running the old one otherwise.
+
+### The demo people share one password
+
+`init --demo` gives Alice, Bob, Carol and Dan the same password and prints it.
+Fine for a laptop. Do not carry any of it into a deployment holding anything
+real, and do not run `seed.sh` against one — it refuses tenants that already
+hold an organisation, but that guard is against mistakes, not against somebody
+who means it.
+
+### Benchmarks are one thin data point
+
+Published LongMemEval scores are 10 instances of 500 — QA 0.300, retrieval
+recall 0.357. Real numbers, honestly reported, and far too few to draw a
+conclusion from. See `docs/BENCHMARKS.md`; the full run exists as
+`make eval-longmemeval-full` and nobody has scheduled it.
+
+---
+
+## Telling us things
+
+What is most useful, roughly in order: something that behaved differently from
+this document; a refusal you could not explain from the console; a harness you
+tried to connect and could not. Include `synveda audit tail --tenant <yours>`
+output where it is relevant — the chain usually says what happened.

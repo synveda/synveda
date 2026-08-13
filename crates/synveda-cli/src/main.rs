@@ -996,6 +996,26 @@ enum McpCommand {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Remove our entry from a client's config (OPS-10, ADR-0067
+    /// decision 3) — the exact mirror of `install`.
+    ///
+    /// It takes out the one key we own and writes every other byte back as
+    /// it found it: your other MCP servers survive, and a hand-maintained
+    /// JSONC file keeps its comments and its layout. That is the promise
+    /// `install` makes in the other direction, and half a promise is not
+    /// one.
+    Uninstall {
+        /// Which client to edit. Pass an unknown name to be told the ones
+        /// this installation knows.
+        #[arg(long)]
+        client: String,
+        /// Edit this file instead of the client's own.
+        #[arg(long)]
+        config: Option<std::path::PathBuf>,
+        /// Report what would change and write nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1027,6 +1047,21 @@ enum PluginCommand {
         /// Claude Code's installation scope.
         #[arg(long, default_value = "user")]
         scope: String,
+    },
+    /// Remove the plugin from Claude Code (OPS-10, ADR-0067 decision 4).
+    ///
+    /// Drives `claude plugin uninstall` and then `marketplace remove`, in
+    /// that order: Claude Code copies a plugin into a versioned cache it
+    /// owns, so removing the marketplace alone leaves the plugin running.
+    /// Verified against `claude plugin list` rather than the filesystem —
+    /// removing and *unloading* are different events.
+    Uninstall {
+        /// Which client to remove it from.
+        #[arg(long, default_value = "claude-code")]
+        client: String,
+        /// Report what would run and change nothing.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -1812,6 +1847,19 @@ async fn run(cli: Cli) -> Result<(), String> {
             force,
             print,
         }),
+        Command::Mcp {
+            command:
+                Some(McpCommand::Uninstall {
+                    client,
+                    config,
+                    dry_run,
+                }),
+            ..
+        } => mcp::install::uninstall(&mcp::install::RemovePlan {
+            client,
+            config,
+            dry_run,
+        }),
         Command::Plugin(PluginCommand::Install {
             client,
             from,
@@ -1825,6 +1873,9 @@ async fn run(cli: Cli) -> Result<(), String> {
             force,
             scope,
         }),
+        Command::Plugin(PluginCommand::Uninstall { client, dry_run }) => {
+            plugin::uninstall(&plugin::RemovePlan { client, dry_run })
+        }
         Command::Auth(AuthCommand::Logout { profile, all }) => {
             let mut stored = credentials::load()?;
             if all {

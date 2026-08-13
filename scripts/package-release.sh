@@ -40,6 +40,16 @@ sed "s/__SYNVEDA_VERSION__/$version/g" "$source_compose" > "$stage/docker-compos
 cp deploy/compose/rauthy/config.toml "$stage/rauthy/config.toml"
 printf '%s\n' "$version" > "$stage/version"
 
+# The demo seeder (OPS-9, ADR-0066 decision 1). It rides in this bundle
+# rather than as an asset of its own because the bundle already carries a
+# `version` that `synveda init` compares against the CLI's before it starts
+# anything (ADR-0065 decision 5) — so a seeder that has drifted from the
+# product it seeds is caught by machinery that already exists.
+mkdir -p "$stage/demo"
+cp deploy/release/demo/seed.sh "$stage/demo/seed.sh"
+cp deploy/release/demo/organisation.txt "$stage/demo/organisation.txt"
+chmod +x "$stage/demo/seed.sh"
+
 # Two assertions about what was produced, both cheap and both about the one
 # property that makes this a *released* profile: it pulls, it never builds.
 if grep -q "__SYNVEDA_VERSION__" "$stage/docker-compose.yml"; then
@@ -50,6 +60,17 @@ if grep -qE '^\s*build:' "$stage/docker-compose.yml"; then
   echo "package-release: the packaged compose file has a build: stanza." >&2
   echo "  A released profile pulls published images; a machine running it has" >&2
   echo "  no source tree to build from (ADR-0065 decision 3)." >&2
+  exit 1
+fi
+# The seeder is the one thing in this bundle a person executes directly, so a
+# bundle that shipped it non-executable would fail in their hands rather than
+# here — the OPS-8 pattern of asserting the artefact rather than its presence.
+if [ ! -x "$stage/demo/seed.sh" ]; then
+  echo "package-release: demo/seed.sh is not executable in the bundle" >&2
+  exit 1
+fi
+if ! sh -n "$stage/demo/seed.sh"; then
+  echo "package-release: demo/seed.sh is not valid POSIX shell" >&2
   exit 1
 fi
 
