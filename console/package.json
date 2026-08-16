@@ -1,6 +1,6 @@
 {
   "name": "@synveda/console",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "private": true,
   "description": "Admin console: the proposals inbox and the surfaces behind it (CNSL-1, ADR-0056)",
   "type": "module",
