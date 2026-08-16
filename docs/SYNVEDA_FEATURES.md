@@ -923,6 +923,63 @@ OPS-8  Release & distribution (M)
   clock; installed from the packaged bundle rather than the tree, so a drifted bundle
   fails; OPS-1's break-glass invariant re-asserted from the installed path; `/console/`
   serving; and an unsupported platform refused by name rather than guessed at.
+OPS-9  Beta demo profile (L)
+  Filed 2026-08-13. OPS-8 made the product installable by somebody else and stopped one
+  step short of being *showable* to them: `init --demo` seeds four people into the bundled
+  IdP and then **prints** the commands that would build ACME's scopes, so a tester logs in
+  to an empty product — no scopes, no memory, no proposals, an empty console — and the
+  governance story that is this product's whole differentiator is invisible until they
+  hand-run a dozen verbs nobody handed them. The printing is not a defect: ADR-0055
+  decisions 1 and 2 refuse to let an installer create governed objects under a break-glass
+  actor, and an installer that seeded an org would show the hierarchy under the wrong
+  subject. So the seeding moves to where it can be governed rather than being abolished —
+  `synveda demo seed`, run *after* login, under the operator's own bearer, through the same
+  routes the CLI drives, which is the one shape that produces a living organisation without
+  carving an exception into the invariant that produced the emptiness. It ships in the
+  binary rather than as a `demos/` script because the audience is exactly the person who
+  installed by `curl | sh` and has no checkout, which is also why the 60 acceptance scripts
+  in `demos/` cannot serve here: each seeds its own scratch state, tears it down, and none
+  of them is a tour. What it seeds is a *living* org — scopes, packs in deliberate contrast,
+  role bindings so a demo person's first login lands somewhere with authority, a memory
+  corpus, a published skill with channel history, a proposal left pending so the console
+  inbox has something in it, and an active lapse — with the audit chain falling out of the
+  seeding rather than being seeded. Content that needs a second author is written by service
+  identities (AUTH-3) rather than by impersonating the demo people, because login is
+  code+PKCE and turning on ROPC to let a seeder log in as Alice would weaken authentication
+  for a demo convenience. Carries the beta's honesty with it: `docs/BETA.md` is the tour and
+  the limits in one file, so the thing a tester is invited to try and the list of what does
+  not work cannot drift apart.
+  AC: on a scratch HOME with no checkout and no Rust toolchain, install → `init --demo` →
+  `login` → `demo seed` → a recall that returns seeded memory, a console a tester **signs
+  in to** rather than merely 200s, an inbox holding the pending proposal, and a chain that
+  verifies with exactly one break-glass event; `demo seed` twice changes nothing on the
+  second run and refuses a tenant that was not demo-marked; and the MCP client registry's
+  extension point is demonstrated by configuring a client the release has never heard of.
+OPS-10 Uninstall & cleanup (M)
+  Filed 2026-08-13. OPS-8 made the product installable by a stranger and gave them no way
+  to remove it: there is no `uninstall.sh`, no `mcp uninstall`, no `plugin uninstall`, and
+  nothing anywhere in the repository matches the word. A beta asks people to try something
+  on their own machine, so "how do I get rid of this" is a question the product has to
+  answer before it is asked, and answering it in prose is not the same as answering it in
+  a script — the footprint spans three tiers with different owners. What `install.sh`
+  wrote is ours and removable exactly (`$SYNVEDA_HOME/{bin,console,profile,plugin}` and
+  the CLI, wherever the sudo fallback put it). What `init` created is a **deployment** —
+  containers and four named volumes — and destroying those volumes is the only way to
+  remove a tenant's memory, because TEN-5 means a tenant row cannot be deleted; so the
+  data is the one thing uninstall must never take by default, and the flag that takes it
+  says what it is. And what the operator later asked us to write into *somebody else's*
+  config — a `synveda` key in Claude Desktop, Cursor, Zed, VS Code, Windsurf or Continue,
+  and a plugin inside Claude Code's own cache — is theirs, so removal is the exact mirror
+  of `mcp install`: take out the one key we own and write every other byte back as found.
+  That mirror is the feature's real content, because a shell script cannot do it: it is
+  the same CST splice, and it belongs in the CLI beside the verb that made the mess.
+  AC: after `uninstall.sh`, nothing of ours is on PATH or under `$SYNVEDA_HOME` and no
+  container of ours is running, asserted from a scratch HOME; the data volumes survive by
+  default and are named in the output, with `--purge` removing them and saying that memory
+  is what it removed; `synveda mcp uninstall --client <c>` removes exactly the `synveda`
+  entry and leaves an adjacent server, comments and layout byte-identical; `plugin
+  uninstall` leaves `claude plugin list` without ours; and the whole thing is idempotent —
+  a second run finds nothing and exits 0 rather than failing on what it already removed.
 
 ──────────────────────────────────────────────
 EPIC CNSL — Admin console (Phase 3)
@@ -1008,7 +1065,8 @@ Phase 2 governance (wk 6–10): FLOW-1..7 · AUTHZ-4,5 · MEM-5,6 · CTX-4,5 · 
                          AUD-2 · EVAL-2,4,5 · PRMT-1,2
    → Demo: promotion pipeline, lapse lifecycle, as-of inject, bank-mode switch.
 Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-2 ·
-                         AUTH-4,5 · EVAL-3 · OPS-2 · TEN-3,4 · OPS-8 · TEN-5,6 ·
+                         AUTH-4,5 · EVAL-3 · OPS-2 · TEN-3,4 · OPS-8 · OPS-9 · OPS-10 ·
+                         TEN-5,6 ·
                          AUD-3,4 · GRPH-3 · EVAL-6 · CTX-7 · OPS-3,4 · ADPT-3 ·
                          CTX-6 · FLOW-8
    (Reordered 2026-08-04. Order within the phase is by demo-readiness, not epic-grouped
@@ -1040,6 +1098,18 @@ Phase 3 enterprise (wk 11–16): SKIL-1..4 · OPS-1 · CNSL-1 · ADPT-2 · CNSL-
    published scores, a Helm install — and until there is a release to download, watching it
    costs a Rust toolchain and a cold release build of Cedar, Tantivy and sqlx. It sits
    behind OPS-2 because the chart's images are two of the things a release publishes.)
+   (OPS-9 added 2026-08-13, directly behind OPS-8 and for the same reason one step further
+   on. OPS-8 asked "can somebody else install this?" and answered it; the question nobody
+   had asked is what that somebody *sees* once they have. They see an empty product, because
+   ADR-0055 decisions 1 and 2 correctly refuse to seed governed objects from an installer,
+   and the seeding was never moved anywhere else — it was left as printed instructions,
+   which is a design that assumes the reader is us. Every goal this phase names is something
+   somebody is meant to watch, and OPS-8 established that watching it no longer costs a Rust
+   toolchain; this establishes that it no longer costs a tour guide. It is also the feature
+   that turns the phase demo into a **beta**, which is a different artefact: a demo is driven
+   by whoever built it and a beta is driven by somebody who did not, so the limits stop being
+   things we remember to mention and become a file — which is why `docs/BETA.md` carries the
+   tour and the standing gaps together rather than in two documents that would drift.)
    → Demo: Entra/Okta live, spec-compliant governed skills into Claude Code + Cursor,
      LongMemEval scores published, Helm install.
      (Read "LoCoMo/LongMemEval" until 2026-08-07. EVAL-3/ADR-0061 decision 1 found LoCoMo's

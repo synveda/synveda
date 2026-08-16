@@ -198,6 +198,44 @@ jobs:
         if: failure()
         run: docker ps -a || true
 
+  # OPS-9's acceptance demo (ADR-0066). Separate from `release-install`
+  # rather than appended to it, because the two answer different questions
+  # and a job that answered both would report neither: OPS-8 asks whether a
+  # stranger can install this, and OPS-9 asks what they see once they have.
+  #
+  # It runs against a dev stack rather than a packaged release — the demo's
+  # own header says why, and `package-release.sh` covers the part this
+  # leaves out by asserting the bundle carries the seeder, executable and
+  # syntactically valid.
+  #
+  # This job's prerequisites are explicit because its first run had two that
+  # were not, and both were invisible on the laptop it was written on: the
+  # `postgres` image (compose skips a `build:` when the image is already
+  # present, so a missing build context only surfaces where `make dev-up` has
+  # never run) and the console bundle. That is OPS-8's own recorded finding —
+  # "a machine where `node_modules` had made it invisible" — arriving a second
+  # time, which is the argument for this job existing rather than against it.
+  beta-demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile --filter @synveda/console...
+      - run: pnpm --filter @synveda/console build
+      - run: cargo build -p synveda-cli -p synveda-gateway --release
+      - run: demos/ops-9-beta-demo.sh
+      - name: What the deployment looked like
+        if: failure()
+        run: docker ps -a || true
+
   kind:
     runs-on: ubuntu-latest
     timeout-minutes: 30

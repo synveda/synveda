@@ -222,6 +222,101 @@ pub fn install(plan: &Plan) -> Result<(), String> {
 /// `adapters/claude-code` itself. Saying so is the whole point: a plugin
 /// directory is not a marketplace, and pointing Claude Code at one installs
 /// nothing.
+/// What one `uninstall` asks for. No `from` and no `scope`: removal names
+/// the plugin Claude Code already has, and where its bundle came from is
+/// not a question that has an answer any more.
+pub struct RemovePlan {
+    pub client: String,
+    pub dry_run: bool,
+}
+
+/// `synveda plugin uninstall` — the mirror of [`install`] (OPS-10,
+/// ADR-0067 decision 4).
+///
+/// Two steps, in this order, and the order is the finding ADR-0065
+/// amendment 8 paid for: Claude Code copies a plugin into a **versioned
+/// cache it owns** at install time, so removing our marketplace does not
+/// remove the running plugin. `plugin uninstall` takes the plugin out;
+/// `marketplace remove` takes out the source it came from. Doing only the
+/// second leaves a plugin loaded from a marketplace that no longer exists.
+///
+/// It asserts against `claude plugin list` rather than the filesystem for
+/// that amendment's other half: installing and *loading* are different
+/// events, and so are removing and unloading.
+pub fn uninstall(plan: &RemovePlan) -> Result<(), String> {
+    if !CLIENTS.contains(&plan.client.as_str()) {
+        return Err(format!(
+            "unknown client {:?}; known clients are {}",
+            plan.client,
+            CLIENTS.join(", ")
+        ));
+    }
+    let claude = which("claude");
+
+    let remove_plugin = vec![
+        "plugin".to_owned(),
+        "uninstall".to_owned(),
+        PLUGIN_ID.to_owned(),
+    ];
+    let remove_marketplace = vec![
+        "plugin".to_owned(),
+        "marketplace".to_owned(),
+        "remove".to_owned(),
+        MARKETPLACE.to_owned(),
+    ];
+
+    if plan.dry_run {
+        println!("synveda plugin uninstall --dry-run");
+        println!();
+        println!(
+            "  claude       {}",
+            match &claude {
+                Some(path) => path.display().to_string(),
+                None => "not on PATH".to_owned(),
+            }
+        );
+        println!("  would run    claude {}", remove_plugin.join(" "));
+        println!("               claude {}", remove_marketplace.join(" "));
+        return Ok(());
+    }
+
+    let Some(claude) = claude else {
+        // Not an error. Claude Code being absent is the ordinary state of a
+        // machine somebody is cleaning up, and failing here would stop an
+        // uninstall over a tool the user has already removed.
+        println!("claude is not on PATH; nothing to remove from Claude Code");
+        return Ok(());
+    };
+
+    match installed_version(&claude) {
+        None => {
+            println!("Claude Code does not have {PLUGIN_ID} installed; nothing to do");
+            return Ok(());
+        }
+        Some(version) => println!("removing {PLUGIN_ID} {version} from Claude Code"),
+    }
+
+    run(&claude, &remove_plugin)?;
+    // The marketplace may already be gone, or never added by us; either way
+    // the plugin is out, which is the thing that mattered. Reported rather
+    // than fatal.
+    if let Err(error) = run(&claude, &remove_marketplace) {
+        println!("    (leaving the marketplace: {error})");
+    }
+
+    // Ask the vendor, not the filesystem.
+    if let Some(still) = installed_version(&claude) {
+        return Err(format!(
+            "claude still lists {PLUGIN_ID} at {still} after uninstalling it.\n  \
+             `claude plugin list` is the authority here, so this is a real \
+             failure rather than\n  a stale cache — remove it by hand with \
+             `claude plugin uninstall {PLUGIN_ID}`."
+        ));
+    }
+    println!("claude plugin list no longer names it");
+    Ok(())
+}
+
 fn locate(from: Option<&Path>) -> Result<PathBuf, String> {
     if let Some(path) = from {
         return validate(path).map(Path::to_path_buf);

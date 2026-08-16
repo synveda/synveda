@@ -1,0 +1,66 @@
+# ACME, the beta demo organisation (OPS-9, ADR-0066 decision 5).
+#
+# Data rather than code, and pipe-delimited rather than JSON, for two
+# reasons that pull the same way.
+#
+# **Data**, because moving the seeder out of the binary moved it out of
+# `cargo test`, so the one check whose failure is silent has to stay
+# reachable deliberately. `synveda init --demo` puts people in
+# `synveda-<department>-<team>` groups and AUTH-2 places them by that
+# convention, so a team missing from this file is a group whose members land
+# in QUARANTINE on their first login — a failure that surfaces one person
+# later, in a different command, looking like an authorisation bug.
+# `crates/synveda-cli/src/init.rs` asserts that every `DEMO_PEOPLE` group
+# resolves to a `team` row here. Edit one, and that test tells you about the
+# other.
+#
+# **Pipe-delimited**, because a beta tester's only prerequisite is Docker
+# (OPS-8). No `jq`, no `node`. JSON read by `sed` is a footgun; this is
+# `while IFS='|' read -r kind a b c` in shell and `split('|')` in Rust, and
+# both are obviously correct.
+#
+# Blank lines and `#` comments are ignored. Fields never contain `|`.
+#
+#   department | slug | display name
+#   team       | department slug | slug | display name
+#   pack       | department slug | embedded pack name
+#   corpus     | one observed turn
+#   setting    | key | value
+
+department|eng|Engineering
+department|sales|Sales
+
+team|eng|platform|Platform
+team|eng|payments|Payments
+team|sales|emea|EMEA
+
+# Assigned for contrast, and the contrast is load-bearing rather than
+# decorative (ADR-0066 decision 2): an explorer showing one pack repeated
+# teaches nothing, and the difference between these is what makes one
+# publication cheap and another impossible for a single person.
+#
+# `sales` is deliberately absent. It inherits the tenant default, which is a
+# third state worth seeing on the policy screen: inherited, not assigned.
+pack|eng|standard
+
+# Turns a harness would have observed, written so the LEXICAL leg alone
+# retrieves them. The default embedder is a hash and semantic similarity is
+# not meaningful under it (ADR-0066 decision 6), so a corpus that only demoed
+# well under TEI would make the default path look broken. Each line therefore
+# carries the distinctive nouns somebody would actually search for, and
+# `wait_query` below must hit at least one of them.
+corpus|We settled on blue-green rollouts for the payments service, because a rollback has to be one DNS change and not a redeploy.
+corpus|The payments ledger reconciliation job runs at 02:00 UTC and pages the on-call engineer if it has not finished by 03:00.
+corpus|Platform owns the shared Postgres cluster. Schema changes go through the expand/contract checklist before they reach production.
+corpus|EMEA customers are contractually entitled to data residency in Frankfurt, so nothing about an EMEA account may be embedded outside the EU plane.
+corpus|Our incident severity ladder: sev-1 pages immediately, sev-2 is next business day, and anything customer-visible is at least sev-2.
+corpus|The signing key for release artefacts rotates every 90 days, and the rotation runbook lives with the platform team.
+
+# What the seeder polls with while the extraction worker catches up. It must
+# match corpus lines under the hash embedder, which is what makes the lexical
+# leg the thing being relied on here.
+setting|wait_query|rollout ledger residency incident
+
+# The title the seeded proposal carries. Also the idempotency key for it:
+# a second run finds this open and leaves it alone.
+setting|proposal_title|Promote the rollout convention to the whole organisation

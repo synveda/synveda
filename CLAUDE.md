@@ -37,14 +37,18 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 ## Current phase
 Phase 3 — Enterprise (wk 11–16). Phases 0, 1 and 2 are complete; SKIL-1
 through SKIL-4, OPS-1, CNSL-1, ADPT-2, CNSL-2, AUTH-4, AUTH-5, EVAL-3,
-OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3 features done so far. 64 of 95 features delivered — see docs/backlog/STATUS.md for what each
+OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3 features done so far. 64 of 96 features delivered — see docs/backlog/STATUS.md for what each
 one proved and what it left standing. (The total read 86 until 2026-08-05,
 when it was corrected to the 88 STATUS.md and `make check-backlog` had both
 said for some time; AUTHZ-7 was filed the same day by CNSL-2/ADR-0058, making
 it 89, EVAL-7 on 2026-08-07 by EVAL-3/ADR-0061, making it 90, OPS-7 on
 2026-08-10 by OPS-2/ADR-0062, making it 91, CTX-7 and TEN-7 the same
 day by TEN-3/ADR-0063, making it 93, and OPS-8 filed and delivered on
-2026-08-11, making it 94.)
+2026-08-11, making it 94. ADPT-8 was filed on 2026-08-13 by running ADPT-1's
+plugin in a real Claude Code session, making it 95, and OPS-9 the same day
+by asking what somebody who takes OPS-8's install actually sees, making
+it 96 — this trail had stopped at 94 while the headline said 95, which is
+the drift the trail exists to prevent.)
 
 Phase 3 was reordered on 2026-08-04 by demo-readiness (see the Sequencing
 note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,

@@ -260,6 +260,95 @@ pub fn install(plan: &Plan) -> Result<(), String> {
     Ok(())
 }
 
+/// What one `uninstall` asks for. Deliberately smaller than [`Plan`]:
+/// removal needs no profile (it is not generating an entry) and no `--force`
+/// (it takes out whatever is under our key, whoever wrote it).
+pub struct RemovePlan {
+    /// Which client's config to edit.
+    pub client: String,
+    /// Edit this file instead of the client's own.
+    pub config: Option<PathBuf>,
+    /// Report what would change and write nothing.
+    pub dry_run: bool,
+}
+
+/// `synveda mcp uninstall --client <name>` — the exact mirror of
+/// [`install`] (OPS-10, ADR-0067 decision 3).
+///
+/// It removes the one key we own and nothing else. That is the same promise
+/// `install` makes in the other direction, and half a promise is not one: a
+/// user who let us write into Zed's settings is owed their comments, their
+/// layout and their other context servers back exactly as they were.
+pub fn uninstall(plan: &RemovePlan) -> Result<(), String> {
+    let client = lookup(&plan.client)?;
+    let key = client.key.as_str();
+    let path = match &plan.config {
+        Some(path) => path.clone(),
+        None => config_path(&plan.client)?,
+    };
+
+    if !path.exists() {
+        // Not an error. An uninstaller that fails on what is already gone is
+        // one nobody runs twice, and the moment somebody runs it twice is
+        // the moment the first run went wrong (ADR-0067 decision 5).
+        println!("{} does not exist; nothing to remove", path.display());
+        return Ok(());
+    }
+
+    let mut document = read(&path, client.syntax)?;
+    if existing(&document, key, &path)?.is_none() {
+        println!("{} has no `{key}.{SERVER_KEY}` entry", path.display());
+        return Ok(());
+    }
+
+    remove_entry(&mut document, key, &path)?;
+    let others = other_servers(&document, key);
+
+    if plan.dry_run {
+        println!("would rewrite {} without our entry", path.display());
+    } else {
+        write(&path, &document)?;
+        println!("removed the `{SERVER_KEY}` entry from {}", path.display());
+    }
+    // Said out loud for install's reason, and more so here: this command
+    // opened a file it does not own in order to delete from it, and the
+    // user is owed the count that survived.
+    println!("  ({others} other MCP server(s) left as they were)");
+    if !plan.dry_run {
+        println!("{}", client.restart);
+    }
+    Ok(())
+}
+
+/// Takes our entry out, leaving the containing map — and, for JSONC, every
+/// other byte of the file — as it was.
+///
+/// The empty map is deliberately **not** pruned. A `mcpServers: {}` that we
+/// emptied is the user's key, and deciding it is now litter is the same
+/// class of judgement as replacing a differing entry without asking.
+fn remove_entry(document: &mut Document, key: &str, path: &Path) -> Result<(), String> {
+    match document {
+        Document::Json(value) => {
+            let servers = value
+                .as_object_mut()
+                .and_then(|root| root.get_mut(key))
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| format!("{}'s `{key}` is not an object", path.display()))?;
+            servers.remove(SERVER_KEY);
+            Ok(())
+        }
+        Document::Jsonc(root) => {
+            let prop = root
+                .object_value()
+                .and_then(|root| root.object_value(key))
+                .and_then(|servers| servers.get(SERVER_KEY))
+                .ok_or_else(|| format!("{}'s `{key}.{SERVER_KEY}` is not there", path.display()))?;
+            prop.remove();
+            Ok(())
+        }
+    }
+}
+
 /// The entry a client will exec.
 fn entry(profile: &str) -> Result<Value, String> {
     let exe = std::env::current_exe().map_err(|err| format!("locate this binary: {err}"))?;
@@ -672,6 +761,107 @@ mod tests {
         serde_json::from_str(&std::fs::read_to_string(path).expect("written")).expect("json")
     }
 
+    fn remove_plan(config: &Path, client: &str) -> RemovePlan {
+        RemovePlan {
+            client: client.to_owned(),
+            config: Some(config.to_owned()),
+            dry_run: false,
+        }
+    }
+
+    /// The mirror of the install test above, and the criterion OPS-10
+    /// exists for: we opened somebody's file to delete from it, so
+    /// everything that is not ours has to come back byte-identical.
+    #[test]
+    fn uninstall_leaves_a_hand_maintained_config_exactly_as_it_found_it() {
+        let path = scratch("jsonc-uninstall");
+        let before = "// Zed settings\n\
+                      //\n\
+                      // Keep the theme, I like it.\n\
+                      {\n\
+                      \x20 \"telemetry\": { \"metrics\": false },\n\
+                      \x20 \"ui_font_size\": 16,\n\
+                      \x20 \"theme\": {\n\
+                      \x20   \"mode\": \"system\", // follows the OS\n\
+                      \x20   \"dark\": \"One Dark\",\n\
+                      \x20 },\n\
+                      }\n";
+        std::fs::write(&path, before).expect("seed");
+
+        install(&zed_plan(&path)).expect("install");
+        let with_ours = std::fs::read_to_string(&path).expect("written");
+        assert!(with_ours.contains("synveda"), "install did not land");
+
+        uninstall(&remove_plan(&path, "zed")).expect("uninstall");
+        let after = std::fs::read_to_string(&path).expect("written");
+
+        assert!(
+            !after.contains("synveda"),
+            "our entry survived the uninstall:\n{after}"
+        );
+        for kept in [
+            "// Zed settings",
+            "// Keep the theme, I like it.",
+            "// follows the OS",
+            "\"ui_font_size\": 16,",
+            "\"dark\": \"One Dark\",",
+        ] {
+            assert!(
+                after.contains(kept),
+                "the removal lost {kept:?} from a file it does not own:\n{after}",
+            );
+        }
+    }
+
+    /// A user's other MCP servers are not ours to remove, and this is the
+    /// assertion that says so — the failure it guards against is a splice
+    /// that takes the whole map instead of one key in it.
+    #[test]
+    fn uninstall_leaves_another_server_alone() {
+        let path = scratch("other-server-uninstall");
+        std::fs::write(
+            &path,
+            r#"{"mcpServers":{"other":{"command":"/usr/bin/other"}}}"#,
+        )
+        .expect("seed");
+
+        install(&plan(&path)).expect("install");
+        uninstall(&remove_plan(&path, "claude-desktop")).expect("uninstall");
+
+        let after = read_back(&path);
+        assert!(
+            after["mcpServers"]["synveda"].is_null(),
+            "ours survived: {after}"
+        );
+        assert_eq!(
+            after["mcpServers"]["other"]["command"],
+            json!("/usr/bin/other"),
+            "somebody else's server did not survive: {after}"
+        );
+    }
+
+    /// Idempotent, and quiet about it (ADR-0067 decision 5). Failing on
+    /// what is already gone makes an uninstaller nobody runs twice, and the
+    /// moment somebody runs it twice is the moment the first run went wrong.
+    #[test]
+    fn uninstalling_twice_is_not_an_error() {
+        let path = scratch("twice-uninstall");
+        std::fs::write(&path, r#"{"mcpServers":{}}"#).expect("seed");
+        install(&plan(&path)).expect("install");
+        uninstall(&remove_plan(&path, "claude-desktop")).expect("first");
+        uninstall(&remove_plan(&path, "claude-desktop")).expect("second must not fail");
+    }
+
+    /// A config that was never written is not an error either — the
+    /// ordinary case when somebody uninstalls a client they never hooked up.
+    #[test]
+    fn uninstalling_an_absent_config_is_not_an_error() {
+        let path = scratch("absent-uninstall").with_file_name("never-written.json");
+        assert!(!path.exists());
+        uninstall(&remove_plan(&path, "claude-desktop")).expect("must not fail");
+        assert!(!path.exists(), "it created the file it was asked to clean");
+    }
+
     #[test]
     fn a_fresh_config_gets_the_entry_and_nothing_else() {
         let path = scratch("fresh");
@@ -851,11 +1041,35 @@ mod tests {
         assert_eq!(args[at + 1], "tool");
     }
 
+    /// The name here is deliberately one no vendor will ever ship.
+    ///
+    /// It used to be `windsurf`, and OPS-9 adding Windsurf to the registry
+    /// turned this test red — correctly, and usefully: a test that asserts
+    /// the *unknown* path must not name a client that growing the table can
+    /// make known, or it fails for a reason that has nothing to do with the
+    /// behaviour it covers.
     #[test]
     fn an_unknown_client_names_the_ones_it_knows() {
-        let error = config_path("windsurf").expect_err("unknown");
+        let error = config_path("not-a-real-mcp-client").expect_err("unknown");
         assert!(error.contains("claude-desktop"), "{error}");
         assert!(error.contains("cursor"), "{error}");
+    }
+
+    /// The clients OPS-9 added parse and resolve a path (ADR-0066
+    /// decision 7). This asserts they are *reachable*, not that they are
+    /// correct: none has been replayed against a running client, which
+    /// `clients.jsonc` says in its own comment and BETA.md repeats.
+    #[test]
+    fn the_clients_ops_9_added_resolve_somewhere() {
+        for client in ["vscode", "windsurf", "continue"] {
+            let path = config_path(client)
+                .unwrap_or_else(|err| panic!("{client} should resolve on this OS: {err}"));
+            assert!(
+                path.is_absolute(),
+                "{client} resolved to a relative path: {}",
+                path.display()
+            );
+        }
     }
 
     /// The vendors' own documented locations. Pinned because these are
