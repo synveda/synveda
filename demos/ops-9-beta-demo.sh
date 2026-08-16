@@ -131,6 +131,18 @@ GATEWAY_BIN="$REPO/target/release/synveda-gateway"
 [ -x "$GATEWAY_BIN" ] ||
   fail "no synveda-gateway binary — cargo build -p synveda-gateway first"
 
+# The console bundle is a prerequisite of this demo the same way the binaries
+# are, because the sign-in step below is an assertion about a served console
+# and ADR-0056 decision 1 makes an absent bundle a 404 rather than a boot
+# failure. It used to be copied conditionally and checked 250 lines later,
+# which meant a machine without it got "GET /console/ returned 404 — no
+# bundle?" long after the stack was up, instead of a named prerequisite before
+# anything started. Checked here, in the same shape and for the same reason as
+# the two above.
+CONSOLE_DIST="$REPO/console/dist"
+[ -f "$CONSOLE_DIST/index.html" ] ||
+  fail "no console bundle — pnpm install && pnpm --filter @synveda/console build first"
+
 # ── the ports this demo needs ───────────────────────────────────────────
 # Checked before anything starts, because a half-started stack reporting a
 # health check that timed out is a worse message than a refusal that names
@@ -167,14 +179,29 @@ INSTALL_ROOT="$HOME/.synveda"
 mkdir -p "$INSTALL_ROOT/profile/rauthy" "$INSTALL_ROOT/bin"
 cp "$REPO/deploy/compose/docker-compose.yml" "$INSTALL_ROOT/profile/docker-compose.yml"
 cp "$REPO/deploy/compose/rauthy/config.toml" "$INSTALL_ROOT/profile/rauthy/config.toml"
+# Every relative path in that compose file is resolved against *its* directory,
+# so copying the file alone copies a set of dangling references. `rauthy` is
+# above; `postgres` is this, and it is the one that only shows up on a machine
+# that has never run `make dev-up`. Compose skips a `build:` when the image is
+# already present, so on a developer's laptop the missing context is invisible
+# and on a clean runner it is `unable to prepare context: … /profile/postgres
+# not found`. That is what happened: this demo passed here and failed on its
+# first CI run, which is the exact asymmetry it was written to catch.
+#
+# The other two dangling paths — `./temporal/dynamicconfig.yaml` and the
+# gateway's `context: ../..` — belong to services this demo never starts, and
+# compose resolves neither for a service it is not asked to bring up. They are
+# left dangling deliberately rather than papered over: copying them would imply
+# this bundle can serve them, and it cannot (the gateway here runs on the host,
+# ADR-0055 decision 8).
+cp -R "$REPO/deploy/compose/postgres" "$INSTALL_ROOT/profile/postgres"
 # The version `check_version` compares against the CLI's own. A mismatch is
 # refused in both directions, so this asks the binary rather than hardcoding.
 "$SYNVEDA" --version | awk '{print $2}' > "$INSTALL_ROOT/profile/version"
 cp "$GATEWAY_BIN" "$INSTALL_ROOT/bin/synveda-gateway"
-# The console, so the sign-in step below has something to serve. Absent is
-# not fatal for the product (ADR-0056 decision 1) but it is for that step.
-[ -f "$REPO/console/dist/index.html" ] &&
-  cp -R "$REPO/console/dist" "$INSTALL_ROOT/console"
+# The console, so the sign-in step below has something to serve. Unconditional
+# now: its absence is a named prerequisite failure above, not a silent skip.
+cp -R "$CONSOLE_DIST" "$INSTALL_ROOT/console"
 # The seeder, into the bundle, and **run from there** rather than from the
 # tree. This is the one thing OPS-9's acceptance criteria recorded as
 # unproven — "nobody has run seed.sh from $SYNVEDA_HOME/profile/demo/" — and
