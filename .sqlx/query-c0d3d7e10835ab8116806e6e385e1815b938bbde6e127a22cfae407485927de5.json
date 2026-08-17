@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select exists(\n            select 1 from scope_closure\n            where ancestor_id = $1 and descendant_id = $2 and tenant_id = $3\n        ) as \"descends!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "descends!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c0d3d7e10835ab8116806e6e385e1815b938bbde6e127a22cfae407485927de5"
+}

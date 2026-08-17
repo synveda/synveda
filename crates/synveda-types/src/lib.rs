@@ -29,6 +29,14 @@ mod record;
 mod redaction;
 mod retention;
 mod role;
+// Public rather than re-exported at the root, and for exactly as long as the
+// old hierarchy lives beside the new substrate: `scope::ScopeKind` (tenant,
+// org_unit, workspace, project, principal) and the root `ScopeKind`
+// (org, division, department, team, user) are different types with the same
+// name. Prompt 6 of the context-platform programme deletes the old one; until
+// then the module path is what says which model a caller is written against
+// (CPR-3, ADR-0070).
+pub mod scope;
 mod sensitivity;
 mod skill;
 mod skillquality;

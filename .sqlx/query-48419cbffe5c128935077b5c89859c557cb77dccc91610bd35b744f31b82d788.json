@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update scopes set tenant_id = $2 where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48419cbffe5c128935077b5c89859c557cb77dccc91610bd35b744f31b82d788"
+}

@@ -760,4 +760,108 @@ frontend changes, deletions, tests, and the resulting commit hash.
   gained 5 entries and lost none.
 - **Commit.** `feat(schema): enforce fresh schema epoch` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by Prompt 3, on Prompt 1's rule.
+- **Commit hash.** `050d798f8825ee3a1cadabeca4d80f3def167665`, written by
+  Prompt 3 on Prompt 1's rule.
+
+### Prompt 3 — Generic governed scope substrate (CPR-3)
+
+- **Implemented.** The first piece of the new domain model: `scopes` +
+  `scope_closure`, tenant-bound with forced RLS, and the internal application
+  services over them — create, rename, move, ancestors, descendants, tenant
+  root, children, path and path resolution (`synveda_store::scopes`). The
+  domain type is `synveda_types::scope::{Scope, ScopeKind, ScopeStatus}` with
+  the slug/name/attributes/path validators beside it. Decisions in **ADR-0070**.
+- **The one place this reads ADR-0068 rather than transcribing it.** Decision 4
+  says a scope "has no `kind`". This keeps a `kind` and removes the *rank*:
+  five shapes (`tenant`, `org_unit`, `workspace`, `project`, `principal`) whose
+  only job is deciding which shapes may be a parent. No `rank()`, no
+  strictly-increasing ladder, no root-must-be-an-org, and nothing anywhere
+  comparing two kinds for order — `org_unit` nests inside itself to arbitrary
+  depth, and one person's entire tree is a tenant scope and a principal.
+  ADR-0070 decision 1 argues it: an untyped node leaves the placement rule with
+  nowhere to live, so "a project inside a principal" becomes representable and
+  the shape information moves into `attributes`, where every consumer parses a
+  convention and no constraint checks one. That is the rank vocabulary again,
+  unenforced. Recorded here rather than absorbed, per §9's preamble.
+- **Schema/domain changes.** One migration, `0040_scopes.sql`. **52 tables, 2
+  views; 48 RLS-forced** (both new tables carry `ENABLE` + `FORCE`, a
+  `*_tenant_isolation` policy and least-privilege grants — no DELETE on
+  `scopes`, no UPDATE on `scope_closure`). Where each structural rule lives is
+  the feature's substance: the root shape, one-root-per-tenant and sibling-slug
+  uniqueness are constraints; the **placement rule** is a row-local CHECK over a
+  denormalised `parent_kind` kept honest by a composite foreign key
+  `(tenant_id, parent_scope_id, parent_kind) → (tenant_id, id, kind)`, which
+  also makes a **cross-tenant edge unrepresentable**; **cycles** are refused by
+  `check ((ancestor_id = descendant_id) = (distance = 0))` on the closure — the
+  exact row a move's relink would write if its destination were inside the
+  subtree; and a `before update` trigger makes `id`, `tenant_id`, `kind`,
+  `slug`, `created_at` and `created_by` immutable, which is what extends
+  "a scope never moves across tenants" to the **owner** role that forced RLS
+  does not bind. No materialised `path` and no `depth` column: both are derived
+  from the closure, so a move stops rewriting every descendant's copy and a
+  path cannot be stale. `synveda-types` gains `serde_json` as a dependency (the
+  `attributes` bag) and exposes `scope` as a module rather than re-exporting it,
+  because the old `ScopeKind` still owns the root name until Prompt 6.
+- **API and frontend changes.** **None, deliberately.** No route, no CLI
+  command, no console screen, no adapter and no PDP call inside the store — the
+  governed entry points (a decision before the call, an audit event after it,
+  VedaFlow where the change is governed) attach at the API boundary Prompts 5–6
+  add, exactly where they attach today for the hierarchy this replaces. One
+  metric is described in the gateway's telemetry registry
+  (`synveda_scope_mutations_total`), and its series is expected to be *absent*
+  rather than zero until a route reaches the services.
+- **Deleted.** Nothing. This prompt is the only one in the deletion map's first
+  row that adds before it removes: §7 row 1 is executed in two halves, and the
+  half that deletes `ScopeKind {org…user}`, `hierarchy_nodes`,
+  `hierarchy_closure`, `rank()`, `hierarchy_nodes_kind_check` and
+  `hierarchy_nodes_root_is_org_check` is Prompt 6. Nothing synchronises the two
+  models in either direction, at any time: no row of `hierarchy_nodes` becomes
+  a row of `scopes`, and no code reads one to write the other.
+- **Tests.** `crates/synveda-store/tests/scopes.rs` (20): the closure agrees
+  with a recomputation from the adjacency after every operation in every test;
+  the placement rule asserted as a **matrix over all 25 pairs** of the
+  vocabulary rather than as cases; the root rules (a parentless non-tenant
+  scope, a second root, a nested tenant scope); sibling slugs; malformed slug,
+  display name and attributes; another tenant's scope absent rather than
+  forbidden on every surface including `move`'s destination; a cross-tenant
+  update refused to the owner role; slug/kind/provenance immutability; cycles
+  refused by the service and unrepresentable in the closure; org units nested
+  **40 deep** with a workspace and project still hanging off the deepest;
+  subtree moves; ineligible moves; rename touching only the display name; path
+  round-trips; and three concurrency tests. Plus a **property test** —
+  randomly generated create/move/rename histories against a live tree, legal
+  and illegal alike, with the closure recomputed and compared after every
+  step. `crates/synveda-store/tests/rls.rs` gains the scope block (4) and both
+  tables join the completeness inventory: 67 → 71 tests. Unit tests in
+  `synveda-types` (10) and `synveda-store` (1).
+- **What one test does not prove, stated rather than implied.**
+  `a_create_inside_a_moving_subtree_waits_for_the_move` still passes with
+  `move_scope`'s subtree lock removed — the relink's foreign keys already take
+  a share lock on every subtree member, which blocks the create for a reason
+  nobody designed. The lock stays (the rule should be *a move owns its subtree*,
+  not *a foreign key happens to*), the narrower window where the incidental
+  lock is not enough ends in a spurious conflict for the move rather than in
+  corruption, and both the module doc and the test say so.
+- **Run record.** On the final tree, against a live Postgres:
+  `crates/synveda-store/tests/scopes.rs` **20/20**, `tests/rls.rs` **71/71**
+  (67 before this feature), `tests/hierarchy.rs` green and unchanged,
+  `synveda-types` unit tests **160/160**. `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. The node gates
+  green: `check-backlog`, `check-adr-status`, `check-crate-deps`,
+  `check-corpus-licences`, `check-chart-images`, `check-benchmarks`,
+  `check-ann-bench`. The `.sqlx` cache gained 28 entries and lost none.
+- **The two full gates did not complete on the machine this was written on, and
+  the cause is the machine.** Bitdefender's on-access scanner runs `codesign
+  -vv -R=notarized --check-notarization` against every freshly built binary:
+  **measured at ~51 seconds per test binary, on an idle scanner**, which is
+  ~1.5 hours of pure overhead across the workspace's ~107 test binaries, and it
+  wedged individual suites (`cedar_entity_sync`, `mcp_corpus`) in `_dyld_start`
+  for 20+ minutes at a stretch. A `make db-test` run of this feature's code
+  reached 29 suites with **zero failures** before being stopped. Recorded here
+  rather than papered over: `make ci` and `make db-test` are this repository's
+  gates, they have not been seen green on this commit, and the next machine to
+  run them should exclude `target/` from on-access scanning first. Nothing in
+  this feature is `#[ignore]`d, excluded or weakened to get a green.
+- **Commit.** `feat(scopes): add governed scope substrate` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by Prompt 4, on Prompt 1's rule.

@@ -528,6 +528,15 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_store::scope_chain::SCOPE_CHAIN_INVALIDATIONS_TOTAL,
         "Tenant-wide scope-chain cache flushes after committed hierarchy mutations"
     );
+    // CPR-3 (ADR-0070): the generic scope substrate. Emitted in
+    // synveda-store's scope services; described here where the recorder lives
+    // (ADR-0007). No route reaches those services yet — the governed entry
+    // points land with the later prompts of the context-platform programme —
+    // so this series is expected to be absent rather than zero until then.
+    metrics::describe_counter!(
+        synveda_store::scopes::SCOPE_MUTATIONS_TOTAL,
+        "Scope tree mutations by operation (create/rename/move)"
+    );
     // TEN-4 key plane (ADR-0064). Emitted in synveda-store and the gateway,
     // described here where the recorder lives (ADR-0007).
     metrics::describe_counter!(

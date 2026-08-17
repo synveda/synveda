@@ -1120,6 +1120,46 @@ CPR-2  Fresh schema epoch, startup guard & local reset (M)
   the console bundle, stored logins and every other database on the server; and no
   old-to-new data migrator exists — asserted structurally (the epoch migration is pure DDL,
   no `.down.sql`) as well as behaviourally.
+CPR-3  Generic governed scope substrate (M)
+  Filed 2026-08-17 by Prompt 3 of the CPR programme. ADR-0068 decision 4 said generic scopes
+  replace fixed organisational ranks; this builds the substrate, with no public API on it
+  yet. `scopes` + `scope_closure`: a named node with a parent and a subtree, tenant-bound,
+  forced RLS, closure maintained transactionally by explicit store SQL. Five **shapes** —
+  `tenant`, `org_unit`, `workspace`, `project`, `principal` — where the only thing a shape
+  decides is which shapes may be its parent, so `org_unit` nests inside itself to arbitrary
+  depth and a person's whole deployment is a tenant scope and a principal. The rank is what
+  goes: no `rank()`, no strictly-increasing ladder, no root-must-be-an-org, nothing anywhere
+  comparing two kinds for order. The judgement worth reading is *where each rule lives*
+  (ADR-0070 decision 2): every structural rule that can be a database fact is one, so the
+  placement rule rides a composite foreign key over a denormalised `parent_kind` rather than
+  a store-side check the next caller can go around, a cycle is refused by a CHECK on the
+  closure's own self-row rather than only by the descendant test a move makes first, and
+  cross-tenant immobility holds for the owner role — migrations, break-glass psql, a restore
+  — and not only for the role RLS binds. Internal services for create, rename, move,
+  ancestors, descendants, tenant root and path resolution; no route, no CLI command, no
+  adapter, and no PDP call inside the store (the governed entry points attach at the API
+  boundary later prompts add). The old hierarchy is untouched and **nothing is synchronised
+  with it**: no row of `hierarchy_nodes` becomes a row of `scopes`, and Prompt 6 deletes it
+  whole. ADR-0070.
+  AC: a scope tree is created, read and moved through the services with the closure agreeing
+  with the adjacency after every operation; the placement rule holds for every pair of the
+  five kinds, asserted as a matrix rather than as cases; a parentless non-tenant scope, a
+  second tenant root, a nested tenant scope, a duplicate sibling slug, a malformed slug,
+  display name or attribute bag, and a placement the tree does not admit are each refused
+  with the rule they broke; org units nest to arbitrary depth and a workspace and project
+  still hang off the deepest one; a scope's path resolves back to that scope and a path that
+  names nothing resolves to nothing while a malformed one is an error; every read is
+  tenant-filtered in SQL as well as by RLS, so another tenant's scope reads as absent rather
+  than forbidden, on every surface including `move`'s destination; a scope cannot move across
+  tenants and the database refuses it to the owner role too, with slug, kind and provenance
+  immutable beside it; cycles are impossible — refused as an error by the service and
+  unrepresentable in the closure; the closure survives randomly generated operation
+  histories, checked against a recomputation from the adjacency after every step; concurrent
+  writers behave — two creates racing one sibling slug admit exactly one, two moves of one
+  scope serialise, and a create landing inside a moving subtree waits and inherits the
+  ancestry the move left; and both tables join the adversarial RLS suite's completeness
+  inventory with a wrong-GUC read seeing nothing, a cross-tenant write rejected, the whole
+  lifecycle working as `synveda_app`, and the app role holding no DELETE.
 
 ──────────────────────────────────────────────
 Sequencing (features → phases)
@@ -1214,7 +1254,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2
+Phase 5 context platform (redesign): CPR-1,2,3
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

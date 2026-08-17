@@ -59,10 +59,21 @@ refuses to boot past and `/readyz` re-asks per probe, `migrate` refuses a
 pre-cut database before touching it, and `synveda reset --database --force`
 is the only way through. **Your dev database will be refused** — reset it.
 The 38-migration chain is not squashed yet; that is Prompt 33.
+Since CPR-3 the new model has its first piece (ADR-0070): `scopes` +
+`scope_closure`, a named node with a parent and a subtree, where `kind` is a
+**shape** deciding only which shapes may be its parent — `tenant`, `org_unit`,
+`workspace`, `project`, `principal` — so an `org_unit` nests inside itself to
+any depth and one person's whole tree is a tenant scope and a principal. There
+is **no API on it yet**, deliberately, and **nothing synchronises it with the
+old hierarchy**, which is untouched until Prompt 6 deletes it whole. Both
+models are in the tree meanwhile, so `synveda_types::ScopeKind` (org, division,
+department, team, user) and `synveda_types::scope::ScopeKind` (the five shapes)
+are different types with the same name: the module path is what says which
+model your code is written against.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 66 of 99 features delivered — see docs/backlog/STATUS.md for
+features done. 67 of 100 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -77,9 +88,9 @@ which is the drift the trail exists to prevent. **OPS-10 was filed the same
 day as OPS-9**, by asking how that same stranger removes it, making it 97;
 the trail missed it and the headline read 96 against a checker that had said
 97 since — the identical drift, one entry later. CPR-1 filed and delivered
-2026-08-17, making it 98, and **CPR-2 the same day**, making it 99.
-Prompts 3–33 of its programme are filed by the prompts that run them, so
-this number will keep moving.)
+2026-08-17, making it 98, **CPR-2 the same day**, making it 99, and
+**CPR-3 the same day**, making it 100. Prompts 4–33 of its programme are filed
+by the prompts that run them, so this number will keep moving.)
 
 Phase 3 was reordered on 2026-08-04 by demo-readiness (see the Sequencing
 note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,

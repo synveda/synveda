@@ -9,8 +9,10 @@ publish.workspace = true
 [dependencies]
 chrono = { workspace = true }
 serde = { workspace = true }
+# A dependency rather than a dev-dependency since CPR-3 (ADR-0070): a generic
+# scope carries an open `attributes` bag, and what a deployment means by a
+# scope is the deployment's to say. A fixed schema there would be the rank
+# vocabulary returning under another name.
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
-
-[dev-dependencies]
-serde_json = { workspace = true }

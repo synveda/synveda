@@ -21,8 +21,11 @@ use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
 use synveda_store::{
     group_mappings, hierarchy, identities, observe, policy_assignments, policy_packs, quarantine,
-    rls, role_bindings, tenants,
+    rls, role_bindings, scopes, tenants,
 };
+// The generic scope vocabulary, reached through its module because the old
+// hierarchy still owns the root name until Prompt 6 (CPR-3, ADR-0070).
+use synveda_types::scope;
 use synveda_types::{
     Error, IdentityId, IdentityKind, ObserveKind, PackConfig, RecordClass, RecordId, RecordKind,
     Role, ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
@@ -235,6 +238,13 @@ const COVERED: &[&str] = &[
     "scim_group_members",
     "scim_groups",
     "scim_users",
+    // CPR-3 (ADR-0070): the generic scope substrate. It sits beside the old
+    // hierarchy rather than replacing it in place — Prompt 6 of the
+    // context-platform programme deletes `hierarchy_nodes` and
+    // `hierarchy_closure`, and until then both are tenant-scoped and both are
+    // covered here.
+    "scope_closure",
+    "scopes",
     "skill_files",
     "skill_quality_overrides",
     "skill_reviews",
@@ -506,6 +516,195 @@ fn same_tenant_hierarchy_lifecycle_works_under_rls() {
             "delete must work in-tenant"
         );
         tx.commit().await.expect("commit lifecycle");
+    });
+}
+
+// ── Scope substrate (CPR-3, ADR-0070) ───────────────────────────────────────
+
+/// Rows of `tenant` visible through the scope tables, in the order
+/// (scopes, scope_closure).
+async fn visible_scope_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64) {
+    let scopes = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from scopes where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count scopes");
+    let closure = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from scope_closure where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count scope_closure");
+    (scopes, closure)
+}
+
+fn new_scope(
+    tenant: TenantId,
+    parent: Option<ScopeId>,
+    kind: scope::ScopeKind,
+    slug: &str,
+) -> scopes::NewScope {
+    scopes::NewScope {
+        id: ScopeId::new(),
+        tenant_id: tenant,
+        kind,
+        parent_scope_id: parent,
+        slug: slug.to_owned(),
+        display_name: slug.to_owned(),
+        attributes: serde_json::json!({}),
+        created_by: None,
+    }
+}
+
+/// Admits a tenant with a root scope and one workspace: 2 scopes, 3 closure
+/// rows (two self-rows + one edge). Runs on the (RLS-exempt) test connection.
+async fn seed_scopes(pool: &PgPool) -> (TenantId, ScopeId) {
+    let tenant = TenantId::new();
+    let slug = format!("rlss-{}", tenant.as_uuid().simple());
+    tenants::create(
+        pool,
+        tenant,
+        &slug,
+        "RLS scope fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create tenant");
+    let mut tx = pool.begin().await.expect("begin transaction");
+    let root = scopes::create(
+        &mut tx,
+        &new_scope(tenant, None, scope::ScopeKind::Tenant, "acme"),
+    )
+    .await
+    .expect("create the tenant root");
+    scopes::create(
+        &mut tx,
+        &new_scope(
+            tenant,
+            Some(root.id),
+            scope::ScopeKind::Workspace,
+            "workspace",
+        ),
+    )
+    .await
+    .expect("create a workspace");
+    tx.commit().await.expect("commit scopes");
+    (tenant, root.id)
+}
+
+/// The wrong (or absent) tenant GUC sees zero scope rows; the right one sees
+/// exactly its own.
+#[test]
+fn wrong_tenant_guc_sees_no_scope_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _) = seed_scopes(&db.pool).await;
+        let (adversary, _) = seed_scopes(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_scope_rows(&mut tx, victim).await,
+            (0, 0),
+            "scope rows leaked across tenants under the wrong GUC"
+        );
+        assert_eq!(visible_scope_rows(&mut tx, adversary).await, (2, 3));
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_scope_rows(&mut tx, victim).await,
+            (0, 0),
+            "scope rows visible without any tenant GUC"
+        );
+    });
+}
+
+/// Writing scope rows for another tenant than the GUC's trips the policies'
+/// WITH CHECK — an application defect, surfaced as internal.
+#[test]
+fn cross_tenant_scope_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed_scopes(&db.pool).await;
+        let (other, _) = seed_scopes(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let result = scopes::create(
+            &mut tx,
+            &new_scope(other, None, scope::ScopeKind::Tenant, "forged"),
+        )
+        .await;
+        assert!(
+            matches!(result, Err(Error::Internal { .. })),
+            "cross-tenant scope insert must be rejected by RLS as an internal \
+             defect, got {result:?}"
+        );
+    });
+}
+
+/// The full scope lifecycle — create, move (closure surgery needs no UPDATE
+/// on the closure table), rename — works as `synveda_app` with the right GUC:
+/// the backstop isolates, it does not deny service.
+#[test]
+fn same_tenant_scope_lifecycle_works_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, root) = seed_scopes(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let unit = scopes::create(
+            &mut tx,
+            &new_scope(tenant, Some(root), scope::ScopeKind::OrgUnit, "unit"),
+        )
+        .await
+        .expect("create under RLS");
+        let space = scopes::create(
+            &mut tx,
+            &new_scope(tenant, Some(root), scope::ScopeKind::Workspace, "space"),
+        )
+        .await
+        .expect("create a second child under RLS");
+        let moved = scopes::move_scope(&mut tx, tenant, space.id, unit.id)
+            .await
+            .expect("move under RLS");
+        assert_eq!(moved.parent_scope_id, Some(unit.id));
+        assert_eq!(
+            scopes::path(&mut *tx, tenant, moved.id)
+                .await
+                .expect("path under RLS"),
+            Some("acme/unit/space".to_owned())
+        );
+        let renamed = scopes::rename(&mut *tx, tenant, moved.id, "Shared space")
+            .await
+            .expect("rename under RLS");
+        assert_eq!(renamed.display_name, "Shared space");
+        tx.commit().await.expect("commit lifecycle");
+    });
+}
+
+/// The application role holds no DELETE on `scopes`: nothing in the product
+/// removes a scope, and a grant for a path that does not exist is a grant
+/// nobody reviewed.
+#[test]
+fn the_app_role_cannot_delete_a_scope() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, root) = seed_scopes(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let result = sqlx::query!("delete from scopes where id = $1", root.as_uuid())
+            .execute(&mut *tx)
+            .await;
+        let err = result.expect_err("the app role must not be able to delete a scope");
+        assert_eq!(
+            err.as_database_error().and_then(|db| db.code()).as_deref(),
+            Some("42501"),
+            "expected insufficient_privilege, got {err:?}"
+        );
     });
 }
 

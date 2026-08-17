@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select s.slug as \"slug!\"\n        from scope_closure c\n        join scopes s on s.id = c.ancestor_id and s.tenant_id = c.tenant_id\n        where c.descendant_id = $1 and c.tenant_id = $2\n        order by c.distance desc\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "slug!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "35f4fb30b4bcd943d39beda5cf725ac7ca65138856f52763405a2d90bdbf29f1"
+}

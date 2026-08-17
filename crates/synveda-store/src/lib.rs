@@ -55,6 +55,7 @@ pub mod retention;
 pub mod rls;
 pub mod role_bindings;
 pub mod scope_chain;
+pub mod scopes;
 pub mod search;
 pub mod skill_reviews;
 pub mod skills;
