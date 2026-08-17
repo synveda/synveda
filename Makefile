@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-ann-bench check-backlog check-benchmarks check-chart-images check-corpus-licences check-npm-licences chart-lint ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-ann-bench check-api-types check-backlog check-benchmarks check-chart-images check-corpus-licences check-npm-licences chart-lint ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -182,6 +182,18 @@ deny:
 check-deps:
 	node scripts/check-crate-deps.mjs
 
+# The frontend's types are generated from the OpenAPI document, and the
+# document is generated from the gateway's own handlers (CPR-4, ADR-0071
+# decision 7). The Rust half of that chain is checked by
+# `crates/synveda-gateway/tests/openapi.rs`, which `test` already runs; this is
+# the TypeScript half. Needs nothing but node, so it runs early.
+#
+# To refresh both after changing a DTO or a handler annotation:
+#   SYNVEDA_WRITE_OPENAPI=1 cargo test -p synveda-gateway --test openapi
+#   node scripts/generate-api-types.mjs
+check-api-types:
+	node scripts/generate-api-types.mjs --check
+
 # SYNVEDA_FEATURES.md, docs/backlog/<ID>.md and STATUS.md describe one feature
 # set; this asserts they agree. Writes nothing — it replaced a generator that
 # wrote all three and discarded their hand-written narrative doing it.
@@ -257,4 +269,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-backlog check-adr-status check-corpus-licences check-chart-images check-benchmarks check-ann-bench chart-lint eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-api-types check-backlog check-adr-status check-corpus-licences check-chart-images check-benchmarks check-ann-bench chart-lint eval-check ts-build check-npm-licences ts-test

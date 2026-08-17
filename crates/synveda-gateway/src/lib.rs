@@ -27,6 +27,14 @@
 //! matrix at [`approvals`], so what it takes to move content across the
 //! boundary is answered in one place.
 //!
+//! Since CPR-4 the context platform has its first public surface
+//! ([`workspaces`] and [`me`], ADR-0071): workspaces and projects as
+//! product-level subtypes of a governed scope, repositories addressed by
+//! canonical identity, creation made retryable by [`idempotency`], and updates
+//! guarded by a revision precondition. It is also where this product's
+//! **OpenAPI contract** starts ([`openapi`]) — derived from the handlers
+//! rather than written beside them, so it cannot drift from what they serve.
+//!
 //! This is a library crate only so integration tests can build the router;
 //! nothing outside the workspace consumes it.
 
@@ -47,9 +55,12 @@ pub mod directory_admin;
 pub mod directory_sync;
 pub mod error;
 pub mod hierarchy;
+pub mod idempotency;
 mod inject;
 pub mod lapses;
+pub mod me;
 pub mod observe;
+pub mod openapi;
 pub mod packs;
 pub mod policy;
 pub mod prompts;
@@ -63,3 +74,4 @@ pub mod service_identities;
 pub mod skills;
 pub mod telemetry;
 pub mod tenant;
+pub mod workspaces;

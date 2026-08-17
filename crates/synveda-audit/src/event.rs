@@ -138,6 +138,28 @@ pub enum AuditAction {
     /// — unreadable under the base layer's forbid, and exempt from every
     /// retention horizon (AUTH-4, ADR-0059 decision 8).
     IdentitySealed,
+    /// A workspace was created, with the governed scope it owns — one event
+    /// for both, because they are one act and one transaction (CPR-4,
+    /// ADR-0071). The payload carries the scope id, so the chain answers
+    /// "which scope is this workspace" without a join.
+    WorkspaceCreated,
+    /// A workspace was renamed, re-described or retired. The payload carries
+    /// the before and after images and the revision the update was applied
+    /// under — a lost-update conflict is a *refusal*, so a chain that records
+    /// the precondition records why the write that lost is absent.
+    WorkspaceUpdated,
+    /// A project was created inside a workspace, with the scope it owns.
+    ProjectCreated,
+    /// A project was renamed, re-described or retired.
+    ProjectUpdated,
+    /// A repository was attached to a project. The payload carries the
+    /// **canonical** URI — which is credential-free by construction, so this
+    /// is one of the places that property is load-bearing rather than tidy.
+    ProjectRepositoryAttached,
+    /// A repository was detached from a project. A delete rather than a
+    /// stamp, because the row asserts a present fact about a project; what it
+    /// was is here, in the chain.
+    ProjectRepositoryDetached,
     /// A hierarchy node was created.
     HierarchyNodeCreated,
     /// A hierarchy node was renamed and/or moved.
@@ -491,7 +513,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 63] = [
+    pub const ALL: [AuditAction; 69] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -508,6 +530,12 @@ impl AuditAction {
         AuditAction::HierarchyNodeCreated,
         AuditAction::HierarchyNodeUpdated,
         AuditAction::HierarchyNodeDeleted,
+        AuditAction::WorkspaceCreated,
+        AuditAction::WorkspaceUpdated,
+        AuditAction::ProjectCreated,
+        AuditAction::ProjectUpdated,
+        AuditAction::ProjectRepositoryAttached,
+        AuditAction::ProjectRepositoryDetached,
         AuditAction::PolicyDefaultSet,
         AuditAction::PolicyDefaultCleared,
         AuditAction::PolicyNodeAssigned,
@@ -575,6 +603,12 @@ impl AuditAction {
             AuditAction::DirectorySyncBreakerTripped => "directory.sync.breaker_tripped",
             AuditAction::DirectorySealAuthorised => "directory.seal.authorised",
             AuditAction::DirectorySealAuthorisationUsed => "directory.seal.authorisation_used",
+            AuditAction::WorkspaceCreated => "workspace.created",
+            AuditAction::WorkspaceUpdated => "workspace.updated",
+            AuditAction::ProjectCreated => "project.created",
+            AuditAction::ProjectUpdated => "project.updated",
+            AuditAction::ProjectRepositoryAttached => "project.repository.attached",
+            AuditAction::ProjectRepositoryDetached => "project.repository.detached",
             AuditAction::HierarchyNodeCreated => "hierarchy.node.created",
             AuditAction::HierarchyNodeUpdated => "hierarchy.node.updated",
             AuditAction::HierarchyNodeDeleted => "hierarchy.node.deleted",

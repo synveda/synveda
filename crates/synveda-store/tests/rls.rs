@@ -20,15 +20,17 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
 use synveda_store::{
-    group_mappings, hierarchy, identities, observe, policy_assignments, policy_packs, quarantine,
-    rls, role_bindings, scopes, tenants,
+    group_mappings, hierarchy, idempotency, identities, observe, policy_assignments, policy_packs,
+    projects, quarantine, repositories, rls, role_bindings, scopes, tenants, workspaces,
 };
 // The generic scope vocabulary, reached through its module because the old
 // hierarchy still owns the root name until Prompt 6 (CPR-3, ADR-0070).
+use synveda_types::repository;
 use synveda_types::scope;
 use synveda_types::{
-    Error, IdentityId, IdentityKind, ObserveKind, PackConfig, RecordClass, RecordId, RecordKind,
-    Role, ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+    Error, IdentityId, IdentityKind, ObserveKind, PackConfig, ProjectId, RecordClass, RecordId,
+    RecordKind, RepositoryId, Role, ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+    WorkspaceId,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -218,6 +220,12 @@ const COVERED: &[&str] = &[
     "group_mappings",
     "hierarchy_closure",
     "hierarchy_nodes",
+    // CPR-4 (ADR-0071): the record that makes a creation retryable, and the
+    // three product-level subtype tables below. `idempotency_records` is
+    // tenant-bound like the rest — a key is a client's claim about a request
+    // to *this* tenant, and a cross-tenant lookup would let one tenant learn
+    // that another used a key it guessed.
+    "idempotency_records",
     "identities",
     "memory_usage",
     "observe_events",
@@ -226,6 +234,8 @@ const COVERED: &[&str] = &[
     "policy_pack_assignments",
     "policy_pack_defaults",
     "policy_packs",
+    "project_repositories",
+    "projects",
     "promotion_watermarks",
     "prompts",
     "record_embeddings",
@@ -263,6 +273,7 @@ const COVERED: &[&str] = &[
     "vedaflow_refs",
     "vedaflow_tree_entries",
     "vedaflow_trees",
+    "workspaces",
 ];
 
 /// Discovers every tenant-scoped table (structural definition, ADR-0009: any
@@ -704,6 +715,287 @@ fn the_app_role_cannot_delete_a_scope() {
             err.as_database_error().and_then(|db| db.code()).as_deref(),
             Some("42501"),
             "expected insufficient_privilege, got {err:?}"
+        );
+    });
+}
+
+// ── Workspaces, projects, repositories (CPR-4, ADR-0071) ────────────────────
+
+/// Rows of `tenant` visible through the four CPR-4 tables, in the order
+/// (workspaces, projects, project_repositories, idempotency_records).
+async fn visible_subtype_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64, i64, i64) {
+    let workspaces = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from workspaces where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count workspaces");
+    let projects = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from projects where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count projects");
+    let repositories = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from project_repositories where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count project_repositories");
+    let keys = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from idempotency_records where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count idempotency_records");
+    (workspaces, projects, repositories, keys)
+}
+
+/// Admits a tenant with one workspace, one project, one repository and one
+/// idempotency record. Runs on the (RLS-exempt) test connection.
+async fn seed_subtypes(pool: &PgPool) -> (TenantId, WorkspaceId, ProjectId) {
+    let tenant = TenantId::new();
+    let slug = format!("rlsw-{}", tenant.as_uuid().simple());
+    tenants::create(
+        pool,
+        tenant,
+        &slug,
+        "RLS workspace fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create tenant");
+    let mut tx = pool.begin().await.expect("begin transaction");
+    let workspace = workspaces::create(
+        &mut tx,
+        &workspaces::NewWorkspace {
+            id: WorkspaceId::new(),
+            tenant_id: tenant,
+            slug: "payments".to_owned(),
+            display_name: "Payments".to_owned(),
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("create workspace");
+    let project = projects::create(
+        &mut tx,
+        &projects::NewProject {
+            id: ProjectId::new(),
+            tenant_id: tenant,
+            workspace_id: workspace.id,
+            slug: "ledger".to_owned(),
+            display_name: "Ledger".to_owned(),
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("create project");
+    repositories::attach(
+        &mut *tx,
+        &repositories::NewRepository {
+            id: RepositoryId::new(),
+            tenant_id: tenant,
+            project_id: project.id,
+            identity: repository::identify(
+                Some("https://github.com/acme/ledger.git"),
+                None,
+                None,
+                None,
+            )
+            .expect("canonical identity"),
+            default_branch: Some("main".to_owned()),
+            metadata: serde_json::json!({}),
+            created_by: None,
+        },
+    )
+    .await
+    .expect("attach repository");
+    idempotency::remember(
+        &mut *tx,
+        tenant,
+        "rls-subject",
+        "workspace.create",
+        "rls-key",
+        &[7u8; 32],
+        workspace.id.as_uuid(),
+    )
+    .await
+    .expect("remember an idempotency key");
+    tx.commit().await.expect("commit subtypes");
+    (tenant, workspace.id, project.id)
+}
+
+/// The wrong (or absent) tenant GUC sees zero rows in all four tables; the
+/// right one sees exactly its own.
+#[test]
+fn wrong_tenant_guc_sees_no_workspace_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (victim, _, _) = seed_subtypes(&db.pool).await;
+        let (adversary, _, _) = seed_subtypes(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(
+            visible_subtype_rows(&mut tx, victim).await,
+            (0, 0, 0, 0),
+            "workspace-plane rows leaked across tenants under the wrong GUC"
+        );
+        assert_eq!(visible_subtype_rows(&mut tx, adversary).await, (1, 1, 1, 1));
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_subtype_rows(&mut tx, victim).await,
+            (0, 0, 0, 0),
+            "workspace-plane rows visible without any tenant GUC"
+        );
+    });
+}
+
+/// Writing a workspace for another tenant than the GUC's trips the policy's
+/// WITH CHECK — an application defect, surfaced as internal.
+#[test]
+fn cross_tenant_workspace_write_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _, _) = seed_subtypes(&db.pool).await;
+        let (other, _, _) = seed_subtypes(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let result = workspaces::create(
+            &mut tx,
+            &workspaces::NewWorkspace {
+                id: WorkspaceId::new(),
+                tenant_id: other,
+                slug: "forged".to_owned(),
+                display_name: "Forged".to_owned(),
+                description: None,
+                created_by: None,
+            },
+        )
+        .await;
+        assert!(
+            matches!(result, Err(Error::Internal { .. })),
+            "cross-tenant workspace insert must be rejected by RLS as an \
+             internal defect, got {result:?}"
+        );
+    });
+}
+
+/// An idempotency key is not a cross-tenant oracle: the same (subject,
+/// operation, key) triple in two tenants is two records, and neither tenant
+/// can see the other's.
+#[test]
+fn an_idempotency_key_is_scoped_to_its_tenant() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (one, first_workspace, _) = seed_subtypes(&db.pool).await;
+        let (two, second_workspace, _) = seed_subtypes(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(two)).await;
+        // The fixture already stored ("rls-subject", "workspace.create",
+        // "rls-key") in *both* tenants; each sees only its own resource.
+        let found = idempotency::find(&mut *tx, two, "rls-subject", "workspace.create", "rls-key")
+            .await
+            .expect("find under RLS")
+            .expect("this tenant's record");
+        assert_eq!(found.resource_id, second_workspace.as_uuid());
+        assert_ne!(
+            found.resource_id,
+            first_workspace.as_uuid(),
+            "one tenant's key must never resolve to another tenant's resource"
+        );
+        assert!(
+            idempotency::find(&mut *tx, one, "rls-subject", "workspace.create", "rls-key")
+                .await
+                .expect("find under RLS")
+                .is_none(),
+            "another tenant's key must read as absent"
+        );
+    });
+}
+
+/// The full subtype lifecycle works as `synveda_app` with the right GUC: the
+/// backstop isolates, it does not deny service. Including the two grants that
+/// are deliberately narrower than the rest — `project_repositories` has
+/// DELETE (detaching is the API's own verb) and `workspaces` does not.
+#[test]
+fn same_tenant_workspace_lifecycle_works_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, workspace, project) = seed_subtypes(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let updated = workspaces::update(
+            &mut tx,
+            tenant,
+            workspace,
+            1,
+            &workspaces::WorkspaceUpdate {
+                display_name: Some("Payments platform".to_owned()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("update under RLS");
+        assert_eq!(updated.revision, 2);
+
+        let attached = repositories::for_project(&mut *tx, tenant, project)
+            .await
+            .expect("list under RLS");
+        assert_eq!(attached.len(), 1);
+        assert!(
+            repositories::detach(&mut *tx, tenant, project, attached[0].id)
+                .await
+                .expect("detach under RLS"),
+            "detach must work in-tenant"
+        );
+        tx.commit().await.expect("commit lifecycle");
+    });
+}
+
+/// The application role holds no DELETE on `workspaces` or `projects`:
+/// retiring one is a status transition, and a grant for a path that does not
+/// exist is a grant nobody reviewed.
+#[test]
+fn the_app_role_cannot_delete_a_workspace_or_a_project() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, workspace, project) = seed_subtypes(&db.pool).await;
+
+        // A transaction each: the first refusal aborts its transaction, so a
+        // second statement inside it would fail with 25P02 and the test would
+        // be asserting that Postgres noticed the first failure.
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let err = sqlx::query!("delete from workspaces where id = $1", workspace.as_uuid())
+            .execute(&mut *tx)
+            .await
+            .expect_err("the app role must not delete a workspace");
+        assert_eq!(
+            err.as_database_error().and_then(|db| db.code()).as_deref(),
+            Some("42501"),
+            "workspaces: expected insufficient_privilege, got {err:?}"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let err = sqlx::query!("delete from projects where id = $1", project.as_uuid())
+            .execute(&mut *tx)
+            .await
+            .expect_err("the app role must not delete a project");
+        assert_eq!(
+            err.as_database_error().and_then(|db| db.code()).as_deref(),
+            Some("42501"),
+            "projects: expected insufficient_privilege, got {err:?}"
         );
     });
 }

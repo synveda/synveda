@@ -1,0 +1,1548 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Synveda",
+    "description": "Governed organisational memory and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface added by CPR-4: `/v1/me`, and the workspace, project and repository planes. The rest of the `/v1` surface — observe, inject, recall, proposals, channels, the registries and the admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`.\n\n**Preconditions.** Every update takes a required `expected_revision`. A mismatch is `409` and writes nothing.",
+    "license": {
+      "name": "Proprietary"
+    },
+    "version": "0.2.0"
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "This gateway"
+    }
+  ],
+  "paths": {
+    "/v1/me": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "`GET /v1/me`.",
+        "operationId": "get_me",
+        "responses": {
+          "200": {
+            "description": "The caller, their tenant, their onboarding state, what they can see and what they may do",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{project_id}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "`GET /v1/projects/{project_id}`.",
+        "operationId": "get_project",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "The project's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `project.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "`PATCH /v1/projects/{project_id}`.",
+        "operationId": "update_project",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "The project's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, or nothing to update",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `project.update`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`expected_revision` is not the current revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/repositories": {
+      "get": {
+        "tags": [
+          "repositories"
+        ],
+        "summary": "`GET /v1/projects/{project_id}/repositories`.",
+        "operationId": "list_repositories",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "The project's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the project is about",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `project.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "repositories"
+        ],
+        "summary": "`POST /v1/projects/{project_id}/repositories` — attach a repository.",
+        "operationId": "attach_repository",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "The project's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required. A unique value per request, reused verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachRepositoryBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "This key already attached this repository",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Attached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A filesystem path, a malformed remote, or no `Idempotency-Key`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `project.update`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already attached to this project, or the key was reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/repositories/{repository_id}": {
+      "delete": {
+        "tags": [
+          "repositories"
+        ],
+        "summary": "`DELETE /v1/projects/{project_id}/repositories/{repository_id}`.",
+        "operationId": "detach_repository",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "The project's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "repository_id",
+            "in": "path",
+            "description": "The attachment's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Detached"
+          },
+          "403": {
+            "description": "The PDP denied `project.update`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such attachment on this project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/workspaces": {
+      "get": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "`GET /v1/workspaces` — the tenant's workspaces.",
+        "operationId": "list_workspaces",
+        "responses": {
+          "200": {
+            "description": "The workspaces this caller may read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `workspace.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "`POST /v1/workspaces` — create a workspace and the governed scope it owns.",
+        "operationId": "create_workspace",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required. A unique value per request, reused verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkspaceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "This key already created this workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, or no `Idempotency-Key`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `workspace.create`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The slug is taken, or the key was reused for a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}": {
+      "get": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "`GET /v1/workspaces/{workspace_id}`.",
+        "operationId": "get_workspace",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The workspace's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `workspace.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "`PATCH /v1/workspaces/{workspace_id}` — rename, re-describe or retire.",
+        "operationId": "update_workspace",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The workspace's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, or nothing to update",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `workspace.update`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`expected_revision` is not the current revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/projects": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "`GET /v1/workspaces/{workspace_id}/projects`.",
+        "operationId": "list_projects",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The workspace's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The workspace's projects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `project.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "`POST /v1/workspaces/{workspace_id}/projects`.",
+        "operationId": "create_project",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The workspace's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required. A unique value per request, reused verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "This key already created this project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, or no `Idempotency-Key`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `project.create`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The slug is taken, the workspace is archived, or the key was reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiErrorBody": {
+        "type": "object",
+        "description": "The taxonomy error body, declared for the OpenAPI document.\n\nA schema-only mirror of `synveda_types::Error`'s serialised form, which is\n`{\"kind\": \"...\", ...}` with a per-variant remainder. It exists because the\ncontract has to say what a 4xx body looks like and the taxonomy lives two\ncrates down, where `utoipa` deliberately does not reach — the OpenAPI\nderive is a property of the surface, and `synveda-types` is not one.",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "action": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`policy_denied` only: the action that was attempted."
+          },
+          "entity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`not_found` only: what was looked up."
+          },
+          "kind": {
+            "type": "string",
+            "description": "The stable machine-readable code — `invalid`, `conflict`, `not_found`,\n`policy_denied`, …"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Present on most variants; what went wrong, safe to show a caller."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`policy_denied` only: which policy produced the denial."
+          },
+          "resource": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`policy_denied` only: what was acted on."
+          }
+        }
+      },
+      "AttachRepositoryBody": {
+        "type": "object",
+        "description": "`POST /v1/projects/{project_id}/repositories`.\n\nThe server derives `provider`, `canonical_uri`, `repository_owner` and\n`repository_name`; a client sends what it knows and never what it\nconcluded, because two clients concluding separately is how one repository\nbecomes two rows.",
+        "properties": {
+          "default_branch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Advisory default branch. Nothing in the product resolves it."
+          },
+          "local_fingerprint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A stable content id for a repository with no remote — a git\nroot-commit object id, 40–128 hex characters. Never a path."
+          },
+          "metadata": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Caller-supplied labelling bag; a JSON object, at most 8 KiB encoded."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to call it. Derived from the remote when there is one; **required**\nwhen there is not, because a fingerprint names nothing a human reads."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "github",
+              "gitlab",
+              "bitbucket",
+              "azure_devops",
+              "generic_git",
+              "local"
+            ]
+          },
+          "remote_uri": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The remote, in any form git accepts: `https://host/owner/name`,\n`git@host:owner/name.git`, `ssh://git@host/owner/name`. **The\nidentity**, whenever it is known. A filesystem path is refused."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateProjectBody": {
+        "type": "object",
+        "description": "`POST /v1/workspaces/{workspace_id}/projects`.",
+        "required": [
+          "slug",
+          "display_name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional prose."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Workspace-unique handle, same grammar as a workspace slug."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateWorkspaceBody": {
+        "type": "object",
+        "description": "`POST /v1/workspaces`.",
+        "required": [
+          "slug",
+          "display_name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional prose. Blank is refused; omit it instead."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Tenant-unique handle: `^[a-z0-9][a-z0-9-]{0,62}$`. Becomes the owned\nscope's slug too, and is immutable afterwards."
+          }
+        },
+        "additionalProperties": false
+      },
+      "MeView": {
+        "type": "object",
+        "description": "Everything a client needs before it renders anything.",
+        "required": [
+          "principal",
+          "tenant",
+          "onboarding",
+          "workspaces",
+          "projects",
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/TenantCapabilities",
+            "description": "What this caller may do on the tenant plane, asked of the PDP.\n\n**A forecast, never a grant** (ADR-0058 decision 2): nothing downstream\nreads this to decide anything, every act still takes its own decision\nat its own seam, and a client uses this to choose what to *offer*."
+          },
+          "onboarding": {
+            "$ref": "#/components/schemas/OnboardingView",
+            "description": "Where they are in setting up — the server's answer, not a client's\ninference from an empty list."
+          },
+          "principal": {
+            "$ref": "#/components/schemas/PrincipalView",
+            "description": "Who is calling."
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectView"
+            },
+            "description": "Every project this caller may read, by workspace then slug. Flat rather\nthan nested under its workspace: a client that wants the tree has\n`workspace_id` on every row, and one that wants a recent-projects list\nwould otherwise have to flatten what we just nested."
+          },
+          "tenant": {
+            "$ref": "#/components/schemas/TenantView",
+            "description": "The tenant they resolved to."
+          },
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceView"
+            },
+            "description": "Every workspace this caller may read, by slug."
+          }
+        }
+      },
+      "OnboardingState": {
+        "type": "string",
+        "description": "The onboarding vocabulary. Closed, so a client's branch is exhaustive and\na new state is a compile error somewhere rather than a silently unhandled\nstring.",
+        "enum": [
+          "blocked",
+          "needs_workspace",
+          "needs_project",
+          "ready"
+        ]
+      },
+      "OnboardingView": {
+        "type": "object",
+        "description": "How far along setting up this caller is.",
+        "required": [
+          "state",
+          "workspace_count",
+          "project_count"
+        ],
+        "properties": {
+          "project_count": {
+            "type": "integer",
+            "description": "How many projects this caller can see.",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/OnboardingState",
+            "description": "The single word a client branches on."
+          },
+          "tenant_scope_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The tenant's root scope, once anything has needed one. Absent on a\ndeployment where nobody has created a workspace yet: the root is minted\nby the first thing that needs a parent, so that nobody is asked to\ndeclare an organisation before they can hold a record."
+          },
+          "workspace_count": {
+            "type": "integer",
+            "description": "How many workspaces this caller can see.",
+            "minimum": 0
+          }
+        }
+      },
+      "PrincipalView": {
+        "type": "object",
+        "description": "The authenticated principal.",
+        "required": [
+          "subject",
+          "quarantined"
+        ],
+        "properties": {
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The IdP's `name` claim at provisioning time, if any."
+          },
+          "identity_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The identity row, when this subject has provisioned one. Absent for a\ndev token and for a service client that never completed login."
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`human` or `service`."
+          },
+          "quarantined": {
+            "type": "boolean",
+            "description": "Whether the base layer forbids this caller everything (AUTH-2,\nADR-0013 decision 5). True also for an IdP subject that never\nprovisioned — fail closed."
+          },
+          "subject": {
+            "type": "string",
+            "description": "The verified token's `sub` claim — the name every audit event, role\nbinding and idempotency key is keyed by."
+          }
+        }
+      },
+      "ProjectList": {
+        "type": "object",
+        "description": "The project listing.",
+        "required": [
+          "projects"
+        ],
+        "properties": {
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectView"
+            },
+            "description": "The workspace's projects, by slug. Archived ones included."
+          }
+        }
+      },
+      "ProjectView": {
+        "type": "object",
+        "description": "A project, as the API serves it.",
+        "required": [
+          "id",
+          "workspace_id",
+          "scope_id",
+          "slug",
+          "display_name",
+          "status",
+          "revision",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was created."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who created it."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional prose."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The project's stable id."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The revision an update must name as its precondition."
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The governed scope this project owns, beneath the workspace's."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Workspace-unique handle, identical to the scope's slug. Immutable."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it last changed."
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The workspace it belongs to. Immutable."
+          }
+        }
+      },
+      "RepositoryList": {
+        "type": "object",
+        "description": "The repository listing.",
+        "required": [
+          "repositories"
+        ],
+        "properties": {
+          "repositories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RepositoryView"
+            },
+            "description": "What the project is about, oldest attachment first."
+          }
+        }
+      },
+      "RepositoryView": {
+        "type": "object",
+        "description": "A repository attached to a project, as the API serves it.",
+        "required": [
+          "id",
+          "project_id",
+          "provider",
+          "canonical_uri",
+          "repository_name",
+          "metadata",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "canonical_uri": {
+            "type": "string",
+            "description": "**The identity**: canonical, credential-free, and never a filesystem\npath. Two clients that describe one repository differently are served\nthe same value here, which is what makes it an identity."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was attached."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who attached it."
+          },
+          "default_branch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The advisory default branch."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The attachment's id — the handle `DELETE` takes."
+          },
+          "local_fingerprint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The stable content fingerprint of a local checkout, when one was given."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "The caller's labelling bag, echoed back."
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The project it belongs to."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "github",
+              "gitlab",
+              "bitbucket",
+              "azure_devops",
+              "generic_git",
+              "local"
+            ]
+          },
+          "repository_name": {
+            "type": "string",
+            "description": "The repository's own name."
+          },
+          "repository_owner": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The owning path on the host, when the remote had one."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it last changed."
+          }
+        }
+      },
+      "TenantCapabilities": {
+        "type": "object",
+        "description": "What the caller may do on the **tenant** plane — `whoami`'s block, and\nsince CPR-4 `/v1/me`'s.\n\nCarries a `ToSchema` because `/v1/me` embeds it and that route is on the\nOpenAPI contract. The three fields are declared to the document by\n`value_type` rather than derived: `Role` and the `&'static str` map keys\nlive in `synveda-types`, where `utoipa` deliberately does not reach — a\ncontract is a property of the surface, and no crate below the gateway has\none.",
+        "required": [
+          "roles",
+          "actions",
+          "role_assign"
+        ],
+        "properties": {
+          "actions": {
+            "type": "object",
+            "description": "Every operand-free tenant-plane action, by its stable machine name.",
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "role_assign": {
+            "type": "object",
+            "description": "`RoleAssign` per role, because it fails closed without\n`context.grant`.",
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The caller's tenant-wide effective roles. Node bindings are absent\nby construction: [`effective_roles_at`] keeps only the tenant-wide\nrows for a tenant resource, which is the same rule the decisions\nbeside it ran under."
+          }
+        }
+      },
+      "TenantView": {
+        "type": "object",
+        "description": "The tenant, as this plane serves it.",
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The isolation key."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Human-stable handle."
+          },
+          "status": {
+            "type": "string",
+            "description": "`active` or `suspended`."
+          }
+        }
+      },
+      "UpdateBody": {
+        "type": "object",
+        "description": "`PATCH /v1/workspaces/{workspace_id}` and\n`PATCH /v1/projects/{project_id}`.\n\n`description` has three cases and the wire says them apart: absent leaves\nit alone, `null` clears it, a string replaces it.",
+        "required": [
+          "expected_revision"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New description; `null` clears it."
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New display name."
+          },
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The revision the caller last saw. Required: an update without a\nprecondition is a last-writer-wins update, which is the failure this\nfield exists to remove rather than a convenience it offers."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorkspaceList": {
+        "type": "object",
+        "description": "The workspace listing.\n\nAn envelope rather than a bare array, so that paging can arrive without\nbreaking every client — and so that a future `not_answered` has somewhere\nto live, which is the shape the capability probe already uses for the same\nreason (ADR-0058 decision 5).",
+        "required": [
+          "workspaces"
+        ],
+        "properties": {
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceView"
+            },
+            "description": "Every workspace the caller may read, by slug. Archived ones included:\na listing that silently omitted them would make an archived workspace\nindistinguishable from one that never existed."
+          }
+        }
+      },
+      "WorkspaceView": {
+        "type": "object",
+        "description": "A workspace, as the API serves it.\n\nA view rather than `synveda_types::workspace::Workspace` itself, because\nthis is the **contract** and the domain type is not: the two agree today\nand the day they need to differ — a computed field, a withheld one — the\ncontract must be able to say so without the storage type moving. `tenant_id`\nis deliberately absent: every `/v1` response is already scoped to the\ncaller's tenant, and echoing it invites a client to key on it.",
+        "required": [
+          "id",
+          "scope_id",
+          "slug",
+          "display_name",
+          "status",
+          "revision",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was created."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who created it; absent when the deployment did."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional prose."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The workspace's stable id."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The revision an update must name as its precondition."
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The governed scope this workspace owns — what policy, role bindings and\nevery asset attach to."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Tenant-unique handle, identical to the scope's slug. Immutable."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it last changed."
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "An OIDC access token from `synveda login`, or the console session cookie the gateway sets on its own origin."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "me",
+      "description": "The caller, their tenant and their onboarding state"
+    },
+    {
+      "name": "workspaces",
+      "description": "Collaboration spaces, each owning a governed scope"
+    },
+    {
+      "name": "projects",
+      "description": "Units of work inside a workspace"
+    },
+    {
+      "name": "repositories",
+      "description": "What a project is about, by canonical identity"
+    }
+  ]
+}

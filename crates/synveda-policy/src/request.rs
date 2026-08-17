@@ -53,6 +53,37 @@ pub enum Action {
     HierarchyUpdate,
     /// Delete the resource node.
     HierarchyDelete,
+    /// Read a workspace, or list the tenant's workspaces (CPR-4, ADR-0071
+    /// decision 3).
+    ///
+    /// Structure rather than content, which is why the shipped packs grant it
+    /// to the content roles as well as the admin ones: a workspace's *name*
+    /// discloses nothing about what is in it, and everything that is in it
+    /// stays behind the tiered reads.
+    WorkspaceRead,
+    /// Create a workspace — and, with it, the governed scope the workspace
+    /// owns.
+    WorkspaceCreate,
+    /// Rename, re-describe or retire a workspace.
+    ///
+    /// Retirement is a status transition under this action rather than a
+    /// delete action of its own: a workspace is what sessions, versions and
+    /// audit events name, so nothing removes one, and a delete authority
+    /// nobody can exercise would be a lie in the vocabulary.
+    WorkspaceUpdate,
+    /// Read a project, list a workspace's projects, or list the repositories
+    /// a project is about.
+    ProjectRead,
+    /// Create a project inside a workspace.
+    ProjectCreate,
+    /// Rename, re-describe or retire a project — and attach or detach the
+    /// repositories it is about.
+    ///
+    /// Repository attachment takes this action rather than one of its own:
+    /// what a project is *about* is part of what the project is, and a
+    /// separate authority over it would be one nobody could describe without
+    /// describing this one.
+    ProjectUpdate,
     /// Include memories attached to the resource scope in the caller's
     /// composition — the seam inject/recall stand on (AUTHZ-2, ADR-0014
     /// decision 5).
@@ -334,11 +365,17 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 34] = [
+    pub const ALL: [Action; 40] = [
         Action::HierarchyCreate,
         Action::HierarchyRead,
         Action::HierarchyUpdate,
         Action::HierarchyDelete,
+        Action::WorkspaceRead,
+        Action::WorkspaceCreate,
+        Action::WorkspaceUpdate,
+        Action::ProjectRead,
+        Action::ProjectCreate,
+        Action::ProjectUpdate,
         Action::MemoryRead,
         Action::MemoryWrite,
         Action::MemoryClassify,
@@ -387,11 +424,17 @@ impl Action {
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 26] = [
+    pub const PROBED_AT_SCOPE: [Action; 32] = [
         Action::HierarchyCreate,
         Action::HierarchyRead,
         Action::HierarchyUpdate,
         Action::HierarchyDelete,
+        Action::WorkspaceRead,
+        Action::WorkspaceCreate,
+        Action::WorkspaceUpdate,
+        Action::ProjectRead,
+        Action::ProjectCreate,
+        Action::ProjectUpdate,
         Action::MemoryWrite,
         Action::MemoryClassify,
         Action::PromptWrite,
@@ -422,11 +465,17 @@ impl Action {
     /// much shorter than the scope set and that is the honest shape: most
     /// of this vocabulary is about a node, and an action that is only ever
     /// taken at a node has no tenant-level answer to give.
-    pub const PROBED_AT_TENANT: [Action; 12] = [
+    pub const PROBED_AT_TENANT: [Action; 18] = [
         Action::HierarchyCreate,
         Action::HierarchyRead,
         Action::HierarchyUpdate,
         Action::HierarchyDelete,
+        Action::WorkspaceRead,
+        Action::WorkspaceCreate,
+        Action::WorkspaceUpdate,
+        Action::ProjectRead,
+        Action::ProjectCreate,
+        Action::ProjectUpdate,
         Action::QuarantineRead,
         Action::PolicyRead,
         Action::PolicyAssign,
@@ -460,6 +509,12 @@ impl Action {
             Action::HierarchyRead => "hierarchy.read",
             Action::HierarchyUpdate => "hierarchy.update",
             Action::HierarchyDelete => "hierarchy.delete",
+            Action::WorkspaceRead => "workspace.read",
+            Action::WorkspaceCreate => "workspace.create",
+            Action::WorkspaceUpdate => "workspace.update",
+            Action::ProjectRead => "project.read",
+            Action::ProjectCreate => "project.create",
+            Action::ProjectUpdate => "project.update",
             Action::MemoryRead => "memory.read",
             Action::MemoryWrite => "memory.write",
             Action::MemoryClassify => "memory.classify",
@@ -500,6 +555,12 @@ impl Action {
             Action::HierarchyRead => "HierarchyRead",
             Action::HierarchyUpdate => "HierarchyUpdate",
             Action::HierarchyDelete => "HierarchyDelete",
+            Action::WorkspaceRead => "WorkspaceRead",
+            Action::WorkspaceCreate => "WorkspaceCreate",
+            Action::WorkspaceUpdate => "WorkspaceUpdate",
+            Action::ProjectRead => "ProjectRead",
+            Action::ProjectCreate => "ProjectCreate",
+            Action::ProjectUpdate => "ProjectUpdate",
             Action::MemoryRead => "MemoryRead",
             Action::MemoryWrite => "MemoryWrite",
             Action::MemoryClassify => "MemoryClassify",

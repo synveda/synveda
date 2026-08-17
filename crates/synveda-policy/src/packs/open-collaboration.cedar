@@ -21,7 +21,16 @@ permit (
         Synveda::Action::"HierarchyDelete",
         Synveda::Action::"PolicyAssign",
         Synveda::Action::"RoleAssign",
-        Synveda::Action::"ServiceIdentityManage"
+        Synveda::Action::"ServiceIdentityManage",
+        // Making and retiring workspaces and projects is structural
+        // administration, priced with the rest of it (CPR-4, ADR-0071
+        // decision 3). There is no delete action to name: retiring a
+        // workspace is a status transition under WorkspaceUpdate, because
+        // a workspace is what sessions, versions and audit events name.
+        Synveda::Action::"WorkspaceCreate",
+        Synveda::Action::"WorkspaceUpdate",
+        Synveda::Action::"ProjectCreate",
+        Synveda::Action::"ProjectUpdate"
     ],
     resource
 ) when {
@@ -39,12 +48,35 @@ permit (
         Synveda::Action::"PolicyRead",
         Synveda::Action::"RoleRead",
         Synveda::Action::"ServiceIdentityRead",
-        Synveda::Action::"AuditRead"
+        Synveda::Action::"AuditRead",
+        Synveda::Action::"WorkspaceRead",
+        Synveda::Action::"ProjectRead"
     ],
     resource
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["steward", "org-admin", "auditor"])
+};
+
+// Workspaces and projects are **structure, not content** (CPR-4, ADR-0071
+// decision 3), so the content roles read them too. This is the one place
+// this feature widens a pack, and CNSL-2's finding is the argument: under
+// every shipped pack `HierarchyRead` is steward/org-admin/auditor only, so
+// a curator — the role the review inbox exists for — could not see the
+// tree at all. A workspace's *name* discloses nothing about what is in it,
+// and a contributor who cannot see the workspace they contribute to cannot
+// use the product. What is inside stays behind MemoryRead, PromptRead,
+// ContextPackRead and SkillRead, tier by tier, exactly as before.
+permit (
+    principal,
+    action in [
+        Synveda::Action::"WorkspaceRead",
+        Synveda::Action::"ProjectRead"
+    ],
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "contributor", "curator"])
 };
 
 // The membership floor: own chain — covers the principal's personal

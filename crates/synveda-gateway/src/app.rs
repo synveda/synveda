@@ -198,6 +198,45 @@ pub fn router(state: AppState) -> Router {
     // operation through the PDP inside its handlers (AUTHZ-1, ADR-0012).
     let authenticated = Router::new()
         .route("/v1/whoami", get(whoami))
+        // The context platform's own plane (CPR-4, ADR-0071). `/v1/me` is the
+        // one call a client makes first: who, which tenant, what exists, what
+        // is missing, and what this caller may do — so a client never has to
+        // infer "is this person set up yet" from a 404.
+        .route("/v1/me", get(crate::me::get))
+        // Workspaces and projects are product-level subtypes of a governed
+        // scope: creating one creates its scope in the same transaction, and
+        // there is no personal/team/enterprise variant of either row
+        // (ADR-0068 decision 1). Creation takes a required `Idempotency-Key`;
+        // update takes a required `expected_revision`.
+        .route(
+            "/v1/workspaces",
+            get(crate::workspaces::list).post(crate::workspaces::create),
+        )
+        .route(
+            "/v1/workspaces/{workspace_id}",
+            get(crate::workspaces::get).patch(crate::workspaces::update),
+        )
+        .route(
+            "/v1/workspaces/{workspace_id}/projects",
+            get(crate::workspaces::list_projects).post(crate::workspaces::create_project),
+        )
+        .route(
+            "/v1/projects/{project_id}",
+            get(crate::workspaces::get_project).patch(crate::workspaces::update_project),
+        )
+        // What a project is *about*, addressed by canonical identity rather
+        // than by where a checkout happens to sit — a filesystem path is
+        // refused by name (ADR-0071 decision 4). There is no update verb:
+        // re-pointing a project at a different repository is a detach and an
+        // attach, so the chain records two acts.
+        .route(
+            "/v1/projects/{project_id}/repositories",
+            get(crate::workspaces::list_repositories).post(crate::workspaces::attach_repository),
+        )
+        .route(
+            "/v1/projects/{project_id}/repositories/{repository_id}",
+            axum::routing::delete(crate::workspaces::detach_repository),
+        )
         .route("/v1/hierarchy/nodes", post(hierarchy::create))
         .route("/v1/hierarchy/root", get(hierarchy::root))
         .route(

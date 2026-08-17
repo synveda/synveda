@@ -397,6 +397,112 @@ pub async fn get(
     row.map(TryInto::try_into).transpose()
 }
 
+/// Returns the tenant's root scope, creating it from the tenant's own slug
+/// and name if it is not there yet.
+///
+/// The root is the one scope nobody asks for: a person creating their first
+/// workspace has no reason to have created a tenant scope first, and asking
+/// them to is the "declare an organisation before the product will hold a
+/// record" this whole programme exists to remove. So the first thing that
+/// needs a parent mints it.
+///
+/// **Nothing is read from the old hierarchy to do this** (ADR-0068 decision 3;
+/// ADR-0070's "synchronises nothing"). The slug and the display name come
+/// from the `tenants` row — the isolation boundary both models share and
+/// neither owns — so no row of `hierarchy_nodes` is consulted, translated or
+/// mirrored, then or ever.
+///
+/// Concurrency: two callers racing both try the insert and the
+/// one-root-per-tenant unique index admits one. The loser sees
+/// [`Error::Conflict`] and re-reads the winner's row, which is why this takes
+/// a connection and reports the outcome rather than simply returning the
+/// scope — a caller inside a transaction that has already written cannot
+/// swallow a conflict, and this one does not hide that it happened.
+///
+/// Must run inside a transaction (see module docs).
+#[tracing::instrument(
+    name = "store.scopes.ensure_tenant_root",
+    skip_all,
+    fields(tenant.id = %tenant_id, scope.created = tracing::field::Empty),
+    err(Display)
+)]
+pub async fn ensure_tenant_root(conn: &mut PgConnection, tenant_id: TenantId) -> Result<Scope> {
+    if let Some(root) = tenant_root(&mut *conn, tenant_id).await? {
+        tracing::Span::current().record("scope.created", false);
+        return Ok(root);
+    }
+    let tenant = crate::tenants::by_id(&mut *conn, tenant_id)
+        .await?
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("tenant {tenant_id}"),
+        })?;
+    let new = NewScope {
+        id: ScopeId::new(),
+        tenant_id,
+        kind: ScopeKind::Tenant,
+        parent_scope_id: None,
+        slug: tenant.slug.clone(),
+        display_name: tenant.name.clone(),
+        attributes: serde_json::json!({}),
+        // No author: the deployment created it, and inventing a synthetic one
+        // would lose that distinction (0040's header).
+        created_by: None,
+    };
+    match create(&mut *conn, &new).await {
+        Ok(root) => {
+            tracing::Span::current().record("scope.created", true);
+            Ok(root)
+        }
+        Err(Error::Conflict { .. }) => {
+            // The unique index admitted somebody else. Their row is the root;
+            // this transaction is now poisoned, so the caller retries.
+            Err(Error::Conflict {
+                message: format!("tenant {tenant_id} root scope was created concurrently"),
+            })
+        }
+        Err(other) => Err(other),
+    }
+}
+
+/// Sets a scope's status. The one transition in the substrate, and it exists
+/// because a subtype's lifecycle and its scope's must not disagree: an
+/// archived workspace whose scope still reads `active` would compose, resolve
+/// and accept writes exactly as before.
+///
+/// Returns [`Error::NotFound`] for a scope that is not this tenant's.
+#[tracing::instrument(
+    name = "store.scopes.set_status",
+    skip_all,
+    fields(tenant.id = %tenant_id, scope.id = %id, scope.status = %status),
+    err(Display)
+)]
+pub async fn set_status(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    id: ScopeId,
+    status: ScopeStatus,
+) -> Result<Scope> {
+    let row = sqlx::query_as!(
+        ScopeRow,
+        r#"
+        update scopes
+           set status = $3, updated_at = now()
+         where id = $1 and tenant_id = $2
+        returning id, tenant_id, kind, parent_scope_id, slug, display_name,
+                  status, attributes, created_by, created_at, updated_at
+        "#,
+        id.as_uuid(),
+        tenant_id.as_uuid(),
+        status.as_str(),
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    let scope: Scope = row.ok_or_else(|| not_found(id))?.try_into()?;
+    metrics::counter!(SCOPE_MUTATIONS_TOTAL, "operation" => "status").increment(1);
+    Ok(scope)
+}
+
 /// Fetches a tenant's root scope, if one has been created.
 #[tracing::instrument(
     name = "store.scopes.tenant_root",

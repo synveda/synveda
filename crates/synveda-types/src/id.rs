@@ -151,3 +151,30 @@ define_id!(
     /// client authenticates with (AUTH-4, ADR-0059 decision 13).
     ScimCredentialId
 );
+
+define_id!(
+    /// Identifies a workspace — the product-level collaboration space that
+    /// owns a `workspace`-shaped governed scope (CPR-4, ADR-0071).
+    ///
+    /// Distinct from the [`ScopeId`] it carries, deliberately: the scope is
+    /// what policy, bindings and assets attach to, and the workspace is the
+    /// product noun a person names. One is not the other's alias, and a
+    /// route that took a scope id where a workspace id belongs would be
+    /// admitting a project's scope by mistake.
+    WorkspaceId
+);
+
+define_id!(
+    /// Identifies a project — a unit of work inside a workspace, owning a
+    /// `project`-shaped governed scope (CPR-4, ADR-0071).
+    ProjectId
+);
+
+define_id!(
+    /// Identifies one repository attached to a project (CPR-4, ADR-0071).
+    ///
+    /// The row's *identity* to a human is its canonical URI; this is the
+    /// handle the API deletes by, so re-attaching a repository somebody
+    /// detached is a new row rather than a resurrection.
+    RepositoryId
+);

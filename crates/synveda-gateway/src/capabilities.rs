@@ -143,15 +143,29 @@ async fn respond<T: IntoResponse>(
     }
 }
 
-/// What the caller may do on the **tenant** plane — `whoami`'s block.
-#[derive(Serialize)]
-pub(crate) struct TenantCapabilities {
+/// What the caller may do on the **tenant** plane — `whoami`'s block, and
+/// since CPR-4 `/v1/me`'s.
+///
+/// Carries a `ToSchema` because `/v1/me` embeds it and that route is on the
+/// OpenAPI contract. The three fields are declared to the document by
+/// `value_type` rather than derived: `Role` and the `&'static str` map keys
+/// live in `synveda-types`, where `utoipa` deliberately does not reach — a
+/// contract is a property of the surface, and no crate below the gateway has
+/// one.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct TenantCapabilities {
     /// The caller's tenant-wide effective roles. Node bindings are absent
     /// by construction: [`effective_roles_at`] keeps only the tenant-wide
     /// rows for a tenant resource, which is the same rule the decisions
     /// beside it ran under.
+    #[schema(value_type = Vec<String>)]
     roles: Vec<Role>,
+    /// Every operand-free tenant-plane action, by its stable machine name.
+    #[schema(value_type = BTreeMap<String, bool>)]
     actions: BTreeMap<&'static str, bool>,
+    /// `RoleAssign` per role, because it fails closed without
+    /// `context.grant`.
+    #[schema(value_type = BTreeMap<String, bool>)]
     role_assign: BTreeMap<&'static str, bool>,
 }
 
@@ -169,7 +183,7 @@ pub(crate) struct TenantCapabilities {
 /// off the chain — and a per-request event on the call a console makes on
 /// every page load would be the row flood decision 4 exists to prevent,
 /// arriving through the other door.
-pub(crate) async fn at_tenant(state: &AppState) -> Result<TenantCapabilities> {
+pub async fn at_tenant(state: &AppState) -> Result<TenantCapabilities> {
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let input = authz::gather(state, &mut tx, None).await?;

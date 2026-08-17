@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update projects\n           set display_name = coalesce($4, display_name),\n               description  = case when $5 then $6 else description end,\n               status       = coalesce($7, status),\n               revision     = revision + 1,\n               updated_at   = now()\n         where id = $1 and tenant_id = $2 and revision = $3\n        returning id, tenant_id, workspace_id, scope_id, slug, display_name,\n                  description, status, revision, created_by, created_at, updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "slug",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Text",
+        "Bool",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "f922054e62137b4be76d81f2174244ea91a8c22b5e2683505a1fa274eb24cf58"
+}

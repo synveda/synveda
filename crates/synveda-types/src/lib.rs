@@ -27,6 +27,10 @@ mod prompt;
 mod proposal;
 mod record;
 mod redaction;
+// Canonical repository identity (CPR-4, ADR-0071 decision 4). Public as a
+// module so `repository::identify` reads as what it is at every call site —
+// the one place two clients agree on what "the same repository" means.
+pub mod repository;
 mod retention;
 mod role;
 // Public rather than re-exported at the root, and for exactly as long as the
@@ -42,6 +46,11 @@ mod skill;
 mod skillquality;
 mod skillscan;
 mod tenant;
+// The two product-level subtypes of a governed scope (CPR-4, ADR-0071).
+// Public as a module for `repository`'s reason and one of its own: `Project`
+// and `Workspace` are ordinary nouns, and the module path is what says these
+// are Synveda's rather than somebody else's.
+pub mod workspace;
 
 pub use approval::{
     ApprovalMatrix, ApprovalRequirement, ApprovalRule, CastApproval, Outstanding, RequiredAudit,
@@ -59,7 +68,8 @@ pub use graph::{Depth, Graph};
 pub use hierarchy::{HierarchyNode, ScopeKind};
 pub use id::{
     DirectoryGroupId, DirectoryUserId, GraphEdgeId, GraphVertexId, IdentityId, LapseId,
-    ObserveEventId, ProposalId, RecordId, ScimCredentialId, ScopeId, TenantId,
+    ObserveEventId, ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId, ScopeId,
+    TenantId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use lapse::{

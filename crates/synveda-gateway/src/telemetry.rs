@@ -38,6 +38,14 @@ pub const HTTP_REQUEST_DURATION_SECONDS: &str = "synveda_http_request_duration_s
 /// emission point once the audit log lands.
 pub const HIERARCHY_OPERATIONS_TOTAL: &str = "synveda_hierarchy_operations_total";
 
+/// The workspace/project/repository plane's operations (CPR-4, ADR-0071),
+/// labelled by `op` (`me`, `workspace.list`, `workspace.create`,
+/// `workspace.get`, `workspace.update`, `project.list`, `project.create`,
+/// `project.get`, `project.update`, `repository.list`, `repository.attach`,
+/// `repository.detach`) and `outcome` (`ok`, `rejected`, `error`) — the same
+/// three-outcome taxonomy every other admin plane uses.
+pub const WORKSPACE_OPERATIONS_TOTAL: &str = "synveda_workspace_operations_total";
+
 /// Policy pack reload sweeps' per-pack outcomes: `installed`, `removed`,
 /// `unchanged`, or `error` (a stored pack that fails to compile keeps the
 /// last-good compile in force — ADR-0012 decision 5). AUTHZ-1/AUTHZ-2.
@@ -409,6 +417,12 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         HIERARCHY_OPERATIONS_TOTAL,
         "Hierarchy admin operations by op and outcome (ok/rejected/error)"
     );
+    // CPR-4 counters (ADR-0071): the plane's own operations here, and the
+    // store-side mutation counters beside the scope one below.
+    metrics::describe_counter!(
+        WORKSPACE_OPERATIONS_TOTAL,
+        "Workspace, project and repository operations by op and outcome (ok/rejected/error)"
+    );
     // AUTHZ-1 counters (ADR-0012): the decision counter is emitted in
     // synveda-policy through the facade, the reload counter in the
     // gateway's refresher; both described here where the recorder lives.
@@ -535,7 +549,19 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     // so this series is expected to be absent rather than zero until then.
     metrics::describe_counter!(
         synveda_store::scopes::SCOPE_MUTATIONS_TOTAL,
-        "Scope tree mutations by operation (create/rename/move)"
+        "Scope tree mutations by operation (create/rename/move/status)"
+    );
+    // CPR-4 (ADR-0071): the product-level subtypes above those scopes.
+    // Unlike the scope counter above, these series appear as soon as anybody
+    // uses the product — /v1/workspaces is the route the scope services
+    // finally have.
+    metrics::describe_counter!(
+        synveda_store::workspaces::SUBTYPE_MUTATIONS_TOTAL,
+        "Workspace and project mutations by subtype and operation (create/update)"
+    );
+    metrics::describe_counter!(
+        synveda_store::repositories::REPOSITORY_MUTATIONS_TOTAL,
+        "Repository attachments by operation (attach/detach)"
     );
     // TEN-4 key plane (ADR-0064). Emitted in synveda-store and the gateway,
     // described here where the recorder lives (ADR-0007).

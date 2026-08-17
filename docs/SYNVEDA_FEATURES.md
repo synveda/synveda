@@ -1160,6 +1160,60 @@ CPR-3  Generic governed scope substrate (M)
   ancestry the move left; and both tables join the adversarial RLS suite's completeness
   inventory with a wrong-GUC read seeing nothing, a cross-tenant write rejected, the whole
   lifecycle working as `synveda_app`, and the app role holding no DELETE.
+CPR-4  Workspaces, projects & canonical repository identity (L)
+  Filed 2026-08-17 by Prompt 4 of the CPR programme. CPR-3 built the scope substrate and gave
+  it no API on purpose; two of its five shapes — `workspace` and `project` — were named by
+  the vocabulary and had nothing behind them. This puts something behind them, and it is the
+  programme's first public surface. `workspaces`, `projects` and `project_repositories` as
+  **product-level subtypes of a governed scope**: a workspace owns one workspace-shaped scope
+  under the tenant root, a project owns one project-shaped scope under its workspace's, and
+  both are created **in the same transaction as their scope**, so the outcomes are both and
+  neither — there is no compensating delete anywhere. The tenant root is minted by the first
+  thing that needs a parent, from the `tenants` row and never from the old hierarchy, so a
+  person's first act is `POST /v1/workspaces` and nobody is asked to declare an organisation.
+  One row shape for one person and for a bank: no personal/team tables and no mode branch
+  (ADR-0068 decision 1). The rules holding the subtype and its scope together are foreign
+  keys rather than service code, ADR-0070 decision 2 applied one level up — the scope's shape,
+  the project's scope sitting under its workspace's, and the fact that a subtype's slug **is**
+  its scope's slug, so a product path and a scope path cannot diverge. Twelve routes: `GET
+  /v1/me` (the client's first call — principal, tenant, accessible workspaces and projects,
+  effective capabilities, and an onboarding state the **server** computes rather than each
+  client inferring from an empty list), the workspace and project CRUD, and repository
+  attach/list/detach. Creation takes a **required** `Idempotency-Key` and update a **required**
+  `expected_revision`, because this surface's first callers are retrying agents rather than
+  people clicking buttons. Repository identity is canonical: transports, credentials, ports
+  and `.git` collapse, so four ways of writing one repository are one row — and a filesystem
+  path is **refused by name**, in the type layer with a message and in a CHECK constraint
+  behind it, because a path differs per machine and changes when somebody moves a directory.
+  A repository with no remote gets a `git+fingerprint:<hex>` identity from a stable content id
+  the client computes. Six new Cedar actions, in all three packs; decisions are anchored at
+  the tenant until Prompt 5 re-cuts the PDP over generic scopes, which is the largest thing
+  this feature defers and is stated rather than implied. And the product gets its **first
+  OpenAPI contract**, derived from the handlers rather than written beside them, with the
+  console's TypeScript generated from it. ADR-0071.
+  AC: creating a workspace creates its scope in one transaction under the tenant root, and a
+  project's under its workspace's, with the tenant root minted on the way past — and a failed
+  creation leaves **neither** an orphan subtype nor an orphan scope, asserted for both
+  subtypes through the failure mode that fires after the scope insert; a subtype's slug and
+  its scope's slug cannot disagree, a workspace cannot own a project-shaped scope, a project
+  cannot move between workspaces and its scope cannot be moved out from under it — each
+  refused against direct SQL, not only through the services; a revision cannot be rewound or
+  skipped by anything holding a connection, a stale `expected_revision` is a 409 that writes
+  nothing, and another tenant's subtype is a 404 rather than a revision oracle; an archived
+  workspace takes no new projects and a status change is mirrored onto the owned scope both
+  ways; a description can be set, cleared and left alone as three distinct requests; one
+  repository written four ways is one attachment and the second is a conflict, a filesystem
+  path is refused with a message naming what to send instead, a repository with no remote is
+  identified by its fingerprint, a handle from one project cannot address another's, and two
+  projects may be about the same repository; a creation replayed with the same key returns the
+  original resource with 200 rather than creating a second, the same key with a different body
+  is a 409, a concurrent duplicate replays rather than conflicting, and **the replay still
+  takes the PDP decision**; every route denies without the action and chains its event, with
+  an update's event carrying the precondition it was applied under; all four tables join the
+  adversarial RLS suite's completeness inventory; and the OpenAPI document is derived from the
+  handlers, every documented path is mounted, every mounted path on this plane is documented,
+  and `console/src/generated/api.ts` is generated from the document with both checks in `make
+  ci`.
 
 ──────────────────────────────────────────────
 Sequencing (features → phases)
@@ -1254,7 +1308,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3
+Phase 5 context platform (redesign): CPR-1,2,3,4
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

@@ -43,6 +43,13 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/check-crate-deps.mjs
+      # The frontend's types are generated from the OpenAPI document, which is
+      # generated from the gateway's own handlers (CPR-4, ADR-0071 decision 7).
+      # The Rust half of that chain is
+      # crates/synveda-gateway/tests/openapi.rs, in the `rust` job above; this
+      # is the TypeScript half, and it lives here because it needs node and
+      # nothing else.
+      - run: node scripts/generate-api-types.mjs --check
       # SYNVEDA_FEATURES.md, docs/backlog/<ID>.md and STATUS.md describe one
       # feature set; this asserts they agree. It replaced the generator that
       # used to write all three (removed 2026-08-05 — regenerating discarded

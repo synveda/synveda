@@ -46,6 +46,14 @@ tracing-subscriber = { workspace = true }
 # header, and hand-rolling URL parsing for a security control is how the
 # comparison ends up wrong in a way nobody reads.
 url = { workspace = true }
+# The OpenAPI document (CPR-4, ADR-0071 decision 7), derived from the DTOs in
+# this crate. Gateway-only by the same rule the Prometheus recorder follows:
+# the contract is a property of the surface, and no crate below it has one.
+utoipa = { workspace = true }
+# An idempotency record names its resource with a bare UUID (the operation
+# column says which table), so this plane handles one directly rather than
+# through a typed newtype.
+uuid = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }

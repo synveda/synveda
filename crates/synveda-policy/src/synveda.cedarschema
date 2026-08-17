@@ -77,6 +77,48 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
+    // The workspace and project planes (/v1/workspaces, /v1/projects —
+    // CPR-4, ADR-0071 decision 3).
+    //
+    // Their own actions rather than the hierarchy plane's, and the reason is
+    // the audit chain rather than the packs: creating a workspace is not
+    // creating a hierarchy node, and an event that said `hierarchy.create`
+    // for it would be a lie in the one record this product asks people to
+    // trust. A pack that wants to price "make a workspace" differently from
+    // "restructure the org" can only say so if they are different actions.
+    //
+    // Read and create/update are split on the separability rule the rest of
+    // this schema uses; there is deliberately **no** delete: a workspace is
+    // what sessions, versions and audit events name, so retiring one is a
+    // status transition under the update action, and a delete verb would be
+    // an authority nobody can exercise.
+    //
+    // Repository attachments take `ProjectUpdate` and `ProjectRead` rather
+    // than a pair of their own. What a project is *about* is part of what the
+    // project is — a separate authority over it would be one nobody could
+    // describe without describing the project's, and the vocabulary is
+    // already the widest thing a reviewer has to hold.
+    //
+    // They apply to `[Tenant, Scope]` so that the decision can move from the
+    // tenant to the subtype's own scope without a schema change, which is
+    // exactly what Prompt 5 of the context-platform programme does when the
+    // PDP is re-cut over generic scopes. Until then the routes decide at the
+    // tenant, because the Cedar entity model still describes the old
+    // hierarchy and a generic scope has no chain in it (ADR-0071 decision 3).
+    action WorkspaceRead, WorkspaceCreate, WorkspaceUpdate
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Scope],
+            context: { roles: Set<String> },
+        };
+
+    action ProjectRead, ProjectCreate, ProjectUpdate
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Scope],
+            context: { roles: Set<String> },
+        };
+
     // The composition seam (AUTHZ-2, ADR-0014 decision 5): may this
     // principal's inject/recall composition include memories attached to
     // this scope? CTX-1/2/3 ask exactly this question per candidate scope.

@@ -864,4 +864,96 @@ frontend changes, deletions, tests, and the resulting commit hash.
   this feature is `#[ignore]`d, excluded or weakened to get a green.
 - **Commit.** `feat(scopes): add governed scope substrate` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by Prompt 4, on Prompt 1's rule.
+- **Commit hash.** `9ff9631c83dfb68a87a38187263c86174f4eaf89`, written by
+  Prompt 4 on Prompt 1's rule.
+
+### Prompt 4 — Workspaces, projects & canonical repository identity (CPR-4)
+
+- **Implemented.** The programme's **first public surface** (ADR-0071).
+  `workspaces`, `projects` and `project_repositories` as product-level subtypes
+  of a governed scope — each owning one scope of the matching shape, created in
+  the same transaction as itself — plus `idempotency_records`, twelve `/v1`
+  routes, six Cedar actions, six audit action types, and the product's first
+  **OpenAPI contract**, generated from the handlers with the console's
+  TypeScript generated from it in turn.
+- **Divergence from §9.** §9's Prompt 4 reads *"Identity, membership and role
+  bindings over generic scopes"*. The prompt as it arrived is workspaces and
+  projects, and the prompt's own text is authoritative (§9's preamble).
+  Recorded rather than absorbed, because the substitution moves a dependency:
+  identity/membership was ordered before the PDP re-cut (Prompt 5) so that
+  bindings would exist over generic scopes when the packs were re-anchored, and
+  this prompt instead lands a surface that **needs** the PDP re-cut and does not
+  have it. The consequence is stated in the decisions below rather than hidden:
+  every decision on this plane is anchored at `Resource::Tenant`, and Prompt 5
+  now has two things to carry rather than one. What the substitution buys is a
+  product somebody can use at all — Prompt 3 built a scope substrate with no
+  API, and a second prompt with no API would have left three consecutive
+  prompts of infrastructure.
+- **Schema/domain changes.** One migration, `0041_workspaces_projects.sql`.
+  **56 tables, 2 views; 52 RLS-forced** (all four new tables carry `ENABLE` +
+  `FORCE`, a `*_tenant_isolation` policy and least-privilege grants — no DELETE
+  on `workspaces` or `projects`, DELETE on `project_repositories` because
+  detaching is the API's own verb, no UPDATE on `idempotency_records`). Domain
+  types: `synveda_types::workspace::{Workspace, Project, LifecycleStatus}`,
+  `synveda_types::repository::{ProjectRepository, RepositoryProvider,
+  RepositoryIdentity, identify}`, and `WorkspaceId` / `ProjectId` /
+  `RepositoryId`. `synveda_store` gains `workspaces`, `projects`,
+  `repositories` and `idempotency`; `scopes` gains `ensure_tenant_root` and
+  `set_status`.
+
+  Where each rule lives is again the substance, and it is ADR-0070 decision 2
+  applied one level up: **the subtype's scope shape, the project's scope sitting
+  under its workspace's, and the fact that a subtype's slug *is* its scope's
+  slug are all foreign keys**, over three denormalised columns (`scope_kind`,
+  `workspace_scope_id`, and `slug` itself). The third is the one nobody would
+  think to make structural, and it is the one that matters most: a product path
+  and a scope path cannot diverge. Revisions step forward by exactly one, and a
+  project never changes workspace, both by trigger — so both hold for the owner
+  role, which is what migrations and break-glass psql run as.
+- **API and frontend changes.** **Twelve routes added** — `GET /v1/me`, the
+  workspace and project CRUD, and repository attach/list/detach (54 → 66 `/v1`
+  route paths). Creation takes a **required** `Idempotency-Key`; update takes a
+  **required** `expected_revision`. No CLI command and no console screen: the
+  console shell is Prompt 20, and the generated types typecheck without a screen
+  consuming them. `docs/api/openapi.json` and `console/src/generated/api.ts` are
+  new, both generated, both checked.
+- **Deleted.** Nothing. This prompt adds the first surface over the substrate
+  Prompt 3 built; the deletion map's rows are executed by Prompts 5, 6 and after.
+  Nothing is synchronised with the old hierarchy in either direction, and a
+  test asserts that a tenant which has used this plane has **zero**
+  `hierarchy_nodes` rows.
+- **Tests.** `crates/synveda-store/tests/workspaces.rs` (21): the scopes the
+  model claims; the tenant root minted once from the `tenants` row with no
+  `hierarchy_nodes` row to have come from; **a failed creation leaving neither
+  an orphan subtype nor an orphan scope**, for both subtypes, through the
+  failure mode that fires *after* the scope insert; the structural rules against
+  direct SQL (a workspace owning a project-shaped scope, a slug disagreeing with
+  its scope's, a rewound or skipped revision, a project moved between
+  workspaces, a project's scope moved out from under its workspace); revision
+  preconditions from both ends; another tenant's subtype absent rather than
+  conflicting; archive/restore mirrored onto the scope; the three-case
+  description; and the repository properties — one repository written four ways
+  is one attachment, a path refused before it reaches a row *and* refused by the
+  CHECK when the service is bypassed, a fingerprint identity, a handle scoped to
+  its project, two projects about one repository.
+  `crates/synveda-gateway/tests/workspaces_api.rs` (23): the whole path from
+  nothing to a project with a repository with `/v1/me` narrating it; the
+  idempotency guarantees including the reordered body and the per-subject key;
+  **the replay that still takes the PDP decision**, with the binding revoked
+  between the two calls; the precondition; every route denied without its action
+  and refused without a credential; the credential swept out of the response and
+  the chain; and the absent delete verb.
+  `crates/synveda-gateway/tests/openapi.rs` (5), which needs no database: the
+  committed document is the tree's, the document declares exactly this plane,
+  every documented path is mounted (401 rather than 404), a path this plane does
+  not declare is not mounted, and the document is generatable (unique operation
+  ids, resolvable refs, a declared security scheme, a taxonomy body on every
+  4xx). `crates/synveda-store/tests/rls.rs` gains the CPR-4 block (5) and all
+  four tables join the completeness inventory: 71 → 76 tests. Unit tests in
+  `synveda-types` (repository canonicalisation, 16), the gateway's idempotency
+  seam and DTOs, and both store modules. `demos/cpr-4-workspaces.sh` drives the
+  whole thing against a real gateway and a real database.
+- **Run record.** *(written by Prompt 5, on Prompt 1's rule — see below)*
+- **Commit.** `feat(workspaces): add workspace and project model` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by Prompt 5, on Prompt 1's rule.

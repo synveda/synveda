@@ -20,6 +20,12 @@
 //! `synveda-audit` — the sibling crate owns the chain semantics; this crate
 //! owns the one embedded migrator.
 //!
+//! Governed scopes and their product-level subtypes (CPR-3 ADR-0070; CPR-4
+//! ADR-0071): [`scopes`] is the tree every asset, binding and decision hangs
+//! off; [`workspaces`], [`projects`] and [`repositories`] are the product
+//! nouns above it, each owning one scope created in the same transaction as
+//! itself. [`idempotency`] is what makes retrying a creation safe.
+//!
 //! Schema epoch (CPR-2, ADR-0068 decision 3, ADR-0069): the migrator is
 //! guarded on both ends. [`epoch::preflight`] refuses to advance a database
 //! written before the context-platform cut, [`epoch::stamp`] records the epoch
@@ -39,6 +45,7 @@ pub mod epoch;
 pub mod graph;
 pub mod group_mappings;
 pub mod hierarchy;
+pub mod idempotency;
 pub mod identities;
 pub mod keys;
 pub mod lapses;
@@ -46,10 +53,12 @@ pub mod observe;
 pub mod packs;
 pub mod policy_assignments;
 pub mod policy_packs;
+pub mod projects;
 pub mod promotion;
 pub mod prompts;
 pub mod quarantine;
 pub mod records;
+pub mod repositories;
 pub mod reset;
 pub mod retention;
 pub mod rls;
@@ -61,6 +70,7 @@ pub mod skill_reviews;
 pub mod skills;
 pub mod tenant_secrets;
 pub mod tenants;
+pub mod workspaces;
 
 pub use scope_chain::ScopeChainCache;
 

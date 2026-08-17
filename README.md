@@ -262,9 +262,11 @@ adapters/
 sdks/                 rust, typescript, python — stubs, Phase 4
 policies/             Cedar policy packs
 deploy/compose/       the dev environment
-demos/                64 runnable acceptance demos, one per feature
+console/              the admin console (React); served from the gateway's origin
+demos/                66 runnable acceptance demos, one per feature
 evals/                corpora, scenarios, and the committed baselines CI gates on
-docs/                 the seed, the tech plan, the backlog, and 68 ADRs
+docs/                 the seed, the tech plan, the backlog, and 71 ADRs
+docs/api/openapi.json the API contract — generated from the gateway's handlers
 ```
 
 **Dependency rule:** `types ← {policy, store, identity, audit} ← retrieval/ingest
@@ -307,9 +309,17 @@ Read in this order:
    Every piece of work maps to a feature ID.
 4. **[docs/backlog/STATUS.md](docs/backlog/STATUS.md)** — where everything stands,
    including what each finished feature actually proved and what it left standing.
-5. **[docs/adr/](docs/adr/)** — 68 architecture decision records. Every
+5. **[docs/adr/](docs/adr/)** — 71 architecture decision records. Every
    architectural choice is written down *before* it is implemented.
-6. **[docs/implementation/synveda-context-platform.md](docs/implementation/synveda-context-platform.md)**
+6. **[docs/api/openapi.json](docs/api/openapi.json)** — the API contract, and it
+   is **generated**: `utoipa` derives it from the gateway's own request and
+   response types, a test fails when the committed file and the tree disagree,
+   and `console/src/generated/api.ts` is generated from it in turn
+   ([ADR-0071](docs/adr/adr-0071-workspaces-projects-and-repository-identity.md)
+   decision 7). It covers the context-platform plane — `/v1/me`, workspaces,
+   projects and repositories — and says so in its own description; the rest of
+   `/v1` joins it later in the programme.
+7. **[docs/implementation/synveda-context-platform.md](docs/implementation/synveda-context-platform.md)**
    — the Phase 5 context-platform redesign, on `feat/context-platform-mvp`:
    the base-commit inventory, the deletion map from old concepts to new, the
    ordered 33-prompt programme and its running record. A **pre-1.0 hard cut**

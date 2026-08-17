@@ -63,13 +63,36 @@ Since CPR-3 the new model has its first piece (ADR-0070): `scopes` +
 `scope_closure`, a named node with a parent and a subtree, where `kind` is a
 **shape** deciding only which shapes may be its parent — `tenant`, `org_unit`,
 `workspace`, `project`, `principal` — so an `org_unit` nests inside itself to
-any depth and one person's whole tree is a tenant scope and a principal. There
-is **no API on it yet**, deliberately, and **nothing synchronises it with the
-old hierarchy**, which is untouched until Prompt 6 deletes it whole. Both
-models are in the tree meanwhile, so `synveda_types::ScopeKind` (org, division,
-department, team, user) and `synveda_types::scope::ScopeKind` (the five shapes)
-are different types with the same name: the module path is what says which
-model your code is written against.
+any depth and one person's whole tree is a tenant scope and a principal.
+**Nothing synchronises it with the old hierarchy**, which is untouched until
+Prompt 6 deletes it whole. Both models are in the tree meanwhile, so
+`synveda_types::ScopeKind` (org, division, department, team, user) and
+`synveda_types::scope::ScopeKind` (the five shapes) are different types with
+the same name: the module path is what says which model your code is written
+against.
+Since CPR-4 that substrate has a surface (ADR-0071): `workspaces`, `projects`
+and `project_repositories` as **product-level subtypes** of a governed scope,
+each owning one scope **created in the same transaction as itself**, with the
+tenant root minted by the first thing that needs a parent — so a person's first
+act is `POST /v1/workspaces` and nobody is asked to declare an organisation.
+Twelve routes, `GET /v1/me` among them. Two rules bind every call on this plane:
+**creation takes a required `Idempotency-Key`** (same key + same request replays
+with 200; same key + a different body is 409) and **update takes a required
+`expected_revision`** (a mismatch is 409 and writes nothing). A repository's
+identity is its **canonical remote URI** — transports, credentials, ports and
+`.git` collapse — and **a filesystem path is never one**, refused by name in
+`synveda_types::repository` and by a CHECK behind it. Every decision on this
+plane is anchored at `Resource::Tenant` until Prompt 5 re-cuts the PDP over
+generic scopes; the six new Cedar actions already apply to `[Tenant, Scope]`, so
+that is a route change and not a contract change.
+CPR-4 also starts this product's **OpenAPI contract**: `docs/api/openapi.json`
+is derived by `utoipa` from the gateway's own handlers, a test fails when the
+committed file and the tree disagree, and `console/src/generated/api.ts` is
+generated from that file (`make check-api-types`). **Never hand-edit either.**
+To refresh both: `SYNVEDA_WRITE_OPENAPI=1 cargo test -p synveda-gateway --test
+openapi` then `node scripts/generate-api-types.mjs`. The document covers this
+plane only, and says so in its own description; the rest of `/v1` joins it at
+Prompt 19.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
