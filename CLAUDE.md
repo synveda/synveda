@@ -8,6 +8,11 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 2. docs/SYNVEDA_TECH_PLAN.md   — stack decisions & VedaFlow design
 3. docs/SYNVEDA_FEATURES.md    — feature backlog; ALL work maps to a feature ID
 4. docs/backlog/STATUS.md      — what is done, what each feature found, what it left standing
+5. docs/implementation/synveda-context-platform.md
+                               — the Phase 5 context-platform redesign: the base-commit
+                                 inventory, the deletion map, the ordered programme and its
+                                 running record. Required before any CPR work; ADR-0068's
+                                 eight decisions are locked and no prompt reopens them.
 
 ## Working rules
 - Every task references a feature ID (e.g. FND-1). Branch: feat/<ID>.
@@ -35,20 +40,39 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 5. docs/backlog/STATUS.md updated
 
 ## Current phase
-Phase 3 — Enterprise (wk 11–16). Phases 0, 1 and 2 are complete; SKIL-1
-through SKIL-4, OPS-1, CNSL-1, ADPT-2, CNSL-2, AUTH-4, AUTH-5, EVAL-3,
-OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3 features done so far. 64 of 96 features delivered — see docs/backlog/STATUS.md for what each
-one proved and what it left standing. (The total read 86 until 2026-08-05,
-when it was corrected to the 88 STATUS.md and `make check-backlog` had both
-said for some time; AUTHZ-7 was filed the same day by CNSL-2/ADR-0058, making
-it 89, EVAL-7 on 2026-08-07 by EVAL-3/ADR-0061, making it 90, OPS-7 on
-2026-08-10 by OPS-2/ADR-0062, making it 91, CTX-7 and TEN-7 the same
-day by TEN-3/ADR-0063, making it 93, and OPS-8 filed and delivered on
-2026-08-11, making it 94. ADPT-8 was filed on 2026-08-13 by running ADPT-1's
-plugin in a real Claude Code session, making it 95, and OPS-9 the same day
-by asking what somebody who takes OPS-8's install actually sees, making
-it 96 — this trail had stopped at 94 while the headline said 95, which is
-the drift the trail exists to prevent.)
+Phase 5 — Context platform redesign, since 2026-08-17. Phase 3 is paused
+mid-phase, not finished: OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6,
+CTX-7, OPS-3,4, ADPT-3, CTX-6 and FLOW-8 are still open, and the phase's
+demo goal is met except for the two live-tenant claims. What moved is the
+audience. Everything above Phase 5 is built for an organisation — a tenant's
+hierarchy root *must* be `kind = 'org'` (migration 0004, a row-local CHECK)
+and every node under it must be a division, department, team or user — so one
+person, or four sharing agent context, must declare themselves a company
+before this product will hold a record. Phase 5 re-cuts that as 33 ordered
+prompts on `feat/context-platform-mvp`, with the decisions locked in ADR-0068
+and the running record in docs/implementation/synveda-context-platform.md.
+**It is a pre-1.0 hard cut**: a fresh schema epoch, no old-data migration, no
+compatibility shims, and old databases rejected with a reset instruction.
+
+Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
+CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
+features done. 65 of 98 features delivered — see docs/backlog/STATUS.md for
+what each one proved and what it left standing. (The total read 86 until
+2026-08-05, when it was corrected to the 88 STATUS.md and `make
+check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
+CNSL-2/ADR-0058, making it 89, EVAL-7 on 2026-08-07 by EVAL-3/ADR-0061,
+making it 90, OPS-7 on 2026-08-10 by OPS-2/ADR-0062, making it 91, CTX-7 and
+TEN-7 the same day by TEN-3/ADR-0063, making it 93, and OPS-8 filed and
+delivered on 2026-08-11, making it 94. ADPT-8 was filed on 2026-08-13 by
+running ADPT-1's plugin in a real Claude Code session, making it 95, and
+OPS-9 the same day by asking what somebody who takes OPS-8's install actually
+sees, making it 96 — this trail had stopped at 94 while the headline said 95,
+which is the drift the trail exists to prevent. **OPS-10 was filed the same
+day as OPS-9**, by asking how that same stranger removes it, making it 97;
+the trail missed it and the headline read 96 against a checker that had said
+97 since — the identical drift, one entry later. CPR-1 filed and delivered
+2026-08-17, making it 98. Prompts 2–33 of its programme are filed by the
+prompts that run them, so this number will keep moving.)
 
 Phase 3 was reordered on 2026-08-04 by demo-readiness (see the Sequencing
 note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,

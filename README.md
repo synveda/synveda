@@ -262,9 +262,9 @@ adapters/
 sdks/                 rust, typescript, python — stubs, Phase 4
 policies/             Cedar policy packs
 deploy/compose/       the dev environment
-demos/                58 runnable acceptance demos, one per feature
+demos/                64 runnable acceptance demos, one per feature
 evals/                corpora, scenarios, and the committed baselines CI gates on
-docs/                 the seed, the tech plan, the backlog, and 61 ADRs
+docs/                 the seed, the tech plan, the backlog, and 68 ADRs
 ```
 
 **Dependency rule:** `types ← {policy, store, identity, audit} ← retrieval/ingest
@@ -307,8 +307,16 @@ Read in this order:
    Every piece of work maps to a feature ID.
 4. **[docs/backlog/STATUS.md](docs/backlog/STATUS.md)** — where everything stands,
    including what each finished feature actually proved and what it left standing.
-5. **[docs/adr/](docs/adr/)** — 61 architecture decision records. Every
+5. **[docs/adr/](docs/adr/)** — 68 architecture decision records. Every
    architectural choice is written down *before* it is implemented.
+6. **[docs/implementation/synveda-context-platform.md](docs/implementation/synveda-context-platform.md)**
+   — the Phase 5 context-platform redesign, on `feat/context-platform-mvp`:
+   the base-commit inventory, the deletion map from old concepts to new, the
+   ordered 33-prompt programme and its running record. A **pre-1.0 hard cut**
+   — fresh schema epoch, no old-data migration, old databases rejected with a
+   reset instruction — with the decisions locked in
+   [ADR-0068](docs/adr/adr-0068-context-platform-domain-and-epoch.md). Nothing
+   on `main` has changed yet.
 
 ---
 

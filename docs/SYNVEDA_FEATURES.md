@@ -1049,6 +1049,47 @@ CNSL-4 Memory browser (M) — per-scope records with provenance, channel, validi
   pin/retire (as proposals). AC: no direct-mutation path exists — everything is a proposal.
 
 ──────────────────────────────────────────────
+EPIC CPR — Context platform redesign (Phase 5)
+──────────────────────────────────────────────
+CPR-1  Implementation baseline & locked decisions (M)
+  Filed 2026-08-17. The first prompt of a 33-prompt programme that re-cuts this product for
+  an individual and a small team without producing a second one. It writes down what the
+  repository *is* at the commit the programme starts from, records the eight decisions the
+  programme may not reopen, and changes no runtime behaviour. Two things have to exist
+  before a hard cut starts and neither is code. The first is an **inventory**: sixty-five
+  delivered features is more shape than anybody holds in their head, and a redesign that has
+  not written down what it is cutting discovers the parts it forgot one compile error at a
+  time — so the record is exhaustive and boring on purpose, every route, verb, table, RLS
+  policy, Cedar action and console screen, plus the part that earned its place, each
+  adapter's *actual* verification level, which for three of them is lower than the feature
+  list implies (a headless Claude Code session never observes; no real Cursor frame has ever
+  been replayed; the SCIM corpus is transcribed from published tables rather than taken from
+  a live tenant). The second is a **lock**: eight decisions later prompts implement and may
+  not relitigate, because every one of them is the kind that gets quietly reversed under
+  pressure at prompt 19 — one domain model rather than two, policy profiles rather than
+  edition branches, a fresh schema epoch rather than a migrator, generic governed scopes
+  rather than five organisational ranks, sessions as a real aggregate rather than a
+  correlation string, the candidate/knowledge boundary as a table boundary rather than a
+  column, immutable knowledge/skill/tool versions, and OKF and MCP as external-format
+  adapters at the boundary. They are ADR-0068, which argues each against the cheaper option
+  it refuses. The baseline also states the **MVP checkpoint** — what must be true after
+  Prompt 20 — so "are we there yet" is a list somebody reads rather than a judgement
+  somebody makes. It deliberately does not file the other 32 prompts as features: each is
+  filed by the prompt that runs it, which is how this backlog stays a record of what was
+  found rather than a forecast.
+  AC: docs/implementation/synveda-context-platform.md records the base commit SHA, CI status,
+  migration head, the public HTTP route inventory, the CLI command inventory, the console
+  route and navigation inventory, domain entities and tenant-bound tables, the RLS-protected
+  table inventory, the Cedar/PDP entity and action model, the observe/inject/recall paths,
+  the hierarchy and role-binding implementation, the record/proposal/quarantine/skill/
+  context-pack models, client adapters with their actual verification level, an explicit
+  deletion map from old concepts to target concepts, the ordered programme of Prompts 1–33,
+  and the MVP checkpoint after Prompt 20; ADR-0068 records the eight decisions with options
+  and a reversal trigger; the complete suite is run and its result recorded accurately with
+  pre-existing failures named; and **no product runtime behaviour changes** — the diff is
+  documentation only and `make ci` is green after it as it was before.
+
+──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
 Phase 0 (wk 1):    FND-1..6
@@ -1141,4 +1182,18 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
+Phase 5 context platform (redesign): CPR-1
+   (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
+   next feature — it is the programme that re-cuts the model every feature above was built
+   on, for an audience none of them was: one person, or four sharing agent context, who
+   today must declare themselves an `org` containing a `team` before this product will hold
+   a single record. Thirty-three ordered prompts, of which this files the first; the rest
+   are filed by the prompts that run them, because a backlog that forecasts thirty-two
+   features stops being a record of what was found. The decisions are locked in ADR-0068
+   and the running record — inventory, deletion map, prompt order, and the MVP checkpoint
+   after Prompt 20 — is docs/implementation/synveda-context-platform.md.)
+   → Demo: a fresh deployment from nothing to a session, observed events, candidates, a
+     published knowledge version, a context assembly that cites it, a recall that serves it,
+     and a verifying audit chain — with one person's deployment and a team's differing only
+     in the policy profile assigned to their scopes.
 ──────────────────────────────────────────────
