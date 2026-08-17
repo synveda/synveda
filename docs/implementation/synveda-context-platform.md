@@ -688,8 +688,76 @@ frontend changes, deletions, tests, and the resulting commit hash.
   db-test` PASS, no pre-existing failures (§8.1).
 - **Commit.** `chore(programme): baseline context platform redesign` on
   `feat/context-platform-mvp`.
-- **Commit hash.** A commit cannot contain its own hash. This one's SHA is
-  reported in Prompt 1's completion output and written into this line by
-  **Prompt 2**, which is the first entry that can see it — rather than left
-  as a placeholder that would read as an oversight. Every later entry
-  records its own hash the same way: written by the prompt after it.
+- **Commit hash.** `db01e5e28e13cc61b39a3e3be288504b389f153d`. A commit cannot
+  contain its own hash, so this line was written by **Prompt 2**, the first
+  entry that could see it — rather than left as a placeholder that would read
+  as an oversight. Every later entry records its own hash the same way:
+  written by the prompt after it.
+
+### Prompt 2 — Fresh schema epoch, startup guard & local reset (CPR-2)
+
+- **Implemented.** The schema epoch as an enforced fact rather than a stated
+  intention (ADR-0069). `schema_metadata` — one row carrying the epoch, the
+  migration head, the creation timestamp and the product version that created
+  it. `synveda_store::epoch` with four surfaces: `read`, `verify` (the
+  guard), `preflight` (refuses to migrate a pre-cut database) and `stamp`
+  (writes the marker after a successful migration). `synveda_store::reset`
+  with `recreate`, which drops and rebuilds the application database at the
+  current epoch. `synveda reset --database --force` on top of it. Guards
+  wired at four seams: gateway boot (refuses to start, exits non-zero),
+  `/readyz` (503), `synveda_store::migrate` (refuses before the migrator
+  runs) and `connect_current_epoch` in the CLI (every store-level command
+  except `db migrate` and `reset`).
+- **Divergence from §9.** §9's Prompt 2 reads *"Delete the 38-migration
+  sequence; new `0001`"*. The prompt as it arrived says the opposite —
+  *"Do not squash the full migration chain yet. That happens in the final
+  cutover"* — and the prompt's own text is authoritative (§9's preamble).
+  Recorded here rather than absorbed, because the substitution is a good one
+  and worth having in the record: squashing here would put the epoch marker
+  and the whole of the new model in one commit, leaving the guard with **no
+  pre-cut database to be tested against**. Keeping the 38 migrations means a
+  pre-cut database is a fixture the tests build, refuse, and reset — which is
+  the difference between an enforced epoch and an asserted one. The squash
+  moves to Prompt 33.
+- **Schema/domain changes.** One migration, `0039_schema_epoch.sql`: creates
+  `schema_metadata` (`id` boolean single-row PK, `epoch`, `migration_head`,
+  `created_at`, `created_by_version`, `updated_at`), read-only for
+  `synveda_app`. **50 tables, 2 views; 46 still RLS-forced.**
+  `schema_metadata` carries no `tenant_id`, so it is structurally exempt like
+  `console_sessions` and `deployment_keys` — and structurally *must* be: the
+  guard reads it before a tenant is resolved, so a tenant-keyed policy would
+  evaluate false and hide the marker from the check that exists to read it.
+  The row is written by Rust, not by the migration: two of its four facts —
+  the creating release and the head reached — are only available to the
+  running binary. No domain type changed.
+- **API and frontend changes.** No route added or removed. `/readyz` gains
+  the epoch check and now answers 503 for a database that answers `SELECT 1`
+  but is at the wrong epoch. **One CLI command added**, `synveda reset`
+  (25 top-level commands). No console change.
+- **Deleted.** Nothing yet — this prompt adds the guard the deletions in §7
+  will be performed behind. The one thing it *removes* is the ability to
+  bring a pre-cut database forward, which was reachable at the base commit by
+  running `synveda db migrate`.
+- **Tests.** `crates/synveda-store/tests/epoch.rs` (10, each on a scratch
+  database of its own): a fresh empty database bootstraps; a current-epoch
+  database starts normally and keeps its provenance across a re-migration; a
+  pre-cut database is refused **and not touched**; a marker with no row is
+  refused; a marker of another shape and one with a blank provenance are both
+  refused; an older epoch and a newer epoch are refused differently; reset
+  builds a working current database, carries zero rows across and is
+  idempotent; reset builds a database that was not there; reset refuses a
+  name it will not quote; and `no_old_to_new_data_migrator_exists`, which
+  checks the epoch migration statement by statement for DML and the chain for
+  `.down.sql`. `crates/synveda-gateway/tests/observability.rs` gains
+  `readyz_refuses_a_database_that_is_not_at_this_schema_epoch`. Unit tests in
+  `epoch.rs` (every refusal names the reset command; the one that must not),
+  `reset.rs` in the store (the identifier grammar, against
+  `synveda"; drop database temporal; --`) and `reset.rs` in the CLI (local
+  only; neither flag alone; the password is never printed).
+  `demos/cpr-2-schema-epoch.sh` drives the **boot** refusal against a real
+  gateway binary — the only check no in-process test can reach.
+- **Run record.** `make ci` PASS, `make db-test` PASS. The `.sqlx` cache
+  gained 5 entries and lost none.
+- **Commit.** `feat(schema): enforce fresh schema epoch` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by Prompt 3, on Prompt 1's rule.

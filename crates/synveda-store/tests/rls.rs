@@ -194,6 +194,14 @@ async fn visible_rows(
 /// The tables this suite adversarially covers. Extending the schema with a
 /// tenant-scoped table means extending this suite; the guard below turns
 /// forgetting into a test failure.
+///
+/// CPR-2 (ADR-0069) adds `schema_metadata`, and it is deliberately absent for
+/// the reason `deployment_keys` and `console_sessions` are: it carries no
+/// `tenant_id`, so the guard does not discover it and no exemption was needed.
+/// Structural rather than granted, and structurally *necessary* here — the
+/// epoch guard runs before a tenant is resolved, which is exactly when a
+/// tenant-keyed predicate would evaluate to false and hide the marker from
+/// the check that exists to read it.
 const COVERED: &[&str] = &[
     "audit_chain_heads",
     "audit_log",

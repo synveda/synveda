@@ -19,6 +19,14 @@
 //! are migrated here with the rest of the schema, but their queries live in
 //! `synveda-audit` — the sibling crate owns the chain semantics; this crate
 //! owns the one embedded migrator.
+//!
+//! Schema epoch (CPR-2, ADR-0068 decision 3, ADR-0069): the migrator is
+//! guarded on both ends. [`epoch::preflight`] refuses to advance a database
+//! written before the context-platform cut, [`epoch::stamp`] records the epoch
+//! it produced, and [`epoch::verify`] is what every process asks before it
+//! serves. [`reset`] is the one supported way past a refusal, and it destroys
+//! rather than translates — there is no migrator from the old model to this
+//! one, by decision.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -27,6 +35,7 @@ pub mod console_sessions;
 pub mod dedup;
 pub mod directory;
 pub mod directory_sync;
+pub mod epoch;
 pub mod graph;
 pub mod group_mappings;
 pub mod hierarchy;
@@ -41,6 +50,7 @@ pub mod promotion;
 pub mod prompts;
 pub mod quarantine;
 pub mod records;
+pub mod reset;
 pub mod retention;
 pub mod rls;
 pub mod role_bindings;
@@ -63,11 +73,28 @@ pub static MIGRATOR: Migrator = sqlx::migrate!();
 
 /// Applies all pending migrations. Idempotent; safe to run concurrently
 /// (sqlx serialises runners with an advisory lock).
+///
+/// Guarded on both ends since CPR-2 (ADR-0069): a database written before the
+/// context-platform epoch is refused *before* the migrator touches it, so a
+/// refused database is left exactly as it was found, and the epoch marker is
+/// stamped after a successful run.
 #[tracing::instrument(name = "store.migrate", skip_all, err(Display))]
 pub async fn migrate(pool: &PgPool) -> Result<()> {
+    migrate_reporting(pool).await.map(|_| ())
+}
+
+/// [`migrate`], returning the epoch marker it produced. The reset path prints
+/// it; everything else has no use for it and calls `migrate`.
+pub async fn migrate_reporting(pool: &PgPool) -> Result<epoch::SchemaMetadata> {
+    epoch::preflight(pool)
+        .await
+        .map_err(|refusal| Error::Storage {
+            message: refusal.to_string(),
+        })?;
     MIGRATOR.run(pool).await.map_err(|err| Error::Storage {
         message: format!("migration failed: {err}"),
-    })
+    })?;
+    epoch::stamp(pool, env!("CARGO_PKG_VERSION")).await
 }
 
 /// Round-trips the database connection (`SELECT 1`). The store leg of the

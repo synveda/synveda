@@ -159,9 +159,20 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         .connect(&database_url)
         .await
         .map_err(|err| format!("connect to {database_url}: {err}"))?;
-    synveda_store::migrate(&pool)
+    // The epoch guard before the migrator (CPR-2, ADR-0069), so that an
+    // operator re-running `init` over a database from before the
+    // context-platform cut is told to reset it — as itself, rather than
+    // wrapped in "apply migrations: storage:" three layers down.
+    synveda_store::epoch::preflight(&pool)
+        .await
+        .map_err(|refusal| refusal.to_string())?;
+    let schema = synveda_store::migrate_reporting(&pool)
         .await
         .map_err(|err| format!("apply migrations: {err}"))?;
+    println!(
+        "    schema epoch {} at migration {}",
+        schema.epoch, schema.migration_head
+    );
 
     // ── 3. the tenant ───────────────────────────────────────────────────
     //
@@ -931,6 +942,68 @@ fn log_tail(path: &Path, lines: usize) -> String {
 fn running_gateway(pidfile: &Path) -> Option<u32> {
     let pid: u32 = std::fs::read_to_string(pidfile).ok()?.trim().parse().ok()?;
     pid_alive(pid).then_some(pid)
+}
+
+/// Stops the host gateway this deployment started, if one is running
+/// (CPR-2, ADR-0069). `Some(pid)` when something was signalled.
+///
+/// `synveda reset` needs this before it destroys the database: a gateway left
+/// running would hold connections against a database that is about to stop
+/// existing, and — worse — would keep serving from in-process caches (the
+/// scope chains, the policy packs) that describe rows nobody can read any
+/// more. `DROP DATABASE ... WITH (FORCE)` would evict its connections and
+/// leave the process alive and confidently wrong.
+///
+/// Deliberately only the host process. The containerised gateway is compose's
+/// (`init --issuer`), and stopping somebody else's container is not this
+/// command's to do — the caller says so instead.
+pub fn stop_host_gateway() -> Option<u32> {
+    let pidfile = state_dir()?.join("gateway.pid");
+    let pid = running_gateway(&pidfile)?;
+    let _ = Command::new("kill").arg(pid.to_string()).status();
+    wait_for_port_release(GATEWAY_URL, Duration::from_secs(10));
+    Some(pid)
+}
+
+/// The compose file of the deployment this CLI would drive, or `None` where no
+/// profile resolves. Named so that a message can tell somebody which compose
+/// file is theirs rather than making them work it out from which shape of
+/// install they have.
+pub fn compose_file_if_any() -> Option<PathBuf> {
+    Profile::discover()
+        .ok()
+        .map(|profile| profile.compose_file())
+}
+
+/// The state directory of the deployment this CLI would drive — the pidfile,
+/// the log, `kms.key` — or `None` where no profile resolves at all.
+///
+/// `None` is ordinary rather than an error: somebody pointing `DATABASE_URL`
+/// at their own Postgres has no compose profile, and the commands that ask
+/// this are the ones that can carry on without one.
+pub fn state_dir() -> Option<PathBuf> {
+    Profile::discover().ok().map(|profile| profile.state_dir())
+}
+
+/// Where the gateway keeps its Tantivy sidecars (CTX-1, ADR-0024), resolved
+/// the way the gateway itself resolves them: `SYNVEDA_SEARCH_INDEX_DIR`, then
+/// the deployment's own working directory, then the relative default.
+///
+/// Needed by `synveda reset`, because the sidecar is *derived* from the
+/// database. Left behind, it would be a lexical index over record ids that no
+/// longer exist — a fresh database that is not fresh, in the one leg of
+/// retrieval that does not read Postgres directly.
+pub fn search_index_dir() -> PathBuf {
+    if let Some(explicit) = std::env::var("SYNVEDA_SEARCH_INDEX_DIR")
+        .ok()
+        .filter(|value| !value.is_empty())
+    {
+        return PathBuf::from(explicit);
+    }
+    Profile::discover().map_or_else(
+        |_| PathBuf::from("./data/search-index"),
+        |profile| profile.working_dir().join("data/search-index"),
+    )
 }
 
 /// What the gateway binary is, for the convergence fingerprint.

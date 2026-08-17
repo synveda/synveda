@@ -272,6 +272,29 @@ No upgrade path, no package manager. Re-run the installer and `synveda init`.
 Then run `synveda plugin install` again — Claude Code caches its own copy of
 the plugin and will keep running the old one otherwise.
 
+### One upgrade will refuse to start, and it is meant to
+
+This product is pre-1.0, and the context-platform redesign is a hard cut: the
+model underneath every table changes, and **nothing translates the old rows
+into the new one**. Since that cut the database carries a *schema epoch* and a
+build serves exactly one of them, so a gateway pointed at a database from
+before it exits at startup rather than serving rows in a model it does not
+implement. It prints why, and the one command that fixes it:
+
+```sh
+synveda reset --database --force
+```
+
+That destroys the database — every tenant, record and audit event in it — and
+builds an empty one at the current epoch. It keeps your `kms.key`, the compose
+profile, your stored logins and every other database on the server. Nothing
+about it is recoverable, so if there is anything in there you want, take it
+out first: `synveda db migrate` refuses the same database and **writes
+nothing**, so a refused deployment is not a deployment on a clock.
+
+Refusing rather than migrating is the decision, not the fallout of one; the
+argument is in `docs/adr/adr-0068-context-platform-domain-and-epoch.md`.
+
 ### The demo people share one password
 
 `init --demo` gives Alice, Bob, Carol and Dan the same password and prints it.

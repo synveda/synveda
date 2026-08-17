@@ -436,14 +436,26 @@ async fn healthz() -> &'static str {
 }
 
 /// Readiness: walks the real crate layering (gateway→retrieval→store) down to
-/// a Postgres round-trip. This is the FND-5 end-to-end traced request; it
-/// reads no application data (ADR-0007).
+/// a Postgres round-trip, then asks that database which schema epoch it is.
+/// This is the FND-5 end-to-end traced request; it reads no application data
+/// (ADR-0007).
+///
+/// The epoch check is here as well as at boot (CPR-2, ADR-0069) because the
+/// gateway is allowed to start without a database — that is what lets an
+/// outage be reported instead of crash-looping — and a check that only ran at
+/// boot would therefore be a check a database could arrive after. Answering it
+/// per probe costs one single-row select and closes that window: nothing that
+/// routes on readiness sends traffic to a gateway sitting on the wrong epoch.
 async fn readyz(State(state): State<AppState>) -> Response {
-    match synveda_retrieval::readiness(&state.pool).await {
-        Ok(()) => (StatusCode::OK, "ready").into_response(),
+    if let Err(err) = synveda_retrieval::readiness(&state.pool).await {
+        tracing::error!(error = %err, "readiness check failed");
+        // The detail is in the trace and the log; the body stays generic.
+        return (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response();
+    }
+    match synveda_store::epoch::verify(&state.pool).await {
+        Ok(_) => (StatusCode::OK, "ready").into_response(),
         Err(err) => {
-            tracing::error!(error = %err, "readiness check failed");
-            // The detail is in the trace and the log; the body stays generic.
+            tracing::error!(error = %err, "readiness check failed: schema epoch");
             (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response()
         }
     }

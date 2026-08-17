@@ -122,6 +122,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_connections(max_connections)
         .connect_lazy(&database_url)?;
 
+    // The schema epoch guard (CPR-2, ADR-0068 decision 3, ADR-0069). This
+    // product is pre-1.0 and the context-platform redesign is a hard cut:
+    // nothing translates a database from before it, so one written before it
+    // is refused here rather than half-read later.
+    //
+    // The two arms are the two different things "the epoch is not the one I
+    // serve" can mean, and conflating them would break the boot contract
+    // above. A reachable database at the wrong epoch is a *verdict*: the
+    // process must not start, because every route below would serve rows in a
+    // model it does not implement. A database that cannot be reached at all is
+    // a don't-know, and the design here is that the gateway boots anyway so
+    // `/readyz` reports the outage (ADR-0007) — so the verdict is taken again
+    // on every readiness probe (`app::readyz`), which is what stops a database
+    // that came up late from slipping past a check that ran while it was down.
+    match synveda_store::epoch::verify(&pool).await {
+        Ok(metadata) => tracing::info!(
+            schema.epoch = metadata.epoch,
+            schema.migration_head = %metadata.migration_head,
+            schema.created_at = %metadata.created_at,
+            schema.created_by_version = %metadata.created_by_version,
+            "schema epoch accepted (CPR-2, ADR-0069)"
+        ),
+        Err(outage) if !outage.is_refusal() => tracing::warn!(
+            error = %outage,
+            "the schema epoch could not be checked at boot; /readyz will refuse \
+             until it can be"
+        ),
+        Err(refusal) => {
+            // Printed rather than only returned: this is a multi-line
+            // instruction for a person, and `main`'s `Box<dyn Error>` renders
+            // through `Debug`, which would hand them one line of `\n`s.
+            eprintln!("\nsynveda-gateway: {refusal}\n");
+            tracing::error!(error = %refusal, "refusing to serve this database");
+            return Err("the database is not at the schema epoch this build serves".into());
+        }
+    }
+
     // The pool says nothing about itself, and an operator watching every
     // `/v1` surface answer 503 has no way to learn whether this is why.
     // Added on the diagnosis 29ae21f withdrew, and kept because it is what

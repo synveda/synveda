@@ -138,12 +138,21 @@ spec:
               port: http
             periodSeconds: 10
           readinessProbe:
-            # `select 1` against the pool. It is honest about a database
+            # `select 1` against the pool, and since CPR-2 (ADR-0069) the
+            # schema *epoch* beside it. It is honest about a database
             # outage — which is the property CNPG failover needs, since the
             # pool is `connect_lazy` and a lost primary must take this pod
-            # out of the Service rather than crash-loop it — and it says
-            # nothing about the schema. The initContainer above covers
-            # that, once, at start.
+            # out of the Service rather than crash-loop it — and it still
+            # says nothing about the grants. The initContainer above covers
+            # those, once, at start.
+            #
+            # The epoch check is per-probe rather than at start for the same
+            # reason the pool is lazy: a database that arrives *after* the
+            # process would otherwise be behind a check that already ran. A
+            # pod pointed at a pre-cut database therefore leaves the Service
+            # rather than serving rows in a model it does not implement —
+            # though in practice the install job's `db migrate` refuses first
+            # and this pod never starts.
             httpGet:
               path: /readyz
               port: http

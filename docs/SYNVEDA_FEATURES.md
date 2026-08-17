@@ -1088,6 +1088,38 @@ CPR-1  Implementation baseline & locked decisions (M)
   and a reversal trigger; the complete suite is run and its result recorded accurately with
   pre-existing failures named; and **no product runtime behaviour changes** — the diff is
   documentation only and `make ci` is green after it as it was before.
+CPR-2  Fresh schema epoch, startup guard & local reset (M)
+  Filed 2026-08-17 by Prompt 2 of the CPR programme. ADR-0068 decision 3 committed to a
+  fresh schema epoch with no old-data migration and said what must follow: a database
+  carrying the old epoch is **rejected at startup with a reset instruction**. This is the
+  mechanism, and it exists because the decision as written had three holes. Nothing in the
+  database says which model its rows are in — 38 migrations and no marker of any kind, so
+  a binary pointed at an old database cannot tell it from a new one and `MIGRATOR.run`
+  will happily bring it forward, which is the silent acceptance the decision forbids,
+  available by running the command the documentation already tells operators to run.
+  `_sqlx_migrations` is not that marker: it answers "which of *this binary's* migrations
+  have run", a question about the current chain, which Prompt 33's squash makes
+  meaningless as evidence and which moves on every ordinary release. And there was no
+  reset — `uninstall.sh --purge` destroys the Docker volumes, which is both too much
+  (Temporal's two databases share `pg-data`) and the wrong shape, so the instruction the
+  guard is meant to print named nothing. CPR-2 adds `schema_metadata` (epoch, migration
+  head, creation time, the product version that created it), a preflight that refuses to
+  migrate a pre-cut database *before* the migrator touches it, a boot guard the gateway
+  refuses to start past, the same check on `/readyz` because the gateway may start without
+  a database, and `synveda reset --database --force` — which drops and recreates the
+  application database, not the volume and not the installation. ADR-0069.
+  AC: a fresh empty database bootstraps to the current epoch and the marker records the
+  epoch, the migration head, the moment and the release; a current-epoch database starts
+  normally and re-migrating keeps its provenance; a database from before the cut is refused
+  by the gateway at startup, by `/readyz` and by the migrator, which writes nothing — the
+  rows it refused are still exactly there; missing and malformed markers are refused;
+  every refusal prints `synveda reset --database --force` verbatim, and the one refusal
+  that must not (a database from a *newer* build) says to upgrade instead; `reset` requires
+  both flags, refuses a database that is not on this machine, builds a working current-epoch
+  database, carries **zero** rows across, is idempotent, and preserves the KEK, the profile,
+  the console bundle, stored logins and every other database on the server; and no
+  old-to-new data migrator exists — asserted structurally (the epoch migration is pure DDL,
+  no `.down.sql`) as well as behaviourally.
 
 ──────────────────────────────────────────────
 Sequencing (features → phases)
@@ -1182,7 +1214,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1
+Phase 5 context platform (redesign): CPR-1,2
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

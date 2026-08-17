@@ -32,6 +32,7 @@ mod plugin;
 mod prompt;
 mod proposal;
 mod recall;
+mod reset;
 mod scim;
 mod skill;
 #[cfg(test)]
@@ -224,6 +225,31 @@ enum Command {
     /// Database administration (dev bootstrap).
     #[command(subcommand)]
     Db(DbCommand),
+    /// Destroy this deployment's database and build a fresh one at the
+    /// current schema epoch (CPR-2, ADR-0069).
+    ///
+    /// Synveda is pre-1.0 and the context-platform redesign is a hard cut:
+    /// there is no migration from the schema that came before it, so a
+    /// database written before it is refused at startup rather than upgraded.
+    /// This is what an operator runs next, and it is destruction rather than
+    /// translation — every tenant, record and audit event in that database
+    /// goes.
+    ///
+    /// It keeps everything that is not the database: `kms.key`, the compose
+    /// profile, the console bundle, your stored logins, the Docker volumes,
+    /// and the other databases on the same server — Temporal's two share the
+    /// volume with ours, which is why this drops a database rather than a
+    /// volume.
+    Reset {
+        /// What to reset. Required: `reset` names what it destroys rather
+        /// than defaulting to everything there is.
+        #[arg(long)]
+        database: bool,
+        /// Required. Without it nothing is destroyed and the command says
+        /// what it would have done.
+        #[arg(long)]
+        force: bool,
+    },
     /// The key-encryption key (TEN-4, ADR-0064). Everything else in the key
     /// plane is wrapped by this one, and it lives outside the database.
     #[command(subcommand)]
@@ -1900,12 +1926,21 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Db(DbCommand::Migrate) => {
             let pool = connect().await?;
+            // Asked here as well as inside `migrate`, so the refusal reaches
+            // a terminal as itself rather than wrapped in `storage:` — this
+            // is the command whose whole job is to advance a schema, and the
+            // answer "this one cannot be advanced, here is what to run" is
+            // the answer (CPR-2, ADR-0069).
+            synveda_store::epoch::preflight(&pool)
+                .await
+                .map_err(|refusal| refusal.to_string())?;
             synveda_store::migrate(&pool)
                 .await
                 .map_err(|err| err.to_string())?;
             eprintln!("migrations applied");
             Ok(())
         }
+        Command::Reset { database, force } => reset::reset(reset::Plan { database, force }).await,
         Command::Tenant(TenantCommand::Create {
             slug,
             name,
@@ -1916,7 +1951,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             } else {
                 TenantStatus::Active
             };
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let tenant = create_tenant(&pool, &slug, &name, status).await?;
             // The tenant's key, in the same command that admits it (TEN-4,
             // ADR-0064). Not in `create_tenant`'s transaction: wrapping a key
@@ -1948,23 +1983,23 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Kms(KmsCommand::Keygen) => keys::keygen(),
         Command::Tenant(TenantCommand::Key(TenantKeyCommand::Provision { tenant })) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::provision(&pool, tenant).await
         }
         Command::Tenant(TenantCommand::Key(TenantKeyCommand::Rotate { tenant })) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::rotate(&pool, tenant).await
         }
         Command::Tenant(TenantCommand::Key(TenantKeyCommand::Status { tenant })) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::status(&pool, tenant).await
         }
         Command::Tenant(TenantCommand::Export { tenant, out }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::export(&pool, tenant, &out).await
         }
         Command::Tenant(TenantCommand::ExportOpen { archive }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::export_open(&pool, &archive).await
         }
         Command::Tenant(TenantCommand::ExportDescribe { archive }) => {
@@ -1972,11 +2007,11 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Directory(DirectoryCommand::SetCredential { tenant, config }) => {
             let json = read_config_arg(&config)?;
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::set_directory_credential(&pool, tenant, &json).await
         }
         Command::Directory(DirectoryCommand::ClearCredential { tenant }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::clear_directory_credential(&pool, tenant).await
         }
         Command::Policy(PolicyCommand::Apply {
@@ -2079,7 +2114,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     Ok::<_, String>(config)
                 })
                 .transpose()?;
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -2129,7 +2164,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Policy(PolicyCommand::Clear { tenant, name }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -2163,7 +2198,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             role,
             scope,
         }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -2192,7 +2227,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             role,
             scope,
         }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -2222,7 +2257,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Role(RoleCommand::List { tenant }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -2241,7 +2276,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             scope,
             name,
         }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -2303,7 +2338,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Service(ServiceCommand::Remove { tenant, id }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -2338,7 +2373,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Service(ServiceCommand::List { tenant }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -2352,7 +2387,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Audit(AuditCommand::Verify { tenant }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -2368,7 +2403,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::Audit(AuditCommand::Tail { tenant, limit }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -2814,6 +2849,23 @@ pub(crate) async fn record_break_glass(
     .await
     .map(|_| ())
     .map_err(|err| err.to_string())
+}
+
+/// [`connect`], then the schema epoch guard (CPR-2, ADR-0069).
+///
+/// Every store-level command goes through this. They open `DATABASE_URL`
+/// directly and write with the owner role — which makes them the one family
+/// of verbs that could quietly succeed against a database from before the
+/// context-platform cut, writing new-model rows beside old-model ones with
+/// nothing in the process to notice. The two that do not are the two that
+/// cannot: `db migrate`, which creates the epoch, and `reset`, which is what
+/// a refusal tells you to run.
+async fn connect_current_epoch() -> Result<sqlx::PgPool, String> {
+    let pool = connect().await?;
+    synveda_store::epoch::verify(&pool)
+        .await
+        .map_err(|refusal| refusal.to_string())?;
+    Ok(pool)
 }
 
 async fn connect() -> Result<sqlx::PgPool, String> {

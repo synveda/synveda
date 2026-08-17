@@ -322,6 +322,58 @@ is no in-place upgrade and no migration story beyond that — reinstalling is
 how you upgrade (ADR-0065 decision 1's reversal trigger is somebody wanting
 more).
 
+### If the upgrade refuses to start: the schema epoch
+
+Synveda is pre-1.0, and one upgrade in this product's life is a **hard cut**
+rather than a migration. Since the context-platform redesign the database
+carries a **schema epoch**, and a build serves exactly one of them. If your
+database was written before the cut, the gateway will not start — it exits
+with a message rather than serving rows in a model it does not implement:
+
+```
+this database carries no Synveda schema epoch marker, so it was written
+before the context platform (epoch 1).
+
+Synveda is pre-1.0 and the context-platform redesign is a hard cut: there is
+no migration from the previous schema, no compatibility path, and nothing that
+translates old rows into the new model. A database from before the cut is
+refused rather than upgraded.
+
+Reset it — this DESTROYS everything in that database:
+
+    synveda reset --database --force
+```
+
+`synveda db migrate` refuses the same database, and writes nothing when it
+does — your rows are left exactly as they were, so you have as long as you
+like to export anything you want before running the reset.
+
+**There is no migrator, deliberately.** Nothing translates old rows into the
+new model; see ADR-0068 for why that is a decision rather than an omission.
+
+```sh
+synveda reset --database --force   # destroys the database, builds a fresh one
+synveda init                       # brings the deployment back up
+synveda login                      # provisions your org root and admin binding again
+```
+
+`reset` drops and recreates **the application database** — not the volumes,
+not the installation. Your `kms.key`, the compose profile, the console bundle,
+your stored logins and every other database on the same server (Temporal's
+two live in the same volume) all survive. It stops the gateway first, installs
+the extensions, migrates to the current epoch, removes the derived search
+index, and is idempotent: running it twice leaves the same thing.
+
+It requires both flags. `synveda reset --database` on its own tells you what
+it would destroy and destroys nothing. It also refuses a `DATABASE_URL` that
+points at another machine, and prints the two statements to run there by hand
+instead — `--force` says "yes, destroy it", not "and I checked which server I
+am pointed at".
+
+If instead you are told the database is at a *newer* epoch than the build,
+**do not reset it**: that database holds data this installation cannot read,
+and the message says to upgrade the installation rather than destroy it.
+
 **If you installed the Claude Code plugin, upgrade it too:**
 
 ```sh

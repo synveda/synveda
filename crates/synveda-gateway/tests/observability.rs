@@ -143,6 +143,83 @@ async fn readyz_degrades_to_503_when_storage_is_unreachable() {
     assert_eq!(body_text(response).await, "not ready");
 }
 
+/// Readiness carries the schema epoch guard (CPR-2, ADR-0069).
+///
+/// The gateway also refuses to *boot* against a database at the wrong epoch,
+/// and that check cannot be reached from here — it is in `main`. This is the
+/// half that can be, and it is the half that matters most for the case the
+/// boot check cannot cover: the gateway is allowed to start without a
+/// database, so a database that comes up afterwards would otherwise arrive
+/// behind a check that had already run. `demos/cpr-2-schema-epoch.sh` drives
+/// the boot refusal end to end.
+///
+/// Needs a live Postgres and builds a database of its own, because it takes
+/// the epoch marker away — run it with `make db-test`.
+#[tokio::test]
+async fn readyz_refuses_a_database_that_is_not_at_this_schema_epoch() {
+    let _serial = serial().await;
+    let Ok(source) = std::env::var("DATABASE_URL").map_err(|_| ()) else {
+        eprintln!(
+            "skipping the schema epoch readiness test: DATABASE_URL is not set \
+             (run `make dev-up` then `make db-test`)"
+        );
+        return;
+    };
+    // `DATABASE_URL` with the database name swapped, as `scripts/db-test.sh`
+    // builds its own.
+    let head = source.split('?').next().unwrap_or(&source);
+    let base = &head[..head.rfind('/').expect("a database name in DATABASE_URL")];
+    let name = format!("synveda_readyz_epoch_{}", std::process::id());
+    let url = format!("{base}/{name}{}", &source[head.len()..]);
+
+    synveda_store::reset::recreate(&url)
+        .await
+        .expect("build a current-epoch database");
+
+    // A database at this epoch is ready.
+    let response = router(state(&url))
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // The same database with the marker taken away — which is what every
+    // database written before the context-platform cut looks like — is not.
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .expect("connect to the scratch database");
+    sqlx::query("drop table schema_metadata")
+        .execute(&pool)
+        .await
+        .expect("remove the marker");
+    pool.close().await;
+
+    let response = router(state(&url))
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "a gateway whose store answers `SELECT 1` is not ready if the rows \
+         behind it are in a model it does not implement"
+    );
+    assert_eq!(body_text(response).await, "not ready");
+
+    // Tidy up; a failure here is not worth failing a passing test over.
+    if let Ok(mut admin) = source.parse::<sqlx::postgres::PgConnectOptions>() {
+        use sqlx::ConnectOptions as _;
+        admin = admin.database("postgres");
+        if let Ok(mut connection) = admin.connect().await {
+            let _ = sqlx::query(&format!("drop database if exists \"{name}\" with (force)"))
+                .execute(&mut connection)
+                .await;
+        }
+    }
+}
+
 // ── Span-chain test (needs a live Postgres) ─────────────────────────────────
 
 /// `(span name, contextual parent name)` for every span opened.

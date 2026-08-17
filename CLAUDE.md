@@ -53,10 +53,16 @@ prompts on `feat/context-platform-mvp`, with the decisions locked in ADR-0068
 and the running record in docs/implementation/synveda-context-platform.md.
 **It is a pre-1.0 hard cut**: a fresh schema epoch, no old-data migration, no
 compatibility shims, and old databases rejected with a reset instruction.
+Since CPR-2 that is enforced rather than planned (ADR-0069): `schema_metadata`
+carries the epoch, `synveda_store::epoch::verify` is the guard the gateway
+refuses to boot past and `/readyz` re-asks per probe, `migrate` refuses a
+pre-cut database before touching it, and `synveda reset --database --force`
+is the only way through. **Your dev database will be refused** — reset it.
+The 38-migration chain is not squashed yet; that is Prompt 33.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 65 of 98 features delivered — see docs/backlog/STATUS.md for
+features done. 66 of 99 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -71,8 +77,9 @@ which is the drift the trail exists to prevent. **OPS-10 was filed the same
 day as OPS-9**, by asking how that same stranger removes it, making it 97;
 the trail missed it and the headline read 96 against a checker that had said
 97 since — the identical drift, one entry later. CPR-1 filed and delivered
-2026-08-17, making it 98. Prompts 2–33 of its programme are filed by the
-prompts that run them, so this number will keep moving.)
+2026-08-17, making it 98, and **CPR-2 the same day**, making it 99.
+Prompts 3–33 of its programme are filed by the prompts that run them, so
+this number will keep moving.)
 
 Phase 3 was reordered on 2026-08-04 by demo-readiness (see the Sequencing
 note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,
