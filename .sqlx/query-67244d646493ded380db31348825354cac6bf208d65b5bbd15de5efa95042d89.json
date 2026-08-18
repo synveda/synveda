@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update hierarchy_nodes n\n        set path = $2 || substr(n.path, char_length($3::text) + 1)\n        from hierarchy_closure c\n        where c.ancestor_id = $1 and c.descendant_id = n.id\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "67244d646493ded380db31348825354cac6bf208d65b5bbd15de5efa95042d89"
+}

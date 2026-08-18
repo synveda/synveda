@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            insert into directory_sync_state (tenant_id, connector, passes_completed)\n            values ($1, 'forged', 99)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "05374e5750018f84d3315ff10a33207e4d09140c921543a14ffcdad29c66f18d"
+}

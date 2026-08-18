@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select payload from audit_log where tenant_id = $1 and action = $2 order by seq",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payload",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "48d8e468abdb0ea532d5025b28321f112c0037b467359fce62318ea66b954d62"
+}

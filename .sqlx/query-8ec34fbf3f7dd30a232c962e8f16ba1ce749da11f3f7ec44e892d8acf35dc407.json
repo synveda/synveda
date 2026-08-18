@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select r.class, e.model as \"model?\", e.dim as \"dim?\"\n           from records r\n           left join record_embeddings e on e.record_id = r.id\n           where r.tenant_id = $1\n           order by r.class",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "class",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "model?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "dim?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8ec34fbf3f7dd30a232c962e8f16ba1ce749da11f3f7ec44e892d8acf35dc407"
+}

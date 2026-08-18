@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update policy_lapses set expiry_recorded_at = now()\n        where tenant_id = $1 and id = $2 and expiry_recorded_at is null\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b6f6f6c7d47ad8bd2f2cb48b497084aeff31c4527b39310e99bd1c6635b514de"
+}

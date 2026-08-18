@@ -1,0 +1,107 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with updated as (\n            update records\n            set scope_id = $2, owner_id = $3, kind = $4, class = $5, content = $6,\n                sensitivity = $7, provenance = $8, valid_from = $9, valid_to = $10\n            where id = $1\n            returning id, tenant_id, scope_id, owner_id, kind, class, content,\n                      sensitivity, provenance, valid_from, valid_to, tx_from, tx_to\n        ),\n        refreshed as (\n            insert into record_embeddings (record_id, tenant_id, model, dim, embedding)\n            select id, tenant_id, $11, cardinality($12::real[]), $12::real[]::vector\n            from updated\n            on conflict (record_id) do update\n                set model = excluded.model, dim = excluded.dim,\n                    embedding = excluded.embedding, embedded_at = now()\n        ),\n        resigned as (\n            insert into record_signatures (record_id, tenant_id, signature, bands)\n            select id, tenant_id, $13::bigint[], $14::bigint[]\n            from updated\n            on conflict (record_id) do update\n                set signature = excluded.signature, bands = excluded.bands,\n                    signed_at = now()\n        )\n        select id as \"id!\", tenant_id as \"tenant_id!\", scope_id as \"scope_id!\",\n               owner_id as \"owner_id!\", kind as \"kind!\", class as \"class!\",\n               content as \"content!\", sensitivity as \"sensitivity!\",\n               provenance as \"provenance!\", valid_from as \"valid_from!\",\n               valid_to, tx_from as \"tx_from!\", tx_to\n        from updated\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "class!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "content!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "sensitivity!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "provenance!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "tx_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Float4Array",
+        "Int8Array",
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "e08fdfbfbb311a624a3d9657d9e257c3fedaf1fc5b2f9c0e340742c50a44eeb5"
+}

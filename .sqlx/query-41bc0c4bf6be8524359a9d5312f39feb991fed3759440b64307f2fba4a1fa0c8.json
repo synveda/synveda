@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            update directory_sync_state\n               set seal_authorised_at = now() - interval '2 hours',\n                   seal_authorised_until = now() - interval '1 hour'\n             where tenant_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "41bc0c4bf6be8524359a9d5312f39feb991fed3759440b64307f2fba4a1fa0c8"
+}

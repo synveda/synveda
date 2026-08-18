@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into vedaflow_proposal_approvals\n                 (tenant_id, proposal_id, approver_id, commit_hash, verdict, roles,\n                  approver_subject)\n             values ($1, $2, $3, $4, 'approve', array['compliance']::text[], 'intruder')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "957e0bba26ce3bd9a4824531c73396780f867837d8990b44f7e53bedb47823b1"
+}

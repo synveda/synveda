@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update graph_edges set confidence_permille = 1000 where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7dd800f10978c0545c6e78dac598315b8dbc8b5b7f5d7f118a6888d3d49e6fd4"
+}

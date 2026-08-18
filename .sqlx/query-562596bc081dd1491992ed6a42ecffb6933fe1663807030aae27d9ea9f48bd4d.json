@@ -1,0 +1,121 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, target_scope_id, source_scope_id, asset_kind, target_channel,\n                  commit_hash, sensitivity, state, title, proposer_id, proposer_subject,\n                  created_at, updated_at, closed_at, closed_by, close_reason, evidence\n           from vedaflow_proposals\n           where tenant_id = $1\n             and ($2::uuid is null or target_scope_id = $2)\n             and ($3::text is null or state = $3)\n           order by created_at desc, id desc\n           limit $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "target_scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "asset_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "target_channel",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "commit_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 6,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "proposer_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "proposer_subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "closed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "closed_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 15,
+        "name": "close_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "evidence",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "562596bc081dd1491992ed6a42ecffb6933fe1663807030aae27d9ea9f48bd4d"
+}

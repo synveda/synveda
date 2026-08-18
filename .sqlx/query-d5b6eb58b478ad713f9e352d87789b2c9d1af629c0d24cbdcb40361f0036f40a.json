@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with closed as (\n            update graph_edges set valid_to = $3\n            where tenant_id = $1 and id = $2\n              and valid_from < $3\n              and (valid_to is null or valid_to > $3)\n            returning id, tenant_id, graph, kind, src_id, dst_id, method,\n                      confidence_permille, source_record_id, valid_from,\n                      valid_to, tx_from, tx_to\n        ),\n        inserted as (\n            insert into graph_edges\n                (id, tenant_id, graph, kind, src_id, dst_id, method,\n                 confidence_permille, source_record_id, valid_from, valid_to, tx_from)\n            select $4, $1, $5, $6, $7, $8, $9, $10, $11, $12, $13, now()\n            from closed\n            returning id, tenant_id, graph, kind, src_id, dst_id, method,\n                      confidence_permille, source_record_id, valid_from,\n                      valid_to, tx_from, tx_to\n        )\n        select 0 as \"hop!\", id as \"id!\", tenant_id as \"tenant_id!\",\n               graph as \"graph!\", kind as \"kind!\", src_id as \"src_id!\",\n               dst_id as \"dst_id!\", method as \"method!\",\n               confidence_permille as \"confidence_permille!\", source_record_id,\n               valid_from as \"valid_from!\", valid_to, tx_from as \"tx_from!\", tx_to\n        from closed\n        union all\n        select 1 as \"hop!\", id as \"id!\", tenant_id as \"tenant_id!\",\n               graph as \"graph!\", kind as \"kind!\", src_id as \"src_id!\",\n               dst_id as \"dst_id!\", method as \"method!\",\n               confidence_permille as \"confidence_permille!\", source_record_id,\n               valid_from as \"valid_from!\", valid_to, tx_from as \"tx_from!\", tx_to\n        from inserted\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hop!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "graph!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "src_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "dst_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "method!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "confidence_permille!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "source_record_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "tx_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int4",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "d5b6eb58b478ad713f9e352d87789b2c9d1af629c0d24cbdcb40361f0036f40a"
+}

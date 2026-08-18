@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into graph_vertices (id, tenant_id, graph, kind, key, label)\n             values ($1, $2, 'entity', 'person', 'mallory', 'Mallory')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4df459744b997d8faf87affcacb25752719f7dcc92de1fd1dc788a9b0e58fc5d"
+}

@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        delete from records\n        where tenant_id = $1 and id = any($2) and kind = 'derived'\n        returning id as \"id!\", class as \"class!\", valid_from as \"valid_from!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "class!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d466a6342d877ac13f21f01c631453e1f4a5125d7b9532e3e891a857ecb1c2e0"
+}

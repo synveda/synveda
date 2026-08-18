@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with recursive reachable (hash) as (\n            select $3::bytea\n            union\n            select parent.parent_hash\n            from vedaflow_commit_parents parent\n            join reachable on reachable.hash = parent.commit_hash\n            where parent.tenant_id = $1\n        )\n        select exists (select from reachable where hash = $2) as \"found!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "found!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "04fbfdb1e2d6df95ffe6c1907969811831b43bacb19f433da86e3184347f6626"
+}

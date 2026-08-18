@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update deployment_keys set retired_at = now() where version = $1 and retired_at is null",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "949d87e9cb643ed0d76fe272433cadbee98c87bdc7feb69f291236527caebce8"
+}

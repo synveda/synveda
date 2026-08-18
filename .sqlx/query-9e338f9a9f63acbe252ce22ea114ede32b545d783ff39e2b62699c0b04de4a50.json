@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from policy_pack_defaults where tenant_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9e338f9a9f63acbe252ce22ea114ede32b545d783ff39e2b62699c0b04de4a50"
+}

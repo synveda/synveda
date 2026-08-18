@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select r.id, r.tenant_id, r.scope_id, r.owner_id, r.kind, r.class,\n               r.content, r.sensitivity, r.provenance, r.valid_from, r.valid_to,\n               r.tx_from, r.tx_to\n        from record_signatures s\n        join records r on r.id = s.record_id\n        where s.tenant_id = $1\n          and s.bands && $2::bigint[]\n          and r.tenant_id = $1\n          and r.scope_id = $3\n          and r.owner_id = $4\n          and r.class = $5\n          and r.kind = 'derived'\n          and (r.valid_to is null or r.valid_to > $6)\n        order by (select count(*) from unnest(s.bands) as band\n                  where band = any($2::bigint[])) desc,\n                 r.valid_from desc, r.id\n        limit $7\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "class",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "provenance",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "valid_from",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "tx_from",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8Array",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "73a3d714d58ceb8bc52fb80bee69e443ebb89d1229bd22564da6c2d310d41994"
+}

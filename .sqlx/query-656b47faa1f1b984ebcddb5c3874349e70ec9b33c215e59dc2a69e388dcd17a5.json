@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select distinct n.id, n.tenant_id, n.parent_id, n.kind, n.slug, n.name,\n               n.depth, n.path, n.created_at,\n               -- A team node never owns an identity, so this is always\n               -- false here; derived rather than asserted so that one\n               -- expression answers the question everywhere.\n               coalesce(s.status = 'departed', false) as \"sealed!\"\n        from unnest($2::text[], $3::text[]) as candidate(dept_slug, team_slug)\n        join hierarchy_nodes n\n          on n.tenant_id = $1 and n.kind = 'team' and n.slug = candidate.team_slug\n        join hierarchy_closure c\n          on c.descendant_id = n.id and c.distance > 0\n        join hierarchy_nodes a\n          on a.id = c.ancestor_id\n         and a.kind = 'department' and a.slug = candidate.dept_slug\n        left join identities s on s.tenant_id = n.tenant_id and s.scope_id = n.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "parent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "slug",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "depth",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "sealed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "656b47faa1f1b984ebcddb5c3874349e70ec9b33c215e59dc2a69e388dcd17a5"
+}

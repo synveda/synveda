@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "alter table records_history disable trigger records_history_append_only",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "68db74c7277d4087f70ae29182545599bbc62bd933ae00c16af85ba5a9cc4e5a"
+}

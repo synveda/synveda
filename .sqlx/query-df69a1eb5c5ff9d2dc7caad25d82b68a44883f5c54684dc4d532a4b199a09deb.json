@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into skill_files\n                 (tenant_id, scope_id, skill_name, path, object_hash, created_by, updated_by)\n             values ($1, $2, 'code-review', $3, $4, $5, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Bytea",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "df69a1eb5c5ff9d2dc7caad25d82b68a44883f5c54684dc4d532a4b199a09deb"
+}

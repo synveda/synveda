@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update scopes set created_at = now() where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c74b48221cceb019b83ef15f5ffc8021e2d7efccbd7570db4f297b7c83aa10a4"
+}

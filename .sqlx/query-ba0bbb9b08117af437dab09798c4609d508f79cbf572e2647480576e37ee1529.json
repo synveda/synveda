@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select distinct scope_id as \"scope_id!\"\n           from records_versions\n           where tenant_id = $1 and id = any($2)\n           order by scope_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "ba0bbb9b08117af437dab09798c4609d508f79cbf572e2647480576e37ee1529"
+}

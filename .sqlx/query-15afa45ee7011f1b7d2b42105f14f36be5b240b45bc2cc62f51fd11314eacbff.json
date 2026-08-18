@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from tenant_secrets where tenant_id = $1 and name = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "15afa45ee7011f1b7d2b42105f14f36be5b240b45bc2cc62f51fd11314eacbff"
+}

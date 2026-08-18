@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select\n                 (select count(*) from vedaflow_objects where tenant_id = $1) as \"objects!\",\n                 (select count(*) from vedaflow_trees where tenant_id = $1) as \"trees!\",\n                 (select count(*) from vedaflow_tree_entries where tenant_id = $1) as \"entries!\",\n                 (select count(*) from vedaflow_commits where tenant_id = $1) as \"commits!\",\n                 (select count(*) from vedaflow_commit_parents where tenant_id = $1) as \"parents!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "objects!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "trees!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "entries!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "commits!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "parents!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "93bd9eacea2c7b2d553a3af039d987ba5da24dc5eb8643056687535a98147a1f"
+}

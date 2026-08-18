@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into skill_reviews\n               (tenant_id, scope_id, skill_name, bundle_digest, answers, note,\n                rubric_version, reviewed_by)\n           values ($1, $2, $3, $4, $5, $6, $7, $8)\n           on conflict (tenant_id, scope_id, skill_name, bundle_digest) do update\n               set answers        = excluded.answers,\n                   note           = excluded.note,\n                   rubric_version = excluded.rubric_version,\n                   reviewed_at    = now(),\n                   reviewed_by    = excluded.reviewed_by\n           returning scope_id, skill_name, bundle_digest, answers, note, rubric_version,\n                     reviewed_at, reviewed_by",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "skill_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "bundle_digest",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 3,
+        "name": "answers",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "note",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "rubric_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "reviewed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "reviewed_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Bytea",
+        "Jsonb",
+        "Text",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5fa4ff757d910ee242f2dd55407ab6310e2df2874ba7179ca3b6e199114eb0c8"
+}

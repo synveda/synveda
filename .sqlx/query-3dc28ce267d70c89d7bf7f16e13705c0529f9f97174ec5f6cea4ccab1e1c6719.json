@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select set_config('hnsw.iterative_scan', 'relaxed_order', true) as \"a!\",\n               set_config('hnsw.ef_search', '100', true) as \"b!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "a!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "b!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "3dc28ce267d70c89d7bf7f16e13705c0529f9f97174ec5f6cea4ccab1e1c6719"
+}

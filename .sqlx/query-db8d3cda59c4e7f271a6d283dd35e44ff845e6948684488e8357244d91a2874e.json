@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update records_history set content = 'never happened' where tenant_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "db8d3cda59c4e7f271a6d283dd35e44ff845e6948684488e8357244d91a2874e"
+}

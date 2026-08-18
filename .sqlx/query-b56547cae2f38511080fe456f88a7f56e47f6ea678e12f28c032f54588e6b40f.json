@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select set_config('synveda.tenant_id', $1, true)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "set_config",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b56547cae2f38511080fe456f88a7f56e47f6ea678e12f28c032f54588e6b40f"
+}

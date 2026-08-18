@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into vedaflow_refs (tenant_id, scope_id, name, commit_hash, updated_by)\n                 values ($1, $2, 'pin/memory/published', $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "739c58860b1964d91f2f1cfce9a410bcf5ce08caed76b5eaa0c7dccb81621b81"
+}

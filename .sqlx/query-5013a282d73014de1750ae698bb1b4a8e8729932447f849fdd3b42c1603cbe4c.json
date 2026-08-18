@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select last_seq from promotion_watermarks where tenant_id = $1 for update",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "last_seq",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5013a282d73014de1750ae698bb1b4a8e8729932447f849fdd3b42c1603cbe4c"
+}

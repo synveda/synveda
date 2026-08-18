@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into graph_edges\n                 (id, tenant_id, graph, kind, src_id, dst_id, method,\n                  confidence_permille, valid_from)\n             values ($1, $2, 'entity', 'attended', $3, $4, 'deterministic', 500, now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a4a914778884db48c33aca5102ec294ba8d89a25119acc0817b5b36f3aa709d"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into graph_vertices (id, tenant_id, graph, kind, key, label)\n        select (substring(replace($1::uuid::text, '-', '') from 1 for 16)\n                || lpad(to_hex(n), 16, '0'))::uuid,\n               $1, 'entity', 'person', 'v' || n, 'v' || n\n        from generate_series(1::bigint, $2::bigint) n\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8a1ce8998f4d209730d68869509d70eb3d97194ebd1f261dba5c43fab9b7514e"
+}

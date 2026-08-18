@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select approver_id, approver_subject, commit_hash, verdict, roles, comment, created_at\n         from vedaflow_proposal_approvals\n         where tenant_id = $1 and proposal_id = $2\n         order by created_at, approver_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "approver_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "approver_subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "commit_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 3,
+        "name": "verdict",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "roles",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 5,
+        "name": "comment",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "a0b33d50ab4399577baddbf4571000f42ac999a4f3b32e689a3c97ec085da346"
+}

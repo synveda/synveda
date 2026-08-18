@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select e.name, e.object_hash\n         from vedaflow_commits c\n         join vedaflow_tree_entries e\n             on e.tenant_id = c.tenant_id and e.tree_hash = c.tree_hash\n         where c.tenant_id = $1 and c.hash = $2\n         order by e.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "object_hash",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "571d069e16ca40cc3a46647047252217b224ee9b4162b17fe14968b44acc030c"
+}

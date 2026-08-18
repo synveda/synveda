@@ -1,0 +1,97 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update records\n        set provenance = jsonb_set(\n                provenance,\n                '{merged}',\n                jsonb_build_object(\n                    'count', coalesce((provenance -> 'merged' ->> 'count')::int, 0) + 1,\n                    'last_event_id', $3::text,\n                    'last_observed_at', $4::text\n                ),\n                true\n            )\n        where tenant_id = $1 and id = $2\n        returning id as \"id!\", tenant_id as \"tenant_id!\", scope_id as \"scope_id!\",\n                  owner_id as \"owner_id!\", kind as \"kind!\", class as \"class!\",\n                  content as \"content!\", sensitivity as \"sensitivity!\",\n                  provenance as \"provenance!\", valid_from as \"valid_from!\",\n                  valid_to, tx_from as \"tx_from!\", tx_to\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "class!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "content!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "sensitivity!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "provenance!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "tx_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "b5dae2b4d12498d0e87771373e0aee945a8bff3d443968f4267e78fe1a544375"
+}

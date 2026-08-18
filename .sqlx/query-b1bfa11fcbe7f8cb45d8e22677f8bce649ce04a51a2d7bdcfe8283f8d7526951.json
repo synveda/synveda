@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from group_mappings where tenant_id = $1 and group_name = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b1bfa11fcbe7f8cb45d8e22677f8bce649ce04a51a2d7bdcfe8283f8d7526951"
+}

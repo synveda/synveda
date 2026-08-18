@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select r.scope_id,\n                  coalesce(p.commit_hash, r.commit_hash) as \"commit_hash!\",\n                  (p.commit_hash is not null) as \"pinned!\",\n                  e.name as \"name?\", e.object_hash as \"object_hash?\"\n           from vedaflow_refs r\n           left join vedaflow_refs p\n               on p.tenant_id = r.tenant_id and p.scope_id = r.scope_id\n                  and p.name = $4\n           join vedaflow_commits c\n               on c.tenant_id = r.tenant_id\n                  and c.hash = coalesce(p.commit_hash, r.commit_hash)\n           left join vedaflow_tree_entries e\n               on e.tenant_id = c.tenant_id and e.tree_hash = c.tree_hash\n           where r.tenant_id = $1 and r.scope_id = any($2) and r.name = $3\n           order by r.scope_id, e.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "commit_hash!",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "pinned!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "object_hash?",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      false,
+      true
+    ]
+  },
+  "hash": "88254c98a62f0cbb2c10aa07f29239a6231ab3acb368231c34c3158db54d7dbe"
+}

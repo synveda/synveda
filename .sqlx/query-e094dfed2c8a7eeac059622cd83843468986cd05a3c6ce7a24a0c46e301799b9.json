@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select scope_id from records where tenant_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e094dfed2c8a7eeac059622cd83843468986cd05a3c6ce7a24a0c46e301799b9"
+}

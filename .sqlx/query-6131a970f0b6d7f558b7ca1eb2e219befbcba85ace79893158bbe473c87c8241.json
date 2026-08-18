@@ -1,0 +1,97 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, scope_id, owner_id, kind, class, content,\n               sensitivity, provenance, valid_from, valid_to, tx_from, tx_to\n        from records\n        where tenant_id = $1 and id = any($2)\n          and sensitivity = any($3)\n          and valid_from <= $4 and (valid_to is null or valid_to > $4)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "class",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "provenance",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "valid_from",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "tx_from",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "TextArray",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "6131a970f0b6d7f558b7ca1eb2e219befbcba85ace79893158bbe473c87c8241"
+}

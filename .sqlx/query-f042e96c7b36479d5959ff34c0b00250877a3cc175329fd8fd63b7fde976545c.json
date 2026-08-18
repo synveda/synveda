@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update directory_sync_state set seal_authorised_ceiling = 300 where tenant_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f042e96c7b36479d5959ff34c0b00250877a3cc175329fd8fd63b7fde976545c"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into vedaflow_trees (tenant_id, hash) values ($1, $2)\n         on conflict (tenant_id, hash) do nothing",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "620484bd1f8807db65cd47d445b5ddb48bc537936824d669a0a350f98d2a724a"
+}

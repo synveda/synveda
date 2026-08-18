@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, class, content, sensitivity, kind, provenance, valid_from\n           from records where tenant_id = $1 order by class",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "class",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "provenance",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "valid_from",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "560615eb6e91730ba00e7790491c06adfd2fafeb5e493794cc737347f672960d"
+}

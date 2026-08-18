@@ -1,0 +1,95 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id as \"id!\", tenant_id as \"tenant_id!\", graph as \"graph!\",\n               kind as \"kind!\", src_id as \"src_id!\", dst_id as \"dst_id!\",\n               method as \"method!\", confidence_permille as \"confidence_permille!\",\n               source_record_id, valid_from as \"valid_from!\", valid_to,\n               tx_from as \"tx_from!\", tx_to\n        from graph_edges_versions\n        where tenant_id = $1 and id = $2\n        order by tx_from\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "graph!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "src_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "dst_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "method!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "confidence_permille!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_record_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "tx_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "00520194cb973cd55830dcef12d2cf274223d460e1b582cf23d921bb6874e353"
+}

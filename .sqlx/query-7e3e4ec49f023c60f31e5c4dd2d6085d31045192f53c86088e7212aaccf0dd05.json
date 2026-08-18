@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update policy_lapses set max_sensitivity = 'restricted'\n             where tenant_id = $1 and id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7e3e4ec49f023c60f31e5c4dd2d6085d31045192f53c86088e7212aaccf0dd05"
+}

@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id as \"id!\", tenant_id as \"tenant_id!\", scope_id as \"scope_id!\",\n               owner_id as \"owner_id!\", kind as \"kind!\", class as \"class!\",\n               content as \"content!\", sensitivity as \"sensitivity!\",\n               provenance as \"provenance!\", valid_from as \"valid_from!\",\n               valid_to, tx_from as \"tx_from!\", tx_to\n        from records_versions\n        where id = $1\n        order by tx_from\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "class!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "content!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "sensitivity!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "provenance!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "tx_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "ad555b4201e60b67bd3fc0d83395d04425ce050e85574fc49d49365e428a4f1f"
+}

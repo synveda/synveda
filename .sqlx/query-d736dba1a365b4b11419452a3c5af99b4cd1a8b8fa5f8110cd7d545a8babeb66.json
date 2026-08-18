@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            insert into directory_sync_state\n                (tenant_id, connector, passes_completed, breaker_would_have_sealed)\n            values ($1, 'entra', 1, 5)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d736dba1a365b4b11419452a3c5af99b4cd1a8b8fa5f8110cd7d545a8babeb66"
+}

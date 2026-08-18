@@ -1,0 +1,107 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                select r.id as \"id!\", r.tenant_id as \"tenant_id!\",\n                       r.scope_id as \"scope_id!\", r.owner_id as \"owner_id!\",\n                       r.kind as \"kind!\", r.class as \"class!\", r.content as \"content!\",\n                       r.sensitivity as \"sensitivity!\", r.provenance as \"provenance!\",\n                       r.valid_from as \"valid_from!\", r.valid_to,\n                       r.tx_from as \"tx_from!\", r.tx_to,\n                       (e.embedding::vector(16) <=> $7::real[]::vector(16))::float8\n                           as \"distance!\"\n                from record_embeddings e\n                join records r on r.id = e.record_id\n                where e.tenant_id = $1\n                  and e.dim = 16\n                  and e.model = $2\n                  and r.tenant_id = $1\n                  and r.scope_id = $3\n                  and r.owner_id = $4\n                  and r.class = $5\n                  and r.kind = 'derived'\n                  and (r.valid_to is null or r.valid_to > $6)\n                order by e.embedding::vector(16) <=> $7::real[]::vector(16)\n                limit $8\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "owner_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "class!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "content!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "sensitivity!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "provenance!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "tx_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "distance!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Float4Array",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "d238cd861b66ea6188f8ab86fb96930745f4abe5700fafaf3fe8bb0c3e707e2a"
+}

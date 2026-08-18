@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update context_pack_documents set title = 'Refunds runbook (v2)'\n             where tenant_id = $1 and scope_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a30491976f41d599664858c44c46ffb06bf4b130373f5934e18afaa4c86dd026"
+}

@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select operation, idempotency_key as \"key\", request_digest, resource_id, created_at\n        from idempotency_records\n        where tenant_id = $1 and subject = $2 and operation = $3 and idempotency_key = $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "operation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "request_digest",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 3,
+        "name": "resource_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6116d230470965329b55ee08a202fe03b639a10ebc7c5f11e2ef627147ff2f19"
+}
