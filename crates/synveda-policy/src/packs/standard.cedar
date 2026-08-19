@@ -1,19 +1,40 @@
-// standard@10 — team-shares-by-default within a department (seed §6,
-// ADR-0014, ADR-0015, ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032, ADR-0036,
-// ADR-0037, ADR-0038).
+// standard@17 — shares by default inside what you belong to (seed §6,
+// ADR-0014, ADR-0015, ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032,
+// ADR-0036, ADR-0037, ADR-0038, ADR-0072, ADR-0073).
 //
-// Own-chain reads plus the department subtree: sibling teams under the
-// principal's department share by default. Other people's personal
-// (user-kind) scopes stay excluded — the privacy floor, which AUTHZ-5
-// resolved by leaving it exactly where it was: a tier says how sensitive
-// material is, not whose it is (ADR-0038 decision 4). A hierarchy that skips
-// the department level leaves the principal without a `department`
-// attribute, and this pack collapses to regulated-strict's read surface.
+// Own-chain reads plus **the neighbourhood of every scope this caller holds**:
+// somebody given one project reads the workspace it sits in and the other
+// projects in it, and a workspace they hold nothing at stays closed. A grant
+// reaches its own subtree under every pack — that is what a grant is — so what
+// this pack adds is exactly one step *outward* from what somebody was given. Other people's
+// `principal` scopes are excluded by the base layer itself, which is stronger
+// than the pack clause that used to say it — a tier says how sensitive
+// material is, not whose it is (ADR-0038 decision 4).
 //
-// What sharing by default means here is the *working* tiers: the department
-// subtree is a default, not an explicit grant, so `confidential` still takes
-// a content-role binding or one's own home, exactly as under
+// Until CPR-6 this sentence was "the department subtree", read off a
+// `principal.department` attribute that named the nearest department-kind
+// ancestor of somebody's placement. That attribute is gone with the rank
+// vocabulary it belonged to (ADR-0073 decision 4), and what replaces it is
+// not a renamed rung: `principal.ambit` is the **parent** of every scope a
+// grant reaches this caller at, so the sharing default now follows what
+// somebody was actually given rather than where an org chart put them, and
+// nothing anywhere asks what kind of thing that parent is. The tenant root is
+// excluded, which is what keeps this pack from meaning `open-collaboration`.
+// A caller who holds nothing gets exactly regulated-strict's read surface,
+// which is the same collapse the missing-department case used to produce.
+//
+// What sharing by default means here is still the *working* tiers: an
+// anchor's subtree is a default, not an explicit grant, so `confidential`
+// still takes a content role or one's own scope, exactly as under
 // regulated-strict. `restricted` takes a lapse under every pack.
+
+// **The privacy floor moved.** Until CPR-6 every permit here restated
+// `resource.kind != "user"`; it is now one base-layer forbid over
+// `principal`-shaped scopes that no pack can drop and that a grant written
+// *at* somebody's own scope can lift (ADR-0073 decision 6). So "personal
+// scopes excluded" is still true of every permit below — it is just no longer
+// each permit's job to remember, and sharing your own notes deliberately is
+// finally sayable.
 
 // The mutating admin planes: steward/org-admin over the bound subtree
 // (context.roles is resolved from the resource chain's bindings,
@@ -47,7 +68,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["steward", "org-admin"])
+        && context.roles.containsAny(["steward", "org-admin", "owner", "administrator"])
 };
 
 // The read-only admin surfaces: auditor joins — including the audit chain
@@ -72,7 +93,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["steward", "org-admin", "auditor"])
+        && context.roles.containsAny(["steward", "org-admin", "auditor", "owner", "administrator"])
 };
 
 // Workspaces and projects are **structure, not content** (CPR-4, ADR-0071
@@ -93,7 +114,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["viewer", "contributor", "curator"])
+        && context.roles.containsAny(["viewer", "contributor", "curator", "member", "reviewer", "owner", "administrator"])
 };
 
 // The membership floor: own chain at the working tiers, as under
@@ -113,12 +134,12 @@ permit (
     action == Synveda::Action::"MemoryRead",
     resource
 ) when {
-    principal has home
-        && resource == principal.home
+    principal has own_scope
+        && resource == principal.own_scope
         && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
 
-// The department subtree, personal scopes excluded, at the working tiers:
+// The neighbourhood of everything this caller holds, at the working tiers:
 // this pack's sharing default is a default, and `confidential` is the tier
 // held to explicitly granted scopes under every pack.
 permit (
@@ -126,9 +147,7 @@ permit (
     action == Synveda::Action::"MemoryRead",
     resource
 ) when {
-    principal has department
-        && resource in principal.department
-        && resource.kind != "user"
+    resource in principal.ambit
         && ["public", "internal"].contains(context.sensitivity)
 };
 
@@ -140,8 +159,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["viewer", "contributor", "curator"])
-        && resource.kind != "user"
+        && context.roles.containsAny(["viewer", "contributor", "curator", "member", "reviewer", "owner", "administrator"])
         && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
 
@@ -154,8 +172,8 @@ permit (
     action == Synveda::Action::"MemoryWrite",
     resource
 ) when {
-    principal has home
-        && resource == principal.home
+    principal has own_scope
+        && resource == principal.own_scope
 };
 
 // Content roles write the bound subtree, personal scopes excluded
@@ -166,13 +184,12 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["contributor", "curator"])
-        && resource.kind != "user"
+        && context.roles.containsAny(["contributor", "curator", "member", "owner", "administrator"])
 };
 
 // The prompt registry (PRMT-1, ADR-0049 decision 4). Reading mirrors this
-// pack's MemoryRead shape, department sharing included: under `standard` a
-// department's prompts are its members' prompts, which is the same default
+// pack's MemoryRead shape, anchor sharing included: under `standard` a
+// workspace's prompts are its members' prompts, which is the same default
 // this pack applies to memory and for the same reason. `confidential` stays
 // with the explicit grant; `restricted` is named by nothing, because no path
 // in the product mints it for an authored asset (decision 5).
@@ -190,8 +207,8 @@ permit (
     action == Synveda::Action::"PromptRead",
     resource
 ) when {
-    principal has home
-        && resource == principal.home
+    principal has own_scope
+        && resource == principal.own_scope
         && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
 
@@ -200,9 +217,7 @@ permit (
     action == Synveda::Action::"PromptRead",
     resource
 ) when {
-    principal has department
-        && resource in principal.department
-        && resource.kind != "user"
+    resource in principal.ambit
         && ["public", "internal"].contains(context.sensitivity)
 };
 
@@ -212,8 +227,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["viewer", "contributor", "curator"])
-        && resource.kind != "user"
+        && context.roles.containsAny(["viewer", "contributor", "curator", "member", "reviewer", "owner", "administrator"])
         && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
 
@@ -225,8 +239,8 @@ permit (
     action == Synveda::Action::"PromptWrite",
     resource
 ) when {
-    principal has home
-        && resource == principal.home
+    principal has own_scope
+        && resource == principal.own_scope
 };
 
 permit (
@@ -235,14 +249,13 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["contributor", "curator"])
-        && resource.kind != "user"
+        && context.roles.containsAny(["contributor", "curator", "member", "owner", "administrator"])
 };
 
 // The context-pack registry (PRMT-2, ADR-0050 decision 7). The prompt
 // plane's shape above, mirrored tier for tier onto this pack's own
-// MemoryRead — department sharing included, because under `standard` a
-// department's conventions are its members' conventions, which is this
+// MemoryRead — anchor sharing included, because under `standard` a
+// workspace's conventions are its members' conventions, which is this
 // pack's default for memory and holds at least as strongly for a glossary.
 //
 // This is the action that admits pack chunks into a block; `MemoryRead`
@@ -261,8 +274,8 @@ permit (
     action == Synveda::Action::"ContextPackRead",
     resource
 ) when {
-    principal has home
-        && resource == principal.home
+    principal has own_scope
+        && resource == principal.own_scope
         && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
 
@@ -271,9 +284,7 @@ permit (
     action == Synveda::Action::"ContextPackRead",
     resource
 ) when {
-    principal has department
-        && resource in principal.department
-        && resource.kind != "user"
+    resource in principal.ambit
         && ["public", "internal"].contains(context.sensitivity)
 };
 
@@ -283,8 +294,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["viewer", "contributor", "curator"])
-        && resource.kind != "user"
+        && context.roles.containsAny(["viewer", "contributor", "curator", "member", "reviewer", "owner", "administrator"])
         && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
 
@@ -294,8 +304,8 @@ permit (
     action == Synveda::Action::"ContextPackWrite",
     resource
 ) when {
-    principal has home
-        && resource == principal.home
+    principal has own_scope
+        && resource == principal.own_scope
 };
 
 permit (
@@ -304,14 +314,13 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["contributor", "curator"])
-        && resource.kind != "user"
+        && context.roles.containsAny(["contributor", "curator", "member", "owner", "administrator"])
 };
 
 // The skills registry (SKIL-1, ADR-0051 decision 10). The context-pack
 // plane's shape above, mirrored tier for tier onto this pack's own
-// MemoryRead — department sharing included, because under `standard` a
-// department's skills are its members' skills.
+// MemoryRead — anchor sharing included, because under `standard` a
+// workspace's skills are its members' skills.
 //
 // A skill composes into no block (decision 9); this decides whether an
 // install may write the bundle onto this caller's disk. Authoring is
@@ -330,8 +339,8 @@ permit (
     action == Synveda::Action::"SkillRead",
     resource
 ) when {
-    principal has home
-        && resource == principal.home
+    principal has own_scope
+        && resource == principal.own_scope
         && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
 
@@ -340,9 +349,7 @@ permit (
     action == Synveda::Action::"SkillRead",
     resource
 ) when {
-    principal has department
-        && resource in principal.department
-        && resource.kind != "user"
+    resource in principal.ambit
         && ["public", "internal"].contains(context.sensitivity)
 };
 
@@ -352,8 +359,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["viewer", "contributor", "curator"])
-        && resource.kind != "user"
+        && context.roles.containsAny(["viewer", "contributor", "curator", "member", "reviewer", "owner", "administrator"])
         && ["public", "internal", "confidential"].contains(context.sensitivity)
 };
 
@@ -363,8 +369,8 @@ permit (
     action == Synveda::Action::"SkillWrite",
     resource
 ) when {
-    principal has home
-        && resource == principal.home
+    principal has own_scope
+        && resource == principal.own_scope
 };
 
 permit (
@@ -373,8 +379,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["contributor", "curator"])
-        && resource.kind != "user"
+        && context.roles.containsAny(["contributor", "curator", "member", "owner", "administrator"])
 };
 
 // The quality override (SKIL-3, ADR-0053 decision 8): the strict pack's
@@ -392,7 +397,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["steward", "org-admin"])
+        && context.roles.containsAny(["steward", "org-admin", "owner", "administrator"])
 };
 
 // The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform —
@@ -403,7 +408,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["curator", "steward", "org-admin"])
+        && context.roles.containsAny(["curator", "steward", "org-admin", "owner", "administrator"])
 };
 
 permit (
@@ -411,8 +416,8 @@ permit (
     action == Synveda::Action::"MemoryClassify",
     resource
 ) when {
-    principal has home
-        && resource == principal.home
+    principal has own_scope
+        && resource == principal.own_scope
 };
 
 // The quarantine review plane (MEM-2, ADR-0021 decision 6):
@@ -426,7 +431,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["steward", "org-admin", "security-reviewer"])
+        && context.roles.containsAny(["steward", "org-admin", "security-reviewer", "reviewer", "owner", "administrator"])
 };
 
 // The VedaFlow channel plane (FLOW-2, ADR-0031 decision 12): pack-uniform,
@@ -440,7 +445,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["steward", "org-admin", "auditor", "curator"])
+        && context.roles.containsAny(["steward", "org-admin", "auditor", "curator", "owner", "administrator"])
 };
 
 // Publishing is the curator's act by name (seed §5: curator "can
@@ -459,7 +464,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["curator", "steward", "org-admin"])
+        && context.roles.containsAny(["curator", "steward", "org-admin", "owner", "administrator"])
 };
 
 // A rewind and a pin (FLOW-7, ADR-0036 decision 3): pack-uniform, and the
@@ -481,7 +486,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["curator", "steward", "org-admin"])
+        && context.roles.containsAny(["curator", "steward", "org-admin", "owner", "administrator"])
 };
 
 // The VedaFlow proposal plane (FLOW-3, ADR-0032 decision 16): pack-uniform,
@@ -502,7 +507,7 @@ permit (
         && resource in principal.tenant
         && context.roles.containsAny([
             "curator", "steward", "org-admin", "auditor", "compliance",
-            "security-reviewer"
+            "security-reviewer", "reviewer", "owner", "administrator"
         ])
 };
 
@@ -524,9 +529,9 @@ permit (
         && resource in principal.tenant
         && context.roles.containsAny([
             "viewer", "contributor", "curator", "steward", "org-admin",
-            "auditor", "compliance", "security-reviewer"
+            "auditor", "compliance", "security-reviewer",
+            "member", "reviewer", "owner", "administrator"
         ])
-        && resource.kind != "user"
 };
 
 // Opening a proposal grants nothing — it asks. So the floor is membership:
@@ -546,8 +551,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["contributor", "curator", "steward", "org-admin"])
-        && resource.kind != "user"
+        && context.roles.containsAny(["contributor", "curator", "steward", "org-admin", "member", "owner", "administrator"])
 };
 
 // Reviewing is a role act with no membership floor: casting a verdict is
@@ -562,7 +566,8 @@ permit (
 ) when {
     resource in principal.tenant
         && context.roles.containsAny([
-            "curator", "steward", "org-admin", "compliance", "security-reviewer"
+            "curator", "steward", "org-admin", "compliance", "security-reviewer",
+            "reviewer", "owner", "administrator"
         ])
 };
 
@@ -577,7 +582,7 @@ permit (
 // scoped, reasoned, time-boxed override"), with org-admin above it. Curator
 // is deliberately absent: a lapse is policy, and ADR-0015 put the policy
 // plane at steward and above. The resource is the scope whose material is
-// disclosed, so a steward bound at a department may open its teams' material
+// disclosed, so a steward bound at an org unit may open its members' material
 // and a team's steward may not open a sibling's.
 permit (
     principal,
@@ -585,7 +590,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["steward", "org-admin"])
+        && context.roles.containsAny(["steward", "org-admin", "owner", "administrator"])
 };
 
 // Revoking is wider than granting, which is the whole reason the two are
@@ -599,7 +604,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.containsAny(["steward", "org-admin", "security-reviewer"])
+        && context.roles.containsAny(["steward", "org-admin", "security-reviewer", "reviewer", "owner", "administrator"])
 };
 
 // The directory plane (AUTH-4, ADR-0059 decision 13): who may wire this
@@ -611,14 +616,14 @@ permit (
 // than an omission: a steward's authority is a subtree, and this credential
 // is not anchored in one. It can place a joiner anywhere the mapping rules
 // reach and seal anybody the directory says has left, so an authority over
-// it that stopped at a department boundary would be a fiction.
+// it that stopped at an org-unit boundary would be a fiction.
 permit (
     principal,
     action == Synveda::Action::"DirectoryManage",
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.contains("org-admin")
+        && context.roles.containsAny(["org-admin", "owner"])
 };
 
 // The breaker's release (AUTH-5, ADR-0060 decision 10). `org-admin` here as
@@ -633,7 +638,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.contains("org-admin")
+        && context.roles.containsAny(["org-admin", "owner"])
 };
 
 // Membership, to the role that reviews (CPR-5, ADR-0072). A curator casts
@@ -646,7 +651,7 @@ permit (
     resource
 ) when {
     resource in principal.tenant
-        && context.roles.contains("curator")
+        && context.roles.containsAny(["curator", "reviewer"])
 };
 
 // Redeeming an invitation (CPR-5, ADR-0072 decision 8).

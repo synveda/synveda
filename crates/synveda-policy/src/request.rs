@@ -4,10 +4,147 @@
 
 use std::fmt;
 
+use synveda_types::access::{GrantSource, RoleKey};
+use synveda_types::anchor::ScopeAnchor;
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Error, HierarchyNode, Lapse, PolicyAssignment, Result, Role, RoleBinding, ScopeId, Sensitivity,
-    TenantId,
+    Error, GrantId, GroupId, HierarchyNode, Lapse, PolicyAssignment, ProjectId, Result, Role,
+    RoleBinding, ScopeId, Sensitivity, TenantId, WorkspaceId,
 };
+
+/// The PDP's own view of a governed scope: a node with a parent, a tenant, a
+/// shape and a seal, and nothing else (CPR-6, ADR-0073 decision 1).
+///
+/// It exists so that the decision point has **one** scope vocabulary. Before
+/// this the PDP was written against [`HierarchyNode`] — a five-value rank
+/// ladder with a materialised path and a depth — and every pack rule that
+/// mentioned a department, a team or an ordering was reading that ladder. The
+/// governed scope model has no ladder, so the PDP is written against this and
+/// the callers project into it.
+///
+/// No display fields, deliberately (ADR-0011, kept): a rename must not
+/// invalidate an entity fragment, and a path must never be an authorisation
+/// input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScopeNode {
+    /// The scope.
+    pub id: ScopeId,
+    /// Its tenant. Carried per node so a chain from a foreign tenant chains up
+    /// to a *different* `Tenant` entity and every membership rule fails closed.
+    pub tenant_id: TenantId,
+    /// Its parent; `None` for the tenant root.
+    pub parent_id: Option<ScopeId>,
+    /// Its shape — `tenant`, `org_unit`, `workspace`, `project` or
+    /// `principal`. A shape, never a rank: nothing anywhere compares two of
+    /// these for order.
+    pub kind: ScopeKind,
+    /// Whether the scope is sealed — nobody's to act on, under any pack
+    /// (AUTH-4, ADR-0059 decision 8).
+    pub sealed: bool,
+}
+
+impl ScopeNode {
+    /// A governed scope, with the seal the caller resolved for it.
+    #[must_use]
+    pub fn from_scope(scope: &Scope, sealed: bool) -> Self {
+        ScopeNode {
+            id: scope.id,
+            tenant_id: scope.tenant_id,
+            parent_id: scope.parent_scope_id,
+            kind: scope.kind,
+            sealed,
+        }
+    }
+
+    /// A node of the **old** hierarchy, projected onto the shape vocabulary.
+    ///
+    /// This is the programme's legacy bridge and it is deleted with
+    /// `hierarchy_nodes` itself. It exists because the prompt that re-cut the
+    /// PDP left the old hierarchy APIs standing: those routes still decide,
+    /// and a decision point that understood two scope vocabularies would be
+    /// the rank ladder surviving inside the thing that was supposed to remove
+    /// it. So the ladder is collapsed **here, at the caller's edge**, and the
+    /// PDP never sees it.
+    ///
+    /// Nothing is written by this: no row of `hierarchy_nodes` becomes a row
+    /// of `scopes`, and no `ScopeNode` produced here is ever persisted. It is
+    /// a projection for one decision, which is why it is not the data
+    /// migrator ADR-0068 decision 3 forbids.
+    #[must_use]
+    pub fn from_hierarchy(node: &HierarchyNode) -> Self {
+        ScopeNode {
+            id: node.id,
+            tenant_id: node.tenant_id,
+            parent_id: node.parent_id,
+            // The collapse: an org root is a tenant scope, a person's node is
+            // their principal scope, and division/department/team are the one
+            // shape that nests inside itself. The three that collapse together
+            // are exactly the three whose distinction *was* the rank.
+            kind: match node.kind {
+                synveda_types::ScopeKind::Org => ScopeKind::Tenant,
+                synveda_types::ScopeKind::User => ScopeKind::Principal,
+                synveda_types::ScopeKind::Division
+                | synveda_types::ScopeKind::Department
+                | synveda_types::ScopeKind::Team => ScopeKind::OrgUnit,
+            },
+            sealed: node.sealed,
+        }
+    }
+
+    /// A whole chain of old hierarchy nodes, projected in order.
+    #[must_use]
+    pub fn from_hierarchy_chain(chain: &[HierarchyNode]) -> Vec<ScopeNode> {
+        chain.iter().map(ScopeNode::from_hierarchy).collect()
+    }
+}
+
+/// A subtype or access-plane object the decision needs as a Cedar entity
+/// (CPR-6, ADR-0073 decision 3).
+///
+/// The scope tree carries containment; these carry **identity**. A pack that
+/// wants to say something about one workspace, one group or one grant needs
+/// the thing itself to exist in the entity graph, and a resource that is only
+/// ever its scope makes that unsayable.
+///
+/// Each is parented to the scope it belongs to, so every containment rule
+/// written over scopes — `resource in principal.anchors`, the token-scope
+/// confinement, the seal — applies to them without being restated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceEntity {
+    /// A workspace and the governed scope it owns.
+    Workspace {
+        /// The workspace.
+        id: WorkspaceId,
+        /// Its scope.
+        scope_id: ScopeId,
+    },
+    /// A project, its scope, and the workspace it sits in.
+    Project {
+        /// The project.
+        id: ProjectId,
+        /// Its scope.
+        scope_id: ScopeId,
+        /// Its workspace.
+        workspace_id: WorkspaceId,
+    },
+    /// A group. Tenant-wide: a group is not anchored anywhere in the tree.
+    Group {
+        /// The group.
+        id: GroupId,
+    },
+    /// One grant, at the scope it is written at.
+    Grant {
+        /// The grant.
+        id: GrantId,
+        /// The scope it is written at.
+        scope_id: ScopeId,
+        /// What it confers.
+        role: RoleKey,
+        /// Where it came from — so a pack can price revoking a
+        /// directory-managed grant differently from revoking a direct one.
+        source: GrantSource,
+    },
+}
 
 /// Who is asking: a verified token subject resolved to a tenant (TEN-1)
 /// with its provisioning status (AUTH-2, ADR-0013 decision 6). The caller
@@ -23,12 +160,18 @@ pub struct Principal {
     /// Whether the subject is quarantined; the base layer forbids every
     /// action when set (ADR-0013 decision 5, ADR-0014 decision 2).
     pub quarantined: bool,
-    /// The identity's placement — its personal scope node (AUTH-2). The
-    /// principal entity is parented to it, so pack membership rules
-    /// (`principal in resource`) walk the real hierarchy. `None` for
-    /// subjects provisioning never placed (dev HS256): such a principal
-    /// is a member of nothing and `MemoryRead` denies everywhere
-    /// (ADR-0014 decision 5).
+    /// The principal's **own scope** — the `principal`-shaped scope that
+    /// belongs to this subject (CPR-6, ADR-0073 decision 2), or, on the old
+    /// hierarchy plane the programme has not deleted yet, its placement node.
+    ///
+    /// The principal entity is parented to it, so pack membership rules
+    /// (`principal in resource`) walk the scope tree upward from it. `None`
+    /// for a subject with neither: such a principal is a member of nothing
+    /// and every membership floor denies (ADR-0014 decision 5).
+    ///
+    /// It is deliberately **not** the same thing as
+    /// [`AuthzContext::anchors`]: this is where the caller stands, those are
+    /// the places their grants reach down from.
     pub scope_id: Option<ScopeId>,
     /// The token's confinement scope — the anchor node whose subtree
     /// bounds every decision for a service identity (AUTH-3, ADR-0018
@@ -669,13 +812,50 @@ impl fmt::Display for Action {
 }
 
 /// What is being acted on.
+///
+/// Four of the six are **objects with a scope** (CPR-6, ADR-0073 decision 3).
+/// Before this, every workspace, project, group and grant decision named the
+/// tenant, because the entity model had no way to say which one — so a pack
+/// could price "administer workspaces" and never "administer *this*
+/// workspace". Each of these materialises as its own Cedar entity parented to
+/// the scope it belongs to, so containment rules written over scopes reach
+/// them without being restated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Resource {
-    /// The tenant itself — the resource of tenant-level actions such as
-    /// creating the org root.
+    /// The tenant itself — the resource of the few actions that are genuinely
+    /// about the whole boundary: the audit chain, the directory plane,
+    /// redeeming an invitation.
     Tenant(TenantId),
-    /// A node of the tenancy hierarchy.
+    /// A governed scope.
     Scope(ScopeId),
+    /// One workspace.
+    Workspace(WorkspaceId),
+    /// One project.
+    Project(ProjectId),
+    /// One group. Tenant-wide, like the action over it.
+    Group(GroupId),
+    /// One grant — what a revocation names.
+    Grant(GrantId),
+}
+
+impl Resource {
+    /// The governed scope this decision is anchored at, when it has one.
+    ///
+    /// [`Resource::Scope`] is its own answer; a workspace, project or grant
+    /// answers with the scope its chain was gathered from, which the caller
+    /// supplies as the head of [`AuthzContext::scopes`]. A tenant and a group
+    /// answer `None`: neither is anchored anywhere in the tree, which is why
+    /// neither takes a subtree-scoped authority.
+    #[must_use]
+    pub fn anchor_scope(&self, context: &AuthzContext<'_>) -> Option<ScopeId> {
+        match self {
+            Resource::Scope(id) => Some(*id),
+            Resource::Workspace(_) | Resource::Project(_) | Resource::Grant(_) => {
+                context.scopes.first().map(|node| node.id)
+            }
+            Resource::Tenant(_) | Resource::Group(_) => None,
+        }
+    }
 }
 
 impl fmt::Display for Resource {
@@ -683,6 +863,10 @@ impl fmt::Display for Resource {
         match self {
             Resource::Tenant(id) => write!(f, "tenant {id}"),
             Resource::Scope(id) => write!(f, "scope {id}"),
+            Resource::Workspace(id) => write!(f, "workspace {id}"),
+            Resource::Project(id) => write!(f, "project {id}"),
+            Resource::Group(id) => write!(f, "group {id}"),
+            Resource::Grant(id) => write!(f, "grant {id}"),
         }
     }
 }
@@ -698,18 +882,46 @@ impl fmt::Display for Resource {
 /// purpose-of-use are refused or deferred there, each for its own reason.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AuthzContext<'a> {
-    /// The resource's scope chain — the node and its ancestors, in any
-    /// order — from the caller's own transaction. A [`Resource::Scope`]
-    /// whose chain is absent has no ancestors in the entity graph, so
-    /// tenant-membership rules fail closed. Empty is correct for
-    /// [`Resource::Tenant`]. HIER-3 replaces this with a synced entity
-    /// store (ADR-0012 decision 4).
-    pub scopes: &'a [HierarchyNode],
-    /// The principal's placement chain — its personal scope node and that
-    /// node's ancestors, in any order — when the principal is a
-    /// provisioned identity. Empty for unplaced principals: membership
-    /// rules then fail closed (ADR-0014 decision 5).
-    pub principal_scopes: &'a [HierarchyNode],
+    /// The resource's scope chain — the scope and its ancestors, **nearest
+    /// first** — from the caller's own transaction. A resource whose chain is
+    /// absent has no ancestors in the entity graph, so containment rules fail
+    /// closed. Empty is correct for [`Resource::Tenant`] and
+    /// [`Resource::Group`], neither of which is anchored in the tree.
+    ///
+    /// Nearest-first matters now that it does: [`Resource::anchor_scope`]
+    /// reads the head of this slice to learn which scope a workspace, project
+    /// or grant decision is anchored at.
+    pub scopes: &'a [ScopeNode],
+    /// The principal's own chain — its own scope and that scope's ancestors,
+    /// in any order. Empty for a principal with no scope of its own:
+    /// membership rules then fail closed (ADR-0014 decision 5).
+    pub principal_scopes: &'a [ScopeNode],
+    /// The ordered anchors this request resolved to (CPR-6, ADR-0073).
+    ///
+    /// Where [`AuthzContext::principal_scopes`] says where the caller
+    /// *stands*, this says where their authority *reaches from*: their own
+    /// scope, the selected workspace and project, the organisation units above
+    /// them, the tenant root, and every scope a direct or group grant names.
+    /// Each carries the [`RoleKey`]s effective there.
+    ///
+    /// The PDP uses it for two things and nothing else: the role keys that
+    /// reach the resource become part of `context.roles`, and the anchors this
+    /// caller actually *holds* become `principal.anchors`, the set every
+    /// "inside something I hold" rule tests against.
+    ///
+    /// Empty is the zero-config answer and denies everything a grant would
+    /// have permitted — which is correct for a caller who holds nothing.
+    pub anchors: &'a [ScopeAnchor],
+    /// The groups this principal belongs to, so a pack can name one directly.
+    /// The principal entity is parented to each, making
+    /// `principal in Synveda::Group::"…"` an entity-hierarchy check rather
+    /// than a string comparison.
+    pub groups: &'a [GroupId],
+    /// The workspace, project, group and grant entities this decision needs
+    /// materialised (ADR-0073 decision 3). A resource whose entity is missing
+    /// evaluates with no attributes and no parents, which fails every
+    /// containment rule — a denial, never a wrong allow.
+    pub resources: &'a [ResourceEntity],
     /// Pack assignments for the nodes of the resource's chain (missing
     /// rows mean "inherit"). The PDP walks the chain nearest-first; the
     /// first assigned node decides the effective pack (ADR-0014

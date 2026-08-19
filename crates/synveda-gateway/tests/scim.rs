@@ -55,8 +55,10 @@ use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::{Pdp, REGULATED_STRICT, STANDARD};
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::{
-    directory, group_mappings, hierarchy, identities, policy_assignments, retention, rls, tenants,
+    access, directory, group_mappings, hierarchy, identities, policy_assignments, retention, rls,
+    tenants,
 };
+use synveda_types::access::{GrantSource, GroupSource};
 use synveda_types::{
     HierarchyNode, IdentityId, ScimCredentialId, ScopeId, ScopeKind, TenantId, TenantStatus,
 };
@@ -859,6 +861,115 @@ async fn a_revoked_credential_stops_authenticating() {
         status,
         StatusCode::UNAUTHORIZED,
         "revocation binds on the very next request"
+    );
+}
+
+// ── 9. The directory projects onto the governed access model (CPR-6) ────────
+
+/// A directory group becomes a **`groups` row**, and its members become
+/// `group_members` keyed by each member's token subject (ADR-0073 decision 9).
+///
+/// The claim worth testing is the one about tables rather than about SCIM:
+/// there is **no enterprise membership table**. A directory group and a group
+/// somebody typed are the same row shape in the same table, differing in one
+/// column — `source` — which decides only whether the product refuses to edit
+/// it. Everything downstream reads one table and cannot tell them apart.
+///
+/// It also asserts the two things the projection deliberately does **not** do:
+/// it writes no grants (a directory says who is in a group, never what the
+/// group may do), and it skips a directory user with no subject yet, because a
+/// principal *is* a verified token subject.
+#[tokio::test]
+async fn a_directory_group_becomes_a_governed_group_with_its_members() {
+    let Some(w) = world().await else { return };
+
+    let (user_id, group_id) = join(&w, "dana@example.test", "synveda-eng-core").await;
+    let identity = linked_identity(&w, &user_id)
+        .await
+        .expect("the joiner reconciled onto an identity");
+
+    let group = access::list_groups(&w.pool, w.tenant)
+        .await
+        .expect("list governed groups")
+        .into_iter()
+        .find(|group| group.directory_ref.as_deref() == Some(group_id.as_str()))
+        .expect("the directory group was projected");
+    assert_eq!(group.source, GroupSource::Directory);
+    assert_eq!(group.display_name, "synveda-eng-core");
+    assert_eq!(
+        group.status,
+        synveda_types::workspace::LifecycleStatus::Active
+    );
+
+    // **Nobody yet.** A directory can create somebody who has never logged in,
+    // and a principal *is* a verified token subject — so a mirror row with no
+    // subject contributes no member rather than being invented one. This is
+    // the case the projection is most likely to get wrong, so it is asserted
+    // before the one that works.
+    assert_eq!(
+        subject_of(&w, identity).await,
+        None,
+        "a SCIM-created person has no subject until they log in"
+    );
+    assert!(
+        access::group_members(&w.pool, w.tenant, group.id)
+            .await
+            .expect("read members")
+            .is_empty(),
+        "and therefore no membership of the governed group"
+    );
+
+    // They log in. The next sync puts them in, keyed by the subject their
+    // token carries.
+    let subject = "dana-subject";
+    provision_via_login(&w, subject, "dana@example.test", "synveda-eng-core").await;
+    add_member(&w, &group_id, &user_id).await;
+
+    let members = access::group_members(&w.pool, w.tenant, group.id)
+        .await
+        .expect("read members");
+    assert_eq!(
+        members
+            .iter()
+            .map(|member| member.principal_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![subject],
+        "the member is the person's token subject, not a directory id"
+    );
+    assert_eq!(members[0].source, GrantSource::Directory);
+
+    // No grants. A directory says who is together; what they may do is a
+    // `scope_grants` row somebody in this product wrote, naming the group.
+    let grants = access::list_grants(&w.pool, w.tenant, &access::GrantFilter::default())
+        .await
+        .expect("list grants");
+    assert!(
+        grants.is_empty(),
+        "the projection must not invent grants: {grants:?}"
+    );
+
+    // Removing them from the directory group removes them here, on the next
+    // sync rather than on a sweep.
+    remove_member(&w, &group_id, &user_id).await;
+    let members = access::group_members(&w.pool, w.tenant, group.id)
+        .await
+        .expect("read members again");
+    assert!(
+        members.is_empty(),
+        "leaving the directory group leaves this one"
+    );
+
+    // And deleting it **archives** rather than deletes: a grant may name it,
+    // and an archived group resolves to nobody.
+    let (status, body) = scim_delete(&w, &format!("/scim/v2/Groups/{group_id}")).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let after = access::get_group(&w.pool, w.tenant, group.id)
+        .await
+        .expect("read the governed group")
+        .expect("it is archived, not deleted");
+    assert_eq!(
+        after.status,
+        synveda_types::workspace::LifecycleStatus::Archived
     );
 }
 

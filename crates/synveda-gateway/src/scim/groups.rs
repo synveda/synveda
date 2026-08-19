@@ -9,12 +9,30 @@
 //! here re-reconciles the members it touched. Nothing else does: renaming a
 //! group re-resolves everybody in it, because the name *is* the mapping
 //! key, and that is the one rename in this product that moves people.
+//!
+//! # It also projects onto the governed access model
+//!
+//! Since CPR-6 every mutation here mirrors the directory group onto a
+//! [`synveda_types::access::Group`] with `source = 'directory'`, and its
+//! membership onto `group_members` keyed by each member's **token subject**
+//! (ADR-0073 decision 9). That is the whole of "directory users and groups map
+//! to principals, groups, group_members and scope_grants": a principal *is* a
+//! subject, a directory group *is* a group, and there is no enterprise
+//! membership table beside the one a person working alone uses.
+//!
+//! Two things it deliberately does not do. It writes **no grants** — a
+//! directory says who is in a group, never what the group may do, and a sync
+//! that invented grants would be a directory writing policy. And it projects
+//! nobody who has not provisioned an identity yet: a subject is what a
+//! verified token carries, and a directory row that has never been through
+//! reconciliation has no subject to name. Such a person joins the group on the
+//! sync that follows their first login.
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use synveda_store::directory;
+use synveda_store::{access, directory, identities};
 use synveda_types::{DirectoryGroupId, DirectoryUser, DirectoryUserId};
 
 use super::users::ListQuery;
@@ -127,6 +145,7 @@ pub async fn create(
     .await
     .map_err(|error| ScimError::from_taxonomy(&error))?;
     directory::replace_members(&mut tx, tenant_id, group.id, &members).await?;
+    project(&mut tx, tenant_id, &group).await?;
     tx.commit().await.map_err(commit_error)?;
 
     reconcile_members(&state, &auth, &members).await?;
@@ -164,6 +183,10 @@ pub async fn replace(
     // one that added somebody.
     let previously = directory::members_of(&mut *tx, tenant_id, id).await?;
     directory::replace_members(&mut tx, tenant_id, id, &members).await?;
+    let group = directory::group(&mut *tx, tenant_id, id)
+        .await?
+        .ok_or_else(ScimError::not_found)?;
+    project(&mut tx, tenant_id, &group).await?;
     tx.commit().await.map_err(commit_error)?;
 
     let mut touched = members.clone();
@@ -272,6 +295,13 @@ pub async fn patch(
             }
         }
     }
+    // Once, after every operation in the request: the projection is a
+    // replacement, so applying it per operation would be the same answer
+    // several times over.
+    let patched = directory::group(&mut *tx, tenant_id, id)
+        .await?
+        .ok_or_else(ScimError::not_found)?;
+    project(&mut tx, tenant_id, &patched).await?;
     tx.commit().await.map_err(commit_error)?;
 
     touched.sort_unstable();
@@ -298,11 +328,72 @@ pub async fn delete(
     if !directory::delete_group(&mut *tx, tenant_id, id).await? {
         return Err(ScimError::not_found());
     }
+    // The governed group is **archived**, not deleted: a grant may name it,
+    // and a grant naming a row that stopped existing is one nobody can review.
+    // An archived group resolves to nobody, so the access goes on the very
+    // next request (ADR-0073 decision 9).
+    access::retire_directory_group(&mut tx, tenant_id, &id.to_string()).await?;
     tx.commit().await.map_err(commit_error)?;
 
     let touched: Vec<DirectoryUserId> = members.iter().map(|user| user.id).collect();
     reconcile_members(&state, &auth, &touched).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Mirrors one directory group onto the governed access model.
+///
+/// The slug is derived from the directory's own id rather than from the
+/// display name, and that is deliberate: a slug is immutable here
+/// (`groups_slug_unique`), a display name is not, and a directory that renames
+/// a group must rename it rather than orphan it and mint a second. The
+/// **display name** is what carries the human-readable name, and it is exactly
+/// what the AUTH-2 mapping resolver already reads.
+///
+/// Members are the subjects of the identities the directory's users have
+/// reconciled into. A directory user with no identity yet contributes nothing —
+/// see the module docs.
+async fn project(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: synveda_types::TenantId,
+    group: &synveda_types::DirectoryGroup,
+) -> Result<(), ScimError> {
+    let users = directory::members_of(&mut **tx, tenant_id, group.id).await?;
+    let mut subjects: Vec<String> = Vec::with_capacity(users.len());
+    for user in &users {
+        let Some(identity_id) = user.identity_id else {
+            continue;
+        };
+        // A provisioned identity may still carry no subject: a directory can
+        // create somebody who has never logged in, and a principal *is* a
+        // verified token subject. They join the group on the sync after their
+        // first login rather than being invented one here.
+        if let Some(identity) = identities::by_id(&mut **tx, tenant_id, identity_id).await?
+            && let Some(subject) = identity.subject
+        {
+            subjects.push(subject);
+        }
+    }
+    subjects.sort_unstable();
+    subjects.dedup();
+    access::sync_directory_group(
+        tx,
+        tenant_id,
+        &group.id.to_string(),
+        &directory_slug(group.id),
+        &group.display_name,
+        &subjects,
+    )
+    .await?;
+    Ok(())
+}
+
+/// A stable, typeable slug for a directory group: `dir-` plus its id.
+///
+/// Not the display name, for [`project`]'s reason, and not a digest, because a
+/// group is a thing an administrator reads in a listing and a directory id is
+/// what they will search their IdP by.
+fn directory_slug(id: DirectoryGroupId) -> String {
+    format!("dir-{id}")
 }
 
 /// Re-projects every member a membership change touched.

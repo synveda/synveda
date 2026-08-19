@@ -31,6 +31,7 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
+use synveda_policy::ScopeNode;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD};
 use synveda_store::{rls, role_bindings};
 use synveda_types::{HierarchyNode, Role, ScopeId, Sensitivity, TenantId};
@@ -198,8 +199,8 @@ async fn member_reads(
             Action::MemoryRead,
             Resource::Scope(target),
             &AuthzContext {
-                scopes: &scopes,
-                principal_scopes: &principal_scopes,
+                scopes: &ScopeNode::from_hierarchy_chain(&scopes),
+                principal_scopes: &ScopeNode::from_hierarchy_chain(&principal_scopes),
                 default_pack: Some(STANDARD),
                 sensitivity: Some(Sensitivity::WORKING),
                 ..Default::default()

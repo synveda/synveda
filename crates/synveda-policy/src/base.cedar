@@ -25,7 +25,7 @@ forbid (
 // may be done to *this material*. A person's personal scope is sealed when
 // the directory says they have left, and from that moment no pack, no role
 // and no lapse reaches it — the lapse permit at the bottom of this file
-// could not anyway, because its `resource.kind != "user"` privacy floor
+// could not anyway, because its `resource.kind != "principal"` privacy floor
 // (ADR-0015 decision 4) already excludes every personal scope, sealed or
 // live.
 //
@@ -90,19 +90,90 @@ unless { context.roles.contains("org-admin") };
 // resource`, reads only — so nothing outside the agent's own chain is
 // reachable, no role widens it, and every write, every admin plane and
 // every tenant-plane action remains forbidden outside the anchor.
+//
+// CPR-6 drops the `resource is Synveda::Scope` guard the containment test used
+// to carry, and that is a widening of the *forbid* rather than of anything an
+// agent may do: a workspace, a project and a grant are now entities parented
+// to the scope they belong to, so `resource in principal.token_scope` is true
+// for exactly the ones inside the anchor and false for everything else —
+// including the Tenant and Group entities, which sit in no subtree at all and
+// are therefore forbidden outright, which is what the old guard achieved by
+// naming the type.
 forbid (
     principal,
     action,
     resource
 ) when {
     principal has token_scope &&
-    !(resource is Synveda::Scope && resource in principal.token_scope) &&
+    !(resource in principal.token_scope) &&
     !([
         Synveda::Action::"MemoryRead",
         Synveda::Action::"PromptRead",
         Synveda::Action::"ContextPackRead",
         Synveda::Action::"SkillRead"
     ].contains(action) && principal in resource)
+};
+
+// **Personal principal-scope privacy** (CPR-6, ADR-0073 decision 6).
+//
+// A `principal`-shaped scope is somebody's own. Nothing above it reaches in:
+// not a tenant-root grant, not an org unit, not a workspace owner, and no
+// role — which is what makes "my own notes" a thing this product can hold at
+// all for a person who is also a member of an organisation.
+//
+// It is a base-layer forbid rather than a rule each pack restates, because the
+// property it protects is the one a custom pack would be most tempted to
+// widen: an administrator who could read every private scope is one line of
+// Cedar away in a product that leaves this to the packs. `synveda-store`'s
+// resolver applies the same floor when it builds an anchor set
+// (`synveda_types::access::inherits_into`), so a grant at an ancestor never
+// even produces roles here. Both, deliberately: the resolver decides what may
+// be *offered*, this decides what may be *permitted*.
+//
+// `principal.private` is the whole of the escape hatch and it is the PDP's own
+// resolution, never a caller's claim: the caller's own scope, plus any
+// principal scope somebody wrote a grant **directly at**. An inherited grant
+// is not in it, because an inherited grant did not reach here.
+//
+// There is deliberately no carve-out for compliance, legal or an
+// administrator **on the material**. Adding a reader here is adding this
+// product's first "read somebody else's private material" surface, and that
+// belongs to an export plane with its own ADR and its own approval matrix
+// (ADR-0059 decision 8's argument, one model later).
+//
+// What *is* carved out is the **governance plane**, and the list is
+// deliberately short and deliberately closed: reading and assigning a policy
+// profile, reading role bindings, and the structural and service-identity
+// planes. None of them discloses a byte of the material and none of them
+// confers access to it — which is exactly why `RoleAssign` and
+// `MembershipGrant` are **not** here. A grant written at a private scope puts
+// that scope in the grantee's `private` set, so an administrator who could
+// write one could grant themselves everybody's notes, and this floor would be
+// a formality. The person whose scope it is holds it in their own `private`
+// set, so they can share it; nobody else can.
+//
+// The shape is "forbid everything, then name the exceptions" rather than
+// "forbid a list of content actions", because the failure modes are not
+// symmetric: a content action added to the vocabulary and forgotten here
+// would silently become readable, and a governance action forgotten here is
+// merely refused until somebody notices.
+forbid (
+    principal,
+    action,
+    resource
+) when { resource is Synveda::Scope && resource.kind == "principal" }
+unless { resource in principal.private }
+unless {
+    [
+        Synveda::Action::"PolicyRead",
+        Synveda::Action::"PolicyAssign",
+        Synveda::Action::"RoleRead",
+        Synveda::Action::"HierarchyRead",
+        Synveda::Action::"HierarchyUpdate",
+        Synveda::Action::"HierarchyDelete",
+        Synveda::Action::"ServiceIdentityRead",
+        Synveda::Action::"ServiceIdentityManage"
+    ].contains(action)
 };
 
 // The read side of the `restricted` floor (AUTHZ-5, ADR-0038 decision 5).
@@ -154,14 +225,16 @@ unless { context.lapsed };
 // What still forbids over this permit is the reason it is safe to put here:
 // a quarantined principal is unaffected, and a service identity cannot be
 // widened past its anchor, because ADR-0018's confinement forbid above
-// carves out only own-chain MemoryRead. `resource.kind != "user"` is
+// carves out only own-chain MemoryRead. `resource.kind != "principal"` is
 // ADR-0015 decision 4's privacy floor restated where it cannot be
 // forgotten — nobody's personal memory is disclosed by a lapse, and the
-// grant surface refuses such a target by name as well.
+// grant surface refuses such a target by name as well. Since CPR-6 the
+// forbid above says the same thing for every action, so this clause is the
+// narrower of two statements of one rule rather than the only one.
 permit (
     principal,
     action == Synveda::Action::"MemoryRead",
     resource
 ) when {
-    context.lapsed && resource.kind != "user"
+    context.lapsed && resource.kind != "principal"
 };

@@ -35,13 +35,14 @@ use serde::Serialize;
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
+use synveda_store::anchors::AnchorSelection;
 use synveda_store::{identities, projects, rls, scopes, workspaces};
 use synveda_types::{Error, IdentityId, Result, ScopeId, TenantId};
 use utoipa::ToSchema;
 
 use crate::app::AppState;
 use crate::audit;
-use crate::capabilities::TenantCapabilities;
+use crate::capabilities::{AnchorCapabilities, TenantCapabilities};
 use crate::error::ApiError;
 use crate::hierarchy::{commit, tenant_id};
 use crate::telemetry::WORKSPACE_OPERATIONS_TOTAL;
@@ -70,6 +71,28 @@ pub struct MeView {
     /// reads this to decide anything, every act still takes its own decision
     /// at its own seam, and a client uses this to choose what to *offer*.
     pub capabilities: TenantCapabilities,
+    /// Where this caller stands, most specific first, and what they may do at
+    /// each — **from real policy decisions** (CPR-6, ADR-0073 decision 8).
+    ///
+    /// Their own scope, the tenant root, and every scope a direct or group
+    /// grant reaches them at. Nothing here is derived from a plan, an edition
+    /// or a shape: each entry is `Action::PROBED_AT_SCOPE` decided at that
+    /// scope, under that scope's own effective profile, by the same PDP the
+    /// act itself will pass through. A personal deployment and an enterprise
+    /// one differ in the rows this reads, never in the code that reads them.
+    pub anchors: Vec<AnchorCapabilities>,
+    /// How many anchors the response bound dropped. Named rather than hidden:
+    /// a truncated answer presented as a complete one is the one failure a
+    /// capability surface cannot afford (ADR-0058 decision 5).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub anchors_not_answered: usize,
+}
+
+/// Keeps `anchors_not_answered` out of the ordinary response, where it is
+/// always zero.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(count: &usize) -> bool {
+    *count == 0
 }
 
 /// The authenticated principal.
@@ -230,6 +253,19 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
     let capabilities = crate::capabilities::at_tenant(state).await?;
 
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    // **This route mints the caller's own scope** (CPR-6, ADR-0073 decision 2),
+    // and it is the only one that does. `/v1/me` is the first call a client
+    // makes, so it is where the one thing every caller needs and nobody thinks
+    // to create comes into existence — the same argument that made the tenant
+    // root the first workspace's to mint (ADR-0071 decision 1), one level down.
+    //
+    // Minting it confers nothing on anybody: a `principal` scope inherits
+    // nothing from above and the base layer forbids every other caller from
+    // reaching it, so this write is visible to exactly one person.
+    //
+    // A quarantined caller gets none: the base layer forbids them everything,
+    // and writing a row for somebody who may do nothing with it is a row
+    // nobody asked for.
     let identity = identities::by_subject(&mut *tx, tenant_id, &subject).await?;
     let quarantined = match &identity {
         Some(identity) => identity.quarantined,
@@ -239,6 +275,16 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
         // whether somebody can do anything at all.
         None => context.claims.provisioning.is_some(),
     };
+    if !quarantined {
+        let display_name = context
+            .claims
+            .provisioning
+            .as_ref()
+            .and_then(|claims| claims.display_name.clone())
+            .or_else(|| identity.as_ref().and_then(|row| row.display_name.clone()))
+            .unwrap_or_else(|| subject.clone());
+        scopes::ensure_principal_scope(&mut tx, tenant_id, &subject, &display_name).await?;
+    }
 
     // **The listings are decided, not merely fetched.** A caller who may not
     // read workspaces sees none — which is the same answer they would get from
@@ -253,12 +299,35 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
     // verdict — it is the same rows either decision would have read, at the
     // same instant — and it is the shape ADR-0042 decision 6 measured for the
     // capability probe's fan-out.
-    let input = crate::authz::gather(state, &mut tx, None).await?;
-    let resource = Resource::Tenant(tenant_id);
+    // Since CPR-6 the gather is the **governed** one: the caller's own scope,
+    // their grants and their groups, resolved from the scope tree rather than
+    // from the hierarchy this programme is deleting. The two listing decisions
+    // are taken at the tenant root scope when the tenant has one — that is
+    // where a tenant-wide grant is written — and at the tenant itself on a
+    // deployment where nobody has created anything yet, because there is then
+    // genuinely nothing more specific to name.
+    let tenant_scope = scopes::tenant_root(&mut *tx, tenant_id).await?;
+    let input = crate::authz::gather_governed(
+        state,
+        &mut tx,
+        tenant_scope.as_ref(),
+        AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
+    let resource = match &tenant_scope {
+        Some(root) => Resource::Scope(root.id),
+        None => Resource::Tenant(tenant_id),
+    };
     let may_read_workspaces =
         crate::authz::decide(state, &input, Action::WorkspaceRead, resource, None).is_ok();
     let may_read_projects =
         crate::authz::decide(state, &input, Action::ProjectRead, resource, None).is_ok();
+    // What this caller may do **where they actually stand** — one real
+    // decision per (anchor, action), never a shape read off an edition.
+    let (anchors, anchors_not_answered) =
+        crate::capabilities::at_anchors(state, &mut tx, &input).await?;
+    let anchor_count = input.anchors.len();
     drop(input);
     let workspaces = if may_read_workspaces {
         workspaces::list(&mut *tx, tenant_id).await?
@@ -270,8 +339,6 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
     } else {
         Vec::new()
     };
-    let tenant_scope = scopes::tenant_root(&mut *tx, tenant_id).await?;
-
     let onboarding = OnboardingView {
         state: OnboardingState::resolve(quarantined, workspaces.len(), projects.len()),
         tenant_scope_id: tenant_scope.map(|scope| scope.id),
@@ -295,6 +362,8 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
             "projects_disclosed": projects.len(),
             "workspace_read": may_read_workspaces,
             "project_read": may_read_projects,
+            "anchors_resolved": anchor_count,
+            "anchors_answered": anchors.len(),
         }),
     )
     .await?;
@@ -322,6 +391,8 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
         workspaces: workspaces.into_iter().map(Into::into).collect(),
         projects: projects.into_iter().map(Into::into).collect(),
         capabilities,
+        anchors,
+        anchors_not_answered,
     })
 }
 

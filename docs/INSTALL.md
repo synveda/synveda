@@ -104,6 +104,65 @@ log in, placed by their IdP groups. A group named `synveda-<department>-<team>`
 places by convention, so `synveda-eng-platform` lands someone under
 `eng/platform`.
 
+## Workspaces and projects — the plane that decides on grants
+
+The hierarchy above is the model this product is being re-cut away from
+(Phase 5). Beside it there is a **governed scope** plane — workspaces,
+projects and the grants that give people access to them — and since CPR-6 it
+is the PDP that reads those grants:
+
+```sh
+curl -H "authorization: Bearer $TOKEN" http://127.0.0.1:8120/v1/me
+```
+
+`/v1/me` is the one call a client makes first. It answers who you are, what
+exists, what is missing, and — the part worth reading — **where you stand and
+what you may do there**:
+
+```json
+"anchors": [
+  {"scope_id": "…", "kind": "principal", "source": "principal_scope",
+   "direct": false, "roles": [], "actions": {"memory.write": true, …}},
+  {"scope_id": "…", "kind": "workspace", "source": "grant",
+   "direct": true,  "roles": ["owner"], "actions": {"workspace.update": true, …}}
+]
+```
+
+Every `actions` entry is a **real PDP decision** taken at that scope under
+that scope's own profile — a forecast of what an act would answer, never a
+grant and never a shape read off a plan. Three things follow from the model
+that are worth knowing before you hand somebody a role key:
+
+- **A grant reaches downward.** Give somebody a workspace and they reach its
+  projects, with no row written at any of them. Give somebody one project and
+  they reach that project and **nothing above it**.
+- **Your own scope is yours.** `/v1/me` mints a `principal`-shaped scope for
+  every caller the first time they call it. Nothing above it reaches in — not
+  a tenant-wide grant, not an administrator, under no profile. The only way
+  somebody else reaches it is a grant written **at** it, by you.
+- **Revocation is immediate.** Access is resolved on every request, so
+  revoking a grant is refused on the very next one. Nothing has to run.
+
+### One thing you have to do by hand, once
+
+**Nothing mints a tenant's first grant.** A newly admitted tenant has no
+grants, so nobody can create the first workspace: every shipped profile prices
+`workspace.create` at an administrative role or an `owner` grant. If you
+reached this plane through `synveda login` you already hold tenant-wide
+`org-admin` from your IdP group and the plane works. If you did not — a fresh
+tenant admitted with `synveda tenant create`, a dev token, a deployment with
+no IdP groups — write the first grant at the tenant root:
+
+```sh
+synveda role bind --tenant <id> --subject <subject> --role org-admin
+```
+
+That is break-glass at the store level and it is deliberately the same command
+INSTALL has always documented. A governed route that hands out the first
+authority in a tenant is the shortcut past the policy engine ADR-0055 refuses;
+where that first grant *should* come from is admission's, and it is recorded
+as standing work rather than solved.
+
 ## Check it works
 
 ```sh

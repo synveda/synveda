@@ -32,7 +32,7 @@
 
 use serde_json::json;
 use synveda_audit::{Actor, AuditAction, Outcome};
-use synveda_policy::{AuthzContext, Resource};
+use synveda_policy::{AuthzContext, Resource, ScopeNode};
 use synveda_store::{directory, hierarchy, identities, policy_assignments, rls};
 use synveda_types::{
     DirectoryUser, HierarchyNode, Identity, IdentityId, IdentityKind, Result, ScopeId, ScopeKind,
@@ -552,9 +552,13 @@ async fn effective_pack_name(
     let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
     let assignments = policy_assignments::for_scopes(&mut **tx, tenant.id, &chain_ids).await?;
     let default_pack = policy_assignments::default_pack(&mut **tx, tenant.id).await?;
+    let chain_nodes = ScopeNode::from_hierarchy_chain(&chain);
     let context = AuthzContext {
-        scopes: &chain,
+        scopes: &chain_nodes,
         principal_scopes: &[],
+        anchors: &[],
+        groups: &[],
+        resources: &[],
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
         role_bindings: &[],

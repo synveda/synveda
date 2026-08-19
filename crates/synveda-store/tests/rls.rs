@@ -585,6 +585,7 @@ fn new_scope(
         slug: slug.to_owned(),
         display_name: slug.to_owned(),
         attributes: serde_json::json!({}),
+        principal_id: (kind == scope::ScopeKind::Principal).then(|| format!("subject-{slug}")),
         created_by: None,
     }
 }
@@ -731,6 +732,89 @@ fn the_app_role_cannot_delete_a_scope() {
             err.as_database_error().and_then(|db| db.code()).as_deref(),
             Some("42501"),
             "expected insufficient_privilege, got {err:?}"
+        );
+    });
+}
+
+// ── Principal scopes (CPR-6, ADR-0073) ──────────────────────────────────────
+
+/// A `principal`-shaped scope is the one row in this schema that is *somebody's
+/// own*, and its `principal_id` is what makes it findable. The forced-RLS
+/// backstop has to hold for that lookup specifically: a subject is not a
+/// secret, so a resolver that could find another tenant's row by subject would
+/// be an existence oracle for who works where.
+#[test]
+fn a_principal_scope_is_not_findable_across_tenants() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (ours, _) = seed_scopes(&db.pool).await;
+        let (theirs, _) = seed_scopes(&db.pool).await;
+
+        // The same subject, in both tenants — the case a shared-subject
+        // deployment actually produces.
+        for tenant in [ours, theirs] {
+            let mut tx = app_tx(&db.pool, Some(tenant)).await;
+            scopes::ensure_principal_scope(&mut tx, tenant, "alice", "Alice")
+                .await
+                .expect("mint under RLS");
+            tx.commit().await.expect("commit");
+        }
+
+        let mut tx = app_tx(&db.pool, Some(ours)).await;
+        let mine = scopes::principal_scope(&mut *tx, ours, "alice")
+            .await
+            .expect("read ours")
+            .expect("ours exists");
+        // Asking *this* tenant's connection for the other tenant's row: the
+        // SQL filter says no and the row policy says no, independently.
+        assert_eq!(
+            scopes::principal_scope(&mut *tx, theirs, "alice")
+                .await
+                .expect("read theirs"),
+            None,
+            "another tenant's own scope must be absent, not forbidden"
+        );
+        let visible = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from scopes where principal_id = 'alice'"#
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count principal scopes");
+        assert_eq!(
+            visible, 1,
+            "an unfiltered query still sees exactly this tenant's row"
+        );
+        assert_eq!(mine.tenant_id, ours);
+        tx.commit().await.expect("commit");
+    });
+}
+
+/// Whose a private scope is cannot be edited — by the **owner** role either,
+/// which is what migrations, break-glass psql and a restore run as and what
+/// forced RLS does not bind. Re-pointing one would hand somebody's material to
+/// a new subject without a single grant row changing.
+#[test]
+fn a_principal_scope_cannot_be_re_pointed_even_by_the_owner() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed_scopes(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let mine = scopes::ensure_principal_scope(&mut tx, tenant, "alice", "Alice")
+            .await
+            .expect("mint");
+        tx.commit().await.expect("commit");
+
+        // The owner connection: no RLS, no application grants, nothing but the
+        // trigger between this and somebody else's notes.
+        let result = sqlx::query!(
+            "update scopes set principal_id = 'mallory' where id = $1",
+            mine.id.as_uuid()
+        )
+        .execute(&db.pool)
+        .await;
+        assert!(
+            result.is_err(),
+            "the owner must not be able to re-point a private scope"
         );
     });
 }

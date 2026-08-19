@@ -1214,7 +1214,38 @@ async fn every_route_denies_without_the_action_and_refuses_without_a_credential(
     )
     .await;
     let invite_id = invite["invite"]["id"].as_str().expect("id").to_owned();
-    let placeholder = TenantId::new();
+    // Real ids for the two admin-grant routes. Since CPR-6 they resolve what
+    // they are about **before** they decide — a grant names its scope and a
+    // revocation names the grant (ADR-0073 decision 3) — so a made-up id is a
+    // 404 rather than a denial, which is the ownership-first order ADR-0012
+    // decision 7 sets and would make this sweep assert nothing.
+    let (_, workspace_view) = call(
+        &app,
+        "GET",
+        &format!("/v1/workspaces/{workspace_id}"),
+        Some(&admin),
+        None,
+        None,
+    )
+    .await;
+    let workspace_scope = workspace_view["scope_id"]
+        .as_str()
+        .expect("scope")
+        .to_owned();
+    let (_, seeded_grant) = call(
+        &app,
+        "POST",
+        "/v1/admin/grants",
+        Some(&admin),
+        Some("grant-pdp"),
+        Some(json!({
+            "scope_id": workspace_scope,
+            "principal_id": "cpr5-someone",
+            "role": "viewer",
+        })),
+    )
+    .await;
+    let grant_id = seeded_grant["id"].as_str().expect("id").to_owned();
 
     // (method, path, body) — every operation except `invite.accept`, which the
     // packs deliberately permit to everybody (the token is the authority) and
@@ -1266,11 +1297,9 @@ async fn every_route_denies_without_the_action_and_refuses_without_a_credential(
         (
             "POST",
             "/v1/admin/grants".to_owned(),
-            Some(
-                json!({"scope_id": placeholder.to_string(), "principal_id": "x", "role": "member"}),
-            ),
+            Some(json!({"scope_id": workspace_scope, "principal_id": "x", "role": "member"})),
         ),
-        ("DELETE", format!("/v1/admin/grants/{placeholder}"), None),
+        ("DELETE", format!("/v1/admin/grants/{grant_id}"), None),
     ];
 
     for (method, path, body) in routes {

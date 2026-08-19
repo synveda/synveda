@@ -235,6 +235,15 @@ pub struct Scope {
     pub display_name: String,
     /// Whether the scope is in use.
     pub status: ScopeStatus,
+    /// The token subject this scope belongs to. `Some` exactly when
+    /// [`kind`](Self::kind) is [`ScopeKind::Principal`], and immutable — a
+    /// scope never changes whose it is (CPR-6, ADR-0073 decision 2).
+    ///
+    /// It is a column rather than a slug convention or an `attributes` entry
+    /// because the anchor resolver reads it to answer "the authenticated
+    /// caller's own scope", which makes it an authorisation input — and
+    /// `attributes` is documented above as never being one.
+    pub principal_id: Option<String>,
     /// Open labelling bag. A JSON object (never a scalar or an array), at most
     /// [`MAX_ATTRIBUTES_BYTES`] encoded. Deliberately unstructured: what a
     /// deployment means by a scope is the deployment's to say, and a fixed
@@ -484,6 +493,7 @@ mod tests {
             slug: "payments".to_owned(),
             display_name: "Payments".to_owned(),
             status: ScopeStatus::Active,
+            principal_id: None,
             attributes: serde_json::json!({"cost-centre": "42"}),
             created_by: Some(IdentityId::new()),
             created_at: Utc::now(),

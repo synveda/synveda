@@ -45,6 +45,7 @@
 #![warn(missing_docs)]
 
 pub mod access;
+pub mod anchors;
 pub mod console_sessions;
 pub mod dedup;
 pub mod directory;

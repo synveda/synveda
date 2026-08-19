@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update scopes set principal_id = 'mallory' where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1081d339972871f117e97073b5e77668f4d6389a9a813773da1a908afbfbe61d"
+}

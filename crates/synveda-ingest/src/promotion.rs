@@ -26,7 +26,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::PgPool;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome, StoredEvent};
-use synveda_policy::{Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource};
+use synveda_policy::{Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource, ScopeNode};
 use synveda_store::promotion::{self as usage, UsageDelta, UsageRow};
 use synveda_store::records::{self, RecordVersion};
 use synveda_store::{ScopeChainCache, identities, policy_assignments, rls, role_bindings, tenants};
@@ -458,9 +458,13 @@ async fn evaluate_scope(
     // The pack is resolved for the *scope*, with no principal in it: which
     // rules run here is a property of the node, not of whoever's material
     // happens to sit on it.
+    let chain_nodes = ScopeNode::from_hierarchy_chain(&chain);
     let scope_context = AuthzContext {
-        scopes: &chain,
+        scopes: &chain_nodes,
         principal_scopes: &[],
+        anchors: &[],
+        groups: &[],
+        resources: &[],
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
         role_bindings: &[],
@@ -823,9 +827,14 @@ async fn authorize_owner(
     let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
     let bindings =
         role_bindings::for_subject_on_scopes(&mut *tx, tenant_id, &subject, &chain_ids).await?;
+    let scope_nodes = ScopeNode::from_hierarchy_chain(scope_chain);
+    let principal_nodes = ScopeNode::from_hierarchy_chain(&principal_chain);
     let context = AuthzContext {
-        scopes: scope_chain,
-        principal_scopes: &principal_chain,
+        scopes: &scope_nodes,
+        principal_scopes: &principal_nodes,
+        anchors: &[],
+        groups: &[],
+        resources: &[],
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
         role_bindings: &bindings,
@@ -871,9 +880,14 @@ async fn resolve_requirement(
     let chain_ids: Vec<ScopeId> = scope_chain.iter().map(|node| node.id).collect();
     let assignments = policy_assignments::for_scopes(&mut *tx, tenant_id, &chain_ids).await?;
     let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
+    let scope_nodes = ScopeNode::from_hierarchy_chain(scope_chain);
+    let principal_nodes = ScopeNode::from_hierarchy_chain(principal_scopes);
     let context = AuthzContext {
-        scopes: scope_chain,
-        principal_scopes,
+        scopes: &scope_nodes,
+        principal_scopes: &principal_nodes,
+        anchors: &[],
+        groups: &[],
+        resources: &[],
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
         role_bindings: &[],

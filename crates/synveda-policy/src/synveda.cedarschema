@@ -9,11 +9,15 @@
 // the materialised path (ADR-0011).
 //
 // Roles reach decisions as *request context*, never entity attributes
-// (ADR-0015 decision 3): `context.roles` is the principal's effective
-// role set at the resource, resolved by the PDP from caller-supplied
-// binding rows — tenant-wide bindings always, node bindings when the
-// bound node is on the resource's chain. HIER-3 takes over entity
-// materialisation.
+// (ADR-0015 decision 3): `context.roles` is the principal's effective role
+// set at the resource, resolved by the PDP and never claimed by a caller.
+// Since CPR-6 it carries **both** closed vocabularies — the old hierarchy's
+// role bindings (`viewer`, `contributor`, `curator`, `steward`, `org-admin`,
+// `auditor`, `security-reviewer`, `compliance`) and the governed scope
+// model's grant keys (`owner`, `member`, `viewer`, `reviewer`, `curator`,
+// `administrator`) — because the two trees are disjoint and a pack reads one
+// `Set<String>`. A grant's keys reach a resource when the grant's scope is on
+// that resource's chain, subject to principal privacy (ADR-0073 decision 5).
 //
 // ABAC context arrived with AUTHZ-5 (ADR-0038) and is one attribute:
 // `context.sensitivity` on MemoryRead. Channel stays the pack's
@@ -26,46 +30,129 @@
 namespace Synveda {
     entity Tenant;
 
-    // The caller: a token subject resolved to a tenant (TEN-1), carrying
-    // its provisioning status (AUTH-2, ADR-0013): quarantined is true for
-    // identities placed in the quarantine scope and for IdP subjects that
-    // never provisioned (fail closed). A provisioned principal is
-    // parented to its placement scope (its personal user node), so pack
-    // membership rules are entity-hierarchy checks; `home` mirrors that
-    // placement as an attribute so packs can *require* placement (an
-    // unplaced principal composes nothing — ADR-0014 decision 5), and
-    // `department` is the nearest department-kind ancestor of the
-    // placement, when the hierarchy has one. `token_scope` is set for
-    // service identities only (AUTH-3, ADR-0018 decision 4): the anchor
-    // node whose subtree confines the token — the base layer forbids
-    // everything outside it, roles notwithstanding.
-    entity Principal in [Tenant, Scope] {
-        tenant: Tenant,
-        quarantined: Bool,
-        home?: Scope,
-        department?: Scope,
-        token_scope?: Scope,
-    };
-
-    // A node of the tenancy hierarchy. Parents follow the hierarchy's
-    // parent pointers; the org root's parent is the Tenant entity.
+    // A node of the **governed scope tree** (CPR-3, ADR-0070; CPR-6,
+    // ADR-0073). Parents follow the tree's parent pointers; the tenant root's
+    // parent is the Tenant entity.
     //
-    // `sealed` is AUTH-4's leaver state (ADR-0059 decision 9), derived
-    // from the identity that owns a user-kind node rather than stored on
-    // the node. It is **required** rather than optional, for the reason
-    // `context.grant` and `context.sensitivity` are: the base layer's
-    // forbid must never go missing for want of an attribute — a policy
-    // referencing a missing one errors, and Cedar drops a policy that
-    // errors, which would silently unseal every departed person.
+    // `kind` is a **shape** — `tenant`, `org_unit`, `workspace`, `project` or
+    // `principal` — and it decides only which shapes may parent which. It is
+    // not the rank vocabulary this schema used to carry: `org`, `division`,
+    // `department`, `team` and `user` are gone, with the strictly-increasing
+    // ladder they encoded, and nothing in any pack compares two kinds for
+    // order. What survives is the one distinction that is about privacy rather
+    // than about seniority: a `principal` scope is somebody's own.
     //
-    // It is an attribute of the *resource* where `quarantined` is an
-    // attribute of the principal, and the pair is the whole shape of the
-    // two controls: quarantine says this caller may do nothing, and a
-    // seal says nothing may be done to this material.
+    // `sealed` is AUTH-4's leaver state (ADR-0059 decision 9). It is
+    // **required** rather than optional, for the reason `context.grant` and
+    // `context.sensitivity` are: the base layer's forbid must never go missing
+    // for want of an attribute — a policy referencing a missing one errors,
+    // and Cedar drops a policy that errors, which would silently unseal every
+    // departed person.
+    //
+    // It is an attribute of the *resource* where `quarantined` is an attribute
+    // of the principal, and the pair is the whole shape of the two controls:
+    // quarantine says this caller may do nothing, and a seal says nothing may
+    // be done to this material.
     entity Scope in [Tenant, Scope] {
         tenant: Tenant,
         kind: String,
         sealed: Bool,
+    };
+
+    // A named set of principals (CPR-5, ADR-0072). Tenant-wide: a group is not
+    // anchored anywhere in the scope tree, which is why `GroupManage` applies
+    // to the Tenant and nothing else.
+    //
+    // A principal is parented to every group it is in, so a pack that wants to
+    // name one writes `principal in Synveda::Group::"<id>"` — an
+    // entity-hierarchy check, never a string comparison against a claim.
+    entity Group in [Tenant] {
+        tenant: Tenant,
+    };
+
+    // The caller: a token subject resolved to a tenant (TEN-1), carrying its
+    // provisioning status (AUTH-2, ADR-0013).
+    //
+    // `own_scope` is the caller's own scope — their `principal`-shaped scope
+    // in the governed model, their placement node on the old hierarchy the
+    // programme has not deleted yet. The principal entity is parented to it,
+    // so `principal in resource` walks the tree upward from it and a pack can
+    // *require* placement (an unscoped principal composes nothing — ADR-0014
+    // decision 5).
+    //
+    // `anchors` is the set of scopes this caller actually **holds** something
+    // at, direct or through a group (CPR-6, ADR-0073 decision 4). It is the
+    // downward direction: `resource in principal.anchors` is "inside something
+    // I hold", which is how a workspace grant reaches that workspace's
+    // projects with no row written there. Anchors are deliberately **not**
+    // parents of the principal — authority flows down from where a grant was
+    // written and never up, so a project grant must not make its holder a
+    // member of the workspace above it.
+    //
+    // `ambit` is the **parent** of every scope this caller holds, minus the
+    // tenant root — their neighbourhood. It is what `standard`'s sharing
+    // default reads, and it is the honest replacement for the `department`
+    // attribute that used to serve that rule: a grant at one project shares
+    // the workspace it sits in, a grant at one team shares its org unit, and
+    // nothing anywhere asks what *kind* of thing that parent is. The tenant
+    // root is excluded deliberately — including it would make `standard` mean
+    // `open-collaboration`, which is a different pack.
+    //
+    // `private` is every `principal`-shaped scope this caller may reach: their
+    // own, plus any somebody granted them directly. The base layer forbids
+    // every other one outright, so this set is the whole of what makes a
+    // private scope reachable at all.
+    //
+    // `department` is **gone**, with the ladder it read. There is no attribute
+    // here that names a rung of an organisation.
+    //
+    // `token_scope` is set for service identities only (AUTH-3, ADR-0018
+    // decision 4): the anchor node whose subtree confines the token — the base
+    // layer forbids everything outside it, roles notwithstanding.
+    entity Principal in [Tenant, Scope, Group] {
+        tenant: Tenant,
+        quarantined: Bool,
+        own_scope?: Scope,
+        token_scope?: Scope,
+        anchors: Set<Scope>,
+        ambit: Set<Scope>,
+        private: Set<Scope>,
+    };
+
+    // A workspace and the project inside it (CPR-4, ADR-0071), as entities
+    // rather than as "the tenant, again" (CPR-6, ADR-0073 decision 3).
+    //
+    // Each is parented to the governed scope it owns, and a project's scope
+    // already sits under its workspace's — so every containment rule written
+    // over scopes reaches them without being restated, and `Project in
+    // Workspace` is true through the tree rather than through a second edge.
+    //
+    // They carry `scope` as an attribute as well as as a parent because a pack
+    // may want to *name* it (`resource.scope == principal.own_scope`) rather
+    // than only test containment.
+    entity Workspace in [Tenant, Scope] {
+        tenant: Tenant,
+        scope: Scope,
+    };
+
+    entity Project in [Tenant, Scope] {
+        tenant: Tenant,
+        scope: Scope,
+        workspace: Workspace,
+    };
+
+    // One grant: a subject's role at a scope (CPR-5, ADR-0072).
+    //
+    // It is an entity so that revoking *this* grant is a decidable act. Before
+    // CPR-6 a revocation named the tenant, so a pack could price "take access
+    // away" and never "take away a grant a directory owns" or "take away an
+    // owner's". `role` and `source` are strings for the reason `kind` is: a
+    // closed vocabulary read by name, with no arithmetic to get wrong.
+    entity ScopeGrant in [Tenant, Scope] {
+        tenant: Tenant,
+        scope: Scope,
+        role: String,
+        source: String,
     };
 
     // The hierarchy admin plane (/v1/hierarchy/*, ADR-0011 decision 8).
@@ -99,23 +186,24 @@ namespace Synveda {
     // describe without describing the project's, and the vocabulary is
     // already the widest thing a reviewer has to hold.
     //
-    // They apply to `[Tenant, Scope]` so that the decision can move from the
-    // tenant to the subtype's own scope without a schema change, which is
-    // exactly what Prompt 5 of the context-platform programme does when the
-    // PDP is re-cut over generic scopes. Until then the routes decide at the
-    // tenant, because the Cedar entity model still describes the old
-    // hierarchy and a generic scope has no chain in it (ADR-0071 decision 3).
+    // Since CPR-6 they apply to the subtype **itself** (ADR-0073 decision 3),
+    // which is what ADR-0071 decision 3 said this would become: a read or an
+    // update names the workspace or the project, a creation names the scope it
+    // would land in (the tenant root for a workspace, the workspace's own
+    // scope for a project), and the tenant remains only for the case where a
+    // deployment has no root scope yet and there is genuinely nothing more
+    // specific to name.
     action WorkspaceRead, WorkspaceCreate, WorkspaceUpdate
         appliesTo {
             principal: [Principal],
-            resource: [Tenant, Scope],
+            resource: [Tenant, Scope, Workspace],
             context: { roles: Set<String> },
         };
 
     action ProjectRead, ProjectCreate, ProjectUpdate
         appliesTo {
             principal: [Principal],
-            resource: [Tenant, Scope],
+            resource: [Tenant, Scope, Workspace, Project],
             context: { roles: Set<String> },
         };
 
@@ -137,15 +225,16 @@ namespace Synveda {
     // own, because an invitation *is* deferred granting: an authority to invite
     // weaker than the authority to grant would be a way around the second.
     //
-    // Both apply to `[Tenant, Scope]` for CPR-4's reason: the routes decide at
-    // the tenant today because the Cedar entity model still materialises Scope
-    // from `hierarchy_nodes`, and a generic scope has no row in it. Re-anchoring
-    // them at the subtype's own scope is then a route change and not a contract
-    // change.
+    // Since CPR-6 both apply where the membership actually is: the scope, the
+    // workspace or the project whose members are being read or changed, and —
+    // for a revocation — the **grant itself**, so that a pack can price taking
+    // away a directory-managed grant or an owner's differently from taking
+    // away an ordinary one (ADR-0073 decision 3). The tenant stays for the
+    // tenant-wide listings and for a deployment with no root scope yet.
     action MembershipRead, MembershipGrant
         appliesTo {
             principal: [Principal],
-            resource: [Tenant, Scope],
+            resource: [Tenant, Scope, Workspace, Project, ScopeGrant],
             context: { roles: Set<String> },
         };
 
@@ -161,7 +250,7 @@ namespace Synveda {
     action GroupManage
         appliesTo {
             principal: [Principal],
-            resource: [Tenant],
+            resource: [Tenant, Group],
             context: { roles: Set<String> },
         };
 

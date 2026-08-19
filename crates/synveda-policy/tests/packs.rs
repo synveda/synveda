@@ -19,9 +19,11 @@
 //! ```
 
 use chrono::Utc;
+use synveda_policy::ScopeNode;
 use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
 };
+use synveda_types::anchor::{AnchorSource, ScopeAnchor};
 use synveda_types::{
     HierarchyNode, PackConfig, PolicyAssignment, Role, ScopeId, ScopeKind, Sensitivity, TenantId,
 };
@@ -54,7 +56,11 @@ impl Fixture {
 
     /// The node and its ancestors — what a caller reads for the resource
     /// (and what the gateway reads for a principal's placement).
-    fn chain(&self, slug: &str) -> Vec<HierarchyNode> {
+    /// The chain the PDP takes: the old hierarchy's rows projected onto
+    /// the shape vocabulary at the caller's edge (CPR-6, ADR-0073
+    /// decision 1). The fixture still holds `HierarchyNode`s because the
+    /// hierarchy plane still exists; nothing below this line does.
+    fn chain(&self, slug: &str) -> Vec<ScopeNode> {
         let mut chain = vec![self.node(slug).clone()];
         let mut current = chain[0].parent_id;
         while let Some(id) = current {
@@ -66,7 +72,7 @@ impl Fixture {
             current = parent.parent_id;
             chain.push(parent.clone());
         }
-        chain
+        chain.iter().map(ScopeNode::from_hierarchy).collect()
     }
 
     fn assignment(&self, slug: &str, pack: &str) -> PolicyAssignment {
@@ -437,20 +443,21 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 fn golden_regulated_strict() {
     assert_pack_golden(
         REGULATED_STRICT,
-        16,
+        17,
         &["org", "eng", "team-a", "alice-user"],
     );
 }
 
-/// standard: own chain plus the department subtree — sibling team-b joins;
-/// sales, team-c, and carol's personal scope stay out.
+/// standard: own chain, **plus the subtree of everything this caller holds**
+/// (CPR-6, ADR-0073). A principal with no grant holds nothing, so this matrix
+/// is now identical to `regulated-strict`'s — which is not a regression but
+/// the removal of the rank: what used to widen it was
+/// `principal.department`, the nearest department-kind ancestor of a
+/// placement, and there is no such thing any more. What widens it now is a
+/// grant, which `standard_shares_within_what_you_hold` asserts.
 #[test]
 fn golden_standard() {
-    assert_pack_golden(
-        STANDARD,
-        16,
-        &["org", "eng", "team-a", "team-b", "alice-user"],
-    );
+    assert_pack_golden(STANDARD, 17, &["org", "eng", "team-a", "alice-user"]);
 }
 
 /// open-collaboration: org-wide — only other people's personal scopes
@@ -460,7 +467,7 @@ fn golden_standard() {
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        16,
+        17,
         &[
             "org",
             "eng",
@@ -473,24 +480,69 @@ fn golden_open_collaboration() {
     );
 }
 
-/// standard, from the other side of the org: dave (sales/team-c) gains
-/// nothing in eng — department sharing is symmetric and bounded.
+/// standard's sharing default, re-cut: **the subtree of what you hold**, not
+/// the subtree of where an org chart put you (CPR-6, ADR-0073).
+///
+/// The old version of this test asserted that dave (sales) gained nothing in
+/// eng and that carol (eng) gained her sibling team — both facts about
+/// `principal.department`. The property that replaces it says what a reader
+/// now has to be told: sharing follows a **grant's neighbourhood**, so carol
+/// with a grant at her own team reads the teams beside it, and carol with no
+/// grant reads exactly her own chain.
 #[test]
-fn standard_shares_within_the_department_only() {
+fn standard_shares_within_what_you_hold() {
     let pdp = Pdp::new().expect("build pdp");
     let fx = fixture();
     let assignments = [fx.assignment("org", STANDARD)];
-    let dave = fx.placed("dave", "dave-user");
-    assert_eq!(
-        composition(&pdp, &fx, &dave, Some("dave-user"), &assignments),
-        vec!["org", "sales", "team-c"],
-        "dave's department sharing must stop at sales"
-    );
     let carol = fx.placed("carol", "carol-user");
+
+    // No grant: own chain only.
     assert_eq!(
         composition(&pdp, &fx, &carol, Some("carol-user"), &assignments),
+        vec!["org", "eng", "team-b", "carol-user"],
+        "with nothing held, standard is regulated-strict's read surface"
+    );
+
+    // A grant at carol's own team: its **parent** — eng — is her
+    // neighbourhood, so eng's whole subtree joins and sales does not.
+    let team_b = fx.node("team-b");
+    let anchor = ScopeAnchor {
+        scope_id: team_b.id,
+        kind: synveda_types::scope::ScopeKind::Workspace,
+        parent_scope_id: team_b.parent_id,
+        depth: 2,
+        source: AnchorSource::Grant,
+        roles: vec![synveda_types::access::RoleKey::Member],
+        granted_at: vec![team_b.id],
+        via_groups: Vec::new(),
+    };
+    let anchors = [anchor];
+    let held: Vec<&'static str> = ALL_SCOPES
+        .into_iter()
+        .filter(|target| {
+            let scopes = fx.chain(target);
+            let principal_scopes = fx.chain("carol-user");
+            pdp.authorize(
+                &carol,
+                Action::MemoryRead,
+                Resource::Scope(fx.node(target).id),
+                &AuthzContext {
+                    sensitivity: Some(Sensitivity::Internal),
+                    scopes: &scopes,
+                    principal_scopes: &principal_scopes,
+                    anchors: &anchors,
+                    assignments: &assignments,
+                    ..Default::default()
+                },
+            )
+            .expect("authorize")
+            .allowed
+        })
+        .collect();
+    assert_eq!(
+        held,
         vec!["org", "eng", "team-a", "team-b", "carol-user"],
-        "carol shares alice's department, both teams visible"
+        "a grant at team-b shares its neighbourhood, and nothing in sales"
     );
 }
 

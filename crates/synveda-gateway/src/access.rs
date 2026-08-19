@@ -6,32 +6,34 @@
 //! `/v1` route, behind the PDP like every governed one, and chaining an audit
 //! event for every mutation.
 //!
-//! # Where these decisions are taken, and why not where they belong
+//! # Where these decisions are taken
 //!
-//! Every decision here names `Resource::Tenant`, and — exactly as on the
-//! workspace plane it sits beside — that is a **stated limitation rather than
-//! a design** (ADR-0071 decision 3, restated by ADR-0072 decision 9). A grant
-//! is written at a generic scope, and a generic scope is what the Cedar entity
-//! model does not describe yet: `Scope` entities are materialised from
-//! `hierarchy_nodes` and its closure, so `Resource::Scope(workspace.scope_id)`
-//! would materialise an entity with no chain and deny at every caller. The
-//! four new actions already apply to `[Tenant, Scope]` where the model admits
-//! it, so re-anchoring them is a route change and not a contract change.
+//! Every decision here named `Resource::Tenant` until CPR-6, and ADR-0072
+//! decision 9 recorded that as a stated debt rather than a design. It is paid:
+//! a membership read or a grant names the **scope** it is about — the
+//! workspace, the project, or the scope a tenant-wide grant route was given —
+//! curating a group names the **group**, and revoking names **the grant**,
+//! which is what lets a pack price taking away a directory-managed grant
+//! differently from taking away one somebody typed (ADR-0073 decision 3).
 //!
-//! # Grants are stored and resolved; they are not yet a PDP input
+//! The two that stay on the tenant plane stay there for reasons rather than
+//! for want of a resource: creating a group has no group to name yet, and
+//! redeeming an invitation must work for somebody who holds nothing anywhere.
+//! Both are decided at the tenant **root scope** when the tenant has one.
 //!
-//! This plane records who holds which **role key** where, and resolves that
-//! through the scope closure into the effective membership the members routes
-//! serve. It does **not** feed those role keys to Cedar as `context.roles`,
-//! and that is deliberate rather than unfinished (ADR-0072 decision 3): the
-//! packs' `context.roles` vocabulary is the *old* role-binding vocabulary
-//! (`steward`, `org-admin`, …) resolved from `role_bindings` over the old
-//! hierarchy. Feeding a grant written on a generic scope into a decision taken
-//! at the tenant would be a translation between the two models — the one thing
-//! this programme forbids outright — and would silently widen every tenant-wide
-//! decision by every project-level grant. The PDP re-cut is the next prompt;
-//! until it lands, a grant is a governed record of authority rather than the
-//! thing that enforces it, and this module says so where somebody will read it.
+//! # Grants are a PDP input
+//!
+//! This plane records who holds which **role key** where, and since CPR-6 the
+//! PDP reads them: `synveda_store::anchors` resolves the caller's grants into
+//! an ordered anchor set, and the role keys that reach the resource arrive in
+//! `context.roles` beside the old hierarchy's binding roles (ADR-0073
+//! decision 5). A workspace `owner` therefore administers their workspace with
+//! no tenant-wide role bound anywhere, and a project-only grantee reaches the
+//! project and not the workspace above it.
+//!
+//! Nothing translates between the two vocabularies, and nothing needs to: the
+//! two trees are disjoint, so a grant's scope is never a hierarchy node and a
+//! node binding is never at a governed scope.
 //!
 //! # Creation is idempotent; the group update carries a precondition
 //!
@@ -49,14 +51,16 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
-use synveda_policy::{Action, Resource};
+use synveda_policy::{Action, Resource, ResourceEntity};
 use synveda_store::access::AccessEntry as StoreAccessEntry;
+use synveda_store::anchors::AnchorSelection;
 use synveda_store::{access, projects, rls, scopes, workspaces};
 use synveda_types::access::{
     DEFAULT_INVITE_TTL_SECS, GrantSource, GrantSubject, Group, GroupSource, InviteStatus,
     PendingInvite, RoleKey, ScopeGrant, SubjectKind, validate_invite_ttl,
 };
-use synveda_types::workspace::LifecycleStatus;
+use synveda_types::scope::Scope;
+use synveda_types::workspace::{LifecycleStatus, Project, Workspace};
 use synveda_types::{
     Error, GrantId, GroupId, InviteId, ProjectId, Result, ScopeId, TenantId, WorkspaceId,
 };
@@ -580,14 +584,161 @@ async fn respond<T: IntoResponse>(
     }
 }
 
-/// One decision at the tenant — see the module docs for why not at the scope.
+/// What a decision on this plane is **about** (CPR-6, ADR-0073 decision 3).
+///
+/// CPR-5 named the tenant for all thirteen and recorded why: the Cedar entity
+/// model still materialised `Scope` from `hierarchy_nodes`, so a governed
+/// scope had no chain to decide against. It has one now, so a membership read
+/// or a grant names the scope it is actually about, curating a group names the
+/// group, and revoking names **the grant** — which is what lets a pack price
+/// taking away a directory-managed grant differently from taking away one
+/// somebody typed.
+enum Subject<'a> {
+    /// The tenant plane: the tenant-wide listings and the group collection.
+    /// Decided at the tenant **root scope** when the tenant has one, and at the
+    /// tenant itself before anything has minted one.
+    Tenant,
+    /// The tenant plane for an action the schema gives **no scope resource**:
+    /// `GroupManage` on the collection and `InviteAccept`. Naming the root
+    /// scope for those would build a request the Cedar schema refuses, which
+    /// fails closed as an internal error rather than as a denial — so they name
+    /// the tenant, and the anchors still carry a tenant-root grant into
+    /// `context.roles` (ADR-0073 decision 5).
+    TenantOnly,
+    /// One governed scope, with the workspace or project that owns it when a
+    /// subtype does.
+    Scope(&'a Scope, Option<ResourceEntity>, AnchorSelection),
+    /// One group.
+    Group(GroupId),
+    /// One grant, at the scope it is written at.
+    Grant(&'a ScopeGrant, &'a Scope),
+}
+
+/// Takes one decision about `subject`, and returns the resource it decided
+/// against so the audit event names the same thing the PDP did.
 async fn require(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     action: Action,
     tenant_id: TenantId,
-) -> Result<Authorized> {
-    authz::require(state, tx, action, Resource::Tenant(tenant_id), None).await
+    subject: Subject<'_>,
+) -> Result<(Authorized, Resource)> {
+    let (anchor, selection, resources, resource) = match subject {
+        Subject::Tenant => {
+            let root = scopes::tenant_root(&mut *tx, tenant_id).await?;
+            let resource = match &root {
+                Some(scope) => Resource::Scope(scope.id),
+                None => Resource::Tenant(tenant_id),
+            };
+            (root, AnchorSelection::none(), Vec::new(), resource)
+        }
+        Subject::Scope(scope, entity, selection) => {
+            let resource = match entity {
+                Some(ResourceEntity::Workspace { id, .. }) => Resource::Workspace(id),
+                Some(ResourceEntity::Project { id, .. }) => Resource::Project(id),
+                _ => Resource::Scope(scope.id),
+            };
+            (
+                Some(scope.clone()),
+                selection,
+                entity.into_iter().collect(),
+                resource,
+            )
+        }
+        Subject::TenantOnly => {
+            // The root is still gathered, so the profile assigned to it is the
+            // one that decides; only the *resource* differs.
+            let root = scopes::tenant_root(&mut *tx, tenant_id).await?;
+            (
+                root,
+                AnchorSelection::none(),
+                Vec::new(),
+                Resource::Tenant(tenant_id),
+            )
+        }
+        Subject::Group(id) => {
+            // A group is anchored nowhere in the tree, so it is decided under
+            // the tenant root's profile — the same shape `DirectoryManage` has
+            // and for the same reason: a subtree-scoped authority over a
+            // tenant-wide set could only ever be a half-truth.
+            let root = scopes::tenant_root(&mut *tx, tenant_id).await?;
+            (
+                root,
+                AnchorSelection::none(),
+                vec![ResourceEntity::Group { id }],
+                Resource::Group(id),
+            )
+        }
+        Subject::Grant(grant, scope) => (
+            Some(scope.clone()),
+            AnchorSelection::none(),
+            vec![ResourceEntity::Grant {
+                id: grant.id,
+                scope_id: grant.scope_id,
+                role: grant.role_key,
+                source: grant.source,
+            }],
+            Resource::Grant(grant.id),
+        ),
+    };
+    let input = authz::gather_governed(state, tx, anchor.as_ref(), selection, resources).await?;
+    let authorized = authz::decide(state, &input, action, resource, None)?;
+    Ok((authorized, resource))
+}
+
+/// [`Subject::Scope`] for a workspace.
+fn workspace_subject<'a>(workspace: &Workspace, scope: &'a Scope) -> Subject<'a> {
+    Subject::Scope(
+        scope,
+        Some(ResourceEntity::Workspace {
+            id: workspace.id,
+            scope_id: workspace.scope_id,
+        }),
+        AnchorSelection::workspace(workspace.id),
+    )
+}
+
+/// [`Subject::Scope`] for a project.
+fn project_subject<'a>(project: &Project, scope: &'a Scope) -> Subject<'a> {
+    Subject::Scope(
+        scope,
+        Some(ResourceEntity::Project {
+            id: project.id,
+            scope_id: project.scope_id,
+            workspace_id: project.workspace_id,
+        }),
+        AnchorSelection::project(project.id),
+    )
+}
+
+/// The workspace and the governed scope it owns, or the uniform 404.
+async fn workspace_and_scope(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    id: WorkspaceId,
+) -> Result<(Workspace, Scope)> {
+    let workspace = workspaces::get(&mut *tx, tenant_id, id)
+        .await?
+        .ok_or_else(|| workspace_not_found(id))?;
+    let scope = scopes::get(&mut *tx, tenant_id, workspace.scope_id)
+        .await?
+        .ok_or_else(|| workspace_not_found(id))?;
+    Ok((workspace, scope))
+}
+
+/// The project and the governed scope it owns, or the uniform 404.
+async fn project_and_scope(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    id: ProjectId,
+) -> Result<(Project, Scope)> {
+    let project = projects::get(&mut *tx, tenant_id, id)
+        .await?
+        .ok_or_else(|| project_not_found(id))?;
+    let scope = scopes::get(&mut *tx, tenant_id, project.scope_id)
+        .await?
+        .ok_or_else(|| project_not_found(id))?;
+    Ok((project, scope))
 }
 
 /// The allowed-read decision event (ADR-0019 decision 4): a read has no
@@ -598,13 +749,14 @@ async fn read_event(
     op: &'static str,
     action: Action,
     authorized: &Authorized,
+    resource: Resource,
     detail: serde_json::Value,
 ) -> Result<()> {
     audit::record(
         tx,
         tenant_id,
         AuditAction::AuthzDecision,
-        Resource::Tenant(tenant_id).to_string(),
+        resource.to_string(),
         Outcome::Allow,
         json!({
             "op": op,
@@ -673,30 +825,6 @@ fn project_not_found(id: ProjectId) -> Error {
     }
 }
 
-/// The workspace's scope, or the uniform 404.
-async fn workspace_scope(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    id: WorkspaceId,
-) -> Result<ScopeId> {
-    workspaces::get(&mut *tx, tenant_id, id)
-        .await?
-        .map(|workspace| workspace.scope_id)
-        .ok_or_else(|| workspace_not_found(id))
-}
-
-/// The project's scope, or the uniform 404.
-async fn project_scope(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    id: ProjectId,
-) -> Result<ScopeId> {
-    projects::get(&mut *tx, tenant_id, id)
-        .await?
-        .map(|project| project.scope_id)
-        .ok_or_else(|| project_not_found(id))
-}
-
 // ── Members ──────────────────────────────────────────────────────────────────
 
 /// `GET /v1/workspaces/{workspace_id}/members` — who may act here.
@@ -720,8 +848,16 @@ pub(crate) async fn list_workspace_members(
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::MembershipRead, tenant_id).await?;
-        let scope_id = workspace_scope(&mut tx, tenant_id, workspace_id).await?;
+        let (workspace, scope) = workspace_and_scope(&mut tx, tenant_id, workspace_id).await?;
+        let scope_id = scope.id;
+        let (authorized, resource) = require(
+            &state,
+            &mut tx,
+            Action::MembershipRead,
+            tenant_id,
+            workspace_subject(&workspace, &scope),
+        )
+        .await?;
         let members = access::members_of(&mut *tx, tenant_id, scope_id).await?;
         read_event(
             &mut tx,
@@ -729,6 +865,7 @@ pub(crate) async fn list_workspace_members(
             "members.list",
             Action::MembershipRead,
             &authorized,
+            resource,
             json!({"workspace_id": workspace_id, "scope_id": scope_id, "count": members.len()}),
         )
         .await?;
@@ -763,8 +900,16 @@ pub(crate) async fn list_project_members(
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::MembershipRead, tenant_id).await?;
-        let scope_id = project_scope(&mut tx, tenant_id, project_id).await?;
+        let (project, scope) = project_and_scope(&mut tx, tenant_id, project_id).await?;
+        let scope_id = scope.id;
+        let (authorized, resource) = require(
+            &state,
+            &mut tx,
+            Action::MembershipRead,
+            tenant_id,
+            project_subject(&project, &scope),
+        )
+        .await?;
         let members = access::members_of(&mut *tx, tenant_id, scope_id).await?;
         read_event(
             &mut tx,
@@ -772,6 +917,7 @@ pub(crate) async fn list_project_members(
             "members.list",
             Action::MembershipRead,
             &authorized,
+            resource,
             json!({"project_id": project_id, "scope_id": scope_id, "count": members.len()}),
         )
         .await?;
@@ -881,8 +1027,16 @@ async fn add_member(
     claim: &Claim,
 ) -> Result<ScopeGrant> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let authorized = require(state, &mut tx, Action::MembershipGrant, tenant_id).await?;
-    let scope_id = project_scope(&mut tx, tenant_id, project_id).await?;
+    let (project, scope) = project_and_scope(&mut tx, tenant_id, project_id).await?;
+    let scope_id = scope.id;
+    let (authorized, _) = require(
+        state,
+        &mut tx,
+        Action::MembershipGrant,
+        tenant_id,
+        project_subject(&project, &scope),
+    )
+    .await?;
     let grant = access::create_grant(
         &mut *tx,
         &access::NewGrant {
@@ -931,19 +1085,30 @@ async fn replay_grant(
     claim: &Claim,
 ) -> Result<ScopeGrant> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let authorized = require(state, &mut tx, Action::MembershipGrant, tenant_id).await?;
     // A grant is the one thing on this plane that is revoked by deleting the
     // row, so a replay can genuinely find nothing. That is a 404 naming the
     // situation rather than a silent re-grant.
     let grant = access::get_grant(&mut *tx, tenant_id, id)
         .await?
         .ok_or_else(|| crate::idempotency::vanished(claim, id.as_uuid()))?;
+    let scope = scopes::get(&mut *tx, tenant_id, grant.scope_id)
+        .await?
+        .ok_or_else(|| crate::idempotency::vanished(claim, id.as_uuid()))?;
+    let (authorized, resource) = require(
+        state,
+        &mut tx,
+        Action::MembershipGrant,
+        tenant_id,
+        Subject::Grant(&grant, &scope),
+    )
+    .await?;
     read_event(
         &mut tx,
         tenant_id,
         "grant.replay",
         Action::MembershipGrant,
         &authorized,
+        resource,
         json!({"grant_id": id, "idempotency_key": claim.key}),
     )
     .await?;
@@ -977,8 +1142,16 @@ pub(crate) async fn remove_project_member(
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::MembershipGrant, tenant_id).await?;
-        let scope_id = project_scope(&mut tx, tenant_id, project_id).await?;
+        let (project, scope) = project_and_scope(&mut tx, tenant_id, project_id).await?;
+        let scope_id = scope.id;
+        let (authorized, _) = require(
+            &state,
+            &mut tx,
+            Action::MembershipGrant,
+            tenant_id,
+            project_subject(&project, &scope),
+        )
+        .await?;
         let revoked = access::remove_member(&mut tx, tenant_id, scope_id, &principal_id).await?;
         audit::record(
             &mut tx,
@@ -1024,8 +1197,16 @@ pub(crate) async fn list_invites(
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::MembershipRead, tenant_id).await?;
-        let scope_id = workspace_scope(&mut tx, tenant_id, workspace_id).await?;
+        let (workspace, scope) = workspace_and_scope(&mut tx, tenant_id, workspace_id).await?;
+        let scope_id = scope.id;
+        let (authorized, resource) = require(
+            &state,
+            &mut tx,
+            Action::MembershipRead,
+            tenant_id,
+            workspace_subject(&workspace, &scope),
+        )
+        .await?;
         let invites = access::list_invites(&mut *tx, tenant_id, scope_id).await?;
         read_event(
             &mut tx,
@@ -1033,6 +1214,7 @@ pub(crate) async fn list_invites(
             "invite.list",
             Action::MembershipRead,
             &authorized,
+            resource,
             json!({"workspace_id": workspace_id, "count": invites.len()}),
         )
         .await?;
@@ -1154,8 +1336,16 @@ async fn mint_invite(
     claim: &Claim,
 ) -> Result<CreatedInviteView> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let authorized = require(state, &mut tx, Action::MembershipGrant, tenant_id).await?;
-    let scope_id = workspace_scope(&mut tx, tenant_id, workspace_id).await?;
+    let (workspace, scope) = workspace_and_scope(&mut tx, tenant_id, workspace_id).await?;
+    let scope_id = scope.id;
+    let (authorized, _) = require(
+        state,
+        &mut tx,
+        Action::MembershipGrant,
+        tenant_id,
+        workspace_subject(&workspace, &scope),
+    )
+    .await?;
     let minted = synveda_identity::invite::mint(tenant_id)?;
     let invite = access::create_invite(
         &mut *tx,
@@ -1227,8 +1417,16 @@ pub(crate) async fn revoke_invite(
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::MembershipGrant, tenant_id).await?;
-        let scope_id = workspace_scope(&mut tx, tenant_id, workspace_id).await?;
+        let (workspace, scope) = workspace_and_scope(&mut tx, tenant_id, workspace_id).await?;
+        let scope_id = scope.id;
+        let (authorized, _) = require(
+            &state,
+            &mut tx,
+            Action::MembershipGrant,
+            tenant_id,
+            workspace_subject(&workspace, &scope),
+        )
+        .await?;
         // An invitation addressed through the wrong workspace is a 404, not
         // somebody else's invitation withdrawn: the handle is scoped to the
         // path that names it.
@@ -1308,7 +1506,19 @@ pub(crate) async fn accept_invite(
         let token_hash = synveda_identity::invite::hash(&token);
 
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::InviteAccept, tenant_id).await?;
+        // Redeeming is decided on the **tenant plane** and stays there: an
+        // invitation's whole point is that its holder may hold nothing
+        // anywhere yet, so a decision anchored at the scope being granted
+        // would refuse exactly the people this route exists for (ADR-0072
+        // decision 8).
+        let (authorized, _) = require(
+            &state,
+            &mut tx,
+            Action::InviteAccept,
+            tenant_id,
+            Subject::TenantOnly,
+        )
+        .await?;
         if named_tenant != tenant_id {
             // The hash would miss anyway — it covers the tenant — but saying
             // so plainly beats a 404 that reads as "your invitation is gone".
@@ -1339,6 +1549,7 @@ pub(crate) async fn accept_invite(
                 "invite.accept.replay",
                 Action::InviteAccept,
                 &authorized,
+                Resource::Scope(accepted.grant.scope_id),
                 json!({"invite_id": accepted.invite.id}),
             )
             .await?;
@@ -1379,7 +1590,14 @@ pub(crate) async fn list_groups(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::MembershipRead, tenant_id).await?;
+        let (authorized, resource) = require(
+            &state,
+            &mut tx,
+            Action::MembershipRead,
+            tenant_id,
+            Subject::Tenant,
+        )
+        .await?;
         let groups = access::list_groups(&mut *tx, tenant_id).await?;
         // One query for every group's membership rather than one per group:
         // an admin screen listing forty groups must not be forty round trips.
@@ -1390,6 +1608,7 @@ pub(crate) async fn list_groups(State(state): State<AppState>) -> Response {
             "group.list",
             Action::MembershipRead,
             &authorized,
+            resource,
             json!({"count": groups.len()}),
         )
         .await?;
@@ -1484,7 +1703,16 @@ async fn make_group(
     claim: &Claim,
 ) -> Result<GroupView> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let authorized = require(state, &mut tx, Action::GroupManage, tenant_id).await?;
+    // Creating one is the tenant plane's: there is no group to name yet, and
+    // `GroupManage` has no scope resource in the schema.
+    let (authorized, _) = require(
+        state,
+        &mut tx,
+        Action::GroupManage,
+        tenant_id,
+        Subject::TenantOnly,
+    )
+    .await?;
     let group = access::create_group(
         &mut *tx,
         &access::NewGroup {
@@ -1543,10 +1771,17 @@ async fn replay_group(
     claim: &Claim,
 ) -> Result<GroupView> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let authorized = require(state, &mut tx, Action::GroupManage, tenant_id).await?;
     let group = access::get_group(&mut *tx, tenant_id, id)
         .await?
         .ok_or_else(|| crate::idempotency::vanished(claim, id.as_uuid()))?;
+    let (authorized, resource) = require(
+        state,
+        &mut tx,
+        Action::GroupManage,
+        tenant_id,
+        Subject::Group(group.id),
+    )
+    .await?;
     let members = access::group_members(&mut *tx, tenant_id, id).await?;
     read_event(
         &mut tx,
@@ -1554,6 +1789,7 @@ async fn replay_group(
         "group.create.replay",
         Action::GroupManage,
         &authorized,
+        resource,
         json!({"group_id": id, "idempotency_key": claim.key}),
     )
     .await?;
@@ -1594,12 +1830,19 @@ pub(crate) async fn update_group(
         let tenant_id = tenant_id()?;
         let actor = subject()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::GroupManage, tenant_id).await?;
         let before = access::get_group(&mut *tx, tenant_id, group_id)
             .await?
             .ok_or_else(|| Error::NotFound {
                 entity: format!("group {group_id}"),
             })?;
+        let (authorized, _) = require(
+            &state,
+            &mut tx,
+            Action::GroupManage,
+            tenant_id,
+            Subject::Group(group_id),
+        )
+        .await?;
         let before_members = access::group_members(&mut *tx, tenant_id, group_id).await?;
         let after = access::update_group(
             &mut tx,
@@ -1695,7 +1938,14 @@ pub(crate) async fn list_grants(
         })?;
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::MembershipRead, tenant_id).await?;
+        let (authorized, resource) = require(
+            &state,
+            &mut tx,
+            Action::MembershipRead,
+            tenant_id,
+            Subject::Tenant,
+        )
+        .await?;
         let grants = access::list_grants(
             &mut *tx,
             tenant_id,
@@ -1711,6 +1961,7 @@ pub(crate) async fn list_grants(
             "grant.list",
             Action::MembershipRead,
             &authorized,
+            resource,
             json!({
                 "scope_id": query.scope_id,
                 "principal_id": query.principal_id,
@@ -1812,7 +2063,22 @@ async fn grant_at(
     claim: &Claim,
 ) -> Result<ScopeGrant> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let authorized = require(state, &mut tx, Action::MembershipGrant, tenant_id).await?;
+    // The named scope is the resource: granting at a project is an authority
+    // over that project, and a caller who holds the workspace above it has it
+    // by inheritance rather than by a tenant-wide role (ADR-0073 decision 3).
+    let scope = scopes::get(&mut *tx, tenant_id, scope_id)
+        .await?
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("scope {scope_id}"),
+        })?;
+    let (authorized, _) = require(
+        state,
+        &mut tx,
+        Action::MembershipGrant,
+        tenant_id,
+        Subject::Scope(&scope, None, AnchorSelection::none()),
+    )
+    .await?;
     // Ownership before the mutation: another tenant's scope is a 404 and never
     // a foreign-key conflict that half-describes what is there.
     if scopes::get(&mut *tx, tenant_id, scope_id).await?.is_none() {
@@ -1885,7 +2151,28 @@ pub(crate) async fn revoke_grant(
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::MembershipGrant, tenant_id).await?;
+        // The **grant itself** is the resource, which is what lets a pack say
+        // something about revoking a directory-managed one or an owner's
+        // (ADR-0073 decision 3). Read before the decision so the entity the PDP
+        // evaluates is the row that is about to go.
+        let existing = access::get_grant(&mut *tx, tenant_id, grant_id)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("grant {grant_id}"),
+            })?;
+        let scope = scopes::get(&mut *tx, tenant_id, existing.scope_id)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("grant {grant_id}"),
+            })?;
+        let (authorized, _) = require(
+            &state,
+            &mut tx,
+            Action::MembershipGrant,
+            tenant_id,
+            Subject::Grant(&existing, &scope),
+        )
+        .await?;
         let grant = access::revoke_grant(&mut tx, tenant_id, grant_id).await?;
         audit::record(
             &mut tx,

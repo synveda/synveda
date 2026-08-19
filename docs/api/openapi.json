@@ -1894,6 +1894,54 @@
           }
         }
       },
+      "AnchorCapabilities": {
+        "type": "object",
+        "description": "What the caller may do at **one anchor** — a real decision at a real scope,\nnever a shape derived from an edition (CPR-6, ADR-0073 decision 8).",
+        "required": [
+          "scope_id",
+          "kind",
+          "source",
+          "direct",
+          "roles",
+          "actions"
+        ],
+        "properties": {
+          "actions": {
+            "type": "object",
+            "description": "Every operand-free scope action, decided here, by its stable machine\nname. **A forecast, never a grant** — the whole of this module's first\ndoc section applies unchanged.",
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "direct": {
+            "type": "boolean",
+            "description": "Whether a grant is written at this very scope rather than inherited\nfrom an ancestor — the \"why\" a member list would otherwise have to be\nread to answer."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Its shape: `tenant`, `org_unit`, `workspace`, `project` or `principal`."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The role keys effective here."
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The scope."
+          },
+          "source": {
+            "type": "string",
+            "description": "Why it is applicable: `principal_scope`, `selected_project`,\n`selected_workspace`, `grant`, `org_unit` or `tenant_root`."
+          }
+        }
+      },
       "ApiErrorBody": {
         "type": "object",
         "description": "The taxonomy error body, declared for the OpenAPI document.\n\nA schema-only mirror of `synveda_types::Error`'s serialised form, which is\n`{\"kind\": \"...\", ...}` with a per-variant remainder. It exists because the\ncontract has to say what a 4xx body looks like and the taxonomy lives two\ncrates down, where `utoipa` deliberately does not reach — the OpenAPI\nderive is a property of the surface, and `synveda-types` is not one.",
@@ -2521,9 +2569,22 @@
           "onboarding",
           "workspaces",
           "projects",
-          "capabilities"
+          "capabilities",
+          "anchors"
         ],
         "properties": {
+          "anchors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnchorCapabilities"
+            },
+            "description": "Where this caller stands, most specific first, and what they may do at\neach — **from real policy decisions** (CPR-6, ADR-0073 decision 8).\n\nTheir own scope, the tenant root, and every scope a direct or group\ngrant reaches them at. Nothing here is derived from a plan, an edition\nor a shape: each entry is `Action::PROBED_AT_SCOPE` decided at that\nscope, under that scope's own effective profile, by the same PDP the\nact itself will pass through. A personal deployment and an enterprise\none differ in the rows this reads, never in the code that reads them."
+          },
+          "anchors_not_answered": {
+            "type": "integer",
+            "description": "How many anchors the response bound dropped. Named rather than hidden:\na truncated answer presented as a complete one is the one failure a\ncapability surface cannot afford (ADR-0058 decision 5).",
+            "minimum": 0
+          },
           "capabilities": {
             "$ref": "#/components/schemas/TenantCapabilities",
             "description": "What this caller may do on the tenant plane, asked of the PDP.\n\n**A forecast, never a grant** (ADR-0058 decision 2): nothing downstream\nreads this to decide anything, every act still takes its own decision\nat its own seam, and a client uses this to choose what to *offer*."
@@ -2932,6 +2993,7 @@
         "description": "What the caller may do on the **tenant** plane — `whoami`'s block, and\nsince CPR-4 `/v1/me`'s.\n\nCarries a `ToSchema` because `/v1/me` embeds it and that route is on the\nOpenAPI contract. The three fields are declared to the document by\n`value_type` rather than derived: `Role` and the `&'static str` map keys\nlive in `synveda-types`, where `utoipa` deliberately does not reach — a\ncontract is a property of the surface, and no crate below the gateway has\none.",
         "required": [
           "roles",
+          "role_keys",
           "actions",
           "role_assign"
         ],
@@ -2955,6 +3017,13 @@
             "propertyNames": {
               "type": "string"
             }
+          },
+          "role_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The caller's role keys at the **tenant root scope** — the grants that\nreach the whole boundary (CPR-6, ADR-0073 decision 5). Separate from\n`roles` rather than merged into it because the two are different closed\nvocabularies over different trees, and a client that displayed them as\none list would be inventing a translation nothing in this product has."
           },
           "roles": {
             "type": "array",

@@ -8,6 +8,7 @@
 //! bypass (CLAUDE.md, seed §2.2).
 
 use chrono::Utc;
+use synveda_policy::ScopeNode;
 use synveda_policy::{
     Action, AuthzContext, Pdp, Principal, REGULATED_STRICT, Resource, is_reserved,
 };
@@ -59,13 +60,15 @@ fn node(
 }
 
 /// An org → department → team chain for `tenant`, deepest scope last.
-fn chain(tenant: TenantId) -> Vec<HierarchyNode> {
+/// The chain the PDP takes: the old hierarchy's rows projected onto the
+/// shape vocabulary at the caller's edge (CPR-6, ADR-0073 decision 1).
+fn chain(tenant: TenantId) -> Vec<ScopeNode> {
     let org = ScopeId::new();
     let dept = ScopeId::new();
     let team = ScopeId::new();
     vec![
-        node(tenant, org, None, ScopeKind::Org, "acme", 0, "acme"),
-        node(
+        ScopeNode::from_hierarchy(&node(tenant, org, None, ScopeKind::Org, "acme", 0, "acme")),
+        ScopeNode::from_hierarchy(&node(
             tenant,
             dept,
             Some(org),
@@ -73,8 +76,8 @@ fn chain(tenant: TenantId) -> Vec<HierarchyNode> {
             "payments",
             1,
             "acme/payments",
-        ),
-        node(
+        )),
+        ScopeNode::from_hierarchy(&node(
             tenant,
             team,
             Some(dept),
@@ -82,15 +85,15 @@ fn chain(tenant: TenantId) -> Vec<HierarchyNode> {
             "core",
             2,
             "acme/payments/core",
-        ),
+        )),
     ]
 }
 
-fn team_of(chain: &[HierarchyNode]) -> ScopeId {
+fn team_of(chain: &[ScopeNode]) -> ScopeId {
     chain.last().expect("chain is non-empty").id
 }
 
-fn org_of(chain: &[HierarchyNode]) -> ScopeId {
+fn org_of(chain: &[ScopeNode]) -> ScopeId {
     chain.first().expect("chain is non-empty").id
 }
 
@@ -153,7 +156,7 @@ fn the_default_pack_is_regulated_strict_and_admits_bound_admins() {
             .expect("authorize");
         assert!(decision.allowed, "{action} must be allowed on own scope");
         assert_eq!(decision.pack_name, REGULATED_STRICT);
-        assert_eq!(decision.pack_version, 16);
+        assert_eq!(decision.pack_version, 17);
         assert!(
             !decision.determining.is_empty(),
             "an allow must name its permitting policies"
@@ -277,7 +280,7 @@ fn the_default_pack_denies_a_foreign_principal_everything() {
             assert_eq!(action, "hierarchy.read");
             assert_eq!(resource, format!("tenant {victim}"));
             assert!(
-                reason.contains(&format!("{REGULATED_STRICT}@16")),
+                reason.contains(&format!("{REGULATED_STRICT}@17")),
                 "denial must name pack@version, got: {reason}"
             );
         }

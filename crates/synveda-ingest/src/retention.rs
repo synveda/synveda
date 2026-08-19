@@ -40,7 +40,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::PgPool;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
-use synveda_policy::{AuthzContext, Pdp, Resource};
+use synveda_policy::{AuthzContext, Pdp, Resource, ScopeNode};
 use synveda_store::retention::{self, DueRecord};
 use synveda_store::{ScopeChainCache, hierarchy, policy_assignments, rls, tenants};
 use synveda_types::{
@@ -282,9 +282,13 @@ async fn effective_retention(
     let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
     let assignments = policy_assignments::for_scopes(&mut *conn, tenant_id, &chain_ids).await?;
     let default_pack = policy_assignments::default_pack(&mut *conn, tenant_id).await?;
+    let chain_nodes = ScopeNode::from_hierarchy_chain(&chain);
     let context = AuthzContext {
-        scopes: &chain,
+        scopes: &chain_nodes,
         principal_scopes: &[],
+        anchors: &[],
+        groups: &[],
+        resources: &[],
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
         role_bindings: &[],

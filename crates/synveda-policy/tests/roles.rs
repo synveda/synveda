@@ -22,6 +22,7 @@
 //! ```
 
 use chrono::Utc;
+use synveda_policy::ScopeNode;
 use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
 };
@@ -95,7 +96,11 @@ impl Fixture {
 
     /// The node and its ancestors — what a caller reads for the resource
     /// (and what the gateway reads for a principal's placement).
-    fn chain(&self, slug: &str) -> Vec<HierarchyNode> {
+    /// The chain the PDP takes: the old hierarchy's rows projected onto
+    /// the shape vocabulary at the caller's edge (CPR-6, ADR-0073
+    /// decision 1). The fixture still holds `HierarchyNode`s because the
+    /// hierarchy plane still exists; nothing below this line does.
+    fn chain(&self, slug: &str) -> Vec<ScopeNode> {
         let mut chain = vec![self.node(slug).clone()];
         let mut current = chain[0].parent_id;
         while let Some(id) = current {
@@ -107,7 +112,7 @@ impl Fixture {
             current = parent.parent_id;
             chain.push(parent.clone());
         }
-        chain
+        chain.iter().map(ScopeNode::from_hierarchy).collect()
     }
 
     fn assignment(&self, slug: &str, pack: &str) -> PolicyAssignment {
@@ -503,20 +508,20 @@ fn assert_matrix(pack: &str, version: i64) {
 /// regulated-strict: the golden matrix (the AC).
 #[test]
 fn matrix_regulated_strict() {
-    assert_matrix(REGULATED_STRICT, 16);
+    assert_matrix(REGULATED_STRICT, 17);
 }
 
 /// standard: identical role matrix — packs differ on composition
 /// membership, never on who administers (ADR-0015 decision 4).
 #[test]
 fn matrix_standard() {
-    assert_matrix(STANDARD, 16);
+    assert_matrix(STANDARD, 17);
 }
 
 /// open-collaboration: identical role matrix.
 #[test]
 fn matrix_open_collaboration() {
-    assert_matrix(OPEN_COLLABORATION, 16);
+    assert_matrix(OPEN_COLLABORATION, 17);
 }
 
 /// A tenant-wide binding is in force everywhere, the tenant plane

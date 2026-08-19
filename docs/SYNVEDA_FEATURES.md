@@ -1267,6 +1267,57 @@ CPR-5  Membership, groups, grants & invitations (L)
   adversarial RLS suite's completeness inventory; and the OpenAPI document grows to
   twenty-six operations with the console's types regenerated from it.
 
+CPR-6  Governed scope anchors: the PDP re-cut (L)
+  Filed 2026-08-19 by Prompt 6 of the CPR programme. CPR-3, CPR-4 and CPR-5 each built a piece
+  of the governed scope model and each recorded the same debt: **the decision point still
+  described the old hierarchy**. Twenty-six routes anchored every decision at
+  `Resource::Tenant` because a governed scope had no chain in the Cedar entity graph, and
+  ADR-0072 decision 3 went further — the role keys a grant carries were stored, resolved and
+  served, and *never reached Cedar at all*, because `context.roles` was the old hierarchy's
+  binding vocabulary. So the product had a complete membership model that decided nothing: a
+  workspace `owner` grant was a governed record of authority, and what actually let somebody
+  administer a workspace was a role binding on the tree this programme is deleting. This is
+  that cut. A **scope-anchor resolver** answers "where does this request stand" from six
+  inputs — the caller's own scope, the selected project, the selected workspace, the
+  organisation-unit relationships above them, the tenant root, and every scope a direct or
+  group grant names — and returns an **ordered set**, most specific first, rather than the one
+  fixed organisation chain the old model assumed. That assumption was wrong in two ways at
+  once: a caller can stand in several places none of which contains the others, and a
+  placement chain runs *upward* where a grant runs *downward*. The Cedar entity model is
+  rewritten around seven entities — `Tenant`, `Scope`, `Principal`, `Group`, `ScopeGrant`,
+  `Workspace`, `Project` — each of the four new ones parented to the scope it belongs to, so a
+  decision names the thing it is about: a read names the workspace, a project creation names
+  the workspace it would land in, and a revocation names **the grant**. `Principal.department`
+  is deleted with the rank vocabulary it read, and `Scope.kind` carries the five shapes
+  instead of the five rungs; a test asserts directly that nesting the same tree four levels
+  deeper changes no verdict. **Personal principal-scope privacy** becomes a base-layer forbid
+  no pack can drop — with a short, closed governance carve-out and, for the first time, a door:
+  a grant written *directly at* somebody's own scope reaches it, so "share my own notes with
+  you" is finally sayable. `GET /v1/me` forecasts what the caller may do **at each anchor**
+  from real PDP decisions, never from a plan or an edition. And the SCIM boundary projects
+  directory users and groups onto the same four tables a person working alone uses —
+  principals, groups, group members, grants — with no enterprise membership table anywhere.
+  The old hierarchy APIs stay until the prompt that deletes them, and they are no longer
+  *required* by PDP evaluation: they project their rows into the decision point's one scope
+  vocabulary at the caller's edge. ADR-0073.
+  AC: an anchor set is ordered most-specific-first, merges one scope into one anchor however
+  many ways it became applicable, and orders by structure rather than by rank — nesting the
+  same tree deeper changes no verdict, asserted over every probed action; a workspace grant is
+  in force at that workspace's projects with no row written there and reaches neither a
+  sibling workspace nor the tenant; a **project-only** grant reaches the project and refuses
+  every read, update and administration of the workspace above it; a grant naming a group
+  reaches its members, and membership of a group with no grant naming it confers nothing;
+  revoking a grant refuses the very next decision with nothing invalidated, and revoking is
+  itself a decision that names the grant; a profile assigned at an organisation unit governs
+  everything beneath it however deep, and a grant written there reaches the same subtree;
+  **nobody reaches into somebody else's own scope** — not a tenant-root owner, under no pack,
+  at no tier, for content or membership — while their own scope is theirs and a grant written
+  directly at it reaches it; a foreign tenant's chain, anchor and entity grant nothing, and a
+  chain spliced across two tenants launders nothing; the capability block for an anchor is the
+  set of decisions it forecasts, moves with the grant and the profile and with nothing else,
+  and forecasts nothing at all for somebody holding nothing; and `/v1/me` mints the caller's
+  own scope, serves its anchors and names how many the bound dropped.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1360,7 +1411,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

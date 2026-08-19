@@ -5,18 +5,28 @@
 //! assignment-resolution path production uses — never a PDP bypass
 //! (CLAUDE.md, seed §2.2).
 //!
-//! The fixture mirrors the AC: two departments, a principal in a team of
-//! one, a sibling team that moves between them.
+//! The fixture mirrors the AC: two org units, a principal in a team of one,
+//! and the team that moves between them.
 //!
 //! ```text
 //! org
-//! ├── eng (department)
-//! │   ├── team-a ── alice-user   ← alice's placement
-//! │   └── team-b                 ← moves to sales and back
-//! └── sales (department)
+//! ├── eng
+//! │   ├── team-a ── alice-user   ← alice's own scope
+//! │   └── team-b
+//! └── sales
 //! ```
+//!
+//! **What the decision hangs on changed with CPR-6** (ADR-0073). These tests
+//! used to move `team-b` and watch `standard`'s *department* rule stop
+//! reaching it — a rule that read `principal.department`, the nearest
+//! department-kind ancestor of a placement. That attribute is gone with the
+//! rank vocabulary it belonged to, so the property is re-expressed on the one
+//! chain rule that survives every model: the **membership floor**,
+//! `principal in resource`. Moving `team-a` takes `eng` off alice's own chain,
+//! and the read must flip on the very next decision.
 
 use chrono::Utc;
+use synveda_policy::ScopeNode;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD};
 use synveda_types::{HierarchyNode, PolicyAssignment, ScopeId, ScopeKind, Sensitivity, TenantId};
 
@@ -47,7 +57,11 @@ impl Fixture {
 
     /// The node and its ancestors — what the gateway resolves from the
     /// scope-chain cache for a resource or a placement.
-    fn chain(&self, slug: &str) -> Vec<HierarchyNode> {
+    /// The chain the PDP takes: the old hierarchy's rows projected onto
+    /// the shape vocabulary at the caller's edge (CPR-6, ADR-0073
+    /// decision 1). The fixture still holds `HierarchyNode`s because the
+    /// hierarchy plane still exists; nothing below this line does.
+    fn chain(&self, slug: &str) -> Vec<ScopeNode> {
         let mut chain = vec![self.node(slug).clone()];
         let mut current = chain[0].parent_id;
         while let Some(id) = current {
@@ -59,7 +73,7 @@ impl Fixture {
             current = parent.parent_id;
             chain.push(parent.clone());
         }
-        chain
+        chain.iter().map(ScopeNode::from_hierarchy).collect()
     }
 }
 
@@ -120,11 +134,11 @@ fn alice_reads(pdp: &Pdp, fx: &Fixture, target: &str, assignments: &[PolicyAssig
     .allowed
 }
 
-/// The AC's decision flip at the facade: move team-b between
-/// departments and the very next decision — served through the entity
-/// store — reflects the new chain; move it back and the read returns.
-/// If the store answered by chain head instead of chain shape, the warm
-/// pre-move fragment would keep team-b readable after the move.
+/// The AC's decision flip at the facade: move alice's team between org units
+/// and the very next decision — served through the entity store — reflects
+/// the new chain; move it back and the read returns. If the store answered by
+/// chain head instead of chain shape, the warm pre-move fragment would keep
+/// `eng` readable after the move.
 #[test]
 fn a_moved_team_is_never_decided_from_stale_fragments() {
     let pdp = Pdp::new().expect("build pdp");
@@ -136,24 +150,23 @@ fn a_moved_team_is_never_decided_from_stale_fragments() {
         updated_at: Utc::now(),
     }];
 
-    // Warm the store: repeat decisions serve team-b's fragment from
-    // memory (`standard`'s department rule: team-b is in alice's
-    // department).
-    assert!(alice_reads(&pdp, &fx, "team-b", &assignments));
-    assert!(alice_reads(&pdp, &fx, "team-b", &assignments));
+    // Warm the store: repeat decisions serve both fragments from memory. `eng`
+    // is on alice's own chain, so the membership floor admits it.
+    assert!(alice_reads(&pdp, &fx, "eng", &assignments));
+    assert!(alice_reads(&pdp, &fx, "eng", &assignments));
 
-    // team-b moves to sales: alice's department no longer contains it.
-    fx.move_node("team-b", "sales");
+    // Alice's team moves to sales: `eng` is no longer on her chain.
+    fx.move_node("team-a", "sales");
     assert!(
-        !alice_reads(&pdp, &fx, "team-b", &assignments),
+        !alice_reads(&pdp, &fx, "eng", &assignments),
         "the warm fragment must not survive the move"
     );
 
     // And back: the fragment rebuilds again, no flush in between.
-    fx.move_node("team-b", "eng");
+    fx.move_node("team-a", "eng");
     assert!(
-        alice_reads(&pdp, &fx, "team-b", &assignments),
-        "moving back must restore the department read"
+        alice_reads(&pdp, &fx, "eng", &assignments),
+        "moving back must restore the own-chain read"
     );
 }
 
@@ -178,11 +191,11 @@ fn flush_changes_no_decision() {
         updated_at: Utc::now(),
     }];
 
-    assert!(alice_reads(&pdp, &fx, "team-b", &assignments));
-    assert!(alice_reads(&pdp, &other, "team-b", &other_assignments));
+    assert!(alice_reads(&pdp, &fx, "eng", &assignments));
+    assert!(alice_reads(&pdp, &other, "eng", &other_assignments));
 
     pdp.flush_entities(fx.tenant);
 
-    assert!(alice_reads(&pdp, &fx, "team-b", &assignments));
-    assert!(alice_reads(&pdp, &other, "team-b", &other_assignments));
+    assert!(alice_reads(&pdp, &fx, "eng", &assignments));
+    assert!(alice_reads(&pdp, &other, "eng", &other_assignments));
 }

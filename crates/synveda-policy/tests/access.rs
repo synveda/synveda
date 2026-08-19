@@ -24,6 +24,7 @@
 //!    quarantined principal does nothing, invitation or no invitation.
 
 use chrono::Utc;
+use synveda_policy::ScopeNode;
 use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
 };
@@ -111,7 +112,7 @@ fn decide(
         .iter()
         .map(|role| binding(fx, subject, *role))
         .collect();
-    let chain = [fx.org.clone()];
+    let chain = [ScopeNode::from_hierarchy(&fx.org)];
     pdp.authorize(
         &principal(fx, subject, quarantined),
         action,
@@ -306,7 +307,7 @@ fn a_service_identity_cannot_reach_the_access_plane() {
         // subtree, so the base layer's forbid covers everything here.
         token_scope: Some(fx.org.id),
     };
-    let chain = [fx.org.clone()];
+    let chain = [ScopeNode::from_hierarchy(&fx.org)];
     for pack in [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION] {
         for action in ACTIONS {
             let decision = pdp

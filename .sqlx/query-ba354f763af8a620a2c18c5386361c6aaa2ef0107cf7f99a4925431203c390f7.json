@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        update scopes\n           set status = $3, updated_at = now()\n         where id = $1 and tenant_id = $2\n        returning id, tenant_id, kind, parent_scope_id, slug, display_name,\n                  status, attributes, created_by, created_at, updated_at\n        ",
+  "query": "\n        select id, tenant_id, kind, parent_scope_id, slug, display_name,\n               status, attributes, principal_id, created_by, created_at, updated_at\n        from scopes\n        where id = $1 and tenant_id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -45,16 +45,21 @@
       },
       {
         "ordinal": 8,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -62,8 +67,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -76,9 +80,10 @@
       false,
       false,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "93899650a34c6575e4d0801ef87ee031fe344fb7b63aa247344ef684d05db260"
+  "hash": "ba354f763af8a620a2c18c5386361c6aaa2ef0107cf7f99a4925431203c390f7"
 }

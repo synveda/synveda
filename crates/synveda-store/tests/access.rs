@@ -154,6 +154,7 @@ async fn seed_principal_scope(pool: &PgPool, tree: &Tree, slug: &str) -> ScopeId
             slug: slug.to_owned(),
             display_name: slug.to_owned(),
             attributes: serde_json::json!({}),
+            principal_id: Some(format!("subject-{slug}")),
             created_by: None,
         },
     )

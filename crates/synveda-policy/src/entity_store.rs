@@ -22,35 +22,25 @@ use std::collections::HashMap;
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use cedar_policy::Entity;
-use synveda_types::{HierarchyNode, Result, ScopeId, ScopeKind, TenantId};
+use synveda_types::{Result, ScopeId, TenantId};
+
+use crate::request::ScopeNode;
 
 use crate::{CEDAR_ENTITY_FLUSHES_TOTAL, CEDAR_ENTITY_FRAGMENTS_TOTAL};
 
 /// The fields of a chain that Cedar entities are built from — a fragment
 /// serves only a chain whose shape matches, in order.
 ///
-/// `sealed` joined the row with AUTH-4 (ADR-0059 decision 9) because it
-/// joined the entity: a fragment built before somebody's last day must not
-/// answer for the chain that carries their seal. The gateway also flushes
-/// this store when an identity departs, so the shape check is the second
-/// of two independent reasons a stale seal cannot be served — which is the
-/// right number for the one attribute here whose staleness would be a
-/// disclosure rather than a delay.
-type ShapeRow = (ScopeId, Option<ScopeId>, TenantId, ScopeKind, bool);
+/// Since CPR-6 that is exactly [`ScopeNode`], which is the point of the type:
+/// it holds the entity-relevant fields and nothing else, so "the shape a
+/// fragment was built from" and "what the PDP puts in an entity" cannot drift
+/// apart. `sealed` is in it for AUTH-4's reason (ADR-0059 decision 9) — a
+/// fragment built before somebody's last day must not answer for the chain
+/// that carries their seal.
+type ShapeRow = ScopeNode;
 
-fn shape_of(chain: &[HierarchyNode]) -> Vec<ShapeRow> {
-    chain
-        .iter()
-        .map(|node| {
-            (
-                node.id,
-                node.parent_id,
-                node.tenant_id,
-                node.kind,
-                node.sealed,
-            )
-        })
-        .collect()
+fn shape_of(chain: &[ScopeNode]) -> Vec<ShapeRow> {
+    chain.to_vec()
 }
 
 /// One chain's built entities: a `Scope` entity per node plus the
@@ -84,7 +74,7 @@ impl EntityStore {
     /// have reshaped.
     pub(crate) fn resolve(
         &self,
-        chain: &[HierarchyNode],
+        chain: &[ScopeNode],
         build: impl FnOnce() -> Result<Vec<Entity>>,
     ) -> Result<Arc<Fragment>> {
         let head = &chain[0];
@@ -138,27 +128,17 @@ fn write<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
 mod tests {
     use std::cell::Cell;
 
-    use chrono::Utc;
+    use synveda_types::scope::ScopeKind;
 
     use super::*;
 
-    fn node(
-        tenant_id: TenantId,
-        parent_id: Option<ScopeId>,
-        kind: ScopeKind,
-        slug: &str,
-    ) -> HierarchyNode {
-        HierarchyNode {
+    fn node(tenant_id: TenantId, parent_id: Option<ScopeId>, kind: ScopeKind) -> ScopeNode {
+        ScopeNode {
             id: ScopeId::new(),
             tenant_id,
             parent_id,
             kind,
-            slug: slug.to_owned(),
-            name: slug.to_owned(),
-            depth: 0,
-            path: slug.to_owned(),
             sealed: false,
-            created_at: Utc::now(),
         }
     }
 
@@ -175,9 +155,9 @@ mod tests {
     fn matching_shape_is_served_without_rebuilding() {
         let store = EntityStore::default();
         let tenant = TenantId::new();
-        let org = node(tenant, None, ScopeKind::Org, "acme");
-        let team = node(tenant, Some(org.id), ScopeKind::Team, "payments");
-        let chain = vec![team, org];
+        let root = node(tenant, None, ScopeKind::Tenant);
+        let team = node(tenant, Some(root.id), ScopeKind::Workspace);
+        let chain = vec![team, root];
         let built = Cell::new(0);
 
         store.resolve(&chain, counted(&built)).expect("first build");
@@ -191,17 +171,17 @@ mod tests {
     fn a_moved_chain_rebuilds_its_fragment() {
         let store = EntityStore::default();
         let tenant = TenantId::new();
-        let org = node(tenant, None, ScopeKind::Org, "acme");
-        let dept_x = node(tenant, Some(org.id), ScopeKind::Department, "x");
-        let dept_y = node(tenant, Some(org.id), ScopeKind::Department, "y");
-        let mut team = node(tenant, Some(dept_x.id), ScopeKind::Team, "payments");
+        let root = node(tenant, None, ScopeKind::Tenant);
+        let unit_x = node(tenant, Some(root.id), ScopeKind::OrgUnit);
+        let unit_y = node(tenant, Some(root.id), ScopeKind::OrgUnit);
+        let mut team = node(tenant, Some(unit_x.id), ScopeKind::Workspace);
         let built = Cell::new(0);
 
-        let before = vec![team.clone(), dept_x, org.clone()];
+        let before = vec![team, unit_x, root];
         store.resolve(&before, counted(&built)).expect("build");
 
-        team.parent_id = Some(dept_y.id);
-        let after = vec![team, dept_y, org];
+        team.parent_id = Some(unit_y.id);
+        let after = vec![team, unit_y, root];
         store.resolve(&after, counted(&built)).expect("rebuild");
         assert_eq!(built.get(), 2, "a reshaped chain must rebuild");
 
@@ -212,33 +192,27 @@ mod tests {
         assert_eq!(built.get(), 4, "stale reinserts must not stick");
     }
 
-    /// Renames flush the chain cache (ADR-0016 invalidates uniformly)
-    /// but reach no Cedar entity: the re-read chain differs only in
-    /// display fields, so the fragment stays valid (ADR-0017 decision 3).
+    /// A fragment holds no display field at all, so the question CNSL-era
+    /// code asked here — "does a rename invalidate a fragment" — is now
+    /// unaskable rather than answered: [`ScopeNode`] has no name, no slug, no
+    /// path and no depth, and a rename produces a byte-identical shape.
     #[test]
-    fn a_rename_keeps_the_fragment() {
-        let store = EntityStore::default();
+    fn a_fragment_shape_carries_no_display_field() {
         let tenant = TenantId::new();
-        let org = node(tenant, None, ScopeKind::Org, "acme");
-        let mut team = node(tenant, Some(org.id), ScopeKind::Team, "payments");
-        let built = Cell::new(0);
-
-        store
-            .resolve(&[team.clone(), org.clone()], counted(&built))
-            .expect("build");
-        team.name = "Payments Platform".to_owned();
-        store
-            .resolve(&[team, org], counted(&built))
-            .expect("renamed");
-        assert_eq!(built.get(), 1, "display-only changes must not rebuild");
+        let scope = node(tenant, None, ScopeKind::Tenant);
+        assert_eq!(
+            shape_of(&[scope]),
+            shape_of(&[scope]),
+            "the shape is the node, and the node is only structure"
+        );
     }
 
     #[test]
     fn flush_drops_only_its_tenant() {
         let store = EntityStore::default();
         let (this, other) = (TenantId::new(), TenantId::new());
-        let mine = node(this, None, ScopeKind::Org, "mine");
-        let theirs = node(other, None, ScopeKind::Org, "theirs");
+        let mine = node(this, None, ScopeKind::Tenant);
+        let theirs = node(other, None, ScopeKind::Tenant);
         let built = Cell::new(0);
         store
             .resolve(std::slice::from_ref(&mine), counted(&built))

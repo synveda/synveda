@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        insert into scopes\n            (id, tenant_id, kind, parent_scope_id, parent_kind, slug, display_name,\n             status, attributes, created_by)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n        returning id, tenant_id, kind, parent_scope_id, slug, display_name,\n                  status, attributes, created_by, created_at, updated_at\n        ",
+  "query": "\n        select s.id, s.tenant_id, s.kind, s.parent_scope_id, s.slug, s.display_name,\n               s.status, s.attributes, s.principal_id, s.created_by, s.created_at, s.updated_at\n        from scope_closure c\n        join scopes s on s.id = c.ancestor_id and s.tenant_id = c.tenant_id\n        where c.descendant_id = $1 and c.tenant_id = $2 and c.distance > 0\n        order by c.distance\n        ",
   "describe": {
     "columns": [
       {
@@ -45,16 +45,21 @@
       },
       {
         "ordinal": 8,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -62,14 +67,6 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        "Text",
-        "Uuid",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Jsonb",
         "Uuid"
       ]
     },
@@ -83,9 +80,10 @@
       false,
       false,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "c408352f5a1932fca319897184b8d686d2ef9bce5e9a5c8afea7ca4cac7c7502"
+  "hash": "9631bbfe5c9b5b41b98d77c6ecfbd561499072590cfbf6880e3127a3c419d8e1"
 }

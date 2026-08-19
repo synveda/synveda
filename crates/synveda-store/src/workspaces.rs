@@ -204,6 +204,7 @@ pub async fn create(conn: &mut PgConnection, new: &NewWorkspace) -> Result<Works
             slug: new.slug.clone(),
             display_name: new.display_name.clone(),
             attributes: serde_json::json!({}),
+            principal_id: None,
             created_by: new.created_by,
         },
     )

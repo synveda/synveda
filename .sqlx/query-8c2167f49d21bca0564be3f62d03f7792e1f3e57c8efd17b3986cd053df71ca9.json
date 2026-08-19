@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        update scopes\n           set display_name = $3, updated_at = now()\n         where id = $1 and tenant_id = $2\n        returning id, tenant_id, kind, parent_scope_id, slug, display_name,\n                  status, attributes, created_by, created_at, updated_at\n        ",
+  "query": "\n        select s.id, s.tenant_id, s.kind, s.parent_scope_id, s.slug, s.display_name,\n               s.status, s.attributes, s.principal_id, s.created_by, s.created_at, s.updated_at\n        from scope_closure c\n        join scopes s on s.id = c.descendant_id and s.tenant_id = c.tenant_id\n        where c.ancestor_id = $1 and c.tenant_id = $2 and c.distance > 0\n        order by c.distance, s.slug\n        ",
   "describe": {
     "columns": [
       {
@@ -45,16 +45,21 @@
       },
       {
         "ordinal": 8,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -62,8 +67,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -76,9 +80,10 @@
       false,
       false,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "8afda66eda8480eeda001c5d5d6cc3a99a36787a41fce598fc562a7133b38ef7"
+  "hash": "8c2167f49d21bca0564be3f62d03f7792e1f3e57c8efd17b3986cd053df71ca9"
 }

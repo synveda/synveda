@@ -104,6 +104,9 @@ fn new_scope(
         slug: slug.to_owned(),
         display_name: format!("{slug} ({kind})"),
         attributes: serde_json::json!({}),
+        // A principal scope names the subject it belongs to (CPR-6,
+        // ADR-0073 decision 2); nothing else may.
+        principal_id: (kind == ScopeKind::Principal).then(|| format!("subject-{slug}")),
         created_by: Some(IdentityId::new()),
     }
 }

@@ -230,9 +230,19 @@ async fn a_person_goes_from_nothing_to_a_project_with_a_repository() {
     assert_eq!(status, StatusCode::OK, "{me}");
     assert_eq!(me["onboarding"]["state"], "needs_workspace");
     assert_eq!(me["onboarding"]["workspace_count"], 0);
+    // The tenant root exists after this call and **nobody was asked for it**:
+    // `/v1/me` mints the caller's own `principal` scope (CPR-6, ADR-0073
+    // decision 2), which needs a root, and the root is derived from the
+    // `tenants` row. Until CPR-6 the first workspace minted it and this
+    // assertion read `is_null()`; what the claim was ever about is that a
+    // person is not asked to declare an organisation, and that is unchanged.
     assert!(
-        me["onboarding"]["tenant_scope_id"].is_null(),
-        "a fresh tenant has no scope tree: nobody was asked to declare one"
+        !me["onboarding"]["tenant_scope_id"].is_null(),
+        "the product mints the root; nobody is asked to declare one: {me}"
+    );
+    assert_eq!(
+        me["anchors"][0]["source"], "principal_scope",
+        "and the caller's own scope is where they stand: {me}"
     );
     assert_eq!(me["principal"]["subject"], ADMIN);
     assert_eq!(

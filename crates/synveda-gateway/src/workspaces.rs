@@ -3,22 +3,6 @@
 //! every `/v1` route, behind the PDP like every governed one, and chaining an
 //! audit event for every mutation.
 //!
-//! # Where these decisions are taken, and why not where they belong
-//!
-//! Every decision here names `Resource::Tenant`, and that is a **stated
-//! limitation rather than a design** (ADR-0071 decision 3). A workspace owns a
-//! generic scope, and a generic scope is exactly what the Cedar entity model
-//! does not describe yet: `Principal in [Tenant, Scope]` and `Scope in
-//! [Tenant, Scope]` are materialised from `hierarchy_nodes` and its closure,
-//! so a `Resource::Scope(workspace.scope_id)` would materialise an entity with
-//! no chain and deny — failing closed, but for the wrong reason and at every
-//! caller. Deciding at the tenant is coarser than the target model and it is a
-//! real decision on the real path: tenant-wide role bindings are what the
-//! shipped packs resolve here, and Prompt 5 of the context-platform programme
-//! re-anchors these six actions at the subtype's own scope. The schema already
-//! admits `[Tenant, Scope]` for all six, so that is a route change and not a
-//! contract change.
-//!
 //! Nothing is synchronised to make this work: no row of `hierarchy_nodes`
 //! becomes a scope, and no scope is mirrored into the hierarchy (ADR-0068
 //! decision 3).
@@ -30,6 +14,22 @@
 //! makes this plane safe to drive from an agent that retries: a duplicate
 //! create is answered with the original resource, and a concurrent update is
 //! refused rather than silently taking the last writer.
+//!
+//! # Where the decisions are anchored
+//!
+//! Since CPR-6 every decision here names the thing it is about (ADR-0073
+//! decision 3): a read or an update names the workspace or the project, a
+//! project creation names the workspace it would land in, and the two
+//! tenant-plane calls — listing workspaces and creating one — name the tenant
+//! **root scope**, or the tenant itself on a deployment that has not minted a
+//! root yet. CPR-4 anchored all fourteen at the tenant and said so as a
+//! stated debt; this is that debt paid.
+//!
+//! The consequence a reader should expect: the ownership check now runs
+//! *before* the decision on every per-object route, because deciding about a
+//! workspace requires having fetched it. That is the order ADR-0012 decision 7
+//! sets and the hierarchy plane has always used — a foreign object is a 404,
+//! never a policy-denial oracle.
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -40,7 +40,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
-use synveda_policy::{Action, Resource};
+use synveda_policy::{Action, Resource, ResourceEntity};
+use synveda_store::anchors::AnchorSelection;
 use synveda_store::{projects, repositories, rls, workspaces};
 use synveda_types::repository::{ProjectRepository, RepositoryProvider};
 use synveda_types::workspace::{LifecycleStatus, Project, Workspace};
@@ -426,16 +427,70 @@ pub(crate) fn subject() -> Result<String> {
         })
 }
 
-/// Takes one decision at the tenant and chains nothing — the caller decides
+/// What a decision on this plane is **about** (CPR-6, ADR-0073 decision 3).
+///
+/// Until CPR-6 every one of them named the tenant, and ADR-0071 decision 3
+/// said why: the Cedar entity model still described the old hierarchy, so a
+/// governed scope had no chain to decide against and "administer workspaces"
+/// was the only sentence a pack could write. It can now say *which* one.
+enum Subject<'a> {
+    /// The tenant plane — listing workspaces, creating one. Decided at the
+    /// tenant **root scope** when the tenant has one, because that is where a
+    /// tenant-wide grant is written, and at the tenant itself on a deployment
+    /// where nobody has created anything yet.
+    Tenant,
+    /// One workspace.
+    Workspace(&'a Workspace),
+    /// One project.
+    Project(&'a Project),
+}
+
+/// Takes one decision about `subject` and chains nothing — the caller decides
 /// whether the act that follows carries a semantic event or the decision
 /// stands alone.
+///
+/// Returns the resource it decided against as well as the verdict, so the
+/// audit event names the same thing the PDP did rather than the tenant every
+/// event on this plane used to name.
 async fn require(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     action: Action,
     tenant_id: TenantId,
-) -> Result<Authorized> {
-    authz::require(state, tx, action, Resource::Tenant(tenant_id), None).await
+    subject: Subject<'_>,
+) -> Result<(Authorized, Resource)> {
+    let (anchor, selection, resources, resource) = match subject {
+        Subject::Tenant => {
+            let root = synveda_store::scopes::tenant_root(&mut *tx, tenant_id).await?;
+            let resource = match &root {
+                Some(scope) => Resource::Scope(scope.id),
+                None => Resource::Tenant(tenant_id),
+            };
+            (root, AnchorSelection::none(), Vec::new(), resource)
+        }
+        Subject::Workspace(workspace) => (
+            synveda_store::scopes::get(&mut *tx, tenant_id, workspace.scope_id).await?,
+            AnchorSelection::workspace(workspace.id),
+            vec![ResourceEntity::Workspace {
+                id: workspace.id,
+                scope_id: workspace.scope_id,
+            }],
+            Resource::Workspace(workspace.id),
+        ),
+        Subject::Project(project) => (
+            synveda_store::scopes::get(&mut *tx, tenant_id, project.scope_id).await?,
+            AnchorSelection::project(project.id),
+            vec![ResourceEntity::Project {
+                id: project.id,
+                scope_id: project.scope_id,
+                workspace_id: project.workspace_id,
+            }],
+            Resource::Project(project.id),
+        ),
+    };
+    let input = authz::gather_governed(state, tx, anchor.as_ref(), selection, resources).await?;
+    let authorized = authz::decide(state, &input, action, resource, None)?;
+    Ok((authorized, resource))
 }
 
 /// The allowed-read decision event (ADR-0019 decision 4): a read has no
@@ -447,13 +502,14 @@ async fn read_event(
     op: &'static str,
     action: Action,
     authorized: &Authorized,
+    resource: Resource,
     detail: serde_json::Value,
 ) -> Result<()> {
     audit::record(
         tx,
         tenant_id,
         AuditAction::AuthzDecision,
-        Resource::Tenant(tenant_id).to_string(),
+        resource.to_string(),
         Outcome::Allow,
         json!({
             "op": op,
@@ -545,7 +601,14 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::WorkspaceRead, tenant_id).await?;
+        let (authorized, resource) = require(
+            &state,
+            &mut tx,
+            Action::WorkspaceRead,
+            tenant_id,
+            Subject::Tenant,
+        )
+        .await?;
         let workspaces = workspaces::list(&mut *tx, tenant_id).await?;
         read_event(
             &mut tx,
@@ -553,6 +616,7 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
             "workspace.list",
             Action::WorkspaceRead,
             &authorized,
+            resource,
             json!({"count": workspaces.len()}),
         )
         .await?;
@@ -640,7 +704,14 @@ async fn create_workspace(
     claim: &Claim,
 ) -> Result<Workspace> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let authorized = require(state, &mut tx, Action::WorkspaceCreate, tenant_id).await?;
+    let (authorized, _) = require(
+        state,
+        &mut tx,
+        Action::WorkspaceCreate,
+        tenant_id,
+        Subject::Tenant,
+    )
+    .await?;
     let created_by = actor_identity(&mut tx, tenant_id).await?;
     let workspace = workspaces::create(
         &mut tx,
@@ -708,7 +779,14 @@ async fn replay_workspace(
     claim: &Claim,
 ) -> Result<Workspace> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let authorized = require(state, &mut tx, Action::WorkspaceCreate, tenant_id).await?;
+    let (authorized, resource) = require(
+        state,
+        &mut tx,
+        Action::WorkspaceCreate,
+        tenant_id,
+        Subject::Tenant,
+    )
+    .await?;
     let workspace = workspaces::get(&mut *tx, tenant_id, id)
         .await?
         .ok_or_else(|| crate::idempotency::vanished(claim, id.as_uuid()))?;
@@ -718,6 +796,7 @@ async fn replay_workspace(
         "workspace.create.replay",
         Action::WorkspaceCreate,
         &authorized,
+        resource,
         json!({"workspace_id": id, "idempotency_key": claim.key}),
     )
     .await?;
@@ -746,16 +825,27 @@ pub(crate) async fn get(
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::WorkspaceRead, tenant_id).await?;
+        // Ownership first, then the decision **about this workspace**: a
+        // foreign one is a 404 rather than a denial oracle (ADR-0012
+        // decision 7), and the decision that follows names the thing itself.
         let workspace = workspaces::get(&mut *tx, tenant_id, workspace_id)
             .await?
             .ok_or_else(|| workspace_not_found(workspace_id))?;
+        let (authorized, resource) = require(
+            &state,
+            &mut tx,
+            Action::WorkspaceRead,
+            tenant_id,
+            Subject::Workspace(&workspace),
+        )
+        .await?;
         read_event(
             &mut tx,
             tenant_id,
             "workspace.get",
             Action::WorkspaceRead,
             &authorized,
+            resource,
             json!({"workspace_id": workspace_id}),
         )
         .await?;
@@ -792,12 +882,19 @@ pub(crate) async fn update(
         let body = body(payload)?;
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::WorkspaceUpdate, tenant_id).await?;
-        // Ownership before the mutation, as everywhere: a foreign workspace is
-        // a 404 and never a revision oracle.
+        // Ownership before the decision and before the mutation, as
+        // everywhere: a foreign workspace is a 404 and never a revision oracle.
         let before = workspaces::get(&mut *tx, tenant_id, workspace_id)
             .await?
             .ok_or_else(|| workspace_not_found(workspace_id))?;
+        let (authorized, _) = require(
+            &state,
+            &mut tx,
+            Action::WorkspaceUpdate,
+            tenant_id,
+            Subject::Workspace(&before),
+        )
+        .await?;
         let after = workspaces::update(
             &mut tx,
             tenant_id,
@@ -854,12 +951,19 @@ pub(crate) async fn list_projects(
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::ProjectRead, tenant_id).await?;
         // 404 for an unknown workspace: an empty list must mean "no projects",
         // never "no such workspace".
-        workspaces::get(&mut *tx, tenant_id, workspace_id)
+        let workspace = workspaces::get(&mut *tx, tenant_id, workspace_id)
             .await?
             .ok_or_else(|| workspace_not_found(workspace_id))?;
+        let (authorized, resource) = require(
+            &state,
+            &mut tx,
+            Action::ProjectRead,
+            tenant_id,
+            Subject::Workspace(&workspace),
+        )
+        .await?;
         let projects = projects::in_workspace(&mut *tx, tenant_id, workspace_id).await?;
         read_event(
             &mut tx,
@@ -867,6 +971,7 @@ pub(crate) async fn list_projects(
             "project.list",
             Action::ProjectRead,
             &authorized,
+            resource,
             json!({"workspace_id": workspace_id, "count": projects.len()}),
         )
         .await?;
@@ -960,10 +1065,20 @@ async fn make_project(
     claim: &Claim,
 ) -> Result<Project> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let authorized = require(state, &mut tx, Action::ProjectCreate, tenant_id).await?;
-    workspaces::get(&mut *tx, tenant_id, workspace_id)
+    // The parent workspace is the resource: creating a project inside one is
+    // an authority over *that* workspace, which is exactly what a workspace
+    // `owner` grant now confers without anybody minting a tenant-wide role.
+    let workspace = workspaces::get(&mut *tx, tenant_id, workspace_id)
         .await?
         .ok_or_else(|| workspace_not_found(workspace_id))?;
+    let (authorized, _) = require(
+        state,
+        &mut tx,
+        Action::ProjectCreate,
+        tenant_id,
+        Subject::Workspace(&workspace),
+    )
+    .await?;
     let created_by = actor_identity(&mut tx, tenant_id).await?;
     let project = projects::create(
         &mut tx,
@@ -1026,16 +1141,27 @@ async fn replay_project(
     claim: &Claim,
 ) -> Result<Project> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let authorized = require(state, &mut tx, Action::ProjectCreate, tenant_id).await?;
     let project = projects::get(&mut *tx, tenant_id, id)
         .await?
         .ok_or_else(|| crate::idempotency::vanished(claim, id.as_uuid()))?;
+    let workspace = workspaces::get(&mut *tx, tenant_id, project.workspace_id)
+        .await?
+        .ok_or_else(|| workspace_not_found(project.workspace_id))?;
+    let (authorized, resource) = require(
+        state,
+        &mut tx,
+        Action::ProjectCreate,
+        tenant_id,
+        Subject::Workspace(&workspace),
+    )
+    .await?;
     read_event(
         &mut tx,
         tenant_id,
         "project.create.replay",
         Action::ProjectCreate,
         &authorized,
+        resource,
         json!({"project_id": id, "idempotency_key": claim.key}),
     )
     .await?;
@@ -1064,16 +1190,24 @@ pub(crate) async fn get_project(
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::ProjectRead, tenant_id).await?;
         let project = projects::get(&mut *tx, tenant_id, project_id)
             .await?
             .ok_or_else(|| project_not_found(project_id))?;
+        let (authorized, resource) = require(
+            &state,
+            &mut tx,
+            Action::ProjectRead,
+            tenant_id,
+            Subject::Project(&project),
+        )
+        .await?;
         read_event(
             &mut tx,
             tenant_id,
             "project.get",
             Action::ProjectRead,
             &authorized,
+            resource,
             json!({"project_id": project_id}),
         )
         .await?;
@@ -1110,10 +1244,17 @@ pub(crate) async fn update_project(
         let body = body(payload)?;
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::ProjectUpdate, tenant_id).await?;
         let before = projects::get(&mut *tx, tenant_id, project_id)
             .await?
             .ok_or_else(|| project_not_found(project_id))?;
+        let (authorized, _) = require(
+            &state,
+            &mut tx,
+            Action::ProjectUpdate,
+            tenant_id,
+            Subject::Project(&before),
+        )
+        .await?;
         let after = projects::update(
             &mut tx,
             tenant_id,
@@ -1170,10 +1311,17 @@ pub(crate) async fn list_repositories(
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::ProjectRead, tenant_id).await?;
-        projects::get(&mut *tx, tenant_id, project_id)
+        let project = projects::get(&mut *tx, tenant_id, project_id)
             .await?
             .ok_or_else(|| project_not_found(project_id))?;
+        let (authorized, resource) = require(
+            &state,
+            &mut tx,
+            Action::ProjectRead,
+            tenant_id,
+            Subject::Project(&project),
+        )
+        .await?;
         let repositories = repositories::for_project(&mut *tx, tenant_id, project_id).await?;
         read_event(
             &mut tx,
@@ -1181,6 +1329,7 @@ pub(crate) async fn list_repositories(
             "repository.list",
             Action::ProjectRead,
             &authorized,
+            resource,
             json!({"project_id": project_id, "count": repositories.len()}),
         )
         .await?;
@@ -1284,10 +1433,17 @@ async fn attach(
     claim: &Claim,
 ) -> Result<ProjectRepository> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let authorized = require(state, &mut tx, Action::ProjectUpdate, tenant_id).await?;
-    projects::get(&mut *tx, tenant_id, project_id)
+    let project = projects::get(&mut *tx, tenant_id, project_id)
         .await?
         .ok_or_else(|| project_not_found(project_id))?;
+    let (authorized, resource) = require(
+        state,
+        &mut tx,
+        Action::ProjectUpdate,
+        tenant_id,
+        Subject::Project(&project),
+    )
+    .await?;
     let created_by = actor_identity(&mut tx, tenant_id).await?;
     let repository = repositories::attach(
         &mut *tx,
@@ -1309,7 +1465,7 @@ async fn attach(
         &mut tx,
         tenant_id,
         AuditAction::ProjectRepositoryAttached,
-        Resource::Tenant(tenant_id).to_string(),
+        resource.to_string(),
         Outcome::Success,
         json!({
             "authz": audit::decision_context(Action::ProjectUpdate, &authorized),
@@ -1330,7 +1486,17 @@ async fn replay_repository(
     claim: &Claim,
 ) -> Result<ProjectRepository> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let authorized = require(state, &mut tx, Action::ProjectUpdate, tenant_id).await?;
+    let project = projects::get(&mut *tx, tenant_id, project_id)
+        .await?
+        .ok_or_else(|| project_not_found(project_id))?;
+    let (authorized, resource) = require(
+        state,
+        &mut tx,
+        Action::ProjectUpdate,
+        tenant_id,
+        Subject::Project(&project),
+    )
+    .await?;
     // A repository is the one thing on this plane that can be detached, so a
     // replay can genuinely find nothing. That is a 404 naming the situation,
     // not a silent re-attach.
@@ -1343,6 +1509,7 @@ async fn replay_repository(
         "repository.attach.replay",
         Action::ProjectUpdate,
         &authorized,
+        resource,
         json!({"repository_id": id, "idempotency_key": claim.key}),
     )
     .await?;
@@ -1374,7 +1541,17 @@ pub(crate) async fn detach_repository(
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let authorized = require(&state, &mut tx, Action::ProjectUpdate, tenant_id).await?;
+        let project = projects::get(&mut *tx, tenant_id, project_id)
+            .await?
+            .ok_or_else(|| project_not_found(project_id))?;
+        let (authorized, resource) = require(
+            &state,
+            &mut tx,
+            Action::ProjectUpdate,
+            tenant_id,
+            Subject::Project(&project),
+        )
+        .await?;
         let repository = repositories::get(&mut *tx, tenant_id, project_id, repository_id)
             .await?
             .ok_or_else(|| Error::NotFound {
@@ -1389,7 +1566,7 @@ pub(crate) async fn detach_repository(
             &mut tx,
             tenant_id,
             AuditAction::ProjectRepositoryDetached,
-            Resource::Tenant(tenant_id).to_string(),
+            resource.to_string(),
             Outcome::Success,
             json!({
                 "authz": audit::decision_context(Action::ProjectUpdate, &authorized),

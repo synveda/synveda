@@ -1172,5 +1172,145 @@ frontend changes, deletions, tests, and the resulting commit hash.
   above were only visible in such a run, which is the argument for paying it.
 - **Commit.** `feat(access): add groups grants and invitations` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by Prompt 6, on Prompt 1's rule.
+- **Commit hash.** `e20f9fa379823ed285262383607c95ae1351ecb4`, written by
+  Prompt 6 on Prompt 1's rule.
 
+### Prompt 6 — Governed scope anchors: the PDP re-cut (CPR-6)
+
+- **Implemented.** The decision point, re-cut over the governed scope model
+  (ADR-0073). `synveda_store::anchors` — the scope-anchor resolver;
+  `synveda_types::anchor` — `AnchorSet`, `ScopeAnchor`, `AnchorSource`;
+  `synveda_policy::{ScopeNode, ResourceEntity}` and a **seven-entity** Cedar
+  model; `Resource` gains `Workspace`, `Project`, `Group` and `Grant`; the
+  twenty-six routes CPR-4 and CPR-5 anchored at the tenant now name the thing
+  they are about; `Principal.department` is deleted with the rank vocabulary;
+  personal principal-scope privacy becomes a base-layer forbid **with a door**;
+  `GET /v1/me` forecasts per anchor from real decisions; and the SCIM boundary
+  projects directory groups onto `groups` + `group_members`.
+- **Divergence from §9.** None worth recording. §9's Prompt 5 read *"Policy
+  profiles and the PDP re-cut"*, and CPR-5 took the membership half of Prompt 4;
+  this prompt is the PDP re-cut arriving one entry late, which the record
+  already predicted ("the PDP re-cut is the next one"). The **policy-profile
+  rename** (`personal`/`team`/`enterprise`, ADR-0068 decision 2) is *not* here:
+  the prompt's own text does not ask for it and says so by omission — it names
+  the anchors, the entity model, the rank removal, `/v1/me` and SCIM. Recorded
+  so the next reader does not look for it.
+- **Schema/domain changes.** One migration, `0043_scope_anchors.sql`, which adds
+  **no table**: `scopes.principal_id`, present exactly on a `principal`-shaped
+  scope, unique per tenant, immutable (the CPR-3 trigger extended rather than
+  duplicated). **60 tables, 2 views; 56 RLS-forced**, unchanged — the RLS
+  completeness inventory is untouched because nothing new is stored.
+  `synveda_types::anchor` is a new module; `synveda_types::scope::Scope` gains
+  `principal_id`; `synveda_store::scopes` gains `principal_scope` and
+  `ensure_principal_scope`; `synveda_store::anchors` is new;
+  `synveda_store::access` gains `sync_directory_group` and
+  `retire_directory_group`.
+- **API and frontend changes.** **No route added or removed** (76 `/v1` route
+  paths, unchanged). What changed is what each decision *names*: a read or an
+  update names the workspace or the project, a project creation names its
+  workspace, curating a group names the group, revoking names the grant, and
+  the tenant-plane calls name the tenant **root scope**. `GET /v1/me` grows
+  `anchors` and `anchors_not_answered`; `TenantCapabilities` grows `role_keys`.
+  `docs/api/openapi.json` and `console/src/generated/api.ts` regenerated (26
+  operations, 33 schemas). No CLI command and no console screen.
+- **The ownership check moved in front of the decision** on every per-object
+  route, because deciding *about* a workspace requires having fetched it. That
+  is ADR-0012 decision 7's order and the hierarchy plane's, so it is a
+  convergence — but it is a behaviour change and two existing tests asserted the
+  old order (a made-up id used to be a 403 and is now a 404).
+- **Deleted.** `Principal.department` and `nearest_department`; the rank
+  vocabulary from the Cedar schema (`Scope.kind` is now the five shapes);
+  `principal.home`, renamed to `own_scope`; **every pack's
+  `resource.kind != "user"` clause** — the privacy floor moved to the base layer
+  where no pack can drop it and where a direct grant can lift it;
+  `standard`'s four `principal.department` permits; and the two dead
+  `workspace_scope`/`project_scope` helpers in the access plane. Nothing was
+  translated: no row of `hierarchy_nodes` became a scope, and the one function
+  that reads the old vocabulary — `ScopeNode::from_hierarchy` — writes nothing
+  and is deleted with the table.
+- **Two findings that changed the design mid-flight.**
+  1. **The obvious re-cut of `standard` was dead policy.** Replacing
+     `principal.department` with `resource in principal.anchors` looked right and
+     asserted nothing: a grant reaches its own subtree under *every* pack,
+     through `context.roles`, so the permit could never be the reason anything
+     was allowed. What makes `standard` different is one step **outward**, so it
+     reads `principal.ambit` — the parent of every held scope, minus the tenant
+     root. Found by a test that failed for the right reason.
+  2. **The privacy floor was in the wrong place and strictly too strong.** Every
+     pack restated `resource.kind != "user"` per permit, which refused even a
+     grant somebody deliberately wrote at their own scope — so "share my notes
+     with you" was unsayable by the only person entitled to say it. Moving it to
+     the base layer fixed both halves at once. The governance carve-out
+     (`PolicyAssign`, `RoleRead`, the structural and service-identity planes)
+     came from a *third* failure: a blanket forbid stopped an administrator
+     assigning a retention profile to a personal scope, which is governance
+     rather than disclosure.
+- **A gap this feature found and did not close.** **Nothing mints a tenant's
+  first grant.** A brand-new tenant has a root scope, no grants and no bindings,
+  so nobody can create the first workspace — every shipped pack prices
+  `WorkspaceCreate` at an admin role or an `owner` grant. CPR-4's own suite bound
+  `org-admin` for the same reason and the programme's headline claim ("a person's
+  first act is `POST /v1/workspaces`") is still not true end to end. What changed
+  here is that a **grant** now works where only a binding did; where the first
+  one comes from is admission's, and both the gateway suite's harness and
+  `demos/cpr-6-anchors.sh` seed it explicitly and say why.
+- **Tests.** `crates/synveda-policy/tests/anchors.rs` (**17**): the nine named
+  properties, decided by the real PDP against the real packs — personal
+  principal-scope privacy across all three packs and all four tiers (and its
+  two halves: your own scope is yours, and a *direct* grant reaches it where an
+  inherited one does not); project sharing; workspace inheritance with the
+  project anchor proven not-direct; project-only access refused every verb
+  upward; group-derived access, and a group with no grant conferring nothing;
+  revocation refusing the next decision, and a grant being a resource a decision
+  can name; organisation-unit policy inheritance (the profile *and* the grant,
+  two levels down); **`depth_is_not_authority`**, which nests the same tree four
+  levels deeper and asserts every probed action decides identically; no
+  cross-tenant entity injection, including a chain **spliced** across two
+  tenants; and effective capabilities moving with the grant and the profile and
+  with nothing else. `crates/synveda-store/tests/anchors.rs` (**13**): the six
+  inputs, the ordering, the merge, inheritance with **zero rows written**,
+  project-only reach, group resolution and archived-group collapse, revocation,
+  tenant filtering, and the `principal_id` rules **against direct SQL**.
+  `crates/synveda-gateway/tests/anchors_api.rs` (**9**): the whole path on a
+  grant alone with `role_bindings` empty, project-only access at the HTTP
+  surface, revocation on the next request, group access arriving and leaving,
+  `/v1/me` minting and serving the caller's own scope, its capability block
+  moving with the grant, nobody else's own scope ever being an anchor, and
+  cross-tenant 404s. `demos/cpr-6-anchors.sh` drives all eight claims against a
+  real gateway, a real database and three tokens, with **no `role bind`
+  anywhere**.
+- **Tests changed rather than added, and why.** `packs.rs`'s golden matrix for
+  `standard` moved (a caller with no grant reads their own chain, not their
+  department) and `standard_shares_within_the_department_only` became
+  `standard_shares_within_what_you_hold`; `sensitivity.rs`'s department test
+  became a neighbourhood test; `entity_sync.rs`'s two HIER-3 tests were
+  re-expressed over the membership floor, because the property they exist for
+  (a reshaped chain is never answered from a stale fragment) survives the rank
+  and the rule they used to demonstrate it with does not; the three packs bumped
+  `@16 → @17` in five assertions; `access_api.rs`'s denial sweep now uses real
+  ids for the two admin-grant routes, because those resolve what they are about
+  before they decide; and `workspaces_api.rs` stopped asserting that a fresh
+  tenant has *no* scope tree, because `/v1/me` now mints the caller's own scope
+  and therefore the root — the claim it protected ("nobody is asked to declare
+  an organisation") is unchanged and is what it now asserts.
+- **Run record.** On the final tree, against a live Postgres:
+  `crates/synveda-policy` **98/98** across eleven binaries,
+  `crates/synveda-store/tests/anchors.rs` **13/13**,
+  `crates/synveda-gateway/tests/anchors_api.rs` **9/9**,
+  `crates/synveda-store/tests/rls.rs` **83/83** (81 before this feature),
+  `tests/access_api.rs` **17/17**, `tests/workspaces_api.rs` **23/23**,
+  `tests/openapi.rs` **5/5**, `tests/explorer.rs` **9/9**,
+  `tests/authz_hierarchy.rs` **2/2**, `tests/hierarchy_admin.rs` **4/4**,
+  `tests/scim.rs` **14/14**, `tests/policy_routes.rs` **2/2**,
+  `tests/roles_routes.rs` **2/2**. `demos/cpr-6-anchors.sh` green end to end.
+  The `.sqlx` cache gained 17 entries and lost 10.
+- **A harness constraint this prompt hit, restated because it costs time.**
+  Running several database-backed suites in one `cargo test` invocation exhausts
+  the dev Postgres's 100 connections: each gateway suite opens a bootstrap pool
+  and an application pool per test, and `cargo test` runs binaries in parallel.
+  Every failure that produced was `connect to DATABASE_URL` at the harness line,
+  never an assertion, and every suite passes when run alone. `anchors.rs`'s pool
+  is two connections for that reason (CPR-5's finding, applied before it bit).
+- **Commit.** `refactor(auth): use governed scope anchors` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by Prompt 7, on Prompt 1's rule.

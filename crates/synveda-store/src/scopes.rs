@@ -46,6 +46,7 @@
 
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, PgExecutor};
+use synveda_types::access::MAX_PRINCIPAL_CHARS;
 use synveda_types::scope::{
     Scope, ScopeKind, ScopeStatus, parse_path, validate_attributes, validate_display_name,
     validate_slug,
@@ -80,6 +81,11 @@ pub struct NewScope {
     pub display_name: String,
     /// Open labelling bag; a JSON object.
     pub attributes: serde_json::Value,
+    /// The token subject this scope belongs to. Required for
+    /// [`ScopeKind::Principal`] and refused for every other kind — a CHECK
+    /// says the same thing, and [`create`] says it with a sentence
+    /// (CPR-6, ADR-0073 decision 2).
+    pub principal_id: Option<String>,
     /// The identity creating the scope, when one is. `None` records that the
     /// deployment created it.
     pub created_by: Option<IdentityId>,
@@ -96,6 +102,7 @@ struct ScopeRow {
     display_name: String,
     status: String,
     attributes: serde_json::Value,
+    principal_id: Option<String>,
     created_by: Option<Uuid>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -118,6 +125,7 @@ impl TryFrom<ScopeRow> for Scope {
             slug: row.slug,
             display_name: row.display_name,
             status: row.status.parse().map_err(vocabulary)?,
+            principal_id: row.principal_id,
             attributes: row.attributes,
             created_by: row.created_by.map(IdentityId::from_uuid),
             created_at: row.created_at,
@@ -188,7 +196,7 @@ async fn lock_scope(
         ScopeRow,
         r#"
         select id, tenant_id, kind, parent_scope_id, slug, display_name,
-               status, attributes, created_by, created_at, updated_at
+               status, attributes, principal_id, created_by, created_at, updated_at
         from scopes
         where id = $1 and tenant_id = $2
         for update
@@ -265,6 +273,7 @@ pub async fn create(conn: &mut PgConnection, new: &NewScope) -> Result<Scope> {
     validate_slug(&new.slug)?;
     validate_display_name(&new.display_name)?;
     validate_attributes(&new.attributes)?;
+    validate_principal_id(new.kind, new.principal_id.as_deref())?;
 
     let parent_kind = match new.parent_scope_id {
         None => {
@@ -312,10 +321,10 @@ pub async fn create(conn: &mut PgConnection, new: &NewScope) -> Result<Scope> {
         r#"
         insert into scopes
             (id, tenant_id, kind, parent_scope_id, parent_kind, slug, display_name,
-             status, attributes, created_by)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             status, attributes, principal_id, created_by)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         returning id, tenant_id, kind, parent_scope_id, slug, display_name,
-                  status, attributes, created_by, created_at, updated_at
+                  status, attributes, principal_id, created_by, created_at, updated_at
         "#,
         new.id.as_uuid(),
         new.tenant_id.as_uuid(),
@@ -326,6 +335,7 @@ pub async fn create(conn: &mut PgConnection, new: &NewScope) -> Result<Scope> {
         new.display_name,
         ScopeStatus::Active.as_str(),
         new.attributes,
+        new.principal_id.as_deref() as Option<&str>,
         new.created_by.map(|by| by.as_uuid()) as Option<Uuid>,
     )
     .fetch_one(&mut *conn)
@@ -353,6 +363,154 @@ pub async fn create(conn: &mut PgConnection, new: &NewScope) -> Result<Scope> {
 
     metrics::counter!(SCOPE_MUTATIONS_TOTAL, "operation" => "create").increment(1);
     row.try_into()
+}
+
+/// The `principal_id` rule, in the store as well as in the CHECK: present
+/// exactly on a `principal`-shaped scope, and a non-blank subject when it is.
+///
+/// Said twice deliberately. The CHECK is what holds when something reaches the
+/// table another way; this is what turns "constraint violated" into a sentence
+/// naming which of the two directions was wrong.
+fn validate_principal_id(kind: ScopeKind, principal_id: Option<&str>) -> Result<()> {
+    match (kind, principal_id) {
+        (ScopeKind::Principal, None) => Err(Error::Invalid {
+            message: "a principal scope must name the subject it belongs to".to_owned(),
+        }),
+        (kind, Some(_)) if kind != ScopeKind::Principal => Err(Error::Invalid {
+            message: format!(
+                "a {kind} scope belongs to nobody in particular; principal_id is only for a {} scope",
+                ScopeKind::Principal
+            ),
+        }),
+        (ScopeKind::Principal, Some(subject)) => {
+            if subject.trim().is_empty() {
+                return Err(Error::Invalid {
+                    message: "principal id must not be blank".to_owned(),
+                });
+            }
+            if subject.chars().count() > MAX_PRINCIPAL_CHARS {
+                return Err(Error::Invalid {
+                    message: format!(
+                        "principal id must be at most {MAX_PRINCIPAL_CHARS} characters"
+                    ),
+                });
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The slug a principal scope gets.
+///
+/// A token subject is not a slug — it can be an email, an `auth0|…` string or
+/// a UUID — and it must not become one anyway: a slug is half of a path
+/// somebody may write down, and putting somebody's login in a shared path is a
+/// disclosure nobody asked for. So the slug is a digest, and the subject lives
+/// in its own column where the unique index can hold it.
+#[must_use]
+fn principal_slug(principal_id: &str) -> String {
+    let digest = blake3::hash(principal_id.as_bytes());
+    format!("p-{}", &digest.to_hex().as_str()[..16])
+}
+
+/// Fetches the scope belonging to `principal_id`, if one has been minted.
+#[tracing::instrument(
+    name = "store.scopes.principal_scope",
+    skip_all,
+    fields(tenant.id = %tenant_id),
+    err(Display)
+)]
+pub async fn principal_scope(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    principal_id: &str,
+) -> Result<Option<Scope>> {
+    let row = sqlx::query_as!(
+        ScopeRow,
+        r#"
+        select id, tenant_id, kind, parent_scope_id, slug, display_name,
+               status, attributes, principal_id, created_by, created_at, updated_at
+        from scopes
+        where tenant_id = $1 and principal_id = $2
+        "#,
+        tenant_id.as_uuid(),
+        principal_id,
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}
+
+/// Returns the scope belonging to `principal_id`, minting it — and the tenant
+/// root it hangs off — if it is not there yet.
+///
+/// [`ensure_tenant_root`]'s shape, one level down, and for the same reason: a
+/// person's own scope is the one nobody thinks to create, and it is what makes
+/// "my own notes" expressible before they have joined anything. A principal
+/// scope hangs directly off the tenant root
+/// ([`ScopeKind::permits_parent`]), so this is a root plus one row.
+///
+/// **Nothing above it reaches in** — that is
+/// [`synveda_types::access::inherits_into`], applied by the anchor resolver
+/// and restated by the PDP's base layer. Minting one therefore confers
+/// nothing on anybody else, which is why it is safe to do on demand.
+///
+/// Concurrency: two callers racing both try the insert and the
+/// `scopes_one_per_principal` unique index admits one. The loser gets
+/// [`Error::Conflict`] and retries, exactly as [`ensure_tenant_root`] does —
+/// a transaction that has already written cannot swallow a conflict.
+///
+/// Must run inside a transaction (see module docs).
+#[tracing::instrument(
+    name = "store.scopes.ensure_principal_scope",
+    skip_all,
+    fields(tenant.id = %tenant_id, scope.created = tracing::field::Empty),
+    err(Display)
+)]
+pub async fn ensure_principal_scope(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    principal_id: &str,
+    display_name: &str,
+) -> Result<Scope> {
+    if let Some(scope) = principal_scope(&mut *conn, tenant_id, principal_id).await? {
+        tracing::Span::current().record("scope.created", false);
+        return Ok(scope);
+    }
+    let root = ensure_tenant_root(&mut *conn, tenant_id).await?;
+    let display_name = if display_name.trim().is_empty() {
+        principal_id
+    } else {
+        display_name
+    };
+    // A subject can be longer than a display name may be, and a display name
+    // is not an identifier — truncating one is a cosmetic loss, refusing to
+    // mint somebody's own scope over it would not be.
+    let display_name: String = display_name.trim().chars().take(200).collect();
+    let new = NewScope {
+        id: ScopeId::new(),
+        tenant_id,
+        kind: ScopeKind::Principal,
+        parent_scope_id: Some(root.id),
+        slug: principal_slug(principal_id),
+        display_name,
+        attributes: serde_json::json!({}),
+        principal_id: Some(principal_id.to_owned()),
+        // No author: nobody creates somebody else's own scope.
+        created_by: None,
+    };
+    match create(&mut *conn, &new).await {
+        Ok(scope) => {
+            tracing::Span::current().record("scope.created", true);
+            Ok(scope)
+        }
+        Err(Error::Conflict { .. }) => Err(Error::Conflict {
+            message: format!("the principal scope in tenant {tenant_id} was created concurrently"),
+        }),
+        Err(other) => Err(other),
+    }
 }
 
 /// Renders a kind list for a refusal. A refusal that says only "no" makes the
@@ -384,7 +542,7 @@ pub async fn get(
         ScopeRow,
         r#"
         select id, tenant_id, kind, parent_scope_id, slug, display_name,
-               status, attributes, created_by, created_at, updated_at
+               status, attributes, principal_id, created_by, created_at, updated_at
         from scopes
         where id = $1 and tenant_id = $2
         "#,
@@ -444,6 +602,7 @@ pub async fn ensure_tenant_root(conn: &mut PgConnection, tenant_id: TenantId) ->
         slug: tenant.slug.clone(),
         display_name: tenant.name.clone(),
         attributes: serde_json::json!({}),
+        principal_id: None,
         // No author: the deployment created it, and inventing a synthetic one
         // would lose that distinction (0040's header).
         created_by: None,
@@ -489,7 +648,7 @@ pub async fn set_status(
            set status = $3, updated_at = now()
          where id = $1 and tenant_id = $2
         returning id, tenant_id, kind, parent_scope_id, slug, display_name,
-                  status, attributes, created_by, created_at, updated_at
+                  status, attributes, principal_id, created_by, created_at, updated_at
         "#,
         id.as_uuid(),
         tenant_id.as_uuid(),
@@ -518,7 +677,7 @@ pub async fn tenant_root(
         ScopeRow,
         r#"
         select id, tenant_id, kind, parent_scope_id, slug, display_name,
-               status, attributes, created_by, created_at, updated_at
+               status, attributes, principal_id, created_by, created_at, updated_at
         from scopes
         where tenant_id = $1 and parent_scope_id is null
         "#,
@@ -546,7 +705,7 @@ pub async fn children(
         ScopeRow,
         r#"
         select id, tenant_id, kind, parent_scope_id, slug, display_name,
-               status, attributes, created_by, created_at, updated_at
+               status, attributes, principal_id, created_by, created_at, updated_at
         from scopes
         where parent_scope_id = $1 and tenant_id = $2
         order by slug
@@ -577,7 +736,7 @@ pub async fn ancestors(
         ScopeRow,
         r#"
         select s.id, s.tenant_id, s.kind, s.parent_scope_id, s.slug, s.display_name,
-               s.status, s.attributes, s.created_by, s.created_at, s.updated_at
+               s.status, s.attributes, s.principal_id, s.created_by, s.created_at, s.updated_at
         from scope_closure c
         join scopes s on s.id = c.ancestor_id and s.tenant_id = c.tenant_id
         where c.descendant_id = $1 and c.tenant_id = $2 and c.distance > 0
@@ -609,7 +768,7 @@ pub async fn descendants(
         ScopeRow,
         r#"
         select s.id, s.tenant_id, s.kind, s.parent_scope_id, s.slug, s.display_name,
-               s.status, s.attributes, s.created_by, s.created_at, s.updated_at
+               s.status, s.attributes, s.principal_id, s.created_by, s.created_at, s.updated_at
         from scope_closure c
         join scopes s on s.id = c.descendant_id and s.tenant_id = c.tenant_id
         where c.ancestor_id = $1 and c.tenant_id = $2 and c.distance > 0
@@ -712,7 +871,7 @@ pub async fn resolve_path(
                and s.slug = ($2::text[])[w.depth + 1]
         )
         select s.id, s.tenant_id, s.kind, s.parent_scope_id, s.slug, s.display_name,
-               s.status, s.attributes, s.created_by, s.created_at, s.updated_at
+               s.status, s.attributes, s.principal_id, s.created_by, s.created_at, s.updated_at
         from walk w
         join scopes s on s.id = w.id and s.tenant_id = $1
         where w.depth = cardinality($2::text[])
@@ -749,7 +908,7 @@ pub async fn rename(
            set display_name = $3, updated_at = now()
          where id = $1 and tenant_id = $2
         returning id, tenant_id, kind, parent_scope_id, slug, display_name,
-                  status, attributes, created_by, created_at, updated_at
+                  status, attributes, principal_id, created_by, created_at, updated_at
         "#,
         id.as_uuid(),
         tenant_id.as_uuid(),

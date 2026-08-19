@@ -24,6 +24,7 @@
 use std::time::Instant;
 
 use chrono::Utc;
+use synveda_policy::ScopeNode;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD};
 use synveda_types::{
     HierarchyNode, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind, Sensitivity, TenantId,
@@ -77,7 +78,7 @@ fn ac_decisions_are_microsecond_level() {
     );
     // A full-depth chain — deeper than most real tenants use (levels are
     // skippable, ADR-0011), so the entity graph is not flattered.
-    let scopes = vec![
+    let scopes = [
         node(tenant, org, None, ScopeKind::Org, "acme", 0, "acme"),
         node(
             tenant,
@@ -147,10 +148,21 @@ fn ac_decisions_are_microsecond_level() {
         role: Role::Steward,
         updated_at: Utc::now(),
     }];
+    let scope_nodes: Vec<ScopeNode> = scopes.iter().map(ScopeNode::from_hierarchy).collect();
+    let principal_nodes: Vec<ScopeNode> = principal_scopes
+        .iter()
+        .map(ScopeNode::from_hierarchy)
+        .collect();
     let context = AuthzContext {
         sensitivity: Some(Sensitivity::Internal),
-        scopes: &scopes,
-        principal_scopes: &principal_scopes,
+        scopes: &scope_nodes,
+        principal_scopes: &principal_nodes,
+        // The measurement is of the hierarchy plane, which resolves no anchors:
+        // an anchor's scope is a governed scope and is never a node of a
+        // hierarchy chain (CPR-6, ADR-0073).
+        anchors: &[],
+        groups: &[],
+        resources: &[],
         assignments: &assignments,
         default_pack: None,
         role_bindings: &bindings,

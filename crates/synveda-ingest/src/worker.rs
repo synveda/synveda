@@ -25,7 +25,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::PgPool;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
-use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
+use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, ScopeNode};
 use synveda_store::dedup as store_dedup;
 use synveda_store::observe::{ObserveMessage, QueuedSignal, StagedEvent};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
@@ -1200,9 +1200,16 @@ async fn authorize_owner(
     let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
     let bindings =
         role_bindings::for_subject_on_scopes(&mut *tx, tenant_id, &subject, &chain_ids).await?;
+    let chain_nodes = ScopeNode::from_hierarchy_chain(&chain);
     let context = AuthzContext {
-        scopes: &chain,
-        principal_scopes: &chain,
+        scopes: &chain_nodes,
+        principal_scopes: &chain_nodes,
+        // The old hierarchy plane: no anchor is ever on a hierarchy chain, so
+        // the grant model contributes nothing here either way (CPR-6,
+        // ADR-0073).
+        anchors: &[],
+        groups: &[],
+        resources: &[],
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
         role_bindings: &bindings,

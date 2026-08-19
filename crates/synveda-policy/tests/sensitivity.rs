@@ -22,9 +22,12 @@
 //! ```
 
 use chrono::{TimeDelta, Utc};
+use synveda_policy::ScopeNode;
 use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
 };
+use synveda_types::access::RoleKey;
+use synveda_types::anchor::{AnchorSource, ScopeAnchor};
 use synveda_types::{
     HierarchyNode, IdentityId, Lapse, LapseAction, LapseId, PolicyAssignment, ProposalId, Role,
     RoleBinding, ScopeId, ScopeKind, Sensitivity, TenantId,
@@ -43,7 +46,11 @@ impl Fixture {
             .unwrap_or_else(|| panic!("fixture has no node {slug}"))
     }
 
-    fn chain(&self, slug: &str) -> Vec<HierarchyNode> {
+    /// The chain the PDP takes: the old hierarchy's rows projected onto
+    /// the shape vocabulary at the caller's edge (CPR-6, ADR-0073
+    /// decision 1). The fixture still holds `HierarchyNode`s because the
+    /// hierarchy plane still exists; nothing below this line does.
+    fn chain(&self, slug: &str) -> Vec<ScopeNode> {
         let mut chain = vec![self.node(slug).clone()];
         let mut current = chain[0].parent_id;
         while let Some(id) = current {
@@ -55,7 +62,7 @@ impl Fixture {
             current = parent.parent_id;
             chain.push(parent.clone());
         }
-        chain
+        chain.iter().map(ScopeNode::from_hierarchy).collect()
     }
 
     fn assignment(&self, slug: &str, pack: &str) -> PolicyAssignment {
@@ -150,6 +157,10 @@ struct Ask<'a> {
     sensitivity: Sensitivity,
     assignments: &'a [PolicyAssignment],
     bindings: &'a [RoleBinding],
+    /// The governed-scope grants standing over this caller (CPR-6, ADR-0073).
+    /// Empty for every ask about the old hierarchy; `standard`'s sharing
+    /// default reads them, because that is what it shares by.
+    anchors: &'a [ScopeAnchor],
     lapses: &'a [Lapse],
 }
 
@@ -163,6 +174,7 @@ fn read(pdp: &Pdp, fx: &Fixture, ask: &Ask<'_>) -> bool {
         &AuthzContext {
             scopes: &scopes,
             principal_scopes: &principal_scopes,
+            anchors: ask.anchors,
             assignments: ask.assignments,
             role_bindings: ask.bindings,
             lapses: ask.lapses,
@@ -205,6 +217,7 @@ fn ask<'a>(
         sensitivity: Sensitivity::Internal,
         assignments,
         bindings: &[],
+        anchors: &[],
         lapses: &[],
     }
 }
@@ -435,24 +448,46 @@ fn open_collaboration_reads_the_org_at_confidential_and_never_restricted() {
     }
 }
 
-/// `standard`'s sharing default is a default, not an explicit grant — so
-/// the department subtree stops at the working tiers, and `confidential`
+/// `standard`'s sharing default is a default, not an explicit grant — so the
+/// subtree of what you hold stops at the working tiers, and `confidential`
 /// still takes a binding.
+///
+/// Until CPR-6 the subtree in question was `principal.department`, read off a
+/// rank ladder that no longer exists (ADR-0073 decision 4). It is now
+/// `principal.anchors` — the scopes a grant reaches this caller at — so the
+/// ask below carries one, and the tier ceiling it demonstrates is unchanged.
 #[test]
-fn standard_shares_the_department_at_the_working_tiers_only() {
+fn standard_shares_what_you_hold_at_the_working_tiers_only() {
     let pdp = Pdp::new().expect("build pdp");
     let fx = fixture();
     let alice = fx.placed("alice", "alice-user");
     let assignments = [fx.assignment("org", STANDARD)];
+    // A grant at alice's own team. Its **parent** is her neighbourhood, so
+    // `standard` shares the sibling team by default; `regulated-strict` would
+    // not, because a grant reaches its own subtree and nothing outward.
+    let team_a = fx.node("team-a");
+    let anchors = [ScopeAnchor {
+        scope_id: team_a.id,
+        kind: synveda_types::scope::ScopeKind::Workspace,
+        parent_scope_id: team_a.parent_id,
+        depth: 2,
+        source: AnchorSource::Grant,
+        roles: vec![RoleKey::Member],
+        granted_at: vec![team_a.id],
+        via_groups: Vec::new(),
+    }];
 
     assert_eq!(
         tiers(
             &pdp,
             &fx,
-            &ask(&alice, "alice-user", "team-b", &assignments)
+            &Ask {
+                anchors: &anchors,
+                ..ask(&alice, "alice-user", "team-b", &assignments)
+            }
         ),
         [Sensitivity::Public, Sensitivity::Internal],
-        "the sibling team shares by default at the working tiers"
+        "the subtree of what alice holds shares by default at the working tiers"
     );
     assert_eq!(
         tiers(

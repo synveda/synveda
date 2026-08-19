@@ -26,6 +26,42 @@ export type AcceptedInviteView = {
   };
 
 /**
+ * What the caller may do at **one anchor** — a real decision at a real scope,
+ * never a shape derived from an edition (CPR-6, ADR-0073 decision 8).
+ */
+export type AnchorCapabilities = {
+    /**
+     * Every operand-free scope action, decided here, by its stable machine
+     * name. **A forecast, never a grant** — the whole of this module's first
+     * doc section applies unchanged.
+     */
+    actions: Record<string, boolean>;
+    /**
+     * Whether a grant is written at this very scope rather than inherited
+     * from an ancestor — the "why" a member list would otherwise have to be
+     * read to answer.
+     */
+    direct: boolean;
+    /**
+     * Its shape: `tenant`, `org_unit`, `workspace`, `project` or `principal`.
+     */
+    kind: string;
+    /**
+     * The role keys effective here.
+     */
+    roles: string[];
+    /**
+     * The scope.
+     */
+    scope_id: string;
+    /**
+     * Why it is applicable: `principal_scope`, `selected_project`,
+     * `selected_workspace`, `grant`, `org_unit` or `tenant_root`.
+     */
+    source: string;
+  };
+
+/**
  * The taxonomy error body, declared for the OpenAPI document.
  *
  * A schema-only mirror of `synveda_types::Error`'s serialised form, which is
@@ -420,6 +456,24 @@ export type InviteView = {
  */
 export type MeView = {
     /**
+     * Where this caller stands, most specific first, and what they may do at
+     * each — **from real policy decisions** (CPR-6, ADR-0073 decision 8).
+     *
+     * Their own scope, the tenant root, and every scope a direct or group
+     * grant reaches them at. Nothing here is derived from a plan, an edition
+     * or a shape: each entry is `Action::PROBED_AT_SCOPE` decided at that
+     * scope, under that scope's own effective profile, by the same PDP the
+     * act itself will pass through. A personal deployment and an enterprise
+     * one differ in the rows this reads, never in the code that reads them.
+     */
+    anchors: AnchorCapabilities[];
+    /**
+     * How many anchors the response bound dropped. Named rather than hidden:
+     * a truncated answer presented as a complete one is the one failure a
+     * capability surface cannot afford (ADR-0058 decision 5).
+     */
+    anchors_not_answered?: number;
+    /**
      * What this caller may do on the tenant plane, asked of the PDP.
      *
      * **A forecast, never a grant** (ADR-0058 decision 2): nothing downstream
@@ -711,6 +765,14 @@ export type TenantCapabilities = {
      * `context.grant`.
      */
     role_assign: Record<string, boolean>;
+    /**
+     * The caller's role keys at the **tenant root scope** — the grants that
+     * reach the whole boundary (CPR-6, ADR-0073 decision 5). Separate from
+     * `roles` rather than merged into it because the two are different closed
+     * vocabularies over different trees, and a client that displayed them as
+     * one list would be inventing a translation nothing in this product has.
+     */
+    role_keys: string[];
     /**
      * The caller's tenant-wide effective roles. Node bindings are absent
      * by construction: [`effective_roles_at`] keeps only the tenant-wide

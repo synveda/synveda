@@ -18,7 +18,9 @@
 //! way to decide would be a second answer to "may this caller see this
 //! record" (seed §2.2).
 
-use synveda_policy::{AuthzContext, EntityBatch, Pdp, PermittedTiers, Principal, Resource};
+use synveda_policy::{
+    AuthzContext, EntityBatch, Pdp, PermittedTiers, Principal, Resource, ScopeNode,
+};
 use synveda_types::{
     CompositionConfig, HierarchyNode, Lapse, LapseId, PolicyAssignment, Result, RoleBinding,
     ScopeId, ScopeTier, Sensitivity,
@@ -138,12 +140,22 @@ pub struct LapsedScope<'a> {
 )]
 pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Vec<ScopeTier>> {
     let batch = materialise(pdp, inputs)?;
+    let chain_nodes = ScopeNode::from_hierarchy_chain(inputs.chain);
     let mut permitted: Vec<ScopeTier> = Vec::with_capacity(inputs.chain.len());
     let mut scopes = 0usize;
     for (position, node) in inputs.chain.iter().enumerate() {
         let context = AuthzContext {
-            scopes: &inputs.chain[position..],
-            principal_scopes: inputs.chain,
+            scopes: &chain_nodes[position..],
+            principal_scopes: &chain_nodes,
+            // The composition sweep decides over the **old** hierarchy until
+            // the read path is re-cut (Prompts 16–18 of the context-platform
+            // programme). Supplying no anchors is not a narrowing: an anchor's
+            // scope is a governed scope and is therefore never a node of a
+            // hierarchy chain, so `effective_role_keys_at` would find none
+            // either way (CPR-6, ADR-0073).
+            anchors: &[],
+            groups: &[],
+            resources: &[],
             assignments: inputs.assignments,
             default_pack: inputs.default_pack,
             role_bindings: inputs.role_bindings,
@@ -183,12 +195,27 @@ pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Resul
 /// membership against are simply absent), so the failure mode of getting
 /// this wrong is a caller reading less than they should — never more.
 fn materialise(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<EntityBatch> {
-    let mut chains: Vec<&[HierarchyNode]> =
+    let mut owned: Vec<Vec<ScopeNode>> =
         Vec::with_capacity(1 + inputs.lapsed.len() + inputs.candidates.len());
-    chains.push(inputs.chain);
-    chains.extend(inputs.lapsed.iter().map(|lapsed| lapsed.chain));
-    chains.extend(inputs.candidates.iter().map(|candidate| candidate.chain));
-    pdp.materialise(inputs.principal, &chains, inputs.chain)
+    owned.push(ScopeNode::from_hierarchy_chain(inputs.chain));
+    owned.extend(
+        inputs
+            .lapsed
+            .iter()
+            .map(|lapsed| ScopeNode::from_hierarchy_chain(lapsed.chain)),
+    );
+    owned.extend(
+        inputs
+            .candidates
+            .iter()
+            .map(|candidate| ScopeNode::from_hierarchy_chain(candidate.chain)),
+    );
+    let chains: Vec<&[ScopeNode]> = owned.iter().map(Vec::as_slice).collect();
+    let context = AuthzContext {
+        principal_scopes: &owned[0],
+        ..AuthzContext::default()
+    };
+    pdp.materialise(inputs.principal, &chains, &context)
 }
 
 /// One off-chain scope to decide, whatever put it on the walk.
@@ -229,9 +256,14 @@ fn plan_off_chain(
         // unplaced principal gets.
         return Ok(());
     };
+    let scope_nodes = ScopeNode::from_hierarchy_chain(scope.chain);
+    let principal_nodes = ScopeNode::from_hierarchy_chain(inputs.chain);
     let context = AuthzContext {
-        scopes: scope.chain,
-        principal_scopes: inputs.chain,
+        scopes: &scope_nodes,
+        principal_scopes: &principal_nodes,
+        anchors: &[],
+        groups: &[],
+        resources: &[],
         assignments: scope.assignments,
         default_pack: inputs.default_pack,
         role_bindings: inputs.role_bindings,
@@ -405,10 +437,14 @@ pub struct ScopeDecision {
 )]
 pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<CompositionPlan> {
     let batch = materialise(pdp, inputs)?;
+    let chain_nodes = ScopeNode::from_hierarchy_chain(inputs.chain);
     let tenant_id = inputs.principal.tenant_id;
     let context_at = |position: usize| AuthzContext {
-        scopes: &inputs.chain[position..],
-        principal_scopes: inputs.chain,
+        scopes: &chain_nodes[position..],
+        principal_scopes: &chain_nodes,
+        anchors: &[],
+        groups: &[],
+        resources: &[],
         assignments: inputs.assignments,
         default_pack: inputs.default_pack,
         role_bindings: inputs.role_bindings,

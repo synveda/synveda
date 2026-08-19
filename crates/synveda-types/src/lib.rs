@@ -11,6 +11,10 @@
 // and `crate::Role` are two closed vocabularies with two overlapping words,
 // and the module path is what says which one a caller means.
 pub mod access;
+// Public as a module for the same reason: an "anchor" is a concept of the
+// governed scope model, and a bare `ScopeAnchor` in a file written against
+// the old hierarchy would read as a scope chain.
+pub mod anchor;
 mod approval;
 mod asset;
 mod channel;

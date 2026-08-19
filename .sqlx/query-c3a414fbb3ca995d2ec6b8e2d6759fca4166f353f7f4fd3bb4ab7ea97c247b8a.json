@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select grp.id as \"id!\"\n        from group_members gm\n        join groups grp\n          on grp.tenant_id = gm.tenant_id and grp.id = gm.group_id and grp.status = 'active'\n        where gm.tenant_id = $1 and gm.principal_id = $2\n        order by grp.slug\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c3a414fbb3ca995d2ec6b8e2d6759fca4166f353f7f4fd3bb4ab7ea97c247b8a"
+}

@@ -15,13 +15,19 @@ use std::time::Duration;
 use sqlx::PgPool;
 use sqlx::postgres::PgConnection;
 use synveda_identity::Claims;
-use synveda_policy::{Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource};
-use synveda_store::{
-    identities, lapses, policy_assignments, policy_packs, rls, role_bindings, tenants,
+use synveda_policy::{
+    Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource, ResourceEntity, ScopeNode,
 };
+use synveda_store::anchors::AnchorSelection;
+use synveda_store::{
+    anchors, identities, lapses, policy_assignments, policy_packs, rls, role_bindings, scopes,
+    tenants,
+};
+use synveda_types::anchor::AnchorSet;
+use synveda_types::scope::Scope;
 use synveda_types::{
-    Error, HierarchyNode, Identity, IdentityKind, Lapse, LapseAction, Result, Role, RoleBinding,
-    ScopeId, Sensitivity, TenantId,
+    Error, GroupId, HierarchyNode, Identity, IdentityKind, Lapse, LapseAction, Result, Role,
+    RoleBinding, ScopeId, Sensitivity, TenantId,
 };
 
 use crate::app::AppState;
@@ -35,6 +41,21 @@ pub(crate) struct DecisionInput {
     pub(crate) principal: Principal,
     pub(crate) chain: Arc<[HierarchyNode]>,
     pub(crate) principal_scopes: Arc<[HierarchyNode]>,
+    /// The resource's chain as the PDP takes it — the same nodes as
+    /// [`DecisionInput::chain`] on the old plane, projected once here
+    /// (CPR-6, ADR-0073 decision 1), and the governed scope chain itself on
+    /// the new one.
+    pub(crate) chain_nodes: Arc<[ScopeNode]>,
+    /// The caller's own chain, likewise.
+    pub(crate) principal_nodes: Arc<[ScopeNode]>,
+    /// The ordered anchors this request resolved to (CPR-6, ADR-0073).
+    /// Empty when the tenant has no governed scopes yet, which denies
+    /// exactly what a grant would have permitted.
+    pub(crate) anchors: AnchorSet,
+    /// The groups this caller is in, so a pack may name one.
+    pub(crate) groups: Vec<GroupId>,
+    /// The subtype and access-plane entities this decision names.
+    pub(crate) resources: Vec<ResourceEntity>,
     pub(crate) assignments: Vec<synveda_types::PolicyAssignment>,
     pub(crate) default_pack: Option<String>,
     pub(crate) role_bindings: Vec<RoleBinding>,
@@ -71,8 +92,11 @@ impl DecisionInput {
     /// empty chain, which fails closed.
     pub(crate) fn context_from(&self, position: usize) -> AuthzContext<'_> {
         AuthzContext {
-            scopes: self.chain.get(position..).unwrap_or(&[]),
-            principal_scopes: &self.principal_scopes,
+            scopes: self.chain_nodes.get(position..).unwrap_or(&[]),
+            principal_scopes: &self.principal_nodes,
+            anchors: self.anchors.as_slice(),
+            groups: &self.groups,
+            resources: &self.resources,
             assignments: &self.assignments,
             default_pack: self.default_pack.as_deref(),
             role_bindings: &self.role_bindings,
@@ -152,7 +176,14 @@ pub(crate) async fn gather(
     conn: &mut PgConnection,
     anchor: Option<&HierarchyNode>,
 ) -> Result<DecisionInput> {
-    gather_inner(state, conn, ResourceChain::Anchor(anchor)).await
+    gather_inner(
+        state,
+        conn,
+        ResourceChain::Anchor(anchor),
+        AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await
 }
 
 /// [`gather`] for the observe shape (MEM-1, ADR-0020 decision 4): the
@@ -164,23 +195,63 @@ pub(crate) async fn gather_at_home(
     state: &AppState,
     conn: &mut PgConnection,
 ) -> Result<DecisionInput> {
-    gather_inner(state, conn, ResourceChain::PrincipalHome).await
+    gather_inner(
+        state,
+        conn,
+        ResourceChain::PrincipalHome,
+        AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await
+}
+
+/// [`gather`] for the **governed scope** plane (CPR-6, ADR-0073).
+///
+/// The same principal, quarantine and pack resolution as [`gather`]; a
+/// different tree. The resource's chain comes from `scope_closure` rather than
+/// from `hierarchy_closure`, the caller's own chain starts at their
+/// `principal`-shaped scope, and the anchors are resolved under `selection` so
+/// a request that named a workspace or a project is decided against it.
+///
+/// `resources` are the Cedar entities the decision names — the workspace,
+/// project, group or grant it is actually about. A decision whose entity is
+/// missing evaluates with no attributes and no parents, which denies.
+pub(crate) async fn gather_governed(
+    state: &AppState,
+    conn: &mut PgConnection,
+    anchor: Option<&Scope>,
+    selection: AnchorSelection,
+    resources: Vec<ResourceEntity>,
+) -> Result<DecisionInput> {
+    gather_inner(
+        state,
+        conn,
+        ResourceChain::Governed(anchor),
+        selection,
+        resources,
+    )
+    .await
 }
 
 /// How [`gather_inner`] obtains the resource's scope chain.
 enum ResourceChain<'a> {
     /// The already-fetched, ownership-checked node the resource refers to
-    /// (`None` for tenant-level resources).
+    /// (`None` for tenant-level resources) — the **old** hierarchy.
     Anchor(Option<&'a HierarchyNode>),
     /// The principal's own placement chain — the resource of a write that
     /// lands at home.
     PrincipalHome,
+    /// A **governed scope** (`None` for the tenant plane, and for a tenant
+    /// with no root scope yet).
+    Governed(Option<&'a Scope>),
 }
 
 async fn gather_inner(
     state: &AppState,
     conn: &mut PgConnection,
     resource_chain: ResourceChain<'_>,
+    selection: AnchorSelection,
+    resources: Vec<ResourceEntity>,
 ) -> Result<DecisionInput> {
     let chains = &state.scope_chains;
     let context = synveda_identity::current_tenant().ok_or_else(|| Error::Internal {
@@ -226,6 +297,7 @@ async fn gather_inner(
             .unwrap_or_else(empty_chain),
         None => empty_chain(),
     };
+    let governed = matches!(resource_chain, ResourceChain::Governed(_));
     let chain = match resource_chain {
         ResourceChain::Anchor(Some(node)) => {
             match chains.resolve(&mut *conn, tenant_id, node.id).await? {
@@ -236,8 +308,27 @@ async fn gather_inner(
                 None => vec![node.clone()].into(),
             }
         }
-        ResourceChain::Anchor(None) => empty_chain(),
+        ResourceChain::Anchor(None) | ResourceChain::Governed(_) => empty_chain(),
         ResourceChain::PrincipalHome => Arc::clone(&principal_scopes),
+    };
+    // The governed plane's own chains (CPR-6, ADR-0073). Read from
+    // `scope_closure`, never from the hierarchy: nothing here consults, mirrors
+    // or translates a `hierarchy_nodes` row.
+    let (governed_chain, governed_own) = if governed {
+        let resource_scope = match resource_chain {
+            ResourceChain::Governed(Some(scope)) => {
+                scope_chain(&mut *conn, tenant_id, scope).await?
+            }
+            _ => Vec::new(),
+        };
+        let own =
+            match scopes::principal_scope(&mut *conn, tenant_id, &context.claims.subject).await? {
+                Some(own) => scope_chain(&mut *conn, tenant_id, &own).await?,
+                None => Vec::new(),
+            };
+        (resource_scope, own)
+    } else {
+        (Vec::new(), Vec::new())
     };
     // The confinement scope (ADR-0018 decision 4): the personal leaf's
     // parent — the anchor the agent was registered at — read off the
@@ -253,14 +344,41 @@ async fn gather_inner(
     } else {
         None
     };
+    // The anchors, resolved for every request (ADR-0073 decision 7).
+    //
+    // Not only on the governed plane, and the reason is the tenant plane: a
+    // grant written at the tenant root is the tenant-wide grant, and an audit,
+    // directory or proposal decision that skipped anchor resolution would be a
+    // decision the grant model could not reach. The cost is a handful of
+    // indexed reads inside a transaction the request already opened.
+    let anchors =
+        anchors::resolve(&mut *conn, tenant_id, &context.claims.subject, selection).await?;
+    let groups = anchors::groups_of(&mut *conn, tenant_id, &context.claims.subject).await?;
+
     let principal = Principal {
         tenant_id,
         subject: context.claims.subject,
         quarantined,
-        scope_id: identity.as_ref().map(|identity| identity.scope_id),
+        // On the governed plane the caller's own scope is their
+        // `principal`-shaped scope; on the old one it is their placement node.
+        // Both are "where this caller stands", which is what the attribute
+        // means and what `principal in resource` walks up from.
+        scope_id: if governed {
+            governed_own.first().map(|node| node.id)
+        } else {
+            identity.as_ref().map(|identity| identity.scope_id)
+        },
         token_scope,
     };
-    let chain_ids: Vec<_> = chain.iter().map(|node| node.id).collect();
+    let (chain_nodes, principal_nodes): (Vec<ScopeNode>, Vec<ScopeNode>) = if governed {
+        (governed_chain, governed_own)
+    } else {
+        (
+            ScopeNode::from_hierarchy_chain(&chain),
+            ScopeNode::from_hierarchy_chain(&principal_scopes),
+        )
+    };
+    let chain_ids: Vec<_> = chain_nodes.iter().map(|node| node.id).collect();
     let assignments = if chain_ids.is_empty() {
         Vec::new()
     } else {
@@ -288,12 +406,36 @@ async fn gather_inner(
         principal,
         chain,
         principal_scopes,
+        chain_nodes: chain_nodes.into(),
+        principal_nodes: principal_nodes.into(),
+        anchors,
+        groups,
+        resources,
         assignments,
         default_pack,
         role_bindings,
         lapses,
         identity,
     })
+}
+
+/// One governed scope's chain, nearest first, as the PDP takes it.
+///
+/// A governed scope carries no seal of its own: AUTH-4's leaver state is a
+/// property of an identity and lands on the old hierarchy's personal node
+/// (ADR-0059 decision 9). Rather than invent a value, this reports `false` and
+/// the seal keeps refusing exactly where it is written — the base layer's
+/// forbid is unchanged and still runs over every hierarchy decision.
+async fn scope_chain(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    scope: &Scope,
+) -> Result<Vec<ScopeNode>> {
+    let mut nodes = vec![ScopeNode::from_scope(scope, false)];
+    for ancestor in scopes::ancestors(&mut *conn, tenant_id, scope.id).await? {
+        nodes.push(ScopeNode::from_scope(&ancestor, false));
+    }
+    Ok(nodes)
 }
 
 /// One off-chain scope a standing lapse reaches, with the rows its own
@@ -332,7 +474,7 @@ pub(crate) async fn gather_lapsed(
     // One shared containment rule with the PDP's own permit, so the plan
     // and the decision can never disagree about who a grant reaches.
     let granting = synveda_policy::lapsed_scopes(
-        &input.principal_scopes,
+        &input.principal_nodes,
         &input.lapses,
         LapseAction::MemoryRead,
     );
@@ -813,6 +955,15 @@ fn decide_inner(
         })
         .map(|binding| binding.role.as_str().to_owned())
         .collect();
+    // The grant keys that reached this resource, beside the bindings that did
+    // (CPR-6, ADR-0073 decision 5). The audit event's role list is what the
+    // decision *actually* weighed, so leaving these out would make the trail
+    // say "no roles" about a decision a workspace `owner` grant carried.
+    roles.extend(
+        synveda_policy::effective_role_keys_at(resource, &context)
+            .into_iter()
+            .map(|key| key.as_str().to_owned()),
+    );
     roles.sort_unstable();
     roles.dedup();
     Ok(Authorized { decision, roles })

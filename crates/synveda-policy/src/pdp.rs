@@ -19,15 +19,19 @@ use cedar_policy::{
     Authorizer, Context, Decision, Entities, Entity, EntityId, EntityTypeName, EntityUid,
     PolicySet, Request, Schema, ValidationMode, Validator,
 };
+use synveda_types::access::{RoleKey, inherits_into};
 use synveda_types::{
-    ApprovalMatrix, CompositionConfig, DedupConfig, Error, HierarchyNode, Lapse, LapseAction,
-    LapseConfig, MoverConfig, PackConfig, PromotionConfig, RedactionConfig, Result,
-    RetentionConfig, Role, ScopeId, ScopeKind, Sensitivity, SkillQualityConfig, SkillScanConfig,
-    TenantId,
+    ApprovalMatrix, CompositionConfig, DedupConfig, Error, Lapse, LapseAction, LapseConfig,
+    MoverConfig, PackConfig, PromotionConfig, RedactionConfig, Result, RetentionConfig, Role,
+    ScopeId, Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId,
 };
 
+use synveda_types::scope::ScopeKind;
+
 use crate::entity_store::EntityStore;
-use crate::request::{Action, AuthzContext, AuthzDecision, Principal, Resource};
+use crate::request::{
+    Action, AuthzContext, AuthzDecision, Principal, Resource, ResourceEntity, ScopeNode,
+};
 use crate::{AUTHZ_DECISIONS_TOTAL, POLICY_PACK_FALLBACKS_TOTAL};
 
 /// The default product pack (ADR-0014 decision 1): deny-first, own-chain
@@ -95,11 +99,22 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// action (ADR-0060 decision 10). All three packs grant it to `org-admin`,
 /// so the golden diff is exactly one new row per pack per scope kind and
 /// nothing else moves: the separation's value is what a *stored* pack can
-/// now express, not what these three say differently.
+/// now express, not what these three say differently. `@17`: CPR-6 re-cut the
+/// entity model over governed scopes (ADR-0073) and every pack moved with it,
+/// in three ways. `principal.home` became `principal.own_scope` and
+/// `resource.kind != "user"` became `resource.kind != "principal"` — the same
+/// rules, in the shape vocabulary that replaced the rank one. Every role list
+/// gained the grant keys beside the binding roles it already named, so a
+/// workspace `owner` administers their workspace and a `member` contributes to
+/// it without anybody minting a legacy binding. And `standard`'s sharing
+/// default stopped reading `principal.department`, which is gone: it now
+/// shares within `principal.anchors`, the scopes a grant actually reaches this
+/// caller at, so the default follows what somebody was given rather than where
+/// an org chart put them.
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 16),
-    (STANDARD, 16),
-    (OPEN_COLLABORATION, 16),
+    (REGULATED_STRICT, 17),
+    (STANDARD, 17),
+    (OPEN_COLLABORATION, 17),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -306,6 +321,10 @@ pub struct Pdp {
     tenant_type: EntityTypeName,
     principal_type: EntityTypeName,
     scope_type: EntityTypeName,
+    group_type: EntityTypeName,
+    grant_type: EntityTypeName,
+    workspace_type: EntityTypeName,
+    project_type: EntityTypeName,
     action_type: EntityTypeName,
     embedded: HashMap<&'static str, Arc<LoadedPack>>,
     tenant_packs: RwLock<HashMap<TenantId, HashMap<String, Arc<LoadedPack>>>>,
@@ -437,6 +456,10 @@ impl Pdp {
             tenant_type: type_name("Synveda::Tenant")?,
             principal_type: type_name("Synveda::Principal")?,
             scope_type: type_name("Synveda::Scope")?,
+            group_type: type_name("Synveda::Group")?,
+            grant_type: type_name("Synveda::ScopeGrant")?,
+            workspace_type: type_name("Synveda::Workspace")?,
+            project_type: type_name("Synveda::Project")?,
             action_type: type_name("Synveda::Action")?,
             embedded,
             tenant_packs: RwLock::new(HashMap::new()),
@@ -588,11 +611,11 @@ impl Pdp {
     pub fn materialise(
         &self,
         principal: &Principal,
-        chains: &[&[HierarchyNode]],
-        principal_scopes: &[HierarchyNode],
+        chains: &[&[ScopeNode]],
+        context: &AuthzContext<'_>,
     ) -> Result<EntityBatch> {
         Ok(EntityBatch {
-            entities: self.entities_over(principal, chains, principal_scopes)?,
+            entities: self.entities_over(principal, chains, context)?,
         })
     }
 
@@ -716,7 +739,7 @@ impl Pdp {
         let entities = match batch {
             Some(batch) => &batch.entities,
             None => {
-                owned = self.entities(principal, context)?;
+                owned = self.entities_over(principal, &[context.scopes], context)?;
                 &owned
             }
         };
@@ -887,7 +910,7 @@ impl Pdp {
             .iter()
             .map(|assignment| (assignment.scope_id, assignment.pack_name.as_str()))
             .collect();
-        let nodes: HashMap<ScopeId, &HierarchyNode> =
+        let nodes: HashMap<ScopeId, &ScopeNode> =
             context.scopes.iter().map(|node| (node.id, node)).collect();
         let named = |name: &str, origin: PackOrigin| -> (Arc<LoadedPack>, PackOrigin) {
             match self.lookup(tenant_id, name) {
@@ -903,7 +926,10 @@ impl Pdp {
                 }
             }
         };
-        if let Resource::Scope(id) = resource {
+        // Every resource with a scope resolves its pack from that scope's
+        // chain — a workspace is governed by the profile assigned to the scope
+        // it owns, exactly as the scope itself is (CPR-6, ADR-0073 decision 3).
+        if let Some(id) = resource.anchor_scope(context) {
             let mut current = id;
             let mut skip = skip_self;
             // Bounded by the chain length: a malformed chain cannot loop.
@@ -961,41 +987,47 @@ impl Pdp {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Materialises the Cedar entity graph for one decision (ADR-0012
-    /// decision 4, ADR-0014 decision 5, ADR-0017): both supplied chains
-    /// arrive as prebuilt fragments from the entity store — served when
-    /// the chain's shape matches, rebuilt from the chain otherwise — and
-    /// the principal entity is built per request, so `quarantined`,
-    /// `home`, and `department` keep riding the per-request identity
-    /// read (ADR-0016 decision 6).
-    fn entities(&self, principal: &Principal, context: &AuthzContext<'_>) -> Result<Entities> {
-        self.entities_over(principal, &[context.scopes], context.principal_scopes)
-    }
-
-    /// [`Self::entities`] over several resource chains at once — the batch
-    /// materialisation recall's widened sweep needs (CTX-5, ADR-0042
-    /// decision 6).
+    /// Materialises the Cedar entity graph for one or more decisions
+    /// (ADR-0012 decision 4, ADR-0014 decision 5, ADR-0017; CPR-6, ADR-0073).
     ///
-    /// A superset entity store cannot change a verdict: Cedar resolves
-    /// only the entities a request actually names, and every scope carries
-    /// the same parents whether or not its neighbours are present. So one
-    /// store built over every chain a sweep will decide answers exactly as
-    /// N stores built one per chain would — for the price of one
-    /// `Entities::from_entities`, which is where the per-decision cost
-    /// almost entirely lives.
+    /// Seven entity types, and which of them appear is decided by what the
+    /// caller supplied rather than by the action:
+    ///
+    /// - `Tenant`, one per distinct tenant in play, so a chain from a foreign
+    ///   tenant chains up to a *different* one and every membership rule fails
+    ///   closed.
+    /// - `Scope`, one per node of every supplied chain, parented along
+    ///   `parent_id` with the root parented to its tenant. Served from the
+    ///   entity store's prebuilt fragments when the chain's shape matches.
+    /// - `Group`, one per group this principal is in.
+    /// - `Workspace`, `Project` and `ScopeGrant`, one per
+    ///   [`ResourceEntity`] the caller named, each parented to the scope it
+    ///   belongs to — which is what makes every containment rule written over
+    ///   scopes reach them without being restated.
+    /// - `Principal`, built per request so quarantine, the caller's own scope,
+    ///   their anchors and their group memberships all ride the per-request
+    ///   read (ADR-0016 decision 6).
+    ///
+    /// A superset store cannot change a verdict: Cedar resolves only the
+    /// entities a request actually names, and every scope carries the same
+    /// parents whether or not its neighbours are present. So one store built
+    /// over every chain a sweep will decide answers exactly as N stores built
+    /// one per chain would — for the price of one `Entities::from_entities`,
+    /// which is where the per-decision cost almost entirely lives (CTX-5,
+    /// ADR-0042 decision 6).
     fn entities_over(
         &self,
         principal: &Principal,
-        chains: &[&[HierarchyNode]],
-        principal_scopes: &[HierarchyNode],
+        chains: &[&[ScopeNode]],
+        context: &AuthzContext<'_>,
     ) -> Result<Entities> {
         use cedar_policy::RestrictedExpression;
 
-        // Chains may share nodes (a team reading its own scope, or two
-        // candidates under one department); Cedar rejects duplicate entity
+        // Chains may share nodes (a project and its workspace, or two
+        // candidates under one org unit); Cedar rejects duplicate entity
         // entries, so deduplicate by uid.
         let mut merged: HashMap<EntityUid, Entity> = HashMap::new();
-        for chain in chains.iter().copied().chain([principal_scopes]) {
+        for chain in chains.iter().copied().chain([context.principal_scopes]) {
             if chain.is_empty() {
                 continue;
             }
@@ -1008,11 +1040,37 @@ impl Pdp {
         }
 
         // The principal's tenant entity exists even when no chain was
-        // supplied at all (a tenant resource, an unplaced principal).
+        // supplied at all (a tenant resource, a principal with no scope).
         let principal_tenant = self.tenant_uid(principal.tenant_id)?;
         merged
             .entry(principal_tenant.clone())
             .or_insert_with(|| Entity::with_uid(principal_tenant.clone()));
+
+        // The groups this caller is in. Parents of the principal, so
+        // `principal in Synveda::Group::"…"` is an entity-hierarchy check.
+        let mut group_uids: Vec<EntityUid> = Vec::with_capacity(context.groups.len());
+        for group_id in context.groups {
+            let uid = self.group_uid(*group_id)?;
+            merged.entry(uid.clone()).or_insert_with(|| {
+                new_entity(
+                    uid.clone(),
+                    HashMap::from([(
+                        "tenant".to_owned(),
+                        RestrictedExpression::new_entity_uid(principal_tenant.clone()),
+                    )]),
+                    HashSet::from([principal_tenant.clone()]),
+                )
+                .unwrap_or_else(|_| Entity::with_uid(uid.clone()))
+            });
+            group_uids.push(uid);
+        }
+
+        // The subtype and access-plane entities the decision names.
+        for resource in context.resources {
+            let (uid, entity) = self.resource_entity(principal_tenant.clone(), *resource)?;
+            merged.entry(uid).or_insert(entity);
+        }
+
         let mut principal_attrs = HashMap::from([
             (
                 "tenant".to_owned(),
@@ -1023,23 +1081,18 @@ impl Pdp {
                 RestrictedExpression::new_bool(principal.quarantined),
             ),
         ]);
-        let mut principal_parents = HashSet::from([principal_tenant]);
-        if let Some(home) = principal.scope_id {
-            // The placement makes the principal a member of its own chain
-            // (`principal in resource`), and the `home` attribute lets
-            // packs require placement outright (ADR-0014 decision 5).
-            let home_uid = self.scope_uid(home)?;
+        let mut principal_parents: HashSet<EntityUid> = HashSet::from([principal_tenant]);
+        principal_parents.extend(group_uids);
+        if let Some(own) = principal.scope_id {
+            // The caller's own scope makes them a member of its chain
+            // (`principal in resource`), and the attribute lets packs require
+            // one outright (ADR-0014 decision 5).
+            let own_uid = self.scope_uid(own)?;
             principal_attrs.insert(
-                "home".to_owned(),
-                RestrictedExpression::new_entity_uid(home_uid.clone()),
+                "own_scope".to_owned(),
+                RestrictedExpression::new_entity_uid(own_uid.clone()),
             );
-            principal_parents.insert(home_uid);
-        }
-        if let Some(department) = nearest_department(principal_scopes) {
-            principal_attrs.insert(
-                "department".to_owned(),
-                RestrictedExpression::new_entity_uid(self.scope_uid(department)?),
-            );
+            principal_parents.insert(own_uid);
         }
         if let Some(token_scope) = principal.token_scope {
             // Service identities only (AUTH-3, ADR-0018 decision 4): the
@@ -1049,6 +1102,86 @@ impl Pdp {
                 RestrictedExpression::new_entity_uid(self.scope_uid(token_scope)?),
             );
         }
+
+        // The two sets the anchor model adds (ADR-0073 decision 4).
+        //
+        // `anchors` is every scope this caller actually **holds** something at
+        // — the downward direction, so `resource in principal.anchors` is
+        // "inside something I hold" and a workspace grant reaches that
+        // workspace's projects with no row written there. It deliberately
+        // excludes anchors the caller holds nothing at: the tenant root is
+        // applicable to every request, and putting it here unheld would make
+        // that expression true for the whole tenant.
+        //
+        // Anchors are **not** made parents of the principal. Authority flows
+        // *down* from where a grant was written and never up: a project grant
+        // must not make its holder a member of the workspace above it, which
+        // is exactly what an entity parent would do.
+        //
+        // `ambit` is the **parent** of every held anchor, minus the tenant
+        // root: the neighbourhood a grant puts somebody in. It replaces the
+        // `department` attribute `standard`'s sharing default used to read
+        // (ADR-0073 decision 4) and reproduces that rule's *shape* — a grant
+        // at one team shares its neighbours — without asking what kind of
+        // thing the parent is. Excluding the root is what keeps `standard`
+        // from meaning `open-collaboration`.
+        let roots: HashSet<ScopeId> = context
+            .anchors
+            .iter()
+            .filter(|anchor| anchor.kind == ScopeKind::Tenant)
+            .map(|anchor| anchor.scope_id)
+            .collect();
+        let mut anchor_uids = Vec::new();
+        let mut ambit_uids = Vec::new();
+        let mut private_uids = Vec::new();
+        for anchor in context.anchors {
+            if anchor.is_held() {
+                anchor_uids.push(RestrictedExpression::new_entity_uid(
+                    self.scope_uid(anchor.scope_id)?,
+                ));
+                if let Some(parent) = anchor.parent_scope_id
+                    && !roots.contains(&parent)
+                    && anchor.kind != ScopeKind::Principal
+                {
+                    ambit_uids.push(RestrictedExpression::new_entity_uid(
+                        self.scope_uid(parent)?,
+                    ));
+                }
+            }
+            // `private` is every `principal`-shaped scope this caller may
+            // reach: their own, and any somebody granted them directly. The
+            // base layer forbids every other principal scope outright, so this
+            // set is the whole of what makes a private scope reachable at all.
+            if anchor.is_private()
+                && (anchor.is_direct() || Some(anchor.scope_id) == principal.scope_id)
+            {
+                private_uids.push(RestrictedExpression::new_entity_uid(
+                    self.scope_uid(anchor.scope_id)?,
+                ));
+            }
+        }
+        if let Some(own) = principal.scope_id
+            && context.anchors.iter().all(|anchor| anchor.scope_id != own)
+        {
+            // A caller's own scope is reachable by them whether or not the
+            // resolver produced an anchor for it — an anchor set gathered for
+            // a different selection must not be able to lock somebody out of
+            // their own notes.
+            private_uids.push(RestrictedExpression::new_entity_uid(self.scope_uid(own)?));
+        }
+        principal_attrs.insert(
+            "anchors".to_owned(),
+            RestrictedExpression::new_set(anchor_uids),
+        );
+        principal_attrs.insert(
+            "ambit".to_owned(),
+            RestrictedExpression::new_set(ambit_uids),
+        );
+        principal_attrs.insert(
+            "private".to_owned(),
+            RestrictedExpression::new_set(private_uids),
+        );
+
         let mut list: Vec<Entity> = merged.into_values().collect();
         list.push(new_entity(
             self.principal_uid(principal)?,
@@ -1061,13 +1194,100 @@ impl Pdp {
         })
     }
 
+    /// Builds one [`ResourceEntity`] — the subtype or access-plane object a
+    /// decision names, parented to the scope it belongs to.
+    fn resource_entity(
+        &self,
+        tenant: EntityUid,
+        resource: ResourceEntity,
+    ) -> Result<(EntityUid, Entity)> {
+        use cedar_policy::RestrictedExpression;
+
+        let tenant_attr = |attrs: &mut HashMap<String, RestrictedExpression>| {
+            attrs.insert(
+                "tenant".to_owned(),
+                RestrictedExpression::new_entity_uid(tenant.clone()),
+            );
+        };
+        match resource {
+            ResourceEntity::Workspace { id, scope_id } => {
+                let uid = self.uid(&self.workspace_type, &id.to_string())?;
+                let scope = self.scope_uid(scope_id)?;
+                let mut attrs = HashMap::new();
+                tenant_attr(&mut attrs);
+                attrs.insert(
+                    "scope".to_owned(),
+                    RestrictedExpression::new_entity_uid(scope.clone()),
+                );
+                let entity = new_entity(uid.clone(), attrs, HashSet::from([scope]))?;
+                Ok((uid, entity))
+            }
+            ResourceEntity::Project {
+                id,
+                scope_id,
+                workspace_id,
+            } => {
+                let uid = self.uid(&self.project_type, &id.to_string())?;
+                let scope = self.scope_uid(scope_id)?;
+                let workspace = self.uid(&self.workspace_type, &workspace_id.to_string())?;
+                let mut attrs = HashMap::new();
+                tenant_attr(&mut attrs);
+                attrs.insert(
+                    "scope".to_owned(),
+                    RestrictedExpression::new_entity_uid(scope.clone()),
+                );
+                attrs.insert(
+                    "workspace".to_owned(),
+                    RestrictedExpression::new_entity_uid(workspace),
+                );
+                // Parented to its own scope only: the workspace above it is
+                // already that scope's ancestor, so a second parent would be
+                // the same edge said twice.
+                let entity = new_entity(uid.clone(), attrs, HashSet::from([scope]))?;
+                Ok((uid, entity))
+            }
+            ResourceEntity::Group { id } => {
+                let uid = self.group_uid(id)?;
+                let mut attrs = HashMap::new();
+                tenant_attr(&mut attrs);
+                let entity = new_entity(uid.clone(), attrs, HashSet::from([tenant]))?;
+                Ok((uid, entity))
+            }
+            ResourceEntity::Grant {
+                id,
+                scope_id,
+                role,
+                source,
+            } => {
+                let uid = self.uid(&self.grant_type, &id.to_string())?;
+                let scope = self.scope_uid(scope_id)?;
+                let mut attrs = HashMap::new();
+                tenant_attr(&mut attrs);
+                attrs.insert(
+                    "scope".to_owned(),
+                    RestrictedExpression::new_entity_uid(scope.clone()),
+                );
+                attrs.insert(
+                    "role".to_owned(),
+                    RestrictedExpression::new_string(role.as_str().to_owned()),
+                );
+                attrs.insert(
+                    "source".to_owned(),
+                    RestrictedExpression::new_string(source.as_str().to_owned()),
+                );
+                let entity = new_entity(uid.clone(), attrs, HashSet::from([scope]))?;
+                Ok((uid, entity))
+            }
+        }
+    }
+
     /// Builds one chain's fragment entities (ADR-0017 decision 4): a
     /// `Scope` entity per node — parented along `parent_id`, the root to
     /// its tenant entity — plus the chain's distinct `Tenant` entities.
     /// Every distinct tenant in play gets its entity so a chain from a
     /// foreign tenant chains up to a *different* tenant entity and
     /// membership rules fail closed.
-    fn chain_entities(&self, chain: &[HierarchyNode]) -> Result<Vec<Entity>> {
+    fn chain_entities(&self, chain: &[ScopeNode]) -> Result<Vec<Entity>> {
         use cedar_policy::RestrictedExpression;
 
         let mut list = Vec::with_capacity(chain.len() + 1);
@@ -1094,14 +1314,18 @@ impl Pdp {
                         RestrictedExpression::new_entity_uid(node_tenant),
                     ),
                     (
+                        // A **shape**, never a rank (ADR-0070): `tenant`,
+                        // `org_unit`, `workspace`, `project` or `principal`.
+                        // No pack compares two of these for order, and there
+                        // is nothing here to compare.
                         "kind".to_owned(),
                         RestrictedExpression::new_string(node.kind.as_str().to_owned()),
                     ),
                     (
                         // AUTH-4, ADR-0059 decision 9. Carried on the node
                         // rather than supplied beside it, so the fragment
-                        // shape below covers it and no cached fragment can
-                        // serve an unsealed answer for a sealed scope.
+                        // shape covers it and no cached fragment can serve an
+                        // unsealed answer for a sealed scope.
                         "sealed".to_owned(),
                         RestrictedExpression::new_bool(node.sealed),
                     ),
@@ -1134,6 +1358,10 @@ impl Pdp {
         let resource_uid = match resource {
             Resource::Tenant(id) => self.tenant_uid(id)?,
             Resource::Scope(id) => self.scope_uid(id)?,
+            Resource::Workspace(id) => self.uid(&self.workspace_type, &id.to_string())?,
+            Resource::Project(id) => self.uid(&self.project_type, &id.to_string())?,
+            Resource::Group(id) => self.group_uid(id)?,
+            Resource::Grant(id) => self.uid(&self.grant_type, &id.to_string())?,
         };
         let mut pairs = vec![(
             "roles".to_owned(),
@@ -1200,6 +1428,10 @@ impl Pdp {
         self.uid(&self.scope_type, &id.to_string())
     }
 
+    fn group_uid(&self, id: synveda_types::GroupId) -> Result<EntityUid> {
+        self.uid(&self.group_type, &id.to_string())
+    }
+
     /// Tenant-qualified so equal subjects from different IdPs/tenants can
     /// never alias to one entity.
     fn principal_uid(&self, principal: &Principal) -> Result<EntityUid> {
@@ -1233,22 +1465,22 @@ struct RequestContext {
     sensitivity: Option<Sensitivity>,
 }
 
-/// The principal's effective roles at the resource (AUTHZ-3, ADR-0015
-/// decision 3): from the caller-supplied binding rows, tenant-wide
-/// bindings always apply; a node binding applies iff the bound node is on
-/// the resource's chain — that one rule is "inherited downward". For a
-/// tenant resource the chain is empty, so only tenant-wide bindings
-/// apply: a root-scoped steward manages nodes, never the tenant plane.
-/// Foreign-tenant rows are dropped defensively (the store's RLS already
-/// makes them unrepresentable). Sorted for a deterministic decision log.
-/// The principal's effective role set at `resource` (ADR-0015
-/// decision 3): tenant-wide bindings always, node bindings when the bound
-/// node is on the resource's chain.
+/// The principal's effective **legacy** roles at the resource (AUTHZ-3,
+/// ADR-0015 decision 3): tenant-wide bindings always, node bindings when the
+/// bound node is on the resource's chain. For a tenant resource the chain is
+/// empty, so only tenant-wide bindings apply — a root-scoped steward manages
+/// nodes, never the tenant plane. Foreign-tenant rows are dropped defensively
+/// (the store's RLS already makes them unrepresentable). Sorted for a
+/// deterministic decision log.
 ///
 /// Public because FLOW-3 records the roles an approval counted under
 /// (ADR-0032 decision 5), and that set has to be *the same* set the
 /// `ProposalReview` decision weighed — one implementation, so the two can
 /// never drift into disagreeing about who held what.
+///
+/// This is the vocabulary of the hierarchy the programme has not deleted yet.
+/// The governed scope model's answer is [`effective_role_keys_at`], and the
+/// two are unioned into `context.roles` by [`effective_roles`].
 #[must_use]
 pub fn effective_roles_at(
     principal: &Principal,
@@ -1256,8 +1488,8 @@ pub fn effective_roles_at(
     context: &AuthzContext<'_>,
 ) -> Vec<Role> {
     let chain: HashSet<ScopeId> = match resource {
-        Resource::Scope(_) => context.scopes.iter().map(|node| node.id).collect(),
-        Resource::Tenant(_) => HashSet::new(),
+        Resource::Tenant(_) | Resource::Group(_) => HashSet::new(),
+        _ => context.scopes.iter().map(|node| node.id).collect(),
     };
     let mut roles: Vec<Role> = context
         .role_bindings
@@ -1274,15 +1506,95 @@ pub fn effective_roles_at(
     roles
 }
 
+/// The principal's effective **role keys** at the resource (CPR-6, ADR-0073
+/// decision 5): the grants, direct and group-derived, that actually reach it.
+///
+/// An anchor's roles apply when the anchor's scope is on the resource's own
+/// chain — which is "at or above the resource", the inheritance rule
+/// [`crate::request::AuthzContext::anchors`] was resolved under. Two things
+/// narrow it:
+///
+/// - **Principal privacy.** When the resource is somebody's own scope, only an
+///   anchor *at* that scope applies ([`inherits_into`]). A tenant-root grant is
+///   the widest thing the model can express and it still does not reach into
+///   one person's notes.
+/// - **The tenant plane.** [`Resource::Tenant`] has no chain, so only the
+///   anchor at the `tenant`-shaped scope applies — a grant written at a
+///   workspace confers nothing over the whole boundary.
+///
+/// A group is deliberately in neither list: [`Resource::Group`] is tenant-wide
+/// and takes tenant-root authority, which is the same shape `DirectoryManage`
+/// has and for the same reason.
+///
+/// Sorted and deduplicated, for [`effective_roles_at`]'s reason.
+#[must_use]
+pub fn effective_role_keys_at(resource: Resource, context: &AuthzContext<'_>) -> Vec<RoleKey> {
+    let mut keys: Vec<RoleKey> = Vec::new();
+    match resource {
+        Resource::Tenant(_) | Resource::Group(_) => {
+            // The root is identified by its **shape**, not by why the resolver
+            // put it in the set: a scope that is both the tenant root and a
+            // scope this caller was granted merges under the more specific
+            // source, and reading `source` here would then miss exactly the
+            // tenant-wide grant this branch exists to find.
+            for anchor in context.anchors {
+                if anchor.kind == ScopeKind::Tenant {
+                    keys.extend(anchor.roles.iter().copied());
+                }
+            }
+        }
+        _ => {
+            let Some(head) = context.scopes.first() else {
+                return keys;
+            };
+            let target = head.id;
+            let inherits = inherits_into(head.kind);
+            let chain: HashSet<ScopeId> = context.scopes.iter().map(|node| node.id).collect();
+            for anchor in context.anchors {
+                if !chain.contains(&anchor.scope_id) {
+                    continue;
+                }
+                if !inherits && anchor.scope_id != target {
+                    continue;
+                }
+                keys.extend(anchor.roles.iter().copied());
+            }
+        }
+    }
+    keys.sort_unstable();
+    keys.dedup();
+    keys
+}
+
+/// `context.roles`: both vocabularies, as one set of strings.
+///
+/// The two closed vocabularies coexist while both scope trees do — a
+/// [`Role`] binds on the old hierarchy, a [`RoleKey`] is granted on a governed
+/// scope — and they meet here because a Cedar `Set<String>` is what a pack
+/// reads. They cannot be confused into widening each other, and the reason is
+/// structural rather than careful naming: the two trees are disjoint, so an
+/// anchor's scope id is never a node of a hierarchy chain and a node binding
+/// is never at a governed scope. What *does* reach both is a tenant-wide
+/// binding and a tenant-root grant, and the overlap there — `viewer` and
+/// `curator`, the two words both vocabularies use — is priced identically by
+/// every shipped pack.
 fn effective_roles(
     principal: &Principal,
     resource: Resource,
     context: &AuthzContext<'_>,
 ) -> Vec<&'static str> {
-    effective_roles_at(principal, resource, context)
+    let mut roles: Vec<&'static str> = effective_roles_at(principal, resource, context)
         .into_iter()
         .map(|role| role.as_str())
-        .collect()
+        .collect();
+    roles.extend(
+        effective_role_keys_at(resource, context)
+            .into_iter()
+            .map(|key| key.as_str()),
+    );
+    roles.sort_unstable();
+    roles.dedup();
+    roles
 }
 
 /// The lapse vocabulary's view of one PDP action: `Some` when a standing
@@ -1311,7 +1623,7 @@ pub const fn lapsable(action: Action) -> Option<LapseAction> {
 /// allows a scope the plan never offers is a grant nobody can see.
 fn covers(
     lapse: &Lapse,
-    principal_scopes: &[HierarchyNode],
+    principal_scopes: &[ScopeNode],
     action: LapseAction,
     resource: ScopeId,
 ) -> bool {
@@ -1335,9 +1647,17 @@ fn lapsing<'a>(
     context: AuthzContext<'a>,
 ) -> impl Iterator<Item = &'a Lapse> {
     let wanted = lapsable(action);
+    // A lapse names a scope. Nothing else it could name is one: a workspace or
+    // a project is decided at its own scope and would be reached through that,
+    // and a lapse over a group or a grant is not in the closed vocabulary
+    // (ADR-0037 decision 2).
     let target = match resource {
         Resource::Scope(id) => Some(id),
-        Resource::Tenant(_) => None,
+        Resource::Tenant(_)
+        | Resource::Workspace(_)
+        | Resource::Project(_)
+        | Resource::Group(_)
+        | Resource::Grant(_) => None,
     };
     context.lapses.iter().filter(move |lapse| {
         let (Some(wanted), Some(target), Some(sensitivity)) = (wanted, target, context.sensitivity)
@@ -1364,7 +1684,7 @@ fn lapsing<'a>(
 /// is the same plan — CTX-2's determinism AC reaches down here.
 #[must_use]
 pub fn lapsed_scopes<'a>(
-    principal_scopes: &[HierarchyNode],
+    principal_scopes: &[ScopeNode],
     lapses: &'a [Lapse],
     action: LapseAction,
 ) -> Vec<&'a Lapse> {
@@ -1390,18 +1710,6 @@ fn new_entity(
     Entity::new(uid, attrs, parents).map_err(|err| Error::Internal {
         message: format!("materialise entity: {err}"),
     })
-}
-
-/// The principal's department: the deepest department-kind node of its
-/// placement chain. A chain is a path with strictly increasing ranks
-/// (ADR-0011), so more than one can only mean malformed caller data —
-/// deepest is then the conservative pick (the narrower subtree).
-fn nearest_department(chain: &[HierarchyNode]) -> Option<ScopeId> {
-    chain
-        .iter()
-        .filter(|node| node.kind == ScopeKind::Department)
-        .max_by_key(|node| node.depth)
-        .map(|node| node.id)
 }
 
 /// Parse + schema-validate on top of the invariant base layer (ADR-0014

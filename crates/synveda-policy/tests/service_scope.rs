@@ -18,6 +18,7 @@
 //! ```
 
 use chrono::Utc;
+use synveda_policy::ScopeNode;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
 use synveda_types::{HierarchyNode, Role, RoleBinding, ScopeId, ScopeKind, Sensitivity, TenantId};
 
@@ -34,7 +35,11 @@ impl Fixture {
             .unwrap_or_else(|| panic!("fixture has no node {slug}"))
     }
 
-    fn chain(&self, slug: &str) -> Vec<HierarchyNode> {
+    /// The chain the PDP takes: the old hierarchy's rows projected onto
+    /// the shape vocabulary at the caller's edge (CPR-6, ADR-0073
+    /// decision 1). The fixture still holds `HierarchyNode`s because the
+    /// hierarchy plane still exists; nothing below this line does.
+    fn chain(&self, slug: &str) -> Vec<ScopeNode> {
         let mut chain = vec![self.node(slug).clone()];
         let mut current = chain[0].parent_id;
         while let Some(id) = current {
@@ -46,7 +51,7 @@ impl Fixture {
             current = parent.parent_id;
             chain.push(parent.clone());
         }
-        chain
+        chain.iter().map(ScopeNode::from_hierarchy).collect()
     }
 
     fn binding(&self, subject: &str, slug: Option<&str>, role: Role) -> RoleBinding {

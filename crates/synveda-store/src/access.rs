@@ -1163,6 +1163,152 @@ pub async fn members_of(
     Ok(entries)
 }
 
+// ── The directory projection ─────────────────────────────────────────────────
+
+/// Projects one directory group onto the governed access model (CPR-6,
+/// ADR-0073 decision 9): a [`Group`] with [`GroupSource::Directory`], and its
+/// membership replaced from the subjects the directory named.
+///
+/// **This introduces no enterprise membership table**, and that is the whole
+/// point of the function existing here rather than beside `scim_groups`. A
+/// directory group and a group somebody typed are the *same row shape* in the
+/// *same table*, differing in one column — `source` — which decides only
+/// whether the product refuses to edit it
+/// ([`GrantSource::is_directory_managed`]). Everything downstream — the anchor
+/// resolver, `members_of`, the PDP's `Group` entity — reads one table and
+/// cannot tell the difference, which is ADR-0068 decision 1 applied to
+/// membership: one runtime, and the directory is an adapter into it.
+///
+/// The projection is a **replacement**, not a delta, for [`GroupUpdate`]'s
+/// reason: a membership list has no natural precondition, so an add/remove
+/// pair races and a full replacement cannot. It is also what a directory
+/// actually sends.
+///
+/// `directory_ref` is the external id the directory knows the group by — the
+/// key this upserts on, so a rename in the directory renames the group here
+/// rather than creating a second one.
+///
+/// Grants are deliberately untouched. A directory says who is *in* a group; it
+/// does not say what the group may do, and a sync that invented grants would
+/// be a directory writing policy. What a group confers is a `scope_grants` row
+/// somebody in this product wrote, naming it.
+///
+/// Must run inside a transaction: the upsert and the membership replacement
+/// are separate statements.
+#[tracing::instrument(
+    name = "store.access.sync_directory_group",
+    skip_all,
+    fields(tenant.id = %tenant_id, group.directory_ref = %directory_ref, members = members.len()),
+    err(Display)
+)]
+pub async fn sync_directory_group(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    directory_ref: &str,
+    slug: &str,
+    display_name: &str,
+    members: &[String],
+) -> Result<Group> {
+    validate_slug(slug)?;
+    validate_display_name(display_name)?;
+    validate_directory_ref(directory_ref)?;
+    for principal_id in members {
+        validate_principal_id(principal_id)?;
+    }
+
+    let row = sqlx::query_as!(
+        GroupRow,
+        r#"
+        insert into groups
+            (id, tenant_id, slug, display_name, description, source, directory_ref,
+             status, revision, created_by)
+        values ($1, $2, $3, $4, null, 'directory', $5, 'active', 1, null)
+        on conflict (tenant_id, directory_ref) where directory_ref is not null
+        do update set display_name = excluded.display_name,
+                      status = 'active',
+                      revision = groups.revision + 1,
+                      updated_at = now()
+        returning id, tenant_id, slug, display_name, description, source,
+                  directory_ref, status, revision, created_by, created_at, updated_at
+        "#,
+        GroupId::new().as_uuid(),
+        tenant_id.as_uuid(),
+        slug,
+        display_name,
+        directory_ref,
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    let group: Group = row.try_into()?;
+
+    replace_members(
+        &mut *conn,
+        tenant_id,
+        group.id,
+        members,
+        GrantSource::Directory,
+        None,
+    )
+    .await?;
+    metrics::counter!(
+        ACCESS_MUTATIONS_TOTAL,
+        "object" => "group",
+        "operation" => "update",
+    )
+    .increment(1);
+    Ok(group)
+}
+
+/// Retires a directory group the directory has deleted.
+///
+/// Archived rather than deleted, for the reason every lifecycle in this
+/// product is a status transition: a grant may name it, and a grant naming a
+/// row that stopped existing is a grant nobody can review. An archived group
+/// resolves to **nobody** — `members_of` and the anchor resolver both join on
+/// `status = 'active'` — so retiring one takes its access away on the next
+/// request without taking the record away.
+///
+/// Returns `None` when the tenant has no group with that reference.
+#[tracing::instrument(
+    name = "store.access.retire_directory_group",
+    skip_all,
+    fields(tenant.id = %tenant_id, group.directory_ref = %directory_ref),
+    err(Display)
+)]
+pub async fn retire_directory_group(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    directory_ref: &str,
+) -> Result<Option<Group>> {
+    let row = sqlx::query_as!(
+        GroupRow,
+        r#"
+        update groups
+           set status = 'archived', revision = revision + 1, updated_at = now()
+         where tenant_id = $1 and directory_ref = $2 and source = 'directory'
+        returning id, tenant_id, slug, display_name, description, source,
+                  directory_ref, status, revision, created_by, created_at, updated_at
+        "#,
+        tenant_id.as_uuid(),
+        directory_ref,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let group: Group = row.try_into()?;
+    metrics::counter!(
+        ACCESS_MUTATIONS_TOTAL,
+        "object" => "group",
+        "operation" => "update",
+    )
+    .increment(1);
+    Ok(Some(group))
+}
+
 // ── Invitations ──────────────────────────────────────────────────────────────
 
 /// What [`create_invite`] needs.

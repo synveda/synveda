@@ -40,9 +40,13 @@ use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
-use synveda_policy::{Action, EntityBatch, Resource, effective_roles_at};
-use synveda_store::{hierarchy, rls};
-use synveda_types::{Error, HierarchyNode, Result, Role, ScopeId, Sensitivity};
+use synveda_policy::{
+    Action, AuthzContext, EntityBatch, Resource, ScopeNode, effective_role_keys_at,
+    effective_roles_at,
+};
+use synveda_store::{hierarchy, policy_assignments, rls, scopes};
+use synveda_types::access::RoleKey;
+use synveda_types::{Error, HierarchyNode, PolicyAssignment, Result, Role, ScopeId, Sensitivity};
 
 use crate::app::AppState;
 use crate::audit;
@@ -160,6 +164,13 @@ pub struct TenantCapabilities {
     /// beside it ran under.
     #[schema(value_type = Vec<String>)]
     roles: Vec<Role>,
+    /// The caller's role keys at the **tenant root scope** — the grants that
+    /// reach the whole boundary (CPR-6, ADR-0073 decision 5). Separate from
+    /// `roles` rather than merged into it because the two are different closed
+    /// vocabularies over different trees, and a client that displayed them as
+    /// one list would be inventing a translation nothing in this product has.
+    #[schema(value_type = Vec<String>)]
+    role_keys: Vec<RoleKey>,
     /// Every operand-free tenant-plane action, by its stable machine name.
     #[schema(value_type = BTreeMap<String, bool>)]
     actions: BTreeMap<&'static str, bool>,
@@ -189,10 +200,9 @@ pub async fn at_tenant(state: &AppState) -> Result<TenantCapabilities> {
     let input = authz::gather(state, &mut tx, None).await?;
     let resource = Resource::Tenant(tenant_id);
     let context = input.context();
-    let batch =
-        state
-            .pdp
-            .materialise(&input.principal, &[&input.chain], &input.principal_scopes)?;
+    let batch = state
+        .pdp
+        .materialise(&input.principal, &[&input.chain_nodes], &context)?;
 
     let mut actions = BTreeMap::new();
     for action in Action::PROBED_AT_TENANT {
@@ -214,14 +224,147 @@ pub async fn at_tenant(state: &AppState) -> Result<TenantCapabilities> {
         role_assign.insert(role.as_str(), decision.allowed);
     }
     let roles = effective_roles_at(&input.principal, resource, &context);
+    let role_keys = effective_role_keys_at(resource, &context);
     commit(tx).await?;
 
     metrics::counter!(CAPABILITY_PROBES_TOTAL, "op" => "at_tenant", "outcome" => "ok").increment(1);
     Ok(TenantCapabilities {
         roles,
+        role_keys,
         actions,
         role_assign,
     })
+}
+
+/// The most anchors one `/v1/me` answers capabilities for.
+///
+/// A bound the response reports rather than hides, exactly like
+/// [`MAX_BATCH_SCOPES`]: a caller with two hundred grants gets the most
+/// specific thirty-two and is told how many were left. Thirty-two because each
+/// anchor costs one chain read, one assignment read and
+/// [`Action::PROBED_AT_SCOPE`]'s worth of Cedar evaluations against a shared
+/// entity batch, and `/v1/me` is the call a client makes on every page load.
+pub(crate) const MAX_ANCHOR_CAPABILITIES: usize = 32;
+
+/// What the caller may do at **one anchor** — a real decision at a real scope,
+/// never a shape derived from an edition (CPR-6, ADR-0073 decision 8).
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct AnchorCapabilities {
+    /// The scope.
+    #[schema(value_type = String, format = "uuid")]
+    pub scope_id: ScopeId,
+    /// Its shape: `tenant`, `org_unit`, `workspace`, `project` or `principal`.
+    pub kind: String,
+    /// Why it is applicable: `principal_scope`, `selected_project`,
+    /// `selected_workspace`, `grant`, `org_unit` or `tenant_root`.
+    pub source: String,
+    /// Whether a grant is written at this very scope rather than inherited
+    /// from an ancestor — the "why" a member list would otherwise have to be
+    /// read to answer.
+    pub direct: bool,
+    /// The role keys effective here.
+    #[schema(value_type = Vec<String>)]
+    pub roles: Vec<RoleKey>,
+    /// Every operand-free scope action, decided here, by its stable machine
+    /// name. **A forecast, never a grant** — the whole of this module's first
+    /// doc section applies unchanged.
+    #[schema(value_type = BTreeMap<String, bool>)]
+    pub actions: BTreeMap<&'static str, bool>,
+}
+
+/// Decides [`Action::PROBED_AT_SCOPE`] at each of the caller's anchors.
+///
+/// One `gather` feeds all of them — the principal, the anchors and the groups
+/// are properties of the *caller*, not of the scope — but each anchor is
+/// decided under **its own chain and its own assignments**, because the
+/// effective pack is a property of the resource (ADR-0014 decision 3) and a
+/// workspace governed by a stricter profile than the tenant default must
+/// answer under that profile.
+///
+/// Returns the answers and how many anchors the bound dropped.
+pub(crate) async fn at_anchors(
+    state: &AppState,
+    conn: &mut sqlx::PgConnection,
+    input: &DecisionInput,
+) -> Result<(Vec<AnchorCapabilities>, usize)> {
+    let tenant_id = input.principal.tenant_id;
+    let all = input.anchors.as_slice();
+    let answered = all.len().min(MAX_ANCHOR_CAPABILITIES);
+    let not_answered = all.len() - answered;
+
+    // Every anchor's chain, read once, so the entity batch covers them all.
+    let mut chains: Vec<Vec<ScopeNode>> = Vec::with_capacity(answered);
+    let mut assignments: Vec<Vec<PolicyAssignment>> = Vec::with_capacity(answered);
+    for anchor in &all[..answered] {
+        let Some(scope) = scopes::get(&mut *conn, tenant_id, anchor.scope_id).await? else {
+            // Resolved a moment ago and gone now: plan nothing for it rather
+            // than answer about a scope that no longer exists.
+            chains.push(Vec::new());
+            assignments.push(Vec::new());
+            continue;
+        };
+        let mut nodes = vec![ScopeNode::from_scope(&scope, false)];
+        for ancestor in scopes::ancestors(&mut *conn, tenant_id, scope.id).await? {
+            nodes.push(ScopeNode::from_scope(&ancestor, false));
+        }
+        let ids: Vec<ScopeId> = nodes.iter().map(|node| node.id).collect();
+        assignments.push(policy_assignments::for_scopes(&mut *conn, tenant_id, &ids).await?);
+        chains.push(nodes);
+    }
+
+    let borrowed: Vec<&[ScopeNode]> = chains.iter().map(Vec::as_slice).collect();
+    let seed = anchor_context(input, &[], &[]);
+    let batch = state.pdp.materialise(&input.principal, &borrowed, &seed)?;
+
+    let mut out = Vec::with_capacity(answered);
+    for (index, anchor) in all[..answered].iter().enumerate() {
+        if chains[index].is_empty() {
+            continue;
+        }
+        let context = anchor_context(input, &chains[index], &assignments[index]);
+        let resource = Resource::Scope(anchor.scope_id);
+        let mut actions = BTreeMap::new();
+        for action in Action::PROBED_AT_SCOPE {
+            let decision =
+                state
+                    .pdp
+                    .authorize_with(&batch, &input.principal, action, resource, &context)?;
+            actions.insert(action.as_str(), decision.allowed);
+        }
+        out.push(AnchorCapabilities {
+            scope_id: anchor.scope_id,
+            kind: anchor.kind.as_str().to_owned(),
+            source: anchor.source.as_str().to_owned(),
+            direct: anchor.is_direct(),
+            roles: effective_role_keys_at(resource, &context),
+            actions,
+        });
+    }
+    metrics::counter!(CAPABILITY_PROBES_TOTAL, "op" => "at_anchors", "outcome" => "ok")
+        .increment(1);
+    Ok((out, not_answered))
+}
+
+/// The decision context for one anchor: the caller's own principal, anchors
+/// and groups, with the anchor's chain and assignments.
+fn anchor_context<'a>(
+    input: &'a DecisionInput,
+    scopes: &'a [ScopeNode],
+    assignments: &'a [PolicyAssignment],
+) -> AuthzContext<'a> {
+    AuthzContext {
+        scopes,
+        principal_scopes: &input.principal_nodes,
+        anchors: input.anchors.as_slice(),
+        groups: &input.groups,
+        resources: &input.resources,
+        assignments,
+        default_pack: input.default_pack.as_deref(),
+        role_bindings: &input.role_bindings,
+        grant: None,
+        lapses: &[],
+        sensitivity: None,
+    }
 }
 
 /// `GET /v1/hierarchy/nodes/{id}/capabilities` — what this caller may do
@@ -447,7 +590,7 @@ fn answer_for(
     let batch: EntityBatch =
         state
             .pdp
-            .materialise(&input.principal, &[&input.chain], &input.principal_scopes)?;
+            .materialise(&input.principal, &[&input.chain_nodes], &context)?;
 
     let mut actions = BTreeMap::new();
     for action in Action::PROBED_AT_SCOPE {
