@@ -18,6 +18,10 @@ pub mod console;
 mod context;
 pub mod directory;
 mod flow;
+// The invitation token (CPR-5, ADR-0072 decision 5): the same mint/hash/
+// show-once shape as `scim`, for the same reason — it is a bearer credential
+// that mints access.
+pub mod invite;
 mod mapping;
 mod oidc;
 pub mod scim;

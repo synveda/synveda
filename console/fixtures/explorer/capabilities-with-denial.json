@@ -26,10 +26,15 @@
       "hierarchy.update": true,
       "lapse.grant": true,
       "lapse.revoke": true,
+      "membership.grant": true,
+      "membership.read": true,
       "memory.classify": true,
       "memory.write": true,
       "policy.assign": false,
       "policy.read": true,
+      "project.create": true,
+      "project.read": true,
+      "project.update": true,
       "prompt.write": true,
       "proposal.open": true,
       "proposal.read": true,
@@ -40,7 +45,10 @@
       "service_identity.manage": true,
       "service_identity.read": true,
       "skill.quality.override": true,
-      "skill.write": true
+      "skill.write": true,
+      "workspace.create": true,
+      "workspace.read": true,
+      "workspace.update": true
     },
     "read_tiers": {
       "context_pack.read": [

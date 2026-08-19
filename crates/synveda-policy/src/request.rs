@@ -84,6 +84,55 @@ pub enum Action {
     /// separate authority over it would be one nobody could describe without
     /// describing this one.
     ProjectUpdate,
+    /// Read who holds what on the access plane: a scope's effective members,
+    /// the tenant's groups, its grants and its outstanding invitations
+    /// (CPR-5, ADR-0072 decision 7).
+    ///
+    /// One read authority over the whole plane rather than one per noun, on
+    /// [`Action::DirectoryManage`]'s argument: a list of who may act and a
+    /// list of outstanding invitations to act are the same disclosure seen
+    /// from two ends, and splitting them would create a role whose only power
+    /// is reconnaissance over the other half.
+    ///
+    /// It is separate from [`Action::WorkspaceRead`] because a workspace's
+    /// *name* discloses nothing and its *membership* discloses who works on
+    /// what — a pack must be able to let a contributor see the workspace they
+    /// contribute to without handing them the org chart.
+    MembershipRead,
+    /// Assign or revoke access at the resource scope: create and revoke
+    /// grants, add and remove members, issue and withdraw invitations
+    /// (ADR-0072 decision 7).
+    ///
+    /// Issuing an invitation takes this action rather than one of its own,
+    /// and that is the whole of what an invitation is: deferred granting. An
+    /// authority to invite that was weaker than the authority to grant would
+    /// be a way around the second, and one that was stronger would be an
+    /// action nobody could describe.
+    MembershipGrant,
+    /// Create, rename, retire and re-populate a group (ADR-0072 decision 7).
+    ///
+    /// Separate from [`Action::MembershipGrant`] on [`Action::ChannelRollback`]'s
+    /// separability rule, and the distinction is real: a group says who exists
+    /// together, a grant says what they may do, and a deployment must be able
+    /// to let somebody curate the first without conferring the second. A group
+    /// with no grant naming it confers nothing at all.
+    GroupManage,
+    /// Redeem an invitation (ADR-0072 decision 8).
+    ///
+    /// Every shipped pack permits this to any principal the base layer has
+    /// not already forbidden, which is the point: the *token* is the
+    /// authority, and a person holding a valid invitation who is refused for
+    /// want of a role is a person the product invited and then turned away.
+    ///
+    /// It is an action rather than an exemption so that the invariant floor
+    /// still runs — a quarantined principal and a sealed scope refuse it like
+    /// everything else — and so that a deployment which wants to switch the
+    /// mechanism off can say so in a pack instead of in a deployment flag.
+    ///
+    /// Tenant-only: a service identity's token confinement therefore forbids
+    /// it outright (ADR-0018 decision 4), which is correct — an agent must not
+    /// redeem a person's invitation.
+    InviteAccept,
     /// Include memories attached to the resource scope in the caller's
     /// composition — the seam inject/recall stand on (AUTHZ-2, ADR-0014
     /// decision 5).
@@ -365,7 +414,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 40] = [
+    pub const ALL: [Action; 44] = [
         Action::HierarchyCreate,
         Action::HierarchyRead,
         Action::HierarchyUpdate,
@@ -376,6 +425,10 @@ impl Action {
         Action::ProjectRead,
         Action::ProjectCreate,
         Action::ProjectUpdate,
+        Action::MembershipRead,
+        Action::MembershipGrant,
+        Action::GroupManage,
+        Action::InviteAccept,
         Action::MemoryRead,
         Action::MemoryWrite,
         Action::MemoryClassify,
@@ -424,7 +477,7 @@ impl Action {
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 32] = [
+    pub const PROBED_AT_SCOPE: [Action; 34] = [
         Action::HierarchyCreate,
         Action::HierarchyRead,
         Action::HierarchyUpdate,
@@ -435,6 +488,8 @@ impl Action {
         Action::ProjectRead,
         Action::ProjectCreate,
         Action::ProjectUpdate,
+        Action::MembershipRead,
+        Action::MembershipGrant,
         Action::MemoryWrite,
         Action::MemoryClassify,
         Action::PromptWrite,
@@ -465,7 +520,7 @@ impl Action {
     /// much shorter than the scope set and that is the honest shape: most
     /// of this vocabulary is about a node, and an action that is only ever
     /// taken at a node has no tenant-level answer to give.
-    pub const PROBED_AT_TENANT: [Action; 18] = [
+    pub const PROBED_AT_TENANT: [Action; 22] = [
         Action::HierarchyCreate,
         Action::HierarchyRead,
         Action::HierarchyUpdate,
@@ -476,6 +531,10 @@ impl Action {
         Action::ProjectRead,
         Action::ProjectCreate,
         Action::ProjectUpdate,
+        Action::MembershipRead,
+        Action::MembershipGrant,
+        Action::GroupManage,
+        Action::InviteAccept,
         Action::QuarantineRead,
         Action::PolicyRead,
         Action::PolicyAssign,
@@ -515,6 +574,10 @@ impl Action {
             Action::ProjectRead => "project.read",
             Action::ProjectCreate => "project.create",
             Action::ProjectUpdate => "project.update",
+            Action::MembershipRead => "membership.read",
+            Action::MembershipGrant => "membership.grant",
+            Action::GroupManage => "group.manage",
+            Action::InviteAccept => "invite.accept",
             Action::MemoryRead => "memory.read",
             Action::MemoryWrite => "memory.write",
             Action::MemoryClassify => "memory.classify",
@@ -561,6 +624,10 @@ impl Action {
             Action::ProjectRead => "ProjectRead",
             Action::ProjectCreate => "ProjectCreate",
             Action::ProjectUpdate => "ProjectUpdate",
+            Action::MembershipRead => "MembershipRead",
+            Action::MembershipGrant => "MembershipGrant",
+            Action::GroupManage => "GroupManage",
+            Action::InviteAccept => "InviteAccept",
             Action::MemoryRead => "MemoryRead",
             Action::MemoryWrite => "MemoryWrite",
             Action::MemoryClassify => "MemoryClassify",
@@ -755,6 +822,11 @@ mod probe_vocabulary_tests {
             .chain(std::iter::once(&Action::AuditRead))
             .chain(std::iter::once(&Action::DirectoryManage))
             .chain(std::iter::once(&Action::DirectorySealAuthorise))
+            // CPR-5's two tenant-plane actions: a group is tenant-wide and an
+            // invitation is redeemed at the tenant, so neither has a per-scope
+            // question to answer (ADR-0072 decision 7).
+            .chain(std::iter::once(&Action::GroupManage))
+            .chain(std::iter::once(&Action::InviteAccept))
         {
             if !seen.insert(action.as_str()) {
                 twice.push(action.as_str());

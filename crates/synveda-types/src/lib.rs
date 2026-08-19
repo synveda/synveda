@@ -6,6 +6,11 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+// Membership and access assignment over governed scopes (CPR-5, ADR-0072).
+// Public as a module for `scope`'s and `workspace`'s reason: `RoleKey` here
+// and `crate::Role` are two closed vocabularies with two overlapping words,
+// and the module path is what says which one a caller means.
+pub mod access;
 mod approval;
 mod asset;
 mod channel;
@@ -67,9 +72,9 @@ pub use error::{Error, Result};
 pub use graph::{Depth, Graph};
 pub use hierarchy::{HierarchyNode, ScopeKind};
 pub use id::{
-    DirectoryGroupId, DirectoryUserId, GraphEdgeId, GraphVertexId, IdentityId, LapseId,
-    ObserveEventId, ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId, ScopeId,
-    TenantId, WorkspaceId,
+    DirectoryGroupId, DirectoryUserId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId,
+    InviteId, LapseId, ObserveEventId, ProjectId, ProposalId, RecordId, RepositoryId,
+    ScimCredentialId, ScopeId, TenantId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use lapse::{

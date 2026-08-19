@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Synveda",
-    "description": "Governed organisational memory and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface added by CPR-4: `/v1/me`, and the workspace, project and repository planes. The rest of the `/v1` surface — observe, inject, recall, proposals, channels, the registries and the admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`.\n\n**Preconditions.** Every update takes a required `expected_revision`. A mismatch is `409` and writes nothing.",
+    "description": "Governed organisational memory and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface added by CPR-4 and CPR-5: `/v1/me`, the workspace, project and repository planes, and the access plane — members, groups, grants and invitations. The rest of the `/v1` surface — observe, inject, recall, proposals, channels, the registries and the admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`.\n\n**Preconditions.** Every update takes a required `expected_revision`. A mismatch is `409` and writes nothing.",
     "license": {
       "name": "Proprietary"
     },
@@ -15,6 +15,524 @@
     }
   ],
   "paths": {
+    "/v1/admin/grants": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`GET /v1/admin/grants`.",
+        "operationId": "list_grants",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "query",
+            "description": "Only grants written **at** this scope.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "principal_id",
+            "in": "query",
+            "description": "Only grants naming this principal directly.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The grants this filter selected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An unknown query parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `membership.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`POST /v1/admin/grants` — grant at any scope the caller names.",
+        "operationId": "create_grant",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required. A unique value per request, reused verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantSubjectBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "This key already made this grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Granted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No `scope_id`, no subject, both subjects, or no `Idempotency-Key`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `membership.grant`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such scope or group in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "They already hold this role there, or the key was reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/grants/{grant_id}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`DELETE /v1/admin/grants/{grant_id}` — revoke one.",
+        "operationId": "revoke_grant",
+        "parameters": [
+          {
+            "name": "grant_id",
+            "in": "path",
+            "description": "The grant's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "403": {
+            "description": "The PDP denied `membership.grant`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such grant in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A directory manages this grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/groups": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`GET /v1/admin/groups`.",
+        "operationId": "list_groups",
+        "responses": {
+          "200": {
+            "description": "The tenant's groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `membership.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`POST /v1/admin/groups`.",
+        "operationId": "create_group",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required. A unique value per request, reused verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGroupBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "This key already created this group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed slug or name, or no `Idempotency-Key`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `group.manage`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The slug is taken, or the key was reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/groups/{group_id}": {
+      "patch": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`PATCH /v1/admin/groups/{group_id}`.",
+        "operationId": "update_group",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "description": "The group's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGroupBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, or nothing to update",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `group.manage`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such group in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale `expected_revision`, or the group is a directory's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/invites/{invite_token}/accept": {
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`POST /v1/invites/{invite_token}/accept` — redeem one.",
+        "description": "# It takes no `Idempotency-Key`, and that is not an exception\n\nThe token *is* the key: it is one-time by construction, so a retry finds the\ninvitation already accepted. When the retrying caller is the principal who\naccepted it, the store replays — same grant, `200` — because that caller is\nthe timeout retry the whole mechanism exists for, arriving late. When it is\nsomebody else, it is a `409`, because that is what one-time means.\n\n# The token is in the path, so the path is not recorded\n\n`crate::app::make_request_span` records the matched route rather than the\nraw URI for this route (and only this route), because a trace is an ordinary\nlog and this URI carries a live credential.",
+        "operationId": "accept_invite",
+        "parameters": [
+          {
+            "name": "invite_token",
+            "in": "path",
+            "description": "The invitation token. Presented with the recipient's own credential: the token says which access to add, never who is asking.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "You had already redeemed this one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedInviteView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Redeemed; the grant is yours",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedInviteView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "That is not an invitation token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `invite.accept`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No invitation in this tenant matches",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Expired, withdrawn, or already somebody else's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/me": {
       "get": {
         "tags": [
@@ -177,6 +695,236 @@
           },
           "409": {
             "description": "`expected_revision` is not the current revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/members": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`GET /v1/projects/{project_id}/members` — who may act here, **including\nwhat the workspace above it grants**.",
+        "operationId": "list_project_members",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "The project's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Everybody who holds a role here, inherited grants included",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `membership.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`POST /v1/projects/{project_id}/members` — a **project-only** grant.",
+        "operationId": "add_project_member",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "The project's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required. A unique value per request, reused verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantSubjectBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "This key already made this grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Granted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No subject, both subjects, a `scope_id`, or no `Idempotency-Key`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `membership.grant`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "They already hold this role here, or the key was reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/projects/{project_id}/members/{principal_id}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`DELETE /v1/projects/{project_id}/members/{principal_id}`.",
+        "operationId": "remove_project_member",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "The project's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "principal_id",
+            "in": "path",
+            "description": "The principal's id — its verified token subject",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Every grant written at this project for this principal is revoked"
+          },
+          "403": {
+            "description": "The PDP denied `membership.grant`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project, or they hold nothing here",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Their access is inherited, group-derived, or a directory's",
             "content": {
               "application/json": {
                 "schema": {
@@ -686,6 +1434,283 @@
         ]
       }
     },
+    "/v1/workspaces/{workspace_id}/invites": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`GET /v1/workspaces/{workspace_id}/invites`.",
+        "operationId": "list_workspace_invites",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The workspace's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every invitation issued here",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `membership.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`POST /v1/workspaces/{workspace_id}/invites` — issue one.",
+        "operationId": "create_workspace_invite",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The workspace's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required. A unique value per request, reused verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInviteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Issued. **The token is in this response and nowhere else.**",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedInviteView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed email, a lifetime over the cap, or no `Idempotency-Key`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `membership.grant`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The key was reused for a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/invites/{invite_id}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`DELETE /v1/workspaces/{workspace_id}/invites/{invite_id}` — withdraw one.",
+        "operationId": "revoke_workspace_invite",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The workspace's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "invite_id",
+            "in": "path",
+            "description": "The invitation's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Withdrawn"
+          },
+          "403": {
+            "description": "The PDP denied `membership.grant`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such invitation on this workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "It was already redeemed or withdrawn",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/members": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "`GET /v1/workspaces/{workspace_id}/members` — who may act here.",
+        "operationId": "list_workspace_members",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The workspace's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Everybody who holds a role here",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `membership.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/workspaces/{workspace_id}/projects": {
       "get": {
         "tags": [
@@ -850,6 +1875,25 @@
   },
   "components": {
     "schemas": {
+      "AcceptedInviteView": {
+        "type": "object",
+        "description": "The response to redeeming an invitation.",
+        "required": [
+          "grant",
+          "scope_id"
+        ],
+        "properties": {
+          "grant": {
+            "$ref": "#/components/schemas/GrantView",
+            "description": "The grant it minted — or the one the acceptor already held."
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The scope they now hold it at."
+          }
+        }
+      },
       "ApiErrorBody": {
         "type": "object",
         "description": "The taxonomy error body, declared for the OpenAPI document.\n\nA schema-only mirror of `synveda_types::Error`'s serialised form, which is\n`{\"kind\": \"...\", ...}` with a per-variant remainder. It exists because the\ncontract has to say what a 4xx body looks like and the taxonomy lives two\ncrates down, where `utoipa` deliberately does not reach — the OpenAPI\nderive is a property of the surface, and `synveda-types` is not one.",
@@ -951,6 +1995,75 @@
         },
         "additionalProperties": false
       },
+      "CreateGroupBody": {
+        "type": "object",
+        "description": "`POST /v1/admin/groups`.",
+        "required": [
+          "slug",
+          "display_name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional prose. Blank is refused; omit it instead."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Its members at creation, by principal id."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Tenant-unique handle: `^[a-z0-9][a-z0-9-]{0,62}$`. Immutable."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateInviteBody": {
+        "type": "object",
+        "description": "`POST /v1/workspaces/{workspace_id}/invites`.",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who it is meant for. Optional: an invitation with no address is a link\nthe inviter copies, redeemable once by whoever presents it first."
+          },
+          "expires_in_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long it stands, in seconds. Defaults to seven days and is capped at\nthirty — an invitation that never expires is a key left under the mat."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "member",
+              "viewer",
+              "reviewer",
+              "curator",
+              "administrator"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateProjectBody": {
         "type": "object",
         "description": "`POST /v1/workspaces/{workspace_id}/projects`.",
@@ -1003,6 +2116,402 @@
         },
         "additionalProperties": false
       },
+      "CreatedInviteView": {
+        "type": "object",
+        "description": "The response to creating an invitation — the **one and only** place the\ntoken exists.\n\nIt is not stored (only its SHA-256 is), not logged, not in the audit\npayload and not on any other route. An inviter who loses it withdraws the\ninvitation and issues another, which is one action; the alternative is a\nproduct that can show you somebody else's live credential.",
+        "required": [
+          "invite",
+          "token",
+          "accept_url"
+        ],
+        "properties": {
+          "accept_url": {
+            "type": "string",
+            "description": "The URL the recipient posts to, with their own credential, to redeem\nit. Enough for a local or demo deployment to invite by copying a link —\nemail delivery is deliberately not a requirement of this feature."
+          },
+          "invite": {
+            "$ref": "#/components/schemas/InviteView",
+            "description": "The invitation."
+          },
+          "token": {
+            "type": "string",
+            "description": "The token. **Shown once.**"
+          }
+        }
+      },
+      "GrantList": {
+        "type": "object",
+        "description": "The grant listing.",
+        "required": [
+          "grants"
+        ],
+        "properties": {
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GrantView"
+            },
+            "description": "The grants this filter selected, oldest first. These are the **rows**,\nnot the authority in force anywhere: a workspace grant appears once\nhere and reaches every project inside it. `GET /v1/projects/{id}/members`\nis the other question."
+          }
+        }
+      },
+      "GrantSubjectBody": {
+        "type": "object",
+        "description": "`POST /v1/projects/{project_id}/members` and `POST /v1/admin/grants`.\n\nExactly one of `principal_id` and `group_id`. Two flat fields rather than a\ntagged union, for [`GrantView`]'s reason.",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group."
+          },
+          "principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The principal, by verified token subject."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "member",
+              "viewer",
+              "reviewer",
+              "curator",
+              "administrator"
+            ]
+          },
+          "scope_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The scope. Required on `/v1/admin/grants`, where the caller chooses;\n**refused** on the project route, where the path already says which\nscope — a body that could name a different one would make the path a\nsuggestion."
+          }
+        },
+        "additionalProperties": false
+      },
+      "GrantView": {
+        "type": "object",
+        "description": "A grant, as the API serves it.\n\nThe subject is **flattened** into `subject_kind` plus one of two id fields\nrather than nested as a tagged union. A tagged union is the tidier model and\nthe worse contract: it renders as a `oneOf` that the frontend generator\nwould have to discriminate, and this document's whole point is that the\ntypes on both ends are derived rather than hand-reconciled.",
+        "required": [
+          "id",
+          "scope_id",
+          "subject_kind",
+          "role",
+          "source",
+          "directory_managed",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was made."
+          },
+          "directory_managed": {
+            "type": "boolean",
+            "description": "Whether a directory manages it, and it therefore cannot be revoked\nhere."
+          },
+          "granted_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who granted it, when a caller did."
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group, for a `group` grant."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable id — what a revocation names."
+          },
+          "invite_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The invitation that produced it, for an `invite` grant."
+          },
+          "principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The principal, for a `principal` grant."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "member",
+              "viewer",
+              "reviewer",
+              "curator",
+              "administrator"
+            ]
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The scope the grant is at. Its subtree inherits it."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "direct",
+              "invite",
+              "directory",
+              "automation"
+            ]
+          },
+          "subject_kind": {
+            "type": "string",
+            "enum": [
+              "principal",
+              "group"
+            ]
+          }
+        }
+      },
+      "GroupList": {
+        "type": "object",
+        "description": "The group listing.",
+        "required": [
+          "groups"
+        ],
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupView"
+            },
+            "description": "The tenant's groups, by slug. Archived ones included: a listing that\nomitted them would make an archived group indistinguishable from one\nthat never existed."
+          }
+        }
+      },
+      "GroupRefView": {
+        "type": "object",
+        "description": "A group, named enough to render without a second call.",
+        "required": [
+          "id",
+          "slug"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group's id."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Its handle."
+          }
+        }
+      },
+      "GroupView": {
+        "type": "object",
+        "description": "A group, as the API serves it.",
+        "required": [
+          "id",
+          "slug",
+          "display_name",
+          "source",
+          "status",
+          "revision",
+          "members",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was created."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who created it, when a caller did."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional prose."
+          },
+          "directory_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The external id a directory knows it by, when one does."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable id."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Its members, by principal id."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The revision an update must name as its precondition."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Tenant-unique handle. Immutable."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "directory"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it last changed."
+          }
+        }
+      },
+      "InviteList": {
+        "type": "object",
+        "description": "The invitation listing.",
+        "required": [
+          "invites"
+        ],
+        "properties": {
+          "invites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InviteView"
+            },
+            "description": "Every invitation issued at this scope, newest first — redeemed and\nwithdrawn ones included, because \"who was invited here and what\nhappened\" is the question this answers."
+          }
+        }
+      },
+      "InviteView": {
+        "type": "object",
+        "description": "An invitation, as the API serves it.\n\nThe token is **not here**, on any route, ever. It appears once, in\n[`CreatedInviteView`], in the response to the request that minted it.",
+        "required": [
+          "id",
+          "scope_id",
+          "role",
+          "status",
+          "expires_at",
+          "created_at"
+        ],
+        "properties": {
+          "accepted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it was redeemed."
+          },
+          "accepted_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The principal that redeemed it, when somebody has."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who issued it."
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who it was meant for, when the inviter said."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it stops being redeemable."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable id — what a withdrawal names."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "member",
+              "viewer",
+              "reviewer",
+              "curator",
+              "administrator"
+            ]
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The scope it grants at."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "accepted",
+              "revoked",
+              "expired"
+            ]
+          }
+        }
+      },
       "MeView": {
         "type": "object",
         "description": "Everything a client needs before it renders anything.",
@@ -1044,6 +2553,97 @@
               "$ref": "#/components/schemas/WorkspaceView"
             },
             "description": "Every workspace this caller may read, by slug."
+          }
+        }
+      },
+      "MemberList": {
+        "type": "object",
+        "description": "The member listing.",
+        "required": [
+          "members"
+        ],
+        "properties": {
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberView"
+            },
+            "description": "Everybody who holds a role here, nearest grant first. One entry per\n(principal, role): somebody holding two roles appears twice, because\nthe two came from different grants and are revoked separately."
+          }
+        }
+      },
+      "MemberView": {
+        "type": "object",
+        "description": "One principal's one role at one scope, with everything a reader needs to\nanswer **why**.\n\nThe `source`, `scope_id`, `inherited` and `via_group` fields together are\nthe whole of \"access-source visibility\": a person looking at a project's\nmember list can see that Robin is there because somebody granted them\n`member` at the workspace, or because they are in the `engineering` group,\nor because a directory said so — without reading an audit log.",
+        "required": [
+          "grant_id",
+          "principal_id",
+          "role",
+          "source",
+          "scope_id",
+          "inherited",
+          "directory_managed",
+          "granted_at"
+        ],
+        "properties": {
+          "directory_managed": {
+            "type": "boolean",
+            "description": "Whether a directory manages it, and it therefore cannot be edited here."
+          },
+          "grant_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The grant this came from — what a revocation names."
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the grant was made."
+          },
+          "inherited": {
+            "type": "boolean",
+            "description": "Whether it was inherited from an ancestor scope rather than written\nhere. A client that offers \"remove\" on an inherited row is offering\nsomething the API will refuse, so this is the field that decides."
+          },
+          "principal_id": {
+            "type": "string",
+            "description": "The principal, by verified token subject."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "member",
+              "viewer",
+              "reviewer",
+              "curator",
+              "administrator"
+            ]
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The scope the grant is actually written at — **not** necessarily the\none that was asked about."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "direct",
+              "invite",
+              "directory",
+              "automation"
+            ]
+          },
+          "via_group": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GroupRefView",
+                "description": "The group it reached them through, when it did."
+              }
+            ]
           }
         }
       },
@@ -1430,6 +3030,52 @@
         },
         "additionalProperties": false
       },
+      "UpdateGroupBody": {
+        "type": "object",
+        "description": "`PATCH /v1/admin/groups/{group_id}`.\n\n`members` is a **full replacement**, not a delta: a membership list has no\nprecondition of its own, so add/remove pairs race — two callers each\nremoving one person can both succeed and leave a list neither intended. A\nreplacement under `expected_revision` cannot.",
+        "required": [
+          "expected_revision"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New description; `null` clears it."
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New display name."
+          },
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The revision the caller last saw. Required, for the reason the\nworkspace plane's is: an update without a precondition is a\nlast-writer-wins update."
+          },
+          "members": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The complete membership after this update."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "WorkspaceList": {
         "type": "object",
         "description": "The workspace listing.\n\nAn envelope rather than a bare array, so that paging can arrive without\nbreaking every client — and so that a future `not_answered` has somewhere\nto live, which is the shape the capability probe already uses for the same\nreason (ADR-0058 decision 5).",
@@ -1543,6 +3189,10 @@
     {
       "name": "repositories",
       "description": "What a project is about, by canonical identity"
+    },
+    {
+      "name": "access",
+      "description": "Who may act where: members, groups, grants and invitations"
     }
   ]
 }

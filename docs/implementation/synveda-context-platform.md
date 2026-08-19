@@ -953,7 +953,224 @@ frontend changes, deletions, tests, and the resulting commit hash.
   `synveda-types` (repository canonicalisation, 16), the gateway's idempotency
   seam and DTOs, and both store modules. `demos/cpr-4-workspaces.sh` drives the
   whole thing against a real gateway and a real database.
-- **Run record.** *(written by Prompt 5, on Prompt 1's rule — see below)*
-- **Commit.** `feat(workspaces): add workspace and project model` on
+- **Run record.** *(written by Prompt 5, on Prompt 1's rule.)* Re-run on Prompt
+  5's machine against a live Postgres, on CPR-4's code as committed:
+  `crates/synveda-store/tests/workspaces.rs` **21/21**,
+  `crates/synveda-gateway/tests/workspaces_api.rs` **23/23**,
+  `crates/synveda-gateway/tests/openapi.rs` **5/5**, `tests/rls.rs` **76/76**.
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D
+  warnings` clean; `check-api-types` and `check-backlog` green.
+- **Commit.** `feat(workspaces): add workspaces, projects and repository
+  identity` on `feat/context-platform-mvp`. (The prompt's proposed message named
+  "workspace and project model"; the committed one names the repository plane
+  too, and this record says the committed one.)
+- **Commit hash.** `165e54ae732beea5b01cd73989e3e3afc23b6595`, written by
+  Prompt 5 on Prompt 1's rule. Two follow-ups belong beside it, because the
+  branch has them and a record that omitted them would not reconstruct:
+  `9e443f3555ff00b095fea5393783702955bef9cc` (untracking the `.sqlx` offline
+  cache) and `f5248ee209aa82b6f70d6821cbc219e92b3a6225` (re-tracking it) — the
+  cache is required for a build without a database, so it is checked in.
+
+### Prompt 5 — Membership, groups, grants & invitations (CPR-5)
+
+- **Implemented.** The membership model (ADR-0072): `groups`, `group_members`,
+  `scope_grants` and `pending_invites`, the resolution that turns them into "who
+  may act here", fourteen `/v1` routes, four Cedar actions, seven audit action
+  types, and the `owner` grant that creating a workspace or a project now mints
+  for its creator in the creating transaction. CPR-4 shipped workspaces that
+  **nobody was in**; this is who is in them.
+- **Divergence from §9.** §9's Prompt 5 reads *"Policy profiles and the PDP
+  re-cut"*. The prompt as it arrived is membership and access assignment — which
+  is §9's Prompt 4, displaced when Prompt 4 turned out to be workspaces — and
+  the prompt's own text is authoritative (§9's preamble). So the programme has
+  now swapped two entries and is one behind on the PDP re-cut rather than two
+  prompts off its plan: the ordering is 4=workspaces, 5=membership, and the PDP
+  re-cut is the next one. Recorded rather than absorbed, because the same
+  dependency has now been deferred twice and the second deferral is what makes
+  it a pattern: decision 3 below is CPR-4's tenant-anchoring debt plus a new
+  one, and both are owed to the same prompt.
+- **The decision this prompt is mostly about is one it refused to make.** There
+  is **no permission table**, and ADR-0072 decision 2 forbids one arriving.
+  Six role keys — `owner`, `member`, `viewer`, `reviewer`, `curator`,
+  `administrator` — and nothing in the schema or in `synveda-types` says what any
+  of them may do. Every product with roles eventually grows a
+  `role_permissions` table because it is inspectable and looks like
+  configuration; it is refused here because it is a **second decision point**,
+  and seed §2.2 permits one. The cost is decision 3.
+- **Schema/domain changes.** One migration, `0042_access.sql`. **60 tables, 2
+  views; 56 RLS-forced** (all four new tables carry `ENABLE` + `FORCE`, a
+  `*_tenant_isolation` policy and least-privilege grants — no DELETE on `groups`,
+  no UPDATE on `scope_grants`, UPDATE on `pending_invites` narrowed by a trigger
+  to exactly two transitions). Domain types:
+  `synveda_types::access::{RoleKey, SubjectKind, GrantSubject, GrantSource,
+  GroupSource, Group, GroupMember, ScopeGrant, PendingInvite, InviteStatus,
+  inherits_into}` plus `GroupId` / `GrantId` / `InviteId`.
+  `synveda_identity::invite` mints and hashes the token;
+  `synveda_store::access` is the services and the resolution.
+
+  Where each rule lives is again the substance. A grant has exactly one subject,
+  is **never edited** (a trigger that refuses every update, beside a grant that
+  withholds `UPDATE` — the same rule said twice, deliberately: the grant is what
+  the app role cannot do, the trigger is what nobody can), and only an
+  `invite`-sourced one may name an invitation. An invitation is one-time because
+  `pending` is the only status anything may leave and it may only be left once —
+  a trigger, not a `SELECT … FOR UPDATE` in one function. And **expiry is a
+  property of the decision rather than of a job** (ADR-0037 decision 4): there is
+  no stored `expired` status, so an invitation stops working at the instant it
+  says it will whether or not any sweep has run.
+- **Inheritance is the scope tree, and nothing is materialised.** `members_of`
+  walks `scope_closure` upward, so a workspace grant is in force at every project
+  inside it — resolved at read time, with **zero rows written at the project**,
+  which a test asserts directly. The one place the walk stops is a
+  `principal`-shaped scope, which is somebody's own: no ancestor reaches in, and
+  the rule is in the resolution SQL and in
+  `synveda_types::access::inherits_into` rather than at each caller.
+- **A principal is a token subject, and the reason is this programme's law.**
+  ADR-0015 decision 2 already argued the general case (a grant may precede first
+  login). The case that decided it is narrower: an `identities` row in this tree
+  still requires a `hierarchy_nodes` node, because `identities_scope_fk` points
+  there — so a membership model keyed on identities would have needed the model
+  it replaces, in every test, every demo and every deployment. That is a
+  synchronisation between the two models, which ADR-0068 decision 3 forbids
+  outright. The cost is that a member list carries subjects rather than names,
+  and it is not paid down here: joining `identities` for a display name would be
+  reaching into the old model for cosmetics.
+- **API and frontend changes.** **Fourteen operations added across ten paths**
+  (66 → 76 `/v1` route paths; the OpenAPI document 12 → 26 operations across 17
+  paths). Creation takes a required `Idempotency-Key` and the group update a
+  required `expected_revision`, unchanged from CPR-4 — with **two deliberate
+  exceptions on the invitation path, each a decision**: a replayed invitation
+  creation is a **409 saying the token cannot be re-served** rather than a 200
+  with the field missing, because the original response carried something that no
+  longer exists; and redeeming takes no `Idempotency-Key`, because a one-time
+  token already is one (a retry by the principal who redeemed it replays with
+  200, anybody else is a 409). `docs/api/openapi.json` and
+  `console/src/generated/api.ts` regenerated. No CLI command and no console
+  screen: Prompts 24 and 20.
+- **One route puts a secret in a URL path, and the mitigation is in the tree.**
+  `POST /v1/invites/{invite_token}/accept` is the prompt's route shape. A trace is
+  an ordinary log, so `crate::app::make_request_span` records the matched *route
+  pattern* rather than the URI for that route, from an explicit `SECRET_IN_PATH`
+  list rather than a heuristic — a heuristic that decides what looks like a
+  secret will one day decide wrong in the permissive direction.
+- **Deleted.** Nothing. The old `role_bindings` plane is untouched and **nothing
+  is translated into a grant or dual-written**: no row of `role_bindings` becomes
+  a `scope_grants` row, and no code reads one to write the other. The two
+  vocabularies deliberately overlap on two words (`viewer`, `curator`) and mean
+  different things, and a unit test says so.
+- **Tests.** `crates/synveda-store/tests/access.rs` (**30**): the inheritance
+  properties (a workspace grant in force at the project with **no row written**
+  there, a project grant reaching neither its workspace nor a sibling, nearest
+  first); principal-private isolation against a tenant-root grant — the widest
+  thing the model can express — with a direct grant at the private scope still
+  applying; group resolution following membership with no grant written, and an
+  archived or empty group resolving to nobody; the structural rules **against
+  direct SQL** (one subject, never edited, the invite shape, group slug/source/
+  provenance immutability, a revision that cannot be rewound or skipped, a
+  terminal invitation that cannot be reopened, terms that cannot be re-pointed);
+  invitation one-time-ness with the same-principal replay and the second-person
+  refusal; expiry with **nothing having run**; the redemption of an invitation
+  for access already held consuming the invitation rather than erroring; an
+  unknown token and a foreign one producing **byte-identical** refusals; and
+  every read tenant-filtered. `crates/synveda-gateway/tests/access_api.rs`
+  (**17**): the owner grant on creation; the whole invitation path with the
+  token appearing once; **a sweep of the entire audit chain for the invitation
+  secret**; the group grant and its `via_group` attribution; the idempotency
+  guarantees including the invitation-creation 409; the stale precondition
+  writing nothing; the inherited-member removal refused with the scope named;
+  every route denied without its action and refused without a credential, as a
+  sweep over all thirteen PDP-gated operations; the replay that still takes the
+  decision, with the binding revoked between the two calls; and cross-tenant
+  404s. `crates/synveda-policy/tests/access.rs` (**7**): the four actions across
+  all three packs, the membership-read gradient the packs differ on, the
+  quarantine floor, and a confined service identity refused all four.
+  `crates/synveda-store/tests/rls.rs` gains the CPR-5 block (**5**) and all four
+  tables join the completeness inventory: 76 → 81 tests.
+  `crates/synveda-gateway/tests/openapi.rs` extended to 26 operations and 17
+  paths, including three sibling paths this plane deliberately does **not**
+  mount. Unit tests in `synveda-types` (access vocabularies, validators, the
+  isolation predicate over the whole shape vocabulary — 188 total, up from 174),
+  `synveda-identity` (5, including a refusal that must not echo the presented
+  token), `synveda-store` and the gateway's views.
+  `demos/cpr-5-access.sh` drives the whole thing against a real gateway and a
+  real database with two people's tokens.
+- **A pre-existing failure this prompt found, and fixed.**
+  `crates/synveda-gateway/tests/explorer.rs::the_explorer_parity_corpus_is_what_the_gateway_serves`
+  was **failing on the branch before this prompt touched it**. CNSL-2 records
+  the gateway's capability answers into `console/fixtures/explorer/*.json` so
+  the console's renderer is tested against what the server actually serves;
+  CPR-4 added six actions to `Action::PROBED_AT_SCOPE` and did not re-record
+  them, and CPR-4's own gates never completed on the machine it was written on
+  (§ Prompt 4), so nothing said so. Re-recorded here with
+  `SYNVEDA_RECORD_FIXTURES=1`: the fixture gained CPR-4's six *and* CPR-5's two,
+  which is what a diff that nobody looked at for a prompt looks like. Worth
+  writing down because the cause is the same one CPR-3 recorded — a gate that
+  does not finish is a gate that reports nothing — and this is the first time it
+  has cost the programme a real regression rather than only a missing green.
+- **A pre-existing failure this prompt did not cause and fixed anyway.**
+  `cargo deny check advisories` was red on the base tree: **RUSTSEC-2026-0258**,
+  `h2` unbounded empty DATA frames, patched in 0.4.16 against a lockfile pinned
+  at 0.4.15. An advisory published against a pinned dependency arrives from
+  outside a diff, so this is `cargo update -p h2 --precise 0.4.16` — one line of
+  `Cargo.lock` plus the `windows-sys` entries cargo re-normalised on the way
+  (Windows-only, and this workspace does not target Windows). `cargo deny check`
+  is green after it.
+- **A defect in this prompt's own test harness, which only a full-workspace run
+  shows.** `crates/synveda-gateway/tests/access_api.rs` first built a pool per
+  test — a 2-connection bootstrap pool *and* a 4-connection application pool,
+  both held for the test's life. Alone that is fine; in `cargo test --workspace`
+  it exhausted Postgres's `max_connections` and eight tests failed with
+  `PoolTimedOut` at the line that opens the bootstrap pool. The bootstrap pool
+  is now **one** connection and is **closed** before the test body runs, and the
+  application pool is two. Recorded because the first attempted fix was wrong in
+  an instructive way: a process-wide shared pool, which is what the store suites
+  use, **cannot** be used here — `#[tokio::test]` builds a runtime per test, and
+  a sqlx pool carries a background task bound to the runtime that created it, so
+  sharing one across them left 6 of 17 tests failing and the suite taking 184s
+  instead of 4s. The per-test pool is right; only its size was wrong. CPR-4's
+  suite has the same shape and was left as it is — it passes, and changing a
+  passing suite's harness is not this prompt's to do.
+- **A pre-existing failure this prompt did *not* fix, and the reason.**
+  `pnpm -r test` fails four of the Claude Code adapter's 74 tests
+  (`adapters/claude-code/src/skills.test.mts`) with `ENOENT` on the argv file a
+  spawned fake CLI is supposed to write into a temp directory. **It fails
+  identically on the base tree**, verified by stashing this prompt's diff, so it
+  is this machine rather than this change — the same on-access scanner that
+  makes the Rust gates take hours. Repairing an adapter's test harness is
+  outside a membership feature, and inventing a skip would be exactly the
+  "hide a failure with an ignore" this programme forbids. Named here so the next
+  machine to run `make ci` knows which red is inherited. The console's 51 tests
+  pass.
+- **Run record.** On the final tree, against a live Postgres:
+  `crates/synveda-store/tests/access.rs` **30/30**,
+  `crates/synveda-gateway/tests/access_api.rs` **17/17**,
+  `crates/synveda-policy/tests/access.rs` **7/7**,
+  `crates/synveda-store/tests/rls.rs` **81/81** (76 before this feature),
+  `crates/synveda-gateway/tests/openapi.rs` **5/5**,
+  `crates/synveda-gateway/tests/workspaces_api.rs` **23/23** (CPR-4's, unchanged
+  by the owner grant this prompt adds to its creation path),
+  `crates/synveda-gateway/tests/explorer.rs` **9/9** after the re-record, and
+  `synveda-types` unit tests **188/188**. `demos/cpr-5-access.sh` **green end to
+  end** against a real gateway, a real database and two people's tokens.
+  `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D
+  warnings`, `cargo build --workspace` and `cargo deny check` all clean. The
+  node gates green: `check-api-types`, `check-backlog`, `check-adr-status`,
+  `check-deps`, `check-corpus-licences`, `check-chart-images`,
+  `check-benchmarks`, `check-ann-bench`, `check-npm-licences`, `chart-lint`,
+  `eval-check`, `ts-build`. `ts-test` is the inherited red named above. The
+  `.sqlx` cache gained 29 entries and lost none.
+
+  **`cargo test --workspace` is slow on this machine for the reason CPR-3
+  recorded, and it is worth restating with a fresh measurement.** Bitdefender's
+  on-access scanner runs `codesign -vv -R=notarized --check-notarization`, as
+  root, against every freshly built binary in `target/debug/deps` — **measured
+  here at 9.3 seconds warm for one binary**, against CPR-3's ~51 seconds cold —
+  which is tens of minutes to over an hour across the workspace's binaries. It
+  is the machine and not the tree: the fix is to exclude `target/` from
+  on-access scanning, and until somebody does, a full run is an overnight job
+  rather than a loop. Two of this prompt's three inherited/introduced failures
+  above were only visible in such a run, which is the argument for paying it.
+- **Commit.** `feat(access): add groups grants and invitations` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by Prompt 5, on Prompt 1's rule.
+- **Commit hash.** Written by Prompt 6, on Prompt 1's rule.
+

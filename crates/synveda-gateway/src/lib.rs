@@ -41,6 +41,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod access;
 pub mod app;
 mod approvals;
 mod audit;

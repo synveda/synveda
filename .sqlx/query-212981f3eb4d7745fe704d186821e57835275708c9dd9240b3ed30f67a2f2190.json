@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with target as (\n            select kind from scopes where tenant_id = $1 and id = $2\n        ),\n        chain as (\n            select c.ancestor_id, c.distance\n            from scope_closure c\n            where c.tenant_id = $1\n              and c.descendant_id = $2\n              -- Principal-private scope isolation: a `principal` scope is\n              -- somebody's own, and nothing above it reaches in. Expressed\n              -- here rather than in Rust so that every caller gets it.\n              and (c.distance = 0\n                   or (select kind from target) <> 'principal')\n        )\n        select g.id                as \"grant_id!\",\n               g.scope_id          as \"scope_id!\",\n               ch.distance         as \"distance!\",\n               g.role_key          as \"role_key!\",\n               g.source            as \"source!\",\n               g.created_at        as \"granted_at!\",\n               coalesce(g.principal_id, gm.principal_id) as \"principal_id!\",\n               grp.id              as \"group_id?\",\n               grp.slug            as \"group_slug?\"\n        from chain ch\n        join scope_grants g\n          on g.tenant_id = $1 and g.scope_id = ch.ancestor_id\n        left join groups grp\n          on grp.tenant_id = $1 and grp.id = g.group_id and grp.status = 'active'\n        left join group_members gm\n          on gm.tenant_id = $1 and gm.group_id = grp.id\n        where g.subject_kind = 'principal' or gm.principal_id is not null\n        order by ch.distance, coalesce(g.principal_id, gm.principal_id), g.role_key, g.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "grant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "distance!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "role_key!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "source!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "granted_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "principal_id!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "group_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "group_slug?",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "212981f3eb4d7745fe704d186821e57835275708c9dd9240b3ed30f67a2f2190"
+}

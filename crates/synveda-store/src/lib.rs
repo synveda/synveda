@@ -26,6 +26,13 @@
 //! nouns above it, each owning one scope created in the same transaction as
 //! itself. [`idempotency`] is what makes retrying a creation safe.
 //!
+//! Membership and access assignment (CPR-5, ADR-0072): [`access`] is groups,
+//! scope grants and invitations, and the resolution that answers "who may act
+//! here" — inheritance through `scope_closure`, groups resolved rather than
+//! expanded, and a `principal`-shaped scope that inherits nothing. It stores
+//! **role keys** and no permission matrix: what a key permits is the policy
+//! pack's, and a second mapping here would be a second decision point.
+//!
 //! Schema epoch (CPR-2, ADR-0068 decision 3, ADR-0069): the migrator is
 //! guarded on both ends. [`epoch::preflight`] refuses to advance a database
 //! written before the context-platform cut, [`epoch::stamp`] records the epoch
@@ -37,6 +44,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod access;
 pub mod console_sessions;
 pub mod dedup;
 pub mod directory;

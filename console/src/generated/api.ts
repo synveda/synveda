@@ -12,6 +12,20 @@
 // Source document: Synveda 0.2.0
 
 /**
+ * The response to redeeming an invitation.
+ */
+export type AcceptedInviteView = {
+    /**
+     * The grant it minted — or the one the acceptor already held.
+     */
+    grant: GrantView;
+    /**
+     * The scope they now hold it at.
+     */
+    scope_id: string;
+  };
+
+/**
  * The taxonomy error body, declared for the OpenAPI document.
  *
  * A schema-only mirror of `synveda_types::Error`'s serialised form, which is
@@ -85,6 +99,45 @@ export type AttachRepositoryBody = {
   };
 
 /**
+ * `POST /v1/admin/groups`.
+ */
+export type CreateGroupBody = {
+    /**
+     * Optional prose. Blank is refused; omit it instead.
+     */
+    description?: string | null;
+    /**
+     * Display name.
+     */
+    display_name: string;
+    /**
+     * Its members at creation, by principal id.
+     */
+    members?: string[];
+    /**
+     * Tenant-unique handle: `^[a-z0-9][a-z0-9-]{0,62}$`. Immutable.
+     */
+    slug: string;
+  };
+
+/**
+ * `POST /v1/workspaces/{workspace_id}/invites`.
+ */
+export type CreateInviteBody = {
+    /**
+     * Who it is meant for. Optional: an invitation with no address is a link
+     * the inviter copies, redeemable once by whoever presents it first.
+     */
+    email?: string | null;
+    /**
+     * How long it stands, in seconds. Defaults to seven days and is capped at
+     * thirty — an invitation that never expires is a key left under the mat.
+     */
+    expires_in_secs?: number | null;
+    role: "owner" | "member" | "viewer" | "reviewer" | "curator" | "administrator";
+  };
+
+/**
  * `POST /v1/workspaces/{workspace_id}/projects`.
  */
 export type CreateProjectBody = {
@@ -119,6 +172,247 @@ export type CreateWorkspaceBody = {
      * scope's slug too, and is immutable afterwards.
      */
     slug: string;
+  };
+
+/**
+ * The response to creating an invitation — the **one and only** place the
+ * token exists.
+ *
+ * It is not stored (only its SHA-256 is), not logged, not in the audit
+ * payload and not on any other route. An inviter who loses it withdraws the
+ * invitation and issues another, which is one action; the alternative is a
+ * product that can show you somebody else's live credential.
+ */
+export type CreatedInviteView = {
+    /**
+     * The URL the recipient posts to, with their own credential, to redeem
+     * it. Enough for a local or demo deployment to invite by copying a link —
+     * email delivery is deliberately not a requirement of this feature.
+     */
+    accept_url: string;
+    /**
+     * The invitation.
+     */
+    invite: InviteView;
+    /**
+     * The token. **Shown once.**
+     */
+    token: string;
+  };
+
+/**
+ * The grant listing.
+ */
+export type GrantList = {
+    /**
+     * The grants this filter selected, oldest first. These are the **rows**,
+     * not the authority in force anywhere: a workspace grant appears once
+     * here and reaches every project inside it. `GET /v1/projects/{id}/members`
+     * is the other question.
+     */
+    grants: GrantView[];
+  };
+
+/**
+ * `POST /v1/projects/{project_id}/members` and `POST /v1/admin/grants`.
+ *
+ * Exactly one of `principal_id` and `group_id`. Two flat fields rather than a
+ * tagged union, for [`GrantView`]'s reason.
+ */
+export type GrantSubjectBody = {
+    /**
+     * The group.
+     */
+    group_id?: string | null;
+    /**
+     * The principal, by verified token subject.
+     */
+    principal_id?: string | null;
+    role: "owner" | "member" | "viewer" | "reviewer" | "curator" | "administrator";
+    /**
+     * The scope. Required on `/v1/admin/grants`, where the caller chooses;
+     * **refused** on the project route, where the path already says which
+     * scope — a body that could name a different one would make the path a
+     * suggestion.
+     */
+    scope_id?: string | null;
+  };
+
+/**
+ * A grant, as the API serves it.
+ *
+ * The subject is **flattened** into `subject_kind` plus one of two id fields
+ * rather than nested as a tagged union. A tagged union is the tidier model and
+ * the worse contract: it renders as a `oneOf` that the frontend generator
+ * would have to discriminate, and this document's whole point is that the
+ * types on both ends are derived rather than hand-reconciled.
+ */
+export type GrantView = {
+    /**
+     * When it was made.
+     */
+    created_at: string;
+    /**
+     * Whether a directory manages it, and it therefore cannot be revoked
+     * here.
+     */
+    directory_managed: boolean;
+    /**
+     * Who granted it, when a caller did.
+     */
+    granted_by?: string | null;
+    /**
+     * The group, for a `group` grant.
+     */
+    group_id?: string | null;
+    /**
+     * Stable id — what a revocation names.
+     */
+    id: string;
+    /**
+     * The invitation that produced it, for an `invite` grant.
+     */
+    invite_id?: string | null;
+    /**
+     * The principal, for a `principal` grant.
+     */
+    principal_id?: string | null;
+    role: "owner" | "member" | "viewer" | "reviewer" | "curator" | "administrator";
+    /**
+     * The scope the grant is at. Its subtree inherits it.
+     */
+    scope_id: string;
+    source: "owner" | "direct" | "invite" | "directory" | "automation";
+    subject_kind: "principal" | "group";
+  };
+
+/**
+ * The group listing.
+ */
+export type GroupList = {
+    /**
+     * The tenant's groups, by slug. Archived ones included: a listing that
+     * omitted them would make an archived group indistinguishable from one
+     * that never existed.
+     */
+    groups: GroupView[];
+  };
+
+/**
+ * A group, named enough to render without a second call.
+ */
+export type GroupRefView = {
+    /**
+     * The group's id.
+     */
+    id: string;
+    /**
+     * Its handle.
+     */
+    slug: string;
+  };
+
+/**
+ * A group, as the API serves it.
+ */
+export type GroupView = {
+    /**
+     * When it was created.
+     */
+    created_at: string;
+    /**
+     * Who created it, when a caller did.
+     */
+    created_by?: string | null;
+    /**
+     * Optional prose.
+     */
+    description?: string | null;
+    /**
+     * The external id a directory knows it by, when one does.
+     */
+    directory_ref?: string | null;
+    /**
+     * Display name.
+     */
+    display_name: string;
+    /**
+     * Stable id.
+     */
+    id: string;
+    /**
+     * Its members, by principal id.
+     */
+    members: string[];
+    /**
+     * The revision an update must name as its precondition.
+     */
+    revision: number;
+    /**
+     * Tenant-unique handle. Immutable.
+     */
+    slug: string;
+    source: "direct" | "directory";
+    status: "active" | "archived";
+    /**
+     * When it last changed.
+     */
+    updated_at: string;
+  };
+
+/**
+ * The invitation listing.
+ */
+export type InviteList = {
+    /**
+     * Every invitation issued at this scope, newest first — redeemed and
+     * withdrawn ones included, because "who was invited here and what
+     * happened" is the question this answers.
+     */
+    invites: InviteView[];
+  };
+
+/**
+ * An invitation, as the API serves it.
+ *
+ * The token is **not here**, on any route, ever. It appears once, in
+ * [`CreatedInviteView`], in the response to the request that minted it.
+ */
+export type InviteView = {
+    /**
+     * When it was redeemed.
+     */
+    accepted_at?: string | null;
+    /**
+     * The principal that redeemed it, when somebody has.
+     */
+    accepted_by?: string | null;
+    /**
+     * When.
+     */
+    created_at: string;
+    /**
+     * Who issued it.
+     */
+    created_by?: string | null;
+    /**
+     * Who it was meant for, when the inviter said.
+     */
+    email?: string | null;
+    /**
+     * When it stops being redeemable.
+     */
+    expires_at: string;
+    /**
+     * Stable id — what a withdrawal names.
+     */
+    id: string;
+    role: "owner" | "member" | "viewer" | "reviewer" | "curator" | "administrator";
+    /**
+     * The scope it grants at.
+     */
+    scope_id: string;
+    status: "pending" | "accepted" | "revoked" | "expired";
   };
 
 /**
@@ -157,6 +451,61 @@ export type MeView = {
      * Every workspace this caller may read, by slug.
      */
     workspaces: WorkspaceView[];
+  };
+
+/**
+ * The member listing.
+ */
+export type MemberList = {
+    /**
+     * Everybody who holds a role here, nearest grant first. One entry per
+     * (principal, role): somebody holding two roles appears twice, because
+     * the two came from different grants and are revoked separately.
+     */
+    members: MemberView[];
+  };
+
+/**
+ * One principal's one role at one scope, with everything a reader needs to
+ * answer **why**.
+ *
+ * The `source`, `scope_id`, `inherited` and `via_group` fields together are
+ * the whole of "access-source visibility": a person looking at a project's
+ * member list can see that Robin is there because somebody granted them
+ * `member` at the workspace, or because they are in the `engineering` group,
+ * or because a directory said so — without reading an audit log.
+ */
+export type MemberView = {
+    /**
+     * Whether a directory manages it, and it therefore cannot be edited here.
+     */
+    directory_managed: boolean;
+    /**
+     * The grant this came from — what a revocation names.
+     */
+    grant_id: string;
+    /**
+     * When the grant was made.
+     */
+    granted_at: string;
+    /**
+     * Whether it was inherited from an ancestor scope rather than written
+     * here. A client that offers "remove" on an inherited row is offering
+     * something the API will refuse, so this is the field that decides.
+     */
+    inherited: boolean;
+    /**
+     * The principal, by verified token subject.
+     */
+    principal_id: string;
+    role: "owner" | "member" | "viewer" | "reviewer" | "curator" | "administrator";
+    /**
+     * The scope the grant is actually written at — **not** necessarily the
+     * one that was asked about.
+     */
+    scope_id: string;
+    source: "owner" | "direct" | "invite" | "directory" | "automation";
+    via_group?: unknown | null | GroupRefView;
   };
 
 /**
@@ -419,6 +768,36 @@ export type UpdateBody = {
   };
 
 /**
+ * `PATCH /v1/admin/groups/{group_id}`.
+ *
+ * `members` is a **full replacement**, not a delta: a membership list has no
+ * precondition of its own, so add/remove pairs race — two callers each
+ * removing one person can both succeed and leave a list neither intended. A
+ * replacement under `expected_revision` cannot.
+ */
+export type UpdateGroupBody = {
+    /**
+     * New description; `null` clears it.
+     */
+    description?: string | null;
+    /**
+     * New display name.
+     */
+    display_name?: string | null;
+    /**
+     * The revision the caller last saw. Required, for the reason the
+     * workspace plane's is: an update without a precondition is a
+     * last-writer-wins update.
+     */
+    expected_revision: number;
+    /**
+     * The complete membership after this update.
+     */
+    members?: string[] | null;
+    status?: "active" | "archived";
+  };
+
+/**
  * The workspace listing.
  *
  * An envelope rather than a bare array, so that paging can arrive without
@@ -496,6 +875,65 @@ export type WorkspaceView = {
  */
 export type Operations = {
   /**
+   * `GET /v1/admin/grants`.
+   */
+  readonly list_grants: {
+    readonly path: "/v1/admin/grants";
+    readonly method: "GET";
+    readonly response: GrantList;
+  };
+  /**
+   * `POST /v1/admin/grants` — grant at any scope the caller names.
+   */
+  readonly create_grant: {
+    readonly path: "/v1/admin/grants";
+    readonly method: "POST";
+    readonly body: GrantSubjectBody;
+    readonly response: GrantView;
+  };
+  /**
+   * `DELETE /v1/admin/grants/{grant_id}` — revoke one.
+   */
+  readonly revoke_grant: {
+    readonly path: "/v1/admin/grants/{grant_id}";
+    readonly method: "DELETE";
+    readonly response: void;
+  };
+  /**
+   * `GET /v1/admin/groups`.
+   */
+  readonly list_groups: {
+    readonly path: "/v1/admin/groups";
+    readonly method: "GET";
+    readonly response: GroupList;
+  };
+  /**
+   * `POST /v1/admin/groups`.
+   */
+  readonly create_group: {
+    readonly path: "/v1/admin/groups";
+    readonly method: "POST";
+    readonly body: CreateGroupBody;
+    readonly response: GroupView;
+  };
+  /**
+   * `PATCH /v1/admin/groups/{group_id}`.
+   */
+  readonly update_group: {
+    readonly path: "/v1/admin/groups/{group_id}";
+    readonly method: "PATCH";
+    readonly body: UpdateGroupBody;
+    readonly response: GroupView;
+  };
+  /**
+   * `POST /v1/invites/{invite_token}/accept` — redeem one.
+   */
+  readonly accept_invite: {
+    readonly path: "/v1/invites/{invite_token}/accept";
+    readonly method: "POST";
+    readonly response: AcceptedInviteView;
+  };
+  /**
    * `GET /v1/me`.
    */
   readonly get_me: {
@@ -519,6 +957,32 @@ export type Operations = {
     readonly method: "PATCH";
     readonly body: UpdateBody;
     readonly response: ProjectView;
+  };
+  /**
+   * `GET /v1/projects/{project_id}/members` — who may act here, **including
+   * what the workspace above it grants**.
+   */
+  readonly list_project_members: {
+    readonly path: "/v1/projects/{project_id}/members";
+    readonly method: "GET";
+    readonly response: MemberList;
+  };
+  /**
+   * `POST /v1/projects/{project_id}/members` — a **project-only** grant.
+   */
+  readonly add_project_member: {
+    readonly path: "/v1/projects/{project_id}/members";
+    readonly method: "POST";
+    readonly body: GrantSubjectBody;
+    readonly response: GrantView;
+  };
+  /**
+   * `DELETE /v1/projects/{project_id}/members/{principal_id}`.
+   */
+  readonly remove_project_member: {
+    readonly path: "/v1/projects/{project_id}/members/{principal_id}";
+    readonly method: "DELETE";
+    readonly response: void;
   };
   /**
    * `GET /v1/projects/{project_id}/repositories`.
@@ -578,6 +1042,39 @@ export type Operations = {
     readonly method: "PATCH";
     readonly body: UpdateBody;
     readonly response: WorkspaceView;
+  };
+  /**
+   * `GET /v1/workspaces/{workspace_id}/invites`.
+   */
+  readonly list_workspace_invites: {
+    readonly path: "/v1/workspaces/{workspace_id}/invites";
+    readonly method: "GET";
+    readonly response: InviteList;
+  };
+  /**
+   * `POST /v1/workspaces/{workspace_id}/invites` — issue one.
+   */
+  readonly create_workspace_invite: {
+    readonly path: "/v1/workspaces/{workspace_id}/invites";
+    readonly method: "POST";
+    readonly body: CreateInviteBody;
+    readonly response: CreatedInviteView;
+  };
+  /**
+   * `DELETE /v1/workspaces/{workspace_id}/invites/{invite_id}` — withdraw one.
+   */
+  readonly revoke_workspace_invite: {
+    readonly path: "/v1/workspaces/{workspace_id}/invites/{invite_id}";
+    readonly method: "DELETE";
+    readonly response: void;
+  };
+  /**
+   * `GET /v1/workspaces/{workspace_id}/members` — who may act here.
+   */
+  readonly list_workspace_members: {
+    readonly path: "/v1/workspaces/{workspace_id}/members";
+    readonly method: "GET";
+    readonly response: MemberList;
   };
   /**
    * `GET /v1/workspaces/{workspace_id}/projects`.

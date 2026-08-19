@@ -19,9 +19,9 @@
 //!
 //! # It covers this plane and says so
 //!
-//! The document describes the workspace, project, repository and `/v1/me`
-//! routes — the surface CPR-4 adds — and **not** the fifty-four `/v1` paths
-//! that predate it. That is a bounded start rather than a bounded ambition:
+//! The document describes the workspace, project, repository, access and
+//! `/v1/me` routes — the surface CPR-4 and CPR-5 add — and **not** the
+//! fifty-four `/v1` paths that predate it. That is a bounded start rather than a bounded ambition:
 //! Prompt 19 of the context-platform programme owns bringing the whole surface
 //! onto the contract, and the alternative here was annotating fifty-four
 //! handlers this programme is about to delete or re-cut. The document's own
@@ -31,6 +31,7 @@
 use utoipa::OpenApi;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 
+use crate::access;
 use crate::me;
 use crate::workspaces;
 
@@ -43,7 +44,8 @@ use crate::workspaces;
 Governed organisational memory and context for AI agents.
 
 **Coverage.** This document describes the context-platform surface added by \
-CPR-4: `/v1/me`, and the workspace, project and repository planes. The rest of \
+CPR-4 and CPR-5: `/v1/me`, the workspace, project and repository planes, and the \
+access plane — members, groups, grants and invitations. The rest of \
 the `/v1` surface — observe, inject, recall, proposals, channels, the \
 registries and the admin planes — predates the OpenAPI contract and is brought \
 onto it by a later prompt of the context-platform programme. Its absence here \
@@ -77,6 +79,20 @@ mismatch is `409` and writes nothing.",
         workspaces::list_repositories,
         workspaces::attach_repository,
         workspaces::detach_repository,
+        access::list_workspace_members,
+        access::list_invites,
+        access::create_invite,
+        access::revoke_invite,
+        access::accept_invite,
+        access::list_project_members,
+        access::add_project_member,
+        access::remove_project_member,
+        access::list_groups,
+        access::create_group,
+        access::update_group,
+        access::list_grants,
+        access::create_grant,
+        access::revoke_grant,
     ),
     components(schemas(
         me::MeView,
@@ -96,12 +112,28 @@ mismatch is `409` and writes nothing.",
         workspaces::UpdateBody,
         workspaces::AttachRepositoryBody,
         workspaces::ApiErrorBody,
+        access::MemberView,
+        access::MemberList,
+        access::GroupRefView,
+        access::GroupView,
+        access::GroupList,
+        access::GrantView,
+        access::GrantList,
+        access::InviteView,
+        access::InviteList,
+        access::CreatedInviteView,
+        access::AcceptedInviteView,
+        access::CreateInviteBody,
+        access::GrantSubjectBody,
+        access::CreateGroupBody,
+        access::UpdateGroupBody,
     )),
     tags(
         (name = "me", description = "The caller, their tenant and their onboarding state"),
         (name = "workspaces", description = "Collaboration spaces, each owning a governed scope"),
         (name = "projects", description = "Units of work inside a workspace"),
         (name = "repositories", description = "What a project is about, by canonical identity"),
+        (name = "access", description = "Who may act where: members, groups, grants and invitations"),
     ),
     modifiers(&BearerAuth),
 )]

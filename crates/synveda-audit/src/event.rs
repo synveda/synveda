@@ -160,6 +160,34 @@ pub enum AuditAction {
     /// stamp, because the row asserts a present fact about a project; what it
     /// was is here, in the chain.
     ProjectRepositoryDetached,
+    /// A group was created (CPR-5, ADR-0072). The payload carries the
+    /// group's handle and whether a directory owns it — a group nobody here
+    /// maintains is a different fact from one somebody here made.
+    GroupCreated,
+    /// A group was renamed, retired or re-populated. The payload carries the
+    /// before and after images and the revision the update was applied under;
+    /// when the membership changed it carries **counts and the difference**,
+    /// never the whole list, because a hundred-person group would otherwise
+    /// put a hundred names in the chain on every edit.
+    GroupUpdated,
+    /// Somebody was granted a role at a scope. The payload carries the
+    /// subject, the role key, the scope and the **source** — which is the
+    /// whole of "why does this person have access", answerable from the chain
+    /// as well as from the row.
+    AccessGranted,
+    /// A grant was revoked. A delete rather than a stamp, on the repository
+    /// plane's reasoning: the row asserts a present fact about who may act,
+    /// and what it was is here.
+    AccessRevoked,
+    /// An invitation was issued. The payload carries the invitation's id, the
+    /// scope, the role and the expiry — and **never the token**, which exists
+    /// once, in the response to the request that created it.
+    InviteCreated,
+    /// An invitation was withdrawn before anybody redeemed it.
+    InviteRevoked,
+    /// An invitation was redeemed, and the grant it carried was minted. One
+    /// event for both, because they are one act and one transaction.
+    InviteAccepted,
     /// A hierarchy node was created.
     HierarchyNodeCreated,
     /// A hierarchy node was renamed and/or moved.
@@ -513,7 +541,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 69] = [
+    pub const ALL: [AuditAction; 76] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -536,6 +564,13 @@ impl AuditAction {
         AuditAction::ProjectUpdated,
         AuditAction::ProjectRepositoryAttached,
         AuditAction::ProjectRepositoryDetached,
+        AuditAction::GroupCreated,
+        AuditAction::GroupUpdated,
+        AuditAction::AccessGranted,
+        AuditAction::AccessRevoked,
+        AuditAction::InviteCreated,
+        AuditAction::InviteRevoked,
+        AuditAction::InviteAccepted,
         AuditAction::PolicyDefaultSet,
         AuditAction::PolicyDefaultCleared,
         AuditAction::PolicyNodeAssigned,
@@ -609,6 +644,13 @@ impl AuditAction {
             AuditAction::ProjectUpdated => "project.updated",
             AuditAction::ProjectRepositoryAttached => "project.repository.attached",
             AuditAction::ProjectRepositoryDetached => "project.repository.detached",
+            AuditAction::GroupCreated => "access.group.created",
+            AuditAction::GroupUpdated => "access.group.updated",
+            AuditAction::AccessGranted => "access.granted",
+            AuditAction::AccessRevoked => "access.revoked",
+            AuditAction::InviteCreated => "access.invite.created",
+            AuditAction::InviteRevoked => "access.invite.revoked",
+            AuditAction::InviteAccepted => "access.invite.accepted",
             AuditAction::HierarchyNodeCreated => "hierarchy.node.created",
             AuditAction::HierarchyNodeUpdated => "hierarchy.node.updated",
             AuditAction::HierarchyNodeDeleted => "hierarchy.node.deleted",

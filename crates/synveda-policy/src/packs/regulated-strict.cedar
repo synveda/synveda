@@ -39,7 +39,14 @@ permit (
         Synveda::Action::"WorkspaceCreate",
         Synveda::Action::"WorkspaceUpdate",
         Synveda::Action::"ProjectCreate",
-        Synveda::Action::"ProjectUpdate"
+        Synveda::Action::"ProjectUpdate",
+        // Handing out and taking back access is administration of the same
+        // kind, priced with it (CPR-5, ADR-0072 decision 7). `GroupManage` is
+        // beside it rather than inside it because a group confers nothing on
+        // its own — a deployment that wanted somebody to curate groups without
+        // conferring access can say so by naming one and not the other.
+        Synveda::Action::"MembershipGrant",
+        Synveda::Action::"GroupManage"
     ],
     resource
 ) when {
@@ -62,7 +69,12 @@ permit (
         Synveda::Action::"ServiceIdentityRead",
         Synveda::Action::"AuditRead",
         Synveda::Action::"WorkspaceRead",
-        Synveda::Action::"ProjectRead"
+        Synveda::Action::"ProjectRead",
+        // Who holds what is an administrative read, not a content one
+        // (CPR-5, ADR-0072). It is deliberately not folded into
+        // `WorkspaceRead`: a workspace's name discloses nothing and its
+        // membership discloses who works on what.
+        Synveda::Action::"MembershipRead"
     ],
     resource
 ) when {
@@ -650,4 +662,28 @@ permit (
 ) when {
     resource in principal.tenant
         && context.roles.contains("org-admin")
+};
+
+// Redeeming an invitation (CPR-5, ADR-0072 decision 8).
+//
+// Permitted to every principal the base layer has not already forbidden, and
+// that is the design rather than a hole: the **token** is the authority. An
+// invitation is 256 bits of entropy, one-time, expiring and revocable, and the
+// only person who can present one is somebody an authorised person handed it
+// to. A person holding a valid invitation who is refused for want of a role is
+// a person this product invited and then turned away.
+//
+// What still refuses: the base layer's quarantine forbid, its seal forbid and
+// AUTH-3's token-scope confinement — which, because this action reaches only
+// the tenant resource, forbids it to every service identity outright. An agent
+// must not redeem a person's invitation.
+//
+// A deployment that wants the mechanism off deletes this permit in its own
+// pack, visibly, in configuration.
+permit (
+    principal,
+    action == Synveda::Action::"InviteAccept",
+    resource
+) when {
+    resource == principal.tenant
 };

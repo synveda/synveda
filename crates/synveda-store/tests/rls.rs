@@ -20,17 +20,19 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
 use synveda_store::{
-    group_mappings, hierarchy, idempotency, identities, observe, policy_assignments, policy_packs,
-    projects, quarantine, repositories, rls, role_bindings, scopes, tenants, workspaces,
+    access, group_mappings, hierarchy, idempotency, identities, observe, policy_assignments,
+    policy_packs, projects, quarantine, repositories, rls, role_bindings, scopes, tenants,
+    workspaces,
 };
 // The generic scope vocabulary, reached through its module because the old
 // hierarchy still owns the root name until Prompt 6 (CPR-3, ADR-0070).
+use synveda_types::access::{GrantSource, GrantSubject, GroupSource, RoleKey};
 use synveda_types::repository;
 use synveda_types::scope;
 use synveda_types::{
-    Error, IdentityId, IdentityKind, ObserveKind, PackConfig, ProjectId, RecordClass, RecordId,
-    RecordKind, RepositoryId, Role, ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
-    WorkspaceId,
+    Error, GrantId, GroupId, IdentityId, IdentityKind, InviteId, ObserveKind, PackConfig,
+    ProjectId, RecordClass, RecordId, RecordKind, RepositoryId, Role, ScopeId, ScopeKind,
+    Sensitivity, TenantId, TenantStatus, WorkspaceId,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -218,6 +220,12 @@ const COVERED: &[&str] = &[
     "graph_edges_history",
     "graph_vertices",
     "group_mappings",
+    // CPR-5 (ADR-0072): the access plane. A group is a tenant's own set of
+    // principals, and `group_members` is its content — both tenant-bound, both
+    // forced, because "who is in engineering" is exactly the kind of fact one
+    // tenant must not learn about another.
+    "group_members",
+    "groups",
     "hierarchy_closure",
     "hierarchy_nodes",
     // CPR-4 (ADR-0071): the record that makes a creation retryable, and the
@@ -230,6 +238,11 @@ const COVERED: &[&str] = &[
     "memory_usage",
     "observe_events",
     "observe_quarantine",
+    // CPR-5 (ADR-0072): an outstanding invitation is a live credential's
+    // shadow. Tenant-bound so a hash lookup runs inside one tenant's own row
+    // policy — the shape ADR-0059 decision 13 set for the provisioning
+    // credential, and for the same threat model.
+    "pending_invites",
     "policy_lapses",
     "policy_pack_assignments",
     "policy_pack_defaults",
@@ -254,6 +267,9 @@ const COVERED: &[&str] = &[
     // `hierarchy_closure`, and until then both are tenant-scoped and both are
     // covered here.
     "scope_closure",
+    // CPR-5 (ADR-0072): who holds what, where. The table a cross-tenant read
+    // would turn into an org chart.
+    "scope_grants",
     "scopes",
     "skill_files",
     "skill_quality_overrides",
@@ -996,6 +1012,344 @@ fn the_app_role_cannot_delete_a_workspace_or_a_project() {
             err.as_database_error().and_then(|db| db.code()).as_deref(),
             Some("42501"),
             "projects: expected insufficient_privilege, got {err:?}"
+        );
+    });
+}
+
+// ── Groups, grants, invitations (CPR-5, ADR-0072) ───────────────────────────
+
+/// Rows of `tenant` visible through the four CPR-5 tables, in the order
+/// (groups, group_members, scope_grants, pending_invites).
+async fn visible_access_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64, i64, i64) {
+    let groups = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from groups where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count groups");
+    let members = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from group_members where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count group_members");
+    let grants = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from scope_grants where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count scope_grants");
+    let invites = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from pending_invites where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count pending_invites");
+    (groups, members, grants, invites)
+}
+
+/// What [`seed_access`] built, so a test can name the rows it wants.
+struct AccessFixture {
+    tenant: TenantId,
+    scope: ScopeId,
+    group: GroupId,
+    grant: GrantId,
+    invite: InviteId,
+}
+
+/// Admits a tenant with a workspace, a group holding one member, a grant to
+/// that group at the workspace's scope, and one outstanding invitation. Runs on
+/// the (RLS-exempt) test connection.
+async fn seed_access(pool: &PgPool) -> AccessFixture {
+    let tenant = TenantId::new();
+    let slug = format!("rlsa-{}", tenant.as_uuid().simple());
+    tenants::create(
+        pool,
+        tenant,
+        &slug,
+        "RLS access fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create tenant");
+    let mut tx = pool.begin().await.expect("begin transaction");
+    let workspace = workspaces::create(
+        &mut tx,
+        &workspaces::NewWorkspace {
+            id: WorkspaceId::new(),
+            tenant_id: tenant,
+            slug: "payments".to_owned(),
+            display_name: "Payments".to_owned(),
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("create workspace");
+    let group = access::create_group(
+        &mut *tx,
+        &access::NewGroup {
+            id: GroupId::new(),
+            tenant_id: tenant,
+            slug: "engineering".to_owned(),
+            display_name: "Engineering".to_owned(),
+            description: None,
+            source: GroupSource::Direct,
+            directory_ref: None,
+            created_by: Some("rls-subject".to_owned()),
+        },
+    )
+    .await
+    .expect("create group");
+    access::set_group_members(
+        &mut tx,
+        tenant,
+        group.id,
+        &["rls-member".to_owned()],
+        Some("rls-subject"),
+    )
+    .await
+    .expect("set members");
+    let grant = access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: workspace.scope_id,
+            subject: GrantSubject::Group { group_id: group.id },
+            role_key: RoleKey::Member,
+            source: GrantSource::Direct,
+            invite_id: None,
+            granted_by: Some("rls-subject".to_owned()),
+        },
+    )
+    .await
+    .expect("create grant");
+    let invite = access::create_invite(
+        &mut *tx,
+        &access::NewInvite {
+            id: InviteId::new(),
+            tenant_id: tenant,
+            scope_id: workspace.scope_id,
+            role_key: RoleKey::Viewer,
+            email: Some("sam@example.com".to_owned()),
+            token_hash: [9u8; 32],
+            expires_at: chrono::Utc::now() + chrono::Duration::days(7),
+            created_by: Some("rls-subject".to_owned()),
+        },
+    )
+    .await
+    .expect("create invite");
+    tx.commit().await.expect("commit access fixture");
+    AccessFixture {
+        tenant,
+        scope: workspace.scope_id,
+        group: group.id,
+        grant: grant.id,
+        invite: invite.id,
+    }
+}
+
+/// The wrong (or absent) tenant GUC sees zero rows in all four tables; the
+/// right one sees exactly its own.
+#[test]
+fn wrong_tenant_guc_sees_no_access_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let victim = seed_access(&db.pool).await;
+        let adversary = seed_access(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary.tenant)).await;
+        assert_eq!(
+            visible_access_rows(&mut tx, victim.tenant).await,
+            (0, 0, 0, 0),
+            "access-plane rows leaked across tenants under the wrong GUC"
+        );
+        // Two grants in the adversary's own tenant: the workspace's `owner`
+        // grant is minted by the API, not by this fixture, so what is here is
+        // the group grant alone.
+        assert_eq!(
+            visible_access_rows(&mut tx, adversary.tenant).await,
+            (1, 1, 1, 1)
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_access_rows(&mut tx, victim.tenant).await,
+            (0, 0, 0, 0),
+            "access-plane rows visible without any tenant GUC"
+        );
+    });
+}
+
+/// Granting into another tenant than the GUC's trips the policy's WITH CHECK
+/// — an application defect, surfaced as internal. This is the adversarial
+/// case that matters most on this plane: a forged grant is a forged authority.
+#[test]
+fn cross_tenant_grant_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let mine = seed_access(&db.pool).await;
+        let theirs = seed_access(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(mine.tenant)).await;
+        let result = access::create_grant(
+            &mut *tx,
+            &access::NewGrant {
+                id: GrantId::new(),
+                tenant_id: theirs.tenant,
+                scope_id: theirs.scope,
+                subject: GrantSubject::Principal {
+                    principal_id: "intruder".to_owned(),
+                },
+                role_key: RoleKey::Owner,
+                source: GrantSource::Direct,
+                invite_id: None,
+                granted_by: Some("intruder".to_owned()),
+            },
+        )
+        .await;
+        assert!(
+            matches!(result, Err(Error::Internal { .. })),
+            "cross-tenant grant must be rejected by RLS as an internal defect, \
+             got {result:?}"
+        );
+    });
+}
+
+/// An invitation token is not a cross-tenant key: the same hash in two tenants
+/// is two invitations, and redeeming inside one tenant never reaches the
+/// other's — which is what makes the `(tenant_id, token_hash)` lookup safe.
+#[test]
+fn an_invitation_is_scoped_to_its_tenant() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let one = seed_access(&db.pool).await;
+        let two = seed_access(&db.pool).await;
+        // Both fixtures store the same hash, deliberately.
+        let mut tx = app_tx(&db.pool, Some(two.tenant)).await;
+        let accepted = access::accept_invite(
+            &mut tx,
+            two.tenant,
+            &[9u8; 32],
+            "rls-acceptor",
+            chrono::Utc::now(),
+        )
+        .await
+        .expect("redeem this tenant's invitation");
+        assert_eq!(accepted.invite.id, two.invite);
+        assert_ne!(
+            accepted.invite.id, one.invite,
+            "one tenant's token must never resolve to another tenant's invitation"
+        );
+        assert_eq!(accepted.grant.scope_id, two.scope);
+        tx.commit().await.expect("commit redemption");
+
+        // And the other tenant's invitation is untouched by it.
+        let mut tx = app_tx(&db.pool, Some(one.tenant)).await;
+        let still = access::get_invite(&mut *tx, one.tenant, one.invite)
+            .await
+            .expect("read under RLS")
+            .expect("still there");
+        assert!(
+            still.is_redeemable(chrono::Utc::now()),
+            "redeeming in one tenant consumed another tenant's invitation"
+        );
+    });
+}
+
+/// The full access lifecycle works as `synveda_app` with the right GUC: the
+/// backstop isolates, it does not deny service.
+#[test]
+fn same_tenant_access_lifecycle_works_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let fixture = seed_access(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let members = access::members_of(&mut *tx, fixture.tenant, fixture.scope)
+            .await
+            .expect("resolve members under RLS");
+        assert_eq!(members.len(), 1, "the group's one member holds the grant");
+        assert_eq!(members[0].principal_id, "rls-member");
+
+        access::update_group(
+            &mut tx,
+            fixture.tenant,
+            fixture.group,
+            1,
+            &access::GroupUpdate {
+                members: Some(vec!["rls-member".to_owned(), "rls-second".to_owned()]),
+                ..Default::default()
+            },
+            Some("rls-subject"),
+        )
+        .await
+        .expect("replace membership under RLS");
+        assert_eq!(
+            access::members_of(&mut *tx, fixture.tenant, fixture.scope)
+                .await
+                .expect("resolve again")
+                .len(),
+            2
+        );
+
+        access::revoke_grant(&mut tx, fixture.tenant, fixture.grant)
+            .await
+            .expect("revoke under RLS");
+        assert!(
+            access::members_of(&mut *tx, fixture.tenant, fixture.scope)
+                .await
+                .expect("resolve after revocation")
+                .is_empty(),
+            "revoking the group's grant removes what it conferred"
+        );
+        tx.commit().await.expect("commit lifecycle");
+    });
+}
+
+/// The application role holds no DELETE on `groups` and no UPDATE on
+/// `scope_grants`: retiring a group is a status transition, and a grant is
+/// created and revoked rather than edited. A grant for a path that does not
+/// exist is a grant nobody reviewed.
+#[test]
+fn the_app_role_cannot_delete_a_group_or_edit_a_grant() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let fixture = seed_access(&db.pool).await;
+
+        // A transaction each: the first refusal aborts its transaction.
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let err = sqlx::query!("delete from groups where id = $1", fixture.group.as_uuid())
+            .execute(&mut *tx)
+            .await
+            .expect_err("the app role must not delete a group");
+        assert_eq!(
+            err.as_database_error().and_then(|db| db.code()).as_deref(),
+            Some("42501"),
+            "groups: expected insufficient_privilege, got {err:?}"
+        );
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let err = sqlx::query!(
+            "update scope_grants set role_key = 'owner' where id = $1",
+            fixture.grant.as_uuid()
+        )
+        .execute(&mut *tx)
+        .await
+        .expect_err("the app role must not edit a grant");
+        assert_eq!(
+            err.as_database_error().and_then(|db| db.code()).as_deref(),
+            Some("42501"),
+            "scope_grants: expected insufficient_privilege, got {err:?}"
         );
     });
 }

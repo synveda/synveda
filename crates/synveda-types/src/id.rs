@@ -178,3 +178,28 @@ define_id!(
     /// detached is a new row rather than a resurrection.
     RepositoryId
 );
+
+define_id!(
+    /// Identifies a group — a named set of principals a grant can be made to
+    /// (CPR-5, ADR-0072).
+    ///
+    /// A group is not a scope and never becomes one: a scope is a place
+    /// authority applies *at*, a group is a set authority applies *to*, and
+    /// collapsing the two is how a membership list turns into a second tree.
+    GroupId
+);
+
+define_id!(
+    /// Identifies one scope grant — one subject's one role at one scope
+    /// (CPR-5, ADR-0072). The handle a revocation names.
+    GrantId
+);
+
+define_id!(
+    /// Identifies one outstanding invitation (CPR-5, ADR-0072).
+    ///
+    /// Deliberately distinct from the token that redeems it: the id is safe
+    /// to list, log and audit, and the token is a bearer credential that
+    /// exists once in one response.
+    InviteId
+);

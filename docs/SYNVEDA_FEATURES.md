@@ -1215,6 +1215,58 @@ CPR-4  Workspaces, projects & canonical repository identity (L)
   and `console/src/generated/api.ts` is generated from the document with both checks in `make
   ci`.
 
+CPR-5  Membership, groups, grants & invitations (L)
+  Filed 2026-08-18 by Prompt 5 of the CPR programme. CPR-4 gave the platform workspaces and
+  projects and left one thing conspicuously absent: **nobody is in them**. A workspace had a
+  name, a scope and no members, and the only way anybody could act on it was a role binding
+  on a node of the *old* hierarchy — a different tree Prompt 6 deletes whole. This is the
+  membership model, and it is one model for a person working alone, four people sharing agent
+  context, and a company with a directory (ADR-0068 decision 1): `groups`, `group_members`,
+  `scope_grants` and `pending_invites`, where a grant gives a **subject** — a principal or a
+  group — a **role key** at a scope, and the scope's subtree inherits it. Creating a workspace
+  or a project mints an `owner` grant for its creator in the same transaction, because a
+  collaboration space nobody is a member of is not one. The judgement worth reading is what is
+  **not** here: there is no permission table, and there must not be one (ADR-0072 decision 2).
+  Six role keys — `owner`, `member`, `viewer`, `reviewer`, `curator`, `administrator` — and
+  nothing anywhere says what any of them may do, because the Cedar packs decide that and a
+  second mapping would be a second decision point that disagrees with the first the day
+  somebody edits one. Inheritance is the scope tree rather than a fan-out: a workspace grant
+  reaches every project inside it through `scope_closure` at read time, with **no per-project
+  row** to keep consistent. The one place it stops is a `principal`-shaped scope, which is
+  somebody's own — no ancestor reaches in, not the tenant root and not a workspace owner.
+  A principal is a **token subject** rather than an identity row, for ADR-0015 decision 2's
+  reason and one sharper: an `identities` row in this tree still needs a `hierarchy_nodes`
+  node, so a membership model keyed on it would need the model it replaces. Invitations are
+  how a small team actually onboards: an expiring, one-time, revocable token minted and hashed
+  exactly like the provisioning credential (ADR-0059 decision 13's shape), returned **once**
+  with a copyable URL, and redeemed with the recipient's *own* credential — no email delivery
+  anywhere in the product. Fourteen routes; four new Cedar actions, and the packs grade
+  membership reads differently on purpose. Every decision is still anchored at the tenant, and
+  **grants are not yet a PDP input** — the largest thing this feature defers, and stated
+  rather than implied. ADR-0072.
+  AC: creating a workspace or a project makes its creator the `owner` in the creating
+  transaction, with the source no route hands out; a grant at a workspace is in force at every
+  project inside it and **writes no row there**, and a project-only grant reaches neither its
+  workspace nor a sibling; a `principal`-shaped scope inherits nothing, asserted against the
+  widest grant the model can express; a grant to a group resolves to its members, following
+  them as the group changes with no grant written, and an archived or empty group resolves to
+  nobody; a grant has exactly one subject, is never edited, and an `invite`-sourced one names
+  its invitation — each refused against direct SQL as well as through the services; a group's
+  slug, source and provenance are immutable and its revision cannot be rewound or skipped by
+  anything holding a connection; a stale `expected_revision` is a 409 that writes nothing,
+  membership included; an invitation is one-time (a retry by the same principal replays, a
+  second person is refused), expires **without anything running**, cannot be reopened after
+  either terminal state, and its token is stored only as a 32-byte hash and appears in exactly
+  one response — swept for in the audit chain and absent; a replayed invitation creation is a
+  409 saying the token cannot be re-served rather than a 200 with it missing; redeeming needs
+  the token rather than a role under every pack, while the invariant floor still refuses a
+  quarantined principal and every service identity; removing a member touches only what was
+  written at that scope and refuses inherited, group-derived and directory-managed authority
+  with the place to go; every route denies without its action, refuses without a credential,
+  chains its event, and a replay still takes the PDP decision; all four tables join the
+  adversarial RLS suite's completeness inventory; and the OpenAPI document grows to
+  twenty-six operations with the console's types regenerated from it.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1308,7 +1360,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4
+Phase 5 context platform (redesign): CPR-1,2,3,4,5
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

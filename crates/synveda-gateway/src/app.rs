@@ -237,6 +237,58 @@ pub fn router(state: AppState) -> Router {
             "/v1/projects/{project_id}/repositories/{repository_id}",
             axum::routing::delete(crate::workspaces::detach_repository),
         )
+        // Membership and access assignment (CPR-5, ADR-0072). One model for a
+        // person working alone, four people sharing agent context, and a
+        // company with a directory: a grant gives a principal or a group a
+        // **role key** at a scope, and the scope's subtree inherits it — so a
+        // workspace grant reaches its projects without a second row. What a
+        // role key permits is the policy pack's; there is no permission table
+        // here for it to disagree with.
+        .route(
+            "/v1/workspaces/{workspace_id}/members",
+            get(crate::access::list_workspace_members),
+        )
+        .route(
+            "/v1/workspaces/{workspace_id}/invites",
+            get(crate::access::list_invites).post(crate::access::create_invite),
+        )
+        .route(
+            "/v1/workspaces/{workspace_id}/invites/{invite_id}",
+            axum::routing::delete(crate::access::revoke_invite),
+        )
+        // Redeeming an invitation. Behind the tenant middleware like every
+        // `/v1` route — the token says which access to add, never who is
+        // asking, so the recipient presents their own credential beside it.
+        // The token is in the path, which is why `make_request_span` records
+        // this route's *pattern* rather than its URI (see `SECRET_IN_PATH`).
+        .route(
+            "/v1/invites/{invite_token}/accept",
+            post(crate::access::accept_invite),
+        )
+        .route(
+            "/v1/projects/{project_id}/members",
+            get(crate::access::list_project_members).post(crate::access::add_project_member),
+        )
+        .route(
+            "/v1/projects/{project_id}/members/{principal_id}",
+            axum::routing::delete(crate::access::remove_project_member),
+        )
+        .route(
+            "/v1/admin/groups",
+            get(crate::access::list_groups).post(crate::access::create_group),
+        )
+        .route(
+            "/v1/admin/groups/{group_id}",
+            axum::routing::patch(crate::access::update_group),
+        )
+        .route(
+            "/v1/admin/grants",
+            get(crate::access::list_grants).post(crate::access::create_grant),
+        )
+        .route(
+            "/v1/admin/grants/{grant_id}",
+            axum::routing::delete(crate::access::revoke_grant),
+        )
         .route("/v1/hierarchy/nodes", post(hierarchy::create))
         .route("/v1/hierarchy/root", get(hierarchy::root))
         .route(
@@ -566,13 +618,14 @@ async fn whoami(State(state): State<AppState>, Query(params): Query<WhoamiParams
 /// [`client_name`].
 fn make_request_span(request: &Request) -> tracing::Span {
     let route = matched_route(request);
+    let path = recorded_path(request, &route);
     let span = tracing::info_span!(
         "http.request",
         otel.name = %format!("{} {}", request.method(), route),
         otel.kind = "server",
         http.request.method = %request.method(),
         http.route = %route,
-        url.path = %request.uri().path(),
+        url.path = %path,
         http.response.status_code = tracing::field::Empty,
         tenant.id = tracing::field::Empty,
         synveda.client = tracing::field::Empty,
@@ -727,9 +780,83 @@ async fn track_http_metrics(request: Request, next: Next) -> Response {
     response
 }
 
+/// Routes whose **path** carries a secret.
+///
+/// `POST /v1/invites/{invite_token}/accept` takes an invitation token as a path
+/// segment (CPR-5, ADR-0072 decision 5). A trace is an ordinary log, and the
+/// seed's rule is that a secret never appears in one — so for these routes the
+/// span records the matched pattern where it would otherwise record the URI.
+///
+/// A list rather than a heuristic, because a heuristic that decides what looks
+/// like a secret is a heuristic that will one day decide wrong in the
+/// permissive direction.
+const SECRET_IN_PATH: [&str; 1] = ["/v1/invites/{invite_token}/accept"];
+
+/// The path to put on the request span: the URI, unless the matched route is
+/// one whose path carries a secret, in which case the pattern.
+fn recorded_path(request: &Request, route: &str) -> String {
+    if SECRET_IN_PATH.contains(&route) {
+        return route.to_owned();
+    }
+    request.uri().path().to_owned()
+}
+
 fn matched_route(request: &Request) -> String {
     request.extensions().get::<MatchedPath>().map_or_else(
         || request.uri().path().to_owned(),
         |path| path.as_str().to_owned(),
     )
+}
+
+#[cfg(test)]
+mod span_tests {
+    use super::*;
+
+    fn request(uri: &str) -> Request {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .body(axum::body::Body::empty())
+            .expect("build request")
+    }
+
+    /// The property CPR-5 needs and nothing else in the tree provides: the one
+    /// route whose *path* carries a live credential must not put that path on a
+    /// span. A trace is an ordinary log (seed: no secret in one).
+    #[test]
+    fn a_route_whose_path_carries_a_secret_records_its_pattern_instead() {
+        let token = "synveda_invite_v1.00000000-0000-7000-8000-000000000000.s3cr3t";
+        let uri = format!("/v1/invites/{token}/accept");
+        let recorded = recorded_path(&request(&uri), "/v1/invites/{invite_token}/accept");
+        assert_eq!(recorded, "/v1/invites/{invite_token}/accept");
+        assert!(
+            !recorded.contains("s3cr3t"),
+            "the span recorded the token: {recorded}"
+        );
+    }
+
+    /// And every other route still records what was actually asked for —
+    /// otherwise the mitigation would cost the whole surface its traces.
+    #[test]
+    fn every_other_route_records_the_path_it_was_asked_for() {
+        let uri = "/v1/workspaces/0199c000-0000-7000-8000-000000000000";
+        assert_eq!(
+            recorded_path(&request(uri), "/v1/workspaces/{workspace_id}"),
+            uri
+        );
+    }
+
+    /// The list names a route the router actually mounts. A stale entry here
+    /// would be a mitigation that silently stopped applying.
+    #[test]
+    fn the_secret_bearing_route_is_one_this_gateway_serves() {
+        for route in SECRET_IN_PATH {
+            assert!(
+                crate::openapi::declared_paths()
+                    .iter()
+                    .any(|path| path == route),
+                "{route} is on the secret-in-path list but not on the contract"
+            );
+        }
+    }
 }

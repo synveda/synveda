@@ -1,4 +1,5 @@
-//! CPR-4: the OpenAPI contract is authoritative (ADR-0071 decision 7).
+//! CPR-4 and CPR-5: the OpenAPI contract is authoritative (ADR-0071
+//! decision 7).
 //!
 //! Three things have to be true for that sentence to mean anything, and this
 //! suite is each of them:
@@ -42,20 +43,35 @@ use tower::ServiceExt;
 /// The committed document, relative to the workspace root.
 const DOCUMENT: &str = "../../docs/api/openapi.json";
 
-/// Every path CPR-4 puts on the contract. Written out rather than derived from
-/// the document, because a check that read the document to decide what the
-/// document should contain would pass for any document at all.
+/// Every path CPR-4 and CPR-5 put on the contract. Written out rather than
+/// derived from the document, because a check that read the document to decide
+/// what the document should contain would pass for any document at all.
 const DECLARED_PATHS: &[&str] = &[
+    "/v1/admin/grants",
+    "/v1/admin/grants/{grant_id}",
+    "/v1/admin/groups",
+    "/v1/admin/groups/{group_id}",
+    "/v1/invites/{invite_token}/accept",
     "/v1/me",
     "/v1/projects/{project_id}",
+    "/v1/projects/{project_id}/members",
+    "/v1/projects/{project_id}/members/{principal_id}",
     "/v1/projects/{project_id}/repositories",
     "/v1/projects/{project_id}/repositories/{repository_id}",
     "/v1/workspaces",
     "/v1/workspaces/{workspace_id}",
+    "/v1/workspaces/{workspace_id}/invites",
+    "/v1/workspaces/{workspace_id}/invites/{invite_id}",
+    "/v1/workspaces/{workspace_id}/members",
     "/v1/workspaces/{workspace_id}/projects",
 ];
 
 const SECRET: &[u8] = b"cpr-4-openapi-test-secret";
+
+/// A stand-in for the invitation token in `{invite_token}`. Deliberately not a
+/// real one: this suite proves the route is mounted, and a request that got
+/// past the tenant middleware is a different test.
+const TOKEN_PLACEHOLDER: &str = "synveda_invite_v1.placeholder.placeholder";
 
 fn metrics_handle() -> PrometheusHandle {
     static HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
@@ -155,7 +171,12 @@ async fn every_documented_path_is_mounted() {
         let concrete = path
             .replace("{workspace_id}", &id)
             .replace("{project_id}", &id)
-            .replace("{repository_id}", &id);
+            .replace("{repository_id}", &id)
+            .replace("{invite_id}", &id)
+            .replace("{grant_id}", &id)
+            .replace("{group_id}", &id)
+            .replace("{principal_id}", "sam")
+            .replace("{invite_token}", TOKEN_PLACEHOLDER);
         let response = app
             .clone()
             .oneshot(
@@ -193,10 +214,20 @@ async fn a_path_this_plane_does_not_declare_is_not_mounted() {
         "/v1/workspaces/{workspace_id}/repositories",
         "/v1/projects",
         "/v1/workspaces/{workspace_id}/projects/{project_id}",
+        // CPR-5 puts members on the project and invitations on the workspace,
+        // deliberately and not symmetrically: a project is invited to through
+        // the workspace that contains it, and a workspace's membership is
+        // granted rather than added. The absent halves are checked here so the
+        // asymmetry is a decision rather than an omission somebody fills in.
+        "/v1/projects/{project_id}/invites",
+        "/v1/workspaces/{workspace_id}/members/{principal_id}",
+        "/v1/admin/groups/{group_id}/members",
     ] {
         let concrete = path
             .replace("{workspace_id}", &id)
-            .replace("{project_id}", &id);
+            .replace("{project_id}", &id)
+            .replace("{group_id}", &id)
+            .replace("{principal_id}", "sam");
         let response = app
             .clone()
             .oneshot(
@@ -272,8 +303,8 @@ fn the_document_is_generatable() {
     }
     assert_eq!(
         operation_ids.len(),
-        12,
-        "CPR-4 declares twelve operations: {operation_ids:?}"
+        26,
+        "CPR-4's twelve operations plus CPR-5's fourteen: {operation_ids:?}"
     );
 }
 

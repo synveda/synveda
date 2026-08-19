@@ -273,7 +273,9 @@ fn repository_provider_schema() -> utoipa::openapi::schema::Object {
     )
 }
 
-fn string_enum<'a>(values: impl Iterator<Item = &'a str>) -> utoipa::openapi::schema::Object {
+pub(crate) fn string_enum<'a>(
+    values: impl Iterator<Item = &'a str>,
+) -> utoipa::openapi::schema::Object {
     utoipa::openapi::ObjectBuilder::new()
         .schema_type(utoipa::openapi::schema::Type::String)
         .enum_values(Some(values.collect::<Vec<_>>()))
@@ -652,9 +654,30 @@ async fn create_workspace(
         },
     )
     .await?;
+    let owner = mint_owner_grant(&mut tx, tenant_id, workspace.scope_id, &claim.subject).await?;
     claim
         .remember(&mut tx, tenant_id, workspace.id.as_uuid())
         .await?;
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::AccessGranted,
+        Resource::Scope(workspace.scope_id).to_string(),
+        Outcome::Success,
+        json!({
+            "authz": audit::decision_context(Action::WorkspaceCreate, &authorized),
+            "grant": {
+                "id": owner.id,
+                "scope_id": owner.scope_id,
+                "subject_kind": owner.subject_kind.as_str(),
+                "principal_id": owner.principal_id,
+                "role": owner.role_key.as_str(),
+                "source": owner.source.as_str(),
+            },
+            "workspace_id": workspace.id,
+        }),
+    )
+    .await?;
     audit::record(
         &mut tx,
         tenant_id,
@@ -955,9 +978,30 @@ async fn make_project(
         },
     )
     .await?;
+    let owner = mint_owner_grant(&mut tx, tenant_id, project.scope_id, &claim.subject).await?;
     claim
         .remember(&mut tx, tenant_id, project.id.as_uuid())
         .await?;
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::AccessGranted,
+        Resource::Scope(project.scope_id).to_string(),
+        Outcome::Success,
+        json!({
+            "authz": audit::decision_context(Action::ProjectCreate, &authorized),
+            "grant": {
+                "id": owner.id,
+                "scope_id": owner.scope_id,
+                "subject_kind": owner.subject_kind.as_str(),
+                "principal_id": owner.principal_id,
+                "role": owner.role_key.as_str(),
+                "source": owner.source.as_str(),
+            },
+            "project_id": project.id,
+        }),
+    )
+    .await?;
     audit::record(
         &mut tx,
         tenant_id,
@@ -1358,6 +1402,46 @@ pub(crate) async fn detach_repository(
     }
     .await;
     respond(&state, "repository.detach", result).await
+}
+
+/// Mints the `owner` grant for whoever created a workspace or a project
+/// (CPR-5, ADR-0072 decision 1), in the creating transaction.
+///
+/// A collaboration space that nobody is a member of is not one — and the person
+/// who made it is the one member the product can name without being told. So
+/// creation grants `owner` at the scope it just minted, with the source
+/// `owner`, which is the one source no route hands out.
+///
+/// It runs in the same transaction as the workspace and its scope, so the three
+/// outcomes are all or none: there is no window in which a workspace exists
+/// with nobody able to administer it.
+///
+/// It is keyed by the creator's **token subject**, so it works for a caller who
+/// has never provisioned an identity — which is why grants are subject-keyed at
+/// all (ADR-0072 decision 4). Contrast `created_by` on the row beside it, which
+/// is an `IdentityId` and is therefore absent for exactly those callers.
+async fn mint_owner_grant(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+    subject: &str,
+) -> Result<synveda_types::access::ScopeGrant> {
+    synveda_store::access::create_grant(
+        &mut *tx,
+        &synveda_store::access::NewGrant {
+            id: synveda_types::GrantId::new(),
+            tenant_id,
+            scope_id,
+            subject: synveda_types::access::GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: synveda_types::access::RoleKey::Owner,
+            source: synveda_types::access::GrantSource::Owner,
+            invite_id: None,
+            granted_by: Some(subject.to_owned()),
+        },
+    )
+    .await
 }
 
 /// The acting identity's id, for the `created_by` provenance column.

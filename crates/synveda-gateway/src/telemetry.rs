@@ -46,6 +46,14 @@ pub const HIERARCHY_OPERATIONS_TOTAL: &str = "synveda_hierarchy_operations_total
 /// three-outcome taxonomy every other admin plane uses.
 pub const WORKSPACE_OPERATIONS_TOTAL: &str = "synveda_workspace_operations_total";
 
+/// The access plane's operations (CPR-5, ADR-0072), labelled by `op`
+/// (`members.list`, `member.add`, `member.remove`, `invite.create`,
+/// `invite.list`, `invite.revoke`, `invite.accept`, `group.list`,
+/// `group.create`, `group.update`, `grant.list`, `grant.create`,
+/// `grant.revoke`) and `outcome` (`ok`, `rejected`, `error`) — the same
+/// three-outcome taxonomy every other admin plane uses.
+pub const ACCESS_OPERATIONS_TOTAL: &str = "synveda_access_operations_total";
+
 /// Policy pack reload sweeps' per-pack outcomes: `installed`, `removed`,
 /// `unchanged`, or `error` (a stored pack that fails to compile keeps the
 /// last-good compile in force — ADR-0012 decision 5). AUTHZ-1/AUTHZ-2.
@@ -423,6 +431,12 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         WORKSPACE_OPERATIONS_TOTAL,
         "Workspace, project and repository operations by op and outcome (ok/rejected/error)"
     );
+    // CPR-5 counters (ADR-0072): the access plane's own operations here, its
+    // store-side mutation counter beside the scope ones below.
+    metrics::describe_counter!(
+        ACCESS_OPERATIONS_TOTAL,
+        "Group, grant, member and invitation operations by op and outcome (ok/rejected/error)"
+    );
     // AUTHZ-1 counters (ADR-0012): the decision counter is emitted in
     // synveda-policy through the facade, the reload counter in the
     // gateway's refresher; both described here where the recorder lives.
@@ -562,6 +576,12 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         synveda_store::repositories::REPOSITORY_MUTATIONS_TOTAL,
         "Repository attachments by operation (attach/detach)"
+    );
+    // CPR-5 (ADR-0072): who holds what, and where it came from.
+    metrics::describe_counter!(
+        synveda_store::access::ACCESS_MUTATIONS_TOTAL,
+        "Access-plane mutations by object (group/membership/grant/invite) and \
+         operation (create/update/revoke/accept)"
     );
     // TEN-4 key plane (ADR-0064). Emitted in synveda-store and the gateway,
     // described here where the recorder lives (ADR-0007).

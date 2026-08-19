@@ -91,12 +91,36 @@ committed file and the tree disagree, and `console/src/generated/api.ts` is
 generated from that file (`make check-api-types`). **Never hand-edit either.**
 To refresh both: `SYNVEDA_WRITE_OPENAPI=1 cargo test -p synveda-gateway --test
 openapi` then `node scripts/generate-api-types.mjs`. The document covers this
-plane only, and says so in its own description; the rest of `/v1` joins it at
-Prompt 19.
+plane and CPR-5's, and says so in its own description; the rest of `/v1` joins
+it at Prompt 19.
+Since CPR-5 those workspaces have members (ADR-0072): `groups`, `group_members`,
+`scope_grants` and `pending_invites`, where a grant gives a **subject** — a
+principal or a group — a **role key** at a scope and the scope's subtree
+inherits it, so a workspace grant reaches its projects with **no row written
+there**. Creating a workspace or a project mints an `owner` grant for its
+creator. Six role keys (`owner`, `member`, `viewer`, `reviewer`, `curator`,
+`administrator`) and **no permission table** — what a key permits is the Cedar
+packs', and a second mapping would be a second decision point. A
+`principal`-shaped scope **inherits nothing**: nobody's own scope is reachable
+from above. A principal is a **token subject**, not an `identities` row, because
+an identity in this tree still needs a `hierarchy_nodes` node and depending on
+it would synchronise the two models. Invitations are one-time, expiring,
+revocable tokens minted and hashed like the SCIM credential, returned **once**
+with a copyable URL and redeemed with the recipient's own bearer — no email
+delivery anywhere. Two things this does **not** do: **grants are not yet a PDP
+input** (the resolution is served; the role keys do not reach Cedar until the
+PDP re-cut, because `context.roles` still carries the old vocabulary over the
+old hierarchy), and nothing mints `principal` scopes yet. Note two `ScopeGrant`
+role vocabularies now coexist for the same reason two `ScopeKind`s do:
+`synveda_types::Role` (viewer, contributor, curator, steward, org-admin,
+auditor, security-reviewer, compliance) binds on the **old** hierarchy and
+`synveda_types::access::RoleKey` grants on a **governed scope** — the module
+path says which model your code is written against, and nothing translates
+between them.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 67 of 100 features delivered — see docs/backlog/STATUS.md for
+features done. 69 of 102 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -112,8 +136,12 @@ day as OPS-9**, by asking how that same stranger removes it, making it 97;
 the trail missed it and the headline read 96 against a checker that had said
 97 since — the identical drift, one entry later. CPR-1 filed and delivered
 2026-08-17, making it 98, **CPR-2 the same day**, making it 99, and
-**CPR-3 the same day**, making it 100. Prompts 4–33 of its programme are filed
-by the prompts that run them, so this number will keep moving.)
+**CPR-3 the same day**, making it 100. **CPR-4 the same day**, making it 101 —
+which the trail missed again, so the headline read 100 against a checker that
+had said 101 since: the third time this exact drift has been recorded, and the
+reason the trail exists. CPR-5 filed and delivered 2026-08-18, making it 102,
+with 69 delivered. Prompts 6–33 of its programme are filed by the prompts that
+run them, so this number will keep moving.)
 
 Phase 3 was reordered on 2026-08-04 by demo-readiness (see the Sequencing
 note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,

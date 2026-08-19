@@ -119,6 +119,74 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
+    // The access plane (/v1/workspaces/{id}/members, /v1/projects/{id}/members,
+    // /v1/admin/grants, /v1/admin/groups, /v1/invites — CPR-5, ADR-0072
+    // decision 7).
+    //
+    // Read is one action over the whole plane, on DirectoryManage's argument:
+    // "who may act here" and "who has been invited to act here" are the same
+    // disclosure seen from two ends, and splitting them would create a role
+    // whose only power is reconnaissance over the other half.
+    //
+    // Read is **not** WorkspaceRead. A workspace's name discloses nothing; its
+    // membership discloses who works on what. A pack must be able to let a
+    // contributor see the workspace they contribute to without handing them
+    // the org chart, and it can only say that if they are two actions.
+    //
+    // Issuing an invitation takes MembershipGrant rather than an action of its
+    // own, because an invitation *is* deferred granting: an authority to invite
+    // weaker than the authority to grant would be a way around the second.
+    //
+    // Both apply to `[Tenant, Scope]` for CPR-4's reason: the routes decide at
+    // the tenant today because the Cedar entity model still materialises Scope
+    // from `hierarchy_nodes`, and a generic scope has no row in it. Re-anchoring
+    // them at the subtype's own scope is then a route change and not a contract
+    // change.
+    action MembershipRead, MembershipGrant
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Scope],
+            context: { roles: Set<String> },
+        };
+
+    // Curating groups (/v1/admin/groups). Separate from MembershipGrant on
+    // ChannelRollback's separability rule, and the distinction is real: a group
+    // says who exists together, a grant says what they may do, and a group with
+    // no grant naming it confers nothing at all. A deployment must be able to
+    // let somebody maintain the first without conferring the second.
+    //
+    // Tenant-only: a group is not anchored anywhere in the scope tree — the
+    // same shape DirectoryManage has, and for the same reason. A subtree-scoped
+    // authority over a tenant-wide set could only ever be a half-truth.
+    action GroupManage
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant],
+            context: { roles: Set<String> },
+        };
+
+    // Redeeming an invitation (POST /v1/invites/{token}/accept, ADR-0072
+    // decision 8).
+    //
+    // Every shipped pack permits this to any principal the base layer has not
+    // already forbidden, and that is the point rather than a gap: the **token**
+    // is the authority. A person holding a valid invitation who is refused for
+    // want of a role is a person this product invited and then turned away.
+    //
+    // It exists as an action rather than as an exemption so that the invariant
+    // floor still runs over it — a quarantined principal is refused, a sealed
+    // scope is refused — and so that a deployment which wants the mechanism off
+    // says so in a pack rather than in a deployment flag.
+    //
+    // Tenant-only, which also means AUTH-3's confinement forbids it to every
+    // service identity for free: an agent must not redeem a person's invitation.
+    action InviteAccept
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant],
+            context: { roles: Set<String> },
+        };
+
     // The composition seam (AUTHZ-2, ADR-0014 decision 5): may this
     // principal's inject/recall composition include memories attached to
     // this scope? CTX-1/2/3 ask exactly this question per candidate scope.

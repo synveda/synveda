@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update scope_grants set role_key = 'owner' where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "51df467666bce2abe537edc6699963ce0c898c27b36b7e8af8226d2cc58bf0b8"
+}
