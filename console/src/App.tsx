@@ -1,29 +1,73 @@
+/**
+ * The console's entry point (CPR-8, ADR-0075).
+ *
+ * One call, then one of four things. `GET /v1/me` answers who is calling,
+ * which tenant, what exists, what is missing and what this caller may do
+ * (ADR-0071 decision 2) — which is exactly the set of facts that decides
+ * whether somebody sees a sign-in page, an onboarding wizard, the product,
+ * or an error. Before CPR-8 this component asked `whoami`, learned four
+ * fewer things, and mounted the proposals inbox and the scope explorer one
+ * after the other with no navigation at all.
+ *
+ * # The onboarding gate is the server's answer, not an inference
+ *
+ * `me.onboarding.state` is computed by the gateway from the same rows it
+ * would refuse a project creation against. The console branches on that
+ * word and never on `workspaces.length === 0`, because the two differ
+ * exactly when it matters: a caller who can read no workspaces is not the
+ * same as a deployment that has none, and only one of them should be shown
+ * a "create your first workspace" wizard.
+ */
+
 import { useCallback, useEffect, useState } from "react";
 
-import { SIGN_IN_URL, signOut, whoami, type Outcome, type WhoAmI } from "./api.mjs";
-import { Explorer } from "./Explorer.js";
-import { Inbox } from "./Inbox.js";
+import { SIGN_IN_URL, type Outcome } from "./api.mjs";
+import { request } from "./client.mjs";
+import { Failure, Loading, useQuery, useRefresh } from "./Query.js";
+import { navigate, useHistoryEvents, useRoute } from "./Router.js";
+import { AppProvider, NotFound, NotOffered, Shell, appContext } from "./Shell.js";
+import {
+  readStored,
+  reconcile,
+  writeStored,
+  type Selection,
+  type SelectionStore,
+} from "./selection.mjs";
+import { hrefOf, offersRoute, routeOf, type RouteId } from "./routes.mjs";
+import type { MeView } from "./generated/api.js";
 
-/**
- * The console shell (CNSL-1, ADR-0056).
- *
- * The session underneath it is the part worth naming: a login that leaves
- * no credential in the browser, `/v1` calls authenticated by a cookie the
- * bundle cannot read, and a sign-out that ends the session server-side.
- * The inbox sits on top of that and was written against the parity corpus
- * (decision 7) rather than the other way round — a renderer built first is
- * a renderer the corpus then has to be written around.
- */
+import { Home } from "./Home.js";
+import { Onboarding } from "./Onboarding.js";
+import { People } from "./People.js";
+import { Planned } from "./Planned.js";
+import { Reviews } from "./Reviews.js";
+import { Scopes } from "./Scopes.js";
+import { Settings } from "./Settings.js";
+import { Skills } from "./Skills.js";
+import { Audit } from "./Audit.js";
+import { Policies } from "./Policies.js";
+import { ServiceIdentities } from "./ServiceIdentities.js";
+
+/** The key `/v1/me` is cached under. Invalidated by anything that changes it. */
+export const ME_KEY = "me";
+
+/** `localStorage`, or nothing at all where it is unavailable. */
+function selectionStore(): SelectionStore | null {
+  try {
+    return window.localStorage;
+  } catch {
+    // Some browsers throw on the *accessor* when site data is blocked, not
+    // just on the read. The console works without a remembered selection;
+    // it does not work if the first thing it does is throw.
+    return null;
+  }
+}
+
 export function App() {
-  const [state, setState] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
-
-  const load = useCallback(async () => {
-    setState(await whoami());
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useHistoryEvents();
+  const route = useRoute();
+  const entry = useQuery(ME_KEY, () => request("get_me", {}));
+  const retry = useRefresh(ME_KEY);
 
   // The gateway sends a failed console login back here with a
   // classification and nothing else (auth::console_error_redirect). Read
@@ -38,112 +82,158 @@ export function App() {
     }
   }, []);
 
-  const onSignOut = useCallback(async () => {
-    await signOut();
-    // Reload rather than clear local state: the cookie is gone, so every
-    // subsequent call is a 401 anyway, and a fresh load is the one path
-    // that cannot leave a stale view of a session that no longer exists.
-    window.location.assign("/console/");
+  if (entry.status === "loading") {
+    return (
+      <main className="centred">
+        <Loading what="your session" />
+      </main>
+    );
+  }
+  const outcome: Outcome = entry.outcome;
+  if (outcome.kind === "unauthenticated") {
+    return <SignIn error={loginError} />;
+  }
+  if (outcome.kind !== "ok") {
+    return (
+      <main className="centred">
+        {loginError ? <Banner>Sign-in failed: {loginError}</Banner> : null}
+        <Failure state={outcome} onRetry={retry} />
+      </main>
+    );
+  }
+  return <SignedIn me={outcome.body as MeView} route={route} />;
+}
+
+/**
+ * Everything behind a resolved session.
+ *
+ * Split from {@link App} so the selection hooks are only mounted once there
+ * is a `MeView` to reconcile against — a hook that has to cope with "there
+ * is no answer yet" is a hook that carries a null branch through every
+ * line of it.
+ */
+function SignedIn({ me, route }: { me: MeView; route: RouteId | null }) {
+  const [preference, setPreference] = useState<Selection>(() => readStored(selectionStore()));
+  const selection = reconcile(preference, me);
+
+  const choose = useCallback((next: Selection) => {
+    const store = selectionStore();
+    writeStored(store, next);
+    setPreference(next);
   }, []);
 
+  // The reconciled answer is written back, so a preference that named a
+  // workspace this caller lost is replaced rather than re-resolved on every
+  // load. Guarded on inequality: an unconditional write in an effect that
+  // sets state is a render loop.
+  useEffect(() => {
+    if (
+      selection.workspaceId !== preference.workspaceId ||
+      selection.projectId !== preference.projectId
+    ) {
+      writeStored(selectionStore(), selection);
+      setPreference(selection);
+    }
+    // The primitive ids rather than the objects: `reconcile` returns a fresh
+    // object every render, so depending on it would re-run this on every
+    // render for no reason.
+  }, [selection.workspaceId, selection.projectId, preference.workspaceId, preference.projectId]);
+
+  const context = appContext(me, selection, choose);
+
+  // First run. `blocked` is the fourth state — a caller who may not create
+  // anything and has nothing to see — and it is *not* sent to the wizard,
+  // because the wizard's first step is a creation they would be refused.
+  //
+  // `replace` rather than `push`, so Back does not return somebody to a
+  // wizard they have just finished. In an effect rather than in render,
+  // because navigating is a side effect and a render that performs one runs
+  // twice under StrictMode.
+  const needsOnboarding =
+    me.onboarding.state === "needs_workspace" || me.onboarding.state === "needs_project";
+  useEffect(() => {
+    if (needsOnboarding && route !== "welcome") {
+      navigate(hrefOf("welcome"), { replace: true });
+    }
+  }, [needsOnboarding, route]);
+
   return (
-    <main>
-      <header>
-        <h1>Synveda</h1>
-        {state.kind === "ok" ? (
-          <button type="button" onClick={() => void onSignOut()}>
-            Sign out
-          </button>
-        ) : null}
-      </header>
+    <AppProvider value={context}>
+      <Shell route={route} context={context}>
+        <Page route={route} me={me} />
+      </Shell>
+    </AppProvider>
+  );
+}
 
-      {loginError ? <Banner kind="error">Sign-in failed: {loginError}</Banner> : null}
+/**
+ * The route table's other half: which component a route renders.
+ *
+ * A `switch` over a closed union, so a route added to `routes.mts` without
+ * a page here is a compile error rather than a blank screen.
+ */
+function Page({ route, me }: { route: RouteId | null; me: MeView }) {
+  if (route === null) {
+    return <NotFound />;
+  }
+  // The capability guard. A forecast, never a grant (`routes.mts`): it
+  // decides what to render, the page's own calls still meet the gateway's
+  // decision, and a reader who gets past a stale forecast sees a refusal
+  // from the act rather than a blank page.
+  if (!offersRoute(routeOf(route), me.capabilities.actions)) {
+    return <NotOffered route={route} />;
+  }
+  switch (route) {
+    case "home":
+      return <Home />;
+    case "welcome":
+      return <Onboarding />;
+    case "people":
+      return <People />;
+    case "settings":
+      return <Settings />;
+    case "skills":
+      return <Skills />;
+    case "sessions":
+    case "knowledge":
+    case "learnings":
+    case "tools":
+      return <Planned route={route} />;
+    case "reviews":
+      return <Reviews />;
+    case "scopes":
+      return <Scopes />;
+    case "policies":
+      return <Policies />;
+    case "audit":
+      return <Audit />;
+    case "service-identities":
+      return <ServiceIdentities />;
+  }
+}
 
-      <Body state={state} onRetry={() => void load()} />
+function SignIn({ error }: { error: string | null }) {
+  return (
+    <main className="centred">
+      <h1>Synveda</h1>
+      {error ? <Banner>Sign-in failed: {error}</Banner> : null}
+      <section>
+        <h2>Sign in</h2>
+        <p className="muted">
+          You will be sent to your identity provider and back. The console keeps no token in your
+          browser.
+        </p>
+        <a className="button" href={SIGN_IN_URL}>
+          Sign in
+        </a>
+      </section>
     </main>
   );
 }
 
-function Body({
-  state,
-  onRetry,
-}: {
-  state: Outcome | { kind: "loading" };
-  onRetry: () => void;
-}) {
-  switch (state.kind) {
-    case "loading":
-      return <p className="muted">Checking your session…</p>;
-
-    case "ok": {
-      const me = state.body as WhoAmI;
-      return (
-        <>
-          <section>
-            <h2>Signed in</h2>
-            <dl>
-              <dt>Subject</dt>
-              <dd>{me.subject}</dd>
-              <dt>Organisation</dt>
-              <dd>
-                {me.tenant.name} <span className="muted">({me.tenant.slug})</span>
-              </dd>
-            </dl>
-          </section>
-          <Inbox />
-          <Explorer />
-        </>
-      );
-    }
-
-    case "unauthenticated":
-      return (
-        <section>
-          <h2>Sign in</h2>
-          <p className="muted">
-            You will be sent to your identity provider and back. The console keeps no token in
-            your browser.
-          </p>
-          <a className="button" href={SIGN_IN_URL}>
-            Sign in
-          </a>
-        </section>
-      );
-
-    // Signed in, and told no. Offering a login here would send somebody
-    // who is already signed in round a loop that cannot end (see api.mts).
-    case "forbidden":
-      return (
-        <Banner kind="error">
-          Your roles do not allow this: {state.message}
-          <p className="muted">
-            Ask an administrator for the role this scope requires — signing in again will not
-            change the answer.
-          </p>
-        </Banner>
-      );
-
-    case "invalid":
-    case "conflict":
-      return <Banner kind="error">{state.message}</Banner>;
-
-    case "unavailable":
-      return (
-        <Banner kind="error">
-          The gateway is not answering: {state.message}
-          <p>
-            <button type="button" onClick={onRetry}>
-              Try again
-            </button>
-          </p>
-        </Banner>
-      );
-  }
-}
-
-function Banner({ kind, children }: { kind: "error"; children: React.ReactNode }) {
+function Banner({ children }: { children: React.ReactNode }) {
   return (
-    <div className={`banner ${kind}`} role="alert">
+    <div className="banner error" role="alert">
       {children}
     </div>
   );

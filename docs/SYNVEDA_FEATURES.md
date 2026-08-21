@@ -1365,6 +1365,52 @@ CPR-7  The hierarchy cutover: one scope tree (XL)
   approval matrix, proposal approvals and curator files speak grant keys only; and a
   fresh database is the only database this build accepts.
 
+CPR-8  The console product shell & first-run onboarding (L)
+  Filed 2026-08-21 by Prompt 8 of the CPR programme. Six prompts built a context platform —
+  governed scopes, workspaces, projects, membership, invitations, the re-cut decision point —
+  and every one of them is reachable only from the CLI. The console still resolves its session
+  with `whoami` and mounts the proposals inbox and the scope explorer one after the other with
+  no navigation at all, which is the right first screen for somebody reviewing other people's
+  publications and the wrong one for the person who just installed the product and has no
+  proposals, one scope and no way to create a workspace. This replaces that entry point with a
+  **route-based product shell**: a primary menu that is the product (Home, Sessions, Knowledge,
+  New Learnings, Skills, Tools, People, Settings), shown to everybody unconditionally, and an
+  **advanced** menu that is governance (Reviews, Scopes, Policies, Audit, Service identities),
+  shown only where the caller's capability forecast offers the plane behind it. Beside it: a
+  workspace and project switcher over a selection persisted per browser and reconciled against
+  `/v1/me` on every load; route-level loading and error states from one query/cache layer; a
+  typed client generated from the OpenAPI contract, which now also emits the runtime path table
+  and a compile-time `Idempotency-Key` obligation on the eight operations whose document
+  requires one; a **People** page answering *why* somebody may act here — workspace members,
+  project-only members, pending and settled invitations, each row carrying its role, access
+  source, the scope its grant is written at, the group it came through and whether a directory
+  owns it, with invite/revoke/remove offered exactly where the API would accept them; and
+  **first-run onboarding** — workspace, project, repository, agent client, connection
+  instructions, connection check — whose personal/team question **seeds** a policy pack and a
+  membership posture and records no edition anywhere, because ADR-0068 decision 1 forbids one
+  and a wizard asking "is this just you?" is the friendliest door that branch could arrive
+  through. The proposals inbox moves to Advanced ▸ Reviews and the scope explorer to
+  Advanced ▸ Scopes, unchanged in substance. No npm dependency added: routing and the cache are
+  written here, because the shipped bundle's licence gate has no exception mechanism and the
+  page is served under `default-src 'none'`. ADR-0075.
+  AC: the primary menu carries all eight items for every caller including one with an empty
+  capability map and no primary route is gated; the advanced menu appears only where the
+  forecast offers a plane, is absent heading-and-all for a caller with none, and carries
+  exactly the planes offered; a guarded route reached directly explains the missing action
+  rather than redirecting, and an unknown path renders a not-found page rather than Home; the
+  selection survives a reload, falls back when it names a workspace the caller lost, drops a
+  project belonging to another workspace, and degrades in a browser that stores nothing; every
+  contract-covered call goes through the generated client, an operation the document marks
+  idempotent cannot be sent without a key and one it does not mark cannot carry one; the People
+  page splits workspace from project-only membership by each row's own `inherited` flag, names
+  the group and the directory together where both are true, and offers remove only on a direct
+  non-directory grant; onboarding walks its six steps, produces a seeding plan carrying no
+  edition field, reports a refused seeding step with the plane that can finish it without
+  blocking, and runs a connection check that passes without a repository, fails on an
+  unreadable project and states what it cannot verify; a plane with no API says it is not built
+  and what it waits on rather than rendering an empty list; and `make check-api-types` passes
+  with no dependency added.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1458,7 +1504,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

@@ -1,13 +1,22 @@
 /**
- * The proposals inbox (CNSL-1) — the queue, and the review beside it.
+ * Advanced ▸ Reviews (CNSL-1; re-homed by CPR-8) — the queue, and the
+ * review beside it.
  *
- * The screen this feature exists for. FLOW-6 established that a full review
- * is possible without a console; what a console adds is that the queue and
- * the thing being reviewed are visible at once, which a terminal cannot do
- * and which is most of why a reviewer with forty open proposals prefers one.
+ * The screen CNSL-1 exists for. FLOW-6 established that a full review is
+ * possible without a console; what a console adds is that the queue and the
+ * thing being reviewed are visible at once, which a terminal cannot do and
+ * which is most of why a reviewer with forty open proposals prefers one.
  *
  * It calls no endpoint the CLI does not (ADR-0056 decision 9): `GET
  * /v1/proposals`, `GET /v1/proposals/{id}`, and the two verdict routes.
+ *
+ * **What CPR-8 changed is where it is, and nothing else.** Until then this
+ * was mounted directly by `App.tsx`, so signing in put every reader in front
+ * of a review queue — the right first screen for the person who reviews
+ * other people's publications and the wrong one for the person who just
+ * installed the product. It is now a route under Advanced, behind
+ * `proposal.read`, where somebody goes to govern rather than lands to work.
+ * Not one line of the review itself moved.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -22,9 +31,10 @@ import {
 } from "./api.mjs";
 import { offers, type Capabilities, type CapabilityBatch } from "./explorer.mjs";
 import { Review } from "./Review.js";
+import { PageHeading } from "./Shell.js";
 import type { Proposal, ProposalDetail } from "./review.mjs";
 
-export function Inbox() {
+export function Reviews() {
   const [queue, setQueue] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -38,7 +48,7 @@ export function Inbox() {
 
   return (
     <section className="inbox">
-      <h2>Proposals</h2>
+      <PageHeading route="reviews" />
       <div className="split">
         <Queue state={queue} selected={selected} onSelect={setSelected} onRetry={() => void load()} />
         {selected ? (

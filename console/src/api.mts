@@ -1,5 +1,19 @@
 /**
- * The console's `/v1` client (CNSL-1, ADR-0056).
+ * The console's `/v1` transport (CNSL-1, ADR-0056), and the calls that are
+ * **not on the OpenAPI contract yet**.
+ *
+ * Since CPR-8 this file is two things and the split matters. The transport —
+ * `call`, `classify`, the session — is what everything uses, generated or
+ * not. The named calls below it are the routes the contract does not cover:
+ * `docs/api/openapi.json` declares the context-platform plane (32
+ * operations) and the rest of `/v1` joins it at Prompt 19 of the
+ * context-platform programme. Everything the document *does* declare is
+ * reached through `client.mts`, whose types are generated from it; nothing
+ * here duplicates one of those routes.
+ *
+ * A hand-written call is therefore a **marker**: it says "this route has no
+ * contract yet". When Prompt 19 lands, these disappear rather than being
+ * kept in step.
  *
  * Two things live here, and only the second one is interesting.
  *
@@ -129,16 +143,12 @@ export async function call(
   return classify(response.status, body);
 }
 
-/** Who the current session resolves to, as `/v1/whoami` reports it. */
-export interface WhoAmI {
-  subject: string;
-  tenant: { id: string; slug: string; name: string };
-}
-
-/** Resolves the session. `unauthenticated` here is the signed-out state. */
-export async function whoami(fetchImpl: typeof fetch = fetch): Promise<Outcome> {
-  return call("/whoami", { method: "GET" }, fetchImpl);
-}
+// `whoami` and its `WhoAmI` type were deleted by CPR-8. The console resolves
+// its session with `GET /v1/me`, through the generated client — one call that
+// answers who, which tenant, what exists, what is missing and what this caller
+// may do (ADR-0071 decision 2), where `whoami` answered the first two. Keeping
+// a second, weaker session call would be keeping a second answer to the
+// question every page starts with.
 
 /**
  * Ends the session. Not under {@link API_BASE}: sign-out is part of the
@@ -306,4 +316,86 @@ export async function scopeCapabilities(
  */
 export async function standingLapses(fetchImpl: typeof fetch = fetch): Promise<Outcome> {
   return call("/lapses", { method: "GET" }, fetchImpl);
+}
+
+// ── The planes the contract does not cover yet ──────────────────────────
+//
+// Policy packs, lapses, audit, service identities and skills. Every one of
+// them is a route the CLI also has (ADR-0056 decision 9 is standing: no
+// console-only route), and every one of them is hand-written here because
+// the OpenAPI document does not declare it. That is the whole reason they
+// are grouped and labelled rather than scattered — the group is a to-do
+// list with a prompt number on it.
+
+/** The packs this tenant can assign: the embedded ones and its stored ones. */
+export async function policyPacks(fetchImpl: typeof fetch = fetch): Promise<Outcome> {
+  return call("/policy/packs", { method: "GET" }, fetchImpl);
+}
+
+/** The tenant-wide default pack, and where it came from. */
+export async function defaultPolicy(fetchImpl: typeof fetch = fetch): Promise<Outcome> {
+  return call("/policy/default", { method: "GET" }, fetchImpl);
+}
+
+/**
+ * Assigns a pack at one scope, governing its subtree.
+ *
+ * Used by first-run onboarding to seed the shape somebody chose, and by
+ * Advanced ▸ Policies to change it afterwards. The same route both times:
+ * onboarding is a caller of the product's own surface, never a second way
+ * in (seed §2.2).
+ */
+export async function assignScopePolicy(
+  scopeId: string,
+  name: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Outcome> {
+  return call(
+    `/admin/scopes/${encodeURIComponent(scopeId)}/policy`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    },
+    fetchImpl,
+  );
+}
+
+/** The most recent audit events, newest first. */
+export async function auditEvents(
+  limit: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Outcome> {
+  return call(`/audit/events?limit=${encodeURIComponent(String(limit))}`, { method: "GET" }, fetchImpl);
+}
+
+/**
+ * Whether the hash chain still verifies.
+ *
+ * A broken chain is a 200 with `valid: false` rather than an error — the
+ * verification succeeded; it is the chain that did not — so the page reads
+ * the verdict rather than the status.
+ */
+export async function auditVerify(fetchImpl: typeof fetch = fetch): Promise<Outcome> {
+  return call("/audit/verify", { method: "GET" }, fetchImpl);
+}
+
+/** The agents registered to act in this tenant. */
+export async function serviceIdentities(fetchImpl: typeof fetch = fetch): Promise<Outcome> {
+  return call("/service-identities", { method: "GET" }, fetchImpl);
+}
+
+/**
+ * The skills available at a scope.
+ *
+ * Skills the caller may not read at their tier are omitted by the gateway
+ * rather than refused, so an empty list here means "nothing you may load",
+ * which is what the page says.
+ */
+export async function skillsAt(
+  scopeId: string | null,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Outcome> {
+  const query = scopeId ? `?scope_id=${encodeURIComponent(scopeId)}` : "";
+  return call(`/skills${query}`, { method: "GET" }, fetchImpl);
 }

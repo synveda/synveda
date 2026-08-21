@@ -1,6 +1,12 @@
 /**
- * The scope & policy explorer (CNSL-2; the governed-scope re-cut CPR-7) —
- * scopes, packs and standing lapses on one page.
+ * Advanced ▸ Scopes (CNSL-2; the governed-scope re-cut CPR-7; re-homed by
+ * CPR-8) — scopes, packs and standing lapses on one page.
+ *
+ * CPR-7 converted this screen off the deleted hierarchy and onto the
+ * governed scope plane (`/v1/admin/scopes`), which is where its calls
+ * already point. CPR-8 moved it out of the application\'s entry point and
+ * onto its own route behind `scope.read`, and renamed it after the thing it
+ * is actually about.
  *
  * The screen exists because those three facts are one question. "How is
  * this scope governed" is answered by a pack, the grants standing across
@@ -23,6 +29,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { PageHeading } from "./Shell.js";
 import {
   childrenOf,
   scopeCapabilities,
@@ -48,7 +55,7 @@ import {
   type ScopeLevel,
 } from "./explorer.mjs";
 
-export function Explorer() {
+export function Scopes() {
   const [root, setRoot] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
   const [selected, setSelected] = useState<Node | null>(null);
   const [lapses, setLapses] = useState<Lapse[]>([]);
@@ -75,15 +82,25 @@ export function Explorer() {
   }, [load]);
 
   if (root.kind === "loading") {
-    return <p className="muted">Reading the scope tree…</p>;
+    return (
+      <>
+        <PageHeading route="scopes" />
+        <p className="muted">Reading the scope tree…</p>
+      </>
+    );
   }
   if (root.kind !== "ok") {
-    return <Failure state={root} onRetry={() => void load()} />;
+    return (
+      <>
+        <PageHeading route="scopes" />
+        <Failure state={root} onRetry={() => void load()} />
+      </>
+    );
   }
 
   return (
     <section className="explorer">
-      <h2>Scope tree &amp; policy</h2>
+      <PageHeading route="scopes" />
       <div className="split">
         <div className="tree" role="tree" aria-label="Scopes">
           <Branch node={(root.body as ScopeLevel).parent as Node} selected={selected} onSelect={setSelected} />

@@ -1053,6 +1053,7 @@ export type WorkspaceView = {
  * Every operation the contract declares, keyed by its operation id.
  *
  * `body` is present exactly when the operation takes a request body;
+ * `idempotent` exactly when it requires an `Idempotency-Key` header;
  * `response` is the union of its 2xx bodies (`void` for a 204). Error
  * bodies are {@link ApiErrorBody} on every operation and are not repeated
  * here.
@@ -1073,6 +1074,7 @@ export type Operations = {
     readonly path: "/v1/admin/grants";
     readonly method: "POST";
     readonly body: GrantSubjectBody;
+    readonly idempotent: true;
     readonly response: GrantView;
   };
   /**
@@ -1098,6 +1100,7 @@ export type Operations = {
     readonly path: "/v1/admin/groups";
     readonly method: "POST";
     readonly body: CreateGroupBody;
+    readonly idempotent: true;
     readonly response: GroupView;
   };
   /**
@@ -1118,6 +1121,7 @@ export type Operations = {
     readonly path: "/v1/admin/scopes";
     readonly method: "POST";
     readonly body: CreateScopeBody;
+    readonly idempotent: true;
     readonly response: ScopeView;
   };
   readonly get_scope: {
@@ -1194,6 +1198,7 @@ export type Operations = {
     readonly path: "/v1/projects/{project_id}/members";
     readonly method: "POST";
     readonly body: GrantSubjectBody;
+    readonly idempotent: true;
     readonly response: GrantView;
   };
   /**
@@ -1219,6 +1224,7 @@ export type Operations = {
     readonly path: "/v1/projects/{project_id}/repositories";
     readonly method: "POST";
     readonly body: AttachRepositoryBody;
+    readonly idempotent: true;
     readonly response: RepositoryView;
   };
   /**
@@ -1244,6 +1250,7 @@ export type Operations = {
     readonly path: "/v1/workspaces";
     readonly method: "POST";
     readonly body: CreateWorkspaceBody;
+    readonly idempotent: true;
     readonly response: WorkspaceView;
   };
   /**
@@ -1278,6 +1285,7 @@ export type Operations = {
     readonly path: "/v1/workspaces/{workspace_id}/invites";
     readonly method: "POST";
     readonly body: CreateInviteBody;
+    readonly idempotent: true;
     readonly response: CreatedInviteView;
   };
   /**
@@ -1311,9 +1319,56 @@ export type Operations = {
     readonly path: "/v1/workspaces/{workspace_id}/projects";
     readonly method: "POST";
     readonly body: CreateProjectBody;
+    readonly idempotent: true;
     readonly response: ProjectView;
   };
 };
 
 /** An operation id. */
 export type OperationId = keyof Operations;
+
+/**
+ * Every operation's path template and method, as values.
+ *
+ * The runtime half of {@link Operations}: a type erases, and a client has to
+ * build a URL. Generated from the same document in the same pass, so the two
+ * cannot disagree. `idempotent` marks the operations whose document requires
+ * an `Idempotency-Key` header.
+ */
+export const OPERATIONS = {
+  list_grants: { path: "/v1/admin/grants", method: "GET" },
+  create_grant: { path: "/v1/admin/grants", method: "POST", idempotent: true },
+  revoke_grant: { path: "/v1/admin/grants/{grant_id}", method: "DELETE" },
+  list_groups: { path: "/v1/admin/groups", method: "GET" },
+  create_group: { path: "/v1/admin/groups", method: "POST", idempotent: true },
+  update_group: { path: "/v1/admin/groups/{group_id}", method: "PATCH" },
+  list_scopes: { path: "/v1/admin/scopes", method: "GET" },
+  create_scope: { path: "/v1/admin/scopes", method: "POST", idempotent: true },
+  get_scope: { path: "/v1/admin/scopes/{scope_id}", method: "GET" },
+  update_scope: { path: "/v1/admin/scopes/{scope_id}", method: "PATCH" },
+  list_scope_ancestors: { path: "/v1/admin/scopes/{scope_id}/ancestors", method: "GET" },
+  list_scope_descendants: { path: "/v1/admin/scopes/{scope_id}/descendants", method: "GET" },
+  accept_invite: { path: "/v1/invites/{invite_token}/accept", method: "POST" },
+  get_me: { path: "/v1/me", method: "GET" },
+  get_project: { path: "/v1/projects/{project_id}", method: "GET" },
+  update_project: { path: "/v1/projects/{project_id}", method: "PATCH" },
+  list_project_members: { path: "/v1/projects/{project_id}/members", method: "GET" },
+  add_project_member: { path: "/v1/projects/{project_id}/members", method: "POST", idempotent: true },
+  remove_project_member: { path: "/v1/projects/{project_id}/members/{principal_id}", method: "DELETE" },
+  list_repositories: { path: "/v1/projects/{project_id}/repositories", method: "GET" },
+  attach_repository: { path: "/v1/projects/{project_id}/repositories", method: "POST", idempotent: true },
+  detach_repository: { path: "/v1/projects/{project_id}/repositories/{repository_id}", method: "DELETE" },
+  list_workspaces: { path: "/v1/workspaces", method: "GET" },
+  create_workspace: { path: "/v1/workspaces", method: "POST", idempotent: true },
+  get_workspace: { path: "/v1/workspaces/{workspace_id}", method: "GET" },
+  update_workspace: { path: "/v1/workspaces/{workspace_id}", method: "PATCH" },
+  list_workspace_invites: { path: "/v1/workspaces/{workspace_id}/invites", method: "GET" },
+  create_workspace_invite: { path: "/v1/workspaces/{workspace_id}/invites", method: "POST", idempotent: true },
+  revoke_workspace_invite: { path: "/v1/workspaces/{workspace_id}/invites/{invite_id}", method: "DELETE" },
+  list_workspace_members: { path: "/v1/workspaces/{workspace_id}/members", method: "GET" },
+  list_projects: { path: "/v1/workspaces/{workspace_id}/projects", method: "GET" },
+  create_project: { path: "/v1/workspaces/{workspace_id}/projects", method: "POST", idempotent: true },
+} as const satisfies Record<
+  OperationId,
+  { readonly path: string; readonly method: string; readonly idempotent?: true }
+>;

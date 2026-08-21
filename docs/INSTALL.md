@@ -369,6 +369,34 @@ why, plus the standing list of what does not work yet.
 no second process and no second port. Sign in with the operator `init`
 printed; the session is an `HttpOnly` cookie, so there is no token to paste.
 
+**Since CPR-8 the console is the product rather than a review queue.** The
+first sign-in on a fresh deployment goes to a six-step **getting started**
+flow — create a workspace (just you, or a team), create the first project,
+attach the repository it is about, choose your agent client, copy the two
+commands that connect it, and run a connection check — because nobody is
+asked to declare an organisation before they can hold a record.
+
+After that the left-hand navigation is the product: **Home, Sessions,
+Knowledge, New Learnings, Skills, Tools, People, Settings**, with a workspace
+and a project switcher in the header that remember what you chose. **People**
+is where you invite somebody (a one-time link you copy — this product emails
+nobody), see who may act in a workspace and who has access only to one
+project, and read *why* each of them does: granted here, inherited from a
+scope above, through a group, or managed by your directory.
+
+Governance lives under **Advanced** — Reviews (the proposals inbox), Scopes
+(the scope tree, the pack in force, standing relaxations), Policies, Audit and
+Service identities. Those five appear only if the policy decision point says
+you may read them, so a viewer who holds no governance role sees no Advanced
+section at all. That is a forecast and not a permission: every act is decided
+again at its own seam, and a page you reach anyway will show you the gateway's
+own refusal.
+
+Four items in that navigation — Sessions, Knowledge, New Learnings and Tools —
+have no data behind them yet. Each says so, and says which piece of work
+brings it. They are listed rather than hidden because they are what the
+product is.
+
 Signing in needs a **key plane**, because a console session seals its tokens
 under the deployment's encryption key (TEN-4). `init` mints one at
 `~/.synveda/data/kms.key` on first run and reuses it after — **back that file

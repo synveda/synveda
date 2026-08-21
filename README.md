@@ -88,7 +88,9 @@ synveda login
 synveda plugin install            # Claude Code: hooks + MCP, one command
 ```
 
-An admin console comes with it, at `http://127.0.0.1:8120/console/`. See
+An admin console comes with it, at `http://127.0.0.1:8120/console/` — since
+CPR-8 a product shell with first-run onboarding, workspace and project
+switchers, a People page and the governance surfaces under **Advanced**. See
 [docs/INSTALL.md](docs/INSTALL.md).
 
 | Phase | Scope | State |
@@ -191,9 +193,14 @@ Being explicit, so nothing here misleads:
   OPS-8 the plugin had never loaded at all: its manifest declared two keys
   Claude Code discovers on its own, and nothing noticed because a harness that
   replaces the harness cannot.
-- **Only two of the four console screens.** The proposals inbox (CNSL-1) and the
-  scope and policy explorer (CNSL-2) are served from the gateway's own origin
-  at `/console/`; CNSL-3 and CNSL-4 are not built.
+- **Four console pages have no plane behind them.** CPR-8 made the console a
+  product shell — routes, switchers, People, first-run onboarding, and the
+  proposals inbox (CNSL-1) and scope explorer (CNSL-2) re-homed under
+  **Advanced** — but Sessions, Knowledge, New Learnings and Tools are in the
+  navigation with no API behind them, waiting on Prompts 9–15 of the
+  context-platform programme. Each page says so rather than rendering an empty
+  list. Seven console surfaces also still call hand-written paths, because the
+  OpenAPI contract covers the context-platform plane only until Prompt 19.
 - **No Python/TS SDKs** (ADPT-4) and **no importers** from claude-mem, Cognee or
   mem0 (ADPT-5).
 - **No per-tenant encryption keys, WORM export or SIEM streaming**

@@ -200,7 +200,9 @@ of `GET /v1/whoami`:
 | Signed-in header + sign-out | `App.tsx` | `/v1/whoami`, `POST /auth/console/logout` |
 | Sign-in prompt (unauthenticated) | `App.tsx` | link to `/auth/login` |
 | Proposals inbox (the hero screen) | `Inbox.tsx` → `Review.tsx` | `/v1/proposals`, `/v1/proposals/{id}`, approve/reject |
+  *(CPR-8: `Inbox.tsx` is now `Reviews.tsx`, mounted at Advanced ▸ Reviews.)*
 | Hierarchy & policy explorer | `Explorer.tsx` | `/v1/hierarchy/root`, `…/children`, `…/policy`, `…/roles`, `…/capabilities`, `/v1/lapses` |
+  *(CPR-7 re-cut it onto `/v1/admin/scopes`; CPR-8 renamed it `Scopes.tsx` and mounted it at Advanced ▸ Scopes.)*
 
 Supporting modules: `api.mts` (fetch + outcome classification + the
 hand-written response types), `review.mts`, `explorer.mts`, `diff.mts`,
@@ -1591,4 +1593,155 @@ frontend changes, deletions, tests, and the resulting commit hash.
   "What this cutover does not carry".
 - **Commit.** `refactor(scopes): remove fixed hierarchy model` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by Prompt 8, on Prompt 1's rule.
+- **Commit hash.** `b2c174d8d131540052e87b9883c7147c685d6a0f`. Written by
+  **Prompt 8**, on Prompt 1's rule.
+
+### Prompt 8 — The console product shell & first-run onboarding (CPR-8)
+
+- **Implemented.** The console re-cut from a governance entry point into a
+  route-based product shell (ADR-0075), and the first prompt of this
+  programme whose deliverable is a screen rather than a plane. Six prompts
+  built a context platform reachable only from the CLI; `App.tsx` still
+  resolved its session with `whoami` and mounted the proposals inbox and the
+  scope explorer one after the other, with no navigation at all. What
+  arrived: a **route table** with two menus — a primary menu shown to
+  everybody (Home, Sessions, Knowledge, New Learnings, Skills, Tools,
+  People, Settings) and an advanced menu shown only where the capability
+  forecast offers the plane (Reviews, Scopes, Policies, Audit, Service
+  identities) — client-side routing over the History API, workspace and
+  project switchers over a persisted-and-reconciled selection, one
+  query/cache layer with one loading and one error state per route, a typed
+  client over the generated contract, a People page, first-run onboarding,
+  and honest pages for the four planes that have no API yet.
+- **Divergence from §9.** §9's Prompt 8 reads *"Session events and the
+  observe path onto sessions"*, and §9's Prompt 7 read *"Sessions"* before
+  CPR-7 took that slot for the hierarchy cutover. The prompt as it arrived
+  is the console shell — §9's Prompt 20, "Console on generated types" —
+  and the prompt's own text is authoritative (§9's preamble). Recorded
+  rather than absorbed, because the swap is larger than CPR-7's: it moves a
+  Stage E prompt in front of the whole of Stages B–D. The programme's
+  numbered order is not renumbered here; Stage B's memory-plane work is
+  unstarted and the prompts that run it will say so. What the swap costs is
+  visible in this entry's own standing gaps — four primary pages with no
+  plane behind them, and seven surfaces still on hand-written paths because
+  Prompt 19 has not run — and what it buys is that the platform CPR-3
+  through CPR-7 built is reachable by somebody who is not holding a
+  terminal.
+- **Schema/domain changes.** **None.** No migration was added, altered or
+  removed; no table, type or store service changed. The epoch stays at 2.
+- **API and frontend changes.** One **contract defect fixed at the source**:
+  `list_scopes` declared `parent_id` as a `Path` parameter on
+  `/v1/admin/scopes`, a route with no such placeholder — `utoipa`'s
+  `IntoParams` defaults to `Path` and nothing had declared otherwise. It is
+  now `#[into_params(parameter_in = Query)]`, with `docs/api/openapi.json`
+  and `console/src/generated/api.ts` regenerated. Invisible while every
+  caller was hand-written; the first thing a generated client trips over.
+  The **generator** gained two things: it emits the runtime path/method
+  table (`OPERATIONS`) beside the type table, so no hand-written second copy
+  of a path exists anywhere in the console, and an `idempotent: true` flag
+  for the eight operations whose document requires an `Idempotency-Key` —
+  which `client.mts` turns into a required argument at compile time and
+  refuses at runtime for an untyped caller, both ways round. Operation and
+  schema counts unchanged (32 operations, 39 schemas). No `/v1` route was
+  added, changed or removed, and no console-only route exists (ADR-0056
+  decision 9 standing).
+- **Frontend.** New: `routes.mts`, `Router.tsx`, `client.mts`, `cache.mts`,
+  `Query.tsx`, `selection.mts`, `Shell.tsx`, `people.mts`,
+  `onboarding.mts`, and the pages `Home`, `People`, `Settings`, `Skills`,
+  `Planned`, `Onboarding`, `Policies`, `Audit`, `ServiceIdentities`.
+  Renamed: `Inbox.tsx` → `Reviews.tsx`, `Explorer.tsx` → `Scopes.tsx`, both
+  unchanged in substance and now behind their own capability. `App.tsx`
+  rewritten. `styles.css` extended with the shell layout — and one existing
+  rule corrected: `.banner` carried the error colours unconditionally,
+  because until now there was only ever one kind of banner, which would have
+  made "the chain verifies" and "your session expired" look identical the
+  moment a second arrived.
+- **Deleted.** `App.tsx`'s direct mounting of `Inbox` and `Explorer`, and
+  the shell that had no navigation. `api.mts`'s `whoami` and its `WhoAmI`
+  type — superseded by `GET /v1/me`, which answers five things where
+  `whoami` answered two, and keeping it would be keeping a second answer to
+  the question every page starts with. The hand-written path strings for
+  every contract-covered route (they are the generated table now).
+- **Four decisions worth reading, all in ADR-0075.** **The primary menu is
+  unconditional** (decision 1): a navigation that grew and shrank with a
+  role would teach every reader a different shape for one application.
+  **The personal/team question seeds and does not brand** (decision 6): it
+  chooses a policy pack and a membership posture and records nothing — no
+  column, no field, nothing that branches — because ADR-0068 decision 1
+  forbids an edition and a wizard asking "is this just you?" is the
+  friendliest possible door for that branch to arrive through;
+  `onboarding.test.mts` asserts the plan carries no `kind`/`edition`/`tier`
+  field **by name**. **The seeding is best-effort and reported**: a first
+  caller holds an `owner` grant on what they just created and may hold
+  nothing that permits `policy.assign`, so a refusal is a sentence pointing
+  at Advanced ▸ Policies and never blocks the wizard — silently skipping it
+  is the one unacceptable option, because somebody would leave believing
+  their workspace was governed the way they chose. And **a plane with no
+  API gets an honest page rather than an empty list** (decision 7): an empty
+  list is indistinguishable from a plane that works and had a quiet week,
+  which is precisely the wrong thing to tell somebody whose agent has been
+  running all week.
+- **Nothing here decides anything.** ADR-0058 decision 2 restated at the top
+  of `routes.mts`, where somebody editing the table will meet it: the
+  capability map chooses what to **offer**, every act still takes its own
+  decision at its own seam, and a reader who reaches a guarded route through
+  a stale forecast or a typed URL gets an explanation naming the missing
+  action — not a redirect, because a redirect to Home tells somebody their
+  link was wrong when in fact their role was.
+- **No dependency was added.** Routing and the cache are written in-repo
+  (~200 tested lines between them) rather than installed, because the
+  shipped bundle's licence gate has no exception mechanism
+  (`scripts/check-npm-licences.mjs`) and the page is served under
+  `default-src 'none'` with `connect-src 'self'`. The checker reports **3
+  shipped packages before and after**. The reversal trigger is in ADR-0075:
+  nesting, per-route loaders or route-level code splitting, and a router is
+  the right answer.
+- **Tests.** **49 → 121** in the console suite. New: `routes.test.mts` (9)
+  — the two menus asserted item by item, including that *no* primary route
+  is gated and that a caller with nothing sees no Advanced heading at all;
+  `client.test.mts` (11) — the wire shape, and the two refusals that matter
+  (an idempotent operation without a key, an unfilled path placeholder);
+  `cache.test.mts` (11) — the four rules, including the one manual testing
+  cannot catch (a watched key refetches on invalidation, an unwatched one is
+  dropped); `selection.test.mts` (11) — every reconciliation case, plus a
+  browser that refuses to store anything; `onboarding.test.mts` (11) — the
+  seeding plan's absent edition field, the refusal sentence, the connection
+  check's honest verdict; `shell.test.tsx` (9) and `people.test.tsx` (10) —
+  rendering, through `react-dom/server` + `toText`, the convention CNSL-1
+  established. The CNSL-1 and CNSL-2 parity corpora are untouched and still
+  pass: the pure helpers they render through did not move.
+- **Two defects the new tests found in this feature's own code.** `slugFrom`
+  ran NFKD and then treated the combining mark it produces as a separator,
+  so "Ünicode Name" proposed `u-nicode-name` — the decomposition was
+  actively harmful without the mark-stripping step beside it. And
+  `accessSource` **replaced** the group clause with the directory clause
+  when both were true, which drops the actionable half: "managed by your
+  directory" tells a reader they cannot change it here, and *which group*
+  tells them what to change instead. Both fixed; both are now asserted.
+- **What this prompt does not carry.** Four primary pages have no plane
+  behind them — Sessions, Knowledge, New Learnings and Tools are waiting on
+  Prompts 9–15, and each page says so. Seven surfaces still call
+  hand-written paths (`api.mts`'s labelled group): proposals, capabilities,
+  policy packs, lapses, audit, skills, service identities — Prompt 19 puts
+  the rest of `/v1` on the contract and deletes them. There is no
+  group-management screen; People manages grants and invitations, and a
+  group screen belongs beside the directory adapter (Prompt 29). And there
+  is still no browser test runner, so what is covered is *which facts
+  appear* and not the switchers' `onChange`, the wizard's step transitions
+  or the mutation round trips — those are asserted at the seam below them,
+  which is where the logic lives.
+- **No demo script, and the reason is written down.** CLAUDE.md's definition
+  of done takes "a test **or** a runnable demo script"; the 72-test console
+  suite is the demonstration and `make ci` runs it (`ts-test`), where no CI
+  target runs a demo. A console demo would need a browser flow against a
+  live Rauthy and a live stack (`cnsl-1-proposals-inbox.sh` is 542 lines of
+  exactly that), and Docker was not reachable in this environment — so
+  writing one would have produced an unverifiable script, which is the same
+  judgement CPR-7 made about the forty-three demos it declined to re-cut
+  blind. Two other clauses of the definition of done are **vacuous here and
+  stated rather than skipped**: this feature adds no server path, so there
+  is no span or metric to add, and no new action type, so there is no audit
+  event to emit. Every route it calls already chains the events it chained.
+- **Commit.** `feat(console): add workspace product shell and onboarding` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by Prompt 9, on Prompt 1's rule.

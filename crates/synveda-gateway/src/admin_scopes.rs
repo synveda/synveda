@@ -122,6 +122,12 @@ impl From<Scope> for ScopeView {
 /// named. The tree is browsed a level at a time because that is what a
 /// console renders and all a CLI needs to walk.
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
+// `IntoParams` defaults to `Path`, and this is a query string: the route is
+// `/v1/admin/scopes`, which has no `{parent_id}` in it. Declared rather than
+// inferred because the contract is what the console's client is generated
+// from (CPR-8) — a parameter in the wrong place produces a client that
+// builds a URL the gateway has never served.
+#[into_params(parameter_in = Query)]
 pub struct ListParams {
     /// The scope whose children to list; absent means the tenant root.
     #[serde(default)]

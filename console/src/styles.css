@@ -120,12 +120,22 @@ button:hover,
   border-color: var(--accent);
 }
 
+/*
+ * A banner is neutral; `.error` is what makes it red (CPR-8). Until the
+ * shell there was only ever one kind, so the base rule carried the error
+ * colours — which would have made "the chain verifies" and "your session
+ * expired" look identical the moment a second kind arrived.
+ */
 .banner {
-  border: 1px solid var(--error-line);
-  background: var(--error-bg);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.85rem 1rem;
   margin-bottom: 1.5rem;
+}
+
+.banner.error {
+  border-color: var(--error-line);
+  background: var(--error-bg);
 }
 
 .banner p {
@@ -494,4 +504,316 @@ ul.actions-list {
   padding-top: 0.4rem;
   margin-top: 0.6rem;
   font-style: italic;
+}
+
+/*
+ * ── The product shell (CPR-8, ADR-0075) ──────────────────────────────────
+ *
+ * The console stopped being one page and became an application with
+ * navigation, so the layout stopped being `main { max-width }` and became a
+ * header, a sidebar and an outlet. Plain CSS still — no framework, no
+ * external font, and the gateway's `default-src 'none'` policy enforces it
+ * rather than trusting it (ADR-0056 decision 8).
+ */
+
+.shell {
+  min-height: 100vh;
+}
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+  padding: 0.75rem 1.25rem;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.brand-link {
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tenant {
+  font-size: 0.85rem;
+}
+
+.switchers {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.identity {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.switcher-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+select,
+input,
+textarea {
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+}
+
+.shell-body {
+  display: grid;
+  grid-template-columns: 13rem 1fr;
+  align-items: start;
+  gap: 2rem;
+  max-width: 78rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+}
+
+/* One column on a narrow viewport: the sidebar becomes a strip above the
+   page rather than squeezing the content it exists to reach. */
+@media (max-width: 60rem) {
+  .shell-body {
+    grid-template-columns: 1fr;
+  }
+  .sidebar ul.nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+}
+
+.nav-heading {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 1.5rem 0 0.4rem;
+}
+
+ul.nav {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.nav-link {
+  display: block;
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
+  color: var(--ink);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+}
+
+.nav-link:hover {
+  border-left-color: var(--line);
+}
+
+.nav-link.selected {
+  border-left-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.page {
+  min-width: 0;
+}
+
+.page-heading {
+  border: 0;
+  padding: 0;
+  margin: 0 0 1.5rem;
+  display: block;
+}
+
+.page-heading h1 {
+  font-size: 1.35rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.page-heading p {
+  margin: 0.25rem 0 0;
+}
+
+.centred {
+  max-width: 32rem;
+  margin: 4rem auto;
+  padding: 0 1.25rem;
+}
+
+/* Home's summary cards. */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+
+.card h2 {
+  margin-bottom: 0.35rem;
+}
+
+.card-value {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+ul.anchors,
+ul.next,
+ul.invites,
+ul.repositories,
+ul.skills,
+ul.packs,
+ul.client-choices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.anchors li,
+ul.invites li,
+ul.repositories li,
+ul.skills li,
+ul.packs li,
+ul.client-choices li {
+  border-bottom: 1px solid var(--line);
+  padding: 0.55rem 0;
+}
+
+ul.next li {
+  padding: 0.3rem 0;
+}
+
+ul.client-choices label {
+  display: block;
+  cursor: pointer;
+}
+
+/* Tables: members, audit. Scrollable rather than overflowing, because a
+   principal id and a resource string are both long and neither is worth
+   truncating into ambiguity. */
+table.members,
+table.audit {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+table.members th,
+table.audit th {
+  text-align: left;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0.35rem 0.6rem 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+table.members td,
+table.audit td {
+  padding: 0.5rem 0.6rem 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.85em;
+}
+
+.breakable {
+  overflow-wrap: anywhere;
+}
+
+.inline-form,
+.stacked-form {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.stacked-form {
+  flex-direction: column;
+  align-items: stretch;
+  max-width: 34rem;
+}
+
+.inline-form label,
+.stacked-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.form-error {
+  color: var(--error-line);
+}
+
+.choice {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  display: flex;
+  gap: 1.25rem;
+  margin: 0 0 0.75rem;
+}
+
+.choice legend {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+ol.commands {
+  padding-left: 1.2rem;
+}
+
+ol.commands li {
+  margin: 0.35rem 0;
+}
+
+.onboarding {
+  max-width: 44rem;
+}
+
+.planned {
+  max-width: 44rem;
 }

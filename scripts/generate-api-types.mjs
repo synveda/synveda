@@ -177,6 +177,7 @@ for (const [name, schema] of Object.entries(schemas)) {
 // contract already knows.
 const METHODS = ["get", "put", "post", "patch", "delete", "head", "options", "trace"];
 const operations = [];
+const routes = [];
 for (const [path, item] of Object.entries(document.paths ?? {})) {
   for (const method of METHODS) {
     const operation = item[method];
@@ -193,13 +194,42 @@ for (const [path, item] of Object.entries(document.paths ?? {})) {
       `    readonly method: ${JSON.stringify(method.toUpperCase())};`,
     ];
     if (body) fields.push(`    readonly body: ${body};`);
+    // A required `Idempotency-Key` is part of the contract, so it is part of
+    // the generated type: the client makes the key a required argument on
+    // exactly these operations (CPR-8). A flag rather than the parameter
+    // list, because the header's *name* is fixed by the document and the only
+    // thing a caller supplies is the value.
+    const idempotent = requiresIdempotencyKey(operation);
+    if (idempotent) {
+      fields.push(`    readonly idempotent: true;`);
+    }
     fields.push(`    readonly response: ${success};`);
     operations.push(
       `${docComment(operation.summary ? { description: operation.summary } : operation, "  ")}  readonly ${id}: {\n${fields.join(
         "\n",
       )}\n  };`,
     );
+    // The same rows as values. `Operations` is a type and erases, so a
+    // client that has to build a URL needs the path and the method at
+    // runtime — and taking them from anywhere but here would be the second
+    // hand-written copy of one contract this generator exists to remove.
+    routes.push(
+      `  ${id}: { path: ${JSON.stringify(path)}, method: ${JSON.stringify(
+        method.toUpperCase(),
+      )}${idempotent ? ", idempotent: true" : ""} },`,
+    );
   }
+}
+
+/** Whether the operation declares `Idempotency-Key` as a required header. */
+function requiresIdempotencyKey(operation) {
+  return (operation.parameters ?? []).some(
+    (parameter) =>
+      parameter.in === "header" &&
+      typeof parameter.name === "string" &&
+      parameter.name.toLowerCase() === "idempotency-key" &&
+      parameter.required === true,
+  );
 }
 
 function requestBodyType(operation, path) {
@@ -234,6 +264,7 @@ parts.push(`/**
  * Every operation the contract declares, keyed by its operation id.
  *
  * \`body\` is present exactly when the operation takes a request body;
+ * \`idempotent\` exactly when it requires an \`Idempotency-Key\` header;
  * \`response\` is the union of its 2xx bodies (\`void\` for a 204). Error
  * bodies are {@link ApiErrorBody} on every operation and are not repeated
  * here.
@@ -244,6 +275,21 @@ ${operations.join("\n")}
 
 /** An operation id. */
 export type OperationId = keyof Operations;
+
+/**
+ * Every operation's path template and method, as values.
+ *
+ * The runtime half of {@link Operations}: a type erases, and a client has to
+ * build a URL. Generated from the same document in the same pass, so the two
+ * cannot disagree. \`idempotent\` marks the operations whose document requires
+ * an \`Idempotency-Key\` header.
+ */
+export const OPERATIONS = {
+${routes.join("\n")}
+} as const satisfies Record<
+  OperationId,
+  { readonly path: string; readonly method: string; readonly idempotent?: true }
+>;
 `);
 
 const rendered = `${parts.join("\n")}`;

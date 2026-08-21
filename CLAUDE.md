@@ -110,7 +110,11 @@ synveda-gateway --test openapi` then `node scripts/generate-api-types.mjs`.
 The document covers the context-platform plane — `/v1/me`,
 workspaces/projects/repositories, the access plane, and the six admin
 scope routes (32 operations) — and says so in its own description; the
-rest of `/v1` joins it at Prompt 19.
+rest of `/v1` joins it at Prompt 19. Since CPR-8 the generator also emits
+the **runtime** path/method table beside the type table and marks the eight
+operations whose document requires an `Idempotency-Key`, so the console's
+client requires the key at compile time and no hand-written copy of a path
+exists.
 
 Since CPR-5 those workspaces have members (ADR-0072): `groups`,
 `group_members`, `scope_grants` and `pending_invites`, where a grant gives
@@ -173,8 +177,12 @@ reason the trail exists. CPR-5 filed and delivered 2026-08-18, making it 102,
 CPR-6 on 2026-08-19, making it 103 with 70 delivered, and **CPR-7 on
 2026-08-20**, making it **104 with 71 delivered** — the hierarchy cutover,
 which deletes whole subsystems six earlier prompts had recorded as standing
-beside the new model. Prompts 8–33 of its programme are filed by the prompts
-that run them, so this number will keep moving.)
+beside the new model — and **CPR-8 on 2026-08-21**, making it **105 with 72
+delivered**: the console product shell, the first prompt of this programme
+whose deliverable is a screen, and the one that makes six prompts of platform
+reachable by somebody who is not holding a terminal. Prompts 9–33 of its
+programme are filed by the prompts that run them, so this number will keep
+moving.)
 
 Phase 3 was reordered on 2026-08-04 by demo-readiness (see the Sequencing
 note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,
@@ -219,6 +227,24 @@ own origin at `/console/`, which needs `pnpm --filter @synveda/console build`.
 A missing bundle is not a boot failure — the route 404s and the rest of the
 product runs, because a static asset must not be a dependency of the audit
 log (crates/synveda-gateway/src/console.rs).
+Since CPR-8 that browser is a **product shell** (ADR-0075): a route table with
+a **primary** menu shown to everybody (Home, Sessions, Knowledge, New
+Learnings, Skills, Tools, People, Settings) and an **advanced** menu shown only
+where the caller's capability forecast offers the plane (Reviews, Scopes,
+Policies, Audit, Service identities) — the proposals inbox and the scope
+explorer re-homed there, unchanged in substance. Beside it: workspace and
+project switchers over a selection persisted per browser and reconciled
+against `/v1/me`; one query/cache layer and therefore one loading and one
+error state per route; a typed client over the generated contract; a
+**People** page that answers *why* somebody may act here; and **first-run
+onboarding** — workspace, project, repository, agent client, connection
+instructions, connection check. The personal/team question **seeds** a policy
+pack and a membership posture and records **no edition anywhere** (ADR-0068
+decision 1). No npm dependency was added: routing and the cache are written
+in-repo. Four primary pages have no plane yet (Sessions, Knowledge, New
+Learnings, Tools) and say so; seven surfaces still call hand-written paths in
+`console/src/api.mts` until Prompt 19 puts the rest of `/v1` on the
+contract.
 
 Phase demo goal: Entra/Okta live, spec-compliant governed skills into Claude
 Code + Cursor, LongMemEval scores published, Helm install.
