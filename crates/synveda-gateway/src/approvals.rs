@@ -18,10 +18,12 @@
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::PgConnection;
-use synveda_policy::{Resource, effective_roles_at};
+use synveda_policy::{Resource, effective_role_keys_at};
+use synveda_types::access::RoleKey;
+use synveda_types::scope::Scope;
 use synveda_types::{
-    ApprovalRequirement, AssetKind, CastApproval, Error, HierarchyNode, Outstanding,
-    RequirementOrigin, Result, Sensitivity, TenantId,
+    ApprovalRequirement, AssetKind, CastApproval, Error, Outstanding, RequirementOrigin, Result,
+    Sensitivity, TenantId,
 };
 use synveda_vedaflow as vedaflow;
 
@@ -35,7 +37,7 @@ use crate::telemetry::PUBLISH_REVIEW_REQUIRED_TOTAL;
 pub(crate) struct Requested<'a> {
     /// The target scope. Its kind and its effective pack both feed the
     /// matrix, and its chain carries the curator file.
-    pub(crate) target: &'a HierarchyNode,
+    pub(crate) target: &'a Scope,
     /// Which asset type.
     pub(crate) asset: AssetKind,
     /// The **maximum** sensitivity over the set: a set is reviewed as a
@@ -80,14 +82,11 @@ pub(crate) async fn resolve(
     Ok(requirement)
 }
 
-/// The acting principal's effective roles at `target` — the same set the
-/// PDP weighed for the decision that got them here.
-pub(crate) fn roles_at(input: &DecisionInput, target: &HierarchyNode) -> Vec<synveda_types::Role> {
-    effective_roles_at(
-        &input.principal,
-        Resource::Scope(target.id),
-        &input.context(),
-    )
+/// The acting principal's effective role keys at `target` — the same set
+/// the PDP weighed for the decision that got them here (CPR-6, ADR-0073
+/// decision 5; since the cutover, the only roles there are).
+pub(crate) fn roles_at(input: &DecisionInput, target: &Scope) -> Vec<RoleKey> {
+    effective_role_keys_at(Resource::Scope(target.id), &input.context())
 }
 
 /// The direct publish route's gate (ADR-0032 decision 8): the publisher

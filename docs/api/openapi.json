@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Synveda",
-    "description": "Governed organisational memory and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface added by CPR-4 and CPR-5: `/v1/me`, the workspace, project and repository planes, and the access plane — members, groups, grants and invitations. The rest of the `/v1` surface — observe, inject, recall, proposals, channels, the registries and the admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`.\n\n**Preconditions.** Every update takes a required `expected_revision`. A mismatch is `409` and writes nothing.",
+    "description": "Governed organisational memory and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface: `/v1/me`, the workspace, project and repository planes (CPR-4), the access plane — members, groups, grants and invitations (CPR-5), and the scope admin plane (CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants). The rest of the `/v1` surface — observe, inject, recall, proposals, channels, the registries and the older admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
     "license": {
       "name": "Proprietary"
     },
@@ -429,6 +429,400 @@
           },
           "409": {
             "description": "Stale `expected_revision`, or the group is a directory's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/scopes": {
+      "get": {
+        "tags": [
+          "admin-scopes"
+        ],
+        "operationId": "list_scopes",
+        "parameters": [
+          {
+            "name": "parent_id",
+            "in": "path",
+            "description": "The scope whose children to list; absent means the tenant root.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One level of the tenant's scope tree",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or an unverifiable one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The named parent is not this tenant's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin-scopes"
+        ],
+        "operationId": "create_scope",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required. Same key + same body replays with 200; a different body is 409.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateScopeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "An idempotent replay of the same request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The scope was created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body failed validation — including every old scope kind",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or an unverifiable one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The parent is not this tenant's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The idempotency key names a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/scopes/{scope_id}": {
+      "get": {
+        "tags": [
+          "admin-scopes"
+        ],
+        "operationId": "get_scope",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "path",
+            "description": "The scope id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The scope, with its path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or an unverifiable one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not this tenant's scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "admin-scopes"
+        ],
+        "operationId": "update_scope",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "path",
+            "description": "The scope id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchScopeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The scope after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The change failed validation — a move into the scope's own subtree, a malformed name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or an unverifiable one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not this tenant's scope — or, for a move, not the destination's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/scopes/{scope_id}/ancestors": {
+      "get": {
+        "tags": [
+          "admin-scopes"
+        ],
+        "operationId": "list_scope_ancestors",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "path",
+            "description": "The scope id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The scope's ancestors, nearest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChainResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or an unverifiable one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not this tenant's scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/scopes/{scope_id}/descendants": {
+      "get": {
+        "tags": [
+          "admin-scopes"
+        ],
+        "summary": "`GET /v1/admin/scopes/{scope_id}/descendants` — the whole subtree,\nnearest first, the scope itself excluded.",
+        "operationId": "list_scope_descendants",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "path",
+            "description": "The scope id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The scope's subtree, nearest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChainResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No credential, or an unverifiable one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not this tenant's scope",
             "content": {
               "application/json": {
                 "schema": {
@@ -2043,6 +2437,22 @@
         },
         "additionalProperties": false
       },
+      "ChainResponse": {
+        "type": "object",
+        "description": "`GET /v1/admin/scopes/{scope_id}/ancestors` — the chain to the tenant\nroot, nearest first.",
+        "required": [
+          "scopes"
+        ],
+        "properties": {
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScopeView"
+            },
+            "description": "The chain or subtree, nearest first."
+          }
+        }
+      },
       "CreateGroupBody": {
         "type": "object",
         "description": "`POST /v1/admin/groups`.",
@@ -2137,6 +2547,38 @@
           }
         },
         "additionalProperties": false
+      },
+      "CreateScopeBody": {
+        "type": "object",
+        "description": "`POST /v1/admin/scopes` — create a scope under a parent. The tenant\nroot is minted by the substrate, so `parent_id` is required.",
+        "required": [
+          "parent_id",
+          "kind",
+          "slug",
+          "display_name"
+        ],
+        "properties": {
+          "attributes": {
+            "description": "Open labelling bag; never an authorisation input."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "kind": {
+            "type": "string",
+            "description": "The scope's shape — `org_unit`, `workspace`, `project` or\n`principal`. The old rank vocabulary (`org`, `division`,\n`department`, `team`, `user`) fails validation by name."
+          },
+          "parent_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The parent. The tenant root is minted by the first thing that needs\na parent and cannot be created here."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Sibling-unique handle, immutable."
+          }
+        }
       },
       "CreateWorkspaceBody": {
         "type": "object",
@@ -2560,6 +3002,33 @@
           }
         }
       },
+      "ListResponse": {
+        "type": "object",
+        "description": "One level of the scope tree: the parent the level hangs from, and its\nchildren.",
+        "required": [
+          "scopes"
+        ],
+        "properties": {
+          "parent": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ScopeView",
+                "description": "The level's parent, when the response is rooted at one."
+              }
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScopeView"
+            },
+            "description": "The parent's children, sorted by slug."
+          }
+        }
+      },
       "MeView": {
         "type": "object",
         "description": "Everything a client needs before it renders anything.",
@@ -2748,6 +3217,37 @@
             "type": "integer",
             "description": "How many workspaces this caller can see.",
             "minimum": 0
+          }
+        }
+      },
+      "PatchScopeBody": {
+        "type": "object",
+        "description": "`PATCH /v1/admin/scopes/{scope_id}` — rename, re-describe, archive or\nmove. Omitted fields change nothing; a `parent_scope_id` is a move.",
+        "properties": {
+          "attributes": {
+            "description": "The new labelling bag, replacing the old one whole."
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The new display name."
+          },
+          "parent_scope_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Naming a parent **moves the scope and its subtree**."
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`active` or `archived`."
           }
         }
       },
@@ -2988,14 +3488,95 @@
           }
         }
       },
+      "ScopeDetail": {
+        "type": "object",
+        "description": "`GET /v1/admin/scopes/{scope_id}` — the scope and its path.",
+        "required": [
+          "scope",
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The slug chain from the tenant root — display and ordering only."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ScopeView",
+            "description": "The scope itself."
+          }
+        }
+      },
+      "ScopeView": {
+        "type": "object",
+        "description": "One governed scope as the admin surface serves it.",
+        "required": [
+          "id",
+          "kind",
+          "slug",
+          "display_name",
+          "status",
+          "attributes",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "attributes": {
+            "description": "The open labelling bag."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the scope was created."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name, renameable."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The scope's stable id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "The scope's shape."
+          },
+          "parent_scope_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Its parent; absent only on the tenant root."
+          },
+          "principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The subject this scope belongs to, on a `principal`-shaped scope."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Sibling-unique handle, immutable."
+          },
+          "status": {
+            "type": "string",
+            "description": "`active` or `archived`."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the scope last changed."
+          }
+        }
+      },
       "TenantCapabilities": {
         "type": "object",
         "description": "What the caller may do on the **tenant** plane — `whoami`'s block, and\nsince CPR-4 `/v1/me`'s.\n\nCarries a `ToSchema` because `/v1/me` embeds it and that route is on the\nOpenAPI contract. The three fields are declared to the document by\n`value_type` rather than derived: `Role` and the `&'static str` map keys\nlive in `synveda-types`, where `utoipa` deliberately does not reach — a\ncontract is a property of the surface, and no crate below the gateway has\none.",
         "required": [
-          "roles",
           "role_keys",
-          "actions",
-          "role_assign"
+          "actions"
         ],
         "properties": {
           "actions": {
@@ -3008,29 +3589,12 @@
               "type": "string"
             }
           },
-          "role_assign": {
-            "type": "object",
-            "description": "`RoleAssign` per role, because it fails closed without\n`context.grant`.",
-            "additionalProperties": {
-              "type": "boolean"
-            },
-            "propertyNames": {
-              "type": "string"
-            }
-          },
           "role_keys": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "The caller's role keys at the **tenant root scope** — the grants that\nreach the whole boundary (CPR-6, ADR-0073 decision 5). Separate from\n`roles` rather than merged into it because the two are different closed\nvocabularies over different trees, and a client that displayed them as\none list would be inventing a translation nothing in this product has."
-          },
-          "roles": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The caller's tenant-wide effective roles. Node bindings are absent\nby construction: [`effective_roles_at`] keeps only the tenant-wide\nrows for a tenant resource, which is the same rule the decisions\nbeside it ran under."
+            "description": "The caller's role keys at the **tenant root scope** — the grants\nthat reach the whole boundary (CPR-6, ADR-0073 decision 5; since\nthe cutover, the only roles there are)."
           }
         }
       },

@@ -390,11 +390,12 @@ fn a_marker_this_build_cannot_read_is_refused() {
 /// An epoch this build has moved past is refused, and one it has not caught
 /// up to is refused differently.
 ///
-/// `CURRENT_EPOCH` is 1 today, so an older epoch is not a number this
-/// migration will write — the CHECK sees to that. It is dropped here rather
-/// than the test being skipped, because the state is not hypothetical: it is
-/// exactly what an epoch-2 build will find on every database this one
-/// creates, and the ordering that decides it is what this test pins.
+/// Since CPR-7 the older direction is not hypothetical: `CURRENT_EPOCH` is
+/// 2, so `CURRENT_EPOCH - 1` is exactly the epoch every pre-cutover
+/// database carries, and this is the refusal an operator upgrading past
+/// the hierarchy cutover actually meets. The newer direction still is
+/// hypothetical, and is pinned here so the two never collapse into one
+/// message: an old database is reset, a newer one is a binary to upgrade.
 #[test]
 fn an_epoch_that_is_not_this_one_is_refused_in_both_directions() {
     let Some(server) = server() else { return };
@@ -402,10 +403,6 @@ fn an_epoch_that_is_not_this_one_is_refused_in_both_directions() {
     scratch.block_on(async {
         let pool = connect_pool(&scratch.options).await;
         synveda_store::migrate(&pool).await.expect("migrate");
-        sqlx::query("alter table schema_metadata drop constraint schema_metadata_epoch_check")
-            .execute(&pool)
-            .await
-            .expect("drop the constraint this test is bypassing");
 
         sqlx::query("update schema_metadata set epoch = $1")
             .bind(CURRENT_EPOCH - 1)

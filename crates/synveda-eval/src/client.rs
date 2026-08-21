@@ -227,7 +227,7 @@ impl RecallEntry {
 ///
 /// EVAL-4 needs this because nothing else can put material above a leaf:
 /// observe writes land at the caller's home scope (ADR-0020) and a service
-/// identity's home is a `ScopeKind::User` leaf under its anchor (ADR-0018
+/// identity's home is a `principal`-shaped scope under its anchor (ADR-0018
 /// decision 2), so a corpus that spans scope tiers is a corpus that was
 /// promoted through review (ADR-0047 decision 3).
 #[derive(Debug, Serialize)]

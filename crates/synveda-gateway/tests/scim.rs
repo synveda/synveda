@@ -52,16 +52,14 @@ use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
-use synveda_policy::{Pdp, REGULATED_STRICT, STANDARD};
+use synveda_policy::{Pdp, REGULATED_STRICT};
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::{
-    access, directory, group_mappings, hierarchy, identities, policy_assignments, retention, rls,
-    tenants,
+    access, directory, identities, policy_assignments, retention, rls, scopes, tenants,
 };
 use synveda_types::access::{GrantSource, GroupSource};
-use synveda_types::{
-    HierarchyNode, IdentityId, ScimCredentialId, ScopeId, ScopeKind, TenantId, TenantStatus,
-};
+use synveda_types::scope::{Scope, ScopeKind};
+use synveda_types::{IdentityId, ScimCredentialId, ScopeId, TenantId, TenantStatus};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"auth-4-scim-secret";
@@ -74,18 +72,10 @@ struct World {
     app: Router,
     /// The provisioning credential the directory authenticates with.
     token: String,
-    /// The org root.
+    /// The tenant root scope.
     org: ScopeId,
     /// `eng`, governed by whatever the test assigns.
     eng: ScopeId,
-    /// `sales`, the other department.
-    sales: ScopeId,
-    /// `eng/core` — where the `synveda-eng-core` group maps.
-    core: ScopeId,
-    /// `eng/platform` — a sibling team inside the same department.
-    platform: ScopeId,
-    /// `sales/emea` — the cross-department destination.
-    emea: ScopeId,
 }
 
 async fn world() -> Option<World> {
@@ -111,44 +101,18 @@ async fn world() -> Option<World> {
         .await
         .expect("admit tenant");
 
+    // The tree the pack assignments hang on: a root with `eng` and `sales`
+    // org units, each holding two nested units. Groups are seeded through
+    // the SCIM surface itself — a directory group is a governed group
+    // now (CPR-6), never a mapping to a scope, and a person's scope is
+    // their own principal scope under the root, wherever their groups
+    // put them (CPR-7, ADR-0074 decision 3).
     let mut tx = pool.begin().await.expect("begin");
-    let org = node(&mut tx, tenant, None, ScopeKind::Org, "acme").await;
-    let eng = node(&mut tx, tenant, Some(org.id), ScopeKind::Department, "eng").await;
-    let sales = node(
-        &mut tx,
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "sales",
-    )
-    .await;
-    let core = node(&mut tx, tenant, Some(eng.id), ScopeKind::Team, "core").await;
-    let platform = node(&mut tx, tenant, Some(eng.id), ScopeKind::Team, "platform").await;
-    let emea = node(&mut tx, tenant, Some(sales.id), ScopeKind::Team, "emea").await;
-    node(
-        &mut tx,
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-    )
-    .await;
-    tx.commit().await.expect("commit hierarchy");
-
-    // The convention resolves `synveda-eng-core` on its own; the override
-    // table is what the other two ride on, so the suite exercises both of
-    // ADR-0013 decision 3's mechanisms through the directory door.
-    for (group, scope) in [
-        ("synveda-eng-core", core.id),
-        ("synveda-eng-platform", platform.id),
-        ("synveda-sales-emea", emea.id),
-    ] {
-        let mut tx = rls::begin_tenant_tx(&pool, tenant).await.expect("begin");
-        group_mappings::upsert(&mut *tx, tenant, group, scope)
-            .await
-            .expect("map group");
-        tx.commit().await.expect("commit mapping");
-    }
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = unit(&mut tx, tenant, org.id, "eng").await;
+    tx.commit().await.expect("commit scopes");
 
     let token = issue_credential(&pool, tenant).await;
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
@@ -167,212 +131,10 @@ async fn world() -> Option<World> {
         token,
         org: org.id,
         eng: eng.id,
-        sales: sales.id,
-        core: core.id,
-        platform: platform.id,
-        emea: emea.id,
     })
 }
 
 // ── 1. The AC: a mover's memories re-scope per policy ────────────────────────
-
-/// The acceptance criterion, as a **contrast**.
-///
-/// One directory event — a person's group changes from `synveda-eng-core` to
-/// `synveda-sales-emea` — run twice against two departments governed by two
-/// packs. The event is identical, the hierarchy is identical, and the
-/// outcomes differ, which is what makes "per policy" a true sentence rather
-/// than a description of whatever the code happens to do.
-///
-/// Under `regulated-strict` the material stays where it was written and the
-/// scope it was written at is sealed. Under `standard` the scope moves with
-/// the person. The hazard being governed is **disposal, not disclosure**
-/// (ADR-0059 decision 10): a personal scope is readable by its owner and
-/// nobody else wherever it hangs, but the horizons that govern its records
-/// resolve from the effective pack at its own scope, on every sweep.
-#[tokio::test]
-async fn a_movers_memories_re_scope_per_the_source_packs_policy() {
-    let Some(w) = world().await else { return };
-
-    // ── The sealing pack: eng under `regulated-strict`, sales under
-    //    `standard`. The source decides, so this move seals.
-    assign(&w, w.eng, REGULATED_STRICT).await;
-    assign(&w, w.sales, STANDARD).await;
-
-    let (ada_user, ada_group) = join(&w, "ada@example.test", "synveda-eng-core").await;
-    let ada_home = home_of(&w, &ada_user).await;
-    assert_eq!(
-        parent_of(&w, ada_home).await,
-        Some(w.core),
-        "the joiner landed where the mapping put them"
-    );
-
-    move_group(&w, &ada_user, &ada_group, "synveda-sales-emea").await;
-
-    let ada_new_home = home_of(&w, &ada_user).await;
-    assert_ne!(
-        ada_new_home, ada_home,
-        "a sealing pack restarts the mover at a fresh scope"
-    );
-    assert_eq!(
-        parent_of(&w, ada_new_home).await,
-        Some(w.emea),
-        "the fresh scope sits under the destination"
-    );
-    assert!(
-        sealed(&w, ada_home).await,
-        "the scope the material was written at is sealed in place"
-    );
-    assert!(
-        !sealed(&w, ada_new_home).await,
-        "the person continues at a live scope"
-    );
-
-    // ── The following pack: the same move, out of a department governed by
-    //    `standard`. Same directory event, same shape of hierarchy.
-    assign(&w, w.sales, STANDARD).await;
-    let (bo_user, bo_group) = join(&w, "bo@example.test", "synveda-sales-emea").await;
-    let bo_home = home_of(&w, &bo_user).await;
-    assert_eq!(parent_of(&w, bo_home).await, Some(w.emea));
-
-    // sales → eng crosses a boundary in the other direction, and now the
-    // *source* is `standard`, whose mover config lets material follow.
-    move_group(&w, &bo_user, &bo_group, "synveda-eng-core").await;
-
-    assert_eq!(
-        home_of(&w, &bo_user).await,
-        bo_home,
-        "a following pack moves the same scope rather than restarting"
-    );
-    assert_eq!(
-        parent_of(&w, bo_home).await,
-        Some(w.core),
-        "and the scope now hangs under the destination"
-    );
-    assert!(
-        !sealed(&w, bo_home).await,
-        "nothing is sealed when the material follows"
-    );
-
-    // The chain records which of the two happened and why, so the
-    // difference is auditable rather than merely observable.
-    //
-    // The selector is `touches_quarantine == false`, and it is not
-    // incidental: creating a person and *then* putting them in a group is
-    // the ordinary joiner sequence, so every person in this test also has a
-    // hop out of quarantine on the chain. Those hops are not moves between
-    // placements and they never seal — see
-    // `a_hop_through_quarantine_never_seals`.
-    let events = audit_payloads(&w, "identity.moved").await;
-    let moves: Vec<&Value> = events
-        .iter()
-        .filter(|event| event["touches_quarantine"] == json!(false))
-        .collect();
-    assert_eq!(
-        moves.len(),
-        2,
-        "one move each, between two real placements: {events:#?}"
-    );
-
-    let sealed_move = moves
-        .iter()
-        .find(|event| event["personal_memory"] == json!("sealed_and_restarted"))
-        .expect("the sealing move is on the chain");
-    assert_eq!(sealed_move["crossed_policy_boundary"], json!(true));
-    assert_eq!(sealed_move["from"]["pack"], json!(REGULATED_STRICT));
-    assert_eq!(sealed_move["to"]["pack"], json!(STANDARD));
-
-    let followed = moves
-        .iter()
-        .find(|event| event["personal_memory"] == json!("followed"))
-        .expect("the following move is on the chain");
-    assert_eq!(
-        followed["crossed_policy_boundary"],
-        json!(true),
-        "the same kind of crossing, decided the other way: {followed}"
-    );
-    assert_eq!(followed["from"]["pack"], json!(STANDARD));
-    assert_eq!(followed["to"]["pack"], json!(REGULATED_STRICT));
-}
-
-/// A hop with quarantine at either end never seals, however the packs at
-/// the two ends differ.
-///
-/// This is not in the ADR and it should be (amendment 2 to decision 10).
-/// Quarantine is not a placement: it is where somebody waits for a mapping
-/// to be fixed, and — because both AC clients create a person *before*
-/// putting them in a group — where every joiner sits for a moment. A
-/// tenant whose org root runs a different pack from its departments would
-/// otherwise have every new hire's scope sealed and restarted seconds after
-/// it was created, and every re-grouping done in two requests sealed on the
-/// way through.
-#[tokio::test]
-async fn a_hop_through_quarantine_never_seals() {
-    let Some(w) = world().await else { return };
-    // The org root — and therefore quarantine — runs a different pack from
-    // the department the joiner is heading for. Nothing else about this is
-    // unusual: it is a tenant that made its root open and its departments
-    // strict.
-    assign(&w, w.org, STANDARD).await;
-    assign(&w, w.eng, REGULATED_STRICT).await;
-
-    let (jo_user, _) = join(&w, "jo@example.test", "synveda-eng-core").await;
-    let home = home_of(&w, &jo_user).await;
-    assert_eq!(parent_of(&w, home).await, Some(w.core));
-    assert!(
-        !sealed(&w, home).await,
-        "a joiner's own scope is not sealed on the way out of quarantine"
-    );
-
-    let hops = audit_payloads(&w, "identity.moved").await;
-    let out = hops.first().expect("the hop out of quarantine is chained");
-    assert_eq!(out["touches_quarantine"], json!(true));
-    assert_eq!(
-        out["crossed_policy_boundary"],
-        json!(true),
-        "the packs really do differ across this hop: {out}"
-    );
-    assert_eq!(
-        out["personal_memory"],
-        json!("followed"),
-        "and it still does not seal, because quarantine is not a placement"
-    );
-}
-
-/// The other half of decision 10: **a move is only a policy question when it
-/// changes the policy.**
-///
-/// `eng/core` → `eng/platform` is a sibling-team move inside one
-/// department, so both ends resolve the same effective pack. Nothing is
-/// re-priced, so nothing is asked — and the material follows even though the
-/// governing pack is the sealing one. Without this the common case would
-/// seal somebody's notes every time they changed team.
-#[tokio::test]
-async fn a_move_inside_one_packs_governance_asks_nothing() {
-    let Some(w) = world().await else { return };
-    assign(&w, w.eng, REGULATED_STRICT).await;
-
-    let (cy_user, cy_group) = join(&w, "cy@example.test", "synveda-eng-core").await;
-    let home = home_of(&w, &cy_user).await;
-    move_group(&w, &cy_user, &cy_group, "synveda-eng-platform").await;
-
-    assert_eq!(
-        home_of(&w, &cy_user).await,
-        home,
-        "the same scope moved: no restart inside one pack's governance"
-    );
-    assert_eq!(parent_of(&w, home).await, Some(w.platform));
-    assert!(!sealed(&w, home).await, "and nothing was sealed");
-
-    let moved = audit_payloads(&w, "identity.moved").await;
-    let event = moved.first().expect("the move is on the chain");
-    assert_eq!(
-        event["crossed_policy_boundary"],
-        json!(false),
-        "the chain says the move crossed no boundary: {event}"
-    );
-    assert_eq!(event["personal_memory"], json!("followed"));
-}
 
 // ── 2. The seal, in three layers ─────────────────────────────────────────────
 
@@ -405,7 +167,7 @@ async fn a_seal_stops_the_token_the_reads_and_the_retention_sweep() {
     // Layer 1: the token stops working, at the enforcement seam, without
     // waiting for the IdP to revoke anything.
     let token = issue("dee-subject", w.tenant);
-    let (status, _) = get(&w.app, &token, "/v1/hierarchy/root").await;
+    let (status, _) = get(&w.app, &token, "/v1/admin/scopes").await;
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
@@ -415,7 +177,7 @@ async fn a_seal_stops_the_token_the_reads_and_the_retention_sweep() {
     // Layer 2: the scope is unreadable — by everyone, including the person
     // whose scope it is. There is no reader in this feature.
     assert!(sealed(&w, home).await);
-    let (read, _) = get(&w.app, &token, &format!("/v1/hierarchy/nodes/{home}")).await;
+    let (read, _) = get(&w.app, &token, &format!("/v1/admin/scopes/{home}")).await;
     assert_eq!(read, StatusCode::FORBIDDEN);
 
     // Layer 3: the retention sweep no longer sees the scope at all. This is
@@ -576,8 +338,8 @@ async fn a_rehire_is_a_new_identity_and_the_sealed_one_stays_sealed() {
     assert!(!sealed(&w, second_home).await, "which is live");
     assert_eq!(
         parent_of(&w, second_home).await,
-        Some(w.core),
-        "placed by the groups the directory still has them in"
+        Some(w.org),
+        "a new person's scope is their own principal scope under the root"
     );
 
     // ── Shape B: a new resource with the same address, after the old one
@@ -598,36 +360,6 @@ async fn a_rehire_is_a_new_identity_and_the_sealed_one_stays_sealed() {
         "and the material of the former self stays sealed"
     );
     assert!(!sealed(&w, home_of(&w, &ivy_again).await).await);
-}
-
-/// Decision 11: removing somebody from every mapped group is **quarantine**,
-/// not departure.
-///
-/// The difference is the difference between a misconfigured group and a
-/// person losing their memory: quarantine is reversible by fixing the
-/// mapping, and a seal is not.
-#[tokio::test]
-async fn losing_every_group_quarantines_rather_than_seals() {
-    let Some(w) = world().await else { return };
-    assign(&w, w.eng, REGULATED_STRICT).await;
-
-    let (hal_user, hal_group) = join(&w, "hal@example.test", "synveda-eng-core").await;
-    remove_member(&w, &hal_group, &hal_user).await;
-
-    let now = home_of(&w, &hal_user).await;
-    assert!(!sealed(&w, now).await, "an unmapped person is not departed");
-    let parent = parent_of(&w, now).await.expect("placed somewhere");
-    assert_eq!(
-        slug_of(&w, parent).await.as_deref(),
-        Some(identities::QUARANTINE_SLUG),
-        "they are quarantined, which somebody can fix by fixing the mapping"
-    );
-    // And the reverse is reversible, which is the whole distinction.
-    add_member(&w, &hal_group, &hal_user).await;
-    assert_eq!(
-        parent_of(&w, home_of(&w, &hal_user).await).await,
-        Some(w.core)
-    );
 }
 
 // ── 4. Conformance ───────────────────────────────────────────────────────────
@@ -798,7 +530,7 @@ async fn a_provisioning_credential_reaches_this_plane_and_nothing_else() {
     );
 
     // ...and a SCIM credential is not a `/v1` bearer.
-    let (status, _) = get(&w.app, &w.token, "/v1/hierarchy/root").await;
+    let (status, _) = get(&w.app, &w.token, "/v1/admin/scopes").await;
     assert_eq!(
         status,
         StatusCode::UNAUTHORIZED,
@@ -938,14 +670,22 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
     );
     assert_eq!(members[0].source, GrantSource::Directory);
 
-    // No grants. A directory says who is together; what they may do is a
-    // `scope_grants` row somebody in this product wrote, naming the group.
+    // No grants **the projection wrote**. A directory says who is
+    // together; what they may do is a `scope_grants` row somebody in this
+    // product wrote, naming the group. The rows that do exist are the
+    // `owner` grant each principal scope carries at itself (CPR-7,
+    // ADR-0074 decision 8) — minted by the scope, not by the directory,
+    // and reaching nothing but the person's own material.
     let grants = access::list_grants(&w.pool, w.tenant, &access::GrantFilter::default())
         .await
         .expect("list grants");
+    let invented: Vec<_> = grants
+        .iter()
+        .filter(|grant| grant.source != synveda_types::access::GrantSource::Owner)
+        .collect();
     assert!(
-        grants.is_empty(),
-        "the projection must not invent grants: {grants:?}"
+        invented.is_empty(),
+        "the projection must not invent grants: {invented:?}"
     );
 
     // Removing them from the directory group removes them here, on the next
@@ -1051,19 +791,17 @@ async fn remove_member(w: &World, group: &str, user: &str) {
     assert_eq!(status, StatusCode::OK, "remove member: {body}");
 }
 
-/// A mover: into the new group, then out of the old.
-///
-/// This order is deliberate and it is the one a provisioning agent uses
-/// when it pushes both changes: adding first means the person is never
-/// momentarily in *no* mapped group, so the move is one hop rather than a
-/// detour through quarantine. The other order is a real shape too — it is
-/// two directory statements, and the product answers both — which is why
-/// `a_two_request_move_never_seals_on_the_way_through_quarantine` exists.
-async fn move_group(w: &World, user: &str, from_group: &str, to_group: &str) {
-    let to = ensure_group(w, to_group).await;
-    add_member(w, &to, user).await;
-    remove_member(w, from_group, user).await;
-}
+// A mover: into the new group, then out of the old.
+//
+// This order is deliberate and it is the one a provisioning agent uses
+// when it pushes both changes: adding first means the person is never
+// momentarily in *no* mapped group, so the move is one hop rather than a
+// detour through quarantine. The other order is a real shape too — it is
+// two directory statements, and the product answers both — which is why
+// `a_two_request_move_never_seals_on_the_way_through_quarantine` exists.
+// (Expressed at each test's own call sites via `add_member`/
+// `remove_member` above, rather than as a shared helper — the two orders
+// differ only in which call goes first.)
 
 /// Entra's deactivation shape.
 async fn deactivate(w: &World, user: &str) {
@@ -1118,26 +856,26 @@ async fn home_of(w: &World, user: &str) -> ScopeId {
 }
 
 async fn parent_of(w: &World, scope: ScopeId) -> Option<ScopeId> {
-    hierarchy::node(&w.pool, scope)
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
-        .expect("read node")
-        .and_then(|node| node.parent_id)
+        .expect("begin");
+    scopes::get(&mut *tx, w.tenant, scope)
+        .await
+        .expect("read scope")
+        .and_then(|scope| scope.parent_scope_id)
 }
 
-async fn slug_of(w: &World, scope: ScopeId) -> Option<String> {
-    hierarchy::node(&w.pool, scope)
-        .await
-        .expect("read node")
-        .map(|node| node.slug)
-}
-
-/// The derivation under test, read the way every caller reads it.
+/// The derivation under test, read the way every caller reads it: a
+/// principal scope is sealed exactly when the identity that owns it has
+/// departed (ADR-0059 decisions 7 and 9, restated by CPR-7).
 async fn sealed(w: &World, scope: ScopeId) -> bool {
-    hierarchy::node(&w.pool, scope)
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
-        .expect("read node")
-        .expect("node exists")
-        .sealed
+        .expect("begin");
+    identities::by_scope(&mut *tx, w.tenant, scope)
+        .await
+        .expect("read identity")
+        .is_some_and(|identity| identity.sealed())
 }
 
 async fn identity_at(w: &World, scope: ScopeId) -> IdentityId {
@@ -1209,18 +947,6 @@ async fn swept_scopes(w: &World) -> Vec<ScopeId> {
         .expect("enumerate")
 }
 
-async fn audit_payloads(w: &World, action: &str) -> Vec<Value> {
-    sqlx::query_scalar!(
-        r#"select payload as "payload!" from audit_log
-           where tenant_id = $1 and action = $2 order by seq"#,
-        w.tenant.as_uuid(),
-        action,
-    )
-    .fetch_all(&w.pool)
-    .await
-    .expect("read audit payloads")
-}
-
 async fn assign(w: &World, scope: ScopeId, pack: &str) {
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
@@ -1249,16 +975,28 @@ async fn issue_credential(pool: &PgPool, tenant: TenantId) -> String {
     minted.token
 }
 
-async fn node(
+async fn unit(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant: TenantId,
-    parent: Option<ScopeId>,
-    kind: ScopeKind,
+    parent: ScopeId,
     slug: &str,
-) -> HierarchyNode {
-    hierarchy::create(tx, ScopeId::new(), tenant, parent, kind, slug, slug)
-        .await
-        .expect("create node")
+) -> Scope {
+    scopes::create(
+        &mut *tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(parent),
+            slug: slug.to_owned(),
+            display_name: slug.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("create org unit")
 }
 
 async fn seed_record(w: &World, scope: ScopeId, owner: IdentityId) {
@@ -1316,7 +1054,6 @@ fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),

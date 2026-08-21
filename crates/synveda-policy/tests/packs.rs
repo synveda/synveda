@@ -19,14 +19,13 @@
 //! ```
 
 use chrono::Utc;
-use synveda_policy::ScopeNode;
 use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
+    ScopeNode,
 };
 use synveda_types::anchor::{AnchorSource, ScopeAnchor};
-use synveda_types::{
-    HierarchyNode, PackConfig, PolicyAssignment, Role, ScopeId, ScopeKind, Sensitivity, TenantId,
-};
+use synveda_types::scope::ScopeKind;
+use synveda_types::{PackConfig, PolicyAssignment, ScopeId, Sensitivity, TenantId};
 
 /// Every scope of the fixture — the candidate set a composition sweep
 /// would consider.
@@ -43,11 +42,11 @@ const ALL_SCOPES: [&str; 8] = [
 
 struct Fixture {
     tenant: TenantId,
-    nodes: Vec<HierarchyNode>,
+    nodes: Vec<ScopeNode>,
 }
 
 impl Fixture {
-    fn node(&self, slug: &str) -> &HierarchyNode {
+    fn node(&self, slug: &str) -> &ScopeNode {
         self.nodes
             .iter()
             .find(|node| node.slug == slug)
@@ -72,7 +71,7 @@ impl Fixture {
             current = parent.parent_id;
             chain.push(parent.clone());
         }
-        chain.iter().map(ScopeNode::from_hierarchy).collect()
+        chain.clone()
     }
 
     fn assignment(&self, slug: &str, pack: &str) -> PolicyAssignment {
@@ -99,31 +98,27 @@ impl Fixture {
 fn fixture() -> Fixture {
     let tenant = TenantId::new();
     let mut nodes = Vec::new();
-    let mut add = |parent: Option<ScopeId>, kind: ScopeKind, slug: &str, depth: i32| -> ScopeId {
+    let mut add = |parent: Option<ScopeId>, kind: ScopeKind, slug: &str, _depth: i32| -> ScopeId {
         let id = ScopeId::new();
-        nodes.push(HierarchyNode {
+        nodes.push(ScopeNode {
             id,
             tenant_id: tenant,
             parent_id: parent,
             kind,
             slug: slug.to_owned(),
-            name: slug.to_owned(),
-            depth,
-            path: slug.to_owned(),
             sealed: false,
-            created_at: Utc::now(),
         });
         id
     };
-    let org = add(None, ScopeKind::Org, "org", 0);
-    let eng = add(Some(org), ScopeKind::Department, "eng", 1);
-    let sales = add(Some(org), ScopeKind::Department, "sales", 1);
-    let team_a = add(Some(eng), ScopeKind::Team, "team-a", 2);
-    let team_b = add(Some(eng), ScopeKind::Team, "team-b", 2);
-    let team_c = add(Some(sales), ScopeKind::Team, "team-c", 2);
-    add(Some(team_a), ScopeKind::User, "alice-user", 3);
-    add(Some(team_b), ScopeKind::User, "carol-user", 3);
-    add(Some(team_c), ScopeKind::User, "dave-user", 3);
+    let org = add(None, ScopeKind::Tenant, "org", 0);
+    let eng = add(Some(org), ScopeKind::OrgUnit, "eng", 1);
+    let sales = add(Some(org), ScopeKind::OrgUnit, "sales", 1);
+    let team_a = add(Some(eng), ScopeKind::OrgUnit, "team-a", 2);
+    let team_b = add(Some(eng), ScopeKind::OrgUnit, "team-b", 2);
+    let team_c = add(Some(sales), ScopeKind::OrgUnit, "team-c", 2);
+    add(Some(team_a), ScopeKind::Principal, "alice-user", 3);
+    add(Some(team_b), ScopeKind::Principal, "carol-user", 3);
+    add(Some(team_c), ScopeKind::Principal, "dave-user", 3);
     Fixture { tenant, nodes }
 }
 
@@ -343,14 +338,11 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         token_scope: None,
     };
     for action in [
-        Action::HierarchyCreate,
-        Action::HierarchyRead,
-        Action::HierarchyUpdate,
-        Action::HierarchyDelete,
+        Action::ScopeCreate,
+        Action::ScopeRead,
+        Action::ScopeUpdate,
         Action::PolicyRead,
         Action::PolicyAssign,
-        Action::RoleRead,
-        Action::RoleAssign,
     ] {
         for principal in [&alice, &unplaced] {
             let scopes = fx.chain("team-b");
@@ -363,9 +355,6 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
                         sensitivity: Some(Sensitivity::Internal),
                         scopes: &scopes,
                         assignments: &assignments,
-                        // RoleAssign requires the grant in context; the
-                        // decision must still be a deny.
-                        grant: (action == Action::RoleAssign).then_some(Role::Viewer),
                         ..Default::default()
                     },
                 )
@@ -443,7 +432,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 fn golden_regulated_strict() {
     assert_pack_golden(
         REGULATED_STRICT,
-        17,
+        18,
         &["org", "eng", "team-a", "alice-user"],
     );
 }
@@ -457,7 +446,7 @@ fn golden_regulated_strict() {
 /// grant, which `standard_shares_within_what_you_hold` asserts.
 #[test]
 fn golden_standard() {
-    assert_pack_golden(STANDARD, 17, &["org", "eng", "team-a", "alice-user"]);
+    assert_pack_golden(STANDARD, 18, &["org", "eng", "team-a", "alice-user"]);
 }
 
 /// open-collaboration: org-wide — only other people's personal scopes
@@ -467,7 +456,7 @@ fn golden_standard() {
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        17,
+        18,
         &[
             "org",
             "eng",
@@ -508,9 +497,9 @@ fn standard_shares_within_what_you_hold() {
     let team_b = fx.node("team-b");
     let anchor = ScopeAnchor {
         scope_id: team_b.id,
-        kind: synveda_types::scope::ScopeKind::Workspace,
+        kind: team_b.kind,
         parent_scope_id: team_b.parent_id,
-        depth: 2,
+        depth: 0,
         source: AnchorSource::Grant,
         roles: vec![synveda_types::access::RoleKey::Member],
         granted_at: vec![team_b.id],

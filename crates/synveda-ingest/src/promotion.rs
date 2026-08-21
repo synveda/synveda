@@ -29,11 +29,12 @@ use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome, StoredEvent};
 use synveda_policy::{Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource, ScopeNode};
 use synveda_store::promotion::{self as usage, UsageDelta, UsageRow};
 use synveda_store::records::{self, RecordVersion};
-use synveda_store::{ScopeChainCache, identities, policy_assignments, rls, role_bindings, tenants};
+use synveda_store::{anchors, identities, policy_assignments, rls, tenants};
+
+use crate::chain::scope_chain as resolve_scope_chain;
 use synveda_types::{
-    AssetKind, Channel, Error, HierarchyNode, IdentityId, IdentityKind, MemberEvidence,
-    PromotionEvidence, PromotionRule, ProposalEffect, RecordId, Result, ScopeId, Sensitivity,
-    TenantId,
+    AssetKind, Channel, Error, IdentityId, IdentityKind, MemberEvidence, PromotionEvidence,
+    PromotionRule, ProposalEffect, RecordId, Result, ScopeId, Sensitivity, TenantId,
 };
 use synveda_vedaflow::hash::{ObjectHash, object_hash};
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
@@ -101,9 +102,6 @@ pub struct SweepDeps {
     pub pool: PgPool,
     /// The embedded PDP; every proposal is a real decision (seed §2.2).
     pub pdp: Arc<Pdp>,
-    /// The gateway's scope-chain cache — pass a clone of the gateway's
-    /// `Arc`, never a fresh cache, or move invalidations are lost.
-    pub chains: Arc<ScopeChainCache>,
 }
 
 /// What one pass did, across every tenant.
@@ -447,28 +445,26 @@ async fn evaluate_scope(
     now: DateTime<Utc>,
 ) -> Result<usize> {
     let mut tx = rls::begin_tenant_tx(&deps.pool, tenant_id).await?;
-    let Some(chain) = deps.chains.resolve(&mut *tx, tenant_id, scope_id).await? else {
+    let chain = resolve_scope_chain(&mut tx, tenant_id, scope_id).await?;
+    if chain.is_empty() {
         // A scope that has since been deleted takes its material's
         // promotion with it.
         return Ok(0);
-    };
+    }
     let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
     let assignments = policy_assignments::for_scopes(&mut *tx, tenant_id, &chain_ids).await?;
     let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
     // The pack is resolved for the *scope*, with no principal in it: which
     // rules run here is a property of the node, not of whoever's material
     // happens to sit on it.
-    let chain_nodes = ScopeNode::from_hierarchy_chain(&chain);
     let scope_context = AuthzContext {
-        scopes: &chain_nodes,
+        scopes: &chain,
         principal_scopes: &[],
         anchors: &[],
         groups: &[],
         resources: &[],
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
-        role_bindings: &[],
-        grant: None,
         sensitivity: None,
         // The engine acts under the material owner's own authority at
         // their own scope; no lapse bears on that (ADR-0037 decision 2).
@@ -608,8 +604,8 @@ fn hours_between(from: DateTime<Utc>, to: DateTime<Utc>) -> u32 {
 async fn open_proposal(
     deps: &SweepDeps,
     tenant_id: TenantId,
-    node: &HierarchyNode,
-    scope_chain: &[HierarchyNode],
+    node: &ScopeNode,
+    scope_chain: &[ScopeNode],
     key: &BatchKey,
     rule_name: &str,
     pack: &synveda_policy::EffectivePack,
@@ -767,7 +763,7 @@ async fn open_proposal(
 struct OwnerAuth {
     subject: String,
     decision: AuthzDecision,
-    principal_scopes: Vec<HierarchyNode>,
+    principal_scopes: Vec<ScopeNode>,
 }
 
 /// Re-decides `ProposalOpen` at the target **as the material's owner**,
@@ -784,7 +780,7 @@ async fn authorize_owner(
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     key: &BatchKey,
-    scope_chain: &[HierarchyNode],
+    scope_chain: &[ScopeNode],
 ) -> Result<Option<OwnerAuth>> {
     let Some(identity) = identities::by_id(&mut *tx, tenant_id, key.owner_id).await? else {
         return Ok(None);
@@ -796,20 +792,20 @@ async fn authorize_owner(
     let Some(subject) = identity.subject.clone() else {
         return Ok(None);
     };
-    let mut quarantined = identity.quarantined;
-    let principal_chain: Vec<HierarchyNode> = deps
-        .chains
-        .resolve(&mut *tx, tenant_id, identity.scope_id)
-        .await?
-        .map(|chain| chain.to_vec())
-        .unwrap_or_default();
+    // Quarantine is now only ever "not provisioned" (CPR-7, ADR-0074
+    // decision 3): an identity row exists here by construction, so the
+    // placement-derived flag is gone and nothing replaces it — an owner
+    // with no grants simply holds no authority the anchor model can reach.
+    let quarantined = false;
+    let principal_chain: Vec<ScopeNode> =
+        resolve_scope_chain(tx, tenant_id, identity.scope_id).await?;
     // The confinement scope (ADR-0018 decision 4): a service identity's
-    // anchor is the node above its personal leaf; unresolvable means
-    // quarantined, never unconfined.
+    // anchor is the scope above its own; unresolvable means refused here,
+    // never unconfined.
     let token_scope = if identity.kind == IdentityKind::Service {
         let anchor = principal_chain.get(1).map(|node| node.id);
         if anchor.is_none() {
-            quarantined = true;
+            return Ok(None);
         }
         anchor
     } else {
@@ -825,20 +821,22 @@ async fn authorize_owner(
     let chain_ids: Vec<ScopeId> = scope_chain.iter().map(|node| node.id).collect();
     let assignments = policy_assignments::for_scopes(&mut *tx, tenant_id, &chain_ids).await?;
     let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
-    let bindings =
-        role_bindings::for_subject_on_scopes(&mut *tx, tenant_id, &subject, &chain_ids).await?;
-    let scope_nodes = ScopeNode::from_hierarchy_chain(scope_chain);
-    let principal_nodes = ScopeNode::from_hierarchy_chain(&principal_chain);
+    let anchor_set = anchors::resolve(
+        &mut *tx,
+        tenant_id,
+        &subject,
+        anchors::AnchorSelection::none(),
+    )
+    .await?;
+    let groups = anchors::groups_of(&mut *tx, tenant_id, &subject).await?;
     let context = AuthzContext {
-        scopes: &scope_nodes,
-        principal_scopes: &principal_nodes,
-        anchors: &[],
-        groups: &[],
+        scopes: scope_chain,
+        principal_scopes: &principal_chain,
+        anchors: anchor_set.as_slice(),
+        groups: &groups,
         resources: &[],
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
-        role_bindings: &bindings,
-        grant: None,
         sensitivity: None,
         lapses: &[],
     };
@@ -871,27 +869,23 @@ async fn resolve_requirement(
     deps: &SweepDeps,
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
-    node: &HierarchyNode,
-    scope_chain: &[HierarchyNode],
-    principal_scopes: &[HierarchyNode],
+    node: &ScopeNode,
+    scope_chain: &[ScopeNode],
+    principal_scopes: &[ScopeNode],
     sensitivity: Sensitivity,
     entries: &[String],
 ) -> Result<synveda_types::ApprovalRequirement> {
     let chain_ids: Vec<ScopeId> = scope_chain.iter().map(|node| node.id).collect();
     let assignments = policy_assignments::for_scopes(&mut *tx, tenant_id, &chain_ids).await?;
     let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
-    let scope_nodes = ScopeNode::from_hierarchy_chain(scope_chain);
-    let principal_nodes = ScopeNode::from_hierarchy_chain(principal_scopes);
     let context = AuthzContext {
-        scopes: &scope_nodes,
-        principal_scopes: &principal_nodes,
+        scopes: scope_chain,
+        principal_scopes,
         anchors: &[],
         groups: &[],
         resources: &[],
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
-        role_bindings: &[],
-        grant: None,
         sensitivity: None,
         lapses: &[],
     };
@@ -916,7 +910,7 @@ async fn resolve_requirement(
 async fn report_queue_full(
     deps: &SweepDeps,
     tenant_id: TenantId,
-    node: &HierarchyNode,
+    node: &ScopeNode,
     rule_name: &str,
     held: usize,
 ) {

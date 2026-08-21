@@ -14,7 +14,7 @@ absence *is* the signal.
 
 Nothing can write to a team, a department or an org node. Observe lands
 records at the caller's home scope (ADR-0020), and a service identity's home
-is a `ScopeKind::User` leaf **under** its anchor (ADR-0018 decision 2) — so
+is a `principal`-shaped scope **under** its anchor (ADR-0018 decision 2) — so
 registering an author "at Engineering" puts its writes on a leaf under
 Engineering, which no sibling's chain contains and the privacy floor excludes
 anyway. A corpus that spans scope tiers is therefore a corpus that climbed

@@ -1013,17 +1013,22 @@ fn eligible_scopes_move_between_permitted_parents() {
             Some("acme/other/space/proj".to_owned())
         );
 
-        // A principal's only permitted parent is the tenant root, which is
-        // where it is: its move is a no-op by construction rather than by a
-        // special case.
+        // A principal moves like anything else — its permitted parents are
+        // the tenant root, org units and workspaces (ADR-0074 decision 3:
+        // a service identity's scope hangs under the scope an operator
+        // registered it at) — and it still cannot sit under a project.
         let stayed = move_to(&db.pool, fx.tenant, fx.person.id, fx.root.id)
             .await
             .expect("a principal moves to the root it is already under");
         assert_eq!(stayed.parent_scope_id, Some(fx.root.id));
-        let elsewhere = move_to(&db.pool, fx.tenant, fx.person.id, fx.unit.id).await;
+        let moved = move_to(&db.pool, fx.tenant, fx.person.id, fx.unit.id)
+            .await
+            .expect("a principal moves under an org unit");
+        assert_eq!(moved.parent_scope_id, Some(fx.unit.id));
+        let elsewhere = move_to(&db.pool, fx.tenant, fx.person.id, fx.proj.id).await;
         assert!(
             matches!(elsewhere, Err(Error::Invalid { .. })),
-            "a principal cannot sit under an org unit, got {elsewhere:?}"
+            "a principal cannot sit under a project, got {elsewhere:?}"
         );
 
         assert_closure_matches_adjacency(&db.pool, fx.tenant, "permitted moves").await;

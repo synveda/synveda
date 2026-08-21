@@ -188,30 +188,24 @@ pub enum AuditAction {
     /// An invitation was redeemed, and the grant it carried was minted. One
     /// event for both, because they are one act and one transaction.
     InviteAccepted,
-    /// A hierarchy node was created.
-    HierarchyNodeCreated,
-    /// A hierarchy node was renamed and/or moved.
-    HierarchyNodeUpdated,
-    /// A hierarchy node was deleted.
-    HierarchyNodeDeleted,
+    /// A governed scope was created (CPR-7, ADR-0074 decision 5).
+    ScopeCreated,
+    /// A governed scope was renamed, re-described, archived or moved —
+    /// the payload names which, and a move names both ends.
+    ScopeUpdated,
     /// The tenant's default policy pack was set.
     PolicyDefaultSet,
     /// The tenant's default policy pack was cleared.
     PolicyDefaultCleared,
-    /// A policy pack was assigned to a hierarchy node.
+    /// A policy pack was assigned to a governed scope.
     PolicyNodeAssigned,
-    /// A node's policy pack assignment was removed.
+    /// A scope's policy pack assignment was removed.
     PolicyNodeUnassigned,
     /// A stored policy pack was applied (CLI break-glass; the reviewed
     /// product surface arrives with VedaFlow).
     PolicyPackApplied,
     /// A stored policy pack was removed (CLI break-glass).
     PolicyPackCleared,
-    /// A role binding was created (admin API, JIT admin-group first
-    /// establishment, or break-glass).
-    RoleBound,
-    /// A role binding was removed.
-    RoleUnbound,
     /// A service identity was registered at an anchor node.
     ServiceIdentityRegistered,
     /// A service identity was revoked (row and personal leaf deleted).
@@ -541,7 +535,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 76] = [
+    pub const ALL: [AuditAction; 73] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -555,9 +549,8 @@ impl AuditAction {
         AuditAction::DirectorySyncBreakerTripped,
         AuditAction::DirectorySealAuthorised,
         AuditAction::DirectorySealAuthorisationUsed,
-        AuditAction::HierarchyNodeCreated,
-        AuditAction::HierarchyNodeUpdated,
-        AuditAction::HierarchyNodeDeleted,
+        AuditAction::ScopeCreated,
+        AuditAction::ScopeUpdated,
         AuditAction::WorkspaceCreated,
         AuditAction::WorkspaceUpdated,
         AuditAction::ProjectCreated,
@@ -577,8 +570,6 @@ impl AuditAction {
         AuditAction::PolicyNodeUnassigned,
         AuditAction::PolicyPackApplied,
         AuditAction::PolicyPackCleared,
-        AuditAction::RoleBound,
-        AuditAction::RoleUnbound,
         AuditAction::ServiceIdentityRegistered,
         AuditAction::ServiceIdentityRevoked,
         AuditAction::MemoryObserved,
@@ -651,17 +642,14 @@ impl AuditAction {
             AuditAction::InviteCreated => "access.invite.created",
             AuditAction::InviteRevoked => "access.invite.revoked",
             AuditAction::InviteAccepted => "access.invite.accepted",
-            AuditAction::HierarchyNodeCreated => "hierarchy.node.created",
-            AuditAction::HierarchyNodeUpdated => "hierarchy.node.updated",
-            AuditAction::HierarchyNodeDeleted => "hierarchy.node.deleted",
+            AuditAction::ScopeCreated => "scope.created",
+            AuditAction::ScopeUpdated => "scope.updated",
             AuditAction::PolicyDefaultSet => "policy.default.set",
             AuditAction::PolicyDefaultCleared => "policy.default.cleared",
             AuditAction::PolicyNodeAssigned => "policy.node.assigned",
             AuditAction::PolicyNodeUnassigned => "policy.node.unassigned",
             AuditAction::PolicyPackApplied => "policy.pack.applied",
             AuditAction::PolicyPackCleared => "policy.pack.cleared",
-            AuditAction::RoleBound => "role.bound",
-            AuditAction::RoleUnbound => "role.unbound",
             AuditAction::ServiceIdentityRegistered => "service_identity.registered",
             AuditAction::ServiceIdentityRevoked => "service_identity.revoked",
             AuditAction::MemoryObserved => "memory.observed",

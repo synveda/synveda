@@ -21,7 +21,6 @@ mod channel;
 mod credentials;
 mod diff;
 mod directory;
-mod hierarchy;
 mod init;
 mod keys;
 mod lapse;
@@ -34,6 +33,7 @@ mod proposal;
 mod recall;
 mod reset;
 mod scim;
+mod scope;
 mod skill;
 #[cfg(test)]
 mod testing;
@@ -47,12 +47,12 @@ use clap::{Parser, Subcommand};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_types::{
     CompositionConfig, DedupConfig, DedupMode, IdentityId, IdentityKind, IndexTier, InjectChannels,
     PackConfig, PromotionConfig, ProposalId, ProposalState, RecordId, RedactionConfig,
-    RedactionMode, RetentionConfig, Role, ScanSeverity, ScopeId, ScopeKind, SkillIndex,
-    SkillScanConfig, TenantId, TenantStatus,
+    RedactionMode, RetentionConfig, ScanSeverity, ScopeId, SkillIndex, SkillScanConfig, TenantId,
+    TenantStatus,
 };
 
 #[derive(Parser)]
@@ -111,18 +111,20 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// The scopes an organisation is made of (OPS-1, ADR-0055 decision 3).
+    /// The governed scope tree (CPR-7, ADR-0074 decision 5).
     ///
     /// Gateway calls under the bearer `synveda login` stored, like
-    /// `proposal` and `recall`: creating a department is a governed act
-    /// whose `HierarchyCreate` decision the PDP takes at the parent scope
-    /// and whose event the gateway chains under your own identity.
+    /// `proposal` and `recall`: creating a scope is a governed act whose
+    /// `ScopeCreate` decision the PDP takes at the parent scope and whose
+    /// event the gateway chains under your own identity.
     ///
-    /// The org root is not creatable here — it arrives with the first
-    /// admin login, from the tenant's own slug and name (ADR-0055
-    /// decision 2), so every `create` has a parent.
+    /// The tenant root is not creatable here — it is minted by the first
+    /// thing that needs a parent (ADR-0071), so every `create` has one.
+    /// There is no `delete`: retiring a scope is `--status archived`
+    /// through the API, because a scope is what audit events, versions and
+    /// grants name.
     #[command(subcommand)]
-    Hierarchy(HierarchyCommand),
+    Scope(ScopeCommand),
     /// Which identity is acting, and what it may do tenant-wide.
     ///
     /// The first question anybody asks a deployment they just logged into,
@@ -266,11 +268,6 @@ enum Command {
     /// packs as reviewed assets.
     #[command(subcommand)]
     Policy(PolicyCommand),
-    /// Role bindings (AUTHZ-3, ADR-0015). Dev plumbing and the documented
-    /// break-glass: a tenant that revoked its last org-admin recovers
-    /// here, at the store level — the product surface is `/v1/roles/*`.
-    #[command(subcommand)]
-    Role(RoleCommand),
     /// Service identities (AUTH-3, ADR-0018). Dev plumbing and the
     /// break-glass at the store level — the product surface is
     /// `/v1/service-identities`. Credentials live in the IdP: register
@@ -1144,33 +1141,10 @@ enum DbCommand {
 }
 
 #[derive(Subcommand)]
-enum HierarchyCommand {
-    /// Create a scope under a parent you may write to.
-    Create {
-        /// Parent scope UUID. Required — the org root is provisioned by
-        /// the first admin login, not created here.
-        #[arg(long)]
-        parent: ScopeId,
-        /// Level: division, department, team. (`org` is the root, and
-        /// `user` scopes are provisioned per person, never authored.)
-        #[arg(long, value_parser = scope_kind_below_root)]
-        kind: ScopeKind,
-        /// Human-stable handle, unique among siblings, immutable.
-        #[arg(long)]
-        slug: String,
-        /// Display name.
-        #[arg(long)]
-        name: String,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
-        #[arg(long)]
-        profile: Option<String>,
-        /// Print the gateway's JSON rather than a line.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Draw the subtree under a scope, or under the org root.
+enum ScopeCommand {
+    /// One level of the tenant's scope tree, or a scope's whole subtree.
     List {
-        /// Anchor scope UUID. Defaults to the tenant's org root.
+        /// Anchor scope UUID. Defaults to the tenant root.
         #[arg(long)]
         under: Option<ScopeId>,
         #[arg(long)]
@@ -1178,7 +1152,7 @@ enum HierarchyCommand {
         #[arg(long)]
         json: bool,
     },
-    /// One scope, in full.
+    /// One scope, with its path.
     Show {
         /// Scope UUID.
         id: ScopeId,
@@ -1187,42 +1161,44 @@ enum HierarchyCommand {
         #[arg(long)]
         json: bool,
     },
-    /// The org root's id — the parent every first `create` needs.
-    Root {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// The policy pack in force at a scope, and where it came from.
-    Policy {
-        /// Scope UUID.
-        id: ScopeId,
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Role bindings at a scope, or (--effective) every binding in force
-    /// there with the node it was bound at.
-    Roles {
-        /// Scope UUID.
-        id: ScopeId,
-        /// Include bindings inherited from ancestors and tenant-wide ones.
-        #[arg(long)]
-        effective: bool,
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// What *you* may do at a scope, decided by the PDP.
+    /// Create a scope under a parent you may write to.
     ///
-    /// A forecast rather than a grant: every act decides again at its own
-    /// seam, so this says what to try, never what will be permitted.
-    Capabilities {
-        /// Scope UUID.
+    /// `kind` is one of the governed shapes: `org_unit`, `workspace`,
+    /// `project` (the old org/division/department/team/user vocabulary is
+    /// gone and fails here by name).
+    Create {
+        /// Parent scope UUID. Required — the tenant root is minted by the
+        /// substrate, not created here.
+        #[arg(long)]
+        parent: ScopeId,
+        /// Shape: org_unit, workspace, project.
+        #[arg(long)]
+        kind: String,
+        /// Human-stable handle, unique among siblings, immutable.
+        #[arg(long)]
+        slug: String,
+        /// Display name.
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Move a scope — and its whole subtree — under a new parent.
+    Move {
+        /// The scope to move.
         id: ScopeId,
+        /// The destination parent.
+        #[arg(long)]
+        parent: ScopeId,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Draw the tenant's whole scope tree.
+    Tree {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long)]
@@ -1353,31 +1329,6 @@ enum LapseCommand {
         #[arg(long)]
         json: bool,
     },
-}
-
-/// Refuses `org` and `user` at the surface (ADR-0011's rank rule and
-/// ADR-0055 decision 2): the root has no parent to pass, and a personal
-/// scope is provisioned with its identity — an authored one would be a
-/// leaf nobody is placed at.
-fn scope_kind_below_root(value: &str) -> Result<ScopeKind, String> {
-    match value {
-        "division" => Ok(ScopeKind::Division),
-        "department" => Ok(ScopeKind::Department),
-        "team" => Ok(ScopeKind::Team),
-        "org" => Err(
-            "the org root is created by the first admin login, from the tenant's \
-                      own slug and name — there is nothing to create here"
-                .to_owned(),
-        ),
-        "user" => Err(
-            "personal scopes are provisioned with their identity at login, \
-                       never authored"
-                .to_owned(),
-        ),
-        other => Err(format!(
-            "unknown scope kind `{other}` (division, department, team)"
-        )),
-    }
 }
 
 #[derive(Subcommand)]
@@ -1583,49 +1534,6 @@ enum PolicyCommand {
 }
 
 #[derive(Subcommand)]
-enum RoleCommand {
-    /// Bind a role to a subject; prints the binding as JSON. Without
-    /// --scope the binding is tenant-wide (in force everywhere, the
-    /// tenant plane included).
-    Bind {
-        /// Tenant UUID.
-        #[arg(long)]
-        tenant: TenantId,
-        /// The token subject to bind.
-        #[arg(long)]
-        subject: String,
-        /// The role (viewer/contributor/curator/steward/org-admin/
-        /// auditor/security-reviewer/compliance).
-        #[arg(long)]
-        role: Role,
-        /// Hierarchy node UUID to bind at; omit for tenant-wide.
-        #[arg(long)]
-        scope: Option<ScopeId>,
-    },
-    /// Remove one binding (exact subject + role + scope).
-    Unbind {
-        /// Tenant UUID.
-        #[arg(long)]
-        tenant: TenantId,
-        /// The bound subject.
-        #[arg(long)]
-        subject: String,
-        /// The bound role.
-        #[arg(long)]
-        role: Role,
-        /// The bound node UUID; omit for the tenant-wide binding.
-        #[arg(long)]
-        scope: Option<ScopeId>,
-    },
-    /// List every binding of the tenant as JSON.
-    List {
-        /// Tenant UUID.
-        #[arg(long)]
-        tenant: TenantId,
-    },
-}
-
-#[derive(Subcommand)]
 enum ServiceCommand {
     /// Register a service identity at an anchor node: creates its
     /// personal leaf under the anchor and the identity row (kind
@@ -1754,49 +1662,32 @@ async fn run(cli: Cli) -> Result<(), String> {
             })
             .await
         }
-        Command::Hierarchy(HierarchyCommand::Create {
+        Command::Scope(ScopeCommand::List {
+            under,
+            profile,
+            json,
+        }) => scope::list(&profile_name(profile), under.as_ref().copied(), json).await,
+        Command::Scope(ScopeCommand::Show { id, profile, json }) => {
+            scope::show(&profile_name(profile), id, json).await
+        }
+        Command::Scope(ScopeCommand::Create {
             parent,
             kind,
             slug,
             name,
             profile,
             json,
-        }) => {
-            hierarchy::create(
-                &profile_name(profile),
-                hierarchy::NewNode {
-                    parent,
-                    kind,
-                    slug: &slug,
-                    name: &name,
-                },
-                json,
-            )
-            .await
-        }
-        Command::Hierarchy(HierarchyCommand::List {
-            under,
-            profile,
-            json,
-        }) => hierarchy::list(&profile_name(profile), under, json).await,
-        Command::Hierarchy(HierarchyCommand::Show { id, profile, json }) => {
-            hierarchy::show(&profile_name(profile), id, json).await
-        }
-        Command::Hierarchy(HierarchyCommand::Root { profile, json }) => {
-            hierarchy::root(&profile_name(profile), json).await
-        }
-        Command::Hierarchy(HierarchyCommand::Policy { id, profile, json }) => {
-            hierarchy::policy(&profile_name(profile), id, json).await
-        }
-        Command::Hierarchy(HierarchyCommand::Roles {
+        }) => scope::create(&profile_name(profile), parent, &kind, &slug, &name, json).await,
+        Command::Scope(ScopeCommand::Move {
             id,
-            effective,
+            parent,
             profile,
             json,
-        }) => hierarchy::roles(&profile_name(profile), id, effective, json).await,
-        Command::Hierarchy(HierarchyCommand::Capabilities { id, profile, json }) => {
-            hierarchy::capabilities(&profile_name(profile), id, json).await
+        }) => scope::move_scope(&profile_name(profile), id, parent, json).await,
+        Command::Scope(ScopeCommand::Tree { profile, json }) => {
+            scope::tree(&profile_name(profile), json).await
         }
+
         Command::Whoami {
             capabilities,
             profile,
@@ -2192,84 +2083,6 @@ async fn run(cli: Cli) -> Result<(), String> {
             );
             Ok(())
         }
-        Command::Role(RoleCommand::Bind {
-            tenant,
-            subject,
-            role,
-            scope,
-        }) => {
-            let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let binding =
-                synveda_store::role_bindings::bind(&mut *tx, tenant, &subject, scope, role)
-                    .await
-                    .map_err(|err| err.to_string())?;
-            record_break_glass(
-                &mut tx,
-                tenant,
-                AuditAction::RoleBound,
-                scope.map_or_else(|| format!("tenant {tenant}"), |id| format!("scope {id}")),
-                json!({"binding": {"subject": subject, "role": role, "scope_id": scope}}),
-            )
-            .await?;
-            tx.commit().await.map_err(|err| err.to_string())?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&binding).map_err(|err| err.to_string())?
-            );
-            Ok(())
-        }
-        Command::Role(RoleCommand::Unbind {
-            tenant,
-            subject,
-            role,
-            scope,
-        }) => {
-            let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let removed =
-                synveda_store::role_bindings::unbind(&mut *tx, tenant, &subject, scope, role)
-                    .await
-                    .map_err(|err| err.to_string())?;
-            if removed {
-                record_break_glass(
-                    &mut tx,
-                    tenant,
-                    AuditAction::RoleUnbound,
-                    scope.map_or_else(|| format!("tenant {tenant}"), |id| format!("scope {id}")),
-                    json!({"binding": {"subject": subject, "role": role, "scope_id": scope}}),
-                )
-                .await?;
-            }
-            tx.commit().await.map_err(|err| err.to_string())?;
-            eprintln!(
-                "{}",
-                if removed {
-                    "role binding removed; it is out of force on the next request"
-                } else {
-                    "no such binding"
-                }
-            );
-            Ok(())
-        }
-        Command::Role(RoleCommand::List { tenant }) => {
-            let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let bindings = synveda_store::role_bindings::all(&mut *tx, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&bindings).map_err(|err| err.to_string())?
-            );
-            Ok(())
-        }
         Command::Service(ServiceCommand::Register {
             tenant,
             subject,
@@ -2280,26 +2093,28 @@ async fn run(cli: Cli) -> Result<(), String> {
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
-            let anchor = synveda_store::hierarchy::node(&mut *tx, scope)
+            let anchor = synveda_store::scopes::get(&mut *tx, tenant, scope)
                 .await
                 .map_err(|err| err.to_string())?
                 .filter(|node| node.tenant_id == tenant)
                 .ok_or_else(|| format!("no scope {scope} in tenant {tenant}"))?;
-            if anchor.slug == synveda_store::identities::QUARANTINE_SLUG && anchor.depth == 1 {
-                return Err(
-                    "service identities cannot be anchored at the quarantine scope".to_owned(),
-                );
-            }
             let identity_id = IdentityId::new();
             let display_name = name.as_deref().unwrap_or(&subject);
-            let leaf = synveda_store::hierarchy::create(
+            // The agent's own scope: a principal-shaped scope under the
+            // operator's anchor, so token confinement is tree position.
+            let leaf = synveda_store::scopes::create(
                 &mut tx,
-                ScopeId::new(),
-                tenant,
-                Some(anchor.id),
-                ScopeKind::User,
-                &personal_slug(None, &subject, identity_id),
-                display_name,
+                &synveda_store::scopes::NewScope {
+                    id: ScopeId::new(),
+                    tenant_id: tenant,
+                    kind: synveda_types::scope::ScopeKind::Principal,
+                    parent_scope_id: Some(anchor.id),
+                    slug: synveda_store::scopes::principal_slug(&subject),
+                    display_name: display_name.to_owned(),
+                    attributes: serde_json::json!({}),
+                    principal_id: Some(subject.clone()),
+                    created_by: None,
+                },
             )
             .await
             .map_err(|err| err.to_string())?;
@@ -2323,13 +2138,13 @@ async fn run(cli: Cli) -> Result<(), String> {
                 json!({
                     "identity": {"id": identity.id, "subject": identity.subject},
                     "leaf_scope_id": leaf.id,
-                    "anchor": {"slug": anchor.slug, "path": anchor.path},
+                    "anchor": {"slug": anchor.slug},
                 }),
             )
             .await?;
             tx.commit().await.map_err(|err| err.to_string())?;
             eprintln!(
-                "note: a running gateway caches hierarchy out-of-process; restart it or use the API path"
+                "note: a running gateway caches entities out-of-process; restart it or use the API path"
             );
             println!(
                 "{}",
@@ -2349,17 +2164,22 @@ async fn run(cli: Cli) -> Result<(), String> {
                 .ok_or_else(|| format!("no service identity {id} in tenant {tenant}"))?;
             // The anchor (the leaf's parent) names the event's resource,
             // read before the leaf goes.
-            let anchor_id = synveda_store::hierarchy::node(&mut *tx, identity.scope_id)
+            let anchor_id = synveda_store::scopes::get(&mut *tx, tenant, identity.scope_id)
                 .await
                 .map_err(|err| err.to_string())?
-                .and_then(|leaf| leaf.parent_id);
+                .and_then(|own| own.parent_scope_id);
             // Row first (its FK pins the leaf), then the leaf.
             synveda_store::identities::delete_service(&mut *tx, tenant, id)
                 .await
                 .map_err(|err| err.to_string())?;
-            synveda_store::hierarchy::delete(&mut tx, identity.scope_id)
-                .await
-                .map_err(|err| err.to_string())?;
+            synveda_store::scopes::set_status(
+                &mut *tx,
+                tenant,
+                identity.scope_id,
+                synveda_types::scope::ScopeStatus::Archived,
+            )
+            .await
+            .map_err(|err| err.to_string())?;
             record_break_glass(
                 &mut tx,
                 tenant,

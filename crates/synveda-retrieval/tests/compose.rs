@@ -24,9 +24,10 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_retrieval::{ComposeRequest, ComposeScope, ComposedBlock, compose, estimated_tokens};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::rls;
+use synveda_types::scope::ScopeKind;
 use synveda_types::{
     Channel, ClassTtl, CompositionConfig, EntryTier, IdentityId, IndexTier, RecordClass, RecordId,
-    RecordKind, RetentionConfig, ScopeId, ScopeKind, Sensitivity, TenantId,
+    RecordKind, RetentionConfig, ScopeId, Sensitivity, TenantId,
 };
 use synveda_vedaflow::{
     self as vedaflow, ChannelRef, ChannelWrite, MemoryAsset, PolicySnapshot, Signer,
@@ -111,10 +112,10 @@ impl Chain {
     /// read, or a lapse that declared a ceiling produces.
     fn scopes_at(&self, sensitivities: &[Sensitivity]) -> Vec<ComposeScope> {
         [
-            (self.user, ScopeKind::User, "acme/eng/team-a/alice"),
-            (self.team, ScopeKind::Team, "acme/eng/team-a"),
-            (self.dept, ScopeKind::Department, "acme/eng"),
-            (self.org, ScopeKind::Org, "acme"),
+            (self.user, ScopeKind::Principal, "acme/eng/team-a/alice"),
+            (self.team, ScopeKind::OrgUnit, "acme/eng/team-a"),
+            (self.dept, ScopeKind::OrgUnit, "acme/eng"),
+            (self.org, ScopeKind::Tenant, "acme"),
         ]
         .into_iter()
         .map(|(scope_id, kind, path)| ComposeScope {
@@ -728,7 +729,7 @@ fn an_ancestors_published_channel_admits_a_record_living_below_it() {
     );
     assert_eq!(entry.channel, Channel::Published);
     assert!(
-        after.text.contains("## acme/eng (department)"),
+        after.text.contains("## acme/eng (org_unit)"),
         "sectioned under the department: {}",
         after.text
     );

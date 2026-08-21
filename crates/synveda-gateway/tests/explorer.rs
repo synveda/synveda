@@ -37,14 +37,15 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::{hierarchy, identities, policy_assignments, role_bindings, tenants};
+use synveda_store::{access, identities, policy_assignments, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, IdentityId, IdentityKind, PackConfig, Role, ScopeId, ScopeKind, TenantId,
-    TenantStatus,
+    GrantId, IdentityId, IdentityKind, PackConfig, ScopeId, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -92,30 +93,35 @@ async fn world() -> Option<World> {
         .expect("admit tenant");
 
     let mut tx = pool.begin().await.expect("begin");
-    let org = node(&mut tx, tenant, None, ScopeKind::Org, "acme").await;
-    let eng = node(&mut tx, tenant, Some(org.id), ScopeKind::Department, "eng").await;
-    let platform = node(&mut tx, tenant, Some(eng.id), ScopeKind::Team, "platform").await;
-    let vault = node(&mut tx, tenant, Some(eng.id), ScopeKind::Team, "vault").await;
-    node(
-        &mut tx,
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-    )
-    .await;
-    tx.commit().await.expect("commit hierarchy");
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = unit(&mut tx, tenant, org.id, "eng").await;
+    let platform = unit(&mut tx, tenant, eng.id, "platform").await;
+    let vault = unit(&mut tx, tenant, eng.id, "vault").await;
+    tx.commit().await.expect("commit scopes");
 
     for subject in ["sam", "vic"] {
-        seed_user(&pool, tenant, subject, platform.id).await;
+        seed_user(&pool, tenant, subject).await;
     }
-    seed_user(&pool, tenant, "vaughn", vault.id).await;
-    bind(&pool, tenant, "vaughn", Some(vault.id), Role::Steward).await;
-    // Three bindings at three levels — the material for assertion 4.
-    bind(&pool, tenant, "sam", Some(platform.id), Role::Steward).await;
-    bind(&pool, tenant, "vic", Some(platform.id), Role::Viewer).await;
-    bind(&pool, tenant, "dana", Some(eng.id), Role::Curator).await;
-    bind(&pool, tenant, "orla", None, Role::Auditor).await;
+    seed_user(&pool, tenant, "vaughn").await;
+    bind(
+        &pool,
+        tenant,
+        "vaughn",
+        Some(vault.id),
+        RoleKey::Administrator,
+    )
+    .await;
+    bind(
+        &pool,
+        tenant,
+        "sam",
+        Some(platform.id),
+        RoleKey::Administrator,
+    )
+    .await;
+    bind(&pool, tenant, "vic", Some(platform.id), RoleKey::Viewer).await;
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
     let app = router(state(&url, pdp.clone()));
@@ -144,8 +150,9 @@ async fn a_capability_is_a_forecast_and_the_act_decides_again() {
     install(&w, "open-everything", 1, PERMISSIVE).await;
     let (status, before) = get(&w.app, &w.sam, &caps_path(w.platform)).await;
     assert_eq!(status, StatusCode::OK);
+    let before = the_one(&before).clone();
     assert_eq!(
-        before["actions"]["hierarchy.create"],
+        before["actions"]["scope.create"],
         json!(true),
         "the probe forecasts yes under the permissive pack: {before}"
     );
@@ -165,15 +172,16 @@ async fn a_capability_is_a_forecast_and_the_act_decides_again() {
 
     // The act is refused, though the forecast said yes. There is one
     // enforcement point and it is not the probe.
-    let (act, body) = post(
+    let (act, body) = post_key(
         &w.app,
         &w.sam,
-        "/v1/hierarchy/nodes",
+        "/v1/admin/scopes",
+        "cnsl2-forecast-act",
         json!({
             "parent_id": w.platform,
-            "kind": "team",
+            "kind": "org_unit",
             "slug": "after-the-forecast",
-            "name": "after the forecast",
+            "display_name": "after the forecast",
         }),
     )
     .await;
@@ -186,8 +194,9 @@ async fn a_capability_is_a_forecast_and_the_act_decides_again() {
     // And the probe now agrees, because it never held an answer — it asks
     // every time, under the pack in force *now*.
     let (_, after) = get(&w.app, &w.sam, &caps_path(w.platform)).await;
+    let after = the_one(&after);
     assert_eq!(
-        after["actions"]["hierarchy.create"],
+        after["actions"]["scope.create"],
         json!(false),
         "the probe re-decides rather than remembering: {after}"
     );
@@ -208,6 +217,7 @@ async fn a_probe_chains_one_event_however_many_pairs_it_decides() {
     let before = chain_len(&w.pool, w.tenant).await;
     let (status, one) = get(&w.app, &w.sam, &caps_path(w.platform)).await;
     assert_eq!(status, StatusCode::OK);
+    let one = the_one(&one);
     let after_single = chain_len(&w.pool, w.tenant).await;
     assert_eq!(
         after_single - before,
@@ -217,11 +227,10 @@ async fn a_probe_chains_one_event_however_many_pairs_it_decides() {
 
     // The pair count is what the row count would have been under a per-pair
     // rule, so asserting it is what gives the claim teeth: a single event
-    // covering ~50 decisions is the whole of ADR-0019 decision 4's second
+    // covering ~36 decisions is the whole of ADR-0019 decision 4's second
     // sentence arriving here.
-    let pairs = one["actions"].as_object().unwrap().len()
-        + one["read_tiers"].as_object().unwrap().len()
-        + one["role_assign"].as_object().unwrap().len();
+    let pairs =
+        one["actions"].as_object().unwrap().len() + one["read_tiers"].as_object().unwrap().len();
     assert!(
         pairs >= 30,
         "a probe decides many pairs, so the saving is real: {pairs}"
@@ -259,18 +268,20 @@ async fn a_probe_answers_about_its_own_caller_and_takes_no_subject() {
 
     let (_, stewards) = get(&w.app, &w.sam, &caps_path(w.platform)).await;
     let (_, viewers) = get(&w.app, &w.vic, &caps_path(w.platform)).await;
+    let stewards = the_one(&stewards);
+    let viewers = the_one(&viewers);
 
     assert_eq!(
         stewards["actions"]["policy.assign"],
         json!(true),
-        "the steward may assign a pack here: {stewards}"
+        "the administrator may assign a pack here: {stewards}"
     );
     assert_eq!(
         viewers["actions"]["policy.assign"],
         json!(false),
         "the viewer may not — same node, same pack, different reader: {viewers}"
     );
-    assert_eq!(stewards["roles"], json!(["steward"]));
+    assert_eq!(stewards["roles"], json!(["administrator"]));
     assert_eq!(viewers["roles"], json!(["viewer"]));
 
     // There is no way to ask about somebody else. A `subject` parameter is
@@ -279,88 +290,17 @@ async fn a_probe_answers_about_its_own_caller_and_takes_no_subject() {
     let (status, spied) = get(
         &w.app,
         &w.vic,
-        &format!("{}?subject=sam", caps_path(w.platform)),
+        &format!("{}&subject=sam", caps_path(w.platform)),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    let spied = the_one(&spied);
     assert_eq!(
         spied["actions"]["policy.assign"],
         json!(false),
         "naming another subject changes nothing: the answer is still the caller's"
     );
     assert_eq!(spied["roles"], json!(["viewer"]));
-}
-
-// ── 4. Three origins, three mechanisms ───────────────────────────────────────
-
-#[tokio::test]
-async fn effective_roles_say_where_each_binding_came_from() {
-    let Some(w) = world().await else { return };
-    install(&w, "open-everything", 1, PERMISSIVE).await;
-
-    let (status, local) = get(
-        &w.app,
-        &w.sam,
-        &format!("/v1/hierarchy/nodes/{}/roles", w.platform),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let local_subjects: Vec<&str> = local["bindings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|binding| binding["subject"].as_str().unwrap())
-        .collect();
-    assert!(
-        local_subjects.contains(&"sam") && !local_subjects.contains(&"dana"),
-        "the local form is this node's own rows and nothing else: {local}"
-    );
-
-    let (status, effective) = get(
-        &w.app,
-        &w.sam,
-        &format!("/v1/hierarchy/nodes/{}/roles?effective=true", w.platform),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let bindings = effective["bindings"].as_array().unwrap();
-
-    // The three mechanisms, asserted as three different reasons rather than
-    // three presences. `sam` is here because the binding is at this node;
-    // `dana` because a binding at an ancestor reaches down; `orla` because
-    // a tenant-wide row is in force everywhere. A suite that asserted all
-    // three the same way would pass for a build that resolved nothing.
-    let sam = find(bindings, "sam");
-    assert_eq!(sam["origin"]["kind"], json!("assigned"));
-    assert_eq!(
-        sam["origin"]["scope_id"].as_str().unwrap(),
-        w.platform.to_string(),
-        "bound here, and the origin says so by naming this very node"
-    );
-
-    let dana = find(bindings, "dana");
-    assert_eq!(dana["origin"]["kind"], json!("assigned"));
-    assert_eq!(
-        dana["origin"]["scope_id"].as_str().unwrap(),
-        w.eng.to_string(),
-        "inherited, and the origin names the ancestor it came from"
-    );
-
-    let orla = find(bindings, "orla");
-    assert_eq!(
-        orla["origin"]["kind"],
-        json!("tenant-wide"),
-        "in force everywhere, which is not the same fact as an ancestor's"
-    );
-    assert!(orla["origin"]["scope_id"].is_null());
-
-    // The chain is served because it is the *reason* the answer has these
-    // rows: platform → eng → acme.
-    assert_eq!(
-        effective["chain"].as_array().unwrap().len(),
-        3,
-        "the walked chain is on the wire: {effective}"
-    );
 }
 
 // ── 5. A lapse from either end ───────────────────────────────────────────────
@@ -389,10 +329,10 @@ async fn a_grant_is_visible_from_both_ends_and_hides_the_end_you_cannot_read() {
 
     // Visible from the *grantee* end — the half `at_target` could never
     // answer, and the reason a steward could not revoke what they held.
-    assert_eq!(
-        found["grantee_scope_path"].as_str().unwrap(),
-        "acme/eng/platform",
-        "the end this reader may read carries its path"
+    let grantee_path = found["grantee_scope_path"].as_str().unwrap_or_default();
+    assert!(
+        grantee_path.ends_with("eng/platform"),
+        "the end this reader may read carries its path: {grantee_path}"
     );
     assert!(
         found["target_scope_path"].is_null(),
@@ -458,17 +398,17 @@ const PERMISSIVE: &str =
 /// one forecast under test flips.
 const NO_CREATING: &str = r#"
 permit (principal, action, resource) when { resource in principal.tenant };
-forbid (principal, action in [Synveda::Action::"HierarchyCreate"], resource);
+forbid (principal, action in [Synveda::Action::"ScopeCreate"], resource);
 "#;
 
 /// A pack where a steward may administer and a viewer may only read — so a
 /// difference between two readers is a difference the *roles* made.
 const ROLES_DECIDE: &str = r#"
 permit (principal, action, resource) when {
-    resource in principal.tenant && context.roles.containsAny(["viewer", "steward"])
+    resource in principal.tenant && context.roles.containsAny(["viewer", "administrator"])
 };
 forbid (principal, action in [Synveda::Action::"PolicyAssign"], resource)
-    unless { context.roles.contains("steward") };
+    unless { context.roles.contains("administrator") };
 "#;
 
 /// Policy reads permitted at one scope only.
@@ -494,14 +434,16 @@ async fn install(w: &World, name: &str, version: i64, source: &str) {
 // ── Plumbing ─────────────────────────────────────────────────────────────────
 
 fn caps_path(scope: ScopeId) -> String {
-    format!("/v1/hierarchy/nodes/{scope}/capabilities")
+    format!("/v1/capabilities?scopes={scope}")
 }
 
-fn find<'a>(bindings: &'a [Value], subject: &str) -> &'a Value {
-    bindings
-        .iter()
-        .find(|binding| binding["subject"].as_str() == Some(subject))
-        .unwrap_or_else(|| panic!("{subject} is in force here"))
+/// The single capability object a one-scope probe answers with.
+fn the_one(batch: &Value) -> &Value {
+    batch["capabilities"]
+        .as_array()
+        .expect("one answer")
+        .first()
+        .expect("the asked-for scope")
 }
 
 async fn chain(pool: &PgPool, tenant: TenantId) -> Vec<synveda_audit::StoredEvent> {
@@ -573,53 +515,85 @@ async fn grant(w: &World, grantee: ScopeId, target: ScopeId, reason: &str) -> St
     granted["id"].as_str().expect("lapse id").to_owned()
 }
 
-async fn node(
+async fn unit(
     tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
     tenant: TenantId,
-    parent: Option<ScopeId>,
-    kind: ScopeKind,
+    parent: ScopeId,
     slug: &str,
-) -> HierarchyNode {
-    hierarchy::create(tx, ScopeId::new(), tenant, parent, kind, slug, slug)
-        .await
-        .expect("create node")
-}
-
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) {
-    let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
+) -> Scope {
+    scopes::create(
+        &mut *tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(parent),
+            slug: slug.to_owned(),
+            display_name: slug.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create personal scope");
+    .expect("create org unit")
+}
+
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) {
+    let mut tx = pool.begin().await.expect("begin");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
     tx.commit().await.expect("commit user");
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: Option<ScopeId>, role: Role) {
+async fn bind(
+    pool: &PgPool,
+    tenant: TenantId,
+    subject: &str,
+    scope: Option<ScopeId>,
+    role: RoleKey,
+) {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, scope, role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    let scope = match scope {
+        Some(scope) => scope,
+        None => {
+            scopes::ensure_tenant_root(&mut tx, tenant)
+                .await
+                .expect("mint root")
+                .id
+        }
+    };
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 fn metrics_handle() -> PrometheusHandle {
@@ -648,7 +622,6 @@ fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -684,6 +657,27 @@ async fn call(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
         serde_json::from_slice(&bytes).unwrap_or(Value::Null)
     };
     (status, value)
+}
+
+async fn post_key(
+    app: &Router,
+    token: &str,
+    uri: &str,
+    key: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    call(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("authorization", format!("Bearer {token}"))
+            .header("idempotency-key", key)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request"),
+    )
+    .await
 }
 
 async fn get(app: &Router, token: &str, uri: &str) -> (StatusCode, Value) {
@@ -746,6 +740,14 @@ fn stabilise(value: &mut Value, map: &mut std::collections::BTreeMap<String, Str
                 *text = stable.clone();
             } else if text.len() >= 20 && text.contains("T") && text.ends_with('Z') {
                 *text = "2026-08-05T09:00:00Z".to_owned();
+            } else if let Some((head, tail)) = text.split_once('/') {
+                // A slug chain's first segment is the tenant root's slug,
+                // which carries the tenant's random id — the one volatile
+                // word a path can hold, since every slug after it was
+                // chosen by the fixture.
+                if is_tenant_slug(head) {
+                    *text = format!("<tenant>/{tail}");
+                }
             }
         }
         Value::Array(items) => items.iter_mut().for_each(|item| stabilise(item, map)),
@@ -758,6 +760,18 @@ fn stabilise(value: &mut Value, map: &mut std::collections::BTreeMap<String, Str
 
 fn is_uuid(text: &str) -> bool {
     text.len() == 36 && text.split('-').map(str::len).eq([8, 4, 4, 4, 12])
+}
+
+/// The fixtures' tenant slugs: a suite prefix, a dash, and the tenant's
+/// 32-hex simple uuid.
+fn is_tenant_slug(text: &str) -> bool {
+    let Some((prefix, hex)) = text.rsplit_once('-') else {
+        return false;
+    };
+    prefix.len() <= 6
+        && !prefix.is_empty()
+        && hex.len() == 32
+        && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 fn corpus_dir() -> PathBuf {
@@ -818,17 +832,12 @@ async fn the_explorer_parity_corpus_is_what_the_gateway_serves() {
     let (status, pack) = get(
         &w.app,
         &w.sam,
-        &format!("/v1/hierarchy/nodes/{}/policy", w.platform),
+        &format!("/v1/admin/scopes/{}/policy", w.platform),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let (_, roles) = get(
-        &w.app,
-        &w.sam,
-        &format!("/v1/hierarchy/nodes/{}/roles?effective=true", w.platform),
-    )
-    .await;
     let (_, caps) = get(&w.app, &w.vic, &caps_path(w.platform)).await;
+    let caps = the_one(&caps).clone();
 
     // A standing grant and one that has already ended, so a renderer that
     // showed them the same way fails on exactly this case.
@@ -844,10 +853,6 @@ async fn the_explorer_parity_corpus_is_what_the_gateway_serves() {
         (
             "pack-inherited",
             json!({"asked_about": asked_about, "payload": pack}),
-        ),
-        (
-            "roles-mixed-origins",
-            json!({"asked_about": asked_about, "payload": roles}),
         ),
         (
             "capabilities-with-denial",
@@ -874,7 +879,6 @@ async fn the_explorer_parity_corpus_is_what_the_gateway_serves() {
 /// it is not, so a fact is a substring each renderer must contain somewhere
 /// and never a line either must produce.
 fn facts_for(name: &str, case: &Value) -> Value {
-    let asked_about = case["asked_about"].as_str().expect("asked_about");
     let payload = &case["payload"];
     match name {
         "pack-inherited" => json!({
@@ -886,15 +890,6 @@ fn facts_for(name: &str, case: &Value) -> Value {
             ],
             "must_not_name": ["assigned here"],
         }),
-        "roles-mixed-origins" => {
-            let mut must = Vec::new();
-            for binding in payload["bindings"].as_array().unwrap() {
-                must.push(binding["subject"].as_str().unwrap().to_owned());
-                must.push(binding["role"].as_str().unwrap().to_owned());
-                must.push(origin_word(&binding["origin"], asked_about));
-            }
-            json!({"must_name": must, "must_not_name": []})
-        }
         "capabilities-with-denial" => {
             let allowed: Vec<String> = payload["actions"]
                 .as_object()
@@ -942,19 +937,6 @@ fn facts_for(name: &str, case: &Value) -> Value {
     }
 }
 
-/// The shared word for an origin — the half of a rendering that has one
-/// right answer and must therefore be the same on both surfaces.
-fn origin_word(origin: &Value, asked_about: &str) -> String {
-    match origin["kind"].as_str() {
-        Some("assigned") if origin["scope_id"].as_str() == Some(asked_about) => {
-            "assigned here".to_owned()
-        }
-        Some("assigned") => "inherited".to_owned(),
-        Some(other) => other.to_owned(),
-        None => "unknown".to_owned(),
-    }
-}
-
 fn denied_actions(payload: &Value) -> Vec<String> {
     payload["actions"]
         .as_object()
@@ -983,8 +965,8 @@ async fn expire_one(w: &World) {
 /// The defect CNSL-2's own demo found, and the reason decision 3 is read
 /// literally (ADR-0058).
 ///
-/// The first cut gated the probe on `HierarchyRead`. Under **every shipped
-/// pack** that action belongs to steward, org-admin and auditor alone — so a
+/// The first cut gated the probe on `ScopeRead`. Under **every shipped
+/// pack** that action belongs to owner and administrator alone — so a
 /// `curator`, the role the proposals inbox exists for, was refused the probe
 /// outright and the console showed them no verdict buttons at all. A
 /// capability surface only privileged readers may consult is worse than
@@ -1003,15 +985,16 @@ async fn a_reader_without_admin_read_still_learns_what_they_may_do() {
         .await
         .expect("set default pack");
 
-    // `vic` is a viewer: no `HierarchyRead` under `standard`.
+    // `vic` is a viewer: no `ScopeRead` under `standard`.
     let (status, caps) = get(&w.app, &w.vic, &caps_path(w.platform)).await;
     assert_eq!(
         status,
         StatusCode::OK,
         "a viewer may ask what they themselves may do: {caps}"
     );
+    let caps = the_one(&caps);
     assert_eq!(
-        caps["actions"]["hierarchy.read"],
+        caps["actions"]["scope.read"],
         json!(false),
         "and the answer is honest about the very action that used to gate it"
     );
@@ -1032,7 +1015,13 @@ async fn a_reader_without_admin_read_still_learns_what_they_may_do() {
     // decision rather than a missing feature.
     let (status, admin) = get(&w.app, &w.sam, &caps_path(w.platform)).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(admin["scope_path"], json!("acme/eng/platform"));
+    let admin = the_one(&admin);
+    assert!(
+        admin["scope_path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("/eng/platform")),
+        "the reader who may read the node learns where it sits: {admin}"
+    );
     assert_eq!(admin["pack"]["name"], json!("standard"));
 
     // And the probe still chains, including for the caller who learned
@@ -1066,58 +1055,40 @@ async fn a_ten_thousand_node_tree_renders_without_fetching_or_probing_it() {
     let Some(w) = wide_world().await else { return };
     install(&w, "open-everything", 1, PERMISSIVE).await;
 
-    // HIER-1's own shape: 1 org + 9 divisions + 90 departments + 900 teams
-    // + 9000 users.
+    // The wide shape, in the five-shape vocabulary: a root and four
+    // levels of nested org units (an org unit nests inside itself to
+    // arbitrary depth, ADR-0070 decision 1). Principal scopes hang off
+    // the tenant root and only there, so a fixture that put nine
+    // thousand of them there would make the root's own level the
+    // subtree — the exact fetch this test exists to refuse.
     let seeded = std::time::Instant::now();
     let mut tx = w.pool.begin().await.expect("begin");
-    let root = node(&mut tx, w.tenant, None, ScopeKind::Org, "wide").await;
+    let root = scopes::ensure_tenant_root(&mut tx, w.tenant)
+        .await
+        .expect("mint root");
     let mut first_division = None;
     let mut first_department = None;
     let mut every_id: Vec<ScopeId> = vec![root.id];
     for d in 0..9 {
-        let division = node(
-            &mut tx,
-            w.tenant,
-            Some(root.id),
-            ScopeKind::Division,
-            &format!("div-{d}"),
-        )
-        .await;
+        let division = unit(&mut tx, w.tenant, root.id, &format!("div-{d}")).await;
         every_id.push(division.id);
         first_division.get_or_insert(division.id);
         for p in 0..10 {
-            let dept = node(
-                &mut tx,
-                w.tenant,
-                Some(division.id),
-                ScopeKind::Department,
-                &format!("dept-{d}-{p}"),
-            )
-            .await;
+            let dept = unit(&mut tx, w.tenant, division.id, &format!("dept-{d}-{p}")).await;
             every_id.push(dept.id);
             first_department.get_or_insert(dept.id);
             for m in 0..10 {
-                let team = node(
-                    &mut tx,
-                    w.tenant,
-                    Some(dept.id),
-                    ScopeKind::Team,
-                    &format!("team-{d}-{p}-{m}"),
-                )
-                .await;
+                let team = unit(&mut tx, w.tenant, dept.id, &format!("team-{d}-{p}-{m}")).await;
                 every_id.push(team.id);
-                for u in 0..10 {
-                    let user = node(
-                        &mut tx,
-                        w.tenant,
-                        Some(team.id),
-                        ScopeKind::User,
-                        &format!("user-{d}-{p}-{m}-{u}"),
-                    )
-                    .await;
-                    every_id.push(user.id);
-                }
             }
+        }
+    }
+    // The fourth level: ten subteams under each of the 900 teams.
+    let teams: Vec<ScopeId> = every_id[1 + 9 + 90..1 + 9 + 90 + 900].to_vec();
+    for (t, team) in teams.iter().enumerate() {
+        for s in 0..10 {
+            let subteam = unit(&mut tx, w.tenant, *team, &format!("sub-{t}-{s}")).await;
+            every_id.push(subteam.id);
         }
     }
     tx.commit().await.expect("commit the wide fixture");
@@ -1129,49 +1100,50 @@ async fn a_ten_thousand_node_tree_renders_without_fetching_or_probing_it() {
     let (status, subtree) = get(
         &w.app,
         &w.sam,
-        &format!("/v1/hierarchy/nodes/{}/descendants", root.id),
+        &format!("/v1/admin/scopes/{}/descendants", root.id),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    let subtree_size = subtree.as_array().unwrap().len();
+    assert_eq!(status, StatusCode::OK, "{subtree}");
+    let subtree_size = subtree["scopes"].as_array().unwrap().len();
     assert_eq!(
         subtree_size, 9_999,
         "the call the explorer refuses to make returns the entire tree"
     );
 
     // What the screen DOES do: children on expand, one level at a time.
-    // A reader opening root → division → department → team sees four
-    // fetches and touches a bounded handful of nodes.
+    // A reader opening root → division → department sees three fetches
+    // and touches a bounded handful of nodes; the fourth structural level
+    // (teams) is what the third fetch returned.
     let mut touched: Vec<ScopeId> = vec![root.id];
     let mut fetches = 0usize;
     let mut cursor = root.id;
-    for _ in 0..4 {
+    for _ in 0..3 {
         let (status, kids) = get(
             &w.app,
             &w.sam,
-            &format!("/v1/hierarchy/nodes/{cursor}/children"),
+            &format!("/v1/admin/scopes?parent_id={cursor}"),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
         fetches += 1;
-        let kids = kids.as_array().unwrap();
+        let kids = kids["scopes"].as_array().unwrap();
         for kid in kids {
             touched.push(kid["id"].as_str().unwrap().parse().unwrap());
         }
         cursor = kids[0]["id"].as_str().unwrap().parse().unwrap();
     }
     eprintln!(
-        "a four-level descent: {fetches} fetches, {} nodes touched of {}",
+        "a three-expand descent: {fetches} fetches, {} nodes touched of {}",
         touched.len(),
         every_id.len()
     );
     assert!(
         touched.len() <= 64,
-        "opening four levels must touch a handful, not a subtree: {} nodes",
+        "opening the tree must touch a handful, not a subtree: {} nodes",
         touched.len()
     );
-    // 9 divisions + 10 departments + 10 teams + 10 users + the root.
-    assert_eq!(touched.len(), 40);
+    // The root + 9 divisions + 10 departments + 10 teams.
+    assert_eq!(touched.len(), 30);
 
     // And the probe is over what was rendered, in ONE request and ONE
     // event — which is the other half of the claim: a tree that fetched
@@ -1186,11 +1158,11 @@ async fn a_ten_thousand_node_tree_renders_without_fetching_or_probing_it() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(probed["capabilities"].as_array().unwrap().len(), 40);
+    assert_eq!(probed["capabilities"].as_array().unwrap().len(), 30);
     assert_eq!(
         chain_len(&w.pool, w.tenant).await - before,
         1,
-        "forty nodes, one event"
+        "thirty nodes, one event"
     );
 
     // The bound, on real distinct ids at last. Ask for more than the API
@@ -1264,7 +1236,7 @@ async fn wide_world() -> Option<World> {
         .expect("admit tenant");
     // Tenant-wide, because the fixture's own scopes do not exist yet and
     // this reader has to be able to walk all of them.
-    bind(&pool, tenant, "sam", None, Role::OrgAdmin).await;
+    bind(&pool, tenant, "sam", None, RoleKey::Administrator).await;
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
     let app = router(state(&url, pdp.clone()));

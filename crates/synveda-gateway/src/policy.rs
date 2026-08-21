@@ -1,6 +1,6 @@
 //! The policy admin API (AUTHZ-2, ADR-0014 decision 8): pack listing, the
 //! tenant default, and per-node assignments on `/v1/policy/*` and
-//! `/v1/hierarchy/nodes/{id}/policy`. Behind tenant resolution like every
+//! `/v1/admin/scopes/{scope_id}/policy`. Behind tenant resolution like every
 //! `/v1` route, uniform-404 ownership first, then the PDP
 //! (`PolicyRead`/`PolicyAssign`) — decided under the pack currently
 //! effective at the target, like every governed action.
@@ -22,14 +22,14 @@ use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{
     Action, EMBEDDED_PACKS, EffectivePack, PackOrigin, REGULATED_STRICT, Resource,
 };
-use synveda_store::{policy_assignments, policy_packs, rls};
+use synveda_store::{policy_assignments, policy_packs, rls, scopes};
 use synveda_types::{Error, Result, ScopeId, TenantId};
 
 use crate::app::AppState;
 use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::POLICY_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the same outcome
@@ -65,7 +65,7 @@ async fn respond<T: IntoResponse>(
 
 /// The allowed-read decision event (ADR-0019 decision 4) — reads commit
 /// their transactions since AUD-1.
-async fn read_event(
+pub(crate) async fn read_event(
     tx: &mut PgConnection,
     tenant_id: TenantId,
     op: &'static str,
@@ -338,29 +338,26 @@ pub(crate) fn origin_view(effective: &EffectivePack) -> OriginView {
     }
 }
 
-/// `GET /v1/hierarchy/nodes/{id}/policy` — the pack effective at the node
+/// `GET /v1/admin/scopes/{scope_id}/policy` — the pack effective at the scope
 /// and where it came from (its own assignment, an ancestor's, the tenant
 /// default, or the embedded default).
-pub(crate) async fn get_node_policy(
+pub(crate) async fn get_scope_policy(
     State(state): State<AppState>,
     Path(id): Path<ScopeId>,
 ) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let node = found(
-            synveda_store::hierarchy::node(&mut *tx, id).await?,
-            tenant_id,
-            id,
-        )?;
-        let input = authz::gather(&state, &mut tx, Some(&node)).await?;
-        let authorized = authz::decide(
+        let scope = found(scopes::get(&mut *tx, tenant_id, id).await?, tenant_id, id)?;
+        let input = authz::gather(
             &state,
-            &input,
-            Action::PolicyRead,
-            Resource::Scope(id),
-            None,
-        )?;
+            &mut tx,
+            Some(&scope),
+            synveda_store::anchors::AnchorSelection::none(),
+            Vec::new(),
+        )
+        .await?;
+        let authorized = authz::decide(&state, &input, Action::PolicyRead, Resource::Scope(id))?;
         let effective = state
             .pdp
             .effective(tenant_id, Resource::Scope(id), &input.context());
@@ -372,7 +369,7 @@ pub(crate) async fn get_node_policy(
         read_event(
             &mut tx,
             tenant_id,
-            "get_node_policy",
+            "get_scope_policy",
             Resource::Scope(id),
             &authorized,
         )
@@ -386,12 +383,12 @@ pub(crate) async fn get_node_policy(
         }))
     }
     .await;
-    respond(&state, "get_node_policy", result).await
+    respond(&state, "get_scope_policy", result).await
 }
 
-/// `PUT /v1/hierarchy/nodes/{id}/policy` — assign a pack at the node; its
+/// `PUT /v1/admin/scopes/{scope_id}/policy` — assign a pack at the scope; its
 /// subtree runs it from the next request on.
-pub(crate) async fn assign_node_policy(
+pub(crate) async fn assign_scope_policy(
     State(state): State<AppState>,
     Path(id): Path<ScopeId>,
     payload: std::result::Result<Json<SetPackBody>, JsonRejection>,
@@ -400,17 +397,13 @@ pub(crate) async fn assign_node_policy(
         let body = body(payload)?;
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let node = found(
-            synveda_store::hierarchy::node(&mut *tx, id).await?,
-            tenant_id,
-            id,
-        )?;
+        let scope = found(scopes::get(&mut *tx, tenant_id, id).await?, tenant_id, id)?;
         let authorized = authz::require(
             &state,
             &mut tx,
             Action::PolicyAssign,
             Resource::Scope(id),
-            Some(&node),
+            Some(&scope),
         )
         .await?;
         known_pack(&mut tx, tenant_id, &body.name).await?;
@@ -424,7 +417,7 @@ pub(crate) async fn assign_node_policy(
             json!({
                 "authz": audit::decision_context(Action::PolicyAssign, &authorized),
                 "pack": body.name,
-                "node": {"slug": node.slug, "path": node.path},
+                "scope": {"slug": scope.slug},
             }),
         )
         .await?;
@@ -432,29 +425,25 @@ pub(crate) async fn assign_node_policy(
         Ok(Json(assignment))
     }
     .await;
-    respond(&state, "assign_node_policy", result).await
+    respond(&state, "assign_scope_policy", result).await
 }
 
-/// `DELETE /v1/hierarchy/nodes/{id}/policy` — remove the node's
+/// `DELETE /v1/admin/scopes/{scope_id}/policy` — remove the scope's
 /// assignment; it falls back to the inherited pack.
-pub(crate) async fn unassign_node_policy(
+pub(crate) async fn unassign_scope_policy(
     State(state): State<AppState>,
     Path(id): Path<ScopeId>,
 ) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let node = found(
-            synveda_store::hierarchy::node(&mut *tx, id).await?,
-            tenant_id,
-            id,
-        )?;
+        let scope = found(scopes::get(&mut *tx, tenant_id, id).await?, tenant_id, id)?;
         let authorized = authz::require(
             &state,
             &mut tx,
             Action::PolicyAssign,
             Resource::Scope(id),
-            Some(&node),
+            Some(&scope),
         )
         .await?;
         if !policy_assignments::unassign(&mut *tx, tenant_id, id).await? {
@@ -470,7 +459,7 @@ pub(crate) async fn unassign_node_policy(
             Outcome::Success,
             json!({
                 "authz": audit::decision_context(Action::PolicyAssign, &authorized),
-                "node": {"slug": node.slug, "path": node.path},
+                "scope": {"slug": scope.slug},
             }),
         )
         .await?;
@@ -478,5 +467,5 @@ pub(crate) async fn unassign_node_policy(
         Ok(StatusCode::NO_CONTENT)
     }
     .await;
-    respond(&state, "unassign_node_policy", result).await
+    respond(&state, "unassign_scope_policy", result).await
 }

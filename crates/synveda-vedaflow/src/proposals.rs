@@ -34,9 +34,10 @@ use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
+use synveda_types::access::RoleKey;
 use synveda_types::{
     AssetKind, CastApproval, Error, IdentityId, PromotionEvidence, ProposalEffect, ProposalId,
-    ProposalState, Result, Role, ScopeId, Sensitivity, TenantId, Verdict,
+    ProposalState, Result, ScopeId, Sensitivity, TenantId, Verdict,
 };
 use uuid::Uuid;
 
@@ -164,7 +165,7 @@ pub struct StoredApproval {
     pub verdict: Verdict,
     /// The effective roles they held at the target scope when they cast
     /// it — recorded, never re-derived (ADR-0032 decision 5).
-    pub roles: Vec<Role>,
+    pub roles: Vec<RoleKey>,
     /// What they said.
     pub comment: Option<String>,
     /// When.
@@ -211,7 +212,7 @@ pub struct NewApproval<'a> {
     /// Approve or reject.
     pub verdict: Verdict,
     /// The effective roles held at the target scope.
-    pub roles: &'a [Role],
+    pub roles: &'a [RoleKey],
     /// What they said.
     pub comment: Option<&'a str>,
 }
@@ -443,7 +444,7 @@ pub async fn approvals(
                     .roles
                     .iter()
                     .map(|role| role.parse().map_err(vocabulary))
-                    .collect::<Result<Vec<Role>>>()?,
+                    .collect::<Result<Vec<RoleKey>>>()?,
                 comment: row.comment,
                 created_at: row.created_at,
             })
@@ -741,7 +742,7 @@ mod tests {
             approver_subject: format!("subject-{byte}"),
             commit,
             verdict,
-            roles: vec![Role::Curator],
+            roles: vec![RoleKey::Curator],
             comment: None,
             created_at: Utc::now(),
         }

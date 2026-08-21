@@ -58,7 +58,7 @@ and the audit chain contains one break-glass event to say so:
 1  tenant.created  BREAK-GLASS
 ```
 
-There are no scopes, no identities, no role bindings and no records, because
+There are no scopes, no identities, no grants and no records, because
 everything the product has a governed surface for is created *through* that
 surface, by a person the PDP can decide about. An installer runs once, as
 root-equivalent, before anybody is watching — it is the worst place in this
@@ -71,45 +71,47 @@ synveda login --gateway http://127.0.0.1:8120
 ```
 
 `init` printed your operator's email and password. The browser opens, you
-sign in, and **that login creates the organisation**: the org root is
-provisioned from the tenant's own slug and name, your identity is placed
-under it, and you are bound tenant-wide `org-admin` because you are in the
-`synveda-admins` group. All three are chained under *your* subject, not an
-installer's:
+sign in, and **that login is where the tenant starts to exist**: the tenant
+root scope is minted from the tenant's own slug and name, your identity gets
+its own `principal`-shaped scope under it, and you are granted
+`administrator` **at the tenant root** because you are in the
+`synveda-admins` group (CPR-7, ADR-0074 decision 4). All three are chained
+under *your* subject, not an installer's:
 
 ```
-2  role.bound             <your subject>
+2  access.granted         <your subject>
 3  identity.provisioned   <your subject>
 ```
 
-## Build your hierarchy
+## Build your scope tree
 
 ```sh
-root=$(synveda hierarchy root)
+root=$(curl -sH "authorization: Bearer $TOKEN" http://127.0.0.1:8120/v1/admin/scopes \
+        | python3 -c 'import json,sys;print(json.load(sys.stdin)["parent"]["id"])')
 
-synveda hierarchy create --parent $root --kind department --slug eng   --name Engineering
-eng=<the id it printed>
-synveda hierarchy create --parent $eng  --kind team       --slug platform --name Platform
+synveda scope create --parent $root --kind org_unit --slug eng      --name Engineering
+eng=<the id the tree shows>
+synveda scope create --parent $eng  --kind workspace --slug platform --name Platform
 
-synveda hierarchy list
+synveda scope tree
 ```
 
-Each of those is a `HierarchyCreate` decision the PDP takes at the *parent*
-scope, and each chains its own `hierarchy.node.created` carrying that
-decision. There is no bulk import and no seeding shortcut; scopes are
-governed objects.
+Each of those is a `ScopeCreate` decision the PDP takes at the *parent*
+scope, creation takes a required `Idempotency-Key` (the CLI mints one), and
+each chains its own `scope.created` carrying that decision. There is no
+bulk import and no seeding shortcut; scopes are governed objects — and
+there is no delete: retiring one is `synveda scope move`-shaped
+administration plus a status transition through the PATCH route.
 
-Personal scopes are not created here — each person gets one when they first
-log in, placed by their IdP groups. A group named `synveda-<department>-<team>`
-places by convention, so `synveda-eng-platform` lands someone under
-`eng/platform`.
+Personal scopes are not created here — each person gets their own when
+they first log in, and a member of the IdP's `synveda-admins` group gets
+an `administrator` grant at the tenant root on that same first login.
 
-## Workspaces and projects — the plane that decides on grants
+## Workspaces, projects and the grants that decide
 
-The hierarchy above is the model this product is being re-cut away from
-(Phase 5). Beside it there is a **governed scope** plane — workspaces,
-projects and the grants that give people access to them — and since CPR-6 it
-is the PDP that reads those grants:
+The scope tree above is the one tree (CPR-7): workspaces and projects are
+product-level subtypes of a governed scope, and grants — not role
+bindings — are what let people act:
 
 ```sh
 curl -H "authorization: Bearer $TOKEN" http://127.0.0.1:8120/v1/me
@@ -143,30 +145,38 @@ that are worth knowing before you hand somebody a role key:
 - **Revocation is immediate.** Access is resolved on every request, so
   revoking a grant is refused on the very next one. Nothing has to run.
 
-### One thing you have to do by hand, once
+### The first grant
 
-**Nothing mints a tenant's first grant.** A newly admitted tenant has no
-grants, so nobody can create the first workspace: every shipped profile prices
-`workspace.create` at an administrative role or an `owner` grant. If you
-reached this plane through `synveda login` you already hold tenant-wide
-`org-admin` from your IdP group and the plane works. If you did not — a fresh
-tenant admitted with `synveda tenant create`, a dev token, a deployment with
-no IdP groups — write the first grant at the tenant root:
+A member of the IdP's `synveda-admins` group gets an `administrator` grant
+at the tenant root on their first login — that is the operator door, and
+for a login-driven deployment it is the whole story. A fresh tenant
+admitted with `synveda tenant create` for dev-token use has no IdP group
+to read, so seed the same row by hand, once, at the store level (CPR-7
+deleted `role bind` with the bindings; this is its replacement, as SQL,
+because a governed route that hands out the first authority in a tenant
+is the shortcut past the policy engine ADR-0055 refuses — where that
+grant *should* come from is admission's, and it is recorded as standing
+work rather than solved):
 
 ```sh
-synveda role bind --tenant <id> --subject <subject> --role org-admin
+docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
+  psql -U synveda -d synveda -c "
+  insert into scopes (id, tenant_id, kind, slug, display_name)
+  values (gen_random_uuid(), '<tenant id>', 'tenant', '<slug>', '<name>');
+  insert into scope_grants
+        (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source)
+  select gen_random_uuid(), tenant_id, id, 'principal', '<subject>',
+         'administrator', 'automation'
+  from scopes where tenant_id = '<tenant id>' and kind = 'tenant';"
 ```
 
-That is break-glass at the store level and it is deliberately the same command
-INSTALL has always documented. A governed route that hands out the first
-authority in a tenant is the shortcut past the policy engine ADR-0055 refuses;
-where that first grant *should* come from is admission's, and it is recorded
-as standing work rather than solved.
+Every grant after the first goes through `/v1/admin/grants` under the
+PDP.
 
 ## Check it works
 
 ```sh
-synveda hierarchy list                       # your organisation
+synveda scope tree                          # your organisation
 synveda recall --query "..."                 # a governed read
 synveda audit tail  --tenant <id> --limit 20 # who did what
 synveda audit verify --tenant <id>           # the chain
@@ -286,9 +296,11 @@ configuration and prints the client registration to perform there — a public
 client, PKCE S256, redirect `http://127.0.0.1:8120/auth/callback`, scopes
 `openid profile email groups`.
 
-Group claims drive placement: `synveda-admins` grants tenant-wide org-admin,
-and `synveda-<department>-<team>` places by convention. `init` configures an
-issuer; it does not sync a directory.
+One group claim is read: `synveda-admins` upserts an `administrator` grant at
+the tenant root on every login. There is no placement convention — everybody
+arrives at their own scope and reaches anything else through a grant
+(ADR-0074 decision 3). `init` configures an issuer; it does not sync a
+directory.
 
 Directory *synchronisation* — joiners, movers, leavers — is a separate,
 deliberate step (AUTH-4, ADR-0059). Once the instance is up:
@@ -310,7 +322,7 @@ logged in before the directory reached them would end up with a second
 identity. Okta needs no change.
 
 What synchronisation then does is placement and lifecycle only: it can put a
-person in the hierarchy, move them, and seal them. It cannot name a scope, a
+person, move them, and seal them. It cannot name a scope, a
 record, a role or a pack — those are not in the wire format.
 
 With a real issuer the gateway runs as the compose `gateway` container. With
@@ -332,13 +344,13 @@ synveda login                # …then become somebody who can build the org
 watch what each of them can and cannot see.
 
 **It creates no scopes and no memory**, and the seeder is a separate step run
-after you log in, because these are governed objects: creating a department is
+after you log in, because these are governed objects: creating an org unit is
 an act the PDP decides and the audit chain attributes, and there is no
 operator to attribute it to until somebody has logged in. An installer that
-seeded your organisation would stand the whole hierarchy under a break-glass
+seeded your organisation would stand the whole tenant under a break-glass
 actor (ADR-0055 decisions 1 and 2).
 
-`seed.sh` builds the departments and teams those groups resolve to, assigns
+`seed.sh` builds the org units those groups are named for, assigns
 contrasting policy packs, observes a small corpus through the real extraction
 pipeline, and opens one proposal that needs two people — so the console has
 something in it and the governance has something to refuse. It is safe to
@@ -557,7 +569,7 @@ sh demos/ops-8-release-install.sh   # from a downloaded release
 ```
 
 Both run the acceptance criterion end to end on a scratch HOME: install, log
-in, build a hierarchy, observe a turn, recall it, and assert the chain shows
+in, build a scope tree, observe a turn, recall it, and assert the chain shows
 exactly one break-glass event with everything else attributed to a person.
 The OPS-8 one additionally installs from packaged release artefacts with
 `cargo`, `rustc` and `rustup` shadowed by shims that exit 127 — so "no Rust

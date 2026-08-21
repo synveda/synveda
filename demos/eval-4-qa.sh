@@ -33,7 +33,7 @@
 #
 # Why a promotion rather than a placement: observe lands records at the
 # caller's home scope (ADR-0020) and a service identity's home is a
-# ScopeKind::User leaf under its anchor (ADR-0018 decision 2), so NOTHING
+# `principal`-shaped scope under its anchor (ADR-0018 decision 2), so NOTHING
 # can write to a team, a department or an org node. A corpus that spans
 # scope tiers is a corpus that climbed through review, which makes a
 # per-scope answer rate an assertion about FLOW-5 as much as about CTX-2.

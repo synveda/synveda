@@ -53,11 +53,12 @@ use synveda_audit::{AuditAction, Outcome};
 use synveda_ingest::ScanOutcome;
 use synveda_ingest::embedding::Embedder as _;
 use synveda_policy::{Action, Resource};
-use synveda_store::{hierarchy, packs, records, rls};
+use synveda_store::{packs, records, rls, scopes};
+use synveda_types::scope::Scope;
 use synveda_types::{
-    Channel, ContextPackName, DocumentChunk, DocumentName, DocumentPath, Error, HierarchyNode,
-    IdentityId, MAX_PACK_DESCRIPTION_CHARS, MAX_PACK_DOCUMENTS, PackDocument, RecordClass,
-    RecordId, RecordKind, RedactionMode, Result, ScopeId, Sensitivity,
+    Channel, ContextPackName, DocumentChunk, DocumentName, DocumentPath, Error, IdentityId,
+    MAX_PACK_DESCRIPTION_CHARS, MAX_PACK_DOCUMENTS, PackDocument, RecordClass, RecordId,
+    RecordKind, RedactionMode, Result, ScopeId, Sensitivity,
 };
 use synveda_vedaflow::{self as vedaflow, ContextPackAsset};
 
@@ -65,7 +66,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::authz::{self, DecisionInput};
 use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::CONTEXT_PACK_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the outcome taxonomy
@@ -282,17 +283,23 @@ async fn author_inner(
     let (node, author, authorized, redaction, unmoved) = {
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let node = found(
-            hierarchy::node(&mut *tx, body.scope_id).await?,
+            scopes::get(&mut *tx, tenant_id, body.scope_id).await?,
             tenant_id,
             body.scope_id,
         )?;
-        let input = authz::gather(state, &mut tx, Some(&node)).await?;
+        let input = authz::gather(
+            state,
+            &mut tx,
+            Some(&node),
+            synveda_store::anchors::AnchorSelection::none(),
+            Vec::new(),
+        )
+        .await?;
         let authorized = authz::decide(
             state,
             &input,
             Action::ContextPackWrite,
             Resource::Scope(body.scope_id),
-            None,
         )?;
         let author = identity_of(&input)?;
         // The authoring scope's effective redaction config — the same
@@ -703,11 +710,18 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     // The gate first, at the working tier — the question a listing asks.
     let authorized = authz::decide_context_pack_read(
         state,
@@ -769,7 +783,7 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
 
     Ok(Json(ListResponse {
         scope_id,
-        scope_path: node.path.clone(),
+        scope_path: node.slug.clone(),
         packs: entries,
     }))
 }
@@ -829,7 +843,7 @@ fn document_view(
 }
 
 fn view(
-    node: &HierarchyNode,
+    node: &Scope,
     pack: packs::StoredPack,
     written: Vec<(packs::StoredDocument, u32, String)>,
     published: Option<PublishedState>,
@@ -843,7 +857,7 @@ fn view(
     PackView {
         name: pack.name.to_string(),
         scope_id: pack.scope_id,
-        scope_path: node.path.clone(),
+        scope_path: node.slug.clone(),
         description: pack.description,
         documents,
         created_at: pack.created_at,

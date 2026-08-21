@@ -19,9 +19,10 @@
 //!
 //! # It covers this plane and says so
 //!
-//! The document describes the workspace, project, repository, access and
-//! `/v1/me` routes — the surface CPR-4 and CPR-5 add — and **not** the
-//! fifty-four `/v1` paths that predate it. That is a bounded start rather than a bounded ambition:
+//! The document describes the workspace, project, repository, access,
+//! `/v1/me` and scope-admin routes — the surface CPR-4, CPR-5 and CPR-7
+//! add — and **not** the `/v1` paths that predate it. That is a bounded
+//! start rather than a bounded ambition:
 //! Prompt 19 of the context-platform programme owns bringing the whole surface
 //! onto the contract, and the alternative here was annotating fifty-four
 //! handlers this programme is about to delete or re-cut. The document's own
@@ -43,13 +44,14 @@ use crate::workspaces;
         description = "\
 Governed organisational memory and context for AI agents.
 
-**Coverage.** This document describes the context-platform surface added by \
-CPR-4 and CPR-5: `/v1/me`, the workspace, project and repository planes, and the \
-access plane — members, groups, grants and invitations. The rest of \
-the `/v1` surface — observe, inject, recall, proposals, channels, the \
-registries and the admin planes — predates the OpenAPI contract and is brought \
-onto it by a later prompt of the context-platform programme. Its absence here \
-is a statement about this document, not about the gateway.
+**Coverage.** This document describes the context-platform surface: `/v1/me`, \
+the workspace, project and repository planes (CPR-4), the access plane — \
+members, groups, grants and invitations (CPR-5), and the scope admin plane \
+(CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants). \
+The rest of the `/v1` surface — observe, inject, recall, proposals, channels, \
+the registries and the older admin planes — predates the OpenAPI contract and \
+is brought onto it by a later prompt of the context-platform programme. Its \
+absence here is a statement about this document, not about the gateway.
 
 **Tenancy.** Every path below sits behind bearer authentication and tenant \
 resolution. A response is always scoped to the caller's tenant, which is why \
@@ -60,13 +62,21 @@ Reusing a key with the same request replays the original resource with `200`; \
 a fresh key creates and answers `201`; reusing a key with a *different* request \
 is `409`.
 
-**Preconditions.** Every update takes a required `expected_revision`. A \
-mismatch is `409` and writes nothing.",
+**Preconditions.** Every update on the workspace plane — workspaces, \
+projects, repositories — takes a required `expected_revision`; a mismatch is \
+`409` and writes nothing. The scope admin plane does not: a scope carries no \
+revision, and its mutations are last-writer-wins under the PDP.",
         version = env!("CARGO_PKG_VERSION"),
         license(name = "Proprietary"),
     ),
     servers((url = "/", description = "This gateway")),
     paths(
+        crate::admin_scopes::list,
+        crate::admin_scopes::create,
+        crate::admin_scopes::get,
+        crate::admin_scopes::update,
+        crate::admin_scopes::ancestors,
+        crate::admin_scopes::descendants,
         me::get,
         workspaces::list,
         workspaces::create,

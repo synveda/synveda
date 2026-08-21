@@ -34,16 +34,17 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::StoredEvent;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, policy_assignments, role_bindings, tenants};
+use synveda_store::{access, identities, policy_assignments, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Channel, CompositionConfig, HierarchyNode, Identity, IdentityId, IdentityKind, InjectChannels,
-    PackConfig, RecordClass, RecordId, RecordKind, Role, ScopeId, ScopeKind, Sensitivity, TenantId,
-    TenantStatus,
+    Channel, CompositionConfig, GrantId, Identity, IdentityId, IdentityKind, InjectChannels,
+    PackConfig, RecordClass, RecordId, RecordKind, ScopeId, Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -79,7 +80,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -131,92 +131,92 @@ fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("checked by admitted_tenant")
 }
 
-/// org → dept → two teams. The second team exists so the same-scope rule
-/// has somewhere to be violated.
-async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (HierarchyNode, HierarchyNode) {
-    let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+/// root → an org unit → two workspaces. The second exists so the
+/// same-scope rule has somewhere to be violated.
+///
+/// The two leaves are **`workspace`-shaped**, which is the LOCAL cell of
+/// the approval matrix — one curator publishes directly there, which is
+/// what the old `team` rank meant and what these tests are about. An
+/// `org_unit` is SHARED and costs a curator *and* an administrator; the
+/// suite that asserts *that* price is `context_packs`.
+async fn unit(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    parent: ScopeId,
+    slug: &str,
+    display: &str,
+    kind: ScopeKind,
+) -> Scope {
+    scopes::create(
+        tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind,
+            parent_scope_id: Some(parent),
+            slug: slug.to_owned(),
+            display_name: display.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let eng = hierarchy::create(
+    .expect("create org unit")
+}
+
+async fn seed_scopes(pool: &PgPool, tenant: TenantId) -> (Scope, Scope) {
+    let mut tx = pool.begin().await.expect("begin");
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = unit(
         &mut tx,
-        ScopeId::new(),
         tenant,
-        Some(org.id),
-        ScopeKind::Department,
+        root.id,
         "eng",
         "Engineering",
+        ScopeKind::OrgUnit,
     )
-    .await
-    .expect("create dept");
-    let platform = hierarchy::create(
+    .await;
+    let platform = unit(
         &mut tx,
-        ScopeId::new(),
         tenant,
-        Some(eng.id),
-        ScopeKind::Team,
+        eng.id,
         "platform",
         "Platform",
+        ScopeKind::Workspace,
     )
-    .await
-    .expect("create team");
-    let payments = hierarchy::create(
+    .await;
+    let payments = unit(
         &mut tx,
-        ScopeId::new(),
         tenant,
-        Some(eng.id),
-        ScopeKind::Team,
+        eng.id,
         "payments",
         "Payments",
+        ScopeKind::Workspace,
     )
-    .await
-    .expect("create second team");
-    hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        "Quarantine",
-    )
-    .await
-    .expect("create quarantine scope");
-    tx.commit().await.expect("commit hierarchy");
+    .await;
+    tx.commit().await.expect("commit scopes");
     (platform, payments)
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+/// A person: their own principal scope under the tenant root, carrying
+/// the identity row (CPR-7, ADR-0074 decision 3).
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -224,12 +224,26 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: Role) {
+async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, Some(scope), role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 async fn seed_record(
@@ -346,13 +360,20 @@ async fn bank_mode_flips_composition_over_real_channels() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (platform, _) = seed_hierarchy(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", platform.id).await;
-    bind(&pool, tenant, "alice", platform.id, Role::Curator).await;
+    let (_platform, _) = seed_scopes(&pool, tenant).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
+    // The material sits at alice's **own scope**, which is where the
+    // pipeline puts every extracted memory (MEM-1, ADR-0020 decision 3)
+    // and — since CPR-7 (ADR-0074 decision 3) — the one scope besides the
+    // tenant root that a session with no grants composes from. She is a
+    // curator there, because a principal scope inherits nothing and the
+    // LOCAL cell of `regulated-strict` asks for one wherever the material
+    // sits.
+    bind(&pool, tenant, "alice", alice.scope_id, RoleKey::Curator).await;
     let procedure = seed_record(
         &pool,
         tenant,
-        platform.id,
+        alice.scope_id,
         alice.id,
         RecordKind::Derived,
         PROCEDURE,
@@ -361,7 +382,7 @@ async fn bank_mode_flips_composition_over_real_channels() {
     let unreviewed = seed_record(
         &pool,
         tenant,
-        platform.id,
+        alice.scope_id,
         alice.id,
         RecordKind::Derived,
         UNREVIEWED,
@@ -390,11 +411,11 @@ async fn bank_mode_flips_composition_over_real_channels() {
     );
 
     // The curator publishes one of them — the governed route, under the
-    // PDP, on the team scope.
+    // PDP, on the scope the material lives at.
     let (status, published) = publish(
         &app,
         &token,
-        platform.id,
+        alice.scope_id,
         json!({"record_ids": [procedure], "message": "reviewed at the release meeting"}),
     )
     .await;
@@ -466,7 +487,7 @@ async fn bank_mode_flips_composition_over_real_channels() {
         channels
             .iter()
             .any(|channel| channel["commit"] == json!(commit)
-                && channel["scope_id"] == json!(platform.id)),
+                && channel["scope_id"] == json!(alice.scope_id)),
         "the block cites the published commit: {channels:?}"
     );
     let entries = last.payload["entries"].as_array().expect("entries");
@@ -484,9 +505,9 @@ async fn publishing_requires_a_curator_not_merely_a_writer() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (platform, _) = seed_hierarchy(&pool, tenant).await;
-    let bob = seed_user(&pool, tenant, "bob", platform.id).await;
-    bind(&pool, tenant, "bob", platform.id, Role::Contributor).await;
+    let (platform, _) = seed_scopes(&pool, tenant).await;
+    let bob = seed_user(&pool, tenant, "bob").await;
+    bind(&pool, tenant, "bob", platform.id, RoleKey::Member).await;
     let record = seed_record(
         &pool,
         tenant,
@@ -519,7 +540,7 @@ async fn publishing_requires_a_curator_not_merely_a_writer() {
 
     // Promote bob and the very same call succeeds — the difference is
     // the role, not the request.
-    bind(&pool, tenant, "bob", platform.id, Role::Curator).await;
+    bind(&pool, tenant, "bob", platform.id, RoleKey::Curator).await;
     let (status, body) = publish(
         &app,
         &token,
@@ -541,12 +562,20 @@ async fn a_curator_cannot_publish_a_personal_scope_they_cannot_read() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (platform, _) = seed_hierarchy(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", platform.id).await;
-    let carol = seed_user(&pool, tenant, "carol", platform.id).await;
-    // Both are curators at the same team.
-    bind(&pool, tenant, "alice", platform.id, Role::Curator).await;
-    bind(&pool, tenant, "carol", platform.id, Role::Curator).await;
+    let (platform, _) = seed_scopes(&pool, tenant).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
+    let carol = seed_user(&pool, tenant, "carol").await;
+    // Both are curators at the same team. Alice is additionally a curator
+    // **at her own scope**, which is where her memory lives: a principal
+    // scope inherits nothing (CPR-5, ADR-0072), so the team grant reaches
+    // the team's material and not hers. Under `regulated-strict` the LOCAL
+    // cell asks for a curator wherever the material sits, so this is the
+    // grant that lets her stand behind her own memory — and carol, who has
+    // no grant there, is refused by the privacy floor before the matrix is
+    // even consulted.
+    bind(&pool, tenant, "alice", platform.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "carol", platform.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "alice", alice.scope_id, RoleKey::Curator).await;
     // The record lives at alice's personal scope — where the pipeline
     // puts every extracted memory (MEM-1, ADR-0020 decision 3).
     let record = seed_record(
@@ -587,10 +616,10 @@ async fn publishing_another_scopes_record_is_refused_whole() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (platform, payments) = seed_hierarchy(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", platform.id).await;
-    bind(&pool, tenant, "alice", platform.id, Role::Curator).await;
-    bind(&pool, tenant, "alice", payments.id, Role::Curator).await;
+    let (platform, payments) = seed_scopes(&pool, tenant).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
+    bind(&pool, tenant, "alice", platform.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "alice", payments.id, RoleKey::Curator).await;
     let mine = seed_record(
         &pool,
         tenant,
@@ -647,9 +676,9 @@ async fn publication_records_the_address_it_reviewed() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (platform, _) = seed_hierarchy(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", platform.id).await;
-    bind(&pool, tenant, "alice", platform.id, Role::Curator).await;
+    let (platform, _) = seed_scopes(&pool, tenant).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
+    bind(&pool, tenant, "alice", platform.id, RoleKey::Curator).await;
     let record = seed_record(
         &pool,
         tenant,
@@ -734,9 +763,9 @@ async fn channel_listing_shows_refs_that_exist_and_nothing_else() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (platform, _) = seed_hierarchy(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", platform.id).await;
-    bind(&pool, tenant, "alice", platform.id, Role::Curator).await;
+    let (platform, _) = seed_scopes(&pool, tenant).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
+    bind(&pool, tenant, "alice", platform.id, RoleKey::Curator).await;
     let record = seed_record(
         &pool,
         tenant,

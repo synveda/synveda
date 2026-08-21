@@ -4,9 +4,17 @@
 //! engine.
 //!
 //! Layering (seed §2.4): `synveda-policy` never touches storage, so this
-//! module carries the data between them — hierarchy rows and pack
+//! module carries the data between them — governed scope rows and pack
 //! assignments into [`synveda_policy::AuthzContext`], stored pack sources
 //! into [`Pdp::install_source`].
+//!
+//! Since the hierarchy cutover there is **one gather** (CPR-7, ADR-0074
+//! decision 2): every route's resource chain comes from `scope_closure`,
+//! every caller's own chain starts at their principal scope, and the roles
+//! a decision weighs are the grant keys its anchors carry. The two-gather
+//! shape CPR-6 left behind — old hierarchy chains projected at the
+//! caller's edge, governed chains read from the closure — is deleted with
+//! the tree it read.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -20,14 +28,13 @@ use synveda_policy::{
 };
 use synveda_store::anchors::AnchorSelection;
 use synveda_store::{
-    anchors, identities, lapses, policy_assignments, policy_packs, rls, role_bindings, scopes,
-    tenants,
+    anchors, identities, lapses, policy_assignments, policy_packs, rls, scopes, tenants,
 };
 use synveda_types::anchor::AnchorSet;
-use synveda_types::scope::Scope;
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Error, GroupId, HierarchyNode, Identity, IdentityKind, Lapse, LapseAction, Result, Role,
-    RoleBinding, ScopeId, Sensitivity, TenantId,
+    Error, GroupId, Identity, IdentityKind, Lapse, LapseAction, Result, ScopeId, Sensitivity,
+    TenantId,
 };
 
 use crate::app::AppState;
@@ -39,15 +46,13 @@ use crate::telemetry::{POLICY_PACK_RELOADS_TOTAL, SERVICE_TOKEN_REJECTIONS_TOTAL
 /// effective pack) build this too, through [`gather`].
 pub(crate) struct DecisionInput {
     pub(crate) principal: Principal,
-    pub(crate) chain: Arc<[HierarchyNode]>,
-    pub(crate) principal_scopes: Arc<[HierarchyNode]>,
-    /// The resource's chain as the PDP takes it — the same nodes as
-    /// [`DecisionInput::chain`] on the old plane, projected once here
-    /// (CPR-6, ADR-0073 decision 1), and the governed scope chain itself on
-    /// the new one.
-    pub(crate) chain_nodes: Arc<[ScopeNode]>,
-    /// The caller's own chain, likewise.
-    pub(crate) principal_nodes: Arc<[ScopeNode]>,
+    /// The resource's chain as the PDP takes it — the governed scope chain
+    /// itself since the cutover (CPR-7, ADR-0074), read from
+    /// `scope_closure`. Kept beside `chain_nodes` for the callers that
+    /// read ids off it; the two are one chain.
+    pub(crate) chain: Arc<[ScopeNode]>,
+    /// The caller's own chain, nearest-first from their own scope.
+    pub(crate) principal_scopes: Arc<[ScopeNode]>,
     /// The ordered anchors this request resolved to (CPR-6, ADR-0073).
     /// Empty when the tenant has no governed scopes yet, which denies
     /// exactly what a grant would have permitted.
@@ -58,7 +63,6 @@ pub(crate) struct DecisionInput {
     pub(crate) resources: Vec<ResourceEntity>,
     pub(crate) assignments: Vec<synveda_types::PolicyAssignment>,
     pub(crate) default_pack: Option<String>,
-    pub(crate) role_bindings: Vec<RoleBinding>,
     /// The lapses standing over this caller, as of this request's own read
     /// (AUTHZ-4, ADR-0037 decision 4): grants whose grantee scope is on the
     /// caller's placement chain, neither revoked nor expired.
@@ -92,15 +96,13 @@ impl DecisionInput {
     /// empty chain, which fails closed.
     pub(crate) fn context_from(&self, position: usize) -> AuthzContext<'_> {
         AuthzContext {
-            scopes: self.chain_nodes.get(position..).unwrap_or(&[]),
-            principal_scopes: &self.principal_nodes,
+            scopes: self.chain.get(position..).unwrap_or(&[]),
+            principal_scopes: &self.principal_scopes,
             anchors: self.anchors.as_slice(),
             groups: &self.groups,
             resources: &self.resources,
             assignments: &self.assignments,
             default_pack: self.default_pack.as_deref(),
-            role_bindings: &self.role_bindings,
-            grant: None,
             lapses: &self.lapses,
             // Named per decision by [`decide_read`], which is the only way
             // to ask `MemoryRead` here: a read decided without a tier is
@@ -114,21 +116,6 @@ impl DecisionInput {
     /// `Some(0)` is the node itself; a strict ancestor is `Some(n > 0)`.
     pub(crate) fn position_of(&self, scope_id: ScopeId) -> Option<usize> {
         self.chain.iter().position(|node| node.id == scope_id)
-    }
-}
-
-/// [`DecisionInput::context`] carrying the role being granted, for the one
-/// action that fails closed without it (ADR-0015 decision 5).
-///
-/// Exists for CNSL-2's probe, which asks `RoleAssign` once per role
-/// because "may I bind a role here" is not a question with one answer —
-/// the base layer's escalation guard reads `context.grant`, so a probe
-/// that supplied no role would be asking something the PDP is right to
-/// refuse (ADR-0058 decision 1).
-pub(crate) fn context_granting<'a>(input: &'a DecisionInput, grant: Role) -> AuthzContext<'a> {
-    AuthzContext {
-        grant: Some(grant),
-        ..input.context()
     }
 }
 
@@ -149,46 +136,49 @@ pub(crate) fn context_at_tier<'a>(
 
 /// Assembles the decision input for the request's ambient principal (the
 /// resolved tenant + token subject) inside the caller's transaction.
-/// `anchor` is the already-fetched, ownership-checked node the resource
-/// refers to — `None` for tenant-level resources.
+/// `anchor` is the already-fetched, ownership-checked governed scope the
+/// resource refers to — `None` for tenant-level resources.
 ///
-/// Quarantine resolves here (AUTH-2, ADR-0013 decision 6): a provisioned
-/// identity's placement decides; an IdP subject with no identity is
-/// quarantined (fail closed — skipping `/auth/login` must not
-/// out-privilege completing it, and an unregistered service client is
-/// exactly this case); an out-of-band (dev HS256) subject is not, but
-/// carries no placement either, so composition rules read nothing for it
-/// (ADR-0014 decision 5). Service identities additionally resolve here
-/// (AUTH-3, ADR-0018): the token-lifetime cap is enforced fail-closed
-/// (decision 5), and `token_scope` — the anchor above the personal leaf —
-/// arms the base layer's confinement forbid (decision 4). The identity's
-/// placement chain and the resource chain's pack assignments are read
+/// Quarantine resolves here (AUTH-2, ADR-0013 decision 6), and since the
+/// cutover it has exactly one meaning: *not provisioned*. An IdP subject
+/// with no identity is quarantined — fail closed, because skipping
+/// `/auth/login` must not out-privilege completing it, and an unregistered
+/// service client is exactly this case. A provisioned identity never is:
+/// its scope is its own principal scope (CPR-7, ADR-0074 decision 3), and
+/// an ungranted one reaches nothing because the anchor model says so
+/// rather than because a placement-derived flag does. Service identities
+/// additionally resolve here (AUTH-3, ADR-0018): the token-lifetime cap is
+/// enforced fail-closed (decision 5), and `token_scope` — the scope above
+/// their own — arms the base layer's confinement forbid (decision 4). The
+/// caller's own chain and the resource chain's pack assignments are read
 /// here too — pack switches are in force on the very next request
 /// (ADR-0014 decision 3).
 ///
-/// Since HIER-2 (ADR-0016) both chains come from the scope-chain cache:
-/// warm requests read no hierarchy rows; assignments and bindings stay
-/// per-request reads — that is what keeps the next-request freshness
-/// promises true (ADR-0016 decision 6). Must run before any hierarchy
-/// mutation staged in `conn`'s transaction (decision 4).
+/// `selection` names a workspace or a project the request is about, so
+/// the anchors are resolved against it; `resources` are the Cedar
+/// entities the decision names — the workspace, project, group or grant
+/// it is actually about. A decision whose entity is missing evaluates
+/// with no attributes and no parents, which denies.
 pub(crate) async fn gather(
     state: &AppState,
     conn: &mut PgConnection,
-    anchor: Option<&HierarchyNode>,
+    anchor: Option<&Scope>,
+    selection: AnchorSelection,
+    resources: Vec<ResourceEntity>,
 ) -> Result<DecisionInput> {
     gather_inner(
         state,
         conn,
         ResourceChain::Anchor(anchor),
-        AnchorSelection::none(),
-        Vec::new(),
+        selection,
+        resources,
     )
     .await
 }
 
 /// [`gather`] for the observe shape (MEM-1, ADR-0020 decision 4): the
-/// resource is the caller's own placement leaf, so the resource chain IS
-/// the placement chain — one identity read, no separate anchor fetch. The
+/// resource is the caller's own scope, so the resource chain IS the
+/// caller's chain — one identity read, no separate anchor fetch. The
 /// handler takes the home scope and owner from
 /// [`DecisionInput::identity`].
 pub(crate) async fn gather_at_home(
@@ -205,45 +195,14 @@ pub(crate) async fn gather_at_home(
     .await
 }
 
-/// [`gather`] for the **governed scope** plane (CPR-6, ADR-0073).
-///
-/// The same principal, quarantine and pack resolution as [`gather`]; a
-/// different tree. The resource's chain comes from `scope_closure` rather than
-/// from `hierarchy_closure`, the caller's own chain starts at their
-/// `principal`-shaped scope, and the anchors are resolved under `selection` so
-/// a request that named a workspace or a project is decided against it.
-///
-/// `resources` are the Cedar entities the decision names — the workspace,
-/// project, group or grant it is actually about. A decision whose entity is
-/// missing evaluates with no attributes and no parents, which denies.
-pub(crate) async fn gather_governed(
-    state: &AppState,
-    conn: &mut PgConnection,
-    anchor: Option<&Scope>,
-    selection: AnchorSelection,
-    resources: Vec<ResourceEntity>,
-) -> Result<DecisionInput> {
-    gather_inner(
-        state,
-        conn,
-        ResourceChain::Governed(anchor),
-        selection,
-        resources,
-    )
-    .await
-}
-
 /// How [`gather_inner`] obtains the resource's scope chain.
 enum ResourceChain<'a> {
-    /// The already-fetched, ownership-checked node the resource refers to
-    /// (`None` for tenant-level resources) — the **old** hierarchy.
-    Anchor(Option<&'a HierarchyNode>),
-    /// The principal's own placement chain — the resource of a write that
-    /// lands at home.
+    /// The already-fetched, ownership-checked governed scope the resource
+    /// refers to (`None` for tenant-level resources).
+    Anchor(Option<&'a Scope>),
+    /// The principal's own chain — the resource of a write that lands at
+    /// home.
     PrincipalHome,
-    /// A **governed scope** (`None` for the tenant plane, and for a tenant
-    /// with no root scope yet).
-    Governed(Option<&'a Scope>),
 }
 
 async fn gather_inner(
@@ -253,7 +212,6 @@ async fn gather_inner(
     selection: AnchorSelection,
     resources: Vec<ResourceEntity>,
 ) -> Result<DecisionInput> {
-    let chains = &state.scope_chains;
     let context = synveda_identity::current_tenant().ok_or_else(|| Error::Internal {
         message: "authorization ran outside a tenant scope".to_owned(),
     })?;
@@ -265,10 +223,10 @@ async fn gather_inner(
     if service {
         enforce_service_token_lifetime(&context.claims, state.service_token_max_ttl)?;
     }
-    let mut quarantined = match &identity {
-        Some(identity) => identity.quarantined,
-        None => context.claims.provisioning.is_some(),
-    };
+    // Quarantine is only ever "not provisioned" now (CPR-7, ADR-0074
+    // decision 3): an identity row — user or service — is never
+    // quarantined, and a subject with none is, fail closed.
+    let mut quarantined = identity.is_none() && context.claims.provisioning.is_some();
     // A departed identity may do nothing (AUTH-4, ADR-0059 decision 8,
     // first layer). Refused through the quarantine attribute rather than
     // through a rule of its own: the base layer's forbid is already
@@ -287,54 +245,50 @@ async fn gather_inner(
             "a departed identity presented a token; refusing every action"
         );
     }
-    let principal_scopes = match &identity {
-        // The FK pins the placement node, so it resolves; a missing chain
-        // (mid-transaction delete) just leaves the principal unplaced —
-        // composition rules then read nothing (fail closed).
-        Some(identity) => chains
-            .resolve(&mut *conn, tenant_id, identity.scope_id)
+    // The caller's own chain: the identity row is the binding between a
+    // token subject and the scope that is theirs (CPR-7, ADR-0074 decision
+    // 3) — a directory-created identity's scope is keyed by its directory
+    // anchor, so the row is read before the slug-keyed fallback and the
+    // two can never mint one person two scopes.
+    let own_scope = match &identity {
+        Some(identity) => Some(identity.scope_id),
+        None => scopes::principal_scope(&mut *conn, tenant_id, &context.claims.subject)
             .await?
-            .unwrap_or_else(empty_chain),
+            .map(|scope| scope.id),
+    };
+    let principal_scopes: Arc<[ScopeNode]> = match own_scope {
+        Some(scope_id) => {
+            // The identity pins its scope, so this resolves; a missing row
+            // (mid-transaction archive) just leaves the principal
+            // unanchored — composition rules then read nothing (fail
+            // closed).
+            let Some(scope) = scopes::get(&mut *conn, tenant_id, scope_id).await? else {
+                unreachable!("an identity's scope is pinned by its foreign key")
+            };
+            let sealed = identity.as_ref().is_some_and(Identity::sealed);
+            let mut chain = vec![ScopeNode::from_scope(&scope, sealed)];
+            for ancestor in scopes::ancestors(&mut *conn, tenant_id, scope_id).await? {
+                chain.push(ScopeNode::from_scope(&ancestor, false));
+            }
+            chain.into()
+        }
         None => empty_chain(),
     };
-    let governed = matches!(resource_chain, ResourceChain::Governed(_));
-    let chain = match resource_chain {
-        ResourceChain::Anchor(Some(node)) => {
-            match chains.resolve(&mut *conn, tenant_id, node.id).await? {
-                Some(chain) => chain,
-                // The anchor vanished between the handler's fetch and this
-                // statement (a concurrent committed delete): the node alone,
-                // no ancestry — the same shape the per-request reads produced.
-                None => vec![node.clone()].into(),
-            }
+    let chain: Arc<[ScopeNode]> = match resource_chain {
+        ResourceChain::Anchor(Some(scope)) => {
+            // The anchor was fetched and ownership-checked moments ago; a
+            // chain that somehow fails to resolve falls back to the scope
+            // alone, no ancestry — the shape a concurrent delete leaves.
+            scope_chain_of(&mut *conn, tenant_id, scope).await?
         }
-        ResourceChain::Anchor(None) | ResourceChain::Governed(_) => empty_chain(),
+        ResourceChain::Anchor(None) => empty_chain(),
         ResourceChain::PrincipalHome => Arc::clone(&principal_scopes),
     };
-    // The governed plane's own chains (CPR-6, ADR-0073). Read from
-    // `scope_closure`, never from the hierarchy: nothing here consults, mirrors
-    // or translates a `hierarchy_nodes` row.
-    let (governed_chain, governed_own) = if governed {
-        let resource_scope = match resource_chain {
-            ResourceChain::Governed(Some(scope)) => {
-                scope_chain(&mut *conn, tenant_id, scope).await?
-            }
-            _ => Vec::new(),
-        };
-        let own =
-            match scopes::principal_scope(&mut *conn, tenant_id, &context.claims.subject).await? {
-                Some(own) => scope_chain(&mut *conn, tenant_id, &own).await?,
-                None => Vec::new(),
-            };
-        (resource_scope, own)
-    } else {
-        (Vec::new(), Vec::new())
-    };
-    // The confinement scope (ADR-0018 decision 4): the personal leaf's
-    // parent — the anchor the agent was registered at — read off the
-    // already-resolved placement chain at zero extra cost. A service
-    // identity whose anchor cannot be resolved is quarantined, never
-    // unconfined (fail closed).
+    // The confinement scope (ADR-0018 decision 4): the scope above the
+    // service's own — the anchor it was registered at — read off the
+    // already-resolved chain at zero extra cost. A service identity whose
+    // anchor cannot be resolved is quarantined, never unconfined (fail
+    // closed).
     let token_scope = if service {
         let anchor_node = principal_scopes.get(1);
         if anchor_node.is_none() {
@@ -359,38 +313,18 @@ async fn gather_inner(
         tenant_id,
         subject: context.claims.subject,
         quarantined,
-        // On the governed plane the caller's own scope is their
-        // `principal`-shaped scope; on the old one it is their placement node.
-        // Both are "where this caller stands", which is what the attribute
-        // means and what `principal in resource` walks up from.
-        scope_id: if governed {
-            governed_own.first().map(|node| node.id)
-        } else {
-            identity.as_ref().map(|identity| identity.scope_id)
-        },
+        // Where this caller stands: their own scope's id, which is what
+        // `principal in resource` walks up from.
+        scope_id: principal_scopes.first().map(|node| node.id),
         token_scope,
     };
-    let (chain_nodes, principal_nodes): (Vec<ScopeNode>, Vec<ScopeNode>) = if governed {
-        (governed_chain, governed_own)
-    } else {
-        (
-            ScopeNode::from_hierarchy_chain(&chain),
-            ScopeNode::from_hierarchy_chain(&principal_scopes),
-        )
-    };
-    let chain_ids: Vec<_> = chain_nodes.iter().map(|node| node.id).collect();
+    let chain_ids: Vec<_> = chain.iter().map(|node| node.id).collect();
     let assignments = if chain_ids.is_empty() {
         Vec::new()
     } else {
         policy_assignments::for_scopes(&mut *conn, tenant_id, &chain_ids).await?
     };
     let default_pack = policy_assignments::default_pack(&mut *conn, tenant_id).await?;
-    // The subject's bindings for the resource's chain plus its
-    // tenant-wide rows (AUTHZ-3, ADR-0015 decision 3) — read here so a
-    // new binding is in force on the very next request.
-    let role_bindings =
-        role_bindings::for_subject_on_scopes(&mut *conn, tenant_id, &principal.subject, &chain_ids)
-            .await?;
     // The grants standing over this caller (AUTHZ-4, ADR-0037 decision 4).
     // Keyed on the *placement* chain, not the resource's: a lapse grants to
     // everyone at or under a grantee scope, and which scope is being
@@ -406,14 +340,11 @@ async fn gather_inner(
         principal,
         chain,
         principal_scopes,
-        chain_nodes: chain_nodes.into(),
-        principal_nodes: principal_nodes.into(),
         anchors,
         groups,
         resources,
         assignments,
         default_pack,
-        role_bindings,
         lapses,
         identity,
     })
@@ -421,21 +352,28 @@ async fn gather_inner(
 
 /// One governed scope's chain, nearest first, as the PDP takes it.
 ///
-/// A governed scope carries no seal of its own: AUTH-4's leaver state is a
-/// property of an identity and lands on the old hierarchy's personal node
-/// (ADR-0059 decision 9). Rather than invent a value, this reports `false` and
-/// the seal keeps refusing exactly where it is written — the base layer's
-/// forbid is unchanged and still runs over every hierarchy decision.
-async fn scope_chain(
+/// The seal rides the chain head only, and only on the one shape that is
+/// ever somebody's own: a `principal`-shaped scope is sealed exactly when
+/// the identity that owns it has departed (ADR-0059 decisions 7 and 9) —
+/// one indexed read, no second column, the same single source of truth the
+/// old model derived from placement.
+async fn scope_chain_of(
     conn: &mut PgConnection,
     tenant_id: TenantId,
     scope: &Scope,
-) -> Result<Vec<ScopeNode>> {
-    let mut nodes = vec![ScopeNode::from_scope(scope, false)];
+) -> Result<Arc<[ScopeNode]>> {
+    let sealed = if scope.kind == ScopeKind::Principal {
+        identities::by_scope(&mut *conn, tenant_id, scope.id)
+            .await?
+            .is_some_and(|identity| identity.sealed())
+    } else {
+        false
+    };
+    let mut nodes = vec![ScopeNode::from_scope(scope, sealed)];
     for ancestor in scopes::ancestors(&mut *conn, tenant_id, scope.id).await? {
         nodes.push(ScopeNode::from_scope(&ancestor, false));
     }
-    Ok(nodes)
+    Ok(nodes.into())
 }
 
 /// One off-chain scope a standing lapse reaches, with the rows its own
@@ -447,7 +385,7 @@ pub(crate) struct LapsedChain {
     /// The grant that reaches the scope.
     pub(crate) lapse: Lapse,
     /// The target's own chain, node-first.
-    pub(crate) chain: Arc<[HierarchyNode]>,
+    pub(crate) chain: Arc<[ScopeNode]>,
     /// Pack assignments for that chain.
     pub(crate) assignments: Vec<synveda_types::PolicyAssignment>,
 }
@@ -466,7 +404,7 @@ pub(crate) struct LapsedChain {
 /// planned and denied later — a deleted scope grants nothing, which is the
 /// same fail-closed reading an unplaced principal gets.
 pub(crate) async fn gather_lapsed(
-    state: &AppState,
+    _state: &AppState,
     conn: &mut PgConnection,
     input: &DecisionInput,
 ) -> Result<Vec<LapsedChain>> {
@@ -474,19 +412,16 @@ pub(crate) async fn gather_lapsed(
     // One shared containment rule with the PDP's own permit, so the plan
     // and the decision can never disagree about who a grant reaches.
     let granting = synveda_policy::lapsed_scopes(
-        &input.principal_nodes,
+        &input.principal_scopes,
         &input.lapses,
         LapseAction::MemoryRead,
     );
     let mut resolved = Vec::with_capacity(granting.len());
     for lapse in granting {
-        let Some(chain) = state
-            .scope_chains
-            .resolve(&mut *conn, tenant_id, lapse.target_scope_id)
-            .await?
-        else {
+        let Some(target) = scopes::get(&mut *conn, tenant_id, lapse.target_scope_id).await? else {
             continue;
         };
+        let chain = scope_chain_of(&mut *conn, tenant_id, &target).await?;
         let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
         let assignments = policy_assignments::for_scopes(&mut *conn, tenant_id, &chain_ids).await?;
         resolved.push(LapsedChain {
@@ -508,7 +443,7 @@ pub(crate) struct CandidateChain {
     /// The scope to decide.
     pub(crate) scope_id: ScopeId,
     /// That scope's own chain, node-first.
-    pub(crate) chain: Arc<[HierarchyNode]>,
+    pub(crate) chain: Arc<[ScopeNode]>,
     /// Pack assignments for that chain.
     pub(crate) assignments: Vec<synveda_types::PolicyAssignment>,
 }
@@ -581,7 +516,6 @@ pub(crate) struct Universe {
     /// work. `effective_roles_at` still admits each binding only where its
     /// scope is on the resource's own chain, so this widens the *read*,
     /// never a decision.
-    pub(crate) role_bindings: Vec<RoleBinding>,
     /// How many contributing scopes existed before the cap.
     pub(crate) considered: usize,
     /// Whether the cap ([`max_recall_scopes`]) dropped any of them.
@@ -615,7 +549,7 @@ pub(crate) struct Universe {
     err(Display)
 )]
 pub(crate) async fn gather_universe(
-    state: &AppState,
+    _state: &AppState,
     conn: &mut PgConnection,
     input: &DecisionInput,
     occupied: &[ScopeId],
@@ -635,16 +569,13 @@ pub(crate) async fn gather_universe(
     // tenant a recall has touched before.
     let mut resolved: Vec<(usize, CandidateChain)> = Vec::new();
     for scope_id in occupied.iter().copied().filter(|id| !own.contains(id)) {
-        let Some(chain) = state
-            .scope_chains
-            .resolve(&mut *conn, tenant_id, scope_id)
-            .await?
-        else {
+        let Some(scope) = scopes::get(&mut *conn, tenant_id, scope_id).await? else {
             // A scope that vanished between the occupancy read and now.
             // Deciding it would deny anyway; dropping it is the same
             // fail-closed reading a deleted lapse target gets.
             continue;
         };
+        let chain = scope_chain_of(&mut *conn, tenant_id, &scope).await?;
         // Root-first, so a shared prefix with the caller's own root-first
         // path is a common ancestry depth.
         let path: Vec<ScopeId> = chain.iter().rev().map(|node| node.id).collect();
@@ -705,15 +636,11 @@ pub(crate) async fn gather_universe(
         candidates.push(candidate);
     }
 
-    let role_bindings =
-        role_bindings::for_subject(&mut *conn, tenant_id, &input.principal.subject).await?;
-
     let span = tracing::Span::current();
     span.record("candidates", candidates.len());
     span.record("truncated", truncated);
     Ok(Universe {
         candidates,
-        role_bindings,
         considered,
         truncated,
     })
@@ -725,8 +652,9 @@ pub(crate) async fn gather_universe(
 pub(crate) struct Authorized {
     /// The PDP's verdict context (pack@version, determining policies).
     pub(crate) decision: AuthzDecision,
-    /// Distinct role names from the bindings relevant to this decision
-    /// (the resource's chain plus tenant-wide — ADR-0015 decision 3).
+    /// The distinct grant keys the decision weighed — every key a direct
+    /// or group grant reaches this resource with (CPR-7, ADR-0074
+    /// decision 6 over ADR-0015 decision 3).
     pub(crate) roles: Vec<String>,
 }
 
@@ -741,16 +669,15 @@ pub(crate) async fn require(
     conn: &mut PgConnection,
     action: Action,
     resource: Resource,
-    anchor: Option<&HierarchyNode>,
+    anchor: Option<&Scope>,
 ) -> Result<Authorized> {
-    let input = gather(state, conn, anchor).await?;
-    decide(state, &input, action, resource, None)
+    let input = gather(state, conn, anchor, AnchorSelection::none(), Vec::new()).await?;
+    decide(state, &input, action, resource)
 }
 
 /// The one decision seam over a gathered [`DecisionInput`]: evaluates,
 /// collapses a deny into the taxonomy, and keeps the allow's context for
-/// the caller's audit event. `grant` is the role being granted or revoked
-/// for [`Action::RoleAssign`] (ADR-0015 decision 5).
+/// the caller's audit event.
 ///
 /// Not for [`Action::MemoryRead`]: that one names a tier, through
 /// [`decide_read`].
@@ -759,9 +686,8 @@ pub(crate) fn decide(
     input: &DecisionInput,
     action: Action,
     resource: Resource,
-    grant: Option<Role>,
 ) -> Result<Authorized> {
-    decide_from(state, input, 0, action, resource, grant)
+    decide_from(state, input, 0, action, resource)
 }
 
 /// [`decide`] for a resource whose chain starts at `position` of the
@@ -775,9 +701,8 @@ pub(crate) fn decide_from(
     position: usize,
     action: Action,
     resource: Resource,
-    grant: Option<Role>,
 ) -> Result<Authorized> {
-    decide_inner(state, input, position, action, resource, grant, None)
+    decide_inner(state, input, position, action, resource, None)
 }
 
 /// [`decide`] for `MemoryRead`, which is the one action that names the tier
@@ -828,7 +753,6 @@ pub(crate) fn decide_prompt_read_from(
         position,
         Action::PromptRead,
         resource,
-        None,
         Some(sensitivity),
     )
 }
@@ -864,7 +788,6 @@ pub(crate) fn decide_context_pack_read_from(
         position,
         Action::ContextPackRead,
         resource,
-        None,
         Some(sensitivity),
     )
 }
@@ -902,7 +825,6 @@ pub(crate) fn decide_skill_read_from(
         position,
         Action::SkillRead,
         resource,
-        None,
         Some(sensitivity),
     )
 }
@@ -922,7 +844,6 @@ pub(crate) fn decide_read_from(
         position,
         Action::MemoryRead,
         resource,
-        None,
         Some(sensitivity),
     )
 }
@@ -934,31 +855,18 @@ fn decide_inner(
     position: usize,
     action: Action,
     resource: Resource,
-    grant: Option<Role>,
     sensitivity: Option<Sensitivity>,
 ) -> Result<Authorized> {
     let mut context = input.context_from(position);
-    context.grant = grant;
     context.sensitivity = sensitivity;
     let decision = state
         .pdp
         .authorize(&input.principal, action, resource, &context)?;
     decision.clone().require(action, resource)?;
-    let on_chain: HashSet<_> = context.scopes.iter().map(|node| node.id).collect();
-    let mut roles: Vec<String> = input
-        .role_bindings
-        .iter()
-        .filter(|binding| {
-            binding
-                .scope_id
-                .is_none_or(|scope| on_chain.contains(&scope))
-        })
-        .map(|binding| binding.role.as_str().to_owned())
-        .collect();
-    // The grant keys that reached this resource, beside the bindings that did
-    // (CPR-6, ADR-0073 decision 5). The audit event's role list is what the
-    // decision *actually* weighed, so leaving these out would make the trail
-    // say "no roles" about a decision a workspace `owner` grant carried.
+    // The grant keys that reached this resource (CPR-6, ADR-0073 decision
+    // 5; since the cutover, the only roles there are). The audit event's
+    // role list is what the decision *actually* weighed.
+    let mut roles: Vec<String> = Vec::new();
     roles.extend(
         synveda_policy::effective_role_keys_at(resource, &context)
             .into_iter()
@@ -1006,7 +914,7 @@ fn enforce_service_token_lifetime(claims: &Claims, max: Duration) -> Result<()> 
     })
 }
 
-fn empty_chain() -> Arc<[HierarchyNode]> {
+fn empty_chain() -> Arc<[ScopeNode]> {
     Vec::new().into()
 }
 

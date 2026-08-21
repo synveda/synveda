@@ -53,10 +53,11 @@ synveda login
 A browser opens against the bundled IdP. Use the operator credentials `init`
 printed.
 
-This login is where your organisation starts to exist: it provisions the org
-root from your tenant, places you under it, and binds you tenant-wide
-org-admin — all of it audited under **your** subject rather than an
-installer's.
+This login is where your tenant starts to exist: it mints the tenant root
+scope from your tenant's own slug and name, gives your identity its own
+scope under it, and grants you `administrator` at the root because you are
+in the `synveda-admins` group — all of it audited under **your** subject
+rather than an installer's.
 
 ## 4. Build the demo organisation
 
@@ -67,15 +68,15 @@ installer's.
 (From a checkout instead: `deploy/release/demo/seed.sh`. `init` prints the
 right path for you.)
 
-**Why this is a separate step, and not something `init` did.** Creating a
-department is a governed act. It needs a bearer, and it gets audited under
+**Why this is a separate step, and not something `init` did.** Creating an
+org unit is a governed act. It needs a bearer, and it gets audited under
 whoever holds it — so an installer that seeded your organisation would stand
-the whole hierarchy under a break-glass actor, and the audit trail would say a
+the whole tenant under a break-glass actor, and the audit trail would say a
 robot built your company. The product refuses to do that. Everything the
 seeder makes is made by *you*, after you log in, through the same routes the
 CLI and any harness use, which is why step 7's chain verifies.
 
-It builds two departments and three teams, assigns contrasting policy packs,
+It builds two org units and three below them, assigns contrasting policy packs,
 observes six turns of memory through the real extraction pipeline, and opens
 one proposal. It is safe to re-run — it asks what exists rather than keeping a
 list — and it refuses a tenant that already holds an organisation it did not
@@ -86,7 +87,7 @@ build.
 ## 5. Look at what you have
 
 ```sh
-synveda hierarchy list
+synveda scope tree
 synveda recall --query "how do we roll out payments"
 ```
 
@@ -100,9 +101,9 @@ Open **http://127.0.0.1:8120/console/** and sign in with the same operator.
 There is a proposal in the inbox: memory climbing from your personal scope to
 the whole organisation. **Try to approve it.**
 
-You cannot. Publishing to the org root under `regulated-strict` takes a
-curator *and* a steward, two distinct people, and you are one person holding
-every role. That refusal is the product working correctly, and it is the thing
+You cannot. Publishing to the tenant root under `regulated-strict` takes a
+`curator` *and* an `administrator`, two distinct people, and you are one
+person holding every key. That refusal is the product working correctly, and it is the thing
 worth showing somebody: the governance is not advisory, and it does not have
 an override for the person who installed it.
 
@@ -124,9 +125,9 @@ synveda audit tail    --tenant <your-tenant-uuid>
 
 The chain covers every act since installation and holds exactly **one**
 break-glass event: admitting the tenant, before any person existed to attribute
-it to. Everything after it — the org root, your role binding, each scope, each
-observed turn, the proposal — is attributed to you and hash-chained to what
-came before.
+it to. Everything after it — the tenant root, your `administrator` grant, each
+scope, each observed turn, the proposal — is attributed to you and hash-chained
+to what came before.
 
 ## 8. Connect an agent
 

@@ -35,6 +35,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod chain;
 pub mod dedup;
 pub mod embedding;
 pub mod extraction;

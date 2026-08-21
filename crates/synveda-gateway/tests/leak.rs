@@ -42,15 +42,17 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, role_bindings, tenants};
+use synveda_store::{access, identities, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, Role,
-    ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, ScopeId,
+    Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -89,7 +91,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(
             SearchIndex::open(
@@ -155,67 +156,68 @@ fn database_url() -> String {
 }
 
 struct Org {
-    eng: HierarchyNode,
-    platform: HierarchyNode,
-    payments: HierarchyNode,
-    field: HierarchyNode,
+    platform: Scope,
+    /// The tenant root — the one scope on every reader's chain since
+    /// CPR-7 (ADR-0074 decision 3).
+    root: Scope,
 }
 
 async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Org {
     let mut tx = pool.begin().await.expect("begin");
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
     let seeded = {
-        let mut node = async |parent: Option<ScopeId>, kind, slug: &str, name: &str| {
-            hierarchy::create(&mut tx, ScopeId::new(), tenant, parent, kind, slug, name)
-                .await
-                .expect("create node")
+        let mut node = async |parent: ScopeId, slug: &str, name: &str| {
+            scopes::create(
+                &mut tx,
+                &scopes::NewScope {
+                    id: ScopeId::new(),
+                    tenant_id: tenant,
+                    kind: ScopeKind::OrgUnit,
+                    parent_scope_id: Some(parent),
+                    slug: slug.to_owned(),
+                    display_name: name.to_owned(),
+                    attributes: serde_json::json!({}),
+                    principal_id: None,
+                    created_by: None,
+                },
+            )
+            .await
+            .expect("create org unit")
         };
-        let org = node(None, ScopeKind::Org, "acme", "ACME").await;
-        let eng = node(Some(org.id), ScopeKind::Department, "eng", "Engineering").await;
-        let platform = node(Some(eng.id), ScopeKind::Team, "platform", "Platform").await;
-        let payments = node(Some(eng.id), ScopeKind::Team, "payments", "Payments").await;
-        let sales = node(Some(org.id), ScopeKind::Department, "sales", "Sales").await;
-        let field = node(Some(sales.id), ScopeKind::Team, "field", "Field").await;
-        node(
-            Some(org.id),
-            ScopeKind::Team,
-            identities::QUARANTINE_SLUG,
-            "Quarantine",
-        )
-        .await;
+        // eng/payments/sales/field remain part of the tree — grants and
+        // negative-leak assertions elsewhere in this suite name them by
+        // slug — but nothing here reads the rows back, so only the two
+        // scopes callers actually use are kept on `Org`.
+        let eng = node(org.id, "eng", "Engineering").await;
+        let platform = node(eng.id, "platform", "Platform").await;
+        node(eng.id, "payments", "Payments").await;
+        let sales = node(org.id, "sales", "Sales").await;
+        node(sales.id, "field", "Field").await;
         Org {
-            eng,
             platform,
-            payments,
-            field,
+            root: org.clone(),
         }
     };
     tx.commit().await.expect("commit hierarchy");
     seeded
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -223,12 +225,26 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: Role) {
+async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, Some(scope), role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 async fn seed_record(
@@ -374,15 +390,22 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
 
     // Platform: the owner, the curator who publishes and classifies, and
     // the compliance officer the floor requires.
-    let sam = seed_user(&pool, tenant, "sam", org.platform.id).await;
-    seed_user(&pool, tenant, "cara", org.platform.id).await;
-    seed_user(&pool, tenant, "cleo", org.platform.id).await;
-    bind(&pool, tenant, "cara", org.platform.id, Role::Curator).await;
-    bind(&pool, tenant, "cleo", org.platform.id, Role::Compliance).await;
+    let sam = seed_user(&pool, tenant, "sam").await;
+    seed_user(&pool, tenant, "cara").await;
+    seed_user(&pool, tenant, "cleo").await;
+    bind(&pool, tenant, "cara", org.platform.id, RoleKey::Curator).await;
+    bind(
+        &pool,
+        tenant,
+        "cleo",
+        org.platform.id,
+        RoleKey::Administrator,
+    )
+    .await;
     // Cleo also holds a content role, because approving a `restricted`
     // publication means reading it: the review surface shows content, and
     // the publication effect asks its own read (ADR-0038 decision 10).
-    bind(&pool, tenant, "cleo", org.platform.id, Role::Curator).await;
+    bind(&pool, tenant, "cleo", org.platform.id, RoleKey::Curator).await;
     let cara = issue("cara", tenant);
     let cleo = issue("cleo", tenant);
 
@@ -407,10 +430,15 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
         Sensitivity::Confidential,
     )
     .await;
+    // At sam's own scope, not org.platform: he authored it, and it is
+    // there — not on a team's chain nobody's own scope sits inside any
+    // more (ADR-0074 decision 3) — that a "still composes for its own
+    // team" check has to be made against, or it would be checking a
+    // scope his own inject can never reach.
     seed_record(
         &pool,
         tenant,
-        org.platform.id,
+        sam.scope_id,
         sam.id,
         INTERNAL,
         Sensitivity::Internal,
@@ -439,8 +467,10 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
     let classification = proposal_id(&opened);
     let outstanding = opened["outstanding"].as_str().unwrap_or_default();
     assert!(
-        outstanding.contains("compliance"),
-        "the invariant floor prices the top tier in compliance approvals: {opened}"
+        outstanding.contains("administrator"),
+        "the invariant floor prices the top tier in administrator approvals — \
+         `compliance` is what that key was called before ADR-0074 decision 6 \
+         collapsed the specialist names: {opened}"
     );
 
     // One curator is not enough, and the refusal says what is missing.
@@ -457,8 +487,8 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
         refused["message"]
             .as_str()
             .unwrap_or_default()
-            .contains("compliance"),
-        "the refusal names the role the floor requires: {refused}"
+            .contains("administrator"),
+        "the refusal names the key the floor requires: {refused}"
     );
 
     approve(&app, &cleo, &classification).await;
@@ -508,16 +538,21 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
     assert_eq!(status, StatusCode::OK, "publishing: {published}");
 
     // ── The sweep: nobody receives it, under any phrasing ───────────────
-    seed_user(&pool, tenant, "priya", org.payments.id).await;
-    seed_user(&pool, tenant, "fay", org.field.id).await;
-    seed_user(&pool, tenant, "nadia", org.eng.id).await;
-    seed_user(&pool, tenant, "omar", org.eng.id).await;
-    bind(&pool, tenant, "nadia", org.eng.id, Role::Steward).await;
-    bind(&pool, tenant, "omar", org.eng.id, Role::Steward).await;
+    seed_user(&pool, tenant, "priya").await;
+    seed_user(&pool, tenant, "fay").await;
+    seed_user(&pool, tenant, "nadia").await;
+    seed_user(&pool, tenant, "omar").await;
+    bind(&pool, tenant, "nadia", org.root.id, RoleKey::Administrator).await;
+    bind(&pool, tenant, "omar", org.root.id, RoleKey::Administrator).await;
     let priya = issue("priya", tenant);
     let fay = issue("fay", tenant);
     let nadia = issue("nadia", tenant);
     let sam_token = issue("sam", tenant);
+
+    let priya_identity = identities::by_subject(&pool, tenant, "priya")
+        .await
+        .expect("read priya")
+        .expect("priya exists");
 
     let corpus = [RESTRICTED, CONFIDENTIAL, INTERNAL];
     let queries = query_variants(&corpus);
@@ -558,7 +593,7 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
         "/v1/lapses",
         json!({
             "scope_id": org.platform.id,
-            "grantee_scope_id": org.payments.id,
+            "grantee_scope_id": priya_identity.scope_id,
             "action": "memory.read",
             "duration_secs": WINDOW_SECS,
             "reason": "joint incident review, working tier",
@@ -601,7 +636,7 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
         "/v1/lapses",
         json!({
             "scope_id": org.platform.id,
-            "grantee_scope_id": org.payments.id,
+            "grantee_scope_id": priya_identity.scope_id,
             "action": "memory.read",
             "max_sensitivity": "restricted",
             "duration_secs": WINDOW_SECS,
@@ -619,14 +654,27 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
         strong["outstanding"]
             .as_str()
             .unwrap_or_default()
-            .contains("compliance"),
+            .contains("administrator"),
         "declaring the top tier is what pulls the floor in: {strong}"
     );
 
-    // Two stewards are no longer enough: this is the AC's
-    // "compliance-granted permission", and nobody wrote a rule for it.
+    // Two administrators at the same level are no longer enough: this is
+    // the AC's "compliance-granted permission" — `compliance` is what the
+    // `administrator` key was called before ADR-0074 decision 6 collapsed
+    // the specialist names, and nobody wrote a rule for it.
+    // One signature is not enough, and the refusal says what is missing.
+    //
+    // **What this no longer asserts, and why.** Until CPR-7 the floor
+    // named `compliance` and the two departmental approvers were
+    // `steward`s, so "two stewards are not enough" was a statement about
+    // two *different* roles. ADR-0074 decision 6 collapsed
+    // steward/org-admin/compliance into one `administrator` key, so the
+    // floor's role and the approvers' role are now the same word and the
+    // separation is unsayable. What survives — and is what actually
+    // protects the tier — is the **count**: an administrator and two
+    // distinct people. Prompt 27 is where the specialist names, and this
+    // assertion, come back.
     approve(&app, &nadia, &strong_id).await;
-    approve(&app, &issue("omar", tenant), &strong_id).await;
     let (status, refused) = post(
         &app,
         &nadia,
@@ -634,16 +682,16 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
         json!({}),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "stewards alone: {refused}");
+    assert_eq!(status, StatusCode::CONFLICT, "one signature: {refused}");
     assert!(
         refused["message"]
             .as_str()
             .unwrap_or_default()
-            .contains("compliance"),
+            .contains("distinct"),
         "and the refusal names what is missing: {refused}"
     );
 
-    approve(&app, &cleo, &strong_id).await;
+    approve(&app, &issue("omar", tenant), &strong_id).await;
     let (status, granted) = post(
         &app,
         &nadia,
@@ -707,12 +755,18 @@ async fn confidential_material_takes_an_explicit_grant_and_a_binding_is_one() {
     // lapse and by nothing else (ADR-0024 decision 2, ADR-0037
     // decision 13). What AUTHZ-5 decides is what a reader may see *at the
     // scopes it already composes*.
-    let mia = seed_user(&pool, tenant, "mia", org.payments.id).await;
-    seed_user(&pool, tenant, "priya", org.payments.id).await;
+    let mia = seed_user(&pool, tenant, "mia").await;
+    seed_user(&pool, tenant, "priya").await;
+    // At the **tenant root**, because since CPR-7 (ADR-0074 decision 3)
+    // that is a scope every reader's chain runs through — nobody is placed
+    // inside a team any more, and the inject universe is still the chain
+    // (widened by a lapse and by nothing else, ADR-0024 decision 2). What
+    // AUTHZ-5 decides is what a reader may see *at the scopes it already
+    // composes*, and this is one of them for everybody.
     seed_record(
         &pool,
         tenant,
-        org.payments.id,
+        org.root.id,
         mia.id,
         CONFIDENTIAL,
         Sensitivity::Confidential,
@@ -723,7 +777,7 @@ async fn confidential_material_takes_an_explicit_grant_and_a_binding_is_one() {
     seed_record(
         &pool,
         tenant,
-        org.payments.id,
+        org.root.id,
         mia.id,
         INTERNAL,
         Sensitivity::Internal,
@@ -740,9 +794,9 @@ async fn confidential_material_takes_an_explicit_grant_and_a_binding_is_one() {
         );
     }
 
-    // A content-role binding at her own team is the explicit grant, and it
-    // is in force on the very next request.
-    bind(&pool, tenant, "priya", org.payments.id, Role::Contributor).await;
+    // A content-role grant at the scope the material sits on is the
+    // explicit grant, and it is in force on the very next request.
+    bind(&pool, tenant, "priya", org.root.id, RoleKey::Member).await;
     let bound = block_for(&app, &priya, Some("incident bridge rota")).await;
     assert!(
         bound.contains(CONFIDENTIAL),

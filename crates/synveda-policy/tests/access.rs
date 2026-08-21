@@ -24,13 +24,14 @@
 //!    quarantined principal does nothing, invitation or no invitation.
 
 use chrono::Utc;
-use synveda_policy::ScopeNode;
 use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
+    ScopeNode,
 };
-use synveda_types::{
-    HierarchyNode, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind, TenantId,
-};
+use synveda_types::access::RoleKey;
+use synveda_types::anchor::{AnchorSource, ScopeAnchor};
+use synveda_types::scope::ScopeKind;
+use synveda_types::{PolicyAssignment, ScopeId, TenantId};
 
 /// The access plane's four actions.
 const ACTIONS: [Action; 4] = [
@@ -42,24 +43,20 @@ const ACTIONS: [Action; 4] = [
 
 struct Fixture {
     tenant: TenantId,
-    org: HierarchyNode,
+    org: ScopeNode,
 }
 
 fn fixture() -> Fixture {
     let tenant = TenantId::new();
     Fixture {
         tenant,
-        org: HierarchyNode {
+        org: ScopeNode {
             id: ScopeId::new(),
             tenant_id: tenant,
             parent_id: None,
-            kind: ScopeKind::Org,
+            kind: ScopeKind::Tenant,
             slug: "org".to_owned(),
-            name: "org".to_owned(),
-            depth: 0,
-            path: "org".to_owned(),
             sealed: false,
-            created_at: Utc::now(),
         },
     }
 }
@@ -74,16 +71,6 @@ fn principal(fx: &Fixture, subject: &str, quarantined: bool) -> Principal {
     }
 }
 
-fn binding(fx: &Fixture, subject: &str, role: Role) -> RoleBinding {
-    RoleBinding {
-        tenant_id: fx.tenant,
-        subject: subject.to_owned(),
-        scope_id: None,
-        role,
-        updated_at: Utc::now(),
-    }
-}
-
 fn assignment(fx: &Fixture, pack: &str) -> PolicyAssignment {
     PolicyAssignment {
         tenant_id: fx.tenant,
@@ -93,26 +80,33 @@ fn assignment(fx: &Fixture, pack: &str) -> PolicyAssignment {
     }
 }
 
-/// One decision at the tenant, under `pack`, with `roles` bound tenant-wide —
-/// exactly the shape `crate::access`'s `require` produces.
-fn allows(pdp: &Pdp, fx: &Fixture, pack: &str, roles: &[Role], action: Action) -> bool {
-    decide(pdp, fx, pack, roles, action, false)
+/// One decision at the tenant, under `pack`, with `keys` granted at the
+/// tenant root — exactly the shape `crate::access`'s `require` produces
+/// (CPR-6's anchors; since the cutover the only roles there are).
+fn allows(pdp: &Pdp, fx: &Fixture, pack: &str, keys: &[RoleKey], action: Action) -> bool {
+    decide(pdp, fx, pack, keys, action, false)
 }
 
 fn decide(
     pdp: &Pdp,
     fx: &Fixture,
     pack: &str,
-    roles: &[Role],
+    keys: &[RoleKey],
     action: Action,
     quarantined: bool,
 ) -> bool {
     let subject = "sam";
-    let bindings: Vec<RoleBinding> = roles
-        .iter()
-        .map(|role| binding(fx, subject, *role))
-        .collect();
-    let chain = [ScopeNode::from_hierarchy(&fx.org)];
+    let anchor = ScopeAnchor {
+        scope_id: fx.org.id,
+        kind: ScopeKind::Tenant,
+        parent_scope_id: None,
+        depth: 0,
+        source: AnchorSource::Grant,
+        roles: keys.to_vec(),
+        granted_at: vec![fx.org.id],
+        via_groups: Vec::new(),
+    };
+    let chain = [fx.org.clone()];
     pdp.authorize(
         &principal(fx, subject, quarantined),
         action,
@@ -120,9 +114,9 @@ fn decide(
         &AuthzContext {
             scopes: &[],
             principal_scopes: &chain,
+            anchors: &[anchor],
             assignments: &[assignment(fx, pack)],
             default_pack: Some(pack),
-            role_bindings: &bindings,
             ..Default::default()
         },
     )
@@ -143,19 +137,19 @@ fn granting_and_group_curation_are_the_admin_roles_under_every_pack() {
     let fx = fixture();
     for pack in [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION] {
         for action in [Action::MembershipGrant, Action::GroupManage] {
-            for role in [Role::Steward, Role::OrgAdmin] {
-                assert!(
-                    allows(&pdp, &fx, pack, &[role], action),
-                    "{pack}: {role} must hold {action}"
-                );
-            }
+            assert!(
+                allows(&pdp, &fx, pack, &[RoleKey::Administrator], action),
+                "{pack}: administrator must hold {action}"
+            );
+            assert!(
+                allows(&pdp, &fx, pack, &[RoleKey::Owner], action),
+                "{pack}: owner must hold {action}"
+            );
             for role in [
-                Role::Viewer,
-                Role::Contributor,
-                Role::Curator,
-                Role::Auditor,
-                Role::SecurityReviewer,
-                Role::Compliance,
+                RoleKey::Viewer,
+                RoleKey::Member,
+                RoleKey::Curator,
+                RoleKey::Reviewer,
             ] {
                 assert!(
                     !allows(&pdp, &fx, pack, &[role], action),
@@ -178,19 +172,25 @@ fn the_packs_grade_who_may_read_membership() {
     let pdp = pdp();
     let fx = fixture();
 
-    // Everywhere: the admin and audit roles.
+    // Everywhere: the administrators. (The audit role that used to join
+    // them left with the role-binding vocabulary — CPR-7; an administrator
+    // reads the chain through `AuditRead`, not membership.)
     for pack in [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION] {
-        for role in [Role::Steward, Role::OrgAdmin, Role::Auditor] {
-            assert!(
-                allows(&pdp, &fx, pack, &[role], Action::MembershipRead),
-                "{pack}: {role} must be able to read membership"
-            );
-        }
+        assert!(
+            allows(
+                &pdp,
+                &fx,
+                pack,
+                &[RoleKey::Administrator],
+                Action::MembershipRead
+            ),
+            "{pack}: administrator must be able to read membership"
+        );
     }
 
     // regulated-strict: nobody else. A contractor with a viewer binding must
     // not be able to enumerate the staff.
-    for role in [Role::Viewer, Role::Contributor, Role::Curator] {
+    for role in [RoleKey::Viewer, RoleKey::Member, RoleKey::Curator] {
         assert!(
             !allows(&pdp, &fx, REGULATED_STRICT, &[role], Action::MembershipRead),
             "regulated-strict must keep membership to the admin roles: {role}"
@@ -203,10 +203,10 @@ fn the_packs_grade_who_may_read_membership() {
         &pdp,
         &fx,
         STANDARD,
-        &[Role::Curator],
+        &[RoleKey::Curator],
         Action::MembershipRead
     ));
-    for role in [Role::Viewer, Role::Contributor] {
+    for role in [RoleKey::Viewer, RoleKey::Member] {
         assert!(
             !allows(&pdp, &fx, STANDARD, &[role], Action::MembershipRead),
             "standard does not extend membership reads to {role}"
@@ -215,7 +215,7 @@ fn the_packs_grade_who_may_read_membership() {
 
     // open-collaboration: every content role. A collaboration space whose
     // members cannot see who else is in it is not one.
-    for role in [Role::Viewer, Role::Contributor, Role::Curator] {
+    for role in [RoleKey::Viewer, RoleKey::Member, RoleKey::Curator] {
         assert!(
             allows(
                 &pdp,
@@ -242,14 +242,14 @@ fn seeing_a_workspace_is_not_seeing_who_is_in_it() {
         &pdp,
         &fx,
         REGULATED_STRICT,
-        &[Role::Contributor],
+        &[RoleKey::Member],
         Action::WorkspaceRead
     ));
     assert!(!allows(
         &pdp,
         &fx,
         REGULATED_STRICT,
-        &[Role::Contributor],
+        &[RoleKey::Member],
         Action::MembershipRead
     ));
 }
@@ -267,7 +267,7 @@ fn redeeming_an_invitation_needs_no_role_under_any_pack() {
             "{pack}: a role-free principal must be able to redeem an invitation"
         );
         assert!(
-            allows(&pdp, &fx, pack, &[Role::Viewer], Action::InviteAccept),
+            allows(&pdp, &fx, pack, &[RoleKey::Viewer], Action::InviteAccept),
             "{pack}: and so must one with any binding at all"
         );
     }
@@ -283,7 +283,7 @@ fn the_base_layer_forbids_a_quarantined_principal_everything_here() {
     for pack in [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION] {
         for action in ACTIONS {
             assert!(
-                !decide(&pdp, &fx, pack, &[Role::OrgAdmin], action, true),
+                !decide(&pdp, &fx, pack, &[RoleKey::Administrator], action, true),
                 "{pack}: a quarantined org-admin must not hold {action}"
             );
         }
@@ -307,7 +307,7 @@ fn a_service_identity_cannot_reach_the_access_plane() {
         // subtree, so the base layer's forbid covers everything here.
         token_scope: Some(fx.org.id),
     };
-    let chain = [ScopeNode::from_hierarchy(&fx.org)];
+    let chain = [fx.org.clone()];
     for pack in [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION] {
         for action in ACTIONS {
             let decision = pdp
@@ -320,7 +320,6 @@ fn a_service_identity_cannot_reach_the_access_plane() {
                         principal_scopes: &chain,
                         assignments: &[assignment(&fx, pack)],
                         default_pack: Some(pack),
-                        role_bindings: &[binding(&fx, "agent", Role::OrgAdmin)],
                         ..Default::default()
                     },
                 )
@@ -344,7 +343,7 @@ fn every_new_action_is_decidable_under_every_pack() {
         for action in ACTIONS {
             // The call itself is the assertion: an unknown action id fails
             // schema validation and errors rather than returning a verdict.
-            let _ = allows(&pdp, &fx, pack, &[Role::OrgAdmin], action);
+            let _ = allows(&pdp, &fx, pack, &[RoleKey::Administrator], action);
         }
     }
 }

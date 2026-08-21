@@ -138,6 +138,7 @@ mod tests {
             tenant_id,
             parent_id,
             kind,
+            slug: format!("s-{}", ScopeId::new().as_uuid().simple()),
             sealed: false,
         }
     }
@@ -177,7 +178,7 @@ mod tests {
         let mut team = node(tenant, Some(unit_x.id), ScopeKind::Workspace);
         let built = Cell::new(0);
 
-        let before = vec![team, unit_x, root];
+        let before = vec![team.clone(), unit_x, root.clone()];
         store.resolve(&before, counted(&built)).expect("build");
 
         team.parent_id = Some(unit_y.id);
@@ -201,7 +202,7 @@ mod tests {
         let tenant = TenantId::new();
         let scope = node(tenant, None, ScopeKind::Tenant);
         assert_eq!(
-            shape_of(&[scope]),
+            shape_of(std::slice::from_ref(&scope)),
             shape_of(&[scope]),
             "the shape is the node, and the node is only structure"
         );

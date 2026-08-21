@@ -35,18 +35,19 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder, Embedder};
 use synveda_ingest::promotion::{self, SweepConfig, SweepDeps};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_retrieval::indexer::{self, IndexerConfig};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, policy_packs, rls, role_bindings, tenants};
+use synveda_store::{access, identities, policy_packs, rls, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, PackConfig, PromotionConfig, PromotionRule,
-    RecordClass, RecordId, RecordKind, Role, ScopeId, ScopeKind, Sensitivity, TenantId,
-    TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, PackConfig, PromotionConfig, PromotionRule,
+    RecordClass, RecordId, RecordKind, ScopeId, Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -115,7 +116,6 @@ fn state_with(url: &str, search_index: Arc<SearchIndex>) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index,
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -138,7 +138,6 @@ fn engine(state: &AppState) -> SweepDeps {
     SweepDeps {
         pool: state.pool.clone(),
         pdp: Arc::clone(&state.pdp),
-        chains: Arc::clone(&state.scope_chains),
     }
 }
 
@@ -177,80 +176,62 @@ fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("checked by admitted_tenant")
 }
 
-/// org → dept → team, plus the reserved quarantine scope.
-async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (HierarchyNode, HierarchyNode) {
+/// The tenant root with an `eng` org unit and a platform unit under it.
+async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Scope {
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(org.id),
+            slug: "eng".to_owned(),
+            display_name: "Engineering".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let eng = hierarchy::create(
+    .expect("create scope");
+    let platform = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "eng",
-        "Engineering",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(eng.id),
+            slug: "platform".to_owned(),
+            display_name: "Platform".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create dept");
-    let platform = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
-    )
-    .await
-    .expect("create team");
-    let quarantine = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        "Quarantine",
-    )
-    .await
-    .expect("create quarantine");
+    .expect("create scope");
     tx.commit().await.expect("commit hierarchy");
-    (platform, quarantine)
+    platform
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -479,14 +460,12 @@ struct Fixture {
     state: AppState,
     alice: Identity,
     record: RecordId,
-    team: ScopeId,
-    quarantine: ScopeId,
 }
 
 async fn fixture() -> Option<Fixture> {
     let (pool, tenant) = admitted_tenant().await?;
-    let (platform, quarantine) = seed_hierarchy(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", platform.id).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
     // The material lives on alice's own personal leaf, which is where
     // extraction puts everything it produces.
     let record = seed_record(
@@ -510,8 +489,6 @@ async fn fixture() -> Option<Fixture> {
         state,
         alice,
         record,
-        team: platform.id,
-        quarantine: quarantine.id,
     })
 }
 
@@ -590,13 +567,13 @@ async fn a_rule_fires_on_real_use_and_its_proposal_carries_evidence() {
 
     // The reviewer's surface shows it. Alice holds no review role, so
     // the curator reads it — the person who would act on it.
-    seed_user(&fx.pool, fx.tenant, "carol", fx.team).await;
+    seed_user(&fx.pool, fx.tenant, "carol").await;
     role_bindings_bind(
         &fx.pool,
         fx.tenant,
         "carol",
         fx.alice.scope_id,
-        Role::Curator,
+        RoleKey::Curator,
     )
     .await;
     let detail = api(
@@ -724,13 +701,13 @@ async fn a_soak_never_opens_the_same_bytes_twice() {
 #[tokio::test]
 async fn a_rejection_binds_bytes_and_an_edit_frees_them() {
     let Some(fx) = fixture().await else { return };
-    seed_user(&fx.pool, fx.tenant, "carol", fx.team).await;
+    seed_user(&fx.pool, fx.tenant, "carol").await;
     role_bindings_bind(
         &fx.pool,
         fx.tenant,
         "carol",
         fx.alice.scope_id,
-        Role::Curator,
+        RoleKey::Curator,
     )
     .await;
     let carol = issue("carol", fx.tenant);
@@ -828,8 +805,8 @@ async fn an_unconfigured_pack_promotes_nothing() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (platform, _) = seed_hierarchy(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", platform.id).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
     let record = seed_record(
         &pool,
         tenant,
@@ -876,7 +853,7 @@ async fn an_unconfigured_pack_promotes_nothing() {
 async fn another_members_recalls_never_reach_a_personal_record() {
     let Some(fx) = fixture().await else { return };
     // Same team as alice: the closest bob can structurally get.
-    let bob = seed_user(&fx.pool, fx.tenant, "bob", fx.team).await;
+    let bob = seed_user(&fx.pool, fx.tenant, "bob").await;
     assert_ne!(bob.scope_id, fx.alice.scope_id);
 
     recall_times(&fx.app, fx.tenant, "alice", 2).await;
@@ -911,19 +888,18 @@ async fn a_quarantined_owner_proposes_nothing() {
     let Some(fx) = fixture().await else { return };
     recall_times(&fx.app, fx.tenant, "alice", 3).await;
 
-    // Quarantine is placement under the reserved node (ADR-0013
-    // decision 4), with the cache invalidation any out-of-band hierarchy
-    // writer owes (ADR-0016).
+    // Quarantine is departure now — the one shape it takes (CPR-7,
+    // ADR-0074 decision 3): a sealed identity, refused by the base
+    // layer's forbid.
     {
         let mut tx = rls::begin_tenant_tx(&fx.pool, fx.tenant)
             .await
             .expect("begin");
-        hierarchy::move_node(&mut tx, fx.alice.scope_id, fx.quarantine)
+        identities::depart(&mut tx, fx.tenant, fx.alice.id)
             .await
-            .expect("move alice into quarantine");
-        tx.commit().await.expect("commit quarantine move");
+            .expect("depart alice");
+        tx.commit().await.expect("commit departure");
     }
-    fx.state.scope_chains.invalidate(fx.tenant);
 
     assert_eq!(
         run_engine(&fx).await,
@@ -933,16 +909,31 @@ async fn a_quarantined_owner_proposes_nothing() {
     assert!(open_proposals(&fx.pool, fx.tenant).await.is_empty());
 }
 
+/// The CLI break-glass shape: a direct grant write, silent in the chain.
 async fn role_bindings_bind(
     pool: &PgPool,
     tenant: TenantId,
     subject: &str,
     scope: ScopeId,
-    role: Role,
+    role: RoleKey,
 ) {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, Some(scope), role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }

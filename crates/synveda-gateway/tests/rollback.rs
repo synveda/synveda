@@ -37,15 +37,17 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::StoredEvent;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, role_bindings, tenants};
+use synveda_store::{access, identities, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, Role,
-    ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, ScopeId,
+    Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -78,7 +80,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(
             SearchIndex::open(
@@ -137,104 +138,88 @@ fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("checked by admitted_tenant")
 }
 
-/// acme → eng → {platform, payments}, plus the quarantine scope every
-/// tenant needs.
+/// root → eng → platform, plus payments beside platform. The teams are
+/// `workspace`-shaped — the LOCAL cell of the approval matrix, where one
+/// curator publishes directly — and eng is the `org_unit` above them,
+/// where publishing takes two distinct people and therefore goes through
+/// a proposal.
 struct Estate {
-    org: HierarchyNode,
-    eng: HierarchyNode,
-    platform: HierarchyNode,
-    payments: HierarchyNode,
+    /// The tenant root. Since CPR-7 (ADR-0074 decision 3) it is the one
+    /// shared scope on every reader's chain — nobody is placed inside a
+    /// team any more — so it is where a publication meant for the fleet
+    /// has to land for the fleet to compose it.
+    root: Scope,
+    platform: Scope,
+    payments: Scope,
 }
 
 async fn seed_estate(pool: &PgPool, tenant: TenantId) -> Estate {
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(org.id),
+            slug: "eng".to_owned(),
+            display_name: "Engineering".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let eng = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "eng",
-        "Engineering",
-    )
-    .await
-    .expect("create dept");
-    let platform = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
-    )
-    .await
-    .expect("create platform");
-    let payments = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "payments",
-        "Payments",
-    )
-    .await
-    .expect("create payments");
-    hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        "Quarantine",
-    )
-    .await
-    .expect("create quarantine scope");
+    .expect("create scope");
+    let team = |slug: &'static str, display: &'static str| {
+        (
+            scopes::NewScope {
+                id: ScopeId::new(),
+                tenant_id: tenant,
+                kind: ScopeKind::Workspace,
+                parent_scope_id: Some(eng.id),
+                slug: slug.to_owned(),
+                display_name: display.to_owned(),
+                attributes: serde_json::json!({}),
+                principal_id: None,
+                created_by: None,
+            },
+            slug,
+        )
+    };
+    let (platform_new, _) = team("platform", "Platform");
+    let platform = scopes::create(&mut tx, &platform_new)
+        .await
+        .expect("create scope");
+    let (payments_new, _) = team("payments", "Payments");
+    let payments = scopes::create(&mut tx, &payments_new)
+        .await
+        .expect("create scope");
     tx.commit().await.expect("commit hierarchy");
     Estate {
-        org,
-        eng,
+        root: org,
         platform,
         payments,
     }
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -242,12 +227,26 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: Role) {
+async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, Some(scope), role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 async fn seed_record(
@@ -368,14 +367,16 @@ async fn publish(
 /// platform team to Engineering, the department's approvers approve, and
 /// cora runs the effect. Returns the publication's commit.
 ///
-/// `regulated-strict` asks for a curator **and** a steward at a department
-/// — two distinct people — which is why this takes two approvals, and why
-/// cora is the one who publishes: steward reads no content in any pack,
-/// and the effect takes the same read a direct publication does.
+/// `regulated-strict` asks for a curator **and** an administrator at a
+/// SHARED scope — two distinct people — which is why this takes two
+/// approvals, and why cora is the one who publishes: an administrator
+/// reads no content in any pack, and the effect takes the same read a
+/// direct publication does. The target is the tenant root, because that
+/// is the shared scope the fleet composes from (see `Estate`).
 impl Fixture {
     async fn promote(&self, records: &[RecordId], title: &str) -> String {
         let body = json!({
-            "scope_id": self.estate.eng.id,
+            "scope_id": self.estate.root.id,
             "source_scope_id": self.estate.platform.id,
             "record_ids": records,
             "title": title,
@@ -470,30 +471,49 @@ struct Fixture {
     bea: String,
     good: RecordId,
     bad: RecordId,
+    /// The PDP behind `app`, so a test can install a stored pack and have
+    /// the very next request decide under it (the refresher's own path).
+    pdp: Arc<Pdp>,
 }
 
 async fn fixture() -> Option<Fixture> {
     let (pool, tenant) = admitted_tenant().await?;
     let estate = seed_estate(&pool, tenant).await;
-    let app = router(state(&database_url()));
+    let state = state(&database_url());
+    let pdp = Arc::clone(&state.pdp);
+    let app = router(state);
 
     // Tara curates the platform team, where the material is authored.
-    let tara_identity = seed_user(&pool, tenant, "tara", estate.platform.id).await;
-    bind(&pool, tenant, "tara", estate.platform.id, Role::Curator).await;
+    let tara_identity = seed_user(&pool, tenant, "tara").await;
+    bind(&pool, tenant, "tara", estate.platform.id, RoleKey::Curator).await;
     // Cora curates Engineering and Steve stewards it: the two distinct
     // approvers `regulated-strict` asks for at a department.
-    seed_user(&pool, tenant, "cora", estate.eng.id).await;
-    bind(&pool, tenant, "cora", estate.eng.id, Role::Curator).await;
+    seed_user(&pool, tenant, "cora").await;
+    bind(&pool, tenant, "cora", estate.root.id, RoleKey::Curator).await;
     // Steve stewards Engineering from outside it: placed under the org,
     // so the `regulated-strict` own-chain MemoryRead floor does not hand
     // him the content read his *role* deliberately does not carry. That
     // is the same shape FLOW-5's fixture uses, and it is what makes
     // "the steward cannot run the effect" true rather than incidental.
-    seed_user(&pool, tenant, "steve", estate.org.id).await;
-    bind(&pool, tenant, "steve", estate.eng.id, Role::Steward).await;
-    // Two readers with no roles at all — the fleet.
-    seed_user(&pool, tenant, "alice", estate.platform.id).await;
-    seed_user(&pool, tenant, "bea", estate.payments.id).await;
+    seed_user(&pool, tenant, "steve").await;
+    bind(
+        &pool,
+        tenant,
+        "steve",
+        estate.root.id,
+        RoleKey::Administrator,
+    )
+    .await;
+    // Two readers the fleet is made of: Alice holds the platform team the
+    // material is authored at, Bea holds payments beside it. Neither holds
+    // anything at Engineering, which is where the retraction happens —
+    // that is what makes "the payments engineer never saw the retracted
+    // line" a statement about the boundary rather than about having no
+    // authority anywhere.
+    seed_user(&pool, tenant, "alice").await;
+    bind(&pool, tenant, "alice", estate.platform.id, RoleKey::Member).await;
+    seed_user(&pool, tenant, "bea").await;
+    bind(&pool, tenant, "bea", estate.payments.id, RoleKey::Member).await;
 
     let good = seed_record(&pool, tenant, estate.platform.id, tara_identity.id, GOOD).await;
     let bad = seed_record(&pool, tenant, estate.platform.id, tara_identity.id, BAD).await;
@@ -510,6 +530,7 @@ async fn fixture() -> Option<Fixture> {
         estate,
         good,
         bad,
+        pdp,
     })
 }
 
@@ -551,7 +572,7 @@ fn a_rewind_reaches_every_agent_under_the_scope_on_the_next_session() {
 
         // The operator's two calls: read the states this channel has held,
         // then install the one before the mistake.
-        let states = history(app, &fx.cora, fx.estate.eng.id).await;
+        let states = history(app, &fx.cora, fx.estate.root.id).await;
         let entries = states["history"].as_array().expect("history array");
         assert_eq!(
             entries[0]["commit"].as_str(),
@@ -566,7 +587,7 @@ fn a_rewind_reaches_every_agent_under_the_scope_on_the_next_session() {
         let previous = entries[1]["commit"].as_str().expect("previous state");
 
         let (status, rewound) =
-            rollback(app, &fx.cora, fx.estate.eng.id, &bad_commit, previous).await;
+            rollback(app, &fx.cora, fx.estate.root.id, &bad_commit, previous).await;
         assert_eq!(status, StatusCode::OK, "rewind: {rewound}");
         assert_eq!(
             rewound["removed"].as_array().map(Vec::len),
@@ -600,9 +621,16 @@ fn a_rewind_reaches_every_agent_under_the_scope_on_the_next_session() {
             "a platform engineer must not see the retracted line as reviewed: {}",
             text(&alice)
         );
+        // …and since CPR-7 she does not see it at all. The record lives at
+        // the platform team, which is no longer on anybody's chain
+        // (ADR-0074 decision 3): the root's published channel was the only
+        // thing carrying it to her, and the rewind took it off. Before the
+        // cutover placement put her under the team, so the same retraction
+        // left the record visible-but-unreviewed. The rewind is doing the
+        // same thing; what changed is how far a scope reaches.
         assert!(
-            text(&alice).contains(&format!("- [procedure] {BAD} [unreviewed]")),
-            "…it comes back as unreviewed material, which is what a channel is: {}",
+            !mentions(&alice, BAD),
+            "the retracted line leaves her block with the channel that carried it: {}",
             text(&alice)
         );
         assert!(reads_as_reviewed(&alice, GOOD), "the good runbook survives");
@@ -657,7 +685,7 @@ fn a_proposal_commit_is_reachable_and_is_still_refused() {
             .promote(&[fx.bad], "runbook: late-release exception")
             .await;
 
-        let states = history(app, &fx.cora, fx.estate.eng.id).await;
+        let states = history(app, &fx.cora, fx.estate.root.id).await;
         let entries = states["history"].as_array().expect("history array");
         let proposal_commit = entries[0]["merge_parents"][0]
             .as_str()
@@ -674,7 +702,7 @@ fn a_proposal_commit_is_reachable_and_is_still_refused() {
         );
 
         let (status, refused) =
-            rollback(app, &fx.cora, fx.estate.eng.id, &head, &proposal_commit).await;
+            rollback(app, &fx.cora, fx.estate.root.id, &head, &proposal_commit).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "refusal: {refused}");
         let message = refused["message"].as_str().unwrap_or_default();
         assert!(
@@ -707,7 +735,7 @@ fn a_proposal_commit_is_reachable_and_is_still_refused() {
             "the walk stops at it rather than listing it: {states}"
         );
         let (status, refused) =
-            rollback(app, &fx.cora, fx.estate.eng.id, &head, &first_proposal).await;
+            rollback(app, &fx.cora, fx.estate.root.id, &head, &first_proposal).await;
         assert_eq!(
             status,
             StatusCode::BAD_REQUEST,
@@ -950,20 +978,78 @@ fn rewinding_takes_the_action_and_the_read_that_publishing_takes() {
         assert_eq!(status, StatusCode::FORBIDDEN, "member rewind: {denied}");
         assert_eq!(denied["action"].as_str(), Some("channel.rollback"));
 
-        // A steward: holds the action, reads no content in any pack, and
-        // so cannot rewind — the same reason a steward cannot publish.
-        let (status, denied) = rollback(app, &fx.steve, fx.estate.eng.id, &head, &first).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "steward rewind: {denied}");
+        // Somebody who holds the action and not the read. Until CPR-7 that
+        // was the `steward` key by name; the collapse of the specialist
+        // names into `administrator` (ADR-0074 decision 6) means every key
+        // that carries `ChannelRollback` under the shipped packs also
+        // carries `MemoryRead`, and Prompt 27 is where the separation gets
+        // its names back. So the separation is demonstrated where it can
+        // still be *said*: a stored pack that grants the action and
+        // withholds the read. If the rewind ever stopped taking the second
+        // decision, this is the case that would notice.
+        {
+            let mut tx = synveda_store::rls::begin_tenant_tx(&fx.pool, fx.tenant)
+                .await
+                .expect("tenant tx");
+            synveda_store::policy_packs::apply(
+                &mut *tx,
+                fx.tenant,
+                "rollback-action-only",
+                r#"
+                permit (principal, action == Synveda::Action::"ChannelRollback", resource)
+                when { resource in principal.tenant };
+                "#,
+                &synveda_types::PackConfig::default(),
+            )
+            .await
+            .expect("store pack");
+            synveda_store::policy_assignments::assign(
+                &mut *tx,
+                fx.tenant,
+                fx.estate.platform.id,
+                "rollback-action-only",
+            )
+            .await
+            .expect("assign pack");
+            tx.commit().await.expect("commit pack");
+        }
+        assert_eq!(
+            synveda_gateway::authz::refresh_tenant_packs(&fx.pool, &fx.pdp, fx.tenant).await,
+            "installed",
+            "the stored pack must be live before the next request"
+        );
+        let (status, denied) = rollback(app, &fx.tara, fx.estate.platform.id, &head, &first).await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "action-only rewind: {denied}"
+        );
         assert_eq!(
             denied["action"].as_str(),
             Some("memory.read"),
             "the second decision is the one that refuses: {denied}"
         );
+        {
+            let mut tx = synveda_store::rls::begin_tenant_tx(&fx.pool, fx.tenant)
+                .await
+                .expect("tenant tx");
+            synveda_store::policy_assignments::unassign(&mut *tx, fx.tenant, fx.estate.platform.id)
+                .await
+                .expect("unassign pack");
+            tx.commit().await.expect("commit unassign");
+        }
+        // The pack is still installed; only its assignment went away, so
+        // the refresher has nothing to reinstall and says so.
+        synveda_gateway::authz::refresh_tenant_packs(&fx.pool, &fx.pdp, fx.tenant).await;
 
         // A teammate's personal channel. Alice curates her own scope and
-        // publishes her own note; Tara curates the team above it, holds
-        // `ChannelRollback` there by inheritance, and is still refused —
-        // by the privacy floor, through the read decision.
+        // publishes her own note; Tara curates the team and is refused —
+        // and since CPR-7 she is refused **one decision earlier** than she
+        // used to be. A principal scope inherits nothing (ADR-0072), so
+        // her team grant carries no key at alice's scope at all and
+        // `ChannelRollback` itself fails; the privacy floor behind it
+        // never has to be consulted. Two rules now say the same no, and
+        // this asserts the nearer one.
         let alice_identity = {
             let mut tx = fx.pool.begin().await.expect("begin");
             let identity = synveda_store::identities::by_subject(&mut *tx, fx.tenant, "alice")
@@ -974,7 +1060,7 @@ fn rewinding_takes_the_action_and_the_read_that_publishing_takes() {
             identity
         };
         let alice_scope = alice_identity.scope_id;
-        bind(&fx.pool, fx.tenant, "alice", alice_scope, Role::Curator).await;
+        bind(&fx.pool, fx.tenant, "alice", alice_scope, RoleKey::Curator).await;
         let note = seed_record(
             &fx.pool,
             fx.tenant,
@@ -994,7 +1080,11 @@ fn rewinding_takes_the_action_and_the_read_that_publishing_takes() {
             StatusCode::FORBIDDEN,
             "a curator must not rewind a teammate's personal channel: {denied}"
         );
-        assert_eq!(denied["action"].as_str(), Some("memory.read"));
+        assert_eq!(
+            denied["action"].as_str(),
+            Some("channel.rollback"),
+            "a grant at the team above reaches no key at a personal scope: {denied}"
+        );
 
         // Every refusal above is a denial, so the chain carries them and
         // none of them moved anything.
@@ -1019,16 +1109,36 @@ fn a_pin_holds_what_readers_compose_while_the_channel_keeps_moving() {
     rt.block_on(async {
         let Some(fx) = fixture().await else { return };
         let app = &fx.app;
-        let platform = fx.estate.platform.id;
+        // The pin is exercised on **alice's own channel**, because that is
+        // a scope she both curates and composes from. Since CPR-7
+        // (ADR-0074 decision 3) a reader's chain is their own scope and
+        // the tenant root; a team's channel reaches nobody's session, and
+        // the tenant root's costs two people under `regulated-strict`, so
+        // it is not a one-curator publication. Her own scope is both — the
+        // LOCAL cell, on her chain — which is exactly the shape this test
+        // needs and nothing about the pin depends on whose scope it is.
+        let alice_identity = {
+            let mut tx = fx.pool.begin().await.expect("begin");
+            let identity = synveda_store::identities::by_subject(&mut *tx, fx.tenant, "alice")
+                .await
+                .expect("read alice")
+                .expect("alice exists");
+            tx.commit().await.expect("commit");
+            identity
+        };
+        let platform = alice_identity.scope_id;
+        bind(&fx.pool, fx.tenant, "alice", platform, RoleKey::Curator).await;
+        let good = seed_record(&fx.pool, fx.tenant, platform, alice_identity.id, GOOD).await;
+        let bad = seed_record(&fx.pool, fx.tenant, platform, alice_identity.id, BAD).await;
 
-        let held = publish(app, &fx.tara, platform, &[fx.good], "runbook").await["commit"]
+        let held = publish(app, &fx.alice, platform, &[good], "runbook").await["commit"]
             .as_str()
             .expect("commit")
             .to_owned();
 
         let (status, pinned) = post(
             app,
-            &fx.tara,
+            &fx.alice,
             &format!("/v1/channels/{platform}/pin"),
             json!({"commit": held, "reason": "freeze the runbook through the migration"}),
         )
@@ -1039,7 +1149,7 @@ fn a_pin_holds_what_readers_compose_while_the_channel_keeps_moving() {
         // Publishing onto a pinned channel lands, moves the ref, and says
         // that readers did not move — a curator who publishes and sees no
         // effect must be told why.
-        let published = publish(app, &fx.tara, platform, &[fx.bad], "late-release exception").await;
+        let published = publish(app, &fx.alice, platform, &[bad], "late-release exception").await;
         let head = published["commit"].as_str().expect("commit").to_owned();
         assert_ne!(head, held, "the channel itself advanced");
         assert_eq!(
@@ -1072,7 +1182,7 @@ fn a_pin_holds_what_readers_compose_while_the_channel_keeps_moving() {
         );
 
         // The listing shows the pin beside the channel it holds.
-        let (status, listed) = get(app, &fx.tara, &format!("/v1/channels/{platform}")).await;
+        let (status, listed) = get(app, &fx.alice, &format!("/v1/channels/{platform}")).await;
         assert_eq!(status, StatusCode::OK, "list: {listed}");
         let channel = listed["channels"]
             .as_array()
@@ -1087,7 +1197,7 @@ fn a_pin_holds_what_readers_compose_while_the_channel_keeps_moving() {
         // A rewind under a pin would reach nobody, so it refuses and names
         // the pin rather than returning 200 to a fleet-wide act that had
         // no fleet-wide effect.
-        let (status, refused) = rollback(app, &fx.tara, platform, &head, &held).await;
+        let (status, refused) = rollback(app, &fx.alice, platform, &head, &held).await;
         assert_eq!(status, StatusCode::CONFLICT, "pinned rewind: {refused}");
         assert!(
             refused["message"]
@@ -1100,7 +1210,7 @@ fn a_pin_holds_what_readers_compose_while_the_channel_keeps_moving() {
         // Release, and the very next session catches up.
         let (status, released) = post(
             app,
-            &fx.tara,
+            &fx.alice,
             &format!("/v1/channels/{platform}/unpin"),
             json!({"reason": "migration done"}),
         )
@@ -1147,7 +1257,7 @@ fn a_pin_can_only_hold_a_state_the_channel_has_held() {
         let app = &fx.app;
 
         fx.promote(&[fx.good], "release runbook").await;
-        let states = history(app, &fx.cora, fx.estate.eng.id).await;
+        let states = history(app, &fx.cora, fx.estate.root.id).await;
         let proposal_commit = states["history"][0]["merge_parents"][0]
             .as_str()
             .expect("proposal commit")
@@ -1156,7 +1266,7 @@ fn a_pin_can_only_hold_a_state_the_channel_has_held() {
         let (status, refused) = post(
             app,
             &fx.cora,
-            &format!("/v1/channels/{}/pin", fx.estate.eng.id),
+            &format!("/v1/channels/{}/pin", fx.estate.root.id),
             json!({"commit": proposal_commit, "reason": "hold here"}),
         )
         .await;
@@ -1175,7 +1285,7 @@ fn a_pin_can_only_hold_a_state_the_channel_has_held() {
         let (status, nothing) = post(
             app,
             &fx.cora,
-            &format!("/v1/channels/{}/unpin", fx.estate.eng.id),
+            &format!("/v1/channels/{}/unpin", fx.estate.root.id),
             json!({"reason": "make sure nothing holds this"}),
         )
         .await;
@@ -1224,13 +1334,16 @@ fn a_climbed_record_survives_its_sources_rewind() {
         // department's own approvers.
         fx.promote(&[fx.good], "the runbook is everyone's").await;
 
-        // Before the rewind: composed under the team, the nearest scope
-        // whose tree names it.
+        // Before the rewind: composed under the **tenant root**, which is
+        // the scope the climb put it on and the only shared scope alice's
+        // session reaches since CPR-7 (ADR-0074 decision 3). The team's
+        // own channel carries it too, and reaches nobody — which is the
+        // fact the rewind below is about.
         let block = inject(app, &fx.alice).await;
         assert!(reads_as_reviewed(&block, GOOD));
         assert!(
-            text(&block).contains("## acme/eng/platform (team)"),
-            "the nearest publisher sections it: {}",
+            text(&block).contains("(tenant)"),
+            "the publishing scope sections it: {}",
             text(&block)
         );
 
@@ -1243,19 +1356,18 @@ fn a_climbed_record_survives_its_sources_rewind() {
             "the team stopped publishing it: {rewound}"
         );
 
-        // The department is untouched. Its approvers made that decision
-        // and a team curator does not get to undo it — which is
+        // The scope it climbed to is untouched. Its approvers made that
+        // decision and a team curator does not get to undo it — which is
         // ADR-0034 decision 5's refusal of a ladder, pointed downhill.
-        let dept = history(app, &fx.cora, fx.estate.eng.id).await;
+        let above = history(app, &fx.cora, fx.estate.root.id).await;
         assert_eq!(
-            dept["history"][0]["members"].as_u64(),
+            above["history"][0]["members"].as_u64(),
             Some(1),
-            "the department's publication stands: {dept}"
+            "the publication it climbed to stands: {above}"
         );
 
-        // And the reader still has the line — now under the department's
-        // section, which is true rather than cosmetic: the department is
-        // the scope that stands behind it now.
+        // And the reader still has the line, under the scope that still
+        // publishes it — which is true rather than cosmetic.
         let block = inject(app, &fx.alice).await;
         assert!(
             reads_as_reviewed(&block, GOOD),
@@ -1263,7 +1375,7 @@ fn a_climbed_record_survives_its_sources_rewind() {
             text(&block)
         );
         assert!(
-            text(&block).contains("## acme/eng (department)"),
+            text(&block).contains("(tenant)"),
             "…and is sectioned under the scope that still publishes it: {}",
             text(&block)
         );

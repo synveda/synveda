@@ -44,14 +44,15 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::{hierarchy, identities, policy_assignments, role_bindings, tenants};
+use synveda_store::{access, identities, policy_assignments, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, PackConfig, Role, ScopeId, ScopeKind,
-    TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, PackConfig, ScopeId, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -90,7 +91,6 @@ fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -111,13 +111,19 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
     Hs256Verifier::new(SECRET).issue(subject, tenant_id, Duration::from_secs(300))
 }
 
-/// The fixture: one tenant, `acme → eng → {platform, payments}`, and the
+/// The fixture: one tenant, `root → eng → platform`, and the
 /// people a governed publication needs.
 struct World {
     pool: PgPool,
     tenant: TenantId,
     app: Router,
     pdp: Arc<Pdp>,
+    /// The tenant root — the org-wide scope. Since CPR-7 a reader's own
+    /// chain is their principal scope and the root and nothing between
+    /// (ADR-0074 decision 3), so this is the one shared scope a session
+    /// composes from, and the cast is bound here for the publications
+    /// that must reach one.
+    root: ScopeId,
     eng: ScopeId,
     platform: ScopeId,
     /// The author: a contributor at the platform team.
@@ -128,7 +134,8 @@ struct World {
     /// *other* team, so his authority at the platform team is a role
     /// binding and nothing else.
     sam: String,
-    /// The consumer: placed at the platform team, holding no role at all.
+    /// The consumer: holding no role at all, so her chain is her own
+    /// scope and the tenant root and nothing else.
     bea: String,
 }
 
@@ -164,36 +171,30 @@ async fn world() -> Option<World> {
     .expect("admit tenant");
 
     let mut tx = pool.begin().await.expect("begin");
-    let org = node(&mut tx, tenant, None, ScopeKind::Org, "acme").await;
-    let eng = node(&mut tx, tenant, Some(org.id), ScopeKind::Department, "eng").await;
-    let platform = node(&mut tx, tenant, Some(eng.id), ScopeKind::Team, "platform").await;
-    let payments = node(&mut tx, tenant, Some(eng.id), ScopeKind::Team, "payments").await;
-    node(
-        &mut tx,
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-    )
-    .await;
-    tx.commit().await.expect("commit hierarchy");
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = unit(&mut tx, tenant, root.id, "eng").await;
+    let platform = unit(&mut tx, tenant, eng.id, "platform").await;
+    tx.commit().await.expect("commit scopes");
 
-    for (subject, parent) in [
-        ("alice", platform.id),
-        ("cora", platform.id),
-        ("sam", payments.id),
-        ("bea", platform.id),
-    ] {
-        seed_user(&pool, tenant, subject, parent).await;
+    for subject in ["alice", "cora", "sam", "bea"] {
+        seed_user(&pool, tenant, subject).await;
     }
-    bind(&pool, tenant, "alice", platform.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora", platform.id, Role::Curator).await;
-    bind(&pool, tenant, "sam", platform.id, Role::Steward).await;
+    bind(&pool, tenant, "alice", platform.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora", platform.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "sam", platform.id, RoleKey::Administrator).await;
     // The department too: decision 15's split is about *shared* scopes, so
     // the test needs the same two people to be able to act there.
-    bind(&pool, tenant, "alice", eng.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora", eng.id, Role::Curator).await;
-    bind(&pool, tenant, "sam", eng.id, Role::Steward).await;
+    bind(&pool, tenant, "alice", eng.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora", eng.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "sam", eng.id, RoleKey::Administrator).await;
+    // And the root, where the publications a session composes from live:
+    // a grant at the root is on every scope's chain, so the same cast can
+    // publish org-wide material (CPR-7, ADR-0074).
+    bind(&pool, tenant, "alice", root.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora", root.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "sam", root.id, RoleKey::Administrator).await;
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
     let app = router(state(&url, pdp.clone()));
@@ -202,6 +203,7 @@ async fn world() -> Option<World> {
         tenant,
         app,
         pdp,
+        root: root.id,
         eng: eng.id,
         platform: platform.id,
         alice: issue("alice", tenant),
@@ -211,41 +213,46 @@ async fn world() -> Option<World> {
     })
 }
 
-async fn node(
+/// One org unit under a parent — the shape every grouping takes now that
+/// rank is gone (ADR-0073 decision 4).
+async fn unit(
     tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
     tenant: TenantId,
-    parent: Option<ScopeId>,
-    kind: ScopeKind,
+    parent: ScopeId,
     slug: &str,
-) -> HierarchyNode {
-    hierarchy::create(tx, ScopeId::new(), tenant, parent, kind, slug, slug)
-        .await
-        .expect("create node")
-}
-
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
-    let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
+) -> Scope {
+    scopes::create(
+        &mut *tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(parent),
+            slug: slug.to_owned(),
+            display_name: slug.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create personal scope");
+    .expect("create org unit")
+}
+
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
+    let mut tx = pool.begin().await.expect("begin");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -253,12 +260,26 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: Role) {
+async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, Some(scope), role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 async fn call(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
@@ -367,13 +388,20 @@ fn pack_watermarks(block: &Value) -> Vec<&Value> {
 /// Carries a pack from a draft to a published version through the review
 /// the pack in force asks for at `scope`. Returns the commit the channel
 /// now serves.
-async fn review_and_publish(w: &World, scope: ScopeId, paths: &[&str], title: &str) -> String {
+async fn review_and_publish(
+    w: &World,
+    scope: ScopeId,
+    source: ScopeId,
+    paths: &[&str],
+    title: &str,
+) -> String {
     let (status, opened) = post(
         &w.app,
         "/v1/proposals",
         &w.alice,
         json!({
             "scope_id": scope,
+            "source_scope_id": source,
             "document_paths": paths,
             "title": title,
         }),
@@ -416,20 +444,28 @@ async fn events(pool: &PgPool, tenant: TenantId) -> Vec<synveda_audit::StoredEve
 
 // ── The acceptance criterion, first clause ───────────────────────────────
 
-/// **A pack authored at a scope reaches a session only through the review
-/// the pack in force asks for** — and above a team that review is now a
-/// curator *and* a steward, two distinct people (ADR-0050 decision 15).
+/// **A pack authored at a shared scope reaches a session only through the
+/// review the pack in force asks for** — and above a team that review is a
+/// curator *and* an administrator, two distinct people (ADR-0050 decision
+/// 15, on the grant-key vocabulary since CPR-7).
 ///
 /// The direct route is not a hole to close here: it resolves the same
 /// matrix (ADR-0032 decision 8), so the refusal is the pack's arithmetic
 /// rather than a rule about packs. What decision 15 changed is which
-/// arithmetic — publishing a bundle into every session at and below a
-/// department must not be cheaper than publishing one memory record there.
+/// arithmetic — publishing a bundle at an org unit must not be cheaper
+/// than publishing one memory record there.
+///
+/// Since CPR-7 a session composes from the reader's own scope and the
+/// tenant root and nothing between (ADR-0074 decision 3), so the walk is
+/// in two halves: the *price* is asserted at the org unit, where the
+/// SHARED row bites, and the *arrival* at the tenant root — the one
+/// shared scope on every session's chain — where the same reviewed route
+/// carries the runbook into bea's very next call.
 #[tokio::test]
 async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above_a_team() {
     let Some(w) = world().await else { return };
 
-    // 1. Authored at the department. Nothing a session composes has moved.
+    // 1. Authored at the org unit. Nothing a session composes has moved.
     let (status, draft) = author(&w, &w.alice, w.eng, "payments", "runbooks/refunds.md", V1).await;
     assert_eq!(status, StatusCode::OK, "author the bundle: {draft}");
     assert_eq!(draft["name"], json!("payments"));
@@ -454,7 +490,7 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
         text(&before)
     );
 
-    // 2. The direct route refuses at a department, and the refusal is the
+    // 2. The direct route refuses at an org unit, and the refusal is the
     //    matrix speaking — decision 15's `SHARED` row.
     let (status, refused) = post(
         &w.app,
@@ -469,11 +505,11 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
-        "a curator alone cannot publish a bundle at a department: {refused}"
+        "a curator alone cannot publish a bundle at an org unit: {refused}"
     );
     let refusal = detail(&refused);
     assert!(
-        refusal.contains("steward"),
+        refusal.contains("administrator"),
         "the refusal must name what the pack is short of: {refusal}"
     );
     assert!(
@@ -481,18 +517,77 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
         "and where to go with it: {refusal}"
     );
 
-    // 3. The review the pack asks for. Two distinct people.
-    let commit = review_and_publish(
-        &w,
-        w.eng,
-        &["payments/runbooks/refunds.md"],
-        "payments conventions",
+    // 3. The review the pack asks for. Two distinct people, and the
+    //    requirement says so before either of them has acted.
+    let (status, opened) = post(
+        &w.app,
+        "/v1/proposals",
+        &w.alice,
+        json!({
+            "scope_id": w.eng,
+            "document_paths": ["payments/runbooks/refunds.md"],
+            "title": "payments conventions",
+        }),
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "open a pack proposal: {opened}");
+    assert_eq!(
+        opened["required"]["roles"],
+        json!([{"role": "curator", "count": 1}, {"role": "administrator", "count": 1}]),
+        "the SHARED row names both authorities: {opened}"
+    );
+    assert_eq!(
+        opened["required"]["distinct_approvers"], 2,
+        "and two distinct identities: {opened}"
+    );
+    let id = opened["id"].as_str().expect("proposal id").to_owned();
 
-    // 4. And now a session composes it — on the very next call, because the
-    //    pack channel is read live (the AC's "next session" satisfied as
-    //    "next call").
+    let (status, first) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/approve"),
+        &w.cora,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "curator approval failed: {first}");
+    assert_eq!(
+        first["state"], "open",
+        "one curator is still short at an org unit: {first}"
+    );
+    let (status, second) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/approve"),
+        &w.sam,
+        json!({}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "administrator approval failed: {second}"
+    );
+    assert_eq!(second["state"], "approved", "two people close it: {second}");
+    let (status, published) = post(
+        &w.app,
+        &format!("/v1/proposals/{id}/publish"),
+        &w.cora,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "publish failed: {published}");
+
+    // 4. The same reviewed route at the tenant root — the one shared scope
+    //    on every session's chain — and a session composes it on the very
+    //    next call, because the pack channel is read live (the AC's "next
+    //    session" satisfied as "next call").
+    let commit = review_and_publish(
+        &w,
+        w.root,
+        w.eng,
+        &["payments/runbooks/refunds.md"],
+        "payments conventions, org-wide",
+    )
+    .await;
     let after = inject(&w, &w.bea, Some("how do refunds work")).await;
     let composed = text(&after);
     assert!(
@@ -509,18 +604,33 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
     );
 }
 
-/// **A pack published at a team still costs one curator.** Decision 15
-/// gave context packs memory's own `SHARED`/`LOCAL` split rather than a
-/// blanket rise, and `standard` and `open-collaboration` were deliberately
-/// left alone — so this is the half of the change that must *not* have
-/// happened.
+/// **A pack published at a LOCAL scope still costs one curator.**
+/// Decision 15 gave context packs memory's own `SHARED`/`LOCAL` split
+/// rather than a blanket rise — so this is the half of the change that
+/// must *not* have happened. The LOCAL cell is a person's own scope, a
+/// workspace or a project (CPR-7 read §2.4's "team/user" row onto the
+/// shapes that replaced it), and the tenant root is **not** in it: the
+/// root is what the old `org` rank became and carries its price. So the
+/// single-curator claim is asserted where it is made — at bea's own
+/// scope, which is also on her chain, so the second half of the claim
+/// ("and a session composes it") stays observable.
 #[tokio::test]
-async fn a_pack_published_at_a_team_still_costs_one_curator() {
+async fn a_pack_published_at_a_local_scope_still_costs_one_curator() {
     let Some(w) = world().await else { return };
+    let bea_scope = {
+        let mut tx = w.pool.begin().await.expect("begin");
+        let identity = synveda_store::identities::by_subject(&mut *tx, w.tenant, "bea")
+            .await
+            .expect("read bea")
+            .expect("bea exists");
+        tx.commit().await.expect("commit");
+        identity.scope_id
+    };
+    bind(&w.pool, w.tenant, "bea", bea_scope, RoleKey::Curator).await;
     let (status, draft) = author(
         &w,
-        &w.alice,
-        w.platform,
+        &w.bea,
+        bea_scope,
         "conventions",
         "style.md",
         "# Style\n\nWe write commit messages in the imperative.\n",
@@ -530,18 +640,18 @@ async fn a_pack_published_at_a_team_still_costs_one_curator() {
 
     let (status, published) = post(
         &w.app,
-        &format!("/v1/channels/{}/publish", w.platform),
-        &w.cora,
+        &format!("/v1/channels/{bea_scope}/publish"),
+        &w.bea,
         json!({
             "document_paths": ["conventions/style.md"],
-            "message": "team style",
+            "message": "the house style",
         }),
     )
     .await;
     assert_eq!(
         status,
         StatusCode::OK,
-        "one curator publishes a bundle at their own team: {published}"
+        "one curator publishes a bundle at a LOCAL scope: {published}"
     );
     assert_eq!(published["channel"], json!("context-pack/published"));
 
@@ -571,8 +681,15 @@ async fn a_pack_published_at_a_team_still_costs_one_curator() {
 #[tokio::test]
 async fn an_edit_composes_as_all_of_the_old_version_until_all_of_the_new_one_is_published() {
     let Some(w) = world().await else { return };
-    author(&w, &w.alice, w.eng, "payments", "runbooks/refunds.md", V1).await;
-    review_and_publish(&w, w.eng, &["payments/runbooks/refunds.md"], "payments v1").await;
+    author(&w, &w.alice, w.root, "payments", "runbooks/refunds.md", V1).await;
+    review_and_publish(
+        &w,
+        w.root,
+        w.root,
+        &["payments/runbooks/refunds.md"],
+        "payments v1",
+    )
+    .await;
 
     let v1 = text(&inject(&w, &w.bea, Some("refunds and escalation")).await);
     assert!(v1.contains("three days"), "v1 body one: {v1}");
@@ -581,7 +698,8 @@ async fn an_edit_composes_as_all_of_the_old_version_until_all_of_the_new_one_is_
     // The edit. It re-chunks and re-embeds, and moves the document's
     // address — which takes every chunk of the old version off nothing at
     // all, because the channel still names the old address.
-    let (status, edited) = author(&w, &w.alice, w.eng, "payments", "runbooks/refunds.md", V2).await;
+    let (status, edited) =
+        author(&w, &w.alice, w.root, "payments", "runbooks/refunds.md", V2).await;
     assert_eq!(status, StatusCode::OK, "{edited}");
     let document = &edited["documents"][0];
     assert!(
@@ -607,7 +725,14 @@ async fn an_edit_composes_as_all_of_the_old_version_until_all_of_the_new_one_is_
     );
 
     // The publication. Now all of the new version, none of the old.
-    review_and_publish(&w, w.eng, &["payments/runbooks/refunds.md"], "payments v2").await;
+    review_and_publish(
+        &w,
+        w.root,
+        w.root,
+        &["payments/runbooks/refunds.md"],
+        "payments v2",
+    )
+    .await;
     let v2 = text(&inject(&w, &w.bea, Some("refunds and escalation")).await);
     assert!(
         v2.contains("one day") && v2.contains("fifty pounds"),
@@ -678,7 +803,7 @@ async fn a_pack_too_large_for_the_budget_is_named_rather_than_dropped() {
         })
         .collect();
     author(&w, &w.alice, w.eng, "payments", "glossary.md", &big).await;
-    review_and_publish(&w, w.eng, &["payments/glossary.md"], "glossary").await;
+    review_and_publish(&w, w.root, w.eng, &["payments/glossary.md"], "glossary").await;
 
     let block = inject(&w, &w.bea, Some("payment terms")).await;
     let composed = text(&block);
@@ -754,7 +879,14 @@ async fn a_reader_with_no_readable_memory_at_a_scope_still_gets_its_conventions(
         "# House style\n\nWe never ship on a Friday.\n",
     )
     .await;
-    review_and_publish(&w, w.eng, &["conventions/house-style.md"], "house style").await;
+    review_and_publish(
+        &w,
+        w.root,
+        w.eng,
+        &["conventions/house-style.md"],
+        "house style",
+    )
+    .await;
     let before = text(&inject(&w, &w.bea, Some("when do we ship")).await);
     assert!(
         before.contains("never ship on a Friday"),
@@ -826,11 +958,25 @@ async fn a_reader_with_no_readable_memory_at_a_scope_still_gets_its_conventions(
 async fn a_rewind_restores_the_previous_version_without_re_embedding_anything() {
     let Some(w) = world().await else { return };
     author(&w, &w.alice, w.eng, "payments", "runbooks/refunds.md", V1).await;
-    let first =
-        review_and_publish(&w, w.eng, &["payments/runbooks/refunds.md"], "payments v1").await;
+    let first = review_and_publish(
+        &w,
+        w.root,
+        w.eng,
+        &["payments/runbooks/refunds.md"],
+        "payments v1",
+    )
+    .await;
     author(&w, &w.alice, w.eng, "payments", "runbooks/refunds.md", V2).await;
-    let second =
-        review_and_publish(&w, w.eng, &["payments/runbooks/refunds.md"], "payments v2").await;
+    // The second version climbs from the org unit it was authored at to
+    // the tenant root, which is the scope bea's session composes from.
+    let second = review_and_publish(
+        &w,
+        w.root,
+        w.eng,
+        &["payments/runbooks/refunds.md"],
+        "payments v2",
+    )
+    .await;
     assert!(
         text(&inject(&w, &w.bea, Some("refunds")).await).contains("one day"),
         "v2 is live"
@@ -838,7 +984,7 @@ async fn a_rewind_restores_the_previous_version_without_re_embedding_anything() 
 
     let (status, rewound) = post(
         &w.app,
-        &format!("/v1/channels/{}/rollback", w.eng),
+        &format!("/v1/channels/{}/rollback", w.root),
         &w.cora,
         json!({
             "asset": "context-pack",
@@ -956,7 +1102,14 @@ async fn a_document_carrying_a_credential_is_stopped_before_the_embedder() {
 async fn every_act_is_on_the_chain_and_no_payload_carries_document_text() {
     let Some(w) = world().await else { return };
     author(&w, &w.alice, w.eng, "payments", "runbooks/refunds.md", V1).await;
-    review_and_publish(&w, w.eng, &["payments/runbooks/refunds.md"], "payments").await;
+    review_and_publish(
+        &w,
+        w.root,
+        w.eng,
+        &["payments/runbooks/refunds.md"],
+        "payments",
+    )
+    .await;
     let block = inject(&w, &w.bea, Some("refunds")).await;
     assert!(text(&block).contains("three days"), "the block composed it");
 
@@ -1029,8 +1182,12 @@ async fn every_act_is_on_the_chain_and_no_payload_carries_document_text() {
 #[tokio::test]
 async fn a_pack_proposal_renders_a_per_document_diff() {
     let Some(w) = world().await else { return };
+    // Published and re-proposed at the **same** scope, because the diff is
+    // against what that scope already publishes: a climb to a different
+    // scope would be an `add` there, correctly, and would not exercise the
+    // replacement this test is about.
     author(&w, &w.alice, w.eng, "payments", "runbooks/refunds.md", V1).await;
-    review_and_publish(&w, w.eng, &["payments/runbooks/refunds.md"], "v1").await;
+    review_and_publish(&w, w.eng, w.eng, &["payments/runbooks/refunds.md"], "v1").await;
     author(&w, &w.alice, w.eng, "payments", "runbooks/refunds.md", V2).await;
 
     let (status, opened) = post(

@@ -26,7 +26,7 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
-use synveda_types::{Role, TenantId};
+use synveda_types::{GrantId, TenantId};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"cpr-4-workspaces-test-secret";
@@ -63,7 +63,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(
             synveda_retrieval::SearchIndex::open(
@@ -124,10 +123,27 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
     let mut tx = synveda_store::rls::begin_tenant_tx(&pool, id)
         .await
         .expect("begin tenant tx");
-    synveda_store::role_bindings::bind(&mut *tx, id, ADMIN, None, Role::OrgAdmin)
+    let root = synveda_store::scopes::ensure_tenant_root(&mut tx, id)
         .await
-        .expect("bind admin");
-    tx.commit().await.expect("commit binding");
+        .expect("mint root");
+    synveda_store::access::create_grant(
+        &mut *tx,
+        &synveda_store::access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: id,
+            scope_id: root.id,
+            subject: synveda_types::access::GrantSubject::Principal {
+                principal_id: ADMIN.to_owned(),
+            },
+            role_key: synveda_types::access::RoleKey::Administrator,
+            source: synveda_types::access::GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant admin at the root");
+    tx.commit().await.expect("commit grant");
     Some((state(&url), id))
 }
 
@@ -500,9 +516,26 @@ async fn one_subjects_key_does_not_shadow_anothers() {
     let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
         .await
         .expect("begin");
-    synveda_store::role_bindings::bind(&mut *tx, tenant_id, "cpr4-admin-2", None, Role::OrgAdmin)
+    let root = synveda_store::scopes::ensure_tenant_root(&mut tx, tenant_id)
         .await
-        .expect("bind");
+        .expect("mint root");
+    synveda_store::access::create_grant(
+        &mut *tx,
+        &synveda_store::access::NewGrant {
+            id: GrantId::new(),
+            tenant_id,
+            scope_id: root.id,
+            subject: synveda_types::access::GrantSubject::Principal {
+                principal_id: "cpr4-admin-2".to_owned(),
+            },
+            role_key: synveda_types::access::RoleKey::Administrator,
+            source: synveda_types::access::GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant");
     tx.commit().await.expect("commit");
 
     let app = router(state);
@@ -745,15 +778,29 @@ async fn a_replay_still_takes_the_pdp_decision() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
 
-    // Revoke the binding the decision rested on.
+    // Revoke the grant the decision rested on.
     let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
         .await
         .expect("begin");
-    synveda_store::role_bindings::unbind(&mut *tx, tenant_id, ADMIN, None, Role::OrgAdmin)
+    let grants = synveda_store::access::list_grants(
+        &mut *tx,
+        tenant_id,
+        &synveda_store::access::GrantFilter {
+            scope_id: None,
+            principal_id: Some(ADMIN.to_owned()),
+        },
+    )
+    .await
+    .expect("list grants");
+    let grant = grants
+        .iter()
+        .find(|grant| grant.role_key == synveda_types::access::RoleKey::Administrator)
+        .expect("admin grant");
+    synveda_store::access::revoke_grant(&mut tx, tenant_id, grant.id)
         .await
-        .expect("unbind");
+        .expect("revoke");
     tx.commit().await.expect("commit");
-    state.invalidate_hierarchy(tenant_id);
+    state.invalidate_scopes(tenant_id);
 
     let (status, error) = call(
         &app,

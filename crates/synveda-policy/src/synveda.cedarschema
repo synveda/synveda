@@ -155,9 +155,14 @@ namespace Synveda {
         source: String,
     };
 
-    // The hierarchy admin plane (/v1/hierarchy/*, ADR-0011 decision 8).
-    // Create targets the parent scope — the Tenant when creating the root.
-    action HierarchyCreate, HierarchyRead, HierarchyUpdate, HierarchyDelete
+    // The scope admin plane (/v1/admin/scopes, CPR-7, ADR-0074 decision 5).
+    // Create and update target the scope they are about — the destination
+    // for a move, the scope itself for a rename or an archive. There is
+    // deliberately **no** delete, for the workspace plane's reason: a scope
+    // is what audit events, versions and grants name, so retiring one is a
+    // status transition under the update action, and a delete verb would be
+    // an authority nobody can exercise.
+    action ScopeCreate, ScopeRead, ScopeUpdate
         appliesTo {
             principal: [Principal],
             resource: [Tenant, Scope],
@@ -290,8 +295,8 @@ namespace Synveda {
     // comparing an encoding, because with four values the enumeration is the
     // documentation and there is no arithmetic to get wrong.
     //
-    // `lapsed` is required — not optional — for the reason `grant` is on
-    // RoleAssign: a policy that referenced a missing attribute would error,
+    // `lapsed` is required — not optional — because a policy that
+    // referenced a missing attribute would error,
     // Cedar would drop it, and the base layer's lapse permit would silently
     // stop existing. The PDP sets it on every MemoryRead request, true only
     // when a standing grant covers exactly this (principal, action, scope)
@@ -478,32 +483,23 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The role admin plane (/v1/roles/*, ADR-0015 decision 7): reading
-    // and mutating bindings at a node (or tenant-wide — the Tenant
-    // resource).
-    action RoleRead
-        appliesTo {
-            principal: [Principal],
-            resource: [Tenant, Scope],
-            context: { roles: Set<String> },
-        };
-
-    // `grant` is the role being granted *or revoked*, and is required —
-    // not optional — so a grant-less request fails schema validation and
-    // denies, instead of silently skipping the base layer's escalation
-    // forbid (Cedar drops a policy that errors; ADR-0015 decision 5).
-    action RoleAssign
-        appliesTo {
-            principal: [Principal],
-            resource: [Tenant, Scope],
-            context: { roles: Set<String>, grant: String },
-        };
+    // (The role admin plane — `RoleRead`/`RoleAssign` over role bindings,
+    // ADR-0015 decision 7 — is deleted with the bindings: grants are the
+    // access plane's actions, a revocation names the grant it is about, and
+    // the escalation guard that needed `context.grant` went with the verb it
+    // guarded. CPR-7, ADR-0074.)
 
     // The quarantine review plane (/v1/quarantine, MEM-2, ADR-0021
-    // decision 6): listing pending quarantined observe events
-    // (tenant-wide on the Tenant resource, a subtree on a Scope) and
-    // reviewing one (release/reject — always the event's scope, never
-    // the tenant: a quarantined event lives at a node).
+    // decision 6): listing pending quarantined observe events and
+    // reviewing one (release/reject).
+    //
+    // **Both decide at the tenant since CPR-7** (ADR-0074 decision 7).
+    // Every quarantined event now lands at a `principal`-shaped scope,
+    // and a principal scope inherits nothing — so a verdict anchored at
+    // the event's own scope was reachable by nobody but the person whose
+    // secret it was. `Scope` stays in the vocabulary because a queue may
+    // still be *filtered* to a subtree, and because a stored pack is free
+    // to write a narrower rule; the product routes ask at the tenant.
     action QuarantineRead
         appliesTo {
             principal: [Principal],
@@ -514,7 +510,7 @@ namespace Synveda {
     action QuarantineReview
         appliesTo {
             principal: [Principal],
-            resource: [Scope],
+            resource: [Tenant, Scope],
             context: { roles: Set<String> },
         };
 

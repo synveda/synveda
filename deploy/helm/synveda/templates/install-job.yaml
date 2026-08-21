@@ -4,7 +4,7 @@ The install job — the enterprise profile's equivalent of `synveda init`,
 and deliberately the same two store-level writes ADR-0055 decision 1
 allowed an installer: the migrations, and one tenant row. Both are existing
 audited break-glass paths. Everything else in an initialised deployment —
-the org root, identities, role bindings, records — still arrives through
+the tenant root scope, identities, grants, records — still arrives through
 the gateway under a real bearer and a PDP decision, which is what makes a
 second installer cheap enough to be a Job.
 

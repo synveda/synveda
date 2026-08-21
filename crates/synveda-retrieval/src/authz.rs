@@ -5,10 +5,11 @@
 //! ADR-0014 decision 5).
 //!
 //! The candidate universe is the chain (seed §4.4's composition
-//! contract: user > team > department > org) for `inject`, and that plus
+//! contract: own scope outward to the tenant root) for `inject`, and that
+//! plus
 //! the scopes a request could actually draw from for `recall` (CTX-5,
 //! ADR-0042 decision 2) — which is where the bound subtrees and
-//! `standard`'s department subtree finally become reachable, seven ADRs
+//! `standard`'s shared subtree finally become reachable, seven ADRs
 //! after ADR-0024 option 2 parked them.
 //!
 //! Three sources of candidate, one decision per `(scope, tier)` for all
@@ -21,32 +22,39 @@
 use synveda_policy::{
     AuthzContext, EntityBatch, Pdp, PermittedTiers, Principal, Resource, ScopeNode,
 };
+use synveda_types::anchor::ScopeAnchor;
 use synveda_types::{
-    CompositionConfig, HierarchyNode, Lapse, LapseId, PolicyAssignment, Result, RoleBinding,
-    ScopeId, ScopeTier, Sensitivity,
+    CompositionConfig, GroupId, Lapse, LapseId, PolicyAssignment, Result, ScopeId, ScopeTier,
+    Sensitivity,
 };
 
 use crate::compose::ComposeScope;
 
-/// What one chain sweep needs: the caller's principal and placement
-/// chain (node-first, from the HIER-2 cache), plus the per-request rows
-/// the PDP resolves packs and roles from — exactly what the gateway's
-/// decision gathering already reads for the full chain. The PDP
-/// consults only rows whose node is on the resource chain, so the
-/// full-chain rows serve every suffix decision.
+/// What one chain sweep needs: the caller's principal and own chain
+/// (node-first, governed scopes), plus the per-request rows the PDP
+/// resolves packs and roles from — exactly what the gateway's decision
+/// gathering already reads for the full chain. The PDP consults only rows
+/// whose node is on the resource chain, so the full-chain rows serve every
+/// suffix decision.
 #[derive(Debug, Clone, Copy)]
 pub struct MemoryReadInputs<'a> {
     /// Who is asking.
     pub principal: &'a Principal,
-    /// The caller's placement chain, nearest-first (personal scope →
-    /// org root).
-    pub chain: &'a [HierarchyNode],
+    /// The caller's own chain, nearest-first (own scope → tenant root).
+    pub chain: &'a [ScopeNode],
+    /// The caller's ordered anchors with the role keys they carry (CPR-6,
+    /// ADR-0073) — the grants, direct and group-derived, that reach this
+    /// caller. The composition sweep decides with them exactly as the
+    /// admin plane does; before the hierarchy cutover this arrived empty
+    /// because an anchor's scope could never be a node of the old
+    /// hierarchy's chains, which is no longer true (CPR-7, ADR-0074).
+    pub anchors: &'a [ScopeAnchor],
+    /// The groups this caller is in, so a pack may name one.
+    pub groups: &'a [GroupId],
     /// Pack assignments for the chain's nodes (missing rows inherit).
     pub assignments: &'a [PolicyAssignment],
     /// The tenant's stored default pack, if any.
     pub default_pack: Option<&'a str>,
-    /// The subject's role bindings on the chain plus tenant-wide rows.
-    pub role_bindings: &'a [RoleBinding],
     /// The lapses standing over the caller (AUTHZ-4, ADR-0037): grants
     /// whose grantee scope is on `chain`, neither revoked nor expired as of
     /// the read that produced them.
@@ -64,8 +72,8 @@ pub struct MemoryReadInputs<'a> {
     pub lapsed: &'a [LapsedScope<'a>],
     /// Recall's widened candidate set (CTX-5, ADR-0042 decision 2): the
     /// scopes that could contribute a record to *this* request, which is
-    /// how a pack's own permits beyond the chain — bound subtrees,
-    /// `standard`'s department — finally get asked.
+    /// how a pack's own permits beyond the chain — granted subtrees,
+    /// `standard`'s `principal.ambit` — finally get asked.
     ///
     /// **Empty for every `inject`**, which is what keeps ADR-0024
     /// decision 1's universe exactly where it was on the hot path. A scope
@@ -88,8 +96,8 @@ pub struct MemoryReadInputs<'a> {
 pub struct CandidateScope<'a> {
     /// The scope to decide.
     pub scope_id: ScopeId,
-    /// That scope's own chain, node-first, from the HIER-2 cache.
-    pub chain: &'a [HierarchyNode],
+    /// That scope's own chain, node-first, from the scope closure.
+    pub chain: &'a [ScopeNode],
     /// Pack assignments for that chain's nodes.
     pub assignments: &'a [PolicyAssignment],
 }
@@ -105,10 +113,40 @@ pub struct CandidateScope<'a> {
 pub struct LapsedScope<'a> {
     /// The grant that reaches this scope.
     pub lapse: &'a Lapse,
-    /// The **target's** own chain, node-first, from the HIER-2 cache.
-    pub chain: &'a [HierarchyNode],
+    /// The **target's** own chain, node-first, from the scope closure.
+    pub chain: &'a [ScopeNode],
     /// Pack assignments for that chain's nodes.
     pub assignments: &'a [PolicyAssignment],
+}
+
+/// The display path of every scope on a node-first chain, parallel to it:
+/// the slugs from the root down to that scope, `/`-joined. Derived, never
+/// stored — the closure is ground truth and a derived path cannot be stale
+/// (CPR-3's doctrine, kept when the chain stopped carrying one).
+fn chain_paths(chain: &[ScopeNode]) -> Vec<String> {
+    let mut paths = Vec::with_capacity(chain.len());
+    for index in 0..chain.len() {
+        paths.push(
+            chain[index..]
+                .iter()
+                .rev()
+                .map(|node| node.slug.as_str())
+                .collect::<Vec<_>>()
+                .join("/"),
+        );
+    }
+    paths
+}
+
+/// One chain sweep's path lookup: the path of `scope_id` on `chain`, or its
+/// bare id when the chain did not name it (which the caller treats as
+/// absent anyway).
+fn path_of(chain: &[ScopeNode], paths: &[String], scope_id: ScopeId) -> String {
+    chain
+        .iter()
+        .position(|node| node.id == scope_id)
+        .and_then(|position| paths.get(position).cloned())
+        .unwrap_or_else(|| scope_id.to_string())
 }
 
 /// The `(scope, tier)` pairs the caller may compose memories from: one
@@ -140,26 +178,18 @@ pub struct LapsedScope<'a> {
 )]
 pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Vec<ScopeTier>> {
     let batch = materialise(pdp, inputs)?;
-    let chain_nodes = ScopeNode::from_hierarchy_chain(inputs.chain);
+    let chain_nodes: Vec<ScopeNode> = inputs.chain.to_vec();
     let mut permitted: Vec<ScopeTier> = Vec::with_capacity(inputs.chain.len());
     let mut scopes = 0usize;
     for (position, node) in inputs.chain.iter().enumerate() {
         let context = AuthzContext {
             scopes: &chain_nodes[position..],
             principal_scopes: &chain_nodes,
-            // The composition sweep decides over the **old** hierarchy until
-            // the read path is re-cut (Prompts 16–18 of the context-platform
-            // programme). Supplying no anchors is not a narrowing: an anchor's
-            // scope is a governed scope and is therefore never a node of a
-            // hierarchy chain, so `effective_role_keys_at` would find none
-            // either way (CPR-6, ADR-0073).
-            anchors: &[],
-            groups: &[],
+            anchors: inputs.anchors,
+            groups: inputs.groups,
             resources: &[],
             assignments: inputs.assignments,
             default_pack: inputs.default_pack,
-            role_bindings: inputs.role_bindings,
-            grant: None,
             lapses: inputs.lapses,
             // Named per tier inside the sweep (ADR-0038 decision 2).
             sensitivity: None,
@@ -197,22 +227,31 @@ pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Resul
 fn materialise(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<EntityBatch> {
     let mut owned: Vec<Vec<ScopeNode>> =
         Vec::with_capacity(1 + inputs.lapsed.len() + inputs.candidates.len());
-    owned.push(ScopeNode::from_hierarchy_chain(inputs.chain));
-    owned.extend(
-        inputs
-            .lapsed
-            .iter()
-            .map(|lapsed| ScopeNode::from_hierarchy_chain(lapsed.chain)),
-    );
+    owned.push(inputs.chain.to_vec());
+    owned.extend(inputs.lapsed.iter().map(|lapsed| lapsed.chain.to_vec()));
     owned.extend(
         inputs
             .candidates
             .iter()
-            .map(|candidate| ScopeNode::from_hierarchy_chain(candidate.chain)),
+            .map(|candidate| candidate.chain.to_vec()),
     );
     let chains: Vec<&[ScopeNode]> = owned.iter().map(Vec::as_slice).collect();
+    // `anchors` and `groups` matter here, not only on the later per-scope
+    // decision: the Principal entity — with its `ambit`, `anchors` and
+    // `private` attributes — is built once, at materialise time, and every
+    // decision through this batch reuses it (`entities_over`,
+    // `synveda-policy`). A default (empty) context here bakes an
+    // ambit-less, group-less principal into the batch permanently — no
+    // later per-scope `AuthzContext` can repair it, because those contexts
+    // supply Cedar's request `context` map, not the entity itself. Found by
+    // recall's own widened universe (CTX-5, ADR-0042 decision 2): a
+    // `standard`-pack sharing permit that reads `principal.ambit` denied
+    // every off-chain candidate, unconditionally, because the entity this
+    // batch built never had one.
     let context = AuthzContext {
         principal_scopes: &owned[0],
+        anchors: inputs.anchors,
+        groups: inputs.groups,
         ..AuthzContext::default()
     };
     pdp.materialise(inputs.principal, &chains, &context)
@@ -222,7 +261,7 @@ fn materialise(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<EntityBatch> 
 #[derive(Debug, Clone, Copy)]
 struct OffChain<'a> {
     scope_id: ScopeId,
-    chain: &'a [HierarchyNode],
+    chain: &'a [ScopeNode],
     assignments: &'a [PolicyAssignment],
     /// The grant that reached it, when one did. `None` is recall's widened
     /// universe: an ordinary pack permit, which is the whole difference
@@ -256,18 +295,16 @@ fn plan_off_chain(
         // unplaced principal gets.
         return Ok(());
     };
-    let scope_nodes = ScopeNode::from_hierarchy_chain(scope.chain);
-    let principal_nodes = ScopeNode::from_hierarchy_chain(inputs.chain);
+    let scope_nodes: Vec<ScopeNode> = scope.chain.to_vec();
+    let principal_nodes: Vec<ScopeNode> = inputs.chain.to_vec();
     let context = AuthzContext {
         scopes: &scope_nodes,
         principal_scopes: &principal_nodes,
-        anchors: &[],
-        groups: &[],
+        anchors: inputs.anchors,
+        groups: inputs.groups,
         resources: &[],
         assignments: scope.assignments,
         default_pack: inputs.default_pack,
-        role_bindings: inputs.role_bindings,
-        grant: None,
         lapses: inputs.lapses,
         sensitivity: None,
     };
@@ -297,7 +334,7 @@ fn plan_off_chain(
     scopes.push(ComposeScope {
         scope_id: target,
         kind: node.kind,
-        path: node.path.clone(),
+        path: path_of(scope.chain, &chain_paths(scope.chain), target),
         // A lapse admits what the target scope stands behind and nothing
         // else. Not the pack's channel rule: derived material is unreviewed
         // extraction output nobody at the target has looked at, and it is
@@ -437,18 +474,17 @@ pub struct ScopeDecision {
 )]
 pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<CompositionPlan> {
     let batch = materialise(pdp, inputs)?;
-    let chain_nodes = ScopeNode::from_hierarchy_chain(inputs.chain);
+    let chain_nodes: Vec<ScopeNode> = inputs.chain.to_vec();
+    let paths = chain_paths(&chain_nodes);
     let tenant_id = inputs.principal.tenant_id;
     let context_at = |position: usize| AuthzContext {
         scopes: &chain_nodes[position..],
         principal_scopes: &chain_nodes,
-        anchors: &[],
-        groups: &[],
+        anchors: inputs.anchors,
+        groups: inputs.groups,
         resources: &[],
         assignments: inputs.assignments,
         default_pack: inputs.default_pack,
-        role_bindings: inputs.role_bindings,
-        grant: None,
         lapses: inputs.lapses,
         // Named per tier inside the sweep (ADR-0038 decision 2).
         sensitivity: None,
@@ -505,7 +541,7 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
         scopes.push(ComposeScope {
             scope_id: node.id,
             kind: node.kind,
-            path: node.path.clone(),
+            path: paths[position].clone(),
             include_derived: effective.composition.channels.includes_derived(),
             sensitivities: permitted.memory,
             // The tiers `ContextPackRead` permitted here — what admits this

@@ -1,5 +1,6 @@
 //! Curator files per scope (FLOW-3, ADR-0032 decisions 13–15):
-//! `/v1/hierarchy/nodes/{id}/curators`, beside `/policy` and `/roles`.
+//! `/v1/admin/scopes/{scope_id}/curators`, beside `/policy` — both
+//! re-homed under the scope admin prefix when CPR-7 deleted `/v1/hierarchy`.
 //!
 //! A curator file names who must **additionally** approve a proposal
 //! touching matching assets at this scope. It adds requirements; it never
@@ -27,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::{hierarchy, rls};
+use synveda_store::{rls, scopes};
 use synveda_types::{Error, IdentityId, Result, ScopeId};
 use synveda_vedaflow::{self as vedaflow, CuratorFile, PolicySnapshot, Signer};
 
@@ -35,7 +36,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::CURATOR_OPERATIONS_TOTAL;
 
 /// The commit-message cap; mirrors `vedaflow_commits`' CHECK.
@@ -102,7 +103,7 @@ struct CuratorsResponse {
     updated_by: Option<IdentityId>,
 }
 
-/// `GET /v1/hierarchy/nodes/{id}/curators` — the curator file in force
+/// `GET /v1/admin/scopes/{scope_id}/curators` — the curator file in force
 /// for this node: its own, or the nearest ancestor's.
 #[tracing::instrument(name = "curators.get", skip_all)]
 pub(crate) async fn get(State(state): State<AppState>, Path(scope_id): Path<ScopeId>) -> Response {
@@ -110,17 +111,23 @@ pub(crate) async fn get(State(state): State<AppState>, Path(scope_id): Path<Scop
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let node = found(
-            hierarchy::node(&mut *tx, scope_id).await?,
+            scopes::get(&mut *tx, tenant_id, scope_id).await?,
             tenant_id,
             scope_id,
         )?;
-        let input = authz::gather(&state, &mut tx, Some(&node)).await?;
+        let input = authz::gather(
+            &state,
+            &mut tx,
+            Some(&node),
+            synveda_store::anchors::AnchorSelection::none(),
+            Vec::new(),
+        )
+        .await?;
         let authorized = authz::decide(
             &state,
             &input,
             Action::PolicyRead,
             Resource::Scope(scope_id),
-            None,
         )?;
         let chain: Vec<ScopeId> = input.chain.iter().map(|node| node.id).collect();
         let stored = vedaflow::nearest_curators(&mut tx, tenant_id, &chain).await?;
@@ -195,7 +202,7 @@ struct PutResponse {
     rules: usize,
 }
 
-/// `PUT /v1/hierarchy/nodes/{id}/curators` — commit this node's curator
+/// `PUT /v1/admin/scopes/{scope_id}/curators` — commit this scope's curator
 /// file.
 #[tracing::instrument(name = "curators.put", skip_all)]
 pub(crate) async fn put(
@@ -226,17 +233,23 @@ async fn put_inner(
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::PolicyAssign,
         Resource::Scope(scope_id),
-        None,
     )?;
     let author = input
         .identity

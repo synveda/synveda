@@ -50,7 +50,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
-use crate::hierarchy::{body, tenant_id};
+use crate::request::{body, tenant_id};
 use crate::telemetry::{CONTEXT_INJECTS_TOTAL, INJECT_STAGE_SECONDS};
 
 /// Task cap: a task is a query, not a document (CTX-6 owns session
@@ -261,9 +261,10 @@ async fn handle(
         &MemoryReadInputs {
             principal: &input.principal,
             chain: &input.chain,
+            anchors: input.anchors.as_slice(),
+            groups: &input.groups,
             assignments: &input.assignments,
             default_pack: input.default_pack.as_deref(),
-            role_bindings: &input.role_bindings,
             lapses: &input.lapses,
             lapsed: &lapsed,
             // The hot path's universe is the chain, exactly where

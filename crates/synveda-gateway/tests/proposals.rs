@@ -1,7 +1,7 @@
 //! FLOW-3's other two acceptance criteria (ADR-0032): **a memory
 //! promotion team→published E2E with 1 curator**, and **a restricted
-//! asset requires compliance + dual approval** — both over the product's
-//! own HTTP surfaces, under the PDP, against a live Postgres.
+//! asset requires the administrator + dual approval** — both over the
+//! product's own HTTP surfaces, under the PDP, against a live Postgres.
 //!
 //! The full matrix golden lives in `synveda-policy/tests/approvals.rs`;
 //! this suite is about what happens when a real principal pushes real
@@ -32,15 +32,17 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::StoredEvent;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, role_bindings, tenants};
+use synveda_store::{access, identities, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, Role,
-    ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, ScopeId,
+    Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -78,7 +80,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -130,91 +131,83 @@ fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("checked by admitted_tenant")
 }
 
-/// org → dept → two teams, plus the quarantine scope AUTH-2 needs.
-async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (HierarchyNode, HierarchyNode) {
+/// The tenant root → an org unit → two workspaces — the old
+/// org → dept → team shape on the five-shape vocabulary (CPR-7, ADR-0074).
+/// The "teams" are workspaces because a workspace is the LOCAL shape a
+/// team's publications were priced at: one curator for working-tier
+/// memory, where an org unit costs curator + administrator (the golden
+/// matrix's SHARED row).
+async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope) {
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(org.id),
+            slug: "eng".to_owned(),
+            display_name: "Engineering".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let eng = hierarchy::create(
+    .expect("create scope");
+    let platform = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "eng",
-        "Engineering",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::Workspace,
+            parent_scope_id: Some(eng.id),
+            slug: "platform".to_owned(),
+            display_name: "Platform".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create dept");
-    let platform = hierarchy::create(
+    .expect("create scope");
+    let payments = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::Workspace,
+            parent_scope_id: Some(eng.id),
+            slug: "payments".to_owned(),
+            display_name: "Payments".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create team");
-    let payments = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "payments",
-        "Payments",
-    )
-    .await
-    .expect("create second team");
-    hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        "Quarantine",
-    )
-    .await
-    .expect("create quarantine scope");
+    .expect("create scope");
     tx.commit().await.expect("commit hierarchy");
     (platform, payments)
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -222,12 +215,26 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: Role) {
+async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, Some(scope), role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 async fn seed_record(
@@ -401,12 +408,12 @@ async fn a_memory_promotion_needs_one_curator_and_publishes_through_the_proposal
         return;
     };
     let (team, _) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "dana@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cora@acme.test", team.id).await;
+    let author = seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "cora@acme.test").await;
     // A contributor writes; a curator reviews. That separation is the
     // whole point of the feature.
-    bind(&pool, tenant, "dana@acme.test", team.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora@acme.test", team.id, Role::Curator).await;
+    bind(&pool, tenant, "dana@acme.test", team.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora@acme.test", team.id, RoleKey::Curator).await;
     let dana = issue("dana@acme.test", tenant);
     let cora = issue("cora@acme.test", tenant);
 
@@ -437,7 +444,8 @@ async fn a_memory_promotion_needs_one_curator_and_publishes_through_the_proposal
         opened["state"], "open",
         "a fresh proposal is not approved: {opened}"
     );
-    // regulated-strict at a team asks for one curator (the golden table).
+    // regulated-strict at a workspace asks for one curator (the golden
+    // table's LOCAL row — the old team rank, as a shape).
     assert_eq!(
         opened["required"]["roles"],
         json!([{"role": "curator", "count": 1}]),
@@ -570,29 +578,38 @@ async fn a_memory_promotion_needs_one_curator_and_publishes_through_the_proposal
     );
 }
 
-// ── AC 2: restricted needs compliance and two distinct approvers ─────────────
+// ── AC 2: restricted needs the administrator and two distinct approvers ──────
 
 /// The floor, on the product surfaces. A `restricted` record cannot be
 /// published by one curator through *either* route: the direct one
 /// refuses and names the proposal path, and the proposal itself refuses
-/// to publish until a compliance reviewer has also approved — two
-/// distinct identities, whatever roles either of them holds.
+/// to publish until an administrator has also approved — two distinct
+/// identities, whatever roles either of them holds. (`compliance` is the
+/// floor's old name for the administrator line — CPR-7, ADR-0074
+/// decision 6.)
 #[tokio::test]
-async fn a_restricted_record_takes_compliance_and_two_distinct_approvers() {
+async fn a_restricted_record_takes_an_administrator_and_two_distinct_approvers() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
     let (team, _) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "dana@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cora@acme.test", team.id).await;
-    seed_user(&pool, tenant, "quinn@acme.test", team.id).await;
-    bind(&pool, tenant, "dana@acme.test", team.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora@acme.test", team.id, Role::Curator).await;
-    // Quinn is compliance *and* a curator, which is the interesting case:
-    // holding both roles satisfies both role lines and still counts as one
-    // identity, so dual approval binds them exactly as intended.
-    bind(&pool, tenant, "quinn@acme.test", team.id, Role::Compliance).await;
-    bind(&pool, tenant, "quinn@acme.test", team.id, Role::Curator).await;
+    let author = seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "cora@acme.test").await;
+    seed_user(&pool, tenant, "quinn@acme.test").await;
+    bind(&pool, tenant, "dana@acme.test", team.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora@acme.test", team.id, RoleKey::Curator).await;
+    // Quinn is the administrator *and* a curator, which is the interesting
+    // case: holding both roles satisfies both role lines and still counts
+    // as one identity, so dual approval binds them exactly as intended.
+    bind(
+        &pool,
+        tenant,
+        "quinn@acme.test",
+        team.id,
+        RoleKey::Administrator,
+    )
+    .await;
+    bind(&pool, tenant, "quinn@acme.test", team.id, RoleKey::Curator).await;
     let dana = issue("dana@acme.test", tenant);
     let cora = issue("cora@acme.test", tenant);
     let quinn = issue("quinn@acme.test", tenant);
@@ -623,7 +640,7 @@ async fn a_restricted_record_takes_compliance_and_two_distinct_approvers() {
     );
     let reason = detail(&refused);
     assert!(
-        reason.contains("compliance") && reason.contains("proposal"),
+        reason.contains("administrator") && reason.contains("proposal"),
         "the refusal must name what is missing and where to go: {reason}"
     );
 
@@ -639,10 +656,10 @@ async fn a_restricted_record_takes_compliance_and_two_distinct_approvers() {
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
-        "one person holding curator and compliance published alone: {refused}"
+        "one person holding curator and administrator published alone: {refused}"
     );
 
-    // ── The proposal route: two approvals, one of them compliance ───────
+    // ── The proposal route: two approvals, one of them the floor's ──────
     let (status, opened) = open_proposal(
         &app,
         &dana,
@@ -664,8 +681,8 @@ async fn a_restricted_record_takes_compliance_and_two_distinct_approvers() {
             .as_array()
             .expect("roles")
             .iter()
-            .any(|role| role["role"] == "compliance"),
-        "compliance is required: {opened}"
+            .any(|role| role["role"] == "administrator"),
+        "the administrator is required: {opened}"
     );
 
     // One curator is not enough — and the response says exactly what is
@@ -681,7 +698,7 @@ async fn a_restricted_record_takes_compliance_and_two_distinct_approvers() {
     assert_eq!(first["state"], "open", "still short: {first}");
     assert_eq!(
         first["outstanding"],
-        "compliance × 1, 1 distinct approver(s)"
+        "administrator × 1, 1 distinct approver(s)"
     );
 
     let (status, early) = post(
@@ -708,7 +725,7 @@ async fn a_restricted_record_takes_compliance_and_two_distinct_approvers() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "double vote counted: {again}");
 
-    // Compliance closes it out.
+    // The administrator closes it out.
     let (status, second) = post(
         &app,
         &quinn,
@@ -719,19 +736,19 @@ async fn a_restricted_record_takes_compliance_and_two_distinct_approvers() {
     assert_eq!(
         status,
         StatusCode::OK,
-        "compliance approval failed: {second}"
+        "administrator approval failed: {second}"
     );
     assert_eq!(second["state"], "approved", "still not approved: {second}");
     assert!(
         second["counted_roles"]
             .as_array()
             .expect("roles")
-            .contains(&json!("compliance"))
+            .contains(&json!("administrator"))
     );
 
-    // The effect still needs `ChannelPublish`: compliance alone holds none
-    // in any pack, which is exactly why the deciding approval does not
-    // publish (ADR-0032 decision 9). Quinn holds curator too, so quinn can.
+    // The effect still needs `ChannelPublish` — which the administrator
+    // holds, so the deciding approver can also run it here. The case where
+    // the deciding vote holds none is the next test's whole subject.
     let (status, published) = post(
         &app,
         &quinn,
@@ -755,37 +772,82 @@ async fn a_restricted_record_takes_compliance_and_two_distinct_approvers() {
     assert_eq!(publishes[0].payload["sensitivity"], "restricted");
 }
 
-/// A `compliance` reviewer with no publish grant reaches the deciding vote
+/// A deciding approver with no publish authority reaches the deciding vote
 /// and stops there: the proposal is `approved`, and its effect refuses.
 /// This is the case that decided against auto-publishing.
+///
+/// Since CPR-7 the only role that can cast a required approval while
+/// holding no `ChannelPublish` is `reviewer` (the re-vocabulary of the old
+/// `compliance` and `security-reviewer` markers, ADR-0074 decision 6) —
+/// and no memory row of the matrix asks for one. So the required vote is
+/// named by a **curator file**, whose named-subject line is satisfied by
+/// an identity rather than by a role: cleo holds `reviewer` at the
+/// workspace, is named in the file, and is exactly the deciding approver
+/// who must not be able to run the effect.
 #[tokio::test]
-async fn compliance_can_approve_but_not_publish() {
+async fn a_deciding_approver_with_no_publish_authority_stops_at_the_vote() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
     let (team, _) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "dana@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cora@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cleo@acme.test", team.id).await;
-    bind(&pool, tenant, "dana@acme.test", team.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora@acme.test", team.id, Role::Curator).await;
-    bind(&pool, tenant, "cleo@acme.test", team.id, Role::Compliance).await;
+    let author = seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "cora@acme.test").await;
+    seed_user(&pool, tenant, "sam@acme.test").await;
+    seed_user(&pool, tenant, "cleo@acme.test").await;
+    bind(&pool, tenant, "dana@acme.test", team.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora@acme.test", team.id, RoleKey::Curator).await;
+    bind(
+        &pool,
+        tenant,
+        "sam@acme.test",
+        team.id,
+        RoleKey::Administrator,
+    )
+    .await;
+    // Reviewer passes `ProposalReview` and holds no `ChannelPublish` in
+    // any pack — the separation this test exists to hold in place.
+    bind(&pool, tenant, "cleo@acme.test", team.id, RoleKey::Reviewer).await;
     let dana = issue("dana@acme.test", tenant);
     let cora = issue("cora@acme.test", tenant);
+    let sam = issue("sam@acme.test", tenant);
     let cleo = issue("cleo@acme.test", tenant);
+
+    let app = router(state(&database_url()));
+
+    // The steward names cleo: every publication this file covers is one
+    // cleo must sign, whatever the pack alone would have asked for.
+    let (status, written) = put(
+        &app,
+        &sam,
+        &format!("/v1/admin/scopes/{}/curators", team.id),
+        json!({
+            "source": "# the reviewer signs these\nmemory/* @cleo@acme.test\n",
+            "message": "a reviewer signs every promotion here",
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "curator file write failed: {written}"
+    );
 
     let record = seed_record(
         &pool,
         tenant,
         team.id,
         author.id,
-        Sensitivity::Restricted,
-        RESTRICTED,
+        Sensitivity::Internal,
+        PROCEDURE,
     )
     .await;
-    let app = router(state(&database_url()));
-    let (_, opened) = open_proposal(&app, &dana, team.id, &[record], "restricted promotion").await;
+    let (_, opened) = open_proposal(&app, &dana, team.id, &[record], "reviewed promotion").await;
     let id = opened["id"].as_str().expect("proposal id").to_owned();
+    assert_eq!(
+        opened["required"]["subjects"],
+        json!(["cleo@acme.test"]),
+        "the file's named approver joined the requirement: {opened}"
+    );
 
     post(
         &app,
@@ -804,13 +866,13 @@ async fn compliance_can_approve_but_not_publish() {
     assert_eq!(
         status,
         StatusCode::OK,
-        "compliance approval failed: {decided}"
+        "the named approval failed: {decided}"
     );
     assert_eq!(decided["state"], "approved");
 
-    // Compliance cast the deciding vote and holds no ChannelPublish. Had
-    // the approval published, this call would have run under system
-    // authority — which is the PDP bypass ADR-0032 decision 9 refuses.
+    // Cleo cast the deciding vote and holds no ChannelPublish. Had the
+    // approval published, this call would have run under system authority
+    // — which is the PDP bypass ADR-0032 decision 9 refuses.
     let (status, refused) = post(
         &app,
         &cleo,
@@ -821,7 +883,7 @@ async fn compliance_can_approve_but_not_publish() {
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
-        "compliance published without ChannelPublish: {refused}"
+        "a reviewer with no ChannelPublish ran the effect: {refused}"
     );
 
     // The curator runs the effect instead.
@@ -847,10 +909,10 @@ async fn editing_a_record_after_approval_refuses_the_publish() {
         return;
     };
     let (team, _) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "dana@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cora@acme.test", team.id).await;
-    bind(&pool, tenant, "dana@acme.test", team.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora@acme.test", team.id, Role::Curator).await;
+    let author = seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "cora@acme.test").await;
+    bind(&pool, tenant, "dana@acme.test", team.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora@acme.test", team.id, RoleKey::Curator).await;
     let dana = issue("dana@acme.test", tenant);
     let cora = issue("cora@acme.test", tenant);
 
@@ -930,16 +992,23 @@ async fn a_curator_file_adds_a_required_approver_without_granting_anything() {
         return;
     };
     let (team, _) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "dana@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cora@acme.test", team.id).await;
-    seed_user(&pool, tenant, "sam@acme.test", team.id).await;
-    seed_user(&pool, tenant, "vic@acme.test", team.id).await;
-    bind(&pool, tenant, "dana@acme.test", team.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora@acme.test", team.id, Role::Curator).await;
-    bind(&pool, tenant, "sam@acme.test", team.id, Role::Steward).await;
+    let author = seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "cora@acme.test").await;
+    seed_user(&pool, tenant, "sam@acme.test").await;
+    seed_user(&pool, tenant, "vic@acme.test").await;
+    bind(&pool, tenant, "dana@acme.test", team.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora@acme.test", team.id, RoleKey::Curator).await;
+    bind(
+        &pool,
+        tenant,
+        "sam@acme.test",
+        team.id,
+        RoleKey::Administrator,
+    )
+    .await;
     // Vic is named in the file but holds only viewer: the file cannot make
     // them an approver.
-    bind(&pool, tenant, "vic@acme.test", team.id, Role::Viewer).await;
+    bind(&pool, tenant, "vic@acme.test", team.id, RoleKey::Viewer).await;
     let dana = issue("dana@acme.test", tenant);
     let cora = issue("cora@acme.test", tenant);
     let sam = issue("sam@acme.test", tenant);
@@ -951,7 +1020,7 @@ async fn a_curator_file_adds_a_required_approver_without_granting_anything() {
     let (status, refused) = put(
         &app,
         &dana,
-        &format!("/v1/hierarchy/nodes/{}/curators", team.id),
+        &format!("/v1/admin/scopes/{}/curators", team.id),
         json!({"source": file, "message": "seize the review"}),
     )
     .await;
@@ -964,7 +1033,7 @@ async fn a_curator_file_adds_a_required_approver_without_granting_anything() {
     let (status, written) = put(
         &app,
         &sam,
-        &format!("/v1/hierarchy/nodes/{}/curators", team.id),
+        &format!("/v1/admin/scopes/{}/curators", team.id),
         json!({"source": file, "message": "platform runbooks need sam"}),
     )
     .await;
@@ -979,7 +1048,7 @@ async fn a_curator_file_adds_a_required_approver_without_granting_anything() {
     let (status, read) = get(
         &app,
         &sam,
-        &format!("/v1/hierarchy/nodes/{}/curators", team.id),
+        &format!("/v1/admin/scopes/{}/curators", team.id),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "curator file read failed: {read}");
@@ -1070,7 +1139,7 @@ async fn a_curator_file_adds_a_required_approver_without_granting_anything() {
     let (_, dept_read) = get(
         &app,
         &sam,
-        &format!("/v1/hierarchy/nodes/{}/curators", team.id),
+        &format!("/v1/admin/scopes/{}/curators", team.id),
     )
     .await;
     assert_eq!(dept_read["effective_at"], json!(team.id));
@@ -1086,10 +1155,10 @@ async fn rejection_is_terminal_and_withdrawal_belongs_to_the_proposer() {
         return;
     };
     let (team, _) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "dana@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cora@acme.test", team.id).await;
-    bind(&pool, tenant, "dana@acme.test", team.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora@acme.test", team.id, Role::Curator).await;
+    let author = seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "cora@acme.test").await;
+    bind(&pool, tenant, "dana@acme.test", team.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora@acme.test", team.id, RoleKey::Curator).await;
     let dana = issue("dana@acme.test", tenant);
     let cora = issue("cora@acme.test", tenant);
     let app = router(state(&database_url()));
@@ -1213,15 +1282,22 @@ async fn the_pdp_gates_every_verb_and_foreign_proposals_are_not_found() {
         return;
     };
     let (team, payments) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "dana@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cora@acme.test", team.id).await;
-    seed_user(&pool, tenant, "nobody@acme.test", payments.id).await;
-    bind(&pool, tenant, "dana@acme.test", team.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora@acme.test", team.id, Role::Curator).await;
+    let author = seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "cora@acme.test").await;
+    seed_user(&pool, tenant, "nobody@acme.test").await;
+    bind(&pool, tenant, "dana@acme.test", team.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora@acme.test", team.id, RoleKey::Curator).await;
     // Cora curates both teams, so the cross-scope refusal below is the
     // *scope* rule talking rather than the PDP: a principal who may open
     // a proposal at payments still cannot name a platform record in it.
-    bind(&pool, tenant, "cora@acme.test", payments.id, Role::Curator).await;
+    bind(
+        &pool,
+        tenant,
+        "cora@acme.test",
+        payments.id,
+        RoleKey::Curator,
+    )
+    .await;
     let dana = issue("dana@acme.test", tenant);
     let cora = issue("cora@acme.test", tenant);
     let outsider = issue("dana@acme.test", other);
@@ -1286,13 +1362,34 @@ async fn the_pdp_gates_every_verb_and_foreign_proposals_are_not_found() {
         );
     }
 
-    // ...and a tenant-wide auditor binding does, read-only, which is what
-    // FLOW-6's `proposal list` and CNSL-1's hero screen stand on.
+    // ...and a tenant-wide reviewer grant does — the review role that has
+    // to see a proposal before acting on it, which is what FLOW-6's
+    // `proposal list` and CNSL-1's hero screen stand on. A grant at the
+    // root is the tenant-wide grant; `viewer` is deliberately not in the
+    // tenant-wide role list, so this is the read-only-ish binding that
+    // reaches the inbox and nothing else the node grants did not.
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, "cora@acme.test", None, Role::Auditor)
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
-        .expect("bind tenant-wide auditor");
-    tx.commit().await.expect("commit binding");
+        .expect("mint root");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: root.id,
+            subject: GrantSubject::Principal {
+                principal_id: "cora@acme.test".to_owned(),
+            },
+            role_key: RoleKey::Reviewer,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant reviewer at the root");
+    tx.commit().await.expect("commit grant");
     let (status, listed) = get(&app, &cora, "/v1/proposals").await;
     assert_eq!(status, StatusCode::OK, "inbox listing failed: {listed}");
     assert_eq!(listed["proposals"].as_array().expect("proposals").len(), 1);
@@ -1319,8 +1416,8 @@ async fn a_curator_still_publishes_internal_memory_directly() {
         return;
     };
     let (team, _) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "cora@acme.test", team.id).await;
-    bind(&pool, tenant, "cora@acme.test", team.id, Role::Curator).await;
+    let author = seed_user(&pool, tenant, "cora@acme.test").await;
+    bind(&pool, tenant, "cora@acme.test", team.id, RoleKey::Curator).await;
     let cora = issue("cora@acme.test", tenant);
 
     let record = seed_record(

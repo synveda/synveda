@@ -73,7 +73,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
-use crate::hierarchy::{body, tenant_id};
+use crate::request::{body, tenant_id};
 use crate::telemetry::{CONTEXT_RECALLS_TOTAL, RECALL_RECORDS_TOTAL, RECALL_STAGE_SECONDS};
 
 /// How many records one recall may serve — named or found (ADR-0041
@@ -415,13 +415,14 @@ async fn handle(
         &MemoryReadInputs {
             principal: &input.principal,
             chain: &input.chain,
+            anchors: input.anchors.as_slice(),
+            groups: &input.groups,
             assignments: &input.assignments,
             default_pack: input.default_pack.as_deref(),
-            // The tenant-wide binding set, not the chain-scoped one: a
-            // binding at a candidate scope is precisely the grant the
-            // widened universe exists to reach, and deciding that scope
-            // without it would ask the question and get the wrong answer.
-            role_bindings: &universe.role_bindings,
+            // The anchors carry every grant this caller holds — a grant at
+            // a candidate scope is precisely the grant the widened
+            // universe exists to reach, and deciding that scope without it
+            // would ask the question and get the wrong answer.
             lapses: &input.lapses,
             lapsed: &lapsed,
             candidates: &candidates,

@@ -46,7 +46,7 @@ This is the idea the whole product turns on. Every memory, prompt, context pack
 and skill flows through **propose → review → approve → publish** — a system
 called **VedaFlow**, implemented with git-like semantics natively in Postgres.
 
-Each scope (org, department, team, user) has three standing channels:
+Each scope has three standing channels:
 
 - **`derived`** — what the extraction pipeline wrote automatically. Readable per
   policy, clearly watermarked as unreviewed.
@@ -63,9 +63,9 @@ consuming agent heals on its next session start.
   the gateway binary — no network hop, no sidecar. There is no code path from a
   harness to storage that goes around it, not even in tests.
 - **Strict by default, relaxable by design.** The default pack assumes a
-  regulated environment. A steward can grant a scoped, reasoned, time-boxed
-  *lapse* ("let team X read team Y's procedures for 30 days — joint incident
-  review"), with dual approval and automatic expiry. That mechanism is why one
+  regulated environment. An administrator can grant a scoped, reasoned,
+  time-boxed *lapse* ("let team X read team Y's procedures for 30 days —
+  joint incident review"), with dual approval and automatic expiry. That mechanism is why one
   product can serve both a 10-person shop and a multi-region bank.
 - **Audit is an output, not a log file.** Every decision, injection, recall,
   write and policy change lands in a hash-chained log that detects tampering
@@ -94,15 +94,18 @@ An admin console comes with it, at `http://127.0.0.1:8120/console/`. See
 | Phase | Scope | State |
 |---|---|---|
 | **0 — Foundation** | Workspace, dev environment, types, bitemporal schema, observability | ✅ 6/6 |
-| **1 — The spine** | SSO → auto-provisioned hierarchy → observe → extraction → inject → audit, live in Claude Code | ✅ 21/21 |
+| **1 — The spine** | SSO → provisioned own-scope → observe → extraction → inject → audit, live in Claude Code | ✅ 21/21 |
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR, gateway scale | ⬜ 0/17 |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP and the hierarchy cutover | 🚧 7/33 |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — 94 in
-total, 63 delivered. The fourteen Phase 3 items finished are the skills registry
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **104
+in total, 71 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
+`feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
-(OPS-1), the admin console's proposals inbox and hierarchy explorer (CNSL-1,
+(OPS-1), the admin console's proposals inbox and scope explorer (CNSL-1,
 CNSL-2), the generic MCP server (ADPT-2), the SCIM server with its
 directory-sync fallback (AUTH-4, AUTH-5), the LongMemEval benchmark adapter
 (EVAL-3), the Helm chart and enterprise profile (OPS-2) — which is where the
@@ -117,18 +120,20 @@ Published benchmark scores, and what they do and do not measure:
 
 ### What works today
 
-- **Zero-config onboarding** — OIDC login (auth code + PKCE); first login places
-  the user in the org hierarchy from their IdP groups. No YAML before value.
-- **Hierarchy and policy** — org → department → team → user, with policy packs
-  (`regulated-strict`, `standard`, `open-collaboration`), eight roles
-  (`viewer`, `contributor`, `curator`, `steward`, `org-admin`, `auditor`,
-  `security-reviewer`, `compliance`), ABAC conditions, time-boxed lapses, and
-  Postgres row-level security as a backstop.
+- **Zero-config onboarding** — OIDC login (auth code + PKCE); first login
+  mints the user's own principal scope. No YAML before value.
+- **Scopes and policy** — one governed tree (tenant, org unit, workspace,
+  project, principal — shapes, not ranks), administered through
+  `/v1/admin/scopes` and `synveda scope`, with policy packs
+  (`regulated-strict`, `standard`, `open-collaboration`), six role keys
+  granted at a scope and inherited by its subtree (`owner`, `member`,
+  `viewer`, `reviewer`, `curator`, `administrator`), ABAC conditions,
+  time-boxed lapses, and Postgres row-level security as a backstop.
 - **The write path** — `observe` → secret scan and redaction → extraction into
   classified records → embedding → graph-linking → commit to `derived`, with
   dedup and conflict detection, decay and TTL.
 - **The read path** — `inject` composes along the specificity gradient
-  (user beats team beats department beats org, pinned beats derived, newer beats
+  (the nearer scope beats the wider one, pinned beats derived, newer beats
   older) under a token budget, watermarked with the record IDs it used.
   `recall` goes deeper: hybrid dense + sparse retrieval, graph traversal, as-of
   queries.
@@ -139,7 +144,7 @@ Published benchmark scores, and what they do and do not measure:
   *"who could see X on date D"* and *"what did agent A know at time T"*.
 - **Governed assets** — prompt templates, context packs, and an
   agentskills.io-compliant skills registry where publishing executable code
-  requires a steward *and* a security reviewer, two distinct people.
+  requires a `reviewer` and two distinct approvers.
 - **A live Claude Code integration** — hooks plus an MCP recall tool.
 - **A quality gate in CI** — extraction, retrieval, injection and security evals
   with committed baselines; the security gate is zero-tolerance on leaks.
@@ -187,7 +192,7 @@ Being explicit, so nothing here misleads:
   Claude Code discovers on its own, and nothing noticed because a harness that
   replaces the harness cannot.
 - **Only two of the four console screens.** The proposals inbox (CNSL-1) and the
-  hierarchy and policy explorer (CNSL-2) are served from the gateway's own origin
+  scope and policy explorer (CNSL-2) are served from the gateway's own origin
   at `/console/`; CNSL-3 and CNSL-4 are not built.
 - **No Python/TS SDKs** (ADPT-4) and **no importers** from claude-mem, Cognee or
   mem0 (ADPT-5).
@@ -248,11 +253,11 @@ make eval        # the eval harness against a live stack, gated by baselines
 crates/
   synveda-types       domain types, IDs, errors — depends on no other crate
   synveda-policy      the Cedar PDP facade, policy packs, roles, lapses
-  synveda-store       Postgres: records, hierarchy, audit, bitemporal versions
+  synveda-store       Postgres: records, scopes, audit, bitemporal versions
   synveda-vedaflow    objects, trees, commits, refs, proposals
   synveda-retrieval   hybrid search, fusion, the composition engine
   synveda-ingest      redaction, extraction, dedup, embedding, graph-linking
-  synveda-identity    OIDC, JIT provisioning, hierarchy sync
+  synveda-identity    OIDC, JIT provisioning, directory sync
   synveda-audit       the hash-chained log
   synveda-gateway     axum HTTP — the only binary that faces the outside world
   synveda-cli         synveda login / proposal review / channel rollback / mcp / ...
@@ -278,7 +283,7 @@ API. `make check-deps` enforces it.
 ## The stack, and why
 
 Postgres-first, Rust-native, permissively licensed. One database engine for
-records, hierarchy, audit, versions, queues, vectors and graph — one backup
+records, scopes, audit, versions, queues, vectors and graph — one backup
 story, one HA story, one thing to explain to a bank's infrastructure review
 board.
 

@@ -24,14 +24,16 @@ use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AssetKind, IdentityId, Role, ScopeId, ScopeKind, Sensitivity};
+use crate::access::RoleKey;
+use crate::scope::ScopeKind;
+use crate::{AssetKind, IdentityId, ScopeId, Sensitivity};
 
 /// How many distinct approvers holding one role a rule asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoleRequirement {
     /// The role an approver must hold at the target scope.
-    pub role: Role,
+    pub role: RoleKey,
     /// How many distinct approvers must hold it. Zero is meaningless and
     /// is rejected when a matrix is validated.
     pub count: u8,
@@ -40,7 +42,7 @@ pub struct RoleRequirement {
 impl RoleRequirement {
     /// `count` approvers holding `role`.
     #[must_use]
-    pub const fn new(role: Role, count: u8) -> Self {
+    pub const fn new(role: RoleKey, count: u8) -> Self {
         RoleRequirement { role, count }
     }
 }
@@ -182,10 +184,16 @@ pub struct ApprovalMatrix {
 /// Two rules, prepended to every matrix — embedded pack, stored pack, or
 /// no configuration at all:
 ///
-/// - anything `restricted` needs the `compliance` role and two distinct
+/// - anything `restricted` needs an `administrator` and two distinct
 ///   approvers (tech plan §2.4; seed §4.2's own definition of the tier);
-/// - any `skill` needs `security-reviewer` **and two distinct approvers**,
+/// - any `skill` needs a `reviewer` **and two distinct approvers**,
 ///   because a skill is executable and reviewed like the code it is.
+///
+/// The two named roles are the grant-key re-vocabulary of `compliance` and
+/// `security-reviewer` (CPR-7, ADR-0074 decision 6): the floors are
+/// unchanged in substance — restricted material needs the administrator's
+/// sign-off, executable content a reviewer's — and Prompt 27 re-cuts the
+/// matrix over artifact versions.
 ///
 /// The second rule's approver count is ADR-0051 decision 18, and it is a
 /// correction rather than an addition. FLOW-3 wrote it at one, so under
@@ -203,14 +211,14 @@ static FLOOR: LazyLock<Vec<ApprovalRule>> = LazyLock::new(|| {
             asset: None,
             min_sensitivity: Sensitivity::Restricted,
             scope_kinds: None,
-            roles: vec![RoleRequirement::new(Role::Compliance, 1)],
+            roles: vec![RoleRequirement::new(RoleKey::Administrator, 1)],
             distinct_approvers: 2,
         },
         ApprovalRule {
             asset: Some(AssetKind::Skill),
             min_sensitivity: Sensitivity::Public,
             scope_kinds: None,
-            roles: vec![RoleRequirement::new(Role::SecurityReviewer, 1)],
+            roles: vec![RoleRequirement::new(RoleKey::Reviewer, 1)],
             distinct_approvers: 2,
         },
     ]
@@ -417,7 +425,7 @@ impl ApprovalRequirement {
 
     /// Adds a role requirement from a source other than a matrix rule —
     /// the curator file's `role:` form.
-    pub fn require_role(&mut self, origin: RequirementOrigin, role: Role) {
+    pub fn require_role(&mut self, origin: RequirementOrigin, role: RoleKey) {
         match self.roles.iter_mut().find(|existing| existing.role == role) {
             Some(existing) => existing.count = existing.count.max(1),
             None => self.roles.push(RoleRequirement::new(role, 1)),
@@ -435,7 +443,7 @@ impl ApprovalRequirement {
 
     /// What `cast` still leaves outstanding.
     ///
-    /// Role counts are satisfied by distinct approvers *holding* the
+    /// RoleKey counts are satisfied by distinct approvers *holding* the
     /// role, so one person holding two required roles satisfies both role
     /// lines and still counts as one identity — which is exactly why
     /// `distinct_approvers` is a separate number (ADR-0032 decision 7).
@@ -496,7 +504,7 @@ pub struct CastApproval {
     /// The approver's token subject — what a curator file names.
     pub subject: String,
     /// The effective roles held at the target scope when cast.
-    pub roles: Vec<Role>,
+    pub roles: Vec<RoleKey>,
 }
 
 /// What a requirement still lacks.
@@ -568,7 +576,7 @@ mod tests {
         IdentityId::from_uuid(Uuid::from_bytes([byte; 16]))
     }
 
-    fn approval(byte: u8, roles: &[Role]) -> CastApproval {
+    fn approval(byte: u8, roles: &[RoleKey]) -> CastApproval {
         CastApproval {
             identity: identity(byte),
             subject: format!("subject-{byte}"),
@@ -581,7 +589,7 @@ mod tests {
             asset: Some(AssetKind::Memory),
             min_sensitivity: Sensitivity::Public,
             scope_kinds: None,
-            roles: vec![RoleRequirement::new(Role::Curator, 1)],
+            roles: vec![RoleRequirement::new(RoleKey::Curator, 1)],
             distinct_approvers: 1,
         }
     }
@@ -593,11 +601,11 @@ mod tests {
         let requirement = ApprovalMatrix::empty().resolve(
             AssetKind::Memory,
             Sensitivity::Restricted,
-            ScopeKind::Team,
+            ScopeKind::OrgUnit,
         );
         assert_eq!(
             requirement.roles,
-            vec![RoleRequirement::new(Role::Compliance, 1)]
+            vec![RoleRequirement::new(RoleKey::Administrator, 1)]
         );
         assert_eq!(requirement.distinct_approvers, 2);
         assert!(requirement.origins.contains(&RequirementOrigin::Floor));
@@ -610,8 +618,11 @@ mod tests {
         let matrix = ApprovalMatrix {
             rules: vec![memory_rule()],
         };
-        let requirement =
-            matrix.resolve(AssetKind::Memory, Sensitivity::Restricted, ScopeKind::Team);
+        let requirement = matrix.resolve(
+            AssetKind::Memory,
+            Sensitivity::Restricted,
+            ScopeKind::OrgUnit,
+        );
         assert_eq!(
             requirement.distinct_approvers, 2,
             "the floor's, not the pack's"
@@ -619,8 +630,8 @@ mod tests {
         assert_eq!(
             requirement.roles,
             vec![
-                RoleRequirement::new(Role::Curator, 1),
-                RoleRequirement::new(Role::Compliance, 1),
+                RoleRequirement::new(RoleKey::Curator, 1),
+                RoleRequirement::new(RoleKey::Administrator, 1),
             ]
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>()
@@ -634,7 +645,7 @@ mod tests {
         let requirement = ApprovalMatrix::empty().resolve(
             AssetKind::Memory,
             Sensitivity::Confidential,
-            ScopeKind::Team,
+            ScopeKind::OrgUnit,
         );
         assert!(requirement.is_empty(), "auto-approve is a real answer");
     }
@@ -645,11 +656,11 @@ mod tests {
     fn every_skill_needs_a_security_reviewer() {
         for sensitivity in Sensitivity::ALL {
             let requirement =
-                ApprovalMatrix::empty().resolve(AssetKind::Skill, sensitivity, ScopeKind::Org);
+                ApprovalMatrix::empty().resolve(AssetKind::Skill, sensitivity, ScopeKind::Tenant);
             assert!(
                 requirement
                     .roles
-                    .contains(&RoleRequirement::new(Role::SecurityReviewer, 1)),
+                    .contains(&RoleRequirement::new(RoleKey::Reviewer, 1)),
                 "{sensitivity} skill escaped security review"
             );
         }
@@ -661,16 +672,17 @@ mod tests {
             rules: vec![
                 memory_rule(),
                 ApprovalRule {
-                    roles: vec![RoleRequirement::new(Role::Curator, 2)],
+                    roles: vec![RoleRequirement::new(RoleKey::Curator, 2)],
                     distinct_approvers: 2,
                     ..memory_rule()
                 },
             ],
         };
-        let requirement = matrix.resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::Team);
+        let requirement =
+            matrix.resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit);
         assert_eq!(
             requirement.roles,
-            vec![RoleRequirement::new(Role::Curator, 2)],
+            vec![RoleRequirement::new(RoleKey::Curator, 2)],
             "two rules asking 1 and 2 ask for 2, not 3"
         );
         assert_eq!(requirement.distinct_approvers, 2);
@@ -681,14 +693,26 @@ mod tests {
         let rule = ApprovalRule {
             asset: Some(AssetKind::Memory),
             min_sensitivity: Sensitivity::Confidential,
-            scope_kinds: Some(vec![ScopeKind::Department, ScopeKind::Org]),
-            roles: vec![RoleRequirement::new(Role::Steward, 1)],
+            scope_kinds: Some(vec![ScopeKind::OrgUnit, ScopeKind::Tenant]),
+            roles: vec![RoleRequirement::new(RoleKey::Administrator, 1)],
             distinct_approvers: 1,
         };
-        assert!(rule.matches(AssetKind::Memory, Sensitivity::Restricted, ScopeKind::Org));
-        assert!(!rule.matches(AssetKind::Memory, Sensitivity::Internal, ScopeKind::Org));
-        assert!(!rule.matches(AssetKind::Memory, Sensitivity::Restricted, ScopeKind::Team));
-        assert!(!rule.matches(AssetKind::Prompt, Sensitivity::Restricted, ScopeKind::Org));
+        assert!(rule.matches(
+            AssetKind::Memory,
+            Sensitivity::Restricted,
+            ScopeKind::Tenant
+        ));
+        assert!(!rule.matches(AssetKind::Memory, Sensitivity::Internal, ScopeKind::Tenant));
+        assert!(!rule.matches(
+            AssetKind::Memory,
+            Sensitivity::Restricted,
+            ScopeKind::Principal
+        ));
+        assert!(!rule.matches(
+            AssetKind::Prompt,
+            Sensitivity::Restricted,
+            ScopeKind::Tenant
+        ));
     }
 
     /// One person holding both required roles satisfies both role lines
@@ -699,16 +723,20 @@ mod tests {
         let requirement = ApprovalMatrix {
             rules: vec![memory_rule()],
         }
-        .resolve(AssetKind::Memory, Sensitivity::Restricted, ScopeKind::Team);
-        let both = [approval(1, &[Role::Curator, Role::Compliance])];
+        .resolve(
+            AssetKind::Memory,
+            Sensitivity::Restricted,
+            ScopeKind::OrgUnit,
+        );
+        let both = [approval(1, &[RoleKey::Curator, RoleKey::Administrator])];
         let outstanding = requirement.outstanding(&both);
         assert!(outstanding.roles.is_empty(), "both role lines are met");
         assert_eq!(outstanding.distinct_approvers, 1, "still one person");
         assert!(!requirement.satisfied_by(&both));
 
         let two = [
-            approval(1, &[Role::Curator, Role::Compliance]),
-            approval(2, &[Role::Viewer]),
+            approval(1, &[RoleKey::Curator, RoleKey::Administrator]),
+            approval(2, &[RoleKey::Viewer]),
         ];
         assert!(requirement.satisfied_by(&two));
     }
@@ -720,9 +748,9 @@ mod tests {
         let requirement = ApprovalMatrix {
             rules: vec![memory_rule()],
         }
-        .resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::Team);
-        assert!(requirement.satisfied_by(&[approval(1, &[Role::Curator])]));
-        assert!(!requirement.satisfied_by(&[approval(1, &[Role::Viewer])]));
+        .resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit);
+        assert!(requirement.satisfied_by(&[approval(1, &[RoleKey::Curator])]));
+        assert!(!requirement.satisfied_by(&[approval(1, &[RoleKey::Viewer])]));
     }
 
     #[test]
@@ -730,16 +758,19 @@ mod tests {
         let mut requirement = ApprovalMatrix::empty().resolve(
             AssetKind::Memory,
             Sensitivity::Internal,
-            ScopeKind::Team,
+            ScopeKind::OrgUnit,
         );
         let scope = ScopeId::from_uuid(Uuid::from_bytes([7; 16]));
         requirement.require_subject(RequirementOrigin::Curators { scope_id: scope }, "subject-3");
         requirement.require_subject(RequirementOrigin::Curators { scope_id: scope }, "subject-4");
         assert_eq!(requirement.distinct_approvers, 2);
 
-        let one = [approval(3, &[Role::Curator])];
+        let one = [approval(3, &[RoleKey::Curator])];
         assert_eq!(requirement.outstanding(&one).subjects, vec!["subject-4"]);
-        let both = [approval(3, &[Role::Curator]), approval(4, &[Role::Curator])];
+        let both = [
+            approval(3, &[RoleKey::Curator]),
+            approval(4, &[RoleKey::Curator]),
+        ];
         assert!(requirement.satisfied_by(&both));
     }
 
@@ -748,23 +779,23 @@ mod tests {
         let requirement = ApprovalMatrix {
             rules: vec![memory_rule()],
         }
-        .resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::Team);
+        .resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit);
         let outstanding = requirement.outstanding(&[]);
         assert!(
-            outstanding.advanced_by(&approval(1, &[Role::Viewer])),
+            outstanding.advanced_by(&approval(1, &[RoleKey::Viewer])),
             "distinct line"
         );
 
-        let satisfied = requirement.outstanding(&[approval(1, &[Role::Curator])]);
+        let satisfied = requirement.outstanding(&[approval(1, &[RoleKey::Curator])]);
         assert!(satisfied.is_empty());
-        assert!(!satisfied.advanced_by(&approval(2, &[Role::Curator])));
+        assert!(!satisfied.advanced_by(&approval(2, &[RoleKey::Curator])));
     }
 
     #[test]
     fn a_rule_asking_more_of_a_role_than_it_asks_of_people_is_rejected() {
         let matrix = ApprovalMatrix {
             rules: vec![ApprovalRule {
-                roles: vec![RoleRequirement::new(Role::Curator, 2)],
+                roles: vec![RoleRequirement::new(RoleKey::Curator, 2)],
                 distinct_approvers: 1,
                 ..memory_rule()
             }],
@@ -773,7 +804,7 @@ mod tests {
 
         let zero = ApprovalMatrix {
             rules: vec![ApprovalRule {
-                roles: vec![RoleRequirement::new(Role::Curator, 0)],
+                roles: vec![RoleRequirement::new(RoleKey::Curator, 0)],
                 ..memory_rule()
             }],
         };
@@ -782,8 +813,8 @@ mod tests {
         let twice = ApprovalMatrix {
             rules: vec![ApprovalRule {
                 roles: vec![
-                    RoleRequirement::new(Role::Curator, 1),
-                    RoleRequirement::new(Role::Curator, 2),
+                    RoleRequirement::new(RoleKey::Curator, 1),
+                    RoleRequirement::new(RoleKey::Curator, 2),
                 ],
                 distinct_approvers: 2,
                 ..memory_rule()
@@ -837,17 +868,17 @@ mod tests {
         let requirement = ApprovalMatrix::empty().resolve(
             AssetKind::Memory,
             Sensitivity::Restricted,
-            ScopeKind::Team,
+            ScopeKind::OrgUnit,
         );
         assert_eq!(
             requirement.outstanding(&[]).describe(),
-            "compliance × 1, 2 distinct approver(s)"
+            "administrator × 1, 2 distinct approver(s)"
         );
         assert_eq!(
             requirement
                 .outstanding(&[
-                    approval(1, &[Role::Compliance]),
-                    approval(2, &[Role::Curator])
+                    approval(1, &[RoleKey::Administrator]),
+                    approval(2, &[RoleKey::Curator])
                 ])
                 .describe(),
             "nothing"

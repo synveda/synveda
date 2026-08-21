@@ -43,16 +43,17 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder, Embedder as _};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_retrieval::indexer::{self, IndexerConfig};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, tenants};
+use synveda_store::{identities, scopes, tenants};
+use synveda_types::scope::ScopeKind;
 use synveda_types::{
-    IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity,
-    TenantId, TenantStatus,
+    IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, ScopeId, Sensitivity, TenantId,
+    TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -226,39 +227,41 @@ async fn inject_median_under_budget_at_1k_concurrent_sessions() {
     .await
     .expect("admit tenant");
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(org.id),
+            slug: "eng".to_owned(),
+            display_name: "Engineering".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("org");
-    let eng = hierarchy::create(
+    .expect("create scope");
+    let platform = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "eng",
-        "Engineering",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(eng.id),
+            slug: "platform".to_owned(),
+            display_name: "Platform".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("dept");
-    let platform = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
-    )
-    .await
-    .expect("team");
+    .expect("create scope");
     tx.commit().await.expect("commit hierarchy");
 
     let mut tokens: Vec<String> = Vec::with_capacity(USERS);
@@ -266,21 +269,12 @@ async fn inject_median_under_budget_at_1k_concurrent_sessions() {
     for user in 0..USERS {
         let subject = format!("load-user-{user}");
         let mut tx = pool.begin().await.expect("begin");
-        let id = IdentityId::new();
-        let leaf = hierarchy::create(
+        let leaf = scopes::ensure_principal_scope(&mut tx, tenant, &subject, &subject)
+            .await
+            .expect("principal scope");
+        let identity = identities::create(
             &mut tx,
-            ScopeId::new(),
-            tenant,
-            Some(platform.id),
-            ScopeKind::User,
-            &personal_slug(None, &subject, id),
-            &subject,
-        )
-        .await
-        .expect("personal scope");
-        identities::create(
-            &mut tx,
-            id,
+            IdentityId::new(),
             tenant,
             Some(&subject),
             IdentityKind::User,
@@ -292,7 +286,7 @@ async fn inject_median_under_budget_at_1k_concurrent_sessions() {
         .expect("identity");
         tx.commit().await.expect("commit user");
         tokens.push(Hs256Verifier::new(SECRET).issue(&subject, tenant, Duration::from_secs(3600)));
-        leaves.push((leaf.id, id));
+        leaves.push((leaf.id, identity.id));
     }
 
     // ── Corpus ───────────────────────────────────────────────────────────
@@ -335,7 +329,6 @@ async fn inject_median_under_budget_at_1k_concurrent_sessions() {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index,
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),

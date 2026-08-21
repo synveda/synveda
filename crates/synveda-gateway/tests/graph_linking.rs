@@ -38,15 +38,16 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{OidcVerifier, parse_issuers, personal_slug};
+use synveda_identity::{OidcVerifier, parse_issuers};
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_ingest::extraction::{AnyExtractor, DeterministicExtractor};
 use synveda_ingest::worker::{self, WorkerConfig, WorkerDeps};
 use synveda_store::graph::{self, ProvenanceEdge};
-use synveda_store::{hierarchy, identities, quarantine, rls, tenants};
+use synveda_store::{identities, quarantine, rls, scopes, tenants};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Depth, Graph, GraphVertexId, HierarchyNode, Identity, IdentityId, IdentityKind, ObserveEventId,
-    RecordId, ScopeId, ScopeKind, TenantId, TenantStatus,
+    Depth, Graph, GraphVertexId, Identity, IdentityId, IdentityKind, ObserveEventId, RecordId,
+    ScopeId, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -164,7 +165,6 @@ fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(
             synveda_retrieval::SearchIndex::open(
@@ -192,7 +192,6 @@ fn worker_deps(state: &AppState) -> WorkerDeps {
     WorkerDeps {
         pool: state.pool.clone(),
         pdp: Arc::clone(&state.pdp),
-        chains: Arc::clone(&state.scope_chains),
         extractor: AnyExtractor::Deterministic(DeterministicExtractor::new()),
         embedder: AnyEmbedder::Deterministic(DeterministicEmbedder::new()),
     }
@@ -273,68 +272,45 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
     Some((pool, id, url))
 }
 
-async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> HierarchyNode {
+async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Scope {
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let platform = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(org.id),
+            slug: "platform".to_owned(),
+            display_name: "Platform".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let platform = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
-    )
-    .await
-    .expect("create team");
-    hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        "Quarantine",
-    )
-    .await
-    .expect("create quarantine");
+    .expect("create scope");
     tx.commit().await.expect("commit hierarchy");
     platform
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -460,11 +436,11 @@ async fn two_sessions_naming_one_company_converge_on_one_vertex() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let platform = seed_hierarchy(&pool, tenant).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
-    seed_user(&pool, tenant, "alice", platform.id).await;
+    seed_user(&pool, tenant, "alice").await;
     let token = idp.user_token("alice");
     let deps = worker_deps(&state);
 
@@ -694,11 +670,11 @@ async fn records_that_name_nothing_are_counted_as_orphans() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let platform = seed_hierarchy(&pool, tenant).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
-    seed_user(&pool, tenant, "alice", platform.id).await;
+    seed_user(&pool, tenant, "alice").await;
     let token = idp.user_token("alice");
 
     let status = post_observe(
@@ -774,11 +750,11 @@ async fn a_redacted_secret_never_becomes_a_vertex() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let platform = seed_hierarchy(&pool, tenant).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
-    seed_user(&pool, tenant, "alice", platform.id).await;
+    seed_user(&pool, tenant, "alice").await;
     let token = idp.user_token("alice");
 
     let status = post_observe(
@@ -866,11 +842,11 @@ async fn supersessions_are_projected_as_provenance_edges_and_never_mirrored() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let platform = seed_hierarchy(&pool, tenant).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
-    seed_user(&pool, tenant, "alice", platform.id).await;
+    seed_user(&pool, tenant, "alice").await;
     let token = idp.user_token("alice");
     let deps = worker_deps(&state);
 

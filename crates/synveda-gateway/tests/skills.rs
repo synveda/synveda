@@ -47,14 +47,16 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::{hierarchy, identities, policy_assignments, role_bindings, tenants};
+use synveda_store::{access, identities, policy_assignments, scopes, tenants};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    CompositionConfig, HierarchyNode, Identity, IdentityId, IdentityKind, PackConfig, Role,
-    ScopeId, ScopeKind, Sensitivity, SkillFile, SkillIndex, TenantId, TenantStatus,
+    CompositionConfig, GrantId, Identity, IdentityId, IdentityKind, PackConfig, ScopeId,
+    Sensitivity, SkillFile, SkillIndex, TenantId, TenantStatus,
+    access::{GrantSource, GrantSubject, RoleKey},
 };
 use synveda_vedaflow::SkillAsset;
 use tower::ServiceExt;
@@ -109,7 +111,6 @@ fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -165,6 +166,14 @@ struct World {
     dave: String,
 }
 
+/// The tenant root's own slug — `ensure_tenant_root` mints it from the
+/// tenant's own slug, which `world()` derives from the tenant id rather
+/// than naming a fixed organisation (there is no "acme" here; a scope
+/// path that ends with this is the org root's).
+fn org_slug(tenant: TenantId) -> String {
+    format!("skil1-{}", tenant.as_uuid().simple())
+}
+
 async fn world() -> Option<World> {
     let url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
@@ -197,46 +206,41 @@ async fn world() -> Option<World> {
     .expect("admit tenant");
 
     let mut tx = pool.begin().await.expect("begin");
-    let org = node(&mut tx, tenant, None, ScopeKind::Org, "acme").await;
-    let eng = node(&mut tx, tenant, Some(org.id), ScopeKind::Department, "eng").await;
-    let platform = node(&mut tx, tenant, Some(eng.id), ScopeKind::Team, "platform").await;
-    let payments = node(&mut tx, tenant, Some(eng.id), ScopeKind::Team, "payments").await;
-    node(
-        &mut tx,
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-    )
-    .await;
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = node(&mut tx, tenant, Some(org.id), "eng").await;
+    let platform = node(&mut tx, tenant, Some(eng.id), "platform").await;
+    let payments = node(&mut tx, tenant, Some(eng.id), "payments").await;
     tx.commit().await.expect("commit hierarchy");
 
-    for (subject, parent) in [
-        ("alice", platform.id),
-        ("cora", platform.id),
-        ("sam", payments.id),
-        ("sec", payments.id),
-        ("bea", platform.id),
-        ("dave", payments.id),
-    ] {
-        seed_user(&pool, tenant, subject, parent).await;
-    }
-    bind(&pool, tenant, "alice", platform.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora", platform.id, Role::Curator).await;
-    bind(&pool, tenant, "sam", platform.id, Role::Steward).await;
-    bind(&pool, tenant, "sec", platform.id, Role::SecurityReviewer).await;
+    // Placement is identity (CPR-7, ADR-0074 decision 3): each principal's
+    // scope is minted with the identity, directly under the anchor the
+    // doc comments on `World` already named — platform for the platform
+    // cast, payments for the other team's, root for the one person this
+    // suite binds rather than places.
+    seed_user(&pool, tenant, "alice", platform.id).await;
+    seed_user(&pool, tenant, "cora", platform.id).await;
+    seed_user(&pool, tenant, "sam", payments.id).await;
+    seed_user(&pool, tenant, "sec", org.id).await;
+    seed_user(&pool, tenant, "bea", platform.id).await;
+    seed_user(&pool, tenant, "dave", payments.id).await;
+    bind(&pool, tenant, "alice", platform.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora", platform.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "sam", platform.id, RoleKey::Administrator).await;
+    bind(&pool, tenant, "sec", platform.id, RoleKey::Reviewer).await;
     // The org too, so a climb has approvers waiting where it lands.
-    bind(&pool, tenant, "cora", org.id, Role::Curator).await;
-    bind(&pool, tenant, "sam", org.id, Role::Steward).await;
-    bind(&pool, tenant, "sec", org.id, Role::SecurityReviewer).await;
+    bind(&pool, tenant, "cora", org.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "sam", org.id, RoleKey::Administrator).await;
+    bind(&pool, tenant, "sec", org.id, RoleKey::Reviewer).await;
     // And the other team, so SKIL-4 can publish something there that a
     // platform reader must never see. The same cast, because the point of
     // the criterion is that team B's skills are absent for reasons of
     // *placement* rather than because nobody could publish them.
-    bind(&pool, tenant, "alice", payments.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora", payments.id, Role::Curator).await;
-    bind(&pool, tenant, "sam", payments.id, Role::Steward).await;
-    bind(&pool, tenant, "sec", payments.id, Role::SecurityReviewer).await;
+    bind(&pool, tenant, "alice", payments.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora", payments.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "sam", payments.id, RoleKey::Administrator).await;
+    bind(&pool, tenant, "sec", payments.id, RoleKey::Reviewer).await;
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
     let app = router(state(&url, pdp.clone()));
@@ -262,31 +266,56 @@ async fn node(
     tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
     tenant: TenantId,
     parent: Option<ScopeId>,
-    kind: ScopeKind,
     slug: &str,
-) -> HierarchyNode {
-    hierarchy::create(tx, ScopeId::new(), tenant, parent, kind, slug, slug)
-        .await
-        .expect("create node")
-}
-
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
-    let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
+) -> Scope {
+    scopes::create(
+        &mut *tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: parent,
+            slug: slug.to_owned(),
+            display_name: slug.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create personal scope");
+    .expect("create scope")
+}
+
+/// Mints `subject`'s own `principal`-shaped scope directly under `anchor`
+/// — the shape `POST /v1/service-identities` mints an agent's scope under
+/// its operator's anchor with (ADR-0018 decision 4), used here for the
+/// gradient this suite is about. `ensure_principal_scope` always anchors
+/// at the tenant root; the gradient tests need placement, not the root,
+/// because since CPR-7 (ADR-0074 decision 3) the root is the only thing
+/// besides a person's own scope that is ever on anyone's own chain, and a
+/// suite about "own team's skills, the org's, never another team's" has
+/// nothing to walk without a real placement chain under it.
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, anchor: ScopeId) -> Identity {
+    let mut tx = pool.begin().await.expect("begin");
+    let leaf = scopes::create(
+        &mut tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::Principal,
+            parent_scope_id: Some(anchor),
+            slug: scopes::principal_slug(subject),
+            display_name: subject.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: Some(subject.to_owned()),
+            created_by: None,
+        },
+    )
+    .await
+    .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
@@ -300,12 +329,26 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: Role) {
+async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, Some(scope), role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant role");
+    tx.commit().await.expect("commit grant");
 }
 
 async fn call(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
@@ -601,8 +644,9 @@ async fn a_skill_reaches_a_client_only_through_review_under_every_pack() {
     );
     let refusal = detail(&refused);
     assert!(
-        refusal.contains("security-reviewer"),
-        "the refusal names the role the floor requires: {refusal}"
+        refusal.contains("reviewer"),
+        "the refusal names the key the floor requires — `reviewer` is what \
+         `security-reviewer` became (ADR-0074 decision 6): {refusal}"
     );
     assert!(
         refusal.contains("proposal"),
@@ -633,7 +677,7 @@ async fn a_skill_reaches_a_client_only_through_review_under_every_pack() {
         "`standard` does not make shipping code a one-signature act: {refused_standard}"
     );
     assert!(
-        detail(&refused_standard).contains("security-reviewer"),
+        detail(&refused_standard).contains("reviewer"),
         "{}",
         detail(&refused_standard)
     );
@@ -2707,7 +2751,7 @@ async fn the_available_set_and_the_by_name_resolve_agree_about_shadowing() {
         1,
         "the org's copy is named as shadowed: {entry}"
     );
-    assert!(shadows[0].ends_with("acme"), "{entry}");
+    assert!(shadows[0].ends_with(&org_slug(w.tenant)), "{entry}");
 
     // The resolve agrees, byte for byte and commit for commit.
     let (status, resolved) = resolve(&w, &w.bea, "code-review").await;
@@ -2724,7 +2768,7 @@ async fn the_available_set_and_the_by_name_resolve_agree_about_shadowing() {
     assert!(
         dave_entry["scope_path"]
             .as_str()
-            .is_some_and(|path| path.ends_with("acme")),
+            .is_some_and(|path| path.ends_with(&org_slug(w.tenant))),
         "{for_dave}"
     );
     assert!(
@@ -2797,7 +2841,7 @@ async fn a_nearer_copy_nobody_may_read_does_not_shadow_the_readable_one() {
     assert!(
         entry["scope_path"]
             .as_str()
-            .is_some_and(|path| path.ends_with("acme")),
+            .is_some_and(|path| path.ends_with(&org_slug(w.tenant))),
         "{entry}"
     );
     assert!(

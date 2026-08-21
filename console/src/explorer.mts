@@ -23,15 +23,20 @@
  * waiting to be noticed.
  */
 
-/** A hierarchy node, as `/v1/hierarchy/*` serves it. */
+/** A governed scope, as `/v1/admin/scopes` serves it (CPR-7). */
 export interface Node {
   id: string;
-  parent_id: string | null;
-  kind: "org" | "division" | "department" | "team" | "user";
+  parent_scope_id: string | null;
+  kind: "tenant" | "org_unit" | "workspace" | "project" | "principal";
   slug: string;
-  name: string;
-  depth: number;
-  path: string;
+  display_name: string;
+  status: string;
+}
+
+/** One level of the tree: the parent it hangs from, and its children. */
+export interface ScopeLevel {
+  parent?: Node | null;
+  scopes: Node[];
 }
 
 /** Where an inherited thing came from. One shape, three admin planes. */
@@ -46,28 +51,24 @@ export interface EffectivePack {
   origin: Origin;
 }
 
-export interface EffectiveBinding {
-  subject: string;
-  role: string;
-  scope_id: string | null;
-  origin: Origin;
-}
-
-export interface EffectiveBindings {
-  bindings: EffectiveBinding[];
-  chain: string[];
-}
-
 export interface Capabilities {
   scope_id: string;
-  /** Absent when the reader may not read the node itself (ADR-0058
+  /** Absent when the reader may not read the scope itself (ADR-0058
    * decision 3): the verdicts beside it are the reader's own either way. */
   scope_path?: string;
   pack?: EffectivePack;
+  /** The grant keys that reached this reader here (CPR-6; since CPR-7 the
+   * only roles there are). */
   roles: string[];
   actions: Record<string, boolean>;
   read_tiers: Record<string, string[]>;
-  role_assign: Record<string, boolean>;
+}
+
+/** The batch probe's envelope. */
+export interface CapabilityBatch {
+  capabilities: Capabilities[];
+  not_answered?: string[];
+  max_scopes: number;
 }
 
 export interface Lapse {
@@ -96,7 +97,7 @@ export interface LapseListing {
  * `askedAbout` is the frame and without it the sentence cannot be written:
  * `{kind: "assigned", scope_id: X}` means "assigned here" or "inherited
  * from X" depending entirely on which node the reader is looking at, and a
- * renderer that dropped the comparison would tell a steward their team had
+ * renderer that dropped the comparison would tell an administrator their unit had
  * its own pack when it does not.
  */
 export function describeOrigin(origin: Origin, askedAbout: string): string {
@@ -149,13 +150,6 @@ export function mayRead(capabilities: Capabilities): [string, string[]][] {
 }
 
 /** The roles this reader may bind here, sorted. */
-export function mayBind(capabilities: Capabilities): string[] {
-  return Object.entries(capabilities.role_assign)
-    .filter(([, permitted]) => permitted)
-    .map(([role]) => role)
-    .sort();
-}
-
 /**
  * Whether a capability answer offers an action.
  *
@@ -173,7 +167,7 @@ export function offers(capabilities: Capabilities | null, action: string): boole
  *
  * Both ends, because that is the whole of ADR-0058 decision 7: a grant is
  * as much a fact about the team that received it as about the team that
- * disclosed. A view that showed only the target end would tell the steward
+ * disclosed. A view that showed only the target end would tell the administrator
  * of a granted team that nothing is happening to them.
  */
 export function lapsesTouching(lapses: Lapse[], scopeId: string): Lapse[] {

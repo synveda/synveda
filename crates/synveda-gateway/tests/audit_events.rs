@@ -25,8 +25,10 @@ use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_policy::Pdp;
-use synveda_store::{hierarchy, identities, rls, role_bindings};
-use synveda_types::{IdentityId, IdentityKind, Role, ScopeId, ScopeKind, TenantId, TenantStatus};
+use synveda_store::{access, identities, rls, scopes};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::Scope;
+use synveda_types::{GrantId, IdentityId, IdentityKind, TenantId, TenantStatus};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"aud-1-test-secret";
@@ -51,7 +53,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(
             synveda_retrieval::SearchIndex::open(
@@ -90,16 +91,35 @@ async fn admitted_tenant(pool: &PgPool, label: &str, status: TenantStatus) -> Te
     id
 }
 
-/// Seeds the admin binding through the store — the CLI bootstrap path,
-/// deliberately silent in the chain so assertions start from seq 1.
-async fn bind_admin(pool: &PgPool, tenant_id: TenantId) {
+/// Seeds the admin's authority through the store — the CLI bootstrap path,
+/// deliberately silent in the chain so assertions start from seq 1: mint
+/// the tenant root and grant the admin subject `administrator` at it.
+async fn bind_admin(pool: &PgPool, tenant_id: TenantId) -> Scope {
     let mut tx = rls::begin_tenant_tx(pool, tenant_id)
         .await
         .expect("begin tenant tx");
-    role_bindings::bind(&mut *tx, tenant_id, ADMIN, None, Role::OrgAdmin)
+    let root = scopes::ensure_tenant_root(&mut tx, tenant_id)
         .await
-        .expect("bind admin");
-    tx.commit().await.expect("commit binding");
+        .expect("mint root");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id,
+            scope_id: root.id,
+            subject: GrantSubject::Principal {
+                principal_id: ADMIN.to_owned(),
+            },
+            role_key: RoleKey::Administrator,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant administrator at the root");
+    tx.commit().await.expect("commit grant");
+    root
 }
 
 async fn api(
@@ -107,12 +127,16 @@ async fn api(
     method: &str,
     path: &str,
     token: &str,
+    key: Option<&str>,
     body: Option<Value>,
 ) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method(method)
         .uri(path)
         .header("authorization", format!("Bearer {token}"));
+    if let Some(key) = key {
+        builder = builder.header("idempotency-key", key);
+    }
     let request = match body {
         Some(body) => {
             builder = builder.header("content-type", "application/json");
@@ -173,40 +197,49 @@ async fn admin_plane_operations_chain_one_event_each() {
     let app = router(state);
 
     let tenant_id = admitted_tenant(&pool, "aud1", TenantStatus::Active).await;
-    bind_admin(&pool, tenant_id).await;
+    let root = bind_admin(&pool, tenant_id).await;
     let admin = issue(ADMIN, tenant_id);
 
-    // Mutation: create the org root.
+    // Mutation: create an org unit under the tenant root.
     let (status, body) = api(
         &app,
         "POST",
-        "/v1/hierarchy/nodes",
+        "/v1/admin/scopes",
         &admin,
-        Some(json!({"kind": "org", "slug": "acme", "name": "ACME"})),
+        Some("aud1-create-eng"),
+        Some(json!({
+            "parent_id": root.id, "kind": "org_unit",
+            "slug": "eng", "display_name": "Engineering"
+        })),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "create root: {body}");
-    let root = body["id"].as_str().expect("root id").to_owned();
+    assert_eq!(status, StatusCode::CREATED, "create unit: {body}");
+    let unit = body["id"].as_str().expect("unit id").to_owned();
 
     // Read: fetch it back.
     let (status, body) = api(
         &app,
         "GET",
-        &format!("/v1/hierarchy/nodes/{root}"),
+        &format!("/v1/admin/scopes/{unit}"),
         &admin,
+        None,
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "read root: {body}");
+    assert_eq!(status, StatusCode::OK, "read unit: {body}");
 
-    // Denial: a roleless subject tries to create under the root.
+    // Denial: an ungranted subject tries to create under the root.
     let nobody = issue("aud1-nobody", tenant_id);
     let (status, body) = api(
         &app,
         "POST",
-        "/v1/hierarchy/nodes",
+        "/v1/admin/scopes",
         &nobody,
-        Some(json!({"parent_id": root, "kind": "team", "slug": "rogue", "name": "Rogue"})),
+        Some("aud1-create-rogue"),
+        Some(json!({
+            "parent_id": root.id, "kind": "org_unit",
+            "slug": "rogue", "display_name": "Rogue"
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "denied create: {body}");
@@ -217,12 +250,12 @@ async fn admin_plane_operations_chain_one_event_each() {
         panic!("expected exactly 3 chain events, got {}", events.len());
     };
 
-    assert_eq!(created.action, "hierarchy.node.created");
+    assert_eq!(created.action, "scope.created");
     assert_eq!(created.outcome, "success");
     assert_eq!(created.actor_kind, "subject");
     assert_eq!(created.actor_subject, ADMIN);
-    assert_eq!(created.resource, format!("scope {root}"));
-    assert_eq!(created.payload["node"]["slug"], "acme");
+    assert_eq!(created.resource, format!("scope {unit}"));
+    assert_eq!(created.payload["scope"]["slug"], "eng");
     let pack = created.payload["authz"]["pack"].as_str().expect("pack");
     assert!(
         pack.starts_with("regulated-strict@"),
@@ -231,13 +264,13 @@ async fn admin_plane_operations_chain_one_event_each() {
 
     assert_eq!(read.action, "authz.decision");
     assert_eq!(read.outcome, "allow");
-    assert_eq!(read.payload["op"], "get");
-    assert_eq!(read.payload["authz"]["action"], "hierarchy.read");
+    assert_eq!(read.payload["op"], "admin_scopes.get");
+    assert_eq!(read.payload["authz"]["action"], "policy.read");
 
     assert_eq!(denied.action, "authz.decision");
     assert_eq!(denied.outcome, "deny");
     assert_eq!(denied.actor_subject, "aud1-nobody");
-    assert_eq!(denied.payload["action"], "hierarchy.create");
+    assert_eq!(denied.payload["action"], "scope.create");
     assert!(
         denied.payload["reason"]
             .as_str()
@@ -259,7 +292,7 @@ async fn suspended_tenant_resolution_chains_the_denial() {
 
     let tenant_id = admitted_tenant(&pool, "aud1s", TenantStatus::Suspended).await;
     let token = issue("aud1-suspended-user", tenant_id);
-    let (status, _) = api(&app, "GET", "/v1/whoami", &token, None).await;
+    let (status, _) = api(&app, "GET", "/v1/whoami", &token, None, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     let (events, verification) = chain(&pool, tenant_id).await;
@@ -281,44 +314,14 @@ async fn over_ttl_service_token_chains_the_rejection() {
     let app = router(state);
 
     let tenant_id = admitted_tenant(&pool, "aud1t", TenantStatus::Active).await;
-    // Register an agent through the store (the CLI bootstrap path): an
-    // anchor team and a personal leaf carrying the identity row.
+    // Register an agent through the store (the CLI bootstrap path): its own
+    // principal scope under the tenant root carrying the identity row.
     let mut tx = rls::begin_tenant_tx(&pool, tenant_id)
         .await
         .expect("begin tenant tx");
-    let org = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant_id,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
-    )
-    .await
-    .expect("create org");
-    let team = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant_id,
-        Some(org.id),
-        ScopeKind::Team,
-        "agents",
-        "Agents",
-    )
-    .await
-    .expect("create team");
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant_id,
-        Some(team.id),
-        ScopeKind::User,
-        "agent-1-leaf",
-        "Agent 1",
-    )
-    .await
-    .expect("create leaf");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant_id, "agent-1", "Agent 1")
+        .await
+        .expect("mint agent scope");
     identities::create(
         &mut tx,
         IdentityId::new(),
@@ -327,7 +330,7 @@ async fn over_ttl_service_token_chains_the_rejection() {
         IdentityKind::Service,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("register agent");
@@ -337,7 +340,7 @@ async fn over_ttl_service_token_chains_the_rejection() {
     // 401, chained as auth.token.rejected.
     let long_lived =
         Hs256Verifier::new(SECRET).issue("agent-1", tenant_id, Duration::from_secs(7200));
-    let (status, _) = api(&app, "GET", "/v1/hierarchy/root", &long_lived, None).await;
+    let (status, _) = api(&app, "GET", "/v1/admin/scopes", &long_lived, None, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     let (events, verification) = chain(&pool, tenant_id).await;
@@ -345,5 +348,5 @@ async fn over_ttl_service_token_chains_the_rejection() {
     assert_eq!(events[0].action, "auth.token.rejected");
     assert_eq!(events[0].outcome, "deny");
     assert_eq!(events[0].actor_subject, "agent-1");
-    assert_eq!(events[0].payload["op"], "root");
+    assert_eq!(events[0].payload["op"], "list");
 }

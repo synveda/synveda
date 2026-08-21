@@ -26,17 +26,17 @@
 //! and the read must flip on the very next decision.
 
 use chrono::Utc;
-use synveda_policy::ScopeNode;
-use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD};
-use synveda_types::{HierarchyNode, PolicyAssignment, ScopeId, ScopeKind, Sensitivity, TenantId};
+use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD, ScopeNode};
+use synveda_types::scope::ScopeKind;
+use synveda_types::{PolicyAssignment, ScopeId, Sensitivity, TenantId};
 
 struct Fixture {
     tenant: TenantId,
-    nodes: Vec<HierarchyNode>,
+    nodes: Vec<ScopeNode>,
 }
 
 impl Fixture {
-    fn node(&self, slug: &str) -> &HierarchyNode {
+    fn node(&self, slug: &str) -> &ScopeNode {
         self.nodes
             .iter()
             .find(|node| node.slug == slug)
@@ -73,35 +73,31 @@ impl Fixture {
             current = parent.parent_id;
             chain.push(parent.clone());
         }
-        chain.iter().map(ScopeNode::from_hierarchy).collect()
+        chain.clone()
     }
 }
 
 fn fixture() -> Fixture {
     let tenant = TenantId::new();
     let mut nodes = Vec::new();
-    let mut add = |parent: Option<ScopeId>, kind: ScopeKind, slug: &str, depth: i32| -> ScopeId {
+    let mut add = |parent: Option<ScopeId>, kind: ScopeKind, slug: &str, _depth: i32| -> ScopeId {
         let id = ScopeId::new();
-        nodes.push(HierarchyNode {
+        nodes.push(ScopeNode {
             id,
             tenant_id: tenant,
             parent_id: parent,
             kind,
             slug: slug.to_owned(),
-            name: slug.to_owned(),
-            depth,
-            path: slug.to_owned(),
             sealed: false,
-            created_at: Utc::now(),
         });
         id
     };
-    let org = add(None, ScopeKind::Org, "org", 0);
-    let eng = add(Some(org), ScopeKind::Department, "eng", 1);
-    add(Some(org), ScopeKind::Department, "sales", 1);
-    let team_a = add(Some(eng), ScopeKind::Team, "team-a", 2);
-    add(Some(eng), ScopeKind::Team, "team-b", 2);
-    add(Some(team_a), ScopeKind::User, "alice-user", 3);
+    let org = add(None, ScopeKind::Tenant, "org", 0);
+    let eng = add(Some(org), ScopeKind::OrgUnit, "eng", 1);
+    add(Some(org), ScopeKind::OrgUnit, "sales", 1);
+    let team_a = add(Some(eng), ScopeKind::OrgUnit, "team-a", 2);
+    add(Some(eng), ScopeKind::OrgUnit, "team-b", 2);
+    add(Some(team_a), ScopeKind::Principal, "alice-user", 3);
     Fixture { tenant, nodes }
 }
 

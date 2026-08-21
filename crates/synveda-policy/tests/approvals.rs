@@ -16,19 +16,21 @@
 use std::fmt::Write as _;
 
 use synveda_policy::{OPEN_COLLABORATION, Pdp, REGULATED_STRICT, STANDARD, approvals};
+use synveda_types::access::RoleKey;
+use synveda_types::scope::ScopeKind;
 use synveda_types::{
     ApprovalMatrix, ApprovalRule, AssetKind, CastApproval, IdentityId, PackConfig,
-    RequirementOrigin, Role, RoleRequirement, ScopeKind, Sensitivity, TenantId,
+    RequirementOrigin, RoleRequirement, Sensitivity, TenantId,
 };
 
 const PACKS: [&str; 3] = [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION];
 
 const SCOPE_KINDS: [ScopeKind; 5] = [
-    ScopeKind::Org,
-    ScopeKind::Division,
-    ScopeKind::Department,
-    ScopeKind::Team,
-    ScopeKind::User,
+    ScopeKind::Tenant,
+    ScopeKind::OrgUnit,
+    ScopeKind::Workspace,
+    ScopeKind::Project,
+    ScopeKind::Principal,
 ];
 
 /// One cell, rendered: `pack asset sensitivity scope → requirement`.
@@ -110,37 +112,39 @@ fn the_packs_differ_where_the_tech_plan_says_they_do() {
     let standard = approvals::embedded(STANDARD);
     let open = approvals::embedded(OPEN_COLLABORATION);
 
-    // A team's own memory: reviewed under regulated-strict, auto under the
-    // two sharing packs (tech plan §2.4's SMB collapse).
-    let team = |matrix: &ApprovalMatrix| {
-        matrix.resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::Team)
+    // A working neighbourhood's own memory (a workspace): one curator
+    // under regulated-strict, auto under the two sharing packs (tech plan
+    // §2.4's SMB collapse; an org_unit is *shared* territory since CPR-7's
+    // shape vocabulary, priced one notch higher).
+    let local = |matrix: &ApprovalMatrix| {
+        matrix.resolve(
+            AssetKind::Memory,
+            Sensitivity::Internal,
+            ScopeKind::Workspace,
+        )
     };
     assert_eq!(
-        team(&strict).roles,
-        vec![RoleRequirement::new(Role::Curator, 1)]
+        local(&strict).roles,
+        vec![RoleRequirement::new(RoleKey::Curator, 1)]
     );
     assert!(
-        team(&standard).is_empty(),
+        local(&standard).is_empty(),
         "standard auto-approves at a team"
     );
-    assert!(team(&open).is_empty(), "open-collaboration too");
+    assert!(local(&open).is_empty(), "open-collaboration too");
 
     // Reaching past a team: two people under regulated-strict, one curator
     // under standard, and under open-collaboration only at the org.
     let dept = |matrix: &ApprovalMatrix| {
-        matrix.resolve(
-            AssetKind::Memory,
-            Sensitivity::Internal,
-            ScopeKind::Department,
-        )
+        matrix.resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit)
     };
     assert_eq!(dept(&strict).distinct_approvers, 2);
     assert_eq!(dept(&standard).distinct_approvers, 1);
     assert!(dept(&open).is_empty());
     assert_eq!(
-        open.resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::Org)
+        open.resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::Tenant)
             .roles,
-        vec![RoleRequirement::new(Role::Curator, 1)],
+        vec![RoleRequirement::new(RoleKey::Curator, 1)],
         "open-collaboration reviews at the one boundary that reaches everybody"
     );
 }
@@ -174,10 +178,16 @@ fn restricted_always_requires_compliance_and_dual_approval() {
         for asset in AssetKind::ALL {
             for kind in SCOPE_KINDS {
                 let requirement = matrix.resolve(asset, Sensitivity::Restricted, kind);
+                // Since CPR-7 merged the vocabularies, a pack cell may ask
+                // for *more* administrators than the floor does; the merged
+                // count is a maximum, so "at least one administrator" is
+                // the floor's claim and the assertion's.
                 assert!(
                     requirement
                         .roles
-                        .contains(&RoleRequirement::new(Role::Compliance, 1)),
+                        .iter()
+                        .any(|required| required.role == RoleKey::Administrator
+                            && required.count >= 1),
                     "{name}: restricted {asset} at {kind:?} escaped compliance review"
                 );
                 assert!(
@@ -197,7 +207,7 @@ fn restricted_always_requires_compliance_and_dual_approval() {
                 let both = [CastApproval {
                     identity: IdentityId::new(),
                     subject: "one-person".to_owned(),
-                    roles: Role::ALL.to_vec(),
+                    roles: RoleKey::ALL.to_vec(),
                 }];
                 assert!(
                     !requirement.satisfied_by(&both),
@@ -222,7 +232,7 @@ fn every_skill_needs_a_security_reviewer_under_every_pack() {
                 assert!(
                     requirement
                         .roles
-                        .contains(&RoleRequirement::new(Role::SecurityReviewer, 1)),
+                        .contains(&RoleRequirement::new(RoleKey::Reviewer, 1)),
                     "{pack}: a {sensitivity} skill at {kind:?} reached published \
                      without a security reviewer"
                 );
@@ -244,7 +254,7 @@ fn a_stored_packs_matrix_rides_its_effective_pack() {
             asset: Some(AssetKind::Memory),
             min_sensitivity: Sensitivity::Public,
             scope_kinds: None,
-            roles: vec![RoleRequirement::new(Role::Steward, 2)],
+            roles: vec![RoleRequirement::new(RoleKey::Administrator, 2)],
             distinct_approvers: 2,
         }],
     };
@@ -274,9 +284,9 @@ fn a_stored_packs_matrix_rides_its_effective_pack() {
     assert_eq!(
         effective
             .approvals
-            .resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::Team)
+            .resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit)
             .roles,
-        vec![RoleRequirement::new(Role::Steward, 2)]
+        vec![RoleRequirement::new(RoleKey::Administrator, 2)]
     );
 
     // The unconfigured case: the floor, and nothing else.
@@ -301,7 +311,11 @@ fn a_stored_packs_matrix_rides_its_effective_pack() {
     assert_eq!(
         plain
             .approvals
-            .resolve(AssetKind::Memory, Sensitivity::Restricted, ScopeKind::Team)
+            .resolve(
+                AssetKind::Memory,
+                Sensitivity::Restricted,
+                ScopeKind::OrgUnit
+            )
             .distinct_approvers,
         2,
         "an unconfigured pack still carries the floor, never 'no review'"
@@ -326,7 +340,7 @@ fn an_unsatisfiable_matrix_is_refused_at_install_time() {
                     asset: None,
                     min_sensitivity: Sensitivity::Public,
                     scope_kinds: None,
-                    roles: vec![RoleRequirement::new(Role::Curator, 2)],
+                    roles: vec![RoleRequirement::new(RoleKey::Curator, 2)],
                     distinct_approvers: 1,
                 }],
             }),

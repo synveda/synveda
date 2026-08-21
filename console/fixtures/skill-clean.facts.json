@@ -1,6 +1,6 @@
 {
   "state": "open",
-  "outstanding": "steward × 1, 1 distinct approver(s)",
+  "outstanding": "administrator × 1, 1 distinct approver(s)",
   "approvals": [
     {
       "subject": "sec",

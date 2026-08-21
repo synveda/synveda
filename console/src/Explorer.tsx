@@ -1,19 +1,18 @@
 /**
- * The hierarchy & policy explorer (CNSL-2) — scopes, packs, roles and
- * standing lapses on one page.
+ * The scope & policy explorer (CNSL-2; the governed-scope re-cut CPR-7) —
+ * scopes, packs and standing lapses on one page.
  *
- * The screen exists because those four facts are one question. "How is this
- * team governed" is answered by a pack, the roles in force over it, the
- * grants standing across it, and where each of those came from — and before
- * this feature answering it took four calls, two of which did not exist and
- * one of which required already knowing the answer.
+ * The screen exists because those three facts are one question. "How is
+ * this scope governed" is answered by a pack, the grants standing across
+ * it, and where each of those came from — and before this feature
+ * answering it took calls that did not exist.
  *
  * # The tree is lazy, and that is a correctness property
  *
  * Children on expand, never `descendants` from the root (ADR-0058 decision
- * 5). HIER-1's AC is a 10,000-node hierarchy; a sidebar that fetched a
- * subtree would pull all of it and then probe every node in it, and the
- * probe is a PDP fan-out. What the reader opens is what gets asked about.
+ * 5). A sidebar that fetched a subtree would pull all of it and then probe
+ * every scope in it, and the probe is a PDP fan-out. What the reader opens
+ * is what gets asked about.
  *
  * # Nothing here is a permission
  *
@@ -25,11 +24,10 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
-  children,
-  hierarchyRoot,
-  nodeCapabilities,
-  nodePolicy,
-  nodeRoles,
+  childrenOf,
+  scopeCapabilities,
+  scopeLevel,
+  scopePolicy,
   standingLapses,
   type Outcome,
 } from "./api.mjs";
@@ -39,15 +37,15 @@ import {
   describeOrigin,
   isInherited,
   lapsesTouching,
-  mayBind,
   mayDo,
   mayRead,
   type Capabilities,
-  type EffectiveBindings,
+  type CapabilityBatch,
   type EffectivePack,
   type Lapse,
   type LapseListing,
   type Node,
+  type ScopeLevel,
 } from "./explorer.mjs";
 
 export function Explorer() {
@@ -56,10 +54,11 @@ export function Explorer() {
   const [lapses, setLapses] = useState<Lapse[]>([]);
 
   const load = useCallback(async () => {
-    const outcome = await hierarchyRoot();
+    const outcome = await scopeLevel();
     setRoot(outcome);
     if (outcome.kind === "ok") {
-      setSelected(outcome.body as Node);
+      const level = outcome.body as ScopeLevel;
+      setSelected(level.parent ?? level.scopes[0] ?? null);
     }
     // Standing grants are read once for the whole screen rather than per
     // node: the scope-free listing is already the set this reader may see
@@ -76,7 +75,7 @@ export function Explorer() {
   }, [load]);
 
   if (root.kind === "loading") {
-    return <p className="muted">Reading the hierarchy…</p>;
+    return <p className="muted">Reading the scope tree…</p>;
   }
   if (root.kind !== "ok") {
     return <Failure state={root} onRetry={() => void load()} />;
@@ -84,10 +83,13 @@ export function Explorer() {
 
   return (
     <section className="explorer">
-      <h2>Hierarchy &amp; policy</h2>
+      <h2>Scope tree &amp; policy</h2>
       <div className="split">
         <div className="tree" role="tree" aria-label="Scopes">
-          <Branch node={root.body as Node} selected={selected} onSelect={setSelected} />
+          <Branch node={(root.body as ScopeLevel).parent as Node} selected={selected} onSelect={setSelected} />
+          {((root.body as ScopeLevel).scopes ?? []).map((child) => (
+            <Branch key={child.id} node={child} selected={selected} onSelect={setSelected} />
+          ))}
         </div>
         {selected ? (
           <NodeDetail key={selected.id} node={selected} lapses={lapses} />
@@ -126,7 +128,13 @@ function Branch({
     // make the cheapest interaction on the screen the most expensive.
     if (next && kids === null) {
       setKids({ kind: "loading" });
-      setKids(await children(node.id));
+      const level = await childrenOf(node.id);
+      // The expansion call answers a level; the tree renders its children.
+      setKids(
+        level.kind === "ok"
+          ? { kind: "ok", body: (level.body as ScopeLevel).scopes ?? [] }
+          : level,
+      );
     }
   }, [open, kids, node.id]);
 
@@ -172,30 +180,33 @@ function Branch({
   );
 }
 
-/** The four panels, for the selected scope. */
+/** The three panels, for the selected scope. */
 function NodeDetail({ node, lapses }: { node: Node; lapses: Lapse[] }) {
   const [pack, setPack] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
-  const [roles, setRoles] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
   const [caps, setCaps] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
 
   useEffect(() => {
     void (async () => {
-      setPack(await nodePolicy(node.id));
-      setRoles(await nodeRoles(node.id, true));
-      setCaps(await nodeCapabilities(node.id));
+      setPack(await scopePolicy(node.id));
+      const batch = await scopeCapabilities([node.id]);
+      // The batch answers a list; this detail asked about one.
+      setCaps(
+        batch.kind === "ok"
+          ? { kind: "ok", body: (batch.body as CapabilityBatch).capabilities[0] }
+          : batch,
+      );
     })();
   }, [node.id]);
 
   const touching = lapsesTouching(lapses, node.id);
   return (
     <article className="node-detail">
-      <h3>{node.path}</h3>
+      <h3>{node.slug}</h3>
       <p className="muted">
-        {node.name} · {node.kind}
+        {node.display_name} · {node.kind}
       </p>
 
       <PackPanel state={pack} node={node} />
-      <RolesPanel state={roles} node={node} />
       <LapsePanel lapses={touching} node={node} />
       <CapabilityPanel state={caps} node={node} />
     </article>
@@ -229,60 +240,6 @@ function PackPanel({ state, node }: { state: Outcome | { kind: "loading" }; node
   );
 }
 
-function RolesPanel({ state, node }: { state: Outcome | { kind: "loading" }; node: Node }) {
-  return (
-    <section>
-      <h4>roles in force</h4>
-      {state.kind === "loading" ? (
-        <p className="muted">…</p>
-      ) : state.kind !== "ok" ? (
-        <PanelFailure state={state} />
-      ) : (
-        (() => {
-          const view = state.body as EffectiveBindings;
-          if (view.bindings.length === 0) {
-            return <p className="muted">nobody holds a role over this scope</p>;
-          }
-          return (
-            <>
-              <table>
-                <thead>
-                  <tr>
-                    <th>role</th>
-                    <th>subject</th>
-                    <th>from</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {view.bindings.map((binding) => (
-                    <tr key={`${binding.subject}:${binding.role}:${binding.scope_id ?? "tenant"}`}>
-                      <td>{binding.role}</td>
-                      <td className="subject">{binding.subject}</td>
-                      <td>
-                        <span
-                          className={
-                            isInherited(binding.origin, node.id) ? "tag inherited" : "tag"
-                          }
-                        >
-                          {describeOrigin(binding.origin, node.id)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {/* The chain is why the answer has the rows it has. A reader
-                  who cannot see it is being asked to take the inheritance
-                  on trust. */}
-              <p className="muted">in force over {view.chain.length} scope(s) of chain</p>
-            </>
-          );
-        })()
-      )}
-    </section>
-  );
-}
-
 function LapsePanel({ lapses, node }: { lapses: Lapse[]; node: Node }) {
   return (
     <section>
@@ -297,7 +254,7 @@ function LapsePanel({ lapses, node }: { lapses: Lapse[]; node: Node }) {
               <li key={lapse.id}>
                 <span className={`tag ${lapse.outcome}`}>{lapse.outcome}</span>{" "}
                 {/* Which side of the grant this scope is on is the first
-                    thing a steward needs: receiving access and disclosing
+                    thing an administrator needs: receiving access and disclosing
                     material are different facts about their team. */}
                 <strong>{receiving ? "receives" : "discloses"}</strong> {lapse.action}{" "}
                 {receiving
@@ -336,7 +293,6 @@ function CapabilityPanel({ state, node }: { state: Outcome | { kind: "loading" }
           const caps = state.body as Capabilities;
           const allowed = mayDo(caps);
           const readable = mayRead(caps);
-          const bindable = mayBind(caps);
           return (
             <>
               <p className="muted">
@@ -360,9 +316,6 @@ function CapabilityPanel({ state, node }: { state: Outcome | { kind: "loading" }
                     </div>
                   ))}
                 </dl>
-              ) : null}
-              {bindable.length > 0 ? (
-                <p className="muted">may bind: {bindable.join(", ")}</p>
               ) : null}
               <p className="muted forecast">
                 {deniedCount(caps)} action(s) denied. Decided under{" "}

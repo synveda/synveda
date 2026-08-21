@@ -297,13 +297,18 @@ fn the_callers_own_scope_sorts_first_and_inherits_nothing() {
             .expect("mint alice's scope");
         tx.commit().await.expect("commit own scope");
 
-        // The widest thing the model can express, at the root.
+        // The widest thing the model can express, at the root — a
+        // **different** role from the one minting the scope already
+        // wrote there (CPR-7, ADR-0074 decision 8: every principal scope
+        // carries its own `owner` grant at itself, in the same
+        // transaction as its creation), so a leak and the baseline are
+        // still distinguishable by role key.
         grant_to(
             &db.pool,
             tree.tenant,
             tree.root,
             subject("alice"),
-            RoleKey::Owner,
+            RoleKey::Administrator,
         )
         .await;
 
@@ -311,25 +316,29 @@ fn the_callers_own_scope_sorts_first_and_inherits_nothing() {
         let first = set.iter().next().expect("at least one anchor");
         assert_eq!(first.scope_id, own.id, "the caller's own scope sorts first");
         assert_eq!(first.source, AnchorSource::PrincipalScope);
-        assert!(
-            first.roles.is_empty(),
-            "a tenant-root grant does not reach into somebody's own scope"
+        assert_eq!(
+            first.roles,
+            vec![RoleKey::Owner],
+            "only the owner grant the scope minted with itself — the \
+             tenant-root administrator grant does not reach into \
+             somebody's own scope"
         );
         assert_eq!(first.kind, ScopeKind::Principal);
         assert!(first.is_private());
 
-        // A grant written *at* it does.
+        // A grant written *at* it does — a second role, so its arrival
+        // is visible beside the one the scope already held.
         grant_to(
             &db.pool,
             tree.tenant,
             own.id,
             subject("alice"),
-            RoleKey::Owner,
+            RoleKey::Curator,
         )
         .await;
         let set = resolve(&db.pool, &tree, "alice", AnchorSelection::none()).await;
         let mine = set.get(own.id).expect("still there");
-        assert_eq!(mine.roles, vec![RoleKey::Owner]);
+        assert_eq!(mine.roles, vec![RoleKey::Owner, RoleKey::Curator]);
         assert!(mine.is_direct(), "written here, not inherited");
     });
 }

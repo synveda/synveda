@@ -3,10 +3,10 @@
 //! arrive through JIT provisioning; service identities through explicit
 //! registration (ADR-0018 decision 2) — same table, same placement shape.
 //!
-//! `quarantined` is derived from placement in every read — the identity's
-//! node sits directly under the tenant's reserved `quarantine` scope (the
-//! org root's child with that slug) — never stored (ADR-0013 decision 4).
-//! `identities` is tenant-scoped (forced RLS, ADR-0009): reach it inside
+//! An identity's scope is its own `principal`-shaped governed scope, minted
+//! in the provisioning transaction (CPR-7, ADR-0074 decision 3) — no
+//! placement convention, no reserved quarantine scope. `identities` is
+//! tenant-scoped (forced RLS, ADR-0009): reach it inside
 //! [`crate::rls::begin_tenant_tx`].
 //!
 //! AUD-1 wiring point: identity creation (`identity.provisioned`) and
@@ -21,10 +21,6 @@ use synveda_types::{
 };
 use uuid::Uuid;
 
-/// The reserved slug of the quarantine scope: the org root's child that
-/// unmapped users' personal scopes are created under (ADR-0013 decision 4).
-pub const QUARANTINE_SLUG: &str = "quarantine";
-
 struct IdentityRow {
     id: Uuid,
     tenant_id: Uuid,
@@ -33,7 +29,6 @@ struct IdentityRow {
     email: Option<String>,
     display_name: Option<String>,
     scope_id: Uuid,
-    quarantined: bool,
     status: String,
     departed_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
@@ -59,7 +54,6 @@ impl TryFrom<IdentityRow> for Identity {
             email: row.email,
             display_name: row.display_name,
             scope_id: ScopeId::from_uuid(row.scope_id),
-            quarantined: row.quarantined,
             status,
             departed_at: row.departed_at,
             created_at: row.created_at,
@@ -96,8 +90,6 @@ fn storage_error(err: sqlx::Error) -> Error {
 }
 
 /// Fetches the identity provisioned for `subject` in `tenant_id`, if any.
-/// Quarantine derives from placement: the identity's node's parent is the
-/// org root's child (depth 1) with the reserved slug (ADR-0013 decision 4).
 #[tracing::instrument(
     name = "store.identities.by_subject",
     skip_all,
@@ -113,12 +105,8 @@ pub async fn by_subject(
         IdentityRow,
         r#"
         select i.id, i.tenant_id, i.subject, i.kind, i.email, i.display_name,
-               i.scope_id, i.status, i.departed_at, i.created_at,
-               coalesce(p.slug = 'quarantine' and p.depth = 1, false)
-                   as "quarantined!"
+               i.scope_id, i.status, i.departed_at, i.created_at
         from identities i
-        join hierarchy_nodes n on n.id = i.scope_id
-        left join hierarchy_nodes p on p.id = n.parent_id
         where i.tenant_id = $1 and i.subject = $2
         "#,
         tenant_id.as_uuid(),
@@ -147,12 +135,8 @@ pub async fn by_id(
         IdentityRow,
         r#"
         select i.id, i.tenant_id, i.subject, i.kind, i.email, i.display_name,
-               i.scope_id, i.status, i.departed_at, i.created_at,
-               coalesce(p.slug = 'quarantine' and p.depth = 1, false)
-                   as "quarantined!"
+               i.scope_id, i.status, i.departed_at, i.created_at
         from identities i
-        join hierarchy_nodes n on n.id = i.scope_id
-        left join hierarchy_nodes p on p.id = n.parent_id
         where i.tenant_id = $1 and i.id = $2
         "#,
         tenant_id.as_uuid(),
@@ -177,12 +161,8 @@ pub async fn services(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Res
         IdentityRow,
         r#"
         select i.id, i.tenant_id, i.subject, i.kind, i.email, i.display_name,
-               i.scope_id, i.status, i.departed_at, i.created_at,
-               coalesce(p.slug = 'quarantine' and p.depth = 1, false)
-                   as "quarantined!"
+               i.scope_id, i.status, i.departed_at, i.created_at
         from identities i
-        join hierarchy_nodes n on n.id = i.scope_id
-        left join hierarchy_nodes p on p.id = n.parent_id
         where i.tenant_id = $1 and i.kind = 'service'
         order by i.subject
         "#,
@@ -386,99 +366,6 @@ pub async fn depart(
     by_id(&mut *conn, tenant_id, id).await
 }
 
-/// Re-points a live identity at a freshly created personal scope — the
-/// second half of a sealing move (AUTH-4, ADR-0059 decision 10).
-///
-/// Called with [`seal_scope_as_former_self`] in one transaction, and in
-/// this order: the live row must let go of the old node before a tombstone
-/// can take it, or the one-personal-scope-per-node constraint refuses.
-#[tracing::instrument(
-    name = "store.identities.rescope",
-    skip_all,
-    fields(tenant.id = %tenant_id, identity.id = %id, scope.id = %scope_id),
-    err(Display)
-)]
-pub async fn rescope(
-    conn: &mut PgConnection,
-    tenant_id: TenantId,
-    id: IdentityId,
-    scope_id: ScopeId,
-) -> Result<Identity> {
-    let updated = sqlx::query!(
-        r#"
-        update identities set scope_id = $3
-        where tenant_id = $1 and id = $2 and status = 'active'
-        "#,
-        tenant_id.as_uuid(),
-        id.as_uuid(),
-        scope_id.as_uuid(),
-    )
-    .execute(&mut *conn)
-    .await
-    .map_err(storage_error)?;
-    if updated.rows_affected() == 0 {
-        return Err(Error::Conflict {
-            message: format!("identity {id} is not an active identity"),
-        });
-    }
-    by_id(&mut *conn, tenant_id, id)
-        .await?
-        .ok_or_else(|| Error::Internal {
-            message: format!("identity {id} vanished mid-rescope"),
-        })
-}
-
-/// Leaves a **former self** on a scope somebody has moved out of, so that
-/// the scope stays sealed after its owner has moved on (AUTH-4, ADR-0059
-/// decision 10).
-///
-/// This is the shape a seal takes when the person is not leaving. Sealing
-/// derives from the identity that owns a node, and a mover's live row has
-/// gone to own a different one — so what stays behind is an identity with
-/// no subject, no future, and the departed status that seals the node it
-/// still holds. It is the same thing a rehire leaves behind (decision 12),
-/// arriving one lifecycle event earlier: a person who moves under a
-/// sealing pack has a former self, and that is what the material belongs
-/// to now.
-#[tracing::instrument(
-    name = "store.identities.seal_scope_as_former_self",
-    skip_all,
-    fields(tenant.id = %tenant_id, scope.id = %scope_id),
-    err(Display)
-)]
-pub async fn seal_scope_as_former_self(
-    conn: &mut PgConnection,
-    id: IdentityId,
-    tenant_id: TenantId,
-    kind: IdentityKind,
-    email: Option<&str>,
-    display_name: Option<&str>,
-    scope_id: ScopeId,
-) -> Result<Identity> {
-    sqlx::query!(
-        r#"
-        insert into identities
-            (id, tenant_id, subject, kind, email, display_name, scope_id,
-             status, departed_at)
-        values ($1, $2, null, $3, $4, $5, $6, 'departed', now())
-        "#,
-        id.as_uuid(),
-        tenant_id.as_uuid(),
-        kind.as_str(),
-        email,
-        display_name,
-        scope_id.as_uuid(),
-    )
-    .execute(&mut *conn)
-    .await
-    .map_err(storage_error)?;
-    by_id(&mut *conn, tenant_id, id)
-        .await?
-        .ok_or_else(|| Error::Internal {
-            message: format!("identity {id} vanished mid-seal"),
-        })
-}
-
 /// The identity that owns `scope_id`, if any — the derivation's own
 /// question, asked directly. One row at most:
 /// `identities_scope_unique` makes a personal scope one person's.
@@ -497,12 +384,8 @@ pub async fn by_scope(
         IdentityRow,
         r#"
         select i.id, i.tenant_id, i.subject, i.kind, i.email, i.display_name,
-               i.scope_id, i.status, i.departed_at, i.created_at,
-               coalesce(p.slug = 'quarantine' and p.depth = 1, false)
-                   as "quarantined!"
+               i.scope_id, i.status, i.departed_at, i.created_at
         from identities i
-        join hierarchy_nodes n on n.id = i.scope_id
-        left join hierarchy_nodes p on p.id = n.parent_id
         where i.tenant_id = $1 and i.scope_id = $2
         "#,
         tenant_id.as_uuid(),
@@ -543,12 +426,8 @@ pub async fn by_email(
         IdentityRow,
         r#"
         select i.id, i.tenant_id, i.subject, i.kind, i.email, i.display_name,
-               i.scope_id, i.status, i.departed_at, i.created_at,
-               coalesce(p.slug = 'quarantine' and p.depth = 1, false)
-                   as "quarantined!"
+               i.scope_id, i.status, i.departed_at, i.created_at
         from identities i
-        join hierarchy_nodes n on n.id = i.scope_id
-        left join hierarchy_nodes p on p.id = n.parent_id
         where i.tenant_id = $1 and lower(i.email) = lower($2)
         order by i.created_at
         limit 1

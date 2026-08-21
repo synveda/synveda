@@ -1,8 +1,8 @@
 //! Generic governed scopes (CPR-3, ADR-0068 decision 4, ADR-0070).
 //!
 //! A scope is a named node with a parent and a subtree. It is what assets
-//! attach to, what the PDP decides about, and what a role binding covers —
-//! which is the whole of what the old organisational hierarchy was ever
+//! attach to, what the PDP decides about, and what a grant covers — which
+//! is the whole of what the old organisational hierarchy was ever
 //! load-bearing for. What it is *not* is a rank: there is no strictly
 //! increasing level vocabulary, no `division` above a `department`, and no
 //! rule that a tenant's root must be an organisation.
@@ -10,20 +10,18 @@
 //! The kind that remains is a **shape**, not a rank. Five of them, and the
 //! only thing a kind decides is which kinds may be its parent
 //! ([`ScopeKind::permits_parent`]): an `org_unit` nests inside itself to
-//! arbitrary depth, a `project` lives in a `workspace`, a `principal` hangs
-//! off the tenant root, and the tenant root has no parent at all. A person
-//! running this product alone has one `tenant` scope and one `principal`, and
-//! is never asked to be a company.
+//! arbitrary depth, a `project` lives in a `workspace`, a `principal` nests
+//! under a `tenant`, an `org_unit` or a `workspace` — a person's own scope
+//! hangs at the root when login mints it, and a service identity's hangs
+//! under the scope an operator registered it at — and the tenant root has
+//! no parent at all. A person running this product alone has one `tenant`
+//! scope and one `principal`, and is never asked to be a company.
 //!
-//! ## Why this module is not re-exported at the crate root
-//!
-//! [`ScopeKind`] here and `crate::ScopeKind` (the `org`/`division`/
-//! `department`/`team`/`user` vocabulary of the old hierarchy) are different
-//! types with the same name, and both exist for exactly as long as Prompt 6 of
-//! the context-platform programme takes to delete the old hierarchy. Reach
-//! these through `synveda_types::scope::…` until then. Importing this module's
-//! path is a compile-time reminder of which model the calling code is written
-//! against, which a root re-export and a rename would both hide.
+//! Since the cutover (CPR-7, ADR-0074) this is the only scope vocabulary:
+//! `synveda_types::scope::ScopeKind` is `synveda_types`' one and only
+//! `ScopeKind`. It stays behind a module path rather than at the crate
+//! root because the path names the model the calling code is written
+//! against — a root re-export would hide it again.
 
 use std::fmt;
 use std::str::FromStr;
@@ -116,7 +114,10 @@ impl ScopeKind {
             (ScopeKind::OrgUnit, ScopeKind::Tenant | ScopeKind::OrgUnit)
                 | (ScopeKind::Workspace, ScopeKind::Tenant | ScopeKind::OrgUnit)
                 | (ScopeKind::Project, ScopeKind::Workspace)
-                | (ScopeKind::Principal, ScopeKind::Tenant)
+                | (
+                    ScopeKind::Principal,
+                    ScopeKind::Tenant | ScopeKind::OrgUnit | ScopeKind::Workspace
+                )
         )
     }
 
@@ -130,7 +131,7 @@ impl ScopeKind {
             ScopeKind::Tenant => &[],
             ScopeKind::OrgUnit | ScopeKind::Workspace => &[ScopeKind::Tenant, ScopeKind::OrgUnit],
             ScopeKind::Project => &[ScopeKind::Workspace],
-            ScopeKind::Principal => &[ScopeKind::Tenant],
+            ScopeKind::Principal => &[ScopeKind::Tenant, ScopeKind::OrgUnit, ScopeKind::Workspace],
         }
     }
 

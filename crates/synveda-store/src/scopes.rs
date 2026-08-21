@@ -409,7 +409,7 @@ fn validate_principal_id(kind: ScopeKind, principal_id: Option<&str>) -> Result<
 /// disclosure nobody asked for. So the slug is a digest, and the subject lives
 /// in its own column where the unique index can hold it.
 #[must_use]
-fn principal_slug(principal_id: &str) -> String {
+pub fn principal_slug(principal_id: &str) -> String {
     let digest = blake3::hash(principal_id.as_bytes());
     format!("p-{}", &digest.to_hex().as_str()[..16])
 }
@@ -503,6 +503,34 @@ pub async fn ensure_principal_scope(
     };
     match create(&mut *conn, &new).await {
         Ok(scope) => {
+            // **Your own scope is yours** (CPR-7, ADR-0074 decision 8), and
+            // it is a *grant* that says so rather than a clause in every
+            // permit. A principal scope inherits nothing (ADR-0072), so
+            // without this row the person whose memory it is holds no role
+            // key there and cannot publish, propose about or govern their
+            // own material — while the privacy floor happily lets them
+            // read it. That gap is not a policy anybody wrote; it is the
+            // absence of the one grant the model already mints for every
+            // other thing somebody owns (CPR-5: creating a workspace or a
+            // project mints an `owner` grant for its creator). The scope
+            // and the grant land in one transaction, like every other
+            // subtype's.
+            crate::access::create_grant(
+                &mut *conn,
+                &crate::access::NewGrant {
+                    id: synveda_types::GrantId::new(),
+                    tenant_id,
+                    scope_id: scope.id,
+                    subject: synveda_types::access::GrantSubject::Principal {
+                        principal_id: principal_id.to_owned(),
+                    },
+                    role_key: synveda_types::access::RoleKey::Owner,
+                    source: synveda_types::access::GrantSource::Owner,
+                    invite_id: None,
+                    granted_by: None,
+                },
+            )
+            .await?;
             tracing::Span::current().record("scope.created", true);
             Ok(scope)
         }
@@ -621,6 +649,42 @@ pub async fn ensure_tenant_root(conn: &mut PgConnection, tenant_id: TenantId) ->
         }
         Err(other) => Err(other),
     }
+}
+/// Replaces the open labelling bag. Validated by the same rules as
+/// creation; never an authorisation input (ADR-0070).
+#[tracing::instrument(
+    name = "store.scopes.set_attributes",
+    skip_all,
+    fields(tenant.id = %tenant_id, scope.id = %id),
+    err(Display)
+)]
+pub async fn set_attributes(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    id: ScopeId,
+    attributes: &serde_json::Value,
+) -> Result<Scope> {
+    validate_attributes(attributes)?;
+    let scope = sqlx::query_as!(
+        ScopeRow,
+        r#"
+        update scopes
+           set attributes = $3, updated_at = now()
+         where tenant_id = $1 and id = $2
+        returning id, tenant_id, kind, parent_scope_id, slug, display_name,
+                  status, attributes, principal_id, created_by, created_at, updated_at
+        "#,
+        tenant_id.as_uuid(),
+        id.as_uuid(),
+        attributes,
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?
+    .ok_or_else(|| Error::NotFound {
+        entity: format!("scope {id}"),
+    })?;
+    TryInto::try_into(scope)
 }
 
 /// Sets a scope's status. The one transition in the substrate, and it exists

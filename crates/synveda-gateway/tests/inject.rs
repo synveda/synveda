@@ -31,17 +31,17 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{ChainVerification, StoredEvent};
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder, Embedder as _, TeiEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_retrieval::indexer::{self, IndexerConfig};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, policy_assignments, rls, tenants};
+use synveda_store::{identities, policy_assignments, rls, scopes, tenants};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Channel, CompositionConfig, HierarchyNode, Identity, IdentityId, IdentityKind, InjectChannels,
-    PackConfig, RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity, TenantId,
-    TenantStatus,
+    Channel, CompositionConfig, Identity, IdentityId, IdentityKind, InjectChannels, PackConfig,
+    RecordClass, RecordId, RecordKind, ScopeId, Sensitivity, TenantId, TenantStatus,
 };
 use synveda_vedaflow::{
     self as vedaflow, ChannelRef, ChannelWrite, MemoryAsset, PolicySnapshot, Signer,
@@ -81,7 +81,6 @@ fn state_with(url: &str, search_index: Arc<SearchIndex>, embedder: AnyEmbedder) 
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index,
         embedder: Arc::new(embedder),
@@ -133,89 +132,112 @@ fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("checked by admitted_tenant")
 }
 
-/// Seeds acme-org → eng (dept) → platform (team), plus the reserved
-/// quarantine team.
-async fn seed_hierarchy(
-    pool: &PgPool,
-    tenant: TenantId,
-) -> (HierarchyNode, HierarchyNode, HierarchyNode) {
+/// Seeds root → eng (org unit) → platform (org unit). There is no reserved
+/// quarantine scope any more: quarantine is a departure-derived status
+/// (CPR-7, ADR-0074 decision 3).
+async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope) {
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(org.id),
+            slug: "eng".to_owned(),
+            display_name: "Engineering".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let eng = hierarchy::create(
+    .expect("create scope");
+    let platform = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "eng",
-        "Engineering",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(eng.id),
+            slug: "platform".to_owned(),
+            display_name: "Platform".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create dept");
-    let platform = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
-    )
-    .await
-    .expect("create team");
-    let quarantine = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        "Quarantine",
-    )
-    .await
-    .expect("create quarantine");
+    .expect("create scope");
     tx.commit().await.expect("commit hierarchy");
-    (org, platform, quarantine)
+    (org, platform)
 }
 
 /// Provisions a user identity at the store level (the JIT shape).
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
+        None,
+        None,
+        own.id,
+    )
+    .await
+    .expect("create identity");
+    tx.commit().await.expect("commit user");
+    identity
+}
+
+/// Provisions the corpus's reader the way the registration route does: a
+/// service identity whose own `principal` scope nests under `anchor`.
+///
+/// Since placement became identity (CPR-7, ADR-0074 decision 3) a user's
+/// chain is their own scope at the tenant root, so the leaf → team →
+/// department → org walk this suite composes over belongs to the anchored
+/// agent — which is also the reader ADR-0018 decision 4's carve-out was
+/// written for: a team agent composes team → department → org on inject
+/// with no grant at all.
+async fn seed_agent(pool: &PgPool, tenant: TenantId, subject: &str, anchor: ScopeId) -> Identity {
+    let mut tx = pool.begin().await.expect("begin");
+    let leaf = scopes::create(
+        &mut tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::Principal,
+            parent_scope_id: Some(anchor),
+            slug: scopes::principal_slug(subject),
+            display_name: subject.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: Some(subject.to_owned()),
+            created_by: None,
+        },
+    )
+    .await
+    .expect("mint agent scope");
+    let identity = identities::create(
+        &mut tx,
+        IdentityId::new(),
+        tenant,
+        Some(subject),
+        IdentityKind::Service,
         None,
         None,
         leaf.id,
     )
     .await
     .expect("create identity");
-    tx.commit().await.expect("commit user");
+    tx.commit().await.expect("commit agent");
     identity
 }
 
@@ -315,8 +337,8 @@ async fn chain(pool: &PgPool, tenant_id: TenantId) -> (Vec<StoredEvent>, ChainVe
     (events, verification)
 }
 
-/// Fixture: alice under platform, one pinned + two derived at the team,
-/// one derived at alice's personal scope. Contents are lexically
+/// Fixture: an agent anchored under platform, one pinned + two derived at
+/// the team, one derived at the agent's own scope. Contents are lexically
 /// disjoint so BM25 relevance is deterministic.
 struct Corpus {
     pinned_team: RecordId,
@@ -330,8 +352,8 @@ const KUBE_CONTENT: &str = "Kubernetes rollout runbook: drain nodes before upgra
 const POSTGRES_CONTENT: &str = "Vacuum maintenance procedure: analyze bloated relations weekly.";
 const NOTE_CONTENT: &str = "Alice prefers rebase-and-merge for her feature branches.";
 
-async fn seed_corpus(pool: &PgPool, tenant: TenantId, platform: &HierarchyNode) -> Corpus {
-    let alice = seed_user(pool, tenant, "alice", platform.id).await;
+async fn seed_corpus(pool: &PgPool, tenant: TenantId, platform: &Scope) -> Corpus {
+    let alice = seed_agent(pool, tenant, "alice", platform.id).await;
     let owner = alice.id;
     let pinned_team = seed_record(
         pool,
@@ -445,7 +467,7 @@ async fn inject_composes_ranked_watermarked_block_and_chains_one_event() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (_, platform, _) = seed_hierarchy(&pool, tenant).await;
+    let (_, platform) = seed_hierarchy(&pool, tenant).await;
     let corpus = seed_corpus(&pool, tenant, &platform).await;
     let index = Arc::new(SearchIndex::open(index_root()).expect("open sidecar"));
     sweep(&pool, &index, tenant).await;
@@ -589,7 +611,7 @@ async fn taskless_inject_composes_recency_ordered_without_retrieval() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (_, platform, _) = seed_hierarchy(&pool, tenant).await;
+    let (_, platform) = seed_hierarchy(&pool, tenant).await;
     let corpus = seed_corpus(&pool, tenant, &platform).await;
     // Deliberately no sweep: the sidecar is cold, and it must not matter.
     let index = Arc::new(SearchIndex::open(index_root()).expect("open sidecar"));
@@ -633,7 +655,7 @@ async fn embedder_down_degrades_to_sparse_only_with_warning_header() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (_, platform, _) = seed_hierarchy(&pool, tenant).await;
+    let (_, platform) = seed_hierarchy(&pool, tenant).await;
     let corpus = seed_corpus(&pool, tenant, &platform).await;
     let index = Arc::new(SearchIndex::open(index_root()).expect("open sidecar"));
     sweep(&pool, &index, tenant).await;
@@ -691,7 +713,7 @@ async fn broken_sidecar_composes_unranked_with_warning_header() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (_, platform, _) = seed_hierarchy(&pool, tenant).await;
+    let (_, platform) = seed_hierarchy(&pool, tenant).await;
     let corpus = seed_corpus(&pool, tenant, &platform).await;
     let root = index_root();
     // Converge with a scratch manager, then corrupt the tenant's index
@@ -740,8 +762,16 @@ async fn quarantined_and_unplaced_callers_receive_the_empty_block() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (_, _, quarantine) = seed_hierarchy(&pool, tenant).await;
-    seed_user(&pool, tenant, "mallory", quarantine.id).await;
+    // Quarantine is departure now (CPR-7, ADR-0074 decision 3): a sealed
+    // identity, refused by the base layer's forbid.
+    let mallory = seed_user(&pool, tenant, "mallory").await;
+    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+        .await
+        .expect("tenant tx");
+    identities::depart(&mut tx, tenant, mallory.id)
+        .await
+        .expect("depart mallory");
+    tx.commit().await.expect("commit departure");
     let index = Arc::new(SearchIndex::open(index_root()).expect("open sidecar"));
     let app = router(state_with(
         &database_url(),
@@ -788,7 +818,7 @@ async fn request_budget_narrows_never_widens() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (_, platform, _) = seed_hierarchy(&pool, tenant).await;
+    let (_, platform) = seed_hierarchy(&pool, tenant).await;
     seed_corpus(&pool, tenant, &platform).await;
     let index = Arc::new(SearchIndex::open(index_root()).expect("open sidecar"));
     let app = router(state_with(
@@ -823,7 +853,7 @@ async fn bank_mode_pack_governs_the_very_next_inject() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (_, platform, _) = seed_hierarchy(&pool, tenant).await;
+    let (_, platform) = seed_hierarchy(&pool, tenant).await;
     let corpus = seed_corpus(&pool, tenant, &platform).await;
     let index = Arc::new(SearchIndex::open(index_root()).expect("open sidecar"));
     let state = state_with(
@@ -884,8 +914,8 @@ async fn contract_rejections_are_not_degraded() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let (_, platform, _) = seed_hierarchy(&pool, tenant).await;
-    seed_user(&pool, tenant, "alice", platform.id).await;
+    let (_, _platform) = seed_hierarchy(&pool, tenant).await;
+    seed_user(&pool, tenant, "alice").await;
     let index = Arc::new(SearchIndex::open(index_root()).expect("open sidecar"));
     let app = router(state_with(
         &database_url(),

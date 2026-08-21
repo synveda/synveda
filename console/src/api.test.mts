@@ -65,10 +65,10 @@ test("a body with no message still yields something honest to show", () => {
 test("the gateway's own sentence is displayed rather than recomposed", () => {
   // ADR-0056 decision 6's rule, applied to errors: the gateway owns the
   // wording, and a second author of one sentence is a second sentence.
-  const outcome = classify(403, { message: "steward and security-reviewer must be two people" });
+  const outcome = classify(403, { message: "curator and reviewer must be two people" });
   assert.equal(
     outcome.kind === "forbidden" ? outcome.message : "",
-    "steward and security-reviewer must be two people",
+    "curator and reviewer must be two people",
   );
 });
 

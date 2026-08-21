@@ -21,11 +21,11 @@ Synveda {{ .Chart.AppVersion }} — enterprise profile (OPS-2, ADR-0062)
    missing secret rather than starting without one, which is the right
    failure for an uninitialised deployment — see step 3.
 
-   The org root, the first admin's identity and its role binding are not
-   created by this chart. They arrive when a person in your directory's
-   admin group logs in for the first time (AUTH-2), which is what puts the
-   tenant's first two facts on the audit chain under a real subject rather
-   than under an installer.
+   The tenant root scope, the first admin's identity and its `administrator`
+   grant are not created by this chart. They arrive when a person in your
+   directory's `synveda-admins` group logs in for the first time (AUTH-2,
+   CPR-7), which is what puts the tenant's first facts on the audit chain
+   under a real subject rather than under an installer.
 
 {{ if not .Values.install.tenant.slug }}3. Admit a tenant. Admission is an owner-role operation — the gateway's
    own credential holds SELECT on `tenants` and nothing more — so this runs
@@ -56,11 +56,13 @@ WHAT THIS DEPLOYMENT IS AND IS NOT
   The gateway is one replica and the chart will not render a second. Two
   things in it are process-local and both fail silently: pending logins
   live in memory, so a callback landing on another pod is a 401 for a login
-  your IdP completed; and the scope-chain cache is invalidated in-process
-  with no TTL, so a hierarchy move handled by one replica leaves the others
-  composing against the ancestry the mover left. OPS-7 is the feature that
-  fixes both. Until then a gateway restart — including this chart's own
-  upgrade, which is a `Recreate` — is a brief outage.
+  your IdP completed; and the PDP's Cedar entity fragments are invalidated
+  in-process, so a scope move handled by one replica leaves the others
+  deciding against the ancestry the mover left. (The scope-chain cache that
+  used to be the second half of this went with the old hierarchy in CPR-7 —
+  chains now resolve per request.) OPS-7 is the feature that fixes both.
+  Until then a gateway restart — including this chart's own upgrade, which
+  is a `Recreate` — is a brief outage.
 
   What is already safe across processes, and needed no work here: the audit
   chain (a row lock on the tenant's chain head), the promotion sweep, the

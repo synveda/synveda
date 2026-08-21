@@ -40,16 +40,18 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder, Embedder as _};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_retrieval::indexer::{self, IndexerConfig};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, policy_assignments, role_bindings, tenants};
+use synveda_store::{identities, policy_assignments, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, Role,
-    ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, ScopeId,
+    Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -89,7 +91,6 @@ fn state_with(url: &str, search_index: Arc<SearchIndex>, pdp: Arc<Pdp>) -> AppSt
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index,
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -145,69 +146,65 @@ fn database_url() -> String {
 /// department, so `standard`'s department permit has something to reach
 /// that the reader's own chain does not contain.
 struct Org {
-    org: HierarchyNode,
-    engineering: HierarchyNode,
-    platform: HierarchyNode,
-    payments: HierarchyNode,
+    org: Scope,
+    engineering: Scope,
+    platform: Scope,
+    payments: Scope,
 }
 
 async fn seed_org(pool: &PgPool, tenant: TenantId) -> Org {
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let engineering = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(org.id),
+            slug: "engineering".to_owned(),
+            display_name: "Engineering".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let engineering = hierarchy::create(
+    .expect("create scope");
+    let platform = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "engineering",
-        "Engineering",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(engineering.id),
+            slug: "platform".to_owned(),
+            display_name: "Platform".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create department");
-    let platform = hierarchy::create(
+    .expect("create scope");
+    let payments = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(engineering.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(engineering.id),
+            slug: "payments".to_owned(),
+            display_name: "Payments".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create platform");
-    let payments = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(engineering.id),
-        ScopeKind::Team,
-        "payments",
-        "Payments",
-    )
-    .await
-    .expect("create payments");
-    hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        "Quarantine",
-    )
-    .await
-    .expect("create quarantine");
+    .expect("create scope");
     tx.commit().await.expect("commit hierarchy");
     Org {
         org,
@@ -217,29 +214,20 @@ async fn seed_org(pool: &PgPool, tenant: TenantId) -> Org {
     }
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -372,29 +360,50 @@ async fn sweep(pool: &PgPool, tenant: TenantId, index: &SearchIndex) {
 
 // ── The universe ────────────────────────────────────────────────────────
 
-/// The headline: `standard` has permitted a department-wide read since
-/// AUTHZ-2, and until now nothing could perform one.
+/// The headline: `standard` has shared the grant-holder's neighbourhood
+/// since AUTHZ-2, and until CTX-5 nothing could perform one.
 ///
-/// Alice is on `platform`. The payments runbook lives at `payments` —
-/// a *sibling* team, not on her chain, so ADR-0024's inject universe
-/// never asks about it. Her pack permits it: `resource in
-/// principal.department && resource.kind != "user"`. One corpus, one
-/// identity, one pack, two surfaces, and the difference between them is
-/// the whole feature.
+/// Alice holds `member` at platform. The payments runbook lives at
+/// `payments` — a *sibling* team, not on her chain, so ADR-0024's inject
+/// universe never asks about it. Her pack permits it: `resource in
+/// principal.ambit`, the parent of every scope a grant reaches her at —
+//  engineering, minus the tenant root (CPR-6, ADR-0073 decision 4). One
+/// corpus, one identity, one pack, two surfaces, and the difference
+/// between them is the whole feature.
 #[tokio::test]
 async fn a_query_reaches_material_the_chain_never_composes() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
     let org = seed_org(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", org.platform.id).await;
-    let bea = seed_user(&pool, tenant, "bea", org.payments.id).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
+    let bea = seed_user(&pool, tenant, "bea").await;
 
     // The real product pack, assigned at the org the product way.
     let mut tx = pool.begin().await.expect("begin");
     policy_assignments::assign(&mut *tx, tenant, org.org.id, "standard")
         .await
         .expect("assign standard");
+    // Membership is a grant (CPR-7): this one at platform is what puts
+    // engineering in alice's ambit, which is the sharing default the
+    // widened universe exists to perform.
+    synveda_store::access::create_grant(
+        &mut *tx,
+        &synveda_store::access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: org.platform.id,
+            subject: GrantSubject::Principal {
+                principal_id: "alice".to_owned(),
+            },
+            role_key: RoleKey::Member,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant member");
     tx.commit().await.expect("commit assignment");
 
     seed_record(&pool, tenant, alice.scope_id, alice.id, ALICE_NOTE).await;
@@ -404,7 +413,7 @@ async fn a_query_reaches_material_the_chain_never_composes() {
     let token = issue("alice", tenant);
 
     // Surface one: the session-start block. Alice's chain is
-    // alice → platform → engineering → acme; payments is not on it.
+    // alice → the tenant root (CPR-7); payments is not on it.
     let (status, injected) = post(
         &app,
         "/v1/inject",
@@ -434,13 +443,14 @@ async fn a_query_reaches_material_the_chain_never_composes() {
     assert!(
         served.iter().any(|text| text == PAYMENTS_RUNBOOK),
         "recall's universe is every scope that could contribute (ADR-0042 \
-         decision 2), and `standard` permits the department subtree — the \
+         decision 2), and `standard` permits the holder's neighbourhood — the \
          grant has been unreachable since ADR-0024 and is not any more. Got: {served:?}"
     );
-    // And the decision was really taken, over more scopes than the chain.
+    // And the decision was really taken, beyond the caller's own chain —
+    // which is two scopes now, home and the tenant root (CPR-7).
     assert!(
-        recalled["scopes_decided"].as_u64().expect("scopes_decided") > 4,
-        "the walk decided beyond alice's four chain scopes: {recalled}"
+        recalled["scopes_decided"].as_u64().expect("scopes_decided") > 2,
+        "the walk decided beyond alice's own chain: {recalled}"
     );
     assert_eq!(recalled["truncated"], false);
 }
@@ -455,8 +465,8 @@ async fn the_widened_universe_is_still_the_pdps_answer() {
         return;
     };
     let org = seed_org(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", org.platform.id).await;
-    let bea = seed_user(&pool, tenant, "bea", org.payments.id).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
+    let bea = seed_user(&pool, tenant, "bea").await;
 
     let mut tx = pool.begin().await.expect("begin");
     policy_assignments::assign(&mut *tx, tenant, org.org.id, "regulated-strict")
@@ -485,17 +495,17 @@ async fn the_widened_universe_is_still_the_pdps_answer() {
     );
 }
 
-/// A role binding is the other grant ADR-0024 left unreachable, and it is
+/// A grant is the other widening ADR-0024 left unreachable, and it is
 /// the one an administrator actually issues. Same corpus, same pack, and
-/// the difference is one row: a `viewer` binding on the sibling team.
+/// the difference is one row: a `viewer` grant on the sibling scope.
 #[tokio::test]
-async fn a_role_binding_widens_the_universe_on_the_very_next_call() {
+async fn a_grant_widens_the_universe_on_the_very_next_call() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
     let org = seed_org(&pool, tenant).await;
-    seed_user(&pool, tenant, "alice", org.platform.id).await;
-    let bea = seed_user(&pool, tenant, "bea", org.payments.id).await;
+    seed_user(&pool, tenant, "alice").await;
+    let bea = seed_user(&pool, tenant, "bea").await;
 
     let mut tx = pool.begin().await.expect("begin");
     policy_assignments::assign(&mut *tx, tenant, org.org.id, "regulated-strict")
@@ -516,21 +526,29 @@ async fn a_role_binding_widens_the_universe_on_the_very_next_call() {
 
     // The grant, written the product way.
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(
+    synveda_store::access::create_grant(
         &mut *tx,
-        tenant,
-        "alice",
-        Some(org.payments.id),
-        Role::Viewer,
+        &synveda_store::access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: org.payments.id,
+            subject: GrantSubject::Principal {
+                principal_id: "alice".to_owned(),
+            },
+            role_key: RoleKey::Viewer,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
     )
     .await
-    .expect("bind viewer");
-    tx.commit().await.expect("commit binding");
+    .expect("grant viewer");
+    tx.commit().await.expect("commit grant");
 
     let (_, after) = post(&app, "/v1/recall", &token, ask).await;
     assert!(
         contents(&after).iter().any(|text| text == PAYMENTS_RUNBOOK),
-        "a binding governs the very next request (ADR-0015), and recall is \
+        "a grant governs the very next request (ADR-0015), and recall is \
          the surface that finally asks: {after}"
     );
 }
@@ -550,7 +568,7 @@ async fn as_of_returns_what_was_known_then_and_now_returns_the_correction() {
         return;
     };
     let org = seed_org(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", org.platform.id).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
 
     let mut tx = pool.begin().await.expect("begin");
     policy_assignments::assign(&mut *tx, tenant, org.org.id, "standard")
@@ -648,7 +666,7 @@ async fn a_bare_instant_sweeps_what_a_query_can_no_longer_rank() {
         return;
     };
     let org = seed_org(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", org.platform.id).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
     let mut tx = pool.begin().await.expect("begin");
     policy_assignments::assign(&mut *tx, tenant, org.org.id, "standard")
         .await
@@ -717,22 +735,30 @@ async fn as_of_never_rewinds_the_authority() {
         return;
     };
     let org = seed_org(&pool, tenant).await;
-    seed_user(&pool, tenant, "alice", org.platform.id).await;
-    let bea = seed_user(&pool, tenant, "bea", org.payments.id).await;
+    seed_user(&pool, tenant, "alice").await;
+    let bea = seed_user(&pool, tenant, "bea").await;
 
     let mut tx = pool.begin().await.expect("begin");
     policy_assignments::assign(&mut *tx, tenant, org.org.id, "regulated-strict")
         .await
         .expect("assign regulated-strict");
-    role_bindings::bind(
+    synveda_store::access::create_grant(
         &mut *tx,
-        tenant,
-        "alice",
-        Some(org.payments.id),
-        Role::Viewer,
+        &synveda_store::access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: org.payments.id,
+            subject: GrantSubject::Principal {
+                principal_id: "alice".to_owned(),
+            },
+            role_key: RoleKey::Viewer,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
     )
     .await
-    .expect("bind viewer");
+    .expect("grant viewer");
     tx.commit().await.expect("commit");
 
     let runbook = seed_record(&pool, tenant, org.payments.id, bea.id, PAYMENTS_RUNBOOK).await;
@@ -751,16 +777,23 @@ async fn as_of_never_rewinds_the_authority() {
         .expect("read now");
 
     let mut tx = pool.begin().await.expect("begin");
-    let removed = role_bindings::unbind(
+    let grants = synveda_store::access::list_grants(
         &mut *tx,
         tenant,
-        "alice",
-        Some(org.payments.id),
-        Role::Viewer,
+        &synveda_store::access::GrantFilter {
+            scope_id: Some(org.payments.id),
+            principal_id: Some("alice".to_owned()),
+        },
     )
     .await
-    .expect("revoke binding");
-    assert!(removed, "the binding existed and is gone");
+    .expect("list grants");
+    let grant = grants
+        .iter()
+        .find(|grant| grant.role_key == RoleKey::Viewer)
+        .expect("the viewer grant");
+    synveda_store::access::revoke_grant(&mut tx, tenant, grant.id)
+        .await
+        .expect("revoke grant");
     tx.commit().await.expect("commit revocation");
 
     let (status, after) = post(
@@ -792,17 +825,35 @@ async fn a_reclassification_reaches_its_own_history() {
         return;
     };
     let org = seed_org(&pool, tenant).await;
-    seed_user(&pool, tenant, "alice", org.platform.id).await;
-    let bea = seed_user(&pool, tenant, "bea", org.payments.id).await;
+    seed_user(&pool, tenant, "alice").await;
+    let bea = seed_user(&pool, tenant, "bea").await;
 
-    // `standard` gives alice the department subtree at the *working*
+    // `standard` gives alice the holder's neighbourhood at the *working*
     // tiers only — `confidential` is held to explicitly granted scopes
     // under every pack — which is precisely the boundary being tested.
+    // The grant at platform is what puts engineering in her ambit.
     let mut tx = pool.begin().await.expect("begin");
     policy_assignments::assign(&mut *tx, tenant, org.org.id, "standard")
         .await
         .expect("assign standard");
-    tx.commit().await.expect("commit assignment");
+    synveda_store::access::create_grant(
+        &mut *tx,
+        &synveda_store::access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: org.platform.id,
+            subject: GrantSubject::Principal {
+                principal_id: "alice".to_owned(),
+            },
+            role_key: RoleKey::Member,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant member");
+    tx.commit().await.expect("commit");
 
     let secret = seed_record(&pool, tenant, org.payments.id, bea.id, PAYMENTS_RUNBOOK).await;
     let (app, _index) = app_for(&pool, tenant).await;
@@ -812,7 +863,7 @@ async fn a_reclassification_reaches_its_own_history() {
     assert_eq!(
         contents(&before),
         vec![PAYMENTS_RUNBOOK.to_owned()],
-        "at `internal`, the department permit reaches it"
+        "at `internal`, the neighbourhood permit reaches it"
     );
     let while_internal: DateTime<Utc> = sqlx::query_scalar!(r#"select now() as "now!""#)
         .fetch_one(&pool)
@@ -880,8 +931,8 @@ async fn the_two_shapes_are_exclusive_and_bounded() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
-    let org = seed_org(&pool, tenant).await;
-    seed_user(&pool, tenant, "alice", org.platform.id).await;
+    let _org = seed_org(&pool, tenant).await;
+    seed_user(&pool, tenant, "alice").await;
     let (app, _index) = app_for(&pool, tenant).await;
     let token = issue("alice", tenant);
 
@@ -917,7 +968,7 @@ async fn a_query_is_not_an_existence_oracle() {
         return;
     };
     let org = seed_org(&pool, tenant).await;
-    seed_user(&pool, tenant, "alice", org.platform.id).await;
+    seed_user(&pool, tenant, "alice").await;
     let mut tx = pool.begin().await.expect("begin");
     policy_assignments::assign(&mut *tx, tenant, org.org.id, "standard")
         .await
@@ -931,7 +982,7 @@ async fn a_query_is_not_an_existence_oracle() {
         .await
         .expect("admit other tenant");
     let other = seed_org(&pool, other_id).await;
-    let carol = seed_user(&pool, other_id, "carol", other.platform.id).await;
+    let carol = seed_user(&pool, other_id, "carol").await;
     let theirs = seed_record(
         &pool,
         other_id,
@@ -992,7 +1043,7 @@ async fn the_plan_stage_fits_the_budget_adr_0029_derived() {
         return;
     };
     let org = seed_org(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", org.platform.id).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
     let mut tx = pool.begin().await.expect("begin");
     policy_assignments::assign(&mut *tx, tenant, org.org.id, "open-collaboration")
         .await
@@ -1005,17 +1056,22 @@ async fn the_plan_stage_fits_the_budget_adr_0029_derived() {
     const TEAMS: usize = 512;
     for team in 0..TEAMS {
         let mut tx = pool.begin().await.expect("begin");
-        let node = hierarchy::create(
+        let node = scopes::create(
             &mut tx,
-            ScopeId::new(),
-            tenant,
-            Some(org.engineering.id),
-            ScopeKind::Team,
-            &format!("team-{team}"),
-            &format!("Team {team}"),
+            &scopes::NewScope {
+                id: ScopeId::new(),
+                tenant_id: tenant,
+                kind: ScopeKind::OrgUnit,
+                parent_scope_id: Some(org.engineering.id),
+                slug: format!("team-{team}"),
+                display_name: format!("Team {team}"),
+                attributes: serde_json::json!({}),
+                principal_id: None,
+                created_by: None,
+            },
         )
         .await
-        .expect("create team");
+        .expect("create scope");
         tx.commit().await.expect("commit team");
         seed_record(
             &pool,

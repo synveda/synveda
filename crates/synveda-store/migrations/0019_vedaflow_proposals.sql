@@ -146,13 +146,14 @@ create table vedaflow_proposal_approvals (
         references vedaflow_commits (tenant_id, hash),
     constraint vedaflow_proposal_approvals_verdict_check
         check (verdict in ('approve', 'reject')),
-    -- The closed role vocabulary (seed §5), in the schema for the same reason
-    -- every other vocabulary is: a stored value outside it means code and
-    -- schema drifted, and the reader should say so rather than shrug.
+    -- The closed grant-key vocabulary (ADR-0072, re-vocabularied onto the
+    -- approval plane by CPR-7/ADR-0074 decision 6), in the schema for the
+    -- same reason every other vocabulary is: a stored value outside it
+    -- means code and schema drifted, and the reader should say so rather
+    -- than shrug.
     constraint vedaflow_proposal_approvals_roles_check
-        check (roles <@ array['viewer', 'contributor', 'curator', 'steward',
-                              'org-admin', 'auditor', 'security-reviewer',
-                              'compliance']::text[]),
+        check (roles <@ array['owner', 'member', 'viewer', 'reviewer',
+                              'curator', 'administrator']::text[]),
     constraint vedaflow_proposal_approvals_subject_check
         check (length(approver_subject) between 1 and 255),
     constraint vedaflow_proposal_approvals_comment_check

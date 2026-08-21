@@ -1,6 +1,6 @@
 //! Composes and prints one context block for an identity — the CTX-2
 //! demo runner (ADR-0025), and a working reference for the CTX-3 inject
-//! seam: identity → scope chain (HIER-2 cache) → decision inputs →
+//! seam: identity → own scope chain (scope closure) → decision inputs →
 //! PDP-derived composition plan → compose. The PDP is never bypassed
 //! (seed §2.2): every scope in the plan is a per-request `MemoryRead`
 //! allow, and channel rules/budget come from the effective packs.
@@ -14,9 +14,7 @@ use chrono::{DateTime, Utc};
 use sqlx::postgres::PgPoolOptions;
 use synveda_policy::{Pdp, Principal};
 use synveda_retrieval::{ComposeRequest, MemoryReadInputs, compose, composition_plan};
-use synveda_store::{
-    ScopeChainCache, identities, policy_assignments, policy_packs, rls, role_bindings,
-};
+use synveda_store::{anchors, identities, policy_assignments, policy_packs, rls, scopes};
 use synveda_types::{Error, ScopeId, TenantId};
 
 #[tokio::main(flavor = "current_thread")]
@@ -59,22 +57,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or_else(|| Error::NotFound {
             entity: format!("identity {subject:?}"),
         })?;
-    let chain = ScopeChainCache::new()
-        .resolve(&mut *tx, tenant, identity.scope_id)
+    // The caller's own chain, from the scope closure (CPR-7): the
+    // identity's scope and its ancestors, nearest first.
+    let own = scopes::get(&mut *tx, tenant, identity.scope_id)
         .await?
         .ok_or_else(|| Error::NotFound {
-            entity: "placement chain".to_owned(),
+            entity: "own scope".to_owned(),
         })?;
+    let mut chain = vec![synveda_policy::ScopeNode::from_scope(
+        &own,
+        identity.sealed(),
+    )];
+    for ancestor in scopes::ancestors(&mut *tx, tenant, identity.scope_id).await? {
+        chain.push(synveda_policy::ScopeNode::from_scope(&ancestor, false));
+    }
     let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
     let assignments = policy_assignments::for_scopes(&mut *tx, tenant, &chain_ids).await?;
     let default_pack = policy_assignments::default_pack(&mut *tx, tenant).await?;
-    let bindings =
-        role_bindings::for_subject_on_scopes(&mut *tx, tenant, &subject, &chain_ids).await?;
+    let anchor_set =
+        anchors::resolve(&mut tx, tenant, &subject, anchors::AnchorSelection::none()).await?;
+    let groups = anchors::groups_of(&mut *tx, tenant, &subject).await?;
 
     let principal = Principal {
         tenant_id: tenant,
         subject: subject.clone(),
-        quarantined: identity.quarantined,
+        // An identity row is never quarantined since the cutover: only an
+        // unprovisioned subject is (CPR-7, ADR-0074 decision 3).
+        quarantined: false,
         scope_id: Some(identity.scope_id),
         token_scope: None,
     };
@@ -83,9 +92,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &MemoryReadInputs {
             principal: &principal,
             chain: &chain,
+            anchors: anchor_set.as_slice(),
+            groups: &groups,
             assignments: &assignments,
             default_pack: default_pack.as_deref(),
-            role_bindings: &bindings,
             lapses: &[],
             lapsed: &[],
             candidates: &[],

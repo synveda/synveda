@@ -57,10 +57,9 @@ use synveda_identity::directory::{
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::{
-    directory, directory_sync, group_mappings, hierarchy, identities, rls, role_bindings, tenants,
-};
-use synveda_types::{Role, ScimCredentialId, ScopeId, ScopeKind, Tenant, TenantId, TenantStatus};
+use synveda_store::{access, directory, directory_sync, identities, rls, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::{GrantId, ScimCredentialId, ScopeId, Tenant, TenantId, TenantStatus};
 
 const SECRET: &[u8] = b"auth-5-directory-sync-suite-secret";
 
@@ -158,58 +157,9 @@ async fn world() -> Option<World> {
         .await
         .expect("admit tenant");
 
-    let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "acme",
-    )
-    .await
-    .expect("org");
-    let eng = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "eng",
-        "eng",
-    )
-    .await
-    .expect("eng");
-    let core = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "core",
-        "core",
-    )
-    .await
-    .expect("core");
-    hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        identities::QUARANTINE_SLUG,
-    )
-    .await
-    .expect("quarantine");
-    tx.commit().await.expect("commit hierarchy");
-
-    let mut tx = rls::begin_tenant_tx(&pool, tenant).await.expect("begin");
-    group_mappings::upsert(&mut *tx, tenant, "synveda-eng-core", core.id)
-        .await
-        .expect("map group");
-    tx.commit().await.expect("commit mapping");
+    // Nothing else is seeded: the pass itself mints the tenant root (with
+    // each person's principal scope) and the groups it reads, exactly as
+    // ADR-0074's "synchronises nothing" intends.
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
     let state = app_state(pool.clone(), pdp);
@@ -625,7 +575,6 @@ fn app_state(pool: PgPool, pdp: Arc<Pdp>) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -787,16 +736,33 @@ fn bearer(w: &World, subject: &str) -> String {
     Hs256Verifier::new(SECRET).issue(subject, w.tenant, Duration::from_secs(600))
 }
 
-/// Binds `org-admin` at the tenant, which is where every embedded pack puts
-/// `DirectorySealAuthorise`.
+/// Grants `administrator` at the tenant root, which is where every
+/// embedded pack puts `DirectorySealAuthorise`.
 async fn bind_org_admin(w: &World, subject: &str) {
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
         .expect("begin");
-    role_bindings::bind(&mut *tx, w.tenant, subject, None, Role::OrgAdmin)
+    let root = scopes::ensure_tenant_root(&mut tx, w.tenant)
         .await
-        .expect("bind org-admin");
-    tx.commit().await.expect("commit binding");
+        .expect("mint root");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: w.tenant,
+            scope_id: root.id,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: RoleKey::Administrator,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant administrator");
+    tx.commit().await.expect("commit grant");
 }
 
 fn authorise_request(token: &str, w: &World, body: Value) -> Request<Body> {

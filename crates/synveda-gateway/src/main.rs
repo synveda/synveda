@@ -330,7 +330,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // queue's consumer, embedded so SMB mode stays one process. It shares
     // the gateway's scope-chain cache — hierarchy-move invalidations must
     // reach the worker's authorization reads.
-    let scope_chains = Arc::new(synveda_store::ScopeChainCache::new());
     let extractor = extractor_from_env()?;
     // Shared with the inject route (CTX-3, ADR-0026 decision 3): the
     // query-embedding call and the pipeline's record vectors carry one
@@ -347,7 +346,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             synveda_ingest::worker::WorkerDeps {
                 pool: pool.clone(),
                 pdp: Arc::clone(&pdp),
-                chains: Arc::clone(&scope_chains),
                 extractor,
                 embedder: embedder.as_ref().clone(),
             },
@@ -374,7 +372,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         synveda_ingest::promotion::SweepDeps {
             pool: pool.clone(),
             pdp: Arc::clone(&pdp),
-            chains: Arc::clone(&scope_chains),
         },
         promotion_config,
     );
@@ -398,7 +395,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         synveda_ingest::retention::SweepDeps {
             pool: pool.clone(),
             pdp: Arc::clone(&pdp),
-            chains: Arc::clone(&scope_chains),
         },
         retention_config,
     );
@@ -464,7 +460,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         login,
         public_origin,
         pdp,
-        scope_chains,
         service_token_max_ttl: Duration::from_secs(service_token_max_ttl_secs),
         search_index,
         embedder,

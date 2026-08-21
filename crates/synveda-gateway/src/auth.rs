@@ -158,9 +158,9 @@ struct CliSessionResponse {
 struct IdentitySummary {
     id: IdentityId,
     scope_id: ScopeId,
-    /// Display-only slug chain of the personal scope (ADR-0011).
+    /// Display-only slug chain of the caller's own principal scope, from
+    /// the tenant root (CPR-3, ADR-0070).
     scope_path: String,
-    quarantined: bool,
 }
 
 /// Starts a login: 302 to the IdP's authorization endpoint. A
@@ -297,8 +297,7 @@ pub async fn callback(
         identity: IdentitySummary {
             id: provisioned.identity.id,
             scope_id: provisioned.identity.scope_id,
-            scope_path: provisioned.scope.path,
-            quarantined: provisioned.identity.quarantined,
+            scope_path: provisioned.scope_path.clone(),
         },
         access_token: session.access_token,
         token_type: session.token_type,

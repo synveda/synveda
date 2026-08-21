@@ -4,14 +4,16 @@
 //! the PDP, against a live Postgres.
 //!
 //! The walk is the feature's own sentence made true: a team's procedure
-//! reaches the department under the department's approvers, then the org
-//! under the org's, and at each level the level below's curator is
-//! refused by the PDP because role bindings inherit downward and never
-//! up. What makes it a *promotion* rather than a row in a table is the
-//! last assertion of each hop: a member of another team, and then a
-//! member of another department, receives the procedure in their own
-//! `inject` — people who could not read the team it lives at, and still
-//! cannot.
+//! reaches the org unit under the org unit's approvers, then the tenant
+//! root, and at each level the level below's curator is refused by the
+//! PDP because grants inherit down the subtree and never up. What makes
+//! it a *promotion* rather than a row in a table is the reader-side
+//! assertion of each hop: after the first, a reader granted at the unit
+//! composes the procedure *as the unit's published material* — the entry
+//! names the publishing scope, not the team the record lives at — and
+//! after the second, a member of another department receives it in their
+//! own `inject`, because the tenant root is on every member's chain and
+//! no org unit is (CPR-7: placement is identity, grants decide).
 //!
 //! Around the AC walk: the direction rule (a climb goes up, never
 //! sideways or down), the disclosure rule that lets a user climb their
@@ -37,15 +39,17 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::StoredEvent;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, role_bindings, tenants};
+use synveda_store::{access, identities, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, Role,
-    ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, ScopeId,
+    Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -75,7 +79,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(
             SearchIndex::open(
@@ -134,86 +137,80 @@ fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("checked by admitted_tenant")
 }
 
-/// The org the climb happens in:
+/// The tree the climb happens in:
 ///
 /// ```text
-/// acme (org)
-/// ├── eng (department)
-/// │   ├── platform (team)   ← the runbook lives here
-/// │   └── payments (team)   ← reads it after the first hop, never before
-/// └── sales (department)
-///     └── field (team)      ← reads it after the second hop, never before
+/// root (tenant)
+/// ├── eng (org unit)
+/// │   ├── platform (org unit)   ← the runbook lives here
+/// │   └── payments (org unit)   ← reads it after the first hop, never before
+/// └── sales (org unit)
+///     └── field (org unit)      ← reads it after the second hop, never before
 /// ```
 ///
-/// Two departments, because "the org" has to mean something a department
+/// Two branches, because "the tenant" has to mean something a branch
 /// publication does not: the second hop is proven by a reader outside
 /// `eng` entirely.
 struct Org {
-    org: HierarchyNode,
-    eng: HierarchyNode,
-    platform: HierarchyNode,
-    payments: HierarchyNode,
-    field: HierarchyNode,
+    root: Scope,
+    eng: Scope,
+    platform: Scope,
+    payments: Scope,
+    field: Scope,
 }
 
 async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Org {
     let mut tx = pool.begin().await.expect("begin");
-    // The closure borrows the transaction, so it lives in a block that
-    // ends before the commit.
-    let seeded = {
-        let mut node = async |parent: Option<ScopeId>, kind, slug: &str, name: &str| {
-            hierarchy::create(&mut tx, ScopeId::new(), tenant, parent, kind, slug, name)
-                .await
-                .expect("create node")
-        };
-        let org = node(None, ScopeKind::Org, "acme", "ACME").await;
-        let eng = node(Some(org.id), ScopeKind::Department, "eng", "Engineering").await;
-        let platform = node(Some(eng.id), ScopeKind::Team, "platform", "Platform").await;
-        let payments = node(Some(eng.id), ScopeKind::Team, "payments", "Payments").await;
-        let sales = node(Some(org.id), ScopeKind::Department, "sales", "Sales").await;
-        let field = node(Some(sales.id), ScopeKind::Team, "field", "Field").await;
-        node(
-            Some(org.id),
-            ScopeKind::Team,
-            identities::QUARANTINE_SLUG,
-            "Quarantine",
+    let unit = async |tx: &mut sqlx::PgConnection, parent: ScopeId, slug: &str, display: &str| {
+        scopes::create(
+            tx,
+            &scopes::NewScope {
+                id: ScopeId::new(),
+                tenant_id: tenant,
+                kind: ScopeKind::OrgUnit,
+                parent_scope_id: Some(parent),
+                slug: slug.to_owned(),
+                display_name: display.to_owned(),
+                attributes: serde_json::json!({}),
+                principal_id: None,
+                created_by: None,
+            },
         )
-        .await;
-        Org {
-            org,
-            eng,
-            platform,
-            payments,
-            field,
-        }
+        .await
+        .expect("create org unit")
     };
-    tx.commit().await.expect("commit hierarchy");
-    seeded
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = unit(&mut tx, root.id, "eng", "Engineering").await;
+    let platform = unit(&mut tx, eng.id, "platform", "Platform").await;
+    let payments = unit(&mut tx, eng.id, "payments", "Payments").await;
+    let sales = unit(&mut tx, root.id, "sales", "Sales").await;
+    let field = unit(&mut tx, sales.id, "field", "Field").await;
+    tx.commit().await.expect("commit scopes");
+    Org {
+        root,
+        eng,
+        platform,
+        payments,
+        field,
+    }
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -221,12 +218,26 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: Role) {
+async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, Some(scope), role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 async fn seed_record(
@@ -370,60 +381,112 @@ async fn events(pool: &PgPool, tenant: TenantId, action: &str) -> Vec<StoredEven
 /// The headline walk, and the only test in this file that asserts on the
 /// whole feature at once.
 ///
-/// A platform-team runbook climbs to Engineering and then to ACME. Each
-/// hop is refused for the level below's curator — bindings inherit
-/// downward, so a team curator holds nothing at the department and a
-/// department curator holds nothing at the org — and carried by that
-/// level's own. Between the hops, the payments team (a sibling that
-/// cannot read platform, and never will) starts receiving the runbook;
-/// after the second, so does a team in a different department entirely.
-/// That is what makes it a promotion rather than a row: the audience
-/// widened, at each level, under that level's approvers.
+/// A platform-team runbook climbs to Engineering and then to the tenant
+/// root. Each hop is refused for the level below's curator — grants
+/// inherit down the subtree, so a team curator holds nothing at the org
+/// unit and an org-unit curator holds nothing at the root — and carried
+/// by that level's own. After the first hop a reader granted at
+/// Engineering composes the runbook as Engineering's *published*
+/// material; after the second, a member of a different branch receives
+/// it in their own inject, because the root is the one scope on every
+/// member's chain. That is what makes it a promotion rather than a row:
+/// the audience widened, at each level, under that level's approvers.
 ///
 /// The approver *sets* are the pack's, not the test's: under
-/// `regulated-strict` a team publication takes one curator, and a
-/// department or org publication takes a curator **and** a steward, two
-/// distinct people (the FLOW-3 matrix golden, rows `memory internal
-/// team|department|org`). So the two hops need four principals between
-/// them and none of them is the team's curator — which is what "each
-/// level's approvers" means when the levels differ in kind as well as in
-/// place.
+/// `regulated-strict` a memory publication takes a curator **and** an
+/// administrator, two distinct people, at an org unit *and* at the tenant
+/// root — the root carries the same SHARED cell, because it is the widest
+/// audience the product has. The two hops therefore need four principals,
+/// two at each level, which is what "each level's approvers" means when
+/// the levels differ in place but not in price.
 #[tokio::test]
 async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
     let org = seed_hierarchy(&pool, tenant).await;
-    let ravi = seed_user(&pool, tenant, "ravi@acme.test", org.platform.id).await;
-    seed_user(&pool, tenant, "tara@acme.test", org.platform.id).await;
-    seed_user(&pool, tenant, "dana@acme.test", org.eng.id).await;
-    seed_user(&pool, tenant, "evan@acme.test", org.eng.id).await;
-    seed_user(&pool, tenant, "olive@acme.test", org.org.id).await;
-    seed_user(&pool, tenant, "owen@acme.test", org.org.id).await;
-    seed_user(&pool, tenant, "pia@acme.test", org.payments.id).await;
-    seed_user(&pool, tenant, "sam@acme.test", org.field.id).await;
-    // Each principal bound at exactly one level. Roles inherit downward,
-    // so binding the org's people at the org would let them approve at the
-    // department too; the direction the AC cares about is the other one,
-    // and it is proven by denial below: a binding never climbs.
+    let ravi = seed_user(&pool, tenant, "ravi@acme.test").await;
+    seed_user(&pool, tenant, "tara@acme.test").await;
+    seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "evan@acme.test").await;
+    seed_user(&pool, tenant, "olive@acme.test").await;
+    seed_user(&pool, tenant, "owen@acme.test").await;
+    seed_user(&pool, tenant, "pia@acme.test").await;
+    seed_user(&pool, tenant, "sam@acme.test").await;
+    // Each principal bound at exactly one level. Grants inherit down the
+    // subtree, so granting the root's people at the root would let them
+    // approve at the org unit too; the direction the AC cares about is
+    // the other one, and it is proven by denial below: a grant never
+    // climbs.
     bind(
         &pool,
         tenant,
         "tara@acme.test",
         org.platform.id,
-        Role::Curator,
+        RoleKey::Curator,
     )
     .await;
-    bind(&pool, tenant, "dana@acme.test", org.eng.id, Role::Curator).await;
-    bind(&pool, tenant, "evan@acme.test", org.eng.id, Role::Steward).await;
-    bind(&pool, tenant, "olive@acme.test", org.org.id, Role::Curator).await;
-    bind(&pool, tenant, "owen@acme.test", org.org.id, Role::Steward).await;
+    bind(
+        &pool,
+        tenant,
+        "dana@acme.test",
+        org.eng.id,
+        RoleKey::Curator,
+    )
+    .await;
+    bind(
+        &pool,
+        tenant,
+        "evan@acme.test",
+        org.eng.id,
+        RoleKey::Administrator,
+    )
+    .await;
+    bind(
+        &pool,
+        tenant,
+        "olive@acme.test",
+        org.root.id,
+        RoleKey::Curator,
+    )
+    .await;
+    bind(
+        &pool,
+        tenant,
+        "owen@acme.test",
+        org.root.id,
+        RoleKey::Administrator,
+    )
+    .await;
     bind(
         &pool,
         tenant,
         "ravi@acme.test",
         org.platform.id,
-        Role::Contributor,
+        RoleKey::Member,
+    )
+    .await;
+    // Opening hop 1 asks at Engineering, and asking is membership or a
+    // grant at the scope asked (CPR-7: no subtree placement exists), so
+    // the platform member who owns the runbook holds the org unit too —
+    // which also reads him the platform record, eng being on its chain.
+    bind(&pool, tenant, "ravi@acme.test", org.eng.id, RoleKey::Member).await;
+    // The audience: a member of the sibling unit and a member of a unit in
+    // the other branch — the grants that stand where placements used to.
+    bind(
+        &pool,
+        tenant,
+        "pia@acme.test",
+        org.payments.id,
+        RoleKey::Member,
+    )
+    .await;
+    bind(
+        &pool,
+        tenant,
+        "sam@acme.test",
+        org.field.id,
+        RoleKey::Member,
     )
     .await;
 
@@ -450,6 +513,22 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
         !reads_runbook(&app, &sam).await,
         "the runbook must not reach sales before it climbs"
     );
+    // The reader-side baseline for the promotion proof below: Dana, who
+    // curates Engineering, reads the runbook as platform's *derived*
+    // material — her grant reaches the team because eng is on its chain —
+    // and nothing more has happened to it yet.
+    let (status, baseline) = post(&app, &dana, "/v1/recall", json!({"ids": [runbook]})).await;
+    assert_eq!(status, StatusCode::OK, "the baseline recall: {baseline}");
+    assert_eq!(
+        baseline["entries"][0]["scope_id"].as_str(),
+        Some(org.platform.id.to_string().as_str()),
+        "before the climb the runbook composes from where it lives: {baseline}"
+    );
+    assert_eq!(
+        baseline["entries"][0]["channel"].as_str(),
+        Some("derived"),
+        "and as unreviewed material: {baseline}"
+    );
 
     // ── Hop 1: platform → eng, under Engineering's curator ──────────────
     let hop1 = climb(
@@ -463,7 +542,7 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     .await;
 
     // Tara curates the platform team. She holds nothing at Engineering,
-    // because role bindings inherit downward and never up — so the level
+    // because grants inherit down the subtree and never up — so the level
     // below cannot approve the level above's publication.
     let (status, denied) = post(
         &app,
@@ -475,7 +554,7 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
-        "a team curator must not review at the department: {denied}"
+        "a team curator must not review at the org unit: {denied}"
     );
 
     let (status, approved) = post(
@@ -488,21 +567,21 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     assert_eq!(
         status,
         StatusCode::OK,
-        "the dept curator's approval: {approved}"
+        "the org unit's curator approval: {approved}"
     );
     assert_eq!(
         approved["state"].as_str(),
         Some("open"),
-        "a department publication is not one curator's to make: {approved}"
+        "an org-unit publication is not one curator's to make: {approved}"
     );
     assert!(
         approved["outstanding"]
             .as_str()
-            .is_some_and(|outstanding| outstanding.contains("steward")),
+            .is_some_and(|outstanding| outstanding.contains("administrator")),
         "and the response says what it still lacks: {approved}"
     );
-    // The department's steward is the second of the two distinct
-    // approvers the matrix asks for at this scope kind.
+    // The org unit's administrator is the second of the two distinct
+    // approvers the matrix asks for at this scope shape.
     let (status, approved) = post(
         &app,
         &evan,
@@ -513,15 +592,15 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     assert_eq!(
         status,
         StatusCode::OK,
-        "the dept steward's approval: {approved}"
+        "the org unit administrator's approval: {approved}"
     );
     assert_eq!(
         approved["state"].as_str(),
         Some("approved"),
-        "curator + steward, two distinct people, satisfies a department: {approved}"
+        "curator + administrator, two distinct people, satisfies an org unit: {approved}"
     );
-    // Dana runs the effect, not Evan: publishing takes `MemoryRead` too,
-    // and `steward` is an authority role that reads no content in any pack
+    // Dana runs the effect: publishing takes `ChannelPublish` and the
+    // working-tier read beside it, and she holds both at Engineering
     // (ADR-0031 decision 12 — nobody publishes what they cannot read).
     let (status, published) = post(
         &app,
@@ -534,32 +613,40 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     assert_eq!(
         published["scope_id"].as_str(),
         Some(org.eng.id.to_string().as_str()),
-        "the department's channel is what moved: {published}"
+        "the org unit's channel is what moved: {published}"
     );
 
-    // The promotion, from the reader's side. Pia is in payments; she has
-    // never been able to read platform and still cannot — what changed is
-    // that Engineering published the runbook, and Engineering is on her
-    // chain.
-    assert!(
-        reads_runbook(&app, &pia).await,
-        "after the climb, the sibling team must receive the runbook"
+    // The promotion, from the reader's side. Dana's own recall composed
+    // the runbook as platform's *derived* material before the climb; it
+    // now composes as Engineering's *published* material — the entry's
+    // address is the publishing scope, not the team the record lives at
+    // (ADR-0034 decision 6). That is the audience the first hop widens
+    // under the new model: everyone the org unit's reviewed channel
+    // stands for, not only those whose grant already reached the team.
+    let (status, recalled) = post(&app, &dana, "/v1/recall", json!({"ids": [runbook]})).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "recalling the climbed runbook: {recalled}"
     );
+    let entry = &recalled["entries"][0];
+    assert_eq!(
+        entry["scope_id"].as_str(),
+        Some(org.eng.id.to_string().as_str()),
+        "the entry composes from the publishing scope: {recalled}"
+    );
+    assert_eq!(
+        entry["channel"].as_str(),
+        Some("published"),
+        "climbed material composes as published, not derived: {recalled}"
+    );
+    // And an org-unit publication stops there: no org unit is on any
+    // member's own chain (a principal scope hangs off the tenant root,
+    // CPR-7), so a member of another branch still receives nothing in
+    // their inject — only the root's publication reaches everyone.
     assert!(
         !reads_runbook(&app, &sam).await,
-        "a department publication must not reach another department"
-    );
-    // It composes as reviewed, under the department's own section — the
-    // reader is never shown a scope they cannot see.
-    let block = inject(&app, &pia).await;
-    let text = block["text"].as_str().expect("block text");
-    assert!(
-        !text.contains("[unreviewed]"),
-        "climbed material composes as published, not derived: {text}"
-    );
-    assert!(
-        text.contains("acme/eng") && !text.contains("platform"),
-        "a climbed entry sits in the publishing scope's section: {text}"
+        "an org-unit publication must not reach another department's inject"
     );
 
     // ── Hop 2: eng → org, on material eng holds only by publishing it ───
@@ -569,7 +656,7 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     let hop2 = climb(
         &app,
         &dana,
-        org.org.id,
+        org.root.id,
         org.eng.id,
         &[runbook],
         "promote the signing-key runbook to ACME",
@@ -603,18 +690,20 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
         "a rejected climb must change nothing"
     );
 
-    // A revision is a new proposal (ADR-0032 decision 12), and this one
-    // carries the org's approval.
+    // A revision is a new proposal (ADR-0032 decision 12). The tenant root
+    // prices a memory at curator + administrator, two distinct people —
+    // the same cell an org unit carries — so this hop needs both of the
+    // root's people, and the first signature alone leaves it open.
     let hop2b = climb(
         &app,
         &dana,
-        org.org.id,
+        org.root.id,
         org.eng.id,
         &[runbook],
         "promote the signing-key runbook to ACME (owner named)",
     )
     .await;
-    let (status, approved) = post(
+    let (status, first) = post(
         &app,
         &olive,
         &format!("/v1/proposals/{hop2b}/approve"),
@@ -624,9 +713,14 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     assert_eq!(
         status,
         StatusCode::OK,
-        "the org curator's approval: {approved}"
+        "the root's curator approves: {first}"
     );
-    let (status, approved) = post(
+    assert_eq!(
+        first["state"].as_str(),
+        Some("open"),
+        "a tenant-root publication is not one curator's to make either: {first}"
+    );
+    let (status, second) = post(
         &app,
         &owen,
         &format!("/v1/proposals/{hop2b}/approve"),
@@ -636,12 +730,12 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     assert_eq!(
         status,
         StatusCode::OK,
-        "the org steward's approval: {approved}"
+        "the root's administrator is the second: {second}"
     );
     assert_eq!(
-        approved["state"].as_str(),
+        second["state"].as_str(),
         Some("approved"),
-        "the org asks for its own curator and its own steward: {approved}"
+        "curator + administrator, two distinct people, satisfies the root too: {second}"
     );
     let (status, published) = post(
         &app,
@@ -650,11 +744,35 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
         Value::Null,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "publishing hop 2: {published}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "and then the root's curator publishes it: {published}"
+    );
 
+    // The audience widened, and here it is reader-visible: the tenant
+    // root is the one scope on every member's own chain, so Sam — in a
+    // branch that never held a grant over the runbook — now receives it
+    // in his own inject, as published material (never `[unreviewed]`).
     assert!(
         reads_runbook(&app, &sam).await,
         "after the second climb, another department must receive the runbook"
+    );
+    let block = inject(&app, &sam).await;
+    let text = block["text"].as_str().expect("block text");
+    assert!(
+        !text.contains("[unreviewed]"),
+        "climbed material composes as published, not derived: {text}"
+    );
+    assert!(
+        !text.contains("platform"),
+        "the entry sits in the tenant root's section, not the team's: {text}"
+    );
+    // And Pia, who never could read the platform team, receives it too —
+    // the tenant's publication is what reaches her, nothing narrower.
+    assert!(
+        reads_runbook(&app, &pia).await,
+        "after the second climb, the sibling team receives the runbook"
     );
 
     // ── The trail: two climbs, one denial, both levels named ────────────
@@ -694,7 +812,7 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     let denial = &rejections[0];
     assert_eq!(
         denial.payload["target_scope_id"].as_str(),
-        Some(org.org.id.to_string().as_str()),
+        Some(org.root.id.to_string().as_str()),
         "the denial names the level it happened at"
     );
     assert_eq!(
@@ -722,7 +840,7 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
         climbed,
         [
             (org.platform.id.to_string(), org.eng.id.to_string()),
-            (org.eng.id.to_string(), org.org.id.to_string()),
+            (org.eng.id.to_string(), org.root.id.to_string()),
         ],
         "the chain shows the runbook climbing, hop by hop"
     );
@@ -752,7 +870,7 @@ async fn a_climb_goes_up_never_sideways_and_never_down() {
         return;
     };
     let org = seed_hierarchy(&pool, tenant).await;
-    let ravi = seed_user(&pool, tenant, "ravi@acme.test", org.platform.id).await;
+    let ravi = seed_user(&pool, tenant, "ravi@acme.test").await;
     // Curator at both teams *and* the department, so every refusal below
     // is the direction rule talking and not the PDP.
     bind(
@@ -760,7 +878,7 @@ async fn a_climb_goes_up_never_sideways_and_never_down() {
         tenant,
         "ravi@acme.test",
         org.platform.id,
-        Role::Curator,
+        RoleKey::Curator,
     )
     .await;
     bind(
@@ -768,10 +886,17 @@ async fn a_climb_goes_up_never_sideways_and_never_down() {
         tenant,
         "ravi@acme.test",
         org.payments.id,
-        Role::Curator,
+        RoleKey::Curator,
     )
     .await;
-    bind(&pool, tenant, "ravi@acme.test", org.eng.id, Role::Curator).await;
+    bind(
+        &pool,
+        tenant,
+        "ravi@acme.test",
+        org.eng.id,
+        RoleKey::Curator,
+    )
+    .await;
     let token = issue("ravi@acme.test", tenant);
     let app = router(state(&database_url()));
     let runbook = seed_record(&pool, tenant, org.platform.id, ravi.id, RUNBOOK).await;
@@ -848,14 +973,53 @@ async fn only_a_principal_who_can_read_the_source_may_climb_it() {
         return;
     };
     let org = seed_hierarchy(&pool, tenant).await;
-    let ravi = seed_user(&pool, tenant, "ravi@acme.test", org.platform.id).await;
-    seed_user(&pool, tenant, "tara@acme.test", org.platform.id).await;
+    // Ravi's own leaf, nested under the team — the shape CPR-7 admits
+    // (a principal may nest under an org unit, ADR-0074 decision 3), and
+    // the shape this test needs: a climb to `platform` is structurally
+    // legal only from a descendant of platform, and a login-minted leaf
+    // at the tenant root is not one. The privacy floor is unimpressed by
+    // either position — nothing above a `principal` scope reaches in
+    // wherever it hangs.
+    let ravi = {
+        let mut tx = pool.begin().await.expect("begin");
+        let own = scopes::create(
+            &mut tx,
+            &scopes::NewScope {
+                id: ScopeId::new(),
+                tenant_id: tenant,
+                kind: ScopeKind::Principal,
+                parent_scope_id: Some(org.platform.id),
+                slug: scopes::principal_slug("ravi@acme.test"),
+                display_name: "ravi@acme.test".to_owned(),
+                attributes: serde_json::json!({}),
+                principal_id: Some("ravi@acme.test".to_owned()),
+                created_by: None,
+            },
+        )
+        .await
+        .expect("mint nested principal scope");
+        let identity = identities::create(
+            &mut tx,
+            IdentityId::new(),
+            tenant,
+            Some("ravi@acme.test"),
+            IdentityKind::User,
+            None,
+            None,
+            own.id,
+        )
+        .await
+        .expect("create identity");
+        tx.commit().await.expect("commit user");
+        identity
+    };
+    seed_user(&pool, tenant, "tara@acme.test").await;
     bind(
         &pool,
         tenant,
         "tara@acme.test",
         org.platform.id,
-        Role::Curator,
+        RoleKey::Curator,
     )
     .await;
     bind(
@@ -863,7 +1027,7 @@ async fn only_a_principal_who_can_read_the_source_may_climb_it() {
         tenant,
         "ravi@acme.test",
         org.platform.id,
-        Role::Contributor,
+        RoleKey::Member,
     )
     .await;
     let (ravi_t, tara) = (
@@ -877,7 +1041,9 @@ async fn only_a_principal_who_can_read_the_source_may_climb_it() {
     let note = seed_record(&pool, tenant, ravi.scope_id, ravi.id, RUNBOOK).await;
 
     // Tara curates the team and can publish there. She still cannot climb
-    // Ravi's note into it, because she cannot read it.
+    // Ravi's note into it, because she cannot read it: the structural
+    // check passes (platform *is* an ancestor of the leaf) and the
+    // disclosure decision is what refuses.
     let (status, denied) = open_climb(
         &app,
         &tara,
@@ -910,9 +1076,10 @@ async fn only_a_principal_who_can_read_the_source_may_climb_it() {
     );
 
     // The disclosure is real and it is the point: Tara reviews content she
-    // cannot read at its source. Requiring otherwise would make the
-    // product's own floor unsatisfiable — `compliance` reads no memory in
-    // any pack — and would leave personal material unclimbable forever.
+    // cannot read at its source. Requiring the source read of every
+    // reviewer would leave personal material unclimbable forever — the
+    // privacy floor admits nobody but the owner, so the review surface is
+    // the only place a teammate's climb can be seen at all.
     let id = opened["id"].as_str().expect("proposal id");
     let request = Request::builder()
         .method("GET")
@@ -945,21 +1112,39 @@ async fn a_climb_carries_only_what_its_source_holds() {
         return;
     };
     let org = seed_hierarchy(&pool, tenant).await;
-    let ravi = seed_user(&pool, tenant, "ravi@acme.test", org.platform.id).await;
-    seed_user(&pool, tenant, "dana@acme.test", org.eng.id).await;
-    seed_user(&pool, tenant, "evan@acme.test", org.eng.id).await;
+    let ravi = seed_user(&pool, tenant, "ravi@acme.test").await;
+    seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "evan@acme.test").await;
     bind(
         &pool,
         tenant,
         "ravi@acme.test",
         org.platform.id,
-        Role::Curator,
+        RoleKey::Curator,
     )
     .await;
-    bind(&pool, tenant, "dana@acme.test", org.eng.id, Role::Curator).await;
-    // A department publication takes a curator and a steward, two distinct
-    // people, whichever route it arrives by (the FLOW-3 matrix golden).
-    bind(&pool, tenant, "evan@acme.test", org.eng.id, Role::Steward).await;
+    // The climb's target is eng, and asking at a scope takes membership
+    // or a grant there (CPR-7) — the same grant reads him the platform
+    // record through the chain, which is what the disclosure check wants.
+    bind(&pool, tenant, "ravi@acme.test", org.eng.id, RoleKey::Member).await;
+    bind(
+        &pool,
+        tenant,
+        "dana@acme.test",
+        org.eng.id,
+        RoleKey::Curator,
+    )
+    .await;
+    // An org-unit publication takes a curator and an administrator, two
+    // distinct people, whichever route it arrives by (the matrix golden).
+    bind(
+        &pool,
+        tenant,
+        "evan@acme.test",
+        org.eng.id,
+        RoleKey::Administrator,
+    )
+    .await;
     let (ravi_t, dana, evan) = (
         issue("ravi@acme.test", tenant),
         issue("dana@acme.test", tenant),
@@ -1003,7 +1188,7 @@ async fn a_climb_carries_only_what_its_source_holds() {
     let (status, early) = open_climb(
         &app,
         &dana,
-        org.org.id,
+        org.root.id,
         Some(org.eng.id),
         &[runbook],
         "climb from a scope that has not received it",
@@ -1051,7 +1236,7 @@ async fn a_climb_carries_only_what_its_source_holds() {
     let hop2 = climb(
         &app,
         &dana,
-        org.org.id,
+        org.root.id,
         org.eng.id,
         &[runbook],
         "the department proposes onward what the team climbed into it",
@@ -1079,33 +1264,39 @@ async fn a_climb_carries_only_what_its_source_holds() {
     .await
     .expect("edit record");
 
-    seed_user(&pool, tenant, "olive@acme.test", org.org.id).await;
-    seed_user(&pool, tenant, "owen@acme.test", org.org.id).await;
-    bind(&pool, tenant, "olive@acme.test", org.org.id, Role::Curator).await;
-    bind(&pool, tenant, "owen@acme.test", org.org.id, Role::Steward).await;
-    let (olive, owen) = (
-        issue("olive@acme.test", tenant),
-        issue("owen@acme.test", tenant),
-    );
-    post(
-        &app,
-        &olive,
-        &format!("/v1/proposals/{hop2}/approve"),
-        Value::Null,
+    seed_user(&pool, tenant, "olive@acme.test").await;
+    bind(
+        &pool,
+        tenant,
+        "olive@acme.test",
+        org.root.id,
+        RoleKey::Curator,
     )
     .await;
-    let (status, approved) = post(
-        &app,
-        &owen,
-        &format!("/v1/proposals/{hop2}/approve"),
-        Value::Null,
+    seed_user(&pool, tenant, "owen@acme.test").await;
+    bind(
+        &pool,
+        tenant,
+        "owen@acme.test",
+        org.root.id,
+        RoleKey::Administrator,
     )
     .await;
-    assert_eq!(
-        approved["state"].as_str(),
-        Some("approved"),
-        "the org's approvers signed off (status {status}): {approved}"
-    );
+    let olive = issue("olive@acme.test", tenant);
+    let owen = issue("owen@acme.test", tenant);
+    // Satisfy the root's matrix cell first — curator + administrator, two
+    // distinct people — so the refusal below is unambiguously the *edit*
+    // and not an unmet approval standing in front of it.
+    for token in [&olive, &owen] {
+        let (status, approved) = post(
+            &app,
+            token,
+            &format!("/v1/proposals/{hop2}/approve"),
+            Value::Null,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "approving hop 2: {approved}");
+    }
     let (status, conflict) = post(
         &app,
         &olive,

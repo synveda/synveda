@@ -29,7 +29,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
-use crate::hierarchy::{body, commit, tenant_id};
+use crate::request::{body, commit, tenant_id};
 use crate::telemetry::SCIM_CREDENTIAL_OPERATIONS_TOTAL;
 
 /// The longest life a provisioning credential may be issued for, and the

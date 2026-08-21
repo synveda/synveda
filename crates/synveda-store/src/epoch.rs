@@ -32,14 +32,19 @@ use sqlx::PgPool;
 
 /// The schema epoch this build serves.
 ///
-/// Epoch 1 is the context platform. Everything before it — the 38-migration
-/// enterprise-memory schema this programme cuts from — carries no marker at
-/// all, which is how a pre-cut database presents to [`verify`]: not as epoch
-/// 0, but as [`SchemaEpochError::Missing`].
+/// Epoch 1 is the context platform's founding marker; epoch 2 is the
+/// hierarchy cutover (CPR-7, ADR-0074) — the chain was rewritten in place
+/// (the scope substrate moved to `0004`, `role_bindings` and the hierarchy
+/// tables left it), so a database at epoch 1 holds a schema this build can
+/// neither read nor migrate, and is refused with the reset instruction.
+/// Everything before epoch 1 — the 38-migration enterprise-memory schema
+/// this programme cuts from — carries no marker at all, which is how a
+/// pre-cut database presents to [`verify`]: not as epoch 0, but as
+/// [`SchemaEpochError::Missing`].
 ///
 /// Bump this only when the model underneath changes incompatibly. Adding a
 /// migration is not that; every ordinary release leaves this number alone.
-pub const CURRENT_EPOCH: i32 = 1;
+pub const CURRENT_EPOCH: i32 = 2;
 
 /// The exact command that makes a refused database usable again. Quoted
 /// verbatim by every refusal below, and by the gateway, the CLI and the

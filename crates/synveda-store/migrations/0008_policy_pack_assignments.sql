@@ -52,9 +52,11 @@ create table policy_pack_defaults (
 insert into policy_pack_defaults (tenant_id, pack_name)
 select tenant_id, name from policy_packs;
 
--- 3) Per-node assignments: the node (and its subtree, until a deeper
--- assignment) runs the named pack. Cascade with the node: HIER-1 deletes
--- are leaf-only, and a deleted leaf's assignment governs nothing.
+-- 3) Per-scope assignments: the scope (and its subtree, until a deeper
+-- assignment) runs the named pack. Cascade with the scope: nothing
+-- deletes a scope, and an orphaned assignment governs nothing. Re-pointed
+-- from `hierarchy_nodes` to `scopes` by CPR-7 (ADR-0074) — the subtree a
+-- assignment covers is now `scope_closure`'s.
 create table policy_pack_assignments (
     tenant_id  uuid        not null,
     scope_id   uuid        not null,
@@ -64,11 +66,11 @@ create table policy_pack_assignments (
     constraint policy_pack_assignments_pk primary key (tenant_id, scope_id),
     constraint policy_pack_assignments_tenant_fk
         foreign key (tenant_id) references tenants (id),
-    -- The node must belong to the same tenant: a cross-tenant assignment
-    -- is unrepresentable (same doctrine as hierarchy parents).
+    -- The scope must belong to the same tenant: a cross-tenant assignment
+    -- is unrepresentable (same doctrine as scope parents).
     constraint policy_pack_assignments_scope_fk
         foreign key (tenant_id, scope_id)
-        references hierarchy_nodes (tenant_id, id)
+        references scopes (tenant_id, id)
         on delete cascade,
     constraint policy_pack_assignments_name_check
         check (pack_name ~ '^[a-z0-9][a-z0-9-]{0,62}$')

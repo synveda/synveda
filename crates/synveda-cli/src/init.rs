@@ -392,10 +392,11 @@ fn print_external_issuer_instructions(issuer: &str) {
     println!("      scopes         openid, profile, email, groups");
     println!("      issuer         {issuer}");
     println!();
-    println!("    Group claims drive placement: a `{ADMIN_GROUP}` member becomes");
-    println!("    tenant-wide org-admin, and `synveda-<department>-<team>` places by");
-    println!("    convention. This command configures an issuer; it does not");
-    println!("    synchronise a directory.");
+    println!("    One group claim is read: a `{ADMIN_GROUP}` member is granted");
+    println!("    `administrator` at the tenant root on every login. There is no");
+    println!("    placement convention — everybody arrives at their own scope and");
+    println!("    reaches anything else through a grant. This command configures an");
+    println!("    issuer; it does not synchronise a directory.");
     println!();
     println!("    For joiners, movers and leavers, issue a provisioning credential");
     println!("    once the instance is up:");

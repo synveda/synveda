@@ -33,8 +33,8 @@
 #  11. `/v1/me` says `ready`.
 #  12. The audit chain records every act under its own action name — and
 #      **verifies**.
-#  13. The chain carries no credential, and no act was recorded as a hierarchy
-#      operation.
+#  13. The chain carries no credential, and no act was recorded under the
+#      deleted hierarchy/role vocabulary.
 #
 # Usage: demos/cpr-4-workspaces.sh
 #   KEEP_DB=1      keep the scratch database on the way out
@@ -128,10 +128,6 @@ TENANT_SLUG="cpr4-demo-$$"
 "$BIN" tenant create --slug "$TENANT_SLUG" --name 'CPR-4 demo' >"$WORK/tenant.json"
 TENANT_ID="$(python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])' <"$WORK/tenant.json")"
 [ -n "$TENANT_ID" ] || fail "admitting the tenant produced no id"
-# Tenant-wide org-admin, which is what a person holds after `synveda init` and
-# their first login (AUTHZ-3, ADR-0015 decision 6). Break-glass at the store
-# level here, because there is nobody to grant it through the API yet.
-"$BIN" role bind --tenant "$TENANT_ID" --subject "$SUBJECT" --role org-admin >/dev/null
 TOKEN="$("$BIN" token issue --tenant "$TENANT_ID" --subject "$SUBJECT")"
 
 "$GATEWAY" >"$WORK/gateway.log" 2>&1 &
@@ -150,11 +146,20 @@ api GET /v1/me
 [ "$STATUS" = "200" ] || fail "/v1/me answered ${STATUS}: ${BODY}"
 [ "$(field onboarding/state)" = "needs_workspace" ] ||
     fail "expected needs_workspace, got '$(field onboarding/state)'"
-[ -z "$(field onboarding/tenant_scope_id)" ] ||
-    fail "a fresh tenant has a root scope nobody asked for"
+ROOT_SCOPE="$(field onboarding/tenant_scope_id)"
+[ -n "$ROOT_SCOPE" ] || fail "/v1/me should have minted the tenant root: ${BODY}"
+# The first grant a tenant holds. Break-glass at the store level, because
+# nothing mints one for a dev-token tenant with no IdP admin group to read
+# (CPR-7, ADR-0074 decision 4 — a login through `synveda-admins` is the
+# operator door; this is the admission-level gap it leaves standing).
+psql_db -c "insert into scope_grants
+              (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source)
+            values (gen_random_uuid(), '${TENANT_ID}', '${ROOT_SCOPE}', 'principal',
+                    '${SUBJECT}', 'owner', 'owner')" >/dev/null
+api GET /v1/me
 [ "$(field capabilities/actions/workspace.create)" = "True" ] ||
-    fail "an org-admin cannot create a workspace: ${BODY}"
-ok "no scope tree, and the server says the next step is a workspace"
+    fail "the tenant root's owner cannot create a workspace: ${BODY}"
+ok "no workspace yet, and the server says the next step is one"
 
 step "2. POST /v1/workspaces creates the workspace and its governed scope"
 api POST /v1/workspaces k-1 '{"slug":"payments","display_name":"Payments"}'
@@ -166,10 +171,8 @@ WORKSPACE_SCOPE="$(field scope_id)"
 KIND="$(psql_db -c "select kind from scopes where id = '${WORKSPACE_SCOPE}'")"
 [ "$KIND" = "workspace" ] || fail "the owned scope is a '${KIND}', not a workspace"
 ROOTS="$(psql_db -c "select count(*) from scopes where kind = 'tenant'")"
-[ "$ROOTS" = "1" ] || fail "expected the tenant root to be minted once, found ${ROOTS}"
-HIER="$(psql_db -c "select count(*) from hierarchy_nodes")"
-[ "$HIER" = "0" ] || fail "the old hierarchy was written to: ${HIER} row(s)"
-ok "workspace ${WORKSPACE_ID}, scope ${WORKSPACE_SCOPE}, tenant root minted on the way past"
+[ "$ROOTS" = "1" ] || fail "expected exactly one tenant root, found ${ROOTS}"
+ok "workspace ${WORKSPACE_ID}, scope ${WORKSPACE_SCOPE}, under the one tenant root"
 
 step "3. The same request with the same key returns the same workspace"
 api POST /v1/workspaces k-1 '{"slug":"payments","display_name":"Payments"}'
@@ -272,13 +275,14 @@ done
     fail "the chain does not verify: $(cat "$WORK/verify.log")"
 ok "workspace.created, workspace.updated, project.created, project.repository.attached — chain verifies"
 
-step "13. Nothing leaked, and nothing was recorded as a hierarchy act"
+step "13. Nothing leaked, and every act is under its own name"
 LEAK="$(psql_db -c "select count(*) from audit_log where payload::text like '%ghp_%'")"
 [ "$LEAK" = "0" ] || fail "${LEAK} audit event(s) carry a credential"
-WRONG="$(psql_db -c "select count(*) from audit_log where action like 'hierarchy.%'")"
+WRONG="$(psql_db -c "select count(*) from audit_log
+                     where action like 'hierarchy.%' or action like 'role.%'")"
 [ "$WRONG" = "0" ] ||
-    fail "${WRONG} act(s) were recorded as hierarchy operations rather than their own"
-ok "no credential in the chain; no workspace act recorded as a hierarchy one"
+    fail "${WRONG} act(s) were recorded under the deleted hierarchy vocabulary"
+ok "no credential in the chain; no act under a deleted action name"
 
 printf '\n\033[1;32mCPR-4 demonstrated.\033[0m A person went from nothing to a project with a\n'
 printf 'repository, was never asked to declare an organisation, and every act is in the\n'

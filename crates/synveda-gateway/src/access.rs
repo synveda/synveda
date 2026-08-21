@@ -70,8 +70,8 @@ use crate::app::AppState;
 use crate::audit;
 use crate::authz::{self, Authorized};
 use crate::error::ApiError;
-use crate::hierarchy::{body, commit, tenant_id};
 use crate::idempotency::{Claim, Dispatch};
+use crate::request::{body, commit, tenant_id};
 use crate::telemetry::ACCESS_OPERATIONS_TOTAL;
 use crate::workspaces::{ApiErrorBody, string_enum, subject};
 
@@ -681,8 +681,8 @@ async fn require(
             Resource::Grant(grant.id),
         ),
     };
-    let input = authz::gather_governed(state, tx, anchor.as_ref(), selection, resources).await?;
-    let authorized = authz::decide(state, &input, action, resource, None)?;
+    let input = authz::gather(state, tx, anchor.as_ref(), selection, resources).await?;
+    let authorized = authz::decide(state, &input, action, resource)?;
     Ok((authorized, resource))
 }
 

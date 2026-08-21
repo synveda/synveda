@@ -1,14 +1,16 @@
--- AUTH-2: provisioned identities and group-mapping overrides (ADR-0013).
+-- AUTH-2: provisioned identities (ADR-0013), re-anchored on governed scopes
+-- by CPR-7 (ADR-0074 decision 3).
 --
--- identities binds a verified token subject to its personal user-kind
--- scope node; JIT provisioning inserts exactly one row per (tenant,
--- subject) at first login. Quarantined status is derived from placement
--- (the user node's parent is the tenant's reserved `quarantine` scope),
--- never stored — no flag to drift (ADR-0013 decision 4).
---
--- group_mappings overrides the `synveda-{dept}-{team}` convention: an
--- exact IdP group name maps to any non-user scope. Managed at the store
--- level for now, like policy packs pre-AUTHZ-2 (ADR-0013 decision 3).
+-- identities binds a verified token subject to its own principal-shaped
+-- scope; JIT provisioning inserts exactly one row per (tenant, subject) at
+-- first login, minting the scope in the same transaction. An identity's
+-- scope is who they are, not where a convention placed them: the
+-- `synveda-{dept}-{team}` convention, the `group_mappings` override table
+-- this migration once created and the reserved `quarantine` scope are
+-- deleted with the hierarchy this table used to point at. "Unmapped" is now
+-- *ungranted* — a principal with no grants reaches nothing beyond their own
+-- scope, decided per action by the anchor model and the base-layer privacy
+-- floor rather than per person by a placement-derived flag.
 
 create table identities (
     id           uuid        not null,
@@ -25,55 +27,30 @@ create table identities (
     -- One identity per subject per tenant; the JIT race resolves here
     -- (the losing login retries and adopts the winner's identity).
     constraint identities_subject_unique unique (tenant_id, subject),
-    -- The personal scope must be a node of the same tenant: a cross-tenant
-    -- binding is unrepresentable (same doctrine as hierarchy parents). No
-    -- cascade: an identity pins its node — leavers are AUTH-4's feature,
-    -- not a delete surprise.
+    -- The identity's own scope, in the same tenant: a cross-tenant binding
+    -- is unrepresentable (same doctrine as scope parents). No cascade: an
+    -- identity pins its scope — leavers are AUTH-4's feature, not a delete
+    -- surprise.
     constraint identities_scope_fk
         foreign key (tenant_id, scope_id)
-        references hierarchy_nodes (tenant_id, id),
-    -- One node is one person's personal scope, never two.
+        references scopes (tenant_id, id),
+    -- One scope is one identity's own, never two.
     constraint identities_scope_unique unique (tenant_id, scope_id),
     constraint identities_subject_check
         check (length(subject) between 1 and 255)
 );
 
-create table group_mappings (
-    tenant_id  uuid        not null,
-    group_name text        not null,
-    scope_id   uuid        not null,
-    created_at timestamptz not null default now(),
-
-    -- Exact-match lookup by group name; one target per name.
-    constraint group_mappings_pk primary key (tenant_id, group_name),
-    constraint group_mappings_tenant_fk
-        foreign key (tenant_id) references tenants (id),
-    constraint group_mappings_scope_fk
-        foreign key (tenant_id, scope_id)
-        references hierarchy_nodes (tenant_id, id),
-    constraint group_mappings_name_check
-        check (length(group_name) between 1 and 255)
-);
-
 -- Tenant-scoped tables ⇒ forced RLS + policy + least-privilege grants in
 -- the same migration (ADR-0009 structural rule; the completeness guard in
 -- crates/synveda-store/tests/rls.rs enforces it). Identities are only
--- created for now — movers/leavers (AUTH-4/5) bring update/delete with
--- their own migrations; mappings are admin-curated.
+-- created for now — subject binding and the mover/leaver lifecycle (AUTH-4/5)
+-- bring update with their own migrations.
 grant select, insert on identities to synveda_app;
-grant select, insert, update, delete on group_mappings to synveda_app;
 
 alter table identities enable row level security;
 alter table identities force row level security;
-alter table group_mappings enable row level security;
-alter table group_mappings force row level security;
 
 create policy identities_tenant_isolation on identities
-    for all
-    using (tenant_id = synveda_current_tenant())
-    with check (tenant_id = synveda_current_tenant());
-
-create policy group_mappings_tenant_isolation on group_mappings
     for all
     using (tenant_id = synveda_current_tenant())
     with check (tenant_id = synveda_current_tenant());

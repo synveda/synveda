@@ -15,12 +15,12 @@ import { useCallback, useEffect, useState } from "react";
 import {
   approve,
   listProposals,
-  nodeCapabilities,
+  scopeCapabilities,
   readProposal,
   reject,
   type Outcome,
 } from "./api.mjs";
-import { offers, type Capabilities } from "./explorer.mjs";
+import { offers, type Capabilities, type CapabilityBatch } from "./explorer.mjs";
 import { Review } from "./Review.js";
 import type { Proposal, ProposalDetail } from "./review.mjs";
 
@@ -126,7 +126,11 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
     setState(outcome);
     if (outcome.kind === "ok") {
       const scope = (outcome.body as ProposalDetail).target_scope_id;
-      const probe = await nodeCapabilities(scope);
+      const batch = await scopeCapabilities([scope]);
+      const probe =
+        batch.kind === "ok"
+          ? { kind: "ok", body: (batch.body as CapabilityBatch).capabilities[0] }
+          : batch;
       // A probe that fails leaves the forecast `null`, which offers
       // nothing — fail closed, so an unreachable PDP shows a reviewer no
       // buttons rather than buttons that will not work.

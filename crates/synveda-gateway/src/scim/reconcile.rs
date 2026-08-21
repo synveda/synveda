@@ -32,16 +32,11 @@
 
 use serde_json::json;
 use synveda_audit::{Actor, AuditAction, Outcome};
-use synveda_policy::{AuthzContext, Resource, ScopeNode};
-use synveda_store::{directory, hierarchy, identities, policy_assignments, rls};
-use synveda_types::{
-    DirectoryUser, HierarchyNode, Identity, IdentityId, IdentityKind, Result, ScopeId, ScopeKind,
-    Tenant,
-};
+use synveda_store::{directory, identities, rls, scopes};
+use synveda_types::{DirectoryUser, Identity, IdentityId, IdentityKind, Result, Tenant};
 
 use crate::app::AppState;
 use crate::audit;
-use crate::provision;
 use crate::telemetry::SCIM_RECONCILES_TOTAL;
 
 /// Which door a directory fact arrived through.
@@ -185,12 +180,15 @@ pub async fn reconcile(
                 if user.identity_id != Some(identity.id) {
                     directory::link_identity(&mut *tx, tenant.id, user.id, identity.id).await?;
                 }
-                let moved =
-                    apply_placement(state, &mut tx, tenant, source, &identity, &groups).await?;
-                match (moved, user.identity_id) {
-                    (Some(outcome), _) => (outcome, true),
-                    (None, None) => (Reconciled::Adopted, false),
-                    (None, Some(_)) => (Reconciled::Unchanged, false),
+                // Group-driven placement is gone with the hierarchy (CPR-7,
+                // ADR-0074 decision 3): the identity stays at its own
+                // principal scope, and belonging somewhere is expressed by
+                // the directory groups the reconciler syncs onto
+                // `groups`/`group_members` and the grants an administrator
+                // writes — never by moving the person's scope.
+                match user.identity_id {
+                    None => (Reconciled::Adopted, false),
+                    Some(_) => (Reconciled::Unchanged, false),
                 }
             }
         }
@@ -202,7 +200,7 @@ pub async fn reconcile(
             message: format!("commit reconciliation: {err}"),
         })?;
     if structural {
-        state.invalidate_hierarchy(tenant.id);
+        state.invalidate_scopes(tenant.id);
     }
     tracing::Span::current().record("scim.outcome", outcome.label());
     metrics::counter!(SCIM_RECONCILES_TOTAL, "outcome" => outcome.label()).increment(1);
@@ -299,6 +297,15 @@ pub async fn conflicting_record(
     let Some(identity) = find_identity(&mut tx, tenant, &candidate).await? else {
         return Ok(None);
     };
+    // **Live rows only.** A departed person's identity still matches on
+    // address — that is what makes the correspondence rule work — but it
+    // must not stand in front of a rehire. A sealed row holding an email
+    // forever would 409 every returning employee, which is the one shape
+    // this uniqueness exists to permit rather than refuse (ADR-0059
+    // decision 8: the seal is permanent, the *address* is not).
+    if identity.sealed() {
+        return Ok(None);
+    }
     let held = directory::user_for_identity(&mut *tx, tenant.id, identity.id).await?;
     Ok(held.map(|row| row.id))
 }
@@ -350,7 +357,6 @@ async fn place(
     user: &DirectoryUser,
     groups: &[String],
 ) -> Result<Reconciled> {
-    let (parent, label) = resolve_parent(tx, tenant, groups).await?;
     let identity_id = IdentityId::new();
     let display_name = user
         .display_name
@@ -360,16 +366,45 @@ async fn place(
         .work_email
         .clone()
         .or_else(|| Some(user.user_name.clone()));
-    let scope = hierarchy::create(
-        tx,
-        ScopeId::new(),
-        tenant.id,
-        Some(parent.id),
-        ScopeKind::User,
-        &synveda_identity::personal_slug(email.as_deref(), &user.user_name, identity_id),
-        &display_name,
-    )
-    .await?;
+    // The principal scope is keyed by the directory's own anchor — the
+    // externalId when the customer's mapping sends one, else the mirror
+    // row's stable resource id — because this person has no token subject
+    // yet. First login adopts the identity through the correspondence rule
+    // (ADR-0059 decision 4), and the anchor resolver reads the identity
+    // row before any subject-keyed scope, so the directory's key and the
+    // login's key are one scope, not two (CPR-7, ADR-0074 decision 3).
+    let mut directory_anchor = user
+        .external_id
+        .clone()
+        .filter(|external| !external.trim().is_empty())
+        .unwrap_or_else(|| user.id.to_string());
+    // **A rehire's anchor collides with its former self's, on purpose —
+    // and has to be broken on purpose too.** `principal_id` is unique per
+    // tenant and immutable (`scopes_principal_id_check`, migration 0043):
+    // one anchor names one scope for that scope's whole life. `place` is
+    // reached only when no *live* identity matched (`reconcile`'s
+    // sealed-filter above), which for the same directory resource
+    // reactivated twice means exactly one thing — a departed identity
+    // already holds the scope this anchor names, structurally
+    // (`identities_scope_unique`: one identity per scope, ever, and
+    // identity rows are never deleted). Reusing it here would not adopt
+    // the old identity (the seal does not lift, decision 12) and would
+    // not mint a new one either — `identities::create` would collide on
+    // that same uniqueness and this rehire would 409. So a rehire mints
+    // under a disambiguated anchor instead: the fresh identity id is
+    // globally unique by construction, and appending it is what makes
+    // "a rehire is a new person, with a new personal scope" true rather
+    // than aspirational. The natural anchor is untouched for the
+    // overwhelmingly common case — nobody's own scope shifts under them
+    // just because someone else, somewhere, once departed.
+    if scopes::principal_scope(&mut **tx, tenant.id, &directory_anchor)
+        .await?
+        .is_some()
+    {
+        directory_anchor = format!("{directory_anchor}#{identity_id}");
+    }
+    let scope =
+        scopes::ensure_principal_scope(tx, tenant.id, &directory_anchor, &display_name).await?;
     let identity = identities::create(
         tx,
         identity_id,
@@ -397,9 +432,9 @@ async fn place(
         Outcome::Success,
         with_source(
             json!({
-                "placement": label,
+                "placement": "own-scope",
                 "identity": {"id": identity.id, "subject": identity.subject},
-                "parent": {"slug": parent.slug, "path": parent.path},
+                "scope": {"id": scope.id, "slug": scope.slug, "kind": scope.kind},
                 "groups": groups,
                 "origin": "scim",
             }),
@@ -409,189 +444,4 @@ async fn place(
     .await?;
     let _ = state;
     Ok(Reconciled::Provisioned)
-}
-
-/// Re-resolves placement for somebody who already exists, and moves them if
-/// the directory says they belong somewhere else (ADR-0059 decision 10).
-///
-/// Returns `None` when nothing moved.
-async fn apply_placement(
-    state: &AppState,
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    tenant: &Tenant,
-    source: DirectorySource,
-    identity: &Identity,
-    groups: &[String],
-) -> Result<Option<Reconciled>> {
-    let home = hierarchy::node(&mut **tx, identity.scope_id)
-        .await?
-        .ok_or_else(|| synveda_types::Error::Internal {
-            message: format!("identity {} lost its scope node", identity.id),
-        })?;
-    let (destination, label) = resolve_parent(tx, tenant, groups).await?;
-    if home.parent_id == Some(destination.id) {
-        return Ok(None);
-    }
-    let source_parent = match home.parent_id {
-        Some(parent_id) => hierarchy::node(&mut **tx, parent_id).await?,
-        None => None,
-    };
-
-    // **A move with quarantine at either end never seals**, whatever the
-    // packs there say. This is not in ADR-0059 and it should be (amendment
-    // 2 to decision 10).
-    //
-    // Quarantine is not a placement — it is where somebody waits for a
-    // mapping to be fixed, or where they sit for the moment between being
-    // created and being put in a group. Material is never *written under*
-    // its pack, so a hop through it is not a policy boundary being crossed
-    // and there is nothing for a pack to have an opinion about.
-    //
-    // Both ends matter and each has its own real shape. A directory that
-    // removes somebody from one group before adding the next passes them
-    // **into** quarantine; a directory that creates a person and *then*
-    // puts them in a group — which is the ordinary joiner sequence both AC
-    // clients use — takes them **out** of it. Without this rule a tenant
-    // whose org root runs a different pack from its departments would seal
-    // a scope on either of those, permanently, on a technicality of
-    // request ordering: in the joiner's case sealing a scope that was
-    // seconds old and empty.
-    //
-    // Decision 11 already says losing every group is quarantine rather
-    // than departure. This is that sentence applied to the material as
-    // well as to the person.
-    let into_quarantine = label == "quarantined";
-    let out_of_quarantine = source_parent.as_ref().is_some_and(|parent| {
-        parent.slug == synveda_store::identities::QUARANTINE_SLUG && parent.depth == 1
-    });
-    let touches_quarantine = into_quarantine || out_of_quarantine;
-
-    // Whose pack decides, and whether there is anything to decide: a move
-    // inside one pack's governance re-prices nothing (decision 10).
-    let source_pack = effective_pack_name(state, tx, tenant, source_parent.as_ref()).await?;
-    let destination_pack = effective_pack_name(state, tx, tenant, Some(&destination)).await?;
-    let crosses_boundary = source_pack.0 != destination_pack.0;
-    let seals = crosses_boundary && source_pack.1 && !touches_quarantine;
-
-    let outcome = if seals {
-        // Seal and restart: the live row lets go of the old node first,
-        // then a former self takes it — the one-personal-scope-per-node
-        // constraint refuses the other order.
-        let fresh = hierarchy::create(
-            tx,
-            ScopeId::new(),
-            tenant.id,
-            Some(destination.id),
-            ScopeKind::User,
-            &format!("{}-{}", home.slug, short(identity.id)),
-            &home.name,
-        )
-        .await?;
-        identities::rescope(tx, tenant.id, identity.id, fresh.id).await?;
-        identities::seal_scope_as_former_self(
-            tx,
-            IdentityId::new(),
-            tenant.id,
-            identity.kind,
-            identity.email.as_deref(),
-            identity.display_name.as_deref(),
-            home.id,
-        )
-        .await?;
-        Reconciled::MovedAndSealed
-    } else {
-        hierarchy::move_node(tx, home.id, destination.id).await?;
-        Reconciled::Moved
-    };
-
-    audit::record_as(
-        tx,
-        tenant.id,
-        Actor::system("scim"),
-        AuditAction::IdentityMoved,
-        format!("scope {}", home.id),
-        Outcome::Success,
-        with_source(
-            json!({
-                "identity": {"id": identity.id, "subject": identity.subject},
-                "placement": label,
-                "from": {"scope_id": home.parent_id, "pack": source_pack.0},
-                "to": {"scope_id": destination.id, "slug": destination.slug, "pack": destination_pack.0},
-                // The two facts that make the effect reviewable: whether the
-                // move crossed a policy boundary at all, and what the source
-                // pack said about material when it did.
-                "crossed_policy_boundary": crosses_boundary,
-                "touches_quarantine": touches_quarantine,
-                "personal_memory": if seals { "sealed_and_restarted" } else { "followed" },
-            }),
-            source,
-        ),
-    )
-    .await?;
-    Ok(Some(outcome))
-}
-
-/// The effective pack at a scope, and whether it seals a mover's material.
-///
-/// `None` (a person with no parent, which only a malformed hierarchy
-/// produces) resolves at the tenant, whose default pack is the honest
-/// answer for "governed by nothing more specific".
-async fn effective_pack_name(
-    state: &AppState,
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    tenant: &Tenant,
-    scope: Option<&HierarchyNode>,
-) -> Result<(String, bool)> {
-    let (resource, chain) = match scope {
-        Some(node) => {
-            let chain = hierarchy::chain(&mut **tx, tenant.id, node.id).await?;
-            (Resource::Scope(node.id), chain)
-        }
-        None => (Resource::Tenant(tenant.id), Vec::new()),
-    };
-    let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
-    let assignments = policy_assignments::for_scopes(&mut **tx, tenant.id, &chain_ids).await?;
-    let default_pack = policy_assignments::default_pack(&mut **tx, tenant.id).await?;
-    let chain_nodes = ScopeNode::from_hierarchy_chain(&chain);
-    let context = AuthzContext {
-        scopes: &chain_nodes,
-        principal_scopes: &[],
-        anchors: &[],
-        groups: &[],
-        resources: &[],
-        assignments: &assignments,
-        default_pack: default_pack.as_deref(),
-        role_bindings: &[],
-        grant: None,
-        sensitivity: None,
-        lapses: &[],
-    };
-    let effective = state.pdp.effective(tenant.id, resource, &context);
-    Ok((effective.name, effective.mover.seals_on_move()))
-}
-
-/// Resolves the parent a person's personal scope belongs under, from their
-/// group names — AUTH-2's resolver (ADR-0013 decision 3), unchanged.
-async fn resolve_parent(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    tenant: &Tenant,
-    groups: &[String],
-) -> Result<(HierarchyNode, &'static str)> {
-    match provision::resolve_mapping(tx, tenant.id, groups).await? {
-        Some(scope) => Ok((scope, "mapped")),
-        // Nothing resolved is quarantine, never departure (ADR-0059
-        // decision 11): a group nobody mapped is a configuration mistake
-        // somebody can fix, and a seal is not.
-        None => Ok((
-            provision::ensure_quarantine(tx, tenant).await?,
-            "quarantined",
-        )),
-    }
-}
-
-/// The first segment of an identity id — enough to make a restarted
-/// personal scope's slug unique among its new siblings without making it
-/// unreadable.
-fn short(id: IdentityId) -> String {
-    id.to_string().chars().take(8).collect()
 }

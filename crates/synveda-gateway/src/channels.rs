@@ -42,7 +42,7 @@ use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::records::RecordState;
-use synveda_store::{hierarchy, records, rls};
+use synveda_store::{records, rls, scopes};
 use synveda_types::{
     AssetKind, CastApproval, Channel, Error, IdentityId, RecordId, Result, ScopeId, Sensitivity,
 };
@@ -53,7 +53,7 @@ use crate::approvals;
 use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::CHANNEL_OPERATIONS_TOTAL;
 
 /// Records per publish. Well below `MAX_CHANNEL_MEMBERS` on purpose: a
@@ -152,7 +152,7 @@ pub(crate) async fn list(State(state): State<AppState>, Path(scope_id): Path<Sco
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let node = found(
-            hierarchy::node(&mut *tx, scope_id).await?,
+            scopes::get(&mut *tx, tenant_id, scope_id).await?,
             tenant_id,
             scope_id,
         )?;
@@ -330,17 +330,23 @@ async fn publish_inner(
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::ChannelPublish,
         Resource::Scope(scope_id),
-        None,
     )?;
     // The commit's author is the curator who published, which is what
     // makes blame and lineage run through the history (tech plan §2.5).
@@ -827,7 +833,7 @@ async fn history_inner(
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
@@ -956,17 +962,23 @@ async fn rollback_inner(
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::ChannelRollback,
         Resource::Scope(scope_id),
-        None,
     )?;
     // The second decision, as for publishing: nobody governs material they
     // cannot read (ADR-0031 decision 12, ADR-0036 decision 3).
@@ -1112,18 +1124,19 @@ async fn pin_inner(
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
-    let authorized = authz::decide(
+    let input = authz::gather(
         state,
-        &input,
-        Action::ChannelPin,
-        Resource::Scope(scope_id),
-        None,
-    )?;
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
+    let authorized = authz::decide(state, &input, Action::ChannelPin, Resource::Scope(scope_id))?;
     // Decided with the *asset kind's* own read action (ADR-0049
     // decision 4), at the working tier: moving a ref discloses no content
     // to the actor, so this guard is a *whose-material* question, which the
@@ -1191,18 +1204,19 @@ async fn unpin_inner(
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
-    let authorized = authz::decide(
+    let input = authz::gather(
         state,
-        &input,
-        Action::ChannelPin,
-        Resource::Scope(scope_id),
-        None,
-    )?;
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
+    let authorized = authz::decide(state, &input, Action::ChannelPin, Resource::Scope(scope_id))?;
     // Decided with the *asset kind's* own read action (ADR-0049
     // decision 4), at the working tier: moving a ref discloses no content
     // to the actor, so this guard is a *whose-material* question, which the

@@ -17,7 +17,7 @@
 //!
 //! There is no `subject` parameter and there must not be one (ADR-0058
 //! decision 3). "What may I do here" discloses nothing about a third party;
-//! "who may do what here" is `RoleRead` on the roles route, with its own
+//! "who may do what here" was `RoleRead` on the roles route CPR-7 deleted, with its own
 //! denial. An explorer that answered the second question through this route
 //! would be an enumeration oracle for an organisation's whole role
 //! assignment, one 403 at a time.
@@ -35,25 +35,25 @@
 use std::collections::BTreeMap;
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{
     Action, AuthzContext, EntityBatch, Resource, ScopeNode, effective_role_keys_at,
-    effective_roles_at,
 };
-use synveda_store::{hierarchy, policy_assignments, rls, scopes};
+use synveda_store::{policy_assignments, rls, scopes};
 use synveda_types::access::RoleKey;
-use synveda_types::{Error, HierarchyNode, PolicyAssignment, Result, Role, ScopeId, Sensitivity};
+use synveda_types::scope::Scope;
+use synveda_types::{Error, PolicyAssignment, Result, ScopeId, Sensitivity};
 
 use crate::app::AppState;
 use crate::audit;
 use crate::authz::{self, DecisionInput};
 use crate::error::ApiError;
-use crate::hierarchy::{commit, found, tenant_id};
 use crate::policy::{OriginView, origin_view};
+use crate::request::{commit, found, tenant_id};
 use crate::telemetry::CAPABILITY_PROBES_TOTAL;
 
 /// The most scopes one batch probe answers.
@@ -69,7 +69,7 @@ pub(crate) const MAX_BATCH_SCOPES: usize = 128;
 pub(crate) struct NodeCapabilities {
     scope_id: ScopeId,
     /// Where the node sits — a fact about the *node*, so it is served only
-    /// to a caller who may read it (`HierarchyRead`). Absent otherwise, and
+    /// to a caller who may read it (`ScopeRead`). Absent otherwise, and
     /// the verdicts beside it are unaffected: they are about the caller.
     #[serde(skip_serializing_if = "Option::is_none")]
     scope_path: Option<String>,
@@ -80,18 +80,15 @@ pub(crate) struct NodeCapabilities {
     /// caller who may not read the node's governance.
     #[serde(skip_serializing_if = "Option::is_none")]
     pack: Option<PackView>,
-    /// The caller's own effective roles here — the caller's, never anyone
-    /// else's (decision 3).
-    roles: Vec<Role>,
+    /// The caller's own effective role keys here — the caller's, never
+    /// anyone else's (decision 3; since the cutover, the only roles there
+    /// are — CPR-6, ADR-0073 decision 5).
+    roles: Vec<RoleKey>,
     /// The operand-free actions, by their stable machine name.
     actions: BTreeMap<&'static str, bool>,
     /// The tier-bearing reads: the tiers each permits here, ascending. An
     /// empty list is a real answer — "nothing at this scope, at any tier".
     read_tiers: BTreeMap<&'static str, Vec<Sensitivity>>,
-    /// `RoleAssign` per role, because it fails closed without
-    /// `context.grant` and because "which roles may I bind here" is the
-    /// question an explorer actually asks.
-    role_assign: BTreeMap<&'static str, bool>,
 }
 
 #[derive(Serialize)]
@@ -158,26 +155,14 @@ async fn respond<T: IntoResponse>(
 /// one.
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TenantCapabilities {
-    /// The caller's tenant-wide effective roles. Node bindings are absent
-    /// by construction: [`effective_roles_at`] keeps only the tenant-wide
-    /// rows for a tenant resource, which is the same rule the decisions
-    /// beside it ran under.
-    #[schema(value_type = Vec<String>)]
-    roles: Vec<Role>,
-    /// The caller's role keys at the **tenant root scope** — the grants that
-    /// reach the whole boundary (CPR-6, ADR-0073 decision 5). Separate from
-    /// `roles` rather than merged into it because the two are different closed
-    /// vocabularies over different trees, and a client that displayed them as
-    /// one list would be inventing a translation nothing in this product has.
+    /// The caller's role keys at the **tenant root scope** — the grants
+    /// that reach the whole boundary (CPR-6, ADR-0073 decision 5; since
+    /// the cutover, the only roles there are).
     #[schema(value_type = Vec<String>)]
     role_keys: Vec<RoleKey>,
     /// Every operand-free tenant-plane action, by its stable machine name.
     #[schema(value_type = BTreeMap<String, bool>)]
     actions: BTreeMap<&'static str, bool>,
-    /// `RoleAssign` per role, because it fails closed without
-    /// `context.grant`.
-    #[schema(value_type = BTreeMap<String, bool>)]
-    role_assign: BTreeMap<&'static str, bool>,
 }
 
 /// The tenant-plane probe, for `GET /v1/whoami?capabilities=true`.
@@ -197,12 +182,19 @@ pub struct TenantCapabilities {
 pub async fn at_tenant(state: &AppState) -> Result<TenantCapabilities> {
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let input = authz::gather(state, &mut tx, None).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        None,
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let resource = Resource::Tenant(tenant_id);
     let context = input.context();
     let batch = state
         .pdp
-        .materialise(&input.principal, &[&input.chain_nodes], &context)?;
+        .materialise(&input.principal, &[&input.chain], &context)?;
 
     let mut actions = BTreeMap::new();
     for action in Action::PROBED_AT_TENANT {
@@ -212,28 +204,11 @@ pub async fn at_tenant(state: &AppState) -> Result<TenantCapabilities> {
                 .authorize_with(&batch, &input.principal, action, resource, &context)?;
         actions.insert(action.as_str(), decision.allowed);
     }
-    let mut role_assign = BTreeMap::new();
-    for role in Role::ALL {
-        let decision = state.pdp.authorize_with(
-            &batch,
-            &input.principal,
-            Action::RoleAssign,
-            resource,
-            &authz::context_granting(&input, role),
-        )?;
-        role_assign.insert(role.as_str(), decision.allowed);
-    }
-    let roles = effective_roles_at(&input.principal, resource, &context);
     let role_keys = effective_role_keys_at(resource, &context);
     commit(tx).await?;
 
     metrics::counter!(CAPABILITY_PROBES_TOTAL, "op" => "at_tenant", "outcome" => "ok").increment(1);
-    Ok(TenantCapabilities {
-        roles,
-        role_keys,
-        actions,
-        role_assign,
-    })
+    Ok(TenantCapabilities { role_keys, actions })
 }
 
 /// The most anchors one `/v1/me` answers capabilities for.
@@ -354,28 +329,15 @@ fn anchor_context<'a>(
 ) -> AuthzContext<'a> {
     AuthzContext {
         scopes,
-        principal_scopes: &input.principal_nodes,
+        principal_scopes: &input.principal_scopes,
         anchors: input.anchors.as_slice(),
         groups: &input.groups,
         resources: &input.resources,
         assignments,
         default_pack: input.default_pack.as_deref(),
-        role_bindings: &input.role_bindings,
-        grant: None,
         lapses: &[],
         sensitivity: None,
     }
-}
-
-/// `GET /v1/hierarchy/nodes/{id}/capabilities` — what this caller may do
-/// at one node.
-pub(crate) async fn at_node(State(state): State<AppState>, Path(id): Path<ScopeId>) -> Response {
-    let result = probe(&state, &[id], "at_node").await.map(|(mut batch, _)| {
-        // A single-node probe answers about one node or 404s before it gets
-        // here, so the batch envelope would be noise.
-        Json(batch.capabilities.remove(0))
-    });
-    respond(&state, "at_node", result).await
 }
 
 /// `GET /v1/capabilities?scopes=<id>,<id>,…` — the plural of the same
@@ -435,10 +397,10 @@ async fn probe(
     // Uniform-404 ownership first, as everywhere: a node this tenant does
     // not own is not found, so a probe can never widen the set of scopes a
     // caller could already enumerate.
-    let mut nodes: Vec<HierarchyNode> = Vec::with_capacity(answered.len());
+    let mut nodes: Vec<Scope> = Vec::with_capacity(answered.len());
     for id in &answered {
         nodes.push(found(
-            hierarchy::node(&mut *tx, *id).await?,
+            scopes::get(&mut *tx, tenant_id, *id).await?,
             tenant_id,
             *id,
         )?);
@@ -451,7 +413,7 @@ async fn probe(
     // about anybody else, so there is nothing here for a permission to
     // protect.
     //
-    // The first cut required `HierarchyRead` and CNSL-2's own demo found
+    // The first cut required `ScopeRead` and CNSL-2's own demo found
     // what that costs: under every shipped pack that action is
     // steward/org-admin/auditor only, so a **curator** — the role the
     // proposals inbox exists for — was refused the probe outright and shown
@@ -459,7 +421,7 @@ async fn probe(
     // readers may consult is worse than none: it hides acts from exactly
     // the readers who hold them.
     //
-    // What `HierarchyRead` *does* still decide is the **node detail**. The
+    // What `ScopeRead` *does* still decide is the **node detail**. The
     // verdicts are about the caller and always served; `scope_path` and the
     // effective pack are facts about the node, so a caller who may not read
     // the node does not receive them and the route cannot become a
@@ -469,16 +431,28 @@ async fn probe(
     let mut allowed_pairs = 0usize;
     let mut gate = None;
     for node in &nodes {
-        let input = authz::gather(state, &mut tx, Some(node)).await?;
-        let readable = authz::decide(
+        let input = authz::gather(
             state,
-            &input,
-            Action::HierarchyRead,
-            Resource::Scope(node.id),
-            None,
-        );
+            &mut tx,
+            Some(node),
+            synveda_store::anchors::AnchorSelection::none(),
+            Vec::new(),
+        )
+        .await?;
+        let readable = authz::decide(state, &input, Action::ScopeRead, Resource::Scope(node.id));
         let may_read_node = readable.is_ok();
-        let answer = answer_for(state, &input, node, may_read_node)?;
+        // The path is the slug chain from the root — a display fact about
+        // the node, priced only when the node is readable.
+        let node_path = if may_read_node {
+            Some(
+                scopes::path(&mut *tx, tenant_id, node.id)
+                    .await?
+                    .unwrap_or_else(|| node.slug.clone()),
+            )
+        } else {
+            None
+        };
+        let answer = answer_for(state, &input, node, node_path)?;
         pairs += answer.pair_count();
         allowed_pairs += answer.allowed_count();
         answers.push(answer);
@@ -505,7 +479,7 @@ async fn probe(
     // log should show, and it is the probes that answer *nothing* that most
     // want recording.
     if let Some(authorized) = gate {
-        payload["authz"] = audit::decision_context(Action::HierarchyRead, &authorized);
+        payload["authz"] = audit::decision_context(Action::ScopeRead, &authorized);
     }
     audit::record(
         &mut tx,
@@ -548,7 +522,7 @@ struct Answer {
 
 impl Answer {
     fn pair_count(&self) -> usize {
-        self.node.actions.len() + self.node.read_tiers.len() + self.node.role_assign.len()
+        self.node.actions.len() + self.node.read_tiers.len()
     }
 
     fn allowed_count(&self) -> usize {
@@ -563,12 +537,6 @@ impl Answer {
                 .values()
                 .filter(|tiers| !tiers.is_empty())
                 .count()
-            + self
-                .node
-                .role_assign
-                .values()
-                .filter(|allowed| **allowed)
-                .count()
     }
 }
 
@@ -582,15 +550,14 @@ impl Answer {
 fn answer_for(
     state: &AppState,
     input: &DecisionInput,
-    node: &HierarchyNode,
-    may_read_node: bool,
+    node: &Scope,
+    node_path: Option<String>,
 ) -> Result<Answer> {
     let resource = Resource::Scope(node.id);
     let context = input.context();
-    let batch: EntityBatch =
-        state
-            .pdp
-            .materialise(&input.principal, &[&input.chain_nodes], &context)?;
+    let batch: EntityBatch = state
+        .pdp
+        .materialise(&input.principal, &[&input.chain], &context)?;
 
     let mut actions = BTreeMap::new();
     for action in Action::PROBED_AT_SCOPE {
@@ -616,31 +583,18 @@ fn answer_for(
         permitted_prompt_tiers(state, input, &batch, resource)?,
     );
 
-    let mut role_assign = BTreeMap::new();
-    for role in Role::ALL {
-        let decision = state.pdp.authorize_with(
-            &batch,
-            &input.principal,
-            Action::RoleAssign,
-            resource,
-            &authz::context_granting(input, role),
-        )?;
-        role_assign.insert(role.as_str(), decision.allowed);
-    }
-
     Ok(Answer {
         node: NodeCapabilities {
             scope_id: node.id,
-            scope_path: may_read_node.then(|| node.path.clone()),
-            pack: may_read_node.then(|| PackView {
+            scope_path: node_path.clone(),
+            pack: node_path.is_some().then(|| PackView {
                 name: tiers.effective.name.clone(),
                 version: tiers.effective.version,
                 origin: origin_view(&tiers.effective),
             }),
-            roles: effective_roles_at(&input.principal, resource, &context),
+            roles: effective_role_keys_at(resource, &context),
             actions,
             read_tiers,
-            role_assign,
         },
     })
 }

@@ -42,15 +42,17 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::StoredEvent;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, role_bindings, tenants};
+use synveda_store::{access, identities, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, Role,
-    ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, ScopeId,
+    Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -85,7 +87,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(
             SearchIndex::open(
@@ -159,31 +160,39 @@ fn database_url() -> String {
 ///     └── payments (team)   ← reads it only while a lapse stands
 /// ```
 struct Org {
-    org: HierarchyNode,
-    eng: HierarchyNode,
-    platform: HierarchyNode,
-    payments: HierarchyNode,
+    org: Scope,
+    eng: Scope,
+    platform: Scope,
+    payments: Scope,
 }
 
 async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Org {
     let mut tx = pool.begin().await.expect("begin");
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
     let seeded = {
-        let mut node = async |parent: Option<ScopeId>, kind, slug: &str, name: &str| {
-            hierarchy::create(&mut tx, ScopeId::new(), tenant, parent, kind, slug, name)
-                .await
-                .expect("create node")
+        let mut node = async |parent: ScopeId, slug: &str, name: &str| {
+            scopes::create(
+                &mut tx,
+                &scopes::NewScope {
+                    id: ScopeId::new(),
+                    tenant_id: tenant,
+                    kind: ScopeKind::OrgUnit,
+                    parent_scope_id: Some(parent),
+                    slug: slug.to_owned(),
+                    display_name: name.to_owned(),
+                    attributes: serde_json::json!({}),
+                    principal_id: None,
+                    created_by: None,
+                },
+            )
+            .await
+            .expect("create org unit")
         };
-        let org = node(None, ScopeKind::Org, "acme", "ACME").await;
-        let eng = node(Some(org.id), ScopeKind::Department, "eng", "Engineering").await;
-        let platform = node(Some(eng.id), ScopeKind::Team, "platform", "Platform").await;
-        let payments = node(Some(eng.id), ScopeKind::Team, "payments", "Payments").await;
-        node(
-            Some(org.id),
-            ScopeKind::Team,
-            identities::QUARANTINE_SLUG,
-            "Quarantine",
-        )
-        .await;
+        let eng = node(org.id, "eng", "Engineering").await;
+        let platform = node(eng.id, "platform", "Platform").await;
+        let payments = node(eng.id, "payments", "Payments").await;
         Org {
             org,
             eng,
@@ -195,29 +204,20 @@ async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Org {
     seeded
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -225,12 +225,26 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: Role) {
+async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, Some(scope), role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 async fn seed_record(
@@ -383,6 +397,41 @@ async fn approve(app: &Router, token: &str, proposal: &str) {
     assert_eq!(status, StatusCode::OK, "approval failed: {body}");
 }
 
+/// Puts records on a scope's published channel through the review the pack
+/// asks for. The direct channel route resolves the same matrix, and under
+/// `regulated-strict` an org-unit publish needs a curator *and* an
+/// administrator — so the fixture goes through the governed route, with
+/// the curator running the effect.
+async fn publish_via_review(
+    app: &Router,
+    opener: &str,
+    approvers: &[&str],
+    target: ScopeId,
+    records: &[RecordId],
+    title: &str,
+) {
+    let (status, opened) = post(
+        app,
+        opener,
+        "/v1/proposals",
+        json!({"scope_id": target, "record_ids": records, "title": title}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "open the publication: {opened}");
+    let id = opened["id"].as_str().expect("proposal id").to_owned();
+    for token in approvers {
+        approve(app, token, &id).await;
+    }
+    let (status, published) = post(
+        app,
+        approvers[0],
+        &format!("/v1/proposals/{id}/publish"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "publish failed: {published}");
+}
+
 // ── The acceptance criterion ─────────────────────────────────────────────────
 
 /// **A lapse grants cross-team read, expiry restores denial, and the audit
@@ -403,33 +452,40 @@ async fn a_lapse_grants_cross_team_read_and_its_expiry_restores_the_denial() {
     // Platform: an engineer who owns the runbook, and a curator who
     // publishes it. A lapse discloses what the target *stands behind*, so
     // the publication is what gives it anything to disclose at all.
-    let sam = seed_user(&pool, tenant, "sam", org.platform.id).await;
-    seed_user(&pool, tenant, "cara", org.platform.id).await;
-    bind(&pool, tenant, "cara", org.platform.id, Role::Curator).await;
+    let sam = seed_user(&pool, tenant, "sam").await;
+    seed_user(&pool, tenant, "cara").await;
+    bind(&pool, tenant, "cara", org.platform.id, RoleKey::Curator).await;
     let runbook = seed_record(&pool, tenant, org.platform.id, sam.id, RUNBOOK).await;
     let cara = issue("cara", tenant);
-    let (status, body) = post(
-        &app,
-        &cara,
-        &format!("/v1/channels/{}/publish", org.platform.id),
-        json!({"record_ids": [runbook], "message": "reviewed at the incident retro"}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "platform's publish failed: {body}");
 
-    // Payments: the reader the whole feature is about.
-    seed_user(&pool, tenant, "priya", org.payments.id).await;
+    // Payments: the reader the whole feature is about. Placement is
+    // identity since CPR-7, so "a payments engineer" is her own principal
+    // scope at the root — and that scope is the lapse's grantee, the one
+    // shape the route documents as covering "just Dana" as well as "team
+    // X" (ADR-0074 decision 3).
+    let priya_identity = seed_user(&pool, tenant, "priya").await;
+    let grantee = priya_identity.scope_id;
     let priya = issue("priya", tenant);
 
-    // Two stewards at the department, because `regulated-strict`'s `policy`
-    // cell asks for two *distinct* steward approvers — tech plan §2.4's
-    // lapse row, carried in the matrix since FLOW-3.
-    seed_user(&pool, tenant, "nadia", org.eng.id).await;
-    seed_user(&pool, tenant, "omar", org.eng.id).await;
-    bind(&pool, tenant, "nadia", org.eng.id, Role::Steward).await;
-    bind(&pool, tenant, "omar", org.eng.id, Role::Steward).await;
+    // Two administrators at the department, because `regulated-strict`'s
+    // `policy` cell asks for two *distinct* administrator approvers —
+    // tech plan §2.4's lapse row, carried in the matrix since FLOW-3.
+    seed_user(&pool, tenant, "nadia").await;
+    seed_user(&pool, tenant, "omar").await;
+    bind(&pool, tenant, "nadia", org.eng.id, RoleKey::Administrator).await;
+    bind(&pool, tenant, "omar", org.eng.id, RoleKey::Administrator).await;
     let nadia = issue("nadia", tenant);
     let omar = issue("omar", tenant);
+
+    publish_via_review(
+        &app,
+        &cara,
+        &[&cara, &nadia],
+        org.platform.id,
+        &[runbook],
+        "reviewed at the incident retro",
+    )
+    .await;
 
     // ── Before ──────────────────────────────────────────────────────────
     assert!(
@@ -442,14 +498,14 @@ async fn a_lapse_grants_cross_team_read_and_its_expiry_restores_the_denial() {
         &app,
         &nadia,
         org.platform.id,
-        org.payments.id,
+        grantee,
         WINDOW_SECS,
         "joint incident review: payments is on the bridge for the outage",
     )
     .await;
 
-    // One steward is not enough, and the refusal says what is missing
-    // rather than leaving someone to read a pack.
+    // One administrator is not enough, and the refusal says what is
+    // missing rather than leaving someone to read a pack.
     approve(&app, &nadia, &proposal).await;
     let (status, body) = post(
         &app,
@@ -461,7 +517,7 @@ async fn a_lapse_grants_cross_team_read_and_its_expiry_restores_the_denial() {
     assert_eq!(
         status,
         StatusCode::CONFLICT,
-        "one steward must not open the door: {body}"
+        "one administrator must not open the door: {body}"
     );
     assert!(
         body["message"]
@@ -502,7 +558,7 @@ async fn a_lapse_grants_cross_team_read_and_its_expiry_restores_the_denial() {
         "a lapsed section has to declare itself: {during}"
     );
     assert!(
-        during.contains(&org.platform.path),
+        during.contains(&org.platform.slug),
         "the section names the scope the material came from: {during}"
     );
 
@@ -537,11 +593,28 @@ async fn a_lapse_grants_cross_team_read_and_its_expiry_restores_the_denial() {
     assert_eq!(expired.len(), 1, "one window, one expiry event");
 
     // ── The full story, on one chain, in order ──────────────────────────
-    let opened = events(&pool, tenant, "vedaflow.proposal.opened").await;
-    let approvals = events(&pool, tenant, "vedaflow.proposal.approved").await;
+    let approvals: Vec<_> = events(&pool, tenant, "vedaflow.proposal.approved")
+        .await
+        .into_iter()
+        .filter(|event| event.payload["proposal_id"].as_str() == Some(proposal.as_str()))
+        .collect();
     let grants = events(&pool, tenant, "policy.lapse.granted").await;
-    assert_eq!(opened.len(), 1, "the proposal was opened once");
-    assert_eq!(approvals.len(), 2, "two distinct stewards approved");
+    // The lapse's own proposal, named rather than counted: the fixture
+    // publishes the runbook through the governed route too (an org-unit
+    // publication takes two people under `regulated-strict`), so the
+    // tenant's chain carries more than one `proposal.opened` and the
+    // claim here is about *this* one.
+    let opened: Vec<_> = events(&pool, tenant, "vedaflow.proposal.opened")
+        .await
+        .into_iter()
+        .filter(|event| event.payload["proposal_id"].as_str() == Some(proposal.as_str()))
+        .collect();
+    assert_eq!(opened.len(), 1, "the lapse proposal was opened once");
+    assert_eq!(
+        approvals.len(),
+        2,
+        "two distinct administrators approved the lapse"
+    );
     assert_eq!(grants.len(), 1, "the effect ran once");
 
     let grant = &grants[0];
@@ -552,7 +625,7 @@ async fn a_lapse_grants_cross_team_read_and_its_expiry_restores_the_denial() {
     );
     assert_eq!(
         grant.payload["lapse"]["grantee_scope_id"].as_str(),
-        Some(org.payments.id.to_string().as_str())
+        Some(grantee.to_string().as_str())
     );
     assert!(
         grant.payload["lapse"]["reason"]
@@ -626,36 +699,40 @@ async fn a_lapse_discloses_only_what_the_target_published() {
     let app = router(state(&database_url()));
     let org = seed_hierarchy(&pool, tenant).await;
 
-    let sam = seed_user(&pool, tenant, "sam", org.platform.id).await;
+    let sam = seed_user(&pool, tenant, "sam").await;
     // Two records at platform: one published, one merely derived.
     let published = seed_record(&pool, tenant, org.platform.id, sam.id, RUNBOOK).await;
     let draft = "the draft nobody has reviewed: restart the broker by hand";
     seed_record(&pool, tenant, org.platform.id, sam.id, draft).await;
-    seed_user(&pool, tenant, "cara", org.platform.id).await;
-    bind(&pool, tenant, "cara", org.platform.id, Role::Curator).await;
-    let (status, body) = post(
-        &app,
-        &issue("cara", tenant),
-        &format!("/v1/channels/{}/publish", org.platform.id),
-        json!({"record_ids": [published], "message": "reviewed"}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "publish failed: {body}");
+    seed_user(&pool, tenant, "cara").await;
+    bind(&pool, tenant, "cara", org.platform.id, RoleKey::Curator).await;
+    let cara = issue("cara", tenant);
 
-    seed_user(&pool, tenant, "priya", org.payments.id).await;
+    let priya_identity = seed_user(&pool, tenant, "priya").await;
+    let grantee = priya_identity.scope_id;
     let priya = issue("priya", tenant);
     for subject in ["nadia", "omar"] {
-        seed_user(&pool, tenant, subject, org.eng.id).await;
-        bind(&pool, tenant, subject, org.eng.id, Role::Steward).await;
+        seed_user(&pool, tenant, subject).await;
+        bind(&pool, tenant, subject, org.eng.id, RoleKey::Administrator).await;
     }
     let nadia = issue("nadia", tenant);
     let omar = issue("omar", tenant);
+
+    publish_via_review(
+        &app,
+        &cara,
+        &[&cara, &nadia],
+        org.platform.id,
+        &[published],
+        "reviewed",
+    )
+    .await;
 
     let proposal = proposed(
         &app,
         &nadia,
         org.platform.id,
-        org.payments.id,
+        grantee,
         600,
         "joint incident review",
     )
@@ -704,39 +781,43 @@ async fn a_security_reviewer_revokes_what_they_could_never_grant() {
     let app = router(state(&database_url()));
     let org = seed_hierarchy(&pool, tenant).await;
 
-    let sam = seed_user(&pool, tenant, "sam", org.platform.id).await;
+    let sam = seed_user(&pool, tenant, "sam").await;
     let runbook = seed_record(&pool, tenant, org.platform.id, sam.id, RUNBOOK).await;
-    seed_user(&pool, tenant, "cara", org.platform.id).await;
-    bind(&pool, tenant, "cara", org.platform.id, Role::Curator).await;
-    post(
-        &app,
-        &issue("cara", tenant),
-        &format!("/v1/channels/{}/publish", org.platform.id),
-        json!({"record_ids": [runbook], "message": "reviewed"}),
-    )
-    .await;
+    seed_user(&pool, tenant, "cara").await;
+    bind(&pool, tenant, "cara", org.platform.id, RoleKey::Curator).await;
+    let cara = issue("cara", tenant);
 
-    seed_user(&pool, tenant, "priya", org.payments.id).await;
+    let priya_identity = seed_user(&pool, tenant, "priya").await;
+    let grantee = priya_identity.scope_id;
     let priya = issue("priya", tenant);
     for subject in ["nadia", "omar"] {
-        seed_user(&pool, tenant, subject, org.eng.id).await;
-        bind(&pool, tenant, subject, org.eng.id, Role::Steward).await;
+        seed_user(&pool, tenant, subject).await;
+        bind(&pool, tenant, subject, org.eng.id, RoleKey::Administrator).await;
     }
-    // The responder: security-reviewer at the org, and nothing else.
-    seed_user(&pool, tenant, "raj", org.org.id).await;
-    bind(&pool, tenant, "raj", org.org.id, Role::SecurityReviewer).await;
+    // The responder: reviewer at the org, and nothing else.
+    seed_user(&pool, tenant, "raj").await;
+    bind(&pool, tenant, "raj", org.org.id, RoleKey::Reviewer).await;
     let nadia = issue("nadia", tenant);
     let omar = issue("omar", tenant);
     let raj = issue("raj", tenant);
 
+    publish_via_review(
+        &app,
+        &cara,
+        &[&cara, &nadia],
+        org.platform.id,
+        &[runbook],
+        "reviewed",
+    )
+    .await;
+
     // Raj cannot open one. `ProposalOpen` at platform is floored on
-    // membership plus contributor-and-above, and security-reviewer is
-    // neither.
+    // membership plus member-and-above, and reviewer is neither.
     let (status, body) = propose(
         &app,
         &raj,
         org.platform.id,
-        org.payments.id,
+        grantee,
         600,
         "I would like to open this myself",
     )
@@ -744,14 +825,14 @@ async fn a_security_reviewer_revokes_what_they_could_never_grant() {
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
-        "a security-reviewer must not be able to open a lapse: {body}"
+        "a reviewer must not be able to open a lapse: {body}"
     );
 
     let proposal = proposed(
         &app,
         &nadia,
         org.platform.id,
-        org.payments.id,
+        grantee,
         600,
         "joint incident review",
     )
@@ -839,9 +920,9 @@ async fn a_lapse_that_cannot_mean_anything_is_refused_at_the_surface() {
     };
     let app = router(state(&database_url()));
     let org = seed_hierarchy(&pool, tenant).await;
-    let sam = seed_user(&pool, tenant, "sam", org.platform.id).await;
-    seed_user(&pool, tenant, "nadia", org.eng.id).await;
-    bind(&pool, tenant, "nadia", org.eng.id, Role::Steward).await;
+    let sam = seed_user(&pool, tenant, "sam").await;
+    seed_user(&pool, tenant, "nadia").await;
+    bind(&pool, tenant, "nadia", org.eng.id, RoleKey::Administrator).await;
     let nadia = issue("nadia", tenant);
 
     // 1. A personal scope, twice over — the privacy floor holds at two
@@ -853,7 +934,7 @@ async fn a_lapse_that_cannot_mean_anything_is_refused_at_the_surface() {
     //    else's personal memory.
     let personal = {
         let mut tx = pool.begin().await.expect("begin");
-        let node = hierarchy::node(&mut *tx, sam.scope_id)
+        let node = scopes::get(&mut *tx, tenant, sam.scope_id)
             .await
             .expect("read sam's scope")
             .expect("sam has a scope");
@@ -974,10 +1055,10 @@ async fn the_listing_keeps_grants_that_have_ended() {
     };
     let app = router(state(&database_url()));
     let org = seed_hierarchy(&pool, tenant).await;
-    seed_user(&pool, tenant, "sam", org.platform.id).await;
+    seed_user(&pool, tenant, "sam").await;
     for subject in ["nadia", "omar"] {
-        seed_user(&pool, tenant, subject, org.eng.id).await;
-        bind(&pool, tenant, subject, org.eng.id, Role::Steward).await;
+        seed_user(&pool, tenant, subject).await;
+        bind(&pool, tenant, subject, org.eng.id, RoleKey::Administrator).await;
     }
     let nadia = issue("nadia", tenant);
     let omar = issue("omar", tenant);

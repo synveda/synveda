@@ -33,7 +33,6 @@ use crate::channels;
 use crate::curators;
 use crate::directory_admin;
 use crate::error::ApiError;
-use crate::hierarchy;
 use crate::inject;
 use crate::observe;
 use crate::packs;
@@ -42,7 +41,6 @@ use crate::prompts;
 use crate::proposals;
 use crate::quarantine;
 use crate::recall;
-use crate::roles;
 use crate::skills;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
@@ -70,10 +68,6 @@ pub struct AppState {
     /// The embedded PDP (AUTHZ-1, ADR-0012): handlers authorize through it
     /// before acting; the pack refresher hot-swaps stored packs into it.
     pub pdp: Arc<Pdp>,
-    /// The scope-chain resolver (HIER-2, ADR-0016): read-through cache
-    /// over the closure table; the hierarchy-mutating handlers invalidate
-    /// it post-commit through [`AppState::invalidate_hierarchy`].
-    pub scope_chains: Arc<synveda_store::ScopeChainCache>,
     /// The service-token lifetime cap (AUTH-3, ADR-0018 decision 5):
     /// the enforcement seam refuses a service identity's token whose
     /// lifetime (`exp − iat`) is unknown or exceeds this.
@@ -98,14 +92,12 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// The one post-commit seam for every hierarchy mutation (ADR-0016
-    /// decision 5, ADR-0017 decision 5): flushes the tenant's cached
-    /// scope chains and its Cedar entity fragments, so the very next
-    /// request re-reads committed truth. Any future hierarchy writer
-    /// (AUTH-4 SCIM, AUTH-5 directory sync) calls this — never the two
-    /// caches individually.
-    pub fn invalidate_hierarchy(&self, tenant_id: synveda_types::TenantId) {
-        self.scope_chains.invalidate(tenant_id);
+    /// The one post-commit seam for every scope-tree mutation (ADR-0017
+    /// decision 5, kept when the chain cache left with the hierarchy —
+    /// CPR-7, ADR-0074): flushes the tenant's Cedar entity fragments, so
+    /// the very next request re-reads committed truth. Every scope writer
+    /// — the admin plane, provisioning, the directory sync — calls this.
+    pub fn invalidate_scopes(&self, tenant_id: synveda_types::TenantId) {
         self.pdp.flush_entities(tenant_id);
     }
 
@@ -194,8 +186,8 @@ fn console_routes() -> Router<AppState> {
 /// plane, wrapped in the per-request trace span and HTTP metrics middleware.
 pub fn router(state: AppState) -> Router {
     // Every /v1 route sits behind tenant resolution; ops routes do not.
-    // The hierarchy admin plane (HIER-1) additionally authorizes every
-    // operation through the PDP inside its handlers (AUTHZ-1, ADR-0012).
+    // The admin planes authorize every operation through the PDP inside
+    // their handlers (AUTHZ-1, ADR-0012).
     let authenticated = Router::new()
         .route("/v1/whoami", get(whoami))
         // The context platform's own plane (CPR-4, ADR-0071). `/v1/me` is the
@@ -289,37 +281,37 @@ pub fn router(state: AppState) -> Router {
             "/v1/admin/grants/{grant_id}",
             axum::routing::delete(crate::access::revoke_grant),
         )
-        .route("/v1/hierarchy/nodes", post(hierarchy::create))
-        .route("/v1/hierarchy/root", get(hierarchy::root))
+        // The scope admin plane (CPR-7, ADR-0074 decision 5): one tree,
+        // administered publicly. Creation is idempotent; a move is decided
+        // at both ends; there is no delete — retiring a scope is a status
+        // transition. The `/v1/hierarchy` routes this replaces are gone
+        // with no alias: old clients get 404s and old scope kinds fail
+        // validation by name, which is the pre-1.0 contract.
         .route(
-            "/v1/hierarchy/nodes/{id}",
-            get(hierarchy::get)
-                .patch(hierarchy::update)
-                .delete(hierarchy::delete),
+            "/v1/admin/scopes",
+            get(crate::admin_scopes::list).post(crate::admin_scopes::create),
         )
         .route(
-            "/v1/hierarchy/nodes/{id}/children",
-            get(hierarchy::children),
+            "/v1/admin/scopes/{scope_id}",
+            get(crate::admin_scopes::get).patch(crate::admin_scopes::update),
         )
         .route(
-            "/v1/hierarchy/nodes/{id}/ancestors",
-            get(hierarchy::ancestors),
+            "/v1/admin/scopes/{scope_id}/ancestors",
+            get(crate::admin_scopes::ancestors),
         )
         .route(
-            "/v1/hierarchy/nodes/{id}/descendants",
-            get(hierarchy::descendants),
+            "/v1/admin/scopes/{scope_id}/descendants",
+            get(crate::admin_scopes::descendants),
         )
         // The capability probe (CNSL-2, ADR-0058): what the *caller* may
         // do, asked of the PDP. A forecast rather than a grant (decision
         // 2) — nothing downstream reads the answer to decide anything —
         // and it never takes a `subject`, so it cannot answer about a
         // third party (decision 3).
-        .route(
-            "/v1/hierarchy/nodes/{id}/capabilities",
-            get(capabilities::at_node),
-        )
         .route("/v1/capabilities", get(capabilities::batch))
-        // The policy admin plane (AUTHZ-2, ADR-0014 decision 8).
+        // The policy admin plane (AUTHZ-2, ADR-0014 decision 8): the pack
+        // registry and the tenant default, and — re-homed from the
+        // hierarchy nodes it used to hang on — per-scope assignment.
         .route("/v1/policy/packs", get(policy::packs))
         .route(
             "/v1/policy/default",
@@ -328,23 +320,10 @@ pub fn router(state: AppState) -> Router {
                 .delete(policy::clear_default),
         )
         .route(
-            "/v1/hierarchy/nodes/{id}/policy",
-            put(policy::assign_node_policy)
-                .get(policy::get_node_policy)
-                .delete(policy::unassign_node_policy),
-        )
-        // The role admin plane (AUTHZ-3, ADR-0015 decision 7).
-        .route(
-            "/v1/roles/bindings",
-            get(roles::list)
-                .put(roles::bind_tenant_wide)
-                .delete(roles::unbind_tenant_wide),
-        )
-        .route(
-            "/v1/hierarchy/nodes/{id}/roles",
-            get(roles::list_node)
-                .put(roles::bind_node)
-                .delete(roles::unbind_node),
+            "/v1/admin/scopes/{scope_id}/policy",
+            put(policy::assign_scope_policy)
+                .get(policy::get_scope_policy)
+                .delete(policy::unassign_scope_policy),
         )
         // The observe primitive (MEM-1, ADR-0020): the data plane's write
         // seam. Its body limit covers the worst-case batch; every other
@@ -446,7 +425,7 @@ pub fn router(state: AppState) -> Router {
         // 13–15), under the policy plane's own actions: they add required
         // approvers and grant nothing.
         .route(
-            "/v1/hierarchy/nodes/{id}/curators",
+            "/v1/admin/scopes/{scope_id}/curators",
             get(curators::get).put(curators::put),
         )
         // The service-identity plane (AUTH-3, ADR-0018 decision 3).

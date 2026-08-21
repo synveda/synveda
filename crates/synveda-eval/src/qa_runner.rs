@@ -19,7 +19,7 @@
 //! a team, a department or the org got there through `POST /v1/proposals`
 //! and this level's own approvers, because observe lands records at the
 //! caller's home scope (ADR-0020) and a service identity's home is a
-//! `ScopeKind::User` leaf under its anchor (ADR-0018 decision 2).
+//! `principal`-shaped scope under its anchor (ADR-0018 decision 2).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};

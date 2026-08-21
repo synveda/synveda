@@ -35,11 +35,11 @@ forbid (
 // extraction worker draining a queue after somebody's last day would be
 // writing memory for a person the directory has already said is gone.
 //
-// There is deliberately no carve-out for compliance, legal or org-admin.
-// Adding a reader here is adding this product's first "read somebody
-// else's private material" surface, and that belongs to the export plane
-// with its own ADR and its own approval matrix — not to the feature that
-// handles somebody resigning (ADR-0059 decision 8).
+// There is deliberately no carve-out for compliance, legal or an
+// administrator. Adding a reader here is adding this product's first "read
+// somebody else's private material" surface, and that belongs to the
+// export plane with its own ADR and its own approval matrix — not to the
+// feature that handles somebody resigning (ADR-0059 decision 8).
 //
 // `sealed` is required by the schema, so this forbid can never be skipped
 // for want of the attribute — the ADR-0015 decision 5 shape, applied to
@@ -51,17 +51,11 @@ forbid (
     resource
 ) when { resource is Synveda::Scope && resource.sealed };
 
-// Escalation resistance (AUTHZ-3, ADR-0015 decision 5): granting or
-// revoking org-admin requires holding org-admin, under every pack — a
-// custom pack that forgot the guard must not let its permitted
-// principals mint org-admins. `context.grant` is required by the schema,
-// so this forbid can never be skipped for want of the attribute.
-forbid (
-    principal,
-    action == Synveda::Action::"RoleAssign",
-    resource
-) when { context.grant == "org-admin" }
-unless { context.roles.contains("org-admin") };
+// (The role-binding escalation guard ADR-0015 decision 5 put here —
+// `RoleAssign` of `org-admin` requiring `org-admin` — is deleted with the
+// action it guarded: role bindings left with the old hierarchy, and the
+// grant plane's own revocation rule names the grant it is about, which is
+// the stronger form of the same resistance. CPR-7, ADR-0074.)
 
 // Token-scope confinement (AUTH-3, ADR-0018 decision 4): a service
 // identity's token is confined to its anchor subtree — everything
@@ -143,14 +137,18 @@ forbid (
 //
 // What *is* carved out is the **governance plane**, and the list is
 // deliberately short and deliberately closed: reading and assigning a policy
-// profile, reading role bindings, and the structural and service-identity
-// planes. None of them discloses a byte of the material and none of them
-// confers access to it — which is exactly why `RoleAssign` and
-// `MembershipGrant` are **not** here. A grant written at a private scope puts
-// that scope in the grantee's `private` set, so an administrator who could
-// write one could grant themselves everybody's notes, and this floor would be
-// a formality. The person whose scope it is holds it in their own `private`
-// set, so they can share it; nobody else can.
+// profile, and the structural and service-identity planes. None of them
+// discloses a byte of the material and none of them confers access to it —
+// which is exactly why `MembershipGrant` is **not** here. The quarantine
+// review plane is **not** here either, and did not need to be: since CPR-7
+// it decides at the tenant resource rather than at the private scope its
+// events land on (ADR-0074 decision 7). A grant written at
+// a private scope puts that scope in the grantee's `private` set, so an
+// administrator who could write one could grant themselves everybody's
+// notes, and this floor would be a formality. The person whose scope it is
+// holds it in their own `private` set, so they can share it; nobody else
+// can. (The role-binding read the list once carried left with the
+// role-binding plane. CPR-7, ADR-0074.)
 //
 // The shape is "forbid everything, then name the exceptions" rather than
 // "forbid a list of content actions", because the failure modes are not
@@ -167,10 +165,8 @@ unless {
     [
         Synveda::Action::"PolicyRead",
         Synveda::Action::"PolicyAssign",
-        Synveda::Action::"RoleRead",
-        Synveda::Action::"HierarchyRead",
-        Synveda::Action::"HierarchyUpdate",
-        Synveda::Action::"HierarchyDelete",
+        Synveda::Action::"ScopeRead",
+        Synveda::Action::"ScopeUpdate",
         Synveda::Action::"ServiceIdentityRead",
         Synveda::Action::"ServiceIdentityManage"
     ].contains(action)
@@ -180,12 +176,13 @@ unless {
 //
 // The product already has one non-negotiable rule about this tier, and it
 // is on the write side: nothing reaches a published channel at `restricted`
-// without the `compliance` role and two distinct approvers, under every
-// pack, unauthorable away (ADR-0032 decision 4's invariant approval floor).
-// This is its mirror. Nothing reaches a *reader* at `restricted` without a
-// standing lapse — and because a lapse's approval matrix resolves at the
-// tier it declares, the grant that lifts this forbid is one a compliance
-// approver signed. One tier, one meaning, both directions, the same role.
+// without an administrator and two distinct approvers, under every pack,
+// unauthorable away (ADR-0032 decision 4's invariant approval floor, on the
+// grant-key vocabulary since CPR-7). This is its mirror. Nothing reaches a
+// *reader* at `restricted` without a standing lapse — and because a lapse's
+// approval matrix resolves at the tier it declares, the grant that lifts
+// this forbid is one an administrator signed. One tier, one meaning, both
+// directions, the same role.
 //
 // `context.sensitivity` is required by the schema, so this forbid can never
 // be skipped for want of the attribute — the ADR-0015 decision 5 shape,
@@ -194,8 +191,8 @@ unless {
 // There is deliberately no carve-out for the material's own author at their
 // own personal scope. Under ADR-0038 decision 8 the only way a record
 // carries this tier is a reclassification two people approved, one of them
-// compliance, so what an owner loses here is access a compliance decision
-// deliberately removed — and an owner exception would make the acceptance
+// an administrator, so what an owner loses here is access a governance
+// decision deliberately removed — and an owner exception would make the acceptance
 // criterion false as written.
 forbid (
     principal,

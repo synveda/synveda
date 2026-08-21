@@ -17,18 +17,20 @@
 //!     └── team-c
 //! ```
 
-use chrono::Utc;
 use synveda_policy::ScopeNode;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource};
-use synveda_types::{HierarchyNode, Role, RoleBinding, ScopeId, ScopeKind, Sensitivity, TenantId};
+use synveda_types::access::RoleKey;
+use synveda_types::anchor::{AnchorSource, ScopeAnchor};
+use synveda_types::scope::ScopeKind;
+use synveda_types::{ScopeId, Sensitivity, TenantId};
 
 struct Fixture {
     tenant: TenantId,
-    nodes: Vec<HierarchyNode>,
+    nodes: Vec<ScopeNode>,
 }
 
 impl Fixture {
-    fn node(&self, slug: &str) -> &HierarchyNode {
+    fn node(&self, slug: &str) -> &ScopeNode {
         self.nodes
             .iter()
             .find(|node| node.slug == slug)
@@ -37,7 +39,7 @@ impl Fixture {
 
     /// The chain the PDP takes: the old hierarchy's rows projected onto
     /// the shape vocabulary at the caller's edge (CPR-6, ADR-0073
-    /// decision 1). The fixture still holds `HierarchyNode`s because the
+    /// decision 1). The fixture still holds `ScopeNode`s because the
     /// hierarchy plane still exists; nothing below this line does.
     fn chain(&self, slug: &str) -> Vec<ScopeNode> {
         let mut chain = vec![self.node(slug).clone()];
@@ -51,16 +53,22 @@ impl Fixture {
             current = parent.parent_id;
             chain.push(parent.clone());
         }
-        chain.iter().map(ScopeNode::from_hierarchy).collect()
+        chain
     }
 
-    fn binding(&self, subject: &str, slug: Option<&str>, role: Role) -> RoleBinding {
-        RoleBinding {
-            tenant_id: self.tenant,
-            subject: subject.to_owned(),
-            scope_id: slug.map(|slug| self.node(slug).id),
-            role,
-            updated_at: Utc::now(),
+    fn anchor(&self, slug: Option<&str>, roles: &[RoleKey]) -> ScopeAnchor {
+        let node = slug.map_or(self.nodes.first().expect("fixture has a root"), |slug| {
+            self.node(slug)
+        });
+        ScopeAnchor {
+            scope_id: node.id,
+            kind: node.kind,
+            parent_scope_id: node.parent_id,
+            depth: 0,
+            source: AnchorSource::Grant,
+            roles: roles.to_vec(),
+            granted_at: vec![node.id],
+            via_groups: Vec::new(),
         }
     }
 
@@ -81,30 +89,26 @@ impl Fixture {
 fn fixture() -> Fixture {
     let tenant = TenantId::new();
     let mut nodes = Vec::new();
-    let mut add = |parent: Option<ScopeId>, kind: ScopeKind, slug: &str, depth: i32| -> ScopeId {
+    let mut add = |parent: Option<ScopeId>, kind: ScopeKind, slug: &str, _depth: i32| -> ScopeId {
         let id = ScopeId::new();
-        nodes.push(HierarchyNode {
+        nodes.push(ScopeNode {
             id,
             tenant_id: tenant,
             parent_id: parent,
             kind,
             slug: slug.to_owned(),
-            name: slug.to_owned(),
-            depth,
-            path: slug.to_owned(),
             sealed: false,
-            created_at: Utc::now(),
         });
         id
     };
-    let org = add(None, ScopeKind::Org, "org", 0);
-    let eng = add(Some(org), ScopeKind::Department, "eng", 1);
-    let sales = add(Some(org), ScopeKind::Department, "sales", 1);
-    let team_a = add(Some(eng), ScopeKind::Team, "team-a", 2);
-    let team_b = add(Some(eng), ScopeKind::Team, "team-b", 2);
-    add(Some(sales), ScopeKind::Team, "team-c", 2);
-    add(Some(team_a), ScopeKind::User, "agent-user", 3);
-    add(Some(team_b), ScopeKind::User, "carol-user", 3);
+    let org = add(None, ScopeKind::Tenant, "org", 0);
+    let eng = add(Some(org), ScopeKind::OrgUnit, "eng", 1);
+    let sales = add(Some(org), ScopeKind::OrgUnit, "sales", 1);
+    let team_a = add(Some(eng), ScopeKind::OrgUnit, "team-a", 2);
+    let team_b = add(Some(eng), ScopeKind::OrgUnit, "team-b", 2);
+    add(Some(sales), ScopeKind::OrgUnit, "team-c", 2);
+    add(Some(team_a), ScopeKind::Principal, "agent-user", 3);
+    add(Some(team_b), ScopeKind::Principal, "carol-user", 3);
     Fixture { tenant, nodes }
 }
 
@@ -115,8 +119,7 @@ fn decide(
     principal: &Principal,
     action: Action,
     target: Option<&str>,
-    bindings: &[RoleBinding],
-    grant: Option<Role>,
+    anchors: &[ScopeAnchor],
 ) -> bool {
     let scopes = target.map(|slug| fx.chain(slug)).unwrap_or_default();
     let principal_scopes = if principal.scope_id.is_some() {
@@ -128,21 +131,27 @@ fn decide(
         Some(slug) => Resource::Scope(fx.node(slug).id),
         None => Resource::Tenant(fx.tenant),
     };
-    pdp.authorize(
-        principal,
-        action,
-        resource,
-        &AuthzContext {
-            sensitivity: Some(Sensitivity::Internal),
-            scopes: &scopes,
-            principal_scopes: &principal_scopes,
-            role_bindings: bindings,
-            grant,
-            ..Default::default()
-        },
-    )
-    .expect("authorize")
-    .allowed
+    let decision = pdp
+        .authorize(
+            principal,
+            action,
+            resource,
+            &AuthzContext {
+                sensitivity: Some(Sensitivity::Internal),
+                scopes: &scopes,
+                principal_scopes: &principal_scopes,
+                anchors,
+                ..Default::default()
+            },
+        )
+        .expect("authorize");
+    if !decision.allowed && std::env::var("SCOPE_DEBUG").is_ok() {
+        eprintln!(
+            "DEBUG {action} target={:?} determining={:?}",
+            target, decision.determining
+        );
+    }
+    decision.allowed
 }
 
 /// The AC's policy half: a tenant-wide org-admin binding on the agent's
@@ -153,31 +162,29 @@ fn token_scope_confines_the_admin_plane_regardless_of_roles() {
     let pdp = Pdp::new().expect("build pdp");
     let fx = fixture();
     let agent = fx.agent();
-    let bindings = [fx.binding("ci-agent", None, Role::OrgAdmin)];
+    let anchors = [fx.anchor(None, &[RoleKey::Administrator])];
 
     for action in [
-        Action::HierarchyCreate,
-        Action::HierarchyRead,
-        Action::HierarchyUpdate,
-        Action::HierarchyDelete,
+        Action::ScopeCreate,
+        Action::ScopeRead,
+        Action::ScopeUpdate,
+        Action::ScopeUpdate,
         Action::PolicyRead,
         Action::PolicyAssign,
-        Action::RoleRead,
         Action::ServiceIdentityRead,
         Action::ServiceIdentityManage,
     ] {
-        // Inside the anchor subtree the binding works: team-a itself and
-        // the agent's own leaf.
-        for target in ["team-a", "agent-user"] {
-            assert!(
-                decide(&pdp, &fx, &agent, action, Some(target), &bindings, None),
-                "{action} on in-subtree {target} must be allowed"
-            );
-        }
+        // Inside the anchor subtree the grant works: team-a itself. The
+        // agent's own scope is a principal-shaped scope — the privacy
+        // floor owns it, asserted below.
+        assert!(
+            decide(&pdp, &fx, &agent, action, Some("team-a"), &anchors),
+            "{action} on in-subtree team-a must be allowed"
+        );
         // Outside it — ancestors included — the base forbid decides.
         for target in ["eng", "org", "sales", "team-b", "team-c", "carol-user"] {
             assert!(
-                !decide(&pdp, &fx, &agent, action, Some(target), &bindings, None),
+                !decide(&pdp, &fx, &agent, action, Some(target), &anchors),
                 "{action} on out-of-scope {target} must be denied to the confined agent"
             );
         }
@@ -185,23 +192,21 @@ fn token_scope_confines_the_admin_plane_regardless_of_roles() {
 
     // The tenant plane is never inside a scope subtree: unreachable, even
     // for a tenant-wide org-admin agent (ADR-0018 decision 4).
-    for (action, grant) in [
-        (Action::HierarchyCreate, None),
-        (Action::HierarchyRead, None),
-        (Action::PolicyRead, None),
-        (Action::PolicyAssign, None),
-        (Action::RoleRead, None),
-        (Action::RoleAssign, Some(Role::Viewer)),
-        (Action::ServiceIdentityRead, None),
+    for action in [
+        Action::ScopeCreate,
+        Action::ScopeRead,
+        Action::PolicyRead,
+        Action::PolicyAssign,
+        Action::ServiceIdentityRead,
         // The audit chain included: `AuditRead` reaches only the tenant
         // resource (ADR-0045 decision 2), and the tenant plane is never
         // inside a scope subtree — so no service identity can read the
         // trail however it is bound, and the confinement forbid gets that
         // for free rather than by naming a new action.
-        (Action::AuditRead, None),
+        Action::AuditRead,
     ] {
         assert!(
-            !decide(&pdp, &fx, &agent, action, None, &bindings, grant),
+            !decide(&pdp, &fx, &agent, action, None, &anchors),
             "{action} on the tenant plane must be denied to a service token"
         );
     }
@@ -213,19 +218,17 @@ fn token_scope_confines_the_admin_plane_regardless_of_roles() {
         &pdp,
         &fx,
         &agent,
-        Action::RoleAssign,
+        Action::ScopeUpdate,
         Some("team-a"),
-        &bindings,
-        Some(Role::Viewer),
+        &anchors,
     ));
     assert!(!decide(
         &pdp,
         &fx,
         &agent,
-        Action::RoleAssign,
+        Action::ScopeUpdate,
         Some("eng"),
-        &bindings,
-        Some(Role::Viewer),
+        &anchors,
     ));
 }
 
@@ -243,29 +246,13 @@ fn memory_read_keeps_the_own_chain_floor_and_nothing_more() {
     // zero-config default pack).
     for target in ["agent-user", "team-a", "eng", "org"] {
         assert!(
-            decide(
-                &pdp,
-                &fx,
-                &agent,
-                Action::MemoryRead,
-                Some(target),
-                &[],
-                None
-            ),
+            decide(&pdp, &fx, &agent, Action::MemoryRead, Some(target), &[]),
             "own-chain MemoryRead on {target} must survive confinement"
         );
     }
     for target in ["team-b", "team-c", "sales", "carol-user"] {
         assert!(
-            !decide(
-                &pdp,
-                &fx,
-                &agent,
-                Action::MemoryRead,
-                Some(target),
-                &[],
-                None
-            ),
+            !decide(&pdp, &fx, &agent, Action::MemoryRead, Some(target), &[]),
             "off-chain MemoryRead on {target} must be denied"
         );
     }
@@ -273,15 +260,14 @@ fn memory_read_keeps_the_own_chain_floor_and_nothing_more() {
     // A viewer binding at eng would grant a *user* the eng subtree
     // (team-b included); the agent's token scope clamps it to team-a's,
     // while the own-chain floor is untouched.
-    let bindings = [fx.binding("ci-agent", Some("eng"), Role::Viewer)];
+    let anchors = [fx.anchor(Some("eng"), &[RoleKey::Viewer])];
     assert!(decide(
         &pdp,
         &fx,
         &agent,
         Action::MemoryRead,
         Some("team-a"),
-        &bindings,
-        None,
+        &anchors,
     ));
     assert!(
         !decide(
@@ -290,8 +276,7 @@ fn memory_read_keeps_the_own_chain_floor_and_nothing_more() {
             &agent,
             Action::MemoryRead,
             Some("team-b"),
-            &bindings,
-            None,
+            &anchors,
         ),
         "a role must not widen MemoryRead beyond the token scope"
     );
@@ -304,15 +289,14 @@ fn memory_read_keeps_the_own_chain_floor_and_nothing_more() {
         subject: "carol".to_owned(),
         ..fx.agent()
     };
-    let bindings = [fx.binding("carol", Some("eng"), Role::Viewer)];
+    let anchors = [fx.anchor(Some("eng"), &[RoleKey::Viewer])];
     assert!(decide(
         &pdp,
         &fx,
         &user,
         Action::MemoryRead,
         Some("team-b"),
-        &bindings,
-        None,
+        &anchors
     ));
 }
 
@@ -334,29 +318,20 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
             &agent,
             Action::MemoryWrite,
             Some("agent-user"),
-            &[],
-            None
+            &[]
         ),
         "the agent's observe writes must land at its personal leaf"
     );
     for target in ["team-a", "eng", "org", "team-b", "team-c", "carol-user"] {
         assert!(
-            !decide(
-                &pdp,
-                &fx,
-                &agent,
-                Action::MemoryWrite,
-                Some(target),
-                &[],
-                None
-            ),
+            !decide(&pdp, &fx, &agent, Action::MemoryWrite, Some(target), &[]),
             "role-free MemoryWrite on {target} must be denied"
         );
     }
 
     // A contributor binding at eng: for a user it grants the eng subtree;
     // the agent's token scope clamps it to team-a's subtree.
-    let bindings = [fx.binding("ci-agent", Some("eng"), Role::Contributor)];
+    let anchors = [fx.anchor(Some("eng"), &[RoleKey::Member])];
     assert!(
         decide(
             &pdp,
@@ -364,8 +339,7 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
             &agent,
             Action::MemoryWrite,
             Some("team-a"),
-            &bindings,
-            None,
+            &anchors
         ),
         "the contributor grant works where the token reaches"
     );
@@ -377,8 +351,7 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
                 &agent,
                 Action::MemoryWrite,
                 Some(target),
-                &bindings,
-                None,
+                &anchors
             ),
             "a role must not widen MemoryWrite beyond the token scope ({target})"
         );
@@ -390,15 +363,14 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
         subject: "carol".to_owned(),
         ..fx.agent()
     };
-    let bindings = [fx.binding("carol", Some("eng"), Role::Contributor)];
+    let anchors = [fx.anchor(Some("eng"), &[RoleKey::Member])];
     assert!(decide(
         &pdp,
         &fx,
         &user,
         Action::MemoryWrite,
         Some("team-b"),
-        &bindings,
-        None,
+        &anchors
     ));
 }
 
@@ -441,7 +413,7 @@ fn an_agent_reads_authored_assets_up_its_own_chain_and_nothing_else() {
         //    and the agent's own leaf. This is the zero-config resolution.
         for target in ["agent-user", "team-a", "eng", "org"] {
             assert!(
-                decide(&pdp, &fx, &agent, read, Some(target), &[], None),
+                decide(&pdp, &fx, &agent, read, Some(target), &[]),
                 "a team-anchored agent must resolve {what} at {target}"
             );
         }
@@ -451,7 +423,7 @@ fn an_agent_reads_authored_assets_up_its_own_chain_and_nothing_else() {
         //    another department are refused exactly as they are for memory.
         for target in ["team-b", "team-c", "sales", "carol-user"] {
             assert!(
-                !decide(&pdp, &fx, &agent, read, Some(target), &[], None),
+                !decide(&pdp, &fx, &agent, read, Some(target), &[]),
                 "{target} is off the agent's chain and its {what} must stay \
                  unreadable"
             );
@@ -461,10 +433,10 @@ fn an_agent_reads_authored_assets_up_its_own_chain_and_nothing_else() {
         //    forbid is that it beats every permit a pack adds, and a viewer
         //    binding at the department is the widest content grant a pack
         //    offers.
-        let bindings = [fx.binding("ci-agent", Some("eng"), Role::Viewer)];
+        let anchors = [fx.anchor(Some("eng"), &[RoleKey::Viewer])];
         for target in ["team-b", "carol-user"] {
             assert!(
-                !decide(&pdp, &fx, &agent, read, Some(target), &bindings, None),
+                !decide(&pdp, &fx, &agent, read, Some(target), &anchors),
                 "a role must not widen {read} past the token scope ({target})"
             );
         }
@@ -473,20 +445,20 @@ fn an_agent_reads_authored_assets_up_its_own_chain_and_nothing_else() {
         //    leaf — inside the anchor, so no carve-out is needed — and
         //    nowhere above it, however it is bound.
         assert!(
-            decide(&pdp, &fx, &agent, write, Some("agent-user"), &[], None),
+            decide(&pdp, &fx, &agent, write, Some("agent-user"), &[]),
             "the agent's own leaf is inside its anchor"
         );
-        let bindings = [fx.binding("ci-agent", Some("eng"), Role::Contributor)];
+        let anchors = [fx.anchor(Some("eng"), &[RoleKey::Member])];
         for target in ["eng", "org", "team-b"] {
             assert!(
-                !decide(&pdp, &fx, &agent, write, Some(target), &bindings, None),
+                !decide(&pdp, &fx, &agent, write, Some(target), &anchors),
                 "{write} at {target} is outside the anchor and is not a read"
             );
         }
         // Inside the anchor a content role still works, exactly as it does
         // for memory: confinement clamps the grant rather than removing it.
         assert!(
-            decide(&pdp, &fx, &agent, write, Some("team-a"), &bindings, None),
+            decide(&pdp, &fx, &agent, write, Some("team-a"), &anchors),
             "the contributor grant works where the token reaches"
         );
 
@@ -497,15 +469,7 @@ fn an_agent_reads_authored_assets_up_its_own_chain_and_nothing_else() {
             subject: "carol".to_owned(),
             ..fx.agent()
         };
-        let bindings = [fx.binding("carol", Some("eng"), Role::Viewer)];
-        assert!(decide(
-            &pdp,
-            &fx,
-            &user,
-            read,
-            Some("team-b"),
-            &bindings,
-            None,
-        ));
+        let anchors = [fx.anchor(Some("eng"), &[RoleKey::Viewer])];
+        assert!(decide(&pdp, &fx, &user, read, Some("team-b"), &anchors));
     }
 }

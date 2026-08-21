@@ -140,11 +140,6 @@ TENANT_SLUG="cpr5-demo-$$"
 "$BIN" tenant create --slug "$TENANT_SLUG" --name 'CPR-5 demo' >"$WORK/tenant.json"
 TENANT_ID="$(python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])' <"$WORK/tenant.json")"
 [ -n "$TENANT_ID" ] || fail "admitting the tenant produced no id"
-# Tenant-wide org-admin for the owner, which is what a person holds after
-# `synveda init` and their first login. Break-glass at the store level, because
-# there is nobody to grant it through the API yet — which is exactly the
-# bootstrap problem this feature removes for *everybody else*.
-"$BIN" role bind --tenant "$TENANT_ID" --subject "$OWNER" --role org-admin >/dev/null
 OWNER_TOKEN="$("$BIN" token issue --tenant "$TENANT_ID" --subject "$OWNER")"
 COLLEAGUE_TOKEN="$("$BIN" token issue --tenant "$TENANT_ID" --subject "$COLLEAGUE")"
 STRANGER_TOKEN="$("$BIN" token issue --tenant "$TENANT_ID" --subject "$STRANGER")"
@@ -160,11 +155,27 @@ curl -fsS "${GATEWAY_URL}/healthz" >/dev/null 2>&1 ||
 
 TOKEN="$OWNER_TOKEN"
 
+# The first grant this tenant holds. Break-glass at the store level, because
+# nothing mints one for a dev-token tenant with no IdP admin group to read
+# (CPR-7, ADR-0074 decision 4) — which is exactly the bootstrap problem this
+# feature removes for *everybody else*. It is removed again the moment the
+# door it opens has been walked through, so every membership fact below is
+# this feature's own and not the bootstrap's.
+api GET /v1/me
+[ "$STATUS" = "200" ] || fail "/v1/me answered ${STATUS}: ${BODY}"
+ROOT_SCOPE="$(field onboarding/tenant_scope_id)"
+[ -n "$ROOT_SCOPE" ] || fail "/v1/me should have minted the tenant root: ${BODY}"
+psql_db -c "insert into scope_grants
+              (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source)
+            values (gen_random_uuid(), '${TENANT_ID}', '${ROOT_SCOPE}', 'principal',
+                    '${OWNER}', 'owner', 'owner')" >/dev/null
+
 step "1. Creating a workspace makes its creator the owner"
 api POST /v1/workspaces w-1 '{"slug":"payments","display_name":"Payments"}'
 [ "$STATUS" = "201" ] || fail "expected 201, got ${STATUS}: ${BODY}"
 WORKSPACE_ID="$(field id)"
 WORKSPACE_SCOPE="$(field scope_id)"
+psql_db -c "delete from scope_grants where scope_id = '${ROOT_SCOPE}'" >/dev/null
 api GET "/v1/workspaces/${WORKSPACE_ID}/members"
 [ "$STATUS" = "200" ] || fail "expected 200, got ${STATUS}: ${BODY}"
 [ "$(count_members)" = "1" ] || fail "a fresh workspace should have exactly its owner: ${BODY}"

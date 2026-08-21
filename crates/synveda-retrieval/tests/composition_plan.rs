@@ -8,46 +8,39 @@
 use chrono::Utc;
 use synveda_policy::{Pdp, Principal};
 use synveda_retrieval::{MemoryReadInputs, composition_plan};
+use synveda_types::scope::ScopeKind;
 use synveda_types::{
-    CompositionConfig, HierarchyNode, InjectChannels, PackConfig, PolicyAssignment, ScopeId,
-    ScopeKind, Sensitivity, TenantId,
+    CompositionConfig, InjectChannels, PackConfig, PolicyAssignment, ScopeId, Sensitivity, TenantId,
 };
 
 struct Fixture {
     tenant: TenantId,
     /// alice's placement chain, nearest-first.
-    chain: Vec<HierarchyNode>,
+    chain: Vec<synveda_policy::ScopeNode>,
 }
 
 fn node(
     tenant: TenantId,
-    parent: Option<&HierarchyNode>,
+    parent: Option<&synveda_policy::ScopeNode>,
     kind: ScopeKind,
     slug: &str,
-) -> HierarchyNode {
-    HierarchyNode {
+) -> synveda_policy::ScopeNode {
+    synveda_policy::ScopeNode {
         id: ScopeId::new(),
         tenant_id: tenant,
         parent_id: parent.map(|parent| parent.id),
         kind,
         slug: slug.to_owned(),
-        name: slug.to_owned(),
-        depth: parent.map_or(0, |parent| parent.depth + 1),
-        path: parent.map_or_else(
-            || slug.to_owned(),
-            |parent| format!("{}/{slug}", parent.path),
-        ),
         sealed: false,
-        created_at: Utc::now(),
     }
 }
 
 fn fixture() -> Fixture {
     let tenant = TenantId::new();
-    let org = node(tenant, None, ScopeKind::Org, "org");
-    let eng = node(tenant, Some(&org), ScopeKind::Department, "eng");
-    let team = node(tenant, Some(&eng), ScopeKind::Team, "team-a");
-    let alice = node(tenant, Some(&team), ScopeKind::User, "alice-user");
+    let org = node(tenant, None, ScopeKind::Tenant, "org");
+    let eng = node(tenant, Some(&org), ScopeKind::OrgUnit, "eng");
+    let team = node(tenant, Some(&eng), ScopeKind::OrgUnit, "team-a");
+    let alice = node(tenant, Some(&team), ScopeKind::Principal, "alice-user");
     Fixture {
         tenant,
         chain: vec![alice, team, eng, org],
@@ -89,7 +82,8 @@ fn default_pack_plans_both_channels_at_the_default_budget() {
             chain: &fixture.chain,
             assignments: &[],
             default_pack: None,
-            role_bindings: &[],
+            anchors: &[],
+            groups: &[],
             lapses: &[],
             lapsed: &[],
             candidates: &[],
@@ -104,8 +98,17 @@ fn default_pack_plans_both_channels_at_the_default_budget() {
         plan.scopes.iter().all(|scope| scope.include_derived),
         "the product default composes both channels"
     );
-    assert_eq!(plan.scopes[0].kind, ScopeKind::User);
-    assert_eq!(plan.scopes[0].path, fixture.chain[0].path);
+    assert_eq!(plan.scopes[0].kind, ScopeKind::Principal);
+    assert_eq!(
+        plan.scopes[0].path,
+        fixture
+            .chain
+            .iter()
+            .rev()
+            .map(|node| node.slug.as_str())
+            .collect::<Vec<_>>()
+            .join("/")
+    );
 
     // Every planned scope carries the tiers the walk permitted there
     // (AUTHZ-5, ADR-0038 decision 3), and zero-config membership means the
@@ -179,7 +182,8 @@ fn published_only_pack_governs_its_subtree_and_the_budget() {
             chain: &fixture.chain,
             assignments: &assignments,
             default_pack: None,
-            role_bindings: &[],
+            anchors: &[],
+            groups: &[],
             lapses: &[],
             lapsed: &[],
             candidates: &[],
@@ -195,10 +199,10 @@ fn published_only_pack_governs_its_subtree_and_the_budget() {
     assert_eq!(
         by_scope,
         vec![
-            (ScopeKind::User, false),
-            (ScopeKind::Team, false),
-            (ScopeKind::Department, true),
-            (ScopeKind::Org, true),
+            (ScopeKind::Principal, false),
+            (ScopeKind::OrgUnit, false),
+            (ScopeKind::OrgUnit, true),
+            (ScopeKind::Tenant, true),
         ],
         "published-only inside the assigned subtree, both channels above"
     );
@@ -227,7 +231,8 @@ fn unconfigured_stored_pack_gets_the_product_config() {
             chain: &fixture.chain,
             assignments: &assignments,
             default_pack: None,
-            role_bindings: &[],
+            anchors: &[],
+            groups: &[],
             lapses: &[],
             lapsed: &[],
             candidates: &[],
@@ -253,7 +258,8 @@ fn quarantine_and_empty_chain_plan_nothing() {
             chain: &fixture.chain,
             assignments: &[],
             default_pack: None,
-            role_bindings: &[],
+            anchors: &[],
+            groups: &[],
             lapses: &[],
             lapsed: &[],
             candidates: &[],
@@ -276,7 +282,8 @@ fn quarantine_and_empty_chain_plan_nothing() {
             chain: &[],
             assignments: &[],
             default_pack: None,
-            role_bindings: &[],
+            anchors: &[],
+            groups: &[],
             lapses: &[],
             lapsed: &[],
             candidates: &[],

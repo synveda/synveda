@@ -50,7 +50,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
-use crate::hierarchy::{body, commit, tenant_id};
+use crate::request::{body, commit, tenant_id};
 
 /// The longest window an authorisation may be granted for.
 ///

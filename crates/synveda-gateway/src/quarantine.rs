@@ -3,9 +3,20 @@
 //! the PDP (`QuarantineRead` for the queue, `QuarantineReview` for
 //! release/reject).
 //!
+//! **The plane is tenant-anchored** (CPR-7, ADR-0074 decision 7). Since
+//! placement became identity, every quarantined event lands at a
+//! `principal`-shaped scope — and a principal scope inherits nothing, so
+//! no grant but one written directly at that person's own scope carries a
+//! role there. Anchoring the verdict at the event's scope therefore made
+//! this plane unreachable for every event it exists for. It decides at the
+//! tenant resource instead, which is where the queue's tenant-wide branch
+//! has always decided and which matches the packs' own treatment of this
+//! control: how a security control is reviewed does not loosen per pack.
+//! A `scope_id` on the queue stays a **filter**, not the anchor.
+//!
 //! A quarantined observe event staged redacted but signal-less; the
-//! reviewer — steward, org-admin, or security-reviewer on the event's
-//! chain — sees the redacted payload plus the finding summary and
+//! reviewer — a `reviewer`, `owner` or `administrator` in the tenant —
+//! sees the redacted payload plus the finding summary and
 //! decides flow: release sends the standard work signal in the review's
 //! own transaction (the pipeline cannot tell a released event from an
 //! admitted one), reject leaves the staging row provenance-only. Review
@@ -23,14 +34,14 @@ use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::quarantine::{QuarantinedEvent, ReviewDecision};
-use synveda_store::{hierarchy, quarantine, rls};
+use synveda_store::{quarantine, rls, scopes};
 use synveda_types::{Error, IdentityId, ObserveEventId, QuarantineState, Result, ScopeId};
 
 use crate::app::AppState;
 use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
-use crate::hierarchy::{commit, found, tenant_id};
+use crate::request::{commit, found, tenant_id};
 use crate::telemetry::QUARANTINE_OPERATIONS_TOTAL;
 
 /// The queue page cap; `limit` above it is a 400, not a silent trim.
@@ -125,9 +136,9 @@ struct QueueResponse {
 }
 
 /// `GET /v1/quarantine` — the pending review queue, oldest first.
-/// Tenant-wide without `scope_id` (a tenant-resource `QuarantineRead`:
-/// tenant-wide reviewer bindings only); a subtree with it (the node's
-/// chain resolves the reviewer's authority, uniform-404 first).
+/// `QuarantineRead` is decided at the tenant either way (module doc);
+/// `scope_id` narrows *which* events come back, after the uniform-404
+/// ownership check on the scope named.
 #[tracing::instrument(name = "quarantine.list", skip_all)]
 pub(crate) async fn list(
     State(state): State<AppState>,
@@ -155,8 +166,10 @@ pub(crate) async fn list(
                 (authorized, Resource::Tenant(tenant_id), None)
             }
             Some(scope_id) => {
-                let node = found(
-                    hierarchy::node(&mut *tx, scope_id).await?,
+                // Ownership first, so a made-up id is a 404 and never a
+                // denial oracle (ADR-0012 decision 7).
+                found(
+                    scopes::get(&mut *tx, tenant_id, scope_id).await?,
                     tenant_id,
                     scope_id,
                 )?;
@@ -164,13 +177,14 @@ pub(crate) async fn list(
                     &state,
                     &mut tx,
                     Action::QuarantineRead,
-                    Resource::Scope(scope_id),
-                    Some(&node),
+                    Resource::Tenant(tenant_id),
+                    None,
                 )
                 .await?;
-                // The subtree filter: the node and everything below it —
-                // quarantined events live at user-kind leaves.
-                let mut scopes: Vec<ScopeId> = hierarchy::descendants(&mut *tx, scope_id)
+                // The subtree filter: the scope and everything below it —
+                // quarantined events live at the `principal` scopes under
+                // it (CPR-7).
+                let mut scopes: Vec<ScopeId> = scopes::descendants(&mut *tx, tenant_id, scope_id)
                     .await?
                     .into_iter()
                     .map(|node| node.id)
@@ -233,7 +247,7 @@ pub(crate) async fn reject(
 }
 
 /// The shared review path: uniform-404 ownership (the quarantine row,
-/// then its scope node), `QuarantineReview` on the event's scope, the
+/// then its scope node), `QuarantineReview` at the tenant (module doc), the
 /// one-shot state flip (plus the release signal) on this transaction,
 /// and the chained semantic event — all atomic (ADR-0021 decision 7).
 async fn review(
@@ -242,7 +256,7 @@ async fn review(
     payload: std::result::Result<Json<ReviewBody>, JsonRejection>,
     decision: ReviewDecision,
 ) -> Result<Json<QuarantineView>> {
-    let body = crate::hierarchy::body(payload)?;
+    let body = crate::request::body(payload)?;
     if let Some(reason) = &body.reason
         && (reason.is_empty() || reason.chars().count() > MAX_REASON_CHARS)
     {
@@ -262,11 +276,12 @@ async fn review(
             entity: "quarantined event".to_owned(),
         });
     };
-    // The event's scope anchors the decision; a since-deleted scope (a
-    // revoked agent's leaf) answers the uniform 404 like every dangling
-    // resource — disposal owns those rows (module doc).
-    let node = found(
-        hierarchy::node(&mut *tx, event.scope_id).await?,
+    // The event's scope is still resolved, because a since-deleted scope
+    // (a revoked agent's) answers the uniform 404 like every dangling
+    // resource — disposal owns those rows (module doc). It no longer
+    // anchors the decision: see the module doc.
+    found(
+        scopes::get(&mut *tx, tenant_id, event.scope_id).await?,
         tenant_id,
         event.scope_id,
     )?;
@@ -274,8 +289,8 @@ async fn review(
         state,
         &mut tx,
         Action::QuarantineReview,
-        Resource::Scope(event.scope_id),
-        Some(&node),
+        Resource::Tenant(tenant_id),
+        None,
     )
     .await?;
     let reviewed = quarantine::review(

@@ -39,7 +39,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
-use crate::hierarchy::{body, tenant_id};
+use crate::request::{body, tenant_id};
 use crate::telemetry::{OBSERVE_BATCHES_TOTAL, OBSERVE_EVENTS_TOTAL, REDACTION_FINDINGS_TOTAL};
 
 /// Batch caps (ADR-0020 decision 5). A batch over the cap is a 422 with
@@ -201,13 +201,7 @@ pub(crate) async fn create(
             });
         };
         let home = identity.scope_id;
-        let authorized = authz::decide(
-            &state,
-            &input,
-            Action::MemoryWrite,
-            Resource::Scope(home),
-            None,
-        )?;
+        let authorized = authz::decide(&state, &input, Action::MemoryWrite, Resource::Scope(home))?;
         // The scan seam (MEM-2, ADR-0021 decision 1): every payload is
         // scanned and redacted before anything persists. The redaction
         // config comes off the effective pack for the write resource —

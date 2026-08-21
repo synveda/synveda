@@ -8,29 +8,32 @@ use synveda_types::access::{GrantSource, RoleKey};
 use synveda_types::anchor::ScopeAnchor;
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Error, GrantId, GroupId, HierarchyNode, Lapse, PolicyAssignment, ProjectId, Result, Role,
-    RoleBinding, ScopeId, Sensitivity, TenantId, WorkspaceId,
+    Error, GrantId, GroupId, Lapse, PolicyAssignment, ProjectId, Result, ScopeId, Sensitivity,
+    TenantId, WorkspaceId,
 };
 
 /// The PDP's own view of a governed scope: a node with a parent, a tenant, a
 /// shape and a seal, and nothing else (CPR-6, ADR-0073 decision 1).
 ///
 /// It exists so that the decision point has **one** scope vocabulary. Before
-/// this the PDP was written against [`HierarchyNode`] — a five-value rank
-/// ladder with a materialised path and a depth — and every pack rule that
-/// mentioned a department, a team or an ordering was reading that ladder. The
-/// governed scope model has no ladder, so the PDP is written against this and
-/// the callers project into it.
+/// CPR-6 the PDP was written against the old hierarchy's node — a five-value
+/// rank ladder with a materialised path and a depth — and every pack rule
+/// that mentioned a department, a team or an ordering was reading that
+/// ladder. The governed scope model has no ladder; since CPR-7 there is one
+/// tree and every caller is written against this (ADR-0074 decision 1).
 ///
-/// No display fields, deliberately (ADR-0011, kept): a rename must not
-/// invalidate an entity fragment, and a path must never be an authorisation
+/// One display field, `slug`, and it is as immutable as the id: a rename
+/// changes `display_name`, never the slug (CPR-3's trigger), so a slug on a
+/// chain cannot go stale — and the composition plane renders a section
+/// header per scope, which needs something stable to say (CPR-7,
+/// ADR-0074). No `display_name`, and a path is never an authorisation
 /// input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopeNode {
     /// The scope.
     pub id: ScopeId,
-    /// Its tenant. Carried per node so a chain from a foreign tenant chains up
-    /// to a *different* `Tenant` entity and every membership rule fails closed.
+    /// Its tenant. Carried per node so a chain from a foreign tenant chains up to
+    /// a *different* `Tenant` entity and every membership rule fails closed.
     pub tenant_id: TenantId,
     /// Its parent; `None` for the tenant root.
     pub parent_id: Option<ScopeId>,
@@ -38,6 +41,9 @@ pub struct ScopeNode {
     /// `principal`. A shape, never a rank: nothing anywhere compares two of
     /// these for order.
     pub kind: ScopeKind,
+    /// The immutable slug — display and ordering only, never an
+    /// authorisation input.
+    pub slug: String,
     /// Whether the scope is sealed — nobody's to act on, under any pack
     /// (AUTH-4, ADR-0059 decision 8).
     pub sealed: bool,
@@ -52,49 +58,9 @@ impl ScopeNode {
             tenant_id: scope.tenant_id,
             parent_id: scope.parent_scope_id,
             kind: scope.kind,
+            slug: scope.slug.clone(),
             sealed,
         }
-    }
-
-    /// A node of the **old** hierarchy, projected onto the shape vocabulary.
-    ///
-    /// This is the programme's legacy bridge and it is deleted with
-    /// `hierarchy_nodes` itself. It exists because the prompt that re-cut the
-    /// PDP left the old hierarchy APIs standing: those routes still decide,
-    /// and a decision point that understood two scope vocabularies would be
-    /// the rank ladder surviving inside the thing that was supposed to remove
-    /// it. So the ladder is collapsed **here, at the caller's edge**, and the
-    /// PDP never sees it.
-    ///
-    /// Nothing is written by this: no row of `hierarchy_nodes` becomes a row
-    /// of `scopes`, and no `ScopeNode` produced here is ever persisted. It is
-    /// a projection for one decision, which is why it is not the data
-    /// migrator ADR-0068 decision 3 forbids.
-    #[must_use]
-    pub fn from_hierarchy(node: &HierarchyNode) -> Self {
-        ScopeNode {
-            id: node.id,
-            tenant_id: node.tenant_id,
-            parent_id: node.parent_id,
-            // The collapse: an org root is a tenant scope, a person's node is
-            // their principal scope, and division/department/team are the one
-            // shape that nests inside itself. The three that collapse together
-            // are exactly the three whose distinction *was* the rank.
-            kind: match node.kind {
-                synveda_types::ScopeKind::Org => ScopeKind::Tenant,
-                synveda_types::ScopeKind::User => ScopeKind::Principal,
-                synveda_types::ScopeKind::Division
-                | synveda_types::ScopeKind::Department
-                | synveda_types::ScopeKind::Team => ScopeKind::OrgUnit,
-            },
-            sealed: node.sealed,
-        }
-    }
-
-    /// A whole chain of old hierarchy nodes, projected in order.
-    #[must_use]
-    pub fn from_hierarchy_chain(chain: &[HierarchyNode]) -> Vec<ScopeNode> {
-        chain.iter().map(ScopeNode::from_hierarchy).collect()
     }
 }
 
@@ -161,8 +127,7 @@ pub struct Principal {
     /// action when set (ADR-0013 decision 5, ADR-0014 decision 2).
     pub quarantined: bool,
     /// The principal's **own scope** — the `principal`-shaped scope that
-    /// belongs to this subject (CPR-6, ADR-0073 decision 2), or, on the old
-    /// hierarchy plane the programme has not deleted yet, its placement node.
+    /// belongs to this subject (CPR-6, ADR-0073 decision 2).
     ///
     /// The principal entity is parented to it, so pack membership rules
     /// (`principal in resource`) walk the scope tree upward from it. `None`
@@ -187,15 +152,22 @@ pub struct Principal {
 /// compile-check time, not at decision time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
-    /// Create a hierarchy node under the resource (the parent scope, or
-    /// the tenant when creating the org root).
-    HierarchyCreate,
-    /// Read a hierarchy node or listing anchored at the resource.
-    HierarchyRead,
-    /// Rename or move the resource node.
-    HierarchyUpdate,
-    /// Delete the resource node.
-    HierarchyDelete,
+    /// Create a governed scope under the resource (CPR-7, ADR-0074
+    /// decision 5). The tenant root is minted by the substrate, so this is
+    /// always a child.
+    ScopeCreate,
+    /// Read a governed scope, listing, ancestry or subtree anchored at the
+    /// resource.
+    ScopeRead,
+    /// Rename, re-describe, archive or **move** the resource scope. A move
+    /// is decided against the destination and audited with both ends.
+    ///
+    /// There is deliberately no delete variant, for
+    /// [`Action::WorkspaceUpdate`]'s reason: a scope is what audit events,
+    /// versions and grants name, so retiring one is a status transition and
+    /// a delete authority nobody can exercise would be a lie in the
+    /// vocabulary.
+    ScopeUpdate,
     /// Read a workspace, or list the tenant's workspaces (CPR-4, ADR-0071
     /// decision 3).
     ///
@@ -410,13 +382,8 @@ pub enum Action {
     /// Assign a pack to the resource node, or set the tenant default
     /// (the tenant resource).
     PolicyAssign,
-    /// Read role bindings at the resource node, or the tenant's bindings
-    /// (the tenant resource) — `/v1/roles/*` (AUTHZ-3, ADR-0015).
-    RoleRead,
-    /// Bind or unbind a role at the resource node, or tenant-wide (the
-    /// tenant resource). Decisions require [`AuthzContext::grant`] — the
-    /// role being granted or revoked (ADR-0015 decision 5).
-    RoleAssign,
+    /// Release or reject one quarantined event at its scope. Never a
+
     /// Read service-identity registrations: one at its anchor node, or
     /// the tenant's list (the tenant resource) — `/v1/service-identities`
     /// (AUTH-3, ADR-0018 decision 3).
@@ -557,11 +524,10 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 44] = [
-        Action::HierarchyCreate,
-        Action::HierarchyRead,
-        Action::HierarchyUpdate,
-        Action::HierarchyDelete,
+    pub const ALL: [Action; 41] = [
+        Action::ScopeCreate,
+        Action::ScopeRead,
+        Action::ScopeUpdate,
         Action::WorkspaceRead,
         Action::WorkspaceCreate,
         Action::WorkspaceUpdate,
@@ -586,8 +552,6 @@ impl Action {
         Action::QuarantineReview,
         Action::PolicyRead,
         Action::PolicyAssign,
-        Action::RoleRead,
-        Action::RoleAssign,
         Action::ServiceIdentityRead,
         Action::ServiceIdentityManage,
         Action::AuditRead,
@@ -614,17 +578,15 @@ impl Action {
     /// operand beyond (principal, action, resource). The two exclusions
     /// are their own groups — [`Action::TIERED_READS`], which answer with
     /// a tier set because a bare boolean would have to pick a tier and
-    /// then hide which one, and [`Action::RoleAssign`], which fails closed
-    /// without [`AuthzContext::grant`] and is therefore probed once per
-    /// role. [`Action::AuditRead`] is absent because the schema refuses it
+    /// then hide which one. [`Action::AuditRead`] is absent because the
+    /// schema refuses it
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 34] = [
-        Action::HierarchyCreate,
-        Action::HierarchyRead,
-        Action::HierarchyUpdate,
-        Action::HierarchyDelete,
+    pub const PROBED_AT_SCOPE: [Action; 32] = [
+        Action::ScopeCreate,
+        Action::ScopeRead,
+        Action::ScopeUpdate,
         Action::WorkspaceRead,
         Action::WorkspaceCreate,
         Action::WorkspaceUpdate,
@@ -643,7 +605,6 @@ impl Action {
         Action::QuarantineReview,
         Action::PolicyRead,
         Action::PolicyAssign,
-        Action::RoleRead,
         Action::ServiceIdentityRead,
         Action::ServiceIdentityManage,
         Action::ChannelRead,
@@ -663,11 +624,10 @@ impl Action {
     /// much shorter than the scope set and that is the honest shape: most
     /// of this vocabulary is about a node, and an action that is only ever
     /// taken at a node has no tenant-level answer to give.
-    pub const PROBED_AT_TENANT: [Action; 22] = [
-        Action::HierarchyCreate,
-        Action::HierarchyRead,
-        Action::HierarchyUpdate,
-        Action::HierarchyDelete,
+    pub const PROBED_AT_TENANT: [Action; 20] = [
+        Action::ScopeCreate,
+        Action::ScopeRead,
+        Action::ScopeUpdate,
         Action::WorkspaceRead,
         Action::WorkspaceCreate,
         Action::WorkspaceUpdate,
@@ -681,7 +641,6 @@ impl Action {
         Action::QuarantineRead,
         Action::PolicyRead,
         Action::PolicyAssign,
-        Action::RoleRead,
         Action::ServiceIdentityRead,
         Action::AuditRead,
         Action::DirectoryManage,
@@ -707,10 +666,9 @@ impl Action {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Action::HierarchyCreate => "hierarchy.create",
-            Action::HierarchyRead => "hierarchy.read",
-            Action::HierarchyUpdate => "hierarchy.update",
-            Action::HierarchyDelete => "hierarchy.delete",
+            Action::ScopeCreate => "scope.create",
+            Action::ScopeRead => "scope.read",
+            Action::ScopeUpdate => "scope.update",
             Action::WorkspaceRead => "workspace.read",
             Action::WorkspaceCreate => "workspace.create",
             Action::WorkspaceUpdate => "workspace.update",
@@ -735,8 +693,6 @@ impl Action {
             Action::QuarantineReview => "quarantine.review",
             Action::PolicyRead => "policy.read",
             Action::PolicyAssign => "policy.assign",
-            Action::RoleRead => "role.read",
-            Action::RoleAssign => "role.assign",
             Action::ServiceIdentityRead => "service_identity.read",
             Action::ServiceIdentityManage => "service_identity.manage",
             Action::AuditRead => "audit.read",
@@ -757,10 +713,9 @@ impl Action {
     /// The action's entity id inside the Cedar schema's `Synveda` namespace.
     pub(crate) const fn cedar_id(&self) -> &'static str {
         match self {
-            Action::HierarchyCreate => "HierarchyCreate",
-            Action::HierarchyRead => "HierarchyRead",
-            Action::HierarchyUpdate => "HierarchyUpdate",
-            Action::HierarchyDelete => "HierarchyDelete",
+            Action::ScopeCreate => "ScopeCreate",
+            Action::ScopeRead => "ScopeRead",
+            Action::ScopeUpdate => "ScopeUpdate",
             Action::WorkspaceRead => "WorkspaceRead",
             Action::WorkspaceCreate => "WorkspaceCreate",
             Action::WorkspaceUpdate => "WorkspaceUpdate",
@@ -785,8 +740,6 @@ impl Action {
             Action::QuarantineReview => "QuarantineReview",
             Action::PolicyRead => "PolicyRead",
             Action::PolicyAssign => "PolicyAssign",
-            Action::RoleRead => "RoleRead",
-            Action::RoleAssign => "RoleAssign",
             Action::ServiceIdentityRead => "ServiceIdentityRead",
             Action::ServiceIdentityManage => "ServiceIdentityManage",
             Action::AuditRead => "AuditRead",
@@ -931,19 +884,6 @@ pub struct AuthzContext<'a> {
     /// when no node on the chain carries an assignment. `None` falls
     /// back to `regulated-strict` (seed §2.1).
     pub default_pack: Option<&'a str>,
-    /// The principal's role bindings relevant to this resource: rows
-    /// bound at nodes of the resource's chain, plus its tenant-wide rows
-    /// (AUTHZ-3, ADR-0015 decision 3). The PDP resolves the effective
-    /// set — tenant-wide always; node rows when the bound node is on the
-    /// chain — and passes it to policies as `context.roles`. Empty means
-    /// no roles: strict by default.
-    pub role_bindings: &'a [RoleBinding],
-    /// For [`Action::RoleAssign`] only: the role being granted or
-    /// revoked, passed to policies as `context.grant` so the base layer
-    /// can guard org-admin escalation (ADR-0015 decision 5). A
-    /// `RoleAssign` decision without it fails closed; other actions
-    /// ignore it.
-    pub grant: Option<Role>,
     /// For [`Action::MemoryRead`] only: the tier being asked about, passed
     /// to policies as `context.sensitivity` (AUTHZ-5, ADR-0038 decision 2).
     /// A `MemoryRead` decision without it fails closed — the `grant`
@@ -959,8 +899,8 @@ pub struct AuthzContext<'a> {
     /// scope is on [`AuthzContext::principal_scopes`], neither revoked nor
     /// expired at the instant that query ran.
     ///
-    /// Caller-supplied for the reason [`AuthzContext::role_bindings`] is —
-    /// policy knows nothing of storage (seed §2.4) — and *pre-filtered* for
+    /// Caller-supplied — policy knows nothing of storage (seed §2.4) — and
+    /// *pre-filtered* for
     /// the reason that matters more: expiry is a property of the decision
     /// rather than of a job, so the one query that loads these rows is the
     /// one place a window ends (decision 4). Empty means no grant stands,
@@ -1027,7 +967,6 @@ mod probe_vocabulary_tests {
         for action in Action::PROBED_AT_SCOPE
             .iter()
             .chain(Action::TIERED_READS.iter())
-            .chain(std::iter::once(&Action::RoleAssign))
             // The two tenant-only actions: the schema gives neither a
             // scope resource, so a per-node probe would be asking a
             // question the model refuses to represent.
@@ -1085,14 +1024,6 @@ mod probe_vocabulary_tests {
                 "{tiered:?} is tier-bearing and cannot be a boolean probe"
             );
         }
-    }
-
-    /// `RoleAssign` fails closed without `context.grant`, so it must not
-    /// be in a list the probe loops over without one.
-    #[test]
-    fn role_assign_is_not_probed_without_a_grant() {
-        assert!(!Action::PROBED_AT_SCOPE.contains(&Action::RoleAssign));
-        assert!(!Action::PROBED_AT_TENANT.contains(&Action::RoleAssign));
     }
 
     /// `AuditRead` applies to the tenant and nothing else (ADR-0045

@@ -32,11 +32,11 @@ pub const TENANT_RESOLUTIONS_TOTAL: &str = "synveda_tenant_resolutions_total";
 /// Request latency in seconds, labelled by method/route/status.
 pub const HTTP_REQUEST_DURATION_SECONDS: &str = "synveda_http_request_duration_seconds";
 
-/// Hierarchy admin operations, labelled by `op` (create/get/root/children/
-/// ancestors/descendants/update/delete) and `outcome` (`ok`, `rejected` —
-/// the caller's fault, `error` — ours or an operator's). HIER-1; an AUD-1
-/// emission point once the audit log lands.
-pub const HIERARCHY_OPERATIONS_TOTAL: &str = "synveda_hierarchy_operations_total";
+/// Scope admin operations (CPR-7, ADR-0074), labelled by `op`
+/// (`list`/`create`/`get`/`update`/`ancestors`/`descendants`) and
+/// `outcome` (`ok`, `rejected` — the caller's fault, `error` — ours or an
+/// operator's).
+pub const SCOPE_OPERATIONS_TOTAL: &str = "synveda_scope_operations_total";
 
 /// The workspace/project/repository plane's operations (CPR-4, ADR-0071),
 /// labelled by `op` (`me`, `workspace.list`, `workspace.create`,
@@ -422,7 +422,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Gateway HTTP request latency"
     );
     metrics::describe_counter!(
-        HIERARCHY_OPERATIONS_TOTAL,
+        SCOPE_OPERATIONS_TOTAL,
         "Hierarchy admin operations by op and outcome (ok/rejected/error)"
     );
     // CPR-4 counters (ADR-0071): the plane's own operations here, and the
@@ -546,16 +546,10 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_audit::AUDIT_VERIFICATIONS_TOTAL,
         "Audit chain verifications by outcome (valid/broken)"
     );
-    // HIER-2 counters (ADR-0016): emitted in synveda-store's scope-chain
-    // resolver; invalidations by the hierarchy-mutating handlers.
-    metrics::describe_counter!(
-        synveda_store::scope_chain::SCOPE_CHAIN_RESOLUTIONS_TOTAL,
-        "Scope chain resolutions by outcome (hit/miss)"
-    );
-    metrics::describe_counter!(
-        synveda_store::scope_chain::SCOPE_CHAIN_INVALIDATIONS_TOTAL,
-        "Tenant-wide scope-chain cache flushes after committed hierarchy mutations"
-    );
+    // (The HIER-2 chain-cache counters left with the cache and the tree it
+    // read — CPR-7, ADR-0074. The description block is kept rather than
+    // silently dropped so a scrape comparing releases sees the series end
+    // rather than a gap.)
     // CPR-3 (ADR-0070): the generic scope substrate. Emitted in
     // synveda-store's scope services; described here where the recorder lives
     // (ADR-0007). No route reaches those services yet — the governed entry

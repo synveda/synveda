@@ -1313,4 +1313,282 @@ frontend changes, deletions, tests, and the resulting commit hash.
   is two connections for that reason (CPR-5's finding, applied before it bit).
 - **Commit.** `refactor(auth): use governed scope anchors` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by Prompt 7, on Prompt 1's rule.
+- **Commit hash.** `a286f4b6d2d90addff81fc3a58a22fcda067edf0`, written by
+  Prompt 7, on Prompt 1's rule.
+
+### Prompt 7 — The hierarchy cutover: one scope tree (CPR-7)
+
+- **Implemented.** The prompt six records deferred to: the old fixed
+  hierarchy deleted **whole** and the governed scope model left standing
+  alone (ADR-0074). What left the schema: `hierarchy_nodes`,
+  `hierarchy_closure`, `role_bindings`, `group_mappings`. What left the
+  types: `ScopeKind {org…user}` with `rank()`, `HierarchyNode`, `Role`,
+  `RoleBinding`, `Identity::quarantined`. What left the product:
+  `/v1/hierarchy/*` (no alias — negative API tests assert the 404s),
+  `synveda hierarchy`, `synveda role bind`, the `synveda-{dept}-{team}`
+  JIT convention, the placement-based quarantine convention, the HIER-2
+  chain cache and the console hierarchy explorer. What arrived: **six
+  public admin routes** (`GET/POST /v1/admin/scopes`, `GET/PATCH
+  /v1/admin/scopes/{id}`, `…/ancestors`, `…/descendants`), **five CLI
+  commands** (`synveda scope list|show|create|move|tree`), and two
+  re-homed sub-surfaces under the same prefix — per-scope pack assignment
+  (`…/policy`) and the VedaFlow curator file (`…/curators`).
+- **Divergence from §9.** §9's Prompt 7 reads *"Sessions"*. The prompt as
+  it arrived is the hierarchy cutover — §7 deletion-map row 1's second
+  half, which CPR-3 had assigned to "Prompt 6" and CPR-6 then displaced —
+  and the prompt's own text is authoritative (§9's preamble). Recorded
+  rather than absorbed because the swap is the programme settling into its
+  real dependency order: the memory plane's re-anchoring (Prompts 7–12 as
+  numbered) needs the tree it hangs off to be the only tree first, and
+  every CPR since 3 has paid a projection seam or a contortion (the
+  identity plane that could not use its own membership model) that this
+  prompt removes. Sessions follow.
+- **Schema/domain changes.** No new tables. The chain is **rewritten in
+  place**: the scope substrate (CPR-3's migration 0040, merged with
+  0043's `principal_id`) becomes `0004` where the hierarchy was;
+  `identities`/`group_mappings`-free `0007` foreign-keys `scopes`;
+  `policy_pack_assignments` foreign-keys `scopes`; `0009_role_bindings`
+  and the old `0004`/`0040` files are deleted — **43 → 41 migrations,
+  56 tables** (60 minus the four that left), RLS-forced count unchanged
+  and the completeness inventory drops exactly the four. The epoch bumps
+  **1 → 2**, so every pre-cutover database is refused by the CPR-2 guard
+  with the reset instruction rather than by a checksum error — which is
+  the guard doing what ADR-0069 decision 3 built it for. One substrate
+  rule changed: a `principal` may nest under `tenant`, `org_unit` **or
+  `workspace`** (ADR-0074 decision 3) — a service identity's confinement
+  anchor is tree position, so the shape must admit it. `scopes::NewScope`
+  gains `set_attributes`; `ScopeNode` (the PDP's) gains an immutable
+  `slug` — its one display field, carried because the composition plane
+  renders a section header per scope and a slug cannot go stale.
+- **API and frontend changes.** Six admin routes on the OpenAPI contract
+  (26 → **32 operations**, 17 → 21 paths); `PATCH` carries
+  rename/archive/**move** (`parent_scope_id`), a move decided at both ends
+  and audited with both; creation idempotent under `Idempotency-Key`. The
+  `Hierarchy*` Cedar actions became `ScopeCreate/Read/Update` (no delete —
+  retiring a scope is a status transition); `RoleRead`/`RoleAssign` left
+  with the bindings, and the base layer's escalation guard with them.
+  `context.roles` carries **grant keys only**. The console explorer re-cut
+  onto the scope plane (tree/pack/lapse/capability panels; the roles panel
+  gone with the bindings, the parity corpus case with it);
+  `console/src/generated/api.ts` regenerated (39 schemas). `synveda scope`
+  replaces `synveda hierarchy`; `synveda service register` mints a
+  principal scope under the operator's anchor; `synveda role` is gone.
+- **The identity plane un-contorted.** Placement is identity (ADR-0074
+  decision 3): an identity's `scope_id` is its own principal scope —
+  minted by `ensure_principal_scope` at first login, by SCIM projection
+  keyed on the directory's `externalId` (adopted at login through
+  ADR-0059 decision 4's correspondence rule, the identity row read before
+  any subject-keyed fallback so one person is never two scopes), and by
+  service registration under the operator's anchor. Quarantine is only
+  ever "not provisioned". The `synveda-admins` convention upserts an
+  `administrator` grant at the tenant root — the operator door ADR-0073
+  recorded as missing. The reconciler's `apply_placement` (group-driven
+  moves, pack-boundary sealing) is **deleted**: belonging is directory
+  groups and grants, and placement-as-configuration is Prompt 29's.
+- **One gather.** The gateway's two decision-gathering paths collapsed
+  into the governed one: every route's resource chain comes from
+  `scope_closure`, every caller's own chain starts at their identity's
+  scope, `context.roles` is grant keys only, and `ScopeNode::from_hierarchy`
+  — CPR-6's projection bridge — is deleted unreplaced. The composition
+  plane (`MemoryReadInputs`) gained `anchors`/`groups` and lost
+  `role_bindings`: the read path finally decides with the grants CPR-6
+  made resolvable, which is the widening `standard`'s `principal.ambit`
+  rule was waiting for. The HIER-2 warm cache went with its tree; chains
+  resolve per request, and the post-mutation seam narrowed to
+  `pdp.flush_entities` (`invalidate_scopes`).
+- **The approval matrix speaks grant keys** (ADR-0074 decision 6):
+  proposals' recorded approvals, curator files' `role:` entries, the
+  embedded matrices and every Cedar role list. `steward`/`org-admin`/
+  `compliance` → `administrator`; `security-reviewer` → `reviewer`; the
+  floors unchanged in substance (restricted ⇒ administrator + 2 distinct,
+  any skill ⇒ reviewer + 2 distinct), Prompt 27 named for the specialist
+  names' return. Packs bumped **@17 → @18**.
+- **Deleted.** Four tables; three type modules (`types/hierarchy.rs`,
+  `types/role.rs` wholesale); four store modules (`hierarchy`, `scope_chain`,
+  `role_bindings`, `group_mappings`); two gateway route modules
+  (`hierarchy`, `roles`); the CLI hierarchy module and the `role` command;
+  ten test suites whose subject was the old model (store `hierarchy`,
+  `scope_chain`, `role_bindings`; gateway `hierarchy_admin`,
+  `roles_routes`, `scope_chain_routes`; policy `roles`; the rls blocks for
+  the four tables; the identities convention block); the console roles
+  panel and its parity case; the scope-chain cache metrics. Nothing was
+  translated: no `hierarchy_nodes` row became a scope, in either
+  direction, at any time.
+- **Tests.** New: `crates/synveda-gateway/tests/admin_scopes_api.rs` (**7**)
+  — the six routes walked end to end, the **negative half** (seventeen
+  `/v1/hierarchy` method-paths all 404; all five old kinds 400 by name),
+  idempotency incl. the key-reuse 409, the move (lands, cycle-refused,
+  both ends in the audit event), the ungranted caller (denied the reads
+  and every mutation — `ScopeRead` is owner/administrator under every
+  shipped pack — foreign tenant 404), and no-credential 401s.
+  Re-cut: every store/policy/gateway suite that seeded or decided through
+  the old model (seeding rebuilt on `scopes::create`/`ensure_*`;
+  binding-based assertions re-expressed as grant anchors; golden
+  matrices over the grant-key vocabulary; `rls.rs` inventory minus four).
+  `demos/cpr-7-scopes.sh` drives the whole thing against a real gateway
+  and a real database — no `role bind`, no `/v1/hierarchy`, anywhere in
+  it.
+- **The re-vocabulary lost the tenant root, and a weakened test hid it.**
+  The scope-kind cells of the approval matrix are the one place the
+  translation could silently drop a row, and it did. The old rule split
+  `[org, division, department]` (SHARED) from `[team, user]` (LOCAL); the
+  new one read `SHARED = [org_unit]` and `LOCAL = [principal, workspace,
+  project]`, which leaves **`tenant` in neither** — so under
+  `regulated-strict` a memory published at an **org unit** took a curator
+  and an administrator, two distinct people, while the same memory
+  published at the **tenant root**, the widest audience the product has
+  and the one scope on every member's own chain, auto-approved. The
+  partition test that exists to catch exactly this
+  (`memory_rules_partition_the_scope_kinds`, "so no cell falls through to
+  auto-approve by accident rather than by decision") had had `Tenant`
+  dropped from the shapes it iterates, and `cross_scope.rs` had been
+  rewritten to *assert* the hole ("a tenant-root publication needs no
+  approvals"), which is what left its second approver unused and was the
+  thread that led here. `SHARED` is now `[Tenant, OrgUnit]` — the root
+  carries the `org` row it replaced — the partition test iterates all
+  five shapes again, `cross_scope.rs` asks the root for its own curator
+  **and** its own administrator, and the golden matrix carries the
+  restored cells. Recorded at length because the failure mode is the one
+  a hard cut is most exposed to: not a rule that broke, a rule that
+  stopped being asked.
+- **Two more things the cutover claimed and had not finished.** The
+  `synveda-{dept}-{team}` convention was recorded as deleted in three
+  places while `synveda_identity::mapping` still exported
+  `CONVENTION_PREFIX`, `ConventionCandidate`, `convention_candidates` and
+  `personal_slug` — dead the moment placement became identity, invisible
+  to `dead_code` because they are `pub` in a library crate. The module is
+  now the one convention that survives (`ADMIN_GROUP`,
+  `contains_admin_group`) and its tests say what the prefix no longer
+  means. And a move was "audited with both ends" (ADR-0074 decision 5)
+  while its event carried `moved_to` alone; the origin parent is read
+  before the move rewrites it and lands as `moved_from`, with the test
+  asserting both ids rather than the presence of one.
+- **The old demo corpus is standing, and named rather than left to be
+  discovered.** Four demos whose *subject* is what this prompt deletes are
+  deleted with it — `hier-1-hierarchy.sh`, `hier-2-scope-chain.sh`,
+  `hier-3-cedar-entity-sync.sh`, `authz-3-roles.sh` (69 → 65) — and the
+  programme's own three, `cpr-4`, `cpr-5` and `cpr-6`, are re-cut onto the
+  grant bootstrap. **Forty-three Phase-3 demos still seed through
+  `role bind`, `hierarchy_closure` inserts or `/v1/hierarchy`, and will
+  fail at that line.** They are not re-cut here: each belongs to a
+  subsystem Stage B onward re-anchors, and re-cutting them blind — no CI
+  target runs them — would be forty-three unverifiable edits. `make ci` does not
+  cover them, which is exactly why the number is written down. STATUS.md
+  carries the same note beside HIER-1, HIER-2, HIER-3 and AUTHZ-3, whose
+  entries now say what replaced them rather than pointing at files that no
+  longer exist.
+- **Run record.** Three production defects the suite re-cut surfaced and
+  the prompt fixed: a move's destination decision was taken without the
+  destination's own chain in the Cedar context (the entity the decision
+  named was absent, so every legal move read as a denial) — it now
+  gathers at the destination; an idempotent replay decided with no anchor
+  at all (empty chain, empty roles) — it now anchors at the parent, as
+  the original create did; and the capability/lapse surfaces rendered a
+  scope's bare slug where they promise a `scope_path` — both now render
+  the slug chain. `permits_parent` disagreed with the substrate's CHECK
+  about a principal's permitted parents (Rust said the tenant root only;
+  the schema and ADR-0074 say tenant, org unit or workspace) — the Rust
+  rule was the bug, and the widened rule is what makes
+  `POST /v1/service-identities` able to mint an agent's scope under the
+  operator's anchor at all. The explorer parity corpus re-recorded
+  (three cases; the roles case died with the bindings) and the console
+  suite passes against it (49/49).
+  **The suite the cutover re-cut had never been run against it**, and
+  running it found forty-three failures across seventeen gateway suites.
+  Three were production defects and are fixed here: the approval matrix's
+  tenant-root hole above; a `synveda-admins` login by an
+  **already-provisioned** subject wrote the bootstrap grant and then
+  returned without committing, so the operator door of ADR-0074 decision 4
+  silently failed for every directory-synced admin (the `bound` branch of
+  `provision_once` now commits, and
+  `the_admin_door_opens_on_a_later_login_and_the_grant_is_committed`
+  is the regression test); and `IdentitySummary.scope_path` promised a slug
+  chain and served a bare slug, beside a `quarantined` field that could no
+  longer be anything but `false` and is deleted.
+  Four pack rules had been re-vocabularied into holes and are restored,
+  each recorded on `EMBEDDED_PACKS`' `@18` line: the SHARED cell (above),
+  `DirectoryManage`/`DirectorySealAuthorise` (the old `org-admin` was
+  mapped to `owner` alone, locking every directory operator out),
+  `ProposalOpen`'s membership floor (ADR-0074 decision 8 — anchors are not
+  entity parents, so `principal in resource` stopped reaching the scope
+  above and the FLOW-5 climb became unsayable), and the quarantine review
+  plane (decision 7 — every quarantined event now lands on a private scope
+  that inherits nothing, so a verdict anchored there was reachable by
+  nobody). Two more model gaps were closed the same way: every principal
+  scope now carries an `owner` grant at itself (decision 8), and SCIM's
+  create-time uniqueness ignores sealed rows, which a rehire needs.
+  The rest was fixture breakage from the incomplete re-cut — teams mapped
+  to `org_unit` (SHARED) where they had been LOCAL, test packs still
+  reading the deleted `principal.home` attribute, proposals opened at
+  scopes the actor held nothing at, and material seeded at scopes no
+  reader's chain reaches.
+- **Finishing the run found a fourth production defect, upstream of the
+  other three.** `synveda-retrieval::authz::materialise` — the entity
+  batch every `composition_plan` call (`inject`, `recall`, lapses) decides
+  against — built its `AuthzContext` with `..AuthzContext::default()`,
+  which is `anchors: &[]` and `groups: &[]`. `entities_over`
+  (`synveda-policy`) bakes `principal.ambit`/`principal.anchors`/
+  `principal.private` into the Principal *entity* at that call, once; the
+  per-scope `AuthzContext` every later decision builds only supplies
+  Cedar's request `context` map (roles, sensitivity, lapsed) and cannot
+  repair an entity already materialised without it. So every decision
+  taken through a composition plan — not only the widened candidates this
+  prompt's own standing-gap note is about — evaluated `standard`'s
+  `principal.ambit` sharing permit, the private-scope door, and any
+  group-anchored grant against an entity that could never satisfy any of
+  them, silently, since CPR-6. Recall's own widened universe (CTX-5,
+  ADR-0042 decision 2) is what surfaced it:
+  `a_query_reaches_material_the_chain_never_composes` asserts exactly the
+  ambit permit this bug denied. Fixed by passing `inputs.anchors` and
+  `inputs.groups` into the materialise-time context; nothing else in the
+  decision path changes, because nothing else needed to.
+- **Three more, smaller.** A rehire under the *same* directory resource
+  collided on `principal_id`'s per-tenant uniqueness (migration 0043):
+  `ensure_principal_scope` finds-or-creates by the raw anchor, and a
+  reactivated SCIM user computes the identical anchor its departed self
+  already holds — `place()` now disambiguates by appending the fresh
+  identity id when the natural anchor is already taken, so "a rehire is a
+  new person" (the reconciler's own words) is what happens rather than a
+  409. `identities::rescope`/`seal_scope_as_former_self` — the
+  group-driven-move machinery ADR-0074 decision 3 deleted the caller of —
+  were dead (zero references outside their own definitions) and are
+  deleted with it. And two test suites (`skills.rs`, `tiered.rs`) needed
+  more than a scope swap: `skills.rs`'s gradient tests (nearest-copy
+  shadowing, "own team's skills, the org's, never another's") assert CTX-2's
+  multi-level walk, which needs a real placement chain under a caller —
+  restored via the shape `POST /v1/service-identities` already mints an
+  agent's scope under its operator's anchor with (`scopes::create` at
+  `kind: Principal, parent_scope_id: Some(anchor)`, the same pattern
+  `inject.rs`'s `seed_agent` already used), rather than the root-only
+  `ensure_principal_scope`.
+- **A fresh full run is what caught the last one.** After every gateway
+  suite was green individually, a clean `make db-test` (fresh scratch
+  database, whole workspace, no filter) found one more:
+  `synveda-store/tests/anchors.rs`'s
+  `the_callers_own_scope_sorts_first_and_inherits_nothing` asserted a
+  caller's own scope carries **no** roles until a grant names it directly
+  — true before decision 8, false after (every principal scope now
+  carries its own `owner` grant at itself, from the moment it is minted).
+  The fix is the test's, not the product's: the tenant-root probe grant
+  now uses a role decision 8 does not already imply (`administrator`
+  rather than `owner`), so "a wide grant does not reach a private scope"
+  and "the scope's own baseline grant" stay distinguishable. Recorded as
+  its own bullet because it is the shape every other fix in this record
+  took, found by the one thing that reliably finds it: running the whole
+  suite fresh rather than trusting suites verified in isolation to still
+  agree with each other. `make db-test` is green on the final tree;
+  `make ci` is the last gate (§ below).
+- **The largest thing this prompt does not carry.** `composition_plan`
+  still walks the caller's **chain** — their own scope outward to the
+  tenant root — and anchors reach it only as decision *context*. With
+  placement gone, that means an agent's `inject` sees its own scope and
+  the tenant root and nothing else: **joining a workspace gives that
+  session nothing**. Making the candidate set the anchor set is the
+  composition contract's re-cut, which §9 assigns to Prompts 16–18, and
+  beginning it here would be beginning a later prompt. Every fixture in
+  this cutover was re-cut to the model as it stands — material a reader
+  must see lives on that reader's chain — and ADR-0074 records it under
+  "What this cutover does not carry".
+- **Commit.** `refactor(scopes): remove fixed hierarchy model` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by Prompt 8, on Prompt 1's rule.

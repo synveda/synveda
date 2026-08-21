@@ -82,7 +82,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: ORIGIN.to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(
             synveda_retrieval::SearchIndex::open(
@@ -340,11 +339,13 @@ async fn a_cookie_mutation_from_another_origin_is_refused() {
 
     let response = router(state)
         .oneshot(
-            Request::post("/v1/hierarchy/nodes")
+            Request::post("/v1/admin/scopes")
                 .header(header::COOKIE, cookie(&secret))
                 .header(header::ORIGIN, "http://evil.test")
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"slug":"x","name":"x","kind":"team"}"#))
+                .body(Body::from(
+                    r#"{"parent_id":"11111111-1111-1111-1111-111111111111","kind":"org_unit","slug":"x","display_name":"x"}"#,
+                ))
                 .unwrap(),
         )
         .await
@@ -366,10 +367,12 @@ async fn a_cookie_mutation_without_an_origin_is_refused() {
 
     let response = router(state)
         .oneshot(
-            Request::post("/v1/hierarchy/nodes")
+            Request::post("/v1/admin/scopes")
                 .header(header::COOKIE, cookie(&secret))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"slug":"x","name":"x","kind":"team"}"#))
+                .body(Body::from(
+                    r#"{"parent_id":"11111111-1111-1111-1111-111111111111","kind":"org_unit","slug":"x","display_name":"x"}"#,
+                ))
                 .unwrap(),
         )
         .await
@@ -400,13 +403,15 @@ async fn a_bearer_mutation_needs_no_origin() {
 
     let response = router(state)
         .oneshot(
-            Request::post("/v1/hierarchy/nodes")
+            Request::post("/v1/admin/scopes")
                 .header(
                     header::AUTHORIZATION,
                     format!("Bearer {}", issue("agent@example.test", tenant_id)),
                 )
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"slug":"x","name":"x","kind":"team"}"#))
+                .body(Body::from(
+                    r#"{"parent_id":"11111111-1111-1111-1111-111111111111","kind":"org_unit","slug":"x","display_name":"x"}"#,
+                ))
                 .unwrap(),
         )
         .await

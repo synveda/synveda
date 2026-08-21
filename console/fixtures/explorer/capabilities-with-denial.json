@@ -2,7 +2,7 @@
   "asked_about": "0199c000-0000-7000-8000-000000000000",
   "payload": {
     "scope_id": "0199c000-0000-7000-8000-000000000000",
-    "scope_path": "acme/eng/platform",
+    "scope_path": "<tenant>/eng/platform",
     "pack": {
       "name": "eng-pack",
       "version": 7,
@@ -20,10 +20,6 @@
       "channel.read": true,
       "channel.rollback": true,
       "context_pack.write": true,
-      "hierarchy.create": true,
-      "hierarchy.delete": true,
-      "hierarchy.read": true,
-      "hierarchy.update": true,
       "lapse.grant": true,
       "lapse.revoke": true,
       "membership.grant": true,
@@ -41,7 +37,9 @@
       "proposal.review": true,
       "quarantine.read": true,
       "quarantine.review": true,
-      "role.read": true,
+      "scope.create": true,
+      "scope.read": true,
+      "scope.update": true,
       "service_identity.manage": true,
       "service_identity.read": true,
       "skill.quality.override": true,
@@ -74,16 +72,6 @@
         "confidential",
         "restricted"
       ]
-    },
-    "role_assign": {
-      "auditor": true,
-      "compliance": true,
-      "contributor": true,
-      "curator": true,
-      "org-admin": false,
-      "security-reviewer": true,
-      "steward": true,
-      "viewer": true
     }
   }
 }

@@ -58,10 +58,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::{hierarchy, prompts, rls};
+use synveda_store::{prompts, rls, scopes};
+use synveda_types::scope::Scope;
 use synveda_types::{
-    Channel, Error, HierarchyNode, IdentityId, PromptChannel, PromptName, PromptTemplate,
-    PromptVariable, Result, ScopeId, Sensitivity,
+    Channel, Error, IdentityId, PromptChannel, PromptName, PromptTemplate, PromptVariable, Result,
+    ScopeId, Sensitivity,
 };
 use synveda_vedaflow::{self as vedaflow, ChannelRef, PromptAsset};
 
@@ -69,7 +70,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::authz::{self, DecisionInput};
 use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::PROMPT_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the outcome taxonomy
@@ -212,17 +213,23 @@ async fn author_inner(
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, body.scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, body.scope_id).await?,
         tenant_id,
         body.scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::PromptWrite,
         Resource::Scope(body.scope_id),
-        None,
     )?;
     let author = identity_of(&input)?;
 
@@ -424,7 +431,7 @@ async fn resolve_inner(
     Ok(Json(ResolveResponse {
         name: name.to_string(),
         scope_id: resolved.node.id,
-        scope_path: resolved.node.path.clone(),
+        scope_path: resolved.node.slug.clone(),
         channel,
         origin: resolved.origin,
         commit: resolved.commit.map(|commit| commit.to_hex()),
@@ -438,7 +445,7 @@ async fn resolve_inner(
 
 /// What a resolution found, before it is rendered or audited.
 struct Resolved {
-    node: HierarchyNode,
+    node: Scope,
     asset: PromptAsset,
     object_hash: vedaflow::hash::ObjectHash,
     commit: Option<vedaflow::CommitHash>,
@@ -467,7 +474,7 @@ async fn walk_chain(
     name: &PromptName,
 ) -> Result<Resolved> {
     let input = authz::gather_at_home(state, tx).await?;
-    let chain: Vec<HierarchyNode> = input.chain.to_vec();
+    let chain: Vec<synveda_policy::ScopeNode> = input.chain.to_vec();
     let scope_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
     let published =
         vedaflow::read_prompt_members(tx, tenant_id, &scope_ids, Channel::Published).await?;
@@ -484,6 +491,9 @@ async fn walk_chain(
                 Some(admitted) => admitted,
                 None => continue,
             };
+        let node = scopes::get(tx, tenant_id, node.id)
+            .await?
+            .expect("the chain's own node resolves");
         return Ok(Resolved {
             node: node.clone(),
             asset,
@@ -513,11 +523,18 @@ async fn at_scope(
     pinned: Option<vedaflow::CommitHash>,
 ) -> Result<Resolved> {
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
 
     if channel == PromptChannel::Draft {
         let Some(draft) = prompts::read(&mut *tx, tenant_id, scope_id, name).await? else {
@@ -603,7 +620,11 @@ async fn at_scope(
     // The tier decision is taken now, against the live pack, at the tier the
     // *served* version carries: a pin freezes bytes and never authority
     // (decision 11).
-    let Some((asset, authorized)) = admit(state, tx, tenant_id, &input, 0, &node, address).await?
+    let Some(scope_node) = input.chain.first() else {
+        return Err(not_found(name));
+    };
+    let Some((asset, authorized)) =
+        admit(state, tx, tenant_id, &input, 0, scope_node, address).await?
     else {
         return Err(not_found(name));
     };
@@ -627,7 +648,7 @@ async fn admit(
     tenant_id: synveda_types::TenantId,
     input: &DecisionInput,
     position: usize,
-    node: &HierarchyNode,
+    node: &synveda_policy::ScopeNode,
     address: vedaflow::hash::ObjectHash,
 ) -> Result<Option<(PromptAsset, crate::authz::Authorized)>> {
     let object = vedaflow::read_object(&mut *tx, tenant_id, address)
@@ -635,7 +656,7 @@ async fn admit(
         .ok_or_else(|| Error::Internal {
             message: format!(
                 "{} names object {} which the append-only store does not hold",
-                node.path,
+                node.slug,
                 address.to_hex()
             ),
         })?;
@@ -755,11 +776,18 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     // The gate first: may this principal see this scope's shelf at all. At
     // the working tier, which is the question a listing asks — the allowed
     // decision is also what puts the read on the chain (ADR-0019
@@ -832,7 +860,7 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
 
     Ok(Json(ListResponse {
         scope_id,
-        scope_path: node.path.clone(),
+        scope_path: node.slug.clone(),
         prompts: entries,
     }))
 }
@@ -857,7 +885,7 @@ async fn published_at(
 }
 
 fn view(
-    node: &HierarchyNode,
+    node: &Scope,
     stored: prompts::StoredPrompt,
     published: Option<(vedaflow::CommitHash, vedaflow::hash::ObjectHash)>,
 ) -> PromptView {
@@ -865,7 +893,7 @@ fn view(
     PromptView {
         name: stored.template.name.to_string(),
         scope_id: stored.scope_id,
-        scope_path: node.path.clone(),
+        scope_path: node.slug.clone(),
         description: stored.template.description,
         sensitivity: stored.sensitivity,
         template: stored.template.template,

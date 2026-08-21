@@ -15,7 +15,6 @@ import {
   describeOrigin,
   isInherited,
   lapsesTouching,
-  mayBind,
   mayDo,
   mayRead,
   offers,
@@ -28,7 +27,7 @@ const ABOVE = "0199aa11-2222-7222-8222-222222222222";
 
 test("an origin is described relative to the node asked about", () => {
   // The same wire value means two different things depending on where the
-  // reader is standing, and telling a steward their team has its own pack
+  // reader is standing, and telling an administrator their unit has its own pack
   // when it inherits one is the failure this comparison prevents.
   assert.equal(describeOrigin({ kind: "assigned", scope_id: HERE }, HERE), "assigned here");
   assert.equal(describeOrigin({ kind: "assigned", scope_id: ABOVE }, HERE), "inherited");
@@ -64,7 +63,6 @@ function capabilities(overrides: Partial<Capabilities> = {}): Capabilities {
     roles: ["viewer"],
     actions: { "proposal.read": true, "proposal.review": false, "policy.assign": false },
     read_tiers: { "memory.read": ["public", "internal"], "skill.read": [] },
-    role_assign: { viewer: false, curator: false },
     ...overrides,
   };
 }
@@ -80,14 +78,6 @@ test("a tiered read with no permitted tier is not listed as readable", () => {
   // rendering the action name with an empty value would read as a partial
   // permission rather than as none.
   assert.deepEqual(mayRead(capabilities()), [["memory.read", ["public", "internal"]]]);
-});
-
-test("nothing bindable produces an empty list rather than a row of noes", () => {
-  assert.deepEqual(mayBind(capabilities()), []);
-  assert.deepEqual(
-    mayBind(capabilities({ role_assign: { viewer: true, curator: false, steward: true } })),
-    ["steward", "viewer"],
-  );
 });
 
 test("offers is false for a probe that never arrived", () => {

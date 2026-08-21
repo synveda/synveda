@@ -11,7 +11,7 @@
 //!
 //! What a corpus says that a scenario cannot: where each batch's material
 //! ends up. Records land at the caller's home scope (ADR-0020) and a
-//! service identity's home is a `ScopeKind::User` leaf under its anchor
+//! service identity's home is a `principal`-shaped scope under its anchor
 //! (ADR-0018 decision 2), so material above a leaf got there by climbing
 //! through review — `promote_to` is that climb (decision 3).
 //!

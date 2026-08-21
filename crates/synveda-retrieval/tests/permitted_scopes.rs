@@ -5,46 +5,39 @@
 //!
 //! Fixture chain: alice-user → team-a → eng → org.
 
-use chrono::Utc;
 use synveda_policy::{Pdp, Principal};
 use synveda_retrieval::{MemoryReadInputs, permitted_chain_scopes};
-use synveda_types::{HierarchyNode, ScopeId, ScopeKind, ScopeTier, Sensitivity, TenantId};
+use synveda_types::scope::ScopeKind;
+use synveda_types::{ScopeId, ScopeTier, Sensitivity, TenantId};
 
 struct Fixture {
     tenant: TenantId,
     /// alice's placement chain, nearest-first.
-    chain: Vec<HierarchyNode>,
+    chain: Vec<synveda_policy::ScopeNode>,
 }
 
 fn node(
     tenant: TenantId,
-    parent: Option<&HierarchyNode>,
+    parent: Option<&synveda_policy::ScopeNode>,
     kind: ScopeKind,
     slug: &str,
-) -> HierarchyNode {
-    HierarchyNode {
+) -> synveda_policy::ScopeNode {
+    synveda_policy::ScopeNode {
         id: ScopeId::new(),
         tenant_id: tenant,
         parent_id: parent.map(|parent| parent.id),
         kind,
         slug: slug.to_owned(),
-        name: slug.to_owned(),
-        depth: parent.map_or(0, |parent| parent.depth + 1),
-        path: parent.map_or_else(
-            || slug.to_owned(),
-            |parent| format!("{}/{slug}", parent.path),
-        ),
         sealed: false,
-        created_at: Utc::now(),
     }
 }
 
 fn fixture() -> Fixture {
     let tenant = TenantId::new();
-    let org = node(tenant, None, ScopeKind::Org, "org");
-    let eng = node(tenant, Some(&org), ScopeKind::Department, "eng");
-    let team = node(tenant, Some(&eng), ScopeKind::Team, "team-a");
-    let alice = node(tenant, Some(&team), ScopeKind::User, "alice-user");
+    let org = node(tenant, None, ScopeKind::Tenant, "org");
+    let eng = node(tenant, Some(&org), ScopeKind::OrgUnit, "eng");
+    let team = node(tenant, Some(&eng), ScopeKind::OrgUnit, "team-a");
+    let alice = node(tenant, Some(&team), ScopeKind::Principal, "alice-user");
     Fixture {
         tenant,
         chain: vec![alice, team, eng, org],
@@ -61,13 +54,17 @@ fn principal(fixture: &Fixture, quarantined: bool) -> Principal {
     }
 }
 
-fn inputs<'a>(principal: &'a Principal, chain: &'a [HierarchyNode]) -> MemoryReadInputs<'a> {
+fn inputs<'a>(
+    principal: &'a Principal,
+    chain: &'a [synveda_policy::ScopeNode],
+) -> MemoryReadInputs<'a> {
     MemoryReadInputs {
         principal,
         chain,
         assignments: &[],
         default_pack: None,
-        role_bindings: &[],
+        anchors: &[],
+        groups: &[],
         lapses: &[],
         lapsed: &[],
         candidates: &[],
@@ -178,10 +175,10 @@ fn unplaced_principal_has_an_empty_predicate() {
 #[test]
 fn service_identity_composes_its_own_chain_through_confinement() {
     let tenant = TenantId::new();
-    let org = node(tenant, None, ScopeKind::Org, "org");
-    let eng = node(tenant, Some(&org), ScopeKind::Department, "eng");
-    let team = node(tenant, Some(&eng), ScopeKind::Team, "team-a");
-    let agent_leaf = node(tenant, Some(&team), ScopeKind::User, "agent-user");
+    let org = node(tenant, None, ScopeKind::Tenant, "org");
+    let eng = node(tenant, Some(&org), ScopeKind::OrgUnit, "eng");
+    let team = node(tenant, Some(&eng), ScopeKind::OrgUnit, "team-a");
+    let agent_leaf = node(tenant, Some(&team), ScopeKind::Principal, "agent-user");
     let chain = vec![agent_leaf, team, eng, org];
     let agent = Principal {
         tenant_id: tenant,
@@ -200,7 +197,8 @@ fn service_identity_composes_its_own_chain_through_confinement() {
             chain: &chain,
             assignments: &[],
             default_pack: None,
-            role_bindings: &[],
+            anchors: &[],
+            groups: &[],
             lapses: &[],
             lapsed: &[],
             candidates: &[],

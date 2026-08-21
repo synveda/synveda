@@ -102,16 +102,17 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, policy_assignments, role_bindings, tenants};
+use synveda_store::{access, identities, policy_assignments, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, PackConfig, RecordClass, RecordId,
-    RecordKind, Role, ScopeId, ScopeKind, Sensitivity, SkillQualityConfig, SkillScanConfig,
-    TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, PackConfig, RecordClass, RecordId, RecordKind,
+    ScopeId, Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -365,7 +366,6 @@ fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -431,26 +431,24 @@ async fn world() -> Option<World> {
     .expect("admit tenant");
 
     let mut tx = pool.begin().await.expect("begin");
-    let org = node(&mut tx, tenant, None, ScopeKind::Org, "acme").await;
-    let eng = node(&mut tx, tenant, Some(org.id), ScopeKind::Department, "eng").await;
-    let platform = node(&mut tx, tenant, Some(eng.id), ScopeKind::Team, "platform").await;
-    node(
-        &mut tx,
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-    )
-    .await;
-    tx.commit().await.expect("commit hierarchy");
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = unit(&mut tx, tenant, root.id, "eng", ScopeKind::OrgUnit).await;
+    // `workspace`-shaped: the LOCAL cell of the approval matrix, which is
+    // what the old `team` rank meant. An `org_unit` is SHARED and prices a
+    // memory publication at a curator *and* an administrator (CPR-7); this
+    // suite is about what the console renders, not about that price.
+    let platform = unit(&mut tx, tenant, eng.id, "platform", ScopeKind::Workspace).await;
+    tx.commit().await.expect("commit scopes");
 
     for subject in ["alice", "cora", "sam", "sec"] {
-        seed_user(&pool, tenant, subject, platform.id).await;
+        seed_user(&pool, tenant, subject).await;
     }
-    bind(&pool, tenant, "alice", platform.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora", platform.id, Role::Curator).await;
-    bind(&pool, tenant, "sam", platform.id, Role::Steward).await;
-    bind(&pool, tenant, "sec", platform.id, Role::SecurityReviewer).await;
+    bind(&pool, tenant, "alice", platform.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora", platform.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "sam", platform.id, RoleKey::Administrator).await;
+    bind(&pool, tenant, "sec", platform.id, RoleKey::Reviewer).await;
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
     let app = router(state(&url, pdp.clone()));
@@ -467,41 +465,47 @@ async fn world() -> Option<World> {
     })
 }
 
-async fn node(
+/// One org unit under a parent — the shape every grouping takes now that
+/// rank is gone (ADR-0073 decision 4).
+async fn unit(
     tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
     tenant: TenantId,
-    parent: Option<ScopeId>,
-    kind: ScopeKind,
+    parent: ScopeId,
     slug: &str,
-) -> HierarchyNode {
-    hierarchy::create(tx, ScopeId::new(), tenant, parent, kind, slug, slug)
-        .await
-        .expect("create node")
-}
-
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
-    let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
+    kind: ScopeKind,
+) -> Scope {
+    scopes::create(
+        &mut *tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind,
+            parent_scope_id: Some(parent),
+            slug: slug.to_owned(),
+            display_name: slug.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create personal scope");
+    .expect("create org unit")
+}
+
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
+    let mut tx = pool.begin().await.expect("begin");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -509,12 +513,26 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: Role) {
+async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, Some(scope), role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 /// Installs a pack that permits everything the PDP is asked and configures

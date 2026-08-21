@@ -31,20 +31,20 @@
 //! Resolution up a chain is **nearest-ancestor-first** — the first scope
 //! carrying a file wins outright, no union — matching pack assignment
 //! (ADR-0014 decision 3). A union would make an org-wide file impossible
-//! to narrow at a team, inverting how the hierarchy works everywhere
+//! to narrow at a project, inverting how the scope tree works everywhere
 //! else.
 //!
 //! # The format
 //!
 //! ```text
 //! # Platform team curators (FLOW-3)
-//! memory/*        @alice-subject role:compliance
+//! memory/*        @alice-subject role:administrator
 //! skill/deploy-*  @bob-subject
 //! *               @head-of-eng
 //! ```
 //!
 //! One rule per line: a pattern, then one or more approvers. `@name` is a
-//! token subject; `role:name` is a role from the seed §5 vocabulary.
+//! token subject; `role:name` is a grant-key role (the one vocabulary, CPR-7).
 //! `#` starts a comment. A pattern matches `{asset-kind}/{entry-name}`,
 //! with `*` standing for any run of characters and no other metacharacter
 //! — deliberately minimal, because entry names are record ids today and
@@ -56,9 +56,9 @@ use std::fmt;
 
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
+use synveda_types::access::RoleKey;
 use synveda_types::{
-    ApprovalRequirement, AssetKind, Error, IdentityId, RequirementOrigin, Result, Role, ScopeId,
-    TenantId,
+    ApprovalRequirement, AssetKind, Error, IdentityId, RequirementOrigin, Result, ScopeId, TenantId,
 };
 
 use crate::commits::{NewCommit, commit};
@@ -98,14 +98,14 @@ pub enum Approver {
     /// A named token subject — CODEOWNERS' `@user`.
     Subject(String),
     /// Anyone holding this role at the target scope.
-    Role(Role),
+    RoleKey(RoleKey),
 }
 
 impl fmt::Display for Approver {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Approver::Subject(subject) => write!(f, "@{subject}"),
-            Approver::Role(role) => write!(f, "role:{role}"),
+            Approver::RoleKey(role) => write!(f, "role:{role}"),
         }
     }
 }
@@ -251,7 +251,7 @@ impl CuratorFile {
             for approver in &rule.approvers {
                 match approver {
                     Approver::Subject(subject) => requirement.require_subject(origin, subject),
-                    Approver::Role(role) => requirement.require_role(origin, *role),
+                    Approver::RoleKey(role) => requirement.require_role(origin, *role),
                 }
             }
         }
@@ -270,7 +270,7 @@ fn parse_approver(line: usize, token: &str) -> Result<Approver> {
         return Ok(Approver::Subject(subject.to_owned()));
     }
     if let Some(role) = token.strip_prefix("role:") {
-        return Ok(Approver::Role(role.parse()?));
+        return Ok(Approver::RoleKey(role.parse()?));
     }
     Err(Error::Invalid {
         message: format!("curator file line {line}: {token:?} is neither @subject nor role:name"),
@@ -438,7 +438,7 @@ pub struct CuratorWrite<'a> {
 
 /// Commits a curator file, fast-forwarding the scope's `curators` ref.
 ///
-/// Compare-and-swap once, not in a loop: two stewards editing one scope's
+/// Compare-and-swap once, not in a loop: two administrators editing one scope's
 /// curator file in the same instant is a collision to report, not a race
 /// to paper over — unlike the derived channel, where concurrent writers
 /// are the steady state.
@@ -525,12 +525,13 @@ pub async fn write_curators(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use synveda_types::{ApprovalMatrix, ScopeKind, Sensitivity};
+    use synveda_types::scope::ScopeKind;
+    use synveda_types::{ApprovalMatrix, Sensitivity};
     use uuid::Uuid;
 
     const SAMPLE: &str = "\
 # Platform team curators (FLOW-3)
-memory/*         @alice role:compliance
+memory/*         @alice role:administrator
 skill/deploy-*   @bob
 
 *                @head-of-eng   # everything, always
@@ -550,7 +551,7 @@ skill/deploy-*   @bob
             file.rules()[0].approvers,
             vec![
                 Approver::Subject("alice".to_owned()),
-                Approver::Role(Role::Compliance)
+                Approver::RoleKey(RoleKey::Administrator)
             ]
         );
         assert_eq!(file.rules()[2].pattern, "*");
@@ -576,7 +577,9 @@ skill/deploy-*   @bob
             "no such role"
         );
         assert!(CuratorFile::parse("memory/* @").is_err(), "empty subject");
-        assert!(CuratorFile::parse("memory/* role:steward").is_ok());
+        assert!(CuratorFile::parse("memory/* role:administrator").is_ok());
+        // The binding vocabulary fails by name (CPR-7, ADR-0074 decision 6).
+        assert!(CuratorFile::parse("memory/* role:steward").is_err());
     }
 
     #[test]
@@ -626,7 +629,7 @@ skill/deploy-*   @bob
         let mut requirement = ApprovalMatrix::empty().resolve(
             AssetKind::Memory,
             Sensitivity::Restricted,
-            ScopeKind::Team,
+            ScopeKind::OrgUnit,
         );
         let floor_roles = requirement.roles.clone();
         CuratorFile::parse(SAMPLE).unwrap().apply(

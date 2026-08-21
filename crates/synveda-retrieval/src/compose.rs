@@ -1,6 +1,7 @@
 //! The composition engine (CTX-2, ADR-0025; channels, FLOW-2,
-//! ADR-0031): deterministic chain-gradient assembly — user > team >
-//! department > org — under an estimated-token budget, with seed §4.4's
+//! ADR-0031): deterministic chain-gradient assembly — the nearer scope
+//! before the wider one, own scope first and the tenant root last — under
+//! an estimated-token budget, with seed §4.4's
 //! conflict rules and per-scope channel rules, every block watermarked
 //! with VedaFlow content addresses and record ids.
 //!
@@ -47,10 +48,11 @@ use sqlx::PgConnection;
 use synveda_store::packs;
 use synveda_store::records::{RecordState, RecordVersion};
 use synveda_store::search::{self, ScopeClassCutoff};
+use synveda_types::scope::ScopeKind;
 use synveda_types::{
     Channel, ContextPackName, DocumentName, EntryTier, Frontmatter, IndexTier, LapseId,
-    RecordClass, RecordId, RecordKind, Result, RetentionConfig, ScopeId, ScopeKind, ScopeTier,
-    Sensitivity, SkillIndex, SkillName, TenantId,
+    RecordClass, RecordId, RecordKind, Result, RetentionConfig, ScopeId, ScopeTier, Sensitivity,
+    SkillIndex, SkillName, TenantId,
 };
 use synveda_vedaflow::{
     ChannelRef, MemoryAsset, SkillAsset, read_context_pack_members, read_memory_members,
@@ -101,7 +103,7 @@ pub const MAX_ADVERTISED_SKILLS: usize = 32;
 pub struct ComposeScope {
     /// The scope records compose from.
     pub scope_id: ScopeId,
-    /// The scope's hierarchy level — rendered in the section header.
+    /// The scope's shape — rendered in the section header.
     pub kind: ScopeKind,
     /// The scope's slug path — the section header's display name.
     pub path: String,
@@ -2189,7 +2191,7 @@ mod tests {
     fn scope(sensitivities: &[Sensitivity]) -> ComposeScope {
         ComposeScope {
             scope_id: ScopeId::from_uuid(uuid::Uuid::from_bytes([7; 16])),
-            kind: ScopeKind::Team,
+            kind: ScopeKind::OrgUnit,
             path: "acme/eng/platform".to_owned(),
             include_derived: true,
             sensitivities: sensitivities.to_vec(),

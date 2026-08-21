@@ -16,14 +16,25 @@
 //!
 //! | | `regulated-strict` | `standard` | `open-collaboration` |
 //! |---|---|---|---|
-//! | memory → team/user | 1 × curator | — (auto) | — (auto) |
-//! | memory → dept/org | curator + steward, 2 distinct | 1 × curator | 1 × curator at org |
-//! | prompt | steward + curator, 2 distinct | 1 × curator | 1 × curator |
-//! | context pack → team/user | 1 × curator | 1 × curator | 1 × curator |
-//! | context pack → dept/org | curator + steward, 2 distinct | 1 × curator | 1 × curator |
-//! | skill | steward, 2 distinct (+ floor's reviewer) | 1 × steward (+ floor) | 1 × steward (+ floor) |
-//! | policy | 2 × steward | 1 × steward | 1 × steward |
-//! | anything `restricted` | the floor: compliance, 2 distinct | same | same |
+//! | memory → workspace/project/own | 1 × curator | — (auto) | — (auto) |
+//! | memory → tenant root / org unit | curator + administrator, 2 distinct | 1 × curator | 1 × curator at the tenant root |
+//! | prompt | administrator + curator, 2 distinct | 1 × curator | 1 × curator |
+//! | context pack → workspace/project/own | 1 × curator | 1 × curator | 1 × curator |
+//! | context pack → tenant root / org unit | curator + administrator, 2 distinct | 1 × curator | 1 × curator |
+//! | skill | administrator, 2 distinct (+ floor's reviewer) | 1 × administrator (+ floor) | 1 × administrator (+ floor) |
+//! | policy | 2 × administrator | 1 × administrator | 1 × administrator |
+//! | anything `restricted` | the floor: administrator, 2 distinct | same | same |
+//!
+//! The role names are grant keys since CPR-7 (ADR-0074 decision 6):
+//! `steward` became `administrator` and the floor's `compliance` and
+//! `security-reviewer` became `administrator` and `reviewer`. The
+//! scope-kind columns are the five shapes: §2.4's "team/user" cell is a
+//! person's own scope, a workspace or a project, and its "dept/org" cell is
+//! an org unit **or the tenant root**. The root carries the old `org` row
+//! rather than a row of its own, because it is the widest audience this
+//! product has — every member's own chain runs through it — and a shape no
+//! rule named would fall through to auto-approve, which would make the
+//! widest publication in the tenant the cheapest one.
 //!
 //! The context-pack rows are **not** in tech plan §2.4's table — it has no
 //! row for them at all. FLOW-3 filled the cell at one curator everywhere,
@@ -37,16 +48,24 @@
 //! deliberately leaves `standard` and `open-collaboration` alone — the
 //! whole content of those packs is that the same publication is cheaper.
 
-use synveda_types::{
-    ApprovalMatrix, ApprovalRule, AssetKind, Role, RoleRequirement, ScopeKind, Sensitivity,
-};
+use synveda_types::access::RoleKey;
+use synveda_types::scope::ScopeKind;
+use synveda_types::{ApprovalMatrix, ApprovalRule, AssetKind, RoleRequirement, Sensitivity};
 
-/// Scope kinds at or below a team — where a scope's own people work.
-const LOCAL: [ScopeKind; 2] = [ScopeKind::Team, ScopeKind::User];
+/// Scope shapes where a scope's own people work — a person's own scope, a
+/// workspace, a project. Publishing here reaches people who were in the
+/// room (CPR-7, ADR-0074: the old team/user rank pair, as shapes).
+const LOCAL: [ScopeKind; 3] = [
+    ScopeKind::Principal,
+    ScopeKind::Workspace,
+    ScopeKind::Project,
+];
 
-/// Scope kinds above a team — where publishing reaches people who were
-/// not in the room.
-const SHARED: [ScopeKind; 3] = [ScopeKind::Org, ScopeKind::Division, ScopeKind::Department];
+/// Scope shapes where publishing reaches people who were not in the room:
+/// an org unit, and the tenant root above all of them (CPR-7 — the root is
+/// what the old `org` rank became, and the partition test below is what
+/// keeps it from falling through to auto-approve).
+const SHARED: [ScopeKind; 2] = [ScopeKind::Tenant, ScopeKind::OrgUnit];
 
 /// `regulated-strict`: every publication is reviewed, and reaching past
 /// a team takes two people.
@@ -57,13 +76,13 @@ pub fn regulated_strict() -> ApprovalMatrix {
             rule(
                 Some(AssetKind::Memory),
                 Some(LOCAL.to_vec()),
-                &[(Role::Curator, 1)],
+                &[(RoleKey::Curator, 1)],
                 1,
             ),
             rule(
                 Some(AssetKind::Memory),
                 Some(SHARED.to_vec()),
-                &[(Role::Curator, 1), (Role::Steward, 1)],
+                &[(RoleKey::Curator, 1), (RoleKey::Administrator, 1)],
                 2,
             ),
             // Tech plan §2.4: "1 × dept steward + 1 × any curator (peer
@@ -71,7 +90,7 @@ pub fn regulated_strict() -> ApprovalMatrix {
             rule(
                 Some(AssetKind::Prompt),
                 None,
-                &[(Role::Steward, 1), (Role::Curator, 1)],
+                &[(RoleKey::Administrator, 1), (RoleKey::Curator, 1)],
                 2,
             ),
             // The `SHARED`/`LOCAL` split memory has had since FLOW-3, given
@@ -83,23 +102,33 @@ pub fn regulated_strict() -> ApprovalMatrix {
             rule(
                 Some(AssetKind::ContextPack),
                 Some(LOCAL.to_vec()),
-                &[(Role::Curator, 1)],
+                &[(RoleKey::Curator, 1)],
                 1,
             ),
             rule(
                 Some(AssetKind::ContextPack),
                 Some(SHARED.to_vec()),
-                &[(Role::Curator, 1), (Role::Steward, 1)],
+                &[(RoleKey::Curator, 1), (RoleKey::Administrator, 1)],
                 2,
             ),
             // The floor already requires a security-reviewer; this adds
             // the steward tech plan §2.4 names and forces them to be two
             // different people.
-            rule(Some(AssetKind::Skill), None, &[(Role::Steward, 1)], 2),
+            rule(
+                Some(AssetKind::Skill),
+                None,
+                &[(RoleKey::Administrator, 1)],
+                2,
+            ),
             // "Policy lapse under regulated-strict: 2 × steward at target
             // scope". Policy governs everything else, so it is the one
             // asset whose review needs two holders of the same role.
-            rule(Some(AssetKind::Policy), None, &[(Role::Steward, 2)], 2),
+            rule(
+                Some(AssetKind::Policy),
+                None,
+                &[(RoleKey::Administrator, 2)],
+                2,
+            ),
         ],
     }
 }
@@ -117,13 +146,28 @@ pub fn standard() -> ApprovalMatrix {
             rule(
                 Some(AssetKind::Memory),
                 Some(SHARED.to_vec()),
-                &[(Role::Curator, 1)],
+                &[(RoleKey::Curator, 1)],
                 1,
             ),
-            rule(Some(AssetKind::Prompt), None, &[(Role::Curator, 1)], 1),
-            rule(Some(AssetKind::ContextPack), None, &[(Role::Curator, 1)], 1),
-            rule(Some(AssetKind::Skill), None, &[(Role::Steward, 1)], 1),
-            rule(Some(AssetKind::Policy), None, &[(Role::Steward, 1)], 1),
+            rule(Some(AssetKind::Prompt), None, &[(RoleKey::Curator, 1)], 1),
+            rule(
+                Some(AssetKind::ContextPack),
+                None,
+                &[(RoleKey::Curator, 1)],
+                1,
+            ),
+            rule(
+                Some(AssetKind::Skill),
+                None,
+                &[(RoleKey::Administrator, 1)],
+                1,
+            ),
+            rule(
+                Some(AssetKind::Policy),
+                None,
+                &[(RoleKey::Administrator, 1)],
+                1,
+            ),
         ],
     }
 }
@@ -138,14 +182,29 @@ pub fn open_collaboration() -> ApprovalMatrix {
         rules: vec![
             rule(
                 Some(AssetKind::Memory),
-                Some(vec![ScopeKind::Org]),
-                &[(Role::Curator, 1)],
+                Some(vec![ScopeKind::Tenant]),
+                &[(RoleKey::Curator, 1)],
                 1,
             ),
-            rule(Some(AssetKind::Prompt), None, &[(Role::Curator, 1)], 1),
-            rule(Some(AssetKind::ContextPack), None, &[(Role::Curator, 1)], 1),
-            rule(Some(AssetKind::Skill), None, &[(Role::Steward, 1)], 1),
-            rule(Some(AssetKind::Policy), None, &[(Role::Steward, 1)], 1),
+            rule(Some(AssetKind::Prompt), None, &[(RoleKey::Curator, 1)], 1),
+            rule(
+                Some(AssetKind::ContextPack),
+                None,
+                &[(RoleKey::Curator, 1)],
+                1,
+            ),
+            rule(
+                Some(AssetKind::Skill),
+                None,
+                &[(RoleKey::Administrator, 1)],
+                1,
+            ),
+            rule(
+                Some(AssetKind::Policy),
+                None,
+                &[(RoleKey::Administrator, 1)],
+                1,
+            ),
         ],
     }
 }
@@ -165,7 +224,7 @@ pub fn embedded(name: &str) -> ApprovalMatrix {
 fn rule(
     asset: Option<AssetKind>,
     scope_kinds: Option<Vec<ScopeKind>>,
-    roles: &[(Role, u8)],
+    roles: &[(RoleKey, u8)],
     distinct_approvers: u8,
 ) -> ApprovalRule {
     ApprovalRule {
@@ -206,11 +265,11 @@ mod tests {
     #[test]
     fn memory_rules_partition_the_scope_kinds() {
         for kind in [
-            ScopeKind::Org,
-            ScopeKind::Division,
-            ScopeKind::Department,
-            ScopeKind::Team,
-            ScopeKind::User,
+            ScopeKind::Tenant,
+            ScopeKind::OrgUnit,
+            ScopeKind::Workspace,
+            ScopeKind::Project,
+            ScopeKind::Principal,
         ] {
             let matching = regulated_strict()
                 .rules
@@ -227,7 +286,11 @@ mod tests {
         assert!(matrix.rules.is_empty());
         assert!(
             !matrix
-                .resolve(AssetKind::Memory, Sensitivity::Restricted, ScopeKind::Team)
+                .resolve(
+                    AssetKind::Memory,
+                    Sensitivity::Restricted,
+                    ScopeKind::OrgUnit
+                )
                 .is_empty(),
             "the floor is not a pack's to opt out of"
         );

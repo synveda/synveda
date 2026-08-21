@@ -30,15 +30,17 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder, Embedder as _};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, role_bindings, tenants};
+use synveda_store::{access, identities, rls, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, Role,
-    ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, ScopeId,
+    Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -85,7 +87,6 @@ fn state_with(url: &str, search_index: Arc<SearchIndex>, pdp: Arc<Pdp>) -> AppSt
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index,
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -137,82 +138,58 @@ fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("checked by admitted_tenant")
 }
 
-async fn seed_hierarchy(
-    pool: &PgPool,
-    tenant: TenantId,
-) -> (HierarchyNode, HierarchyNode, HierarchyNode) {
-    let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+/// One org unit under a parent — the shape every grouping takes now that
+/// rank is gone (ADR-0073 decision 4).
+async fn unit(tx: &mut sqlx::PgConnection, tenant: TenantId, parent: ScopeId, slug: &str) -> Scope {
+    scopes::create(
+        tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(parent),
+            slug: slug.to_owned(),
+            display_name: slug.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let platform = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
-    )
-    .await
-    .expect("create platform");
-    let payments = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        "payments",
-        "Payments",
-    )
-    .await
-    .expect("create payments");
-    hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        "Quarantine",
-    )
-    .await
-    .expect("create quarantine");
-    tx.commit().await.expect("commit hierarchy");
-    (org, platform, payments)
+    .expect("create org unit")
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
-    let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+async fn seed_scopes(pool: &PgPool, tenant: TenantId) -> (Scope, Scope) {
+    let mut tx = rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin tenant tx");
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let platform = unit(&mut tx, tenant, root.id, "platform").await;
+    let payments = unit(&mut tx, tenant, root.id, "payments").await;
+    tx.commit().await.expect("commit scopes");
+    (platform, payments)
+}
+
+/// A person: their own principal scope under the tenant root, carrying the
+/// identity row (CPR-7, ADR-0074 decision 3).
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
+    let mut tx = rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin tenant tx");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -259,12 +236,29 @@ async fn seed_record(
     id
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: Option<ScopeId>, role: Role) {
-    let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, scope, role)
+/// A direct grant write — the bootstrap path, silent in the chain.
+async fn grant(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
+    let mut tx = rls::begin_tenant_tx(pool, tenant)
         .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+        .expect("begin tenant tx");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 async fn call(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
@@ -294,31 +288,28 @@ async fn get(app: &Router, path: &str, token: &str) -> (StatusCode, Value) {
     call(app, request).await
 }
 
-/// Bind a role through the product surface, so the act lands on the chain
-/// as `role.bound` — which is what makes the authority half of a
-/// disclosure answer non-empty. A binding written straight to the store
+/// Grant a role through the product surface, so the act lands on the chain
+/// as `access.granted` — which is what makes the authority half of a
+/// disclosure answer non-empty. A grant written straight to the store
 /// (the AUTHZ-3 bootstrap, and what most fixtures do) chains nothing, and
 /// an audit answer can only ever report what was recorded.
-async fn bind_over_http(
+async fn grant_over_http(
     app: &Router,
     token: &str,
-    scope: Option<ScopeId>,
+    scope: ScopeId,
     subject: &str,
-    role: Role,
+    role: RoleKey,
 ) -> StatusCode {
-    let uri = match scope {
-        None => "/v1/roles/bindings".to_owned(),
-        Some(id) => format!("/v1/hierarchy/nodes/{id}/roles"),
-    };
     let request = Request::builder()
-        .method("PUT")
-        .uri(uri)
+        .method("POST")
+        .uri("/v1/admin/grants")
         .header("authorization", format!("Bearer {token}"))
+        .header("idempotency-key", format!("aud2-grant-{subject}-{scope}"))
         .header("content-type", "application/json")
         .body(Body::from(
-            json!({"subject": subject, "role": role}).to_string(),
+            json!({"principal_id": subject, "role": role, "scope_id": scope}).to_string(),
         ))
-        .expect("build bind request");
+        .expect("build grant request");
     call(app, request).await.0
 }
 
@@ -338,10 +329,16 @@ fn stamp(at: DateTime<Utc>) -> String {
     at.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string()
 }
 
-/// The world every test starts in: a platform runbook and alice's own
-/// note, both served to alice; the runbook also served to bob; a payments
-/// record nobody is ever served; and two auditors — dana tenant-wide,
-/// erin at platform only.
+/// The world every test starts in: a runbook the whole tenant shares and
+/// alice's own note, both served to alice; the runbook also served to
+/// bob; a payments record nobody is ever served; and two auditors — dana
+/// tenant-wide, erin at platform only.
+///
+/// The shared material lives at the tenant root because that is where a
+/// session actually receives it (CPR-7): a member's own chain is their
+/// principal scope and the root, and an org unit composes for nobody
+/// without a grant — so the runbook sits at the root and the
+/// payments-only record sits where no ungranted reader reaches it.
 struct World {
     pool: PgPool,
     tenant: TenantId,
@@ -359,19 +356,31 @@ struct World {
 
 async fn world() -> Option<World> {
     let (pool, tenant) = admitted_tenant().await?;
-    let (_org, platform, payments) = seed_hierarchy(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", platform.id).await;
-    let bob = seed_user(&pool, tenant, "bob", platform.id).await;
-    let carol = seed_user(&pool, tenant, "carol", payments.id).await;
-    seed_user(&pool, tenant, "dana", platform.id).await;
-    seed_user(&pool, tenant, "erin", platform.id).await;
-    seed_user(&pool, tenant, "olive", platform.id).await;
+    let (platform, payments) = seed_scopes(&pool, tenant).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
+    let bob = seed_user(&pool, tenant, "bob").await;
+    let carol = seed_user(&pool, tenant, "carol").await;
+    seed_user(&pool, tenant, "dana").await;
+    seed_user(&pool, tenant, "erin").await;
+    seed_user(&pool, tenant, "olive").await;
+    let root = scopes::tenant_root(&pool, tenant)
+        .await
+        .expect("read root")
+        .expect("the world minted one");
     // The bootstrap is a direct write, exactly as AUTHZ-3 describes it:
-    // `synveda role bind` is how a tenant gets its first org-admin, and it
-    // chains as break-glass rather than as a governed act.
-    bind(&pool, tenant, "olive", None, Role::OrgAdmin).await;
+    // the CLI break-glass grant is how a tenant gets its first
+    // administrator, and it chains as break-glass rather than as a
+    // governed act.
+    grant(&pool, tenant, "olive", root.id, RoleKey::Administrator).await;
+    // Membership is a grant now, not a placement: alice and bob hold
+    // `member` at platform — the ordinary shape of a person in a unit,
+    // kept so the world is not a tenant of strangers, and inert on the
+    // inject chain, which is the root and one's own scope and nothing
+    // between (CPR-7).
+    grant(&pool, tenant, "alice", platform.id, RoleKey::Member).await;
+    grant(&pool, tenant, "bob", platform.id, RoleKey::Member).await;
 
-    let runbook = seed_record(&pool, tenant, platform.id, alice.id, RUNBOOK).await;
+    let runbook = seed_record(&pool, tenant, root.id, alice.id, RUNBOOK).await;
     let note = seed_record(&pool, tenant, alice.scope_id, alice.id, NOTE).await;
     let payments_only = seed_record(&pool, tenant, payments.id, carol.id, PAYMENTS_ONLY).await;
 
@@ -379,21 +388,23 @@ async fn world() -> Option<World> {
     let index = Arc::new(SearchIndex::open(index_root()).expect("open sidecar"));
     let app = router(state_with(&database_url(), index, pdp));
 
-    // The two auditors, bound through the product surface by the
-    // org-admin: dana tenant-wide, erin at platform only. Going through
-    // the route is what puts `role.bound` on the chain, which is where
-    // historical authority lives — `role_bindings` is a current-state
-    // table and an unbound role leaves no row behind.
+    // The two audit readers, granted through the product surface by the
+    // administrator: dana at the tenant root, erin at platform only —
+    // `AuditRead` reaches only the tenant resource (ADR-0045 decision 2),
+    // so dana's grant reaches the chain and erin's does not. Going
+    // through the route is what puts `access.granted` on the chain, which
+    // is where historical authority lives — `scope_grants` is a
+    // current-state table and a revoked grant leaves no row behind.
     let olive = issue("olive", tenant);
     assert_eq!(
-        bind_over_http(&app, &olive, None, "dana", Role::Auditor).await,
-        StatusCode::OK,
-        "dana is bound auditor tenant-wide"
+        grant_over_http(&app, &olive, root.id, "dana", RoleKey::Administrator).await,
+        StatusCode::CREATED,
+        "dana holds administrator at the root, where the chain lives"
     );
     assert_eq!(
-        bind_over_http(&app, &olive, Some(platform.id), "erin", Role::Auditor).await,
-        StatusCode::OK,
-        "erin is bound the same role at platform only"
+        grant_over_http(&app, &olive, platform.id, "erin", RoleKey::Administrator).await,
+        StatusCode::CREATED,
+        "erin holds the same role at platform only"
     );
 
     let before = Utc::now();
@@ -478,7 +489,8 @@ async fn who_could_see_this_record_is_one_call_answered_from_the_chain() {
     );
     assert!(
         !who.contains(&"carol".to_owned()),
-        "carol is on payments and was served nothing of platform's"
+        "carol started no session, and the chain records nobody was served \
+         material they never asked for"
     );
 
     // Each disclosure carries what that reader got, not merely that they
@@ -540,9 +552,9 @@ async fn disclosure_and_authority_arrive_as_two_lists_with_the_reason_in_the_res
     );
 
     // The authority half is the events that opened and closed authority —
-    // here, the two role bindings the world established. They exist
-    // nowhere else: `role_bindings` is a current-state table, so the
-    // chain is the only record that dana held `auditor` today.
+    // here, the two grants the world established. They exist nowhere
+    // else: `scope_grants` is a current-state table, so the chain is the
+    // only record that dana held `administrator` today.
     let actions: Vec<&str> = body["authority"]
         .as_array()
         .expect("authority array")
@@ -550,8 +562,8 @@ async fn disclosure_and_authority_arrive_as_two_lists_with_the_reason_in_the_res
         .map(|event| event["action"].as_str().expect("action"))
         .collect();
     assert!(
-        actions.contains(&"role.bound"),
-        "the bindings that granted authority are on the chain: {actions:?}"
+        actions.contains(&"access.granted"),
+        "the grants that opened authority are on the chain: {actions:?}"
     );
 
     let note = body["note"]
@@ -691,15 +703,15 @@ async fn the_instant_decides_what_the_answer_contains() {
 
 // ── The refusals ─────────────────────────────────────────────────────
 
-/// **A subtree-bound auditor is refused rather than served a subset**
+/// **A subtree-bound audit reader is refused rather than served a subset**
 /// (ADR-0045 decision 2).
 ///
-/// erin holds exactly the role dana holds — `auditor` — bound at platform
-/// instead of tenant-wide. There is one chain per tenant and no way to
-/// answer for part of it without silently omitting the events whose
-/// `resource` string does not name a scope, so the answer is a refusal.
-/// The Cedar action has no `Scope` in its `appliesTo`, so this holds for
-/// every route without any of them checking.
+/// erin holds exactly the role dana holds — `administrator` — granted at
+/// platform instead of at the tenant root. There is one chain per tenant
+/// and no way to answer for part of it without silently omitting the
+/// events whose `resource` string does not name a scope, so the answer is
+/// a refusal. `AuditRead` reaches only the tenant resource, so this holds
+/// for every route without any of them checking.
 #[tokio::test]
 async fn a_subtree_bound_auditor_is_refused_rather_than_served_a_subset() {
     let Some(w) = world().await else { return };
@@ -718,14 +730,19 @@ async fn a_subtree_bound_auditor_is_refused_rather_than_served_a_subset() {
         assert_eq!(
             status,
             StatusCode::FORBIDDEN,
-            "erin's platform binding must not reach the tenant's chain at {path}: {body}"
+            "erin's platform grant must not reach the tenant's chain at {path}: {body}"
         );
     }
 
-    // And the same four are open to the same role held tenant-wide, so
-    // the refusal is about the *binding* and not about the role.
+    // And the same four are open to the same role held at the root, so
+    // the refusal is about *where the grant is written* and not about the
+    // role.
     let (status, _) = get(&w.app, "/v1/audit/verify", &w.dana).await;
-    assert_eq!(status, StatusCode::OK, "dana holds auditor tenant-wide");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "dana's root grant reaches the chain"
+    );
 }
 
 /// An ordinary member holds nothing on the audit plane: alice can be

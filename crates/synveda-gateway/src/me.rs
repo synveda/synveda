@@ -44,7 +44,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::capabilities::{AnchorCapabilities, TenantCapabilities};
 use crate::error::ApiError;
-use crate::hierarchy::{commit, tenant_id};
+use crate::request::{commit, tenant_id};
 use crate::telemetry::WORKSPACE_OPERATIONS_TOTAL;
 use crate::workspaces::{ProjectView, WorkspaceView};
 
@@ -268,7 +268,7 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
     // nobody asked for.
     let identity = identities::by_subject(&mut *tx, tenant_id, &subject).await?;
     let quarantined = match &identity {
-        Some(identity) => identity.quarantined,
+        Some(_) => false,
         // An IdP subject with no identity is quarantined and a dev subject is
         // not — the same fail-closed rule the PDP applies, restated here
         // because this view must not disagree with the decision point about
@@ -307,7 +307,7 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
     // deployment where nobody has created anything yet, because there is then
     // genuinely nothing more specific to name.
     let tenant_scope = scopes::tenant_root(&mut *tx, tenant_id).await?;
-    let input = crate::authz::gather_governed(
+    let input = crate::authz::gather(
         state,
         &mut tx,
         tenant_scope.as_ref(),
@@ -320,9 +320,9 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
         None => Resource::Tenant(tenant_id),
     };
     let may_read_workspaces =
-        crate::authz::decide(state, &input, Action::WorkspaceRead, resource, None).is_ok();
+        crate::authz::decide(state, &input, Action::WorkspaceRead, resource).is_ok();
     let may_read_projects =
-        crate::authz::decide(state, &input, Action::ProjectRead, resource, None).is_ok();
+        crate::authz::decide(state, &input, Action::ProjectRead, resource).is_ok();
     // What this caller may do **where they actually stand** — one real
     // decision per (anchor, action), never a shape read off an edition.
     let (anchors, anchors_not_answered) =

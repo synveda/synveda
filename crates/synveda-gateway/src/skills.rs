@@ -64,11 +64,12 @@ use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_ingest::{BundleScan, RubricScore, ScanOutcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::{hierarchy, rls, skill_reviews, skills};
+use synveda_store::{rls, scopes, skill_reviews, skills};
+use synveda_types::scope::Scope;
 use synveda_types::{
-    Channel, ChecklistItem, Error, Frontmatter, HierarchyNode, IdentityId, QualityShortfall,
-    RedactionMode, Result, ScanSeverity, ScopeId, Sensitivity, SkillBundle, SkillChannel,
-    SkillFile, SkillFilePath, SkillName, SkillPath, SkillQualityConfig, SkillScanConfig,
+    Channel, ChecklistItem, Error, Frontmatter, IdentityId, QualityShortfall, RedactionMode,
+    Result, ScanSeverity, ScopeId, Sensitivity, SkillBundle, SkillChannel, SkillFile,
+    SkillFilePath, SkillName, SkillPath, SkillQualityConfig, SkillScanConfig,
 };
 use synveda_vedaflow::{self as vedaflow, ChannelRef, SkillAsset};
 
@@ -76,7 +77,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::authz::{self, DecisionInput};
 use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::SKILL_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the outcome taxonomy every
@@ -666,17 +667,23 @@ async fn author_inner(
     let (node, author, authorized, redaction, scan_config, quality_config, pack) = {
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let node = found(
-            hierarchy::node(&mut *tx, body.scope_id).await?,
+            scopes::get(&mut *tx, tenant_id, body.scope_id).await?,
             tenant_id,
             body.scope_id,
         )?;
-        let input = authz::gather(state, &mut tx, Some(&node)).await?;
+        let input = authz::gather(
+            state,
+            &mut tx,
+            Some(&node),
+            synveda_store::anchors::AnchorSelection::none(),
+            Vec::new(),
+        )
+        .await?;
         let authorized = authz::decide(
             state,
             &input,
             Action::SkillWrite,
             Resource::Scope(body.scope_id),
-            None,
         )?;
         let author = identity_of(&input)?;
         let effective =
@@ -1305,7 +1312,7 @@ async fn resolve_inner(
     Ok(Json(ResolveResponse {
         name: name.to_string(),
         scope_id: resolved.node.id,
-        scope_path: resolved.node.path.clone(),
+        scope_path: resolved.node.slug.clone(),
         channel,
         origin: resolved.origin,
         commit: resolved.commit.map(|commit| commit.to_hex()),
@@ -1326,7 +1333,7 @@ async fn resolve_inner(
 
 /// What a resolution found, before it is rendered or audited.
 struct Resolved {
-    node: HierarchyNode,
+    node: synveda_policy::ScopeNode,
     sensitivity: Sensitivity,
     /// Every file of the bundle in path order, with its address and bytes.
     files: Vec<(SkillFilePath, vedaflow::hash::ObjectHash, String)>,
@@ -1350,7 +1357,7 @@ impl Resolved {
             .ok_or_else(|| Error::Internal {
                 message: format!(
                     "the bundle served from {} has no {}, which authoring cannot produce",
-                    self.node.path,
+                    self.node.slug,
                     synveda_types::SKILL_MANIFEST
                 ),
             })?;
@@ -1373,7 +1380,7 @@ async fn walk_chain(
     name: &SkillName,
 ) -> Result<Resolved> {
     let input = authz::gather_at_home(state, tx).await?;
-    let chain: Vec<HierarchyNode> = input.chain.to_vec();
+    let chain: Vec<synveda_policy::ScopeNode> = input.chain.to_vec();
     let scope_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
     let published =
         vedaflow::read_skill_members(tx, tenant_id, &scope_ids, Channel::Published).await?;
@@ -1420,11 +1427,18 @@ async fn at_scope(
     pinned: Option<vedaflow::CommitHash>,
 ) -> Result<Resolved> {
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
 
     if channel == SkillChannel::Draft {
         let Some(draft) = skills::skill(&mut *tx, tenant_id, scope_id, name).await? else {
@@ -1449,9 +1463,15 @@ async fn at_scope(
         }
         // The draft row's tier is the authoritative one here — the objects
         // carry it too, and they agree by construction.
-        let (_, files) = read_bundle(tx, tenant_id, &node, &members).await?;
+        let (_, files) = read_bundle(
+            tx,
+            tenant_id,
+            &synveda_policy::ScopeNode::from_scope(&node, false),
+            &members,
+        )
+        .await?;
         return Ok(Resolved {
-            node,
+            node: synveda_policy::ScopeNode::from_scope(&node, false),
             sensitivity: draft.sensitivity,
             files,
             commit: None,
@@ -1509,13 +1529,18 @@ async fn at_scope(
     if members.is_empty() {
         return Err(not_found(name));
     }
+    let scope_node = input
+        .chain
+        .first()
+        .cloned()
+        .ok_or_else(|| not_found(name))?;
     let Some((sensitivity, files, authorized)) =
-        admit(state, tx, tenant_id, &input, 0, &node, &members).await?
+        admit(state, tx, tenant_id, &input, 0, &scope_node, &members).await?
     else {
         return Err(not_found(name));
     };
     Ok(Resolved {
-        node,
+        node: scope_node,
         sensitivity,
         files,
         commit: Some(commit_hash),
@@ -1540,7 +1565,7 @@ async fn admit(
     tenant_id: synveda_types::TenantId,
     input: &DecisionInput,
     position: usize,
-    node: &HierarchyNode,
+    node: &synveda_policy::ScopeNode,
     members: &HashMap<SkillFilePath, vedaflow::hash::ObjectHash>,
 ) -> Result<
     Option<(
@@ -1575,7 +1600,7 @@ async fn admit(
 async fn read_bundle(
     tx: &mut sqlx::PgConnection,
     tenant_id: synveda_types::TenantId,
-    node: &HierarchyNode,
+    node: &synveda_policy::ScopeNode,
     members: &HashMap<SkillFilePath, vedaflow::hash::ObjectHash>,
 ) -> Result<(
     Sensitivity,
@@ -1592,7 +1617,7 @@ async fn read_bundle(
             .ok_or_else(|| Error::Internal {
                 message: format!(
                     "{} names object {} which the append-only store does not hold",
-                    node.path,
+                    node.slug,
                     address.to_hex()
                 ),
             })?;
@@ -1604,7 +1629,7 @@ async fn read_bundle(
         files.push((path.clone(), *address, asset.file.content));
     }
     let sensitivity = sensitivity.ok_or_else(|| Error::Internal {
-        message: format!("{} names a skill with no files", node.path),
+        message: format!("{} names a skill with no files", node.slug),
     })?;
     Ok((sensitivity, files))
 }
@@ -1810,7 +1835,7 @@ async fn available_inner(state: &AppState) -> Result<Json<AvailableResponse>> {
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let input = authz::gather_at_home(state, &mut tx).await?;
-    let chain: Vec<HierarchyNode> = input.chain.to_vec();
+    let chain: Vec<synveda_policy::ScopeNode> = input.chain.to_vec();
     let scope_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
     let published =
         vedaflow::read_skill_members(&mut tx, tenant_id, &scope_ids, Channel::Published).await?;
@@ -1850,7 +1875,7 @@ async fn available_inner(state: &AppState) -> Result<Json<AvailableResponse>> {
                 shadowed
                     .entry(existing.name.clone())
                     .or_default()
-                    .push(node.path.clone());
+                    .push(node.slug.clone());
                 continue;
             }
             let manifest = files
@@ -1860,7 +1885,7 @@ async fn available_inner(state: &AppState) -> Result<Json<AvailableResponse>> {
                     message: format!(
                         "the bundle {} serves at {} has no {}, which publication cannot produce",
                         name,
-                        node.path,
+                        node.slug,
                         synveda_types::SKILL_MANIFEST
                     ),
                 })?;
@@ -1870,7 +1895,7 @@ async fn available_inner(state: &AppState) -> Result<Json<AvailableResponse>> {
                 description: frontmatter.description,
                 sensitivity,
                 scope_id: node.id,
-                scope_path: node.path.clone(),
+                scope_path: node.slug.clone(),
                 position,
                 commit: state_at.commit.to_hex(),
                 pinned: state_at.pinned,
@@ -1901,7 +1926,7 @@ async fn available_inner(state: &AppState) -> Result<Json<AvailableResponse>> {
             // is the half of the acceptance criterion no per-skill record
             // carries: a scope absent from this list published nothing to
             // this caller because it was never asked.
-            "chain": chain.iter().map(|node| node.path.as_str()).collect::<Vec<_>>(),
+            "chain": chain.iter().map(|node| node.slug.as_str()).collect::<Vec<_>>(),
             // Names, scopes and commits — never a description.
             "skills": entries.iter().map(|entry| json!({
                 "name": entry.name,
@@ -1920,7 +1945,7 @@ async fn available_inner(state: &AppState) -> Result<Json<AvailableResponse>> {
 
     Ok(Json(AvailableResponse {
         view: "available",
-        chain: chain.iter().map(|node| node.path.clone()).collect(),
+        chain: chain.iter().map(|node| node.slug.clone()).collect(),
         skills: entries,
     }))
 }
@@ -1929,11 +1954,18 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     // The gate first, at the working tier — the question a listing asks.
     let authorized = authz::decide_skill_read(
         state,
@@ -1993,7 +2025,7 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
 
     Ok(Json(ListResponse {
         scope_id,
-        scope_path: node.path.clone(),
+        scope_path: node.slug.clone(),
         skills: entries,
     }))
 }
@@ -2055,7 +2087,7 @@ struct Reports {
 }
 
 fn view(
-    node: &HierarchyNode,
+    node: &Scope,
     skill: skills::StoredSkill,
     frontmatter: Frontmatter,
     written: Vec<(skills::StoredFile, usize)>,
@@ -2067,7 +2099,7 @@ fn view(
     SkillView {
         name: skill.name.to_string(),
         scope_id: skill.scope_id,
-        scope_path: node.path.clone(),
+        scope_path: node.slug.clone(),
         description: skill.description,
         sensitivity: skill.sensitivity,
         frontmatter,

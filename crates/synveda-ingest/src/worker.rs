@@ -29,16 +29,17 @@ use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, ScopeNode};
 use synveda_store::dedup as store_dedup;
 use synveda_store::observe::{ObserveMessage, QueuedSignal, StagedEvent};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{ScopeChainCache, identities, observe, policy_assignments, rls, role_bindings};
+use synveda_store::{anchors, identities, observe, policy_assignments, rls};
 use synveda_types::{
-    Channel, DedupConfig, Error, HierarchyNode, IdentityId, IdentityKind, RecordClass, RecordId,
-    RecordKind, Result, ScopeId, Sensitivity, TenantId, permille,
+    Channel, DedupConfig, Error, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind,
+    Result, ScopeId, Sensitivity, TenantId, permille,
 };
 use synveda_vedaflow::hash::ObjectHash;
 use synveda_vedaflow::{
     self as vedaflow, MemoryAsset, PolicySnapshot, Signer, read_memory_members,
 };
 
+use crate::chain::scope_chain;
 use crate::dedup::{DEDUP_CANDIDATES, DEDUP_DECISIONS_TOTAL, DEDUP_SECONDS};
 use crate::embedding::{AnyEmbedder, Embedder};
 use crate::extraction::{AnyExtractor, ExtractionInput, ExtractionOutcome, Extractor};
@@ -116,7 +117,6 @@ pub struct WorkerDeps {
     pub pdp: Arc<Pdp>,
     /// The gateway's scope-chain cache — pass a clone of the gateway's
     /// `Arc`, never a fresh cache, or move invalidations are lost.
-    pub chains: Arc<ScopeChainCache>,
     /// The configured extractor.
     pub extractor: AnyExtractor,
     /// The configured embedder: every record commits with its vector,
@@ -1166,19 +1166,21 @@ async fn authorize_owner(
             reason: "owner identity has no bound subject".to_owned(),
         });
     };
-    let mut quarantined = identity.quarantined;
-    let chain: Arc<[HierarchyNode]> = deps
-        .chains
-        .resolve(&mut *tx, tenant_id, identity.scope_id)
-        .await?
-        .unwrap_or_else(|| Vec::new().into());
+    // Quarantine is only ever "not provisioned" now (CPR-7, ADR-0074
+    // decision 3): the identity row exists by construction here, so the
+    // placement-derived flag is gone and nothing replaces it.
+    let quarantined = false;
+    let chain: Vec<ScopeNode> = scope_chain(tx, tenant_id, identity.scope_id).await?;
     // The confinement scope (ADR-0018 decision 4): a service identity's
-    // anchor is the node above its personal leaf; unresolvable means
-    // quarantined, never unconfined.
+    // anchor is the scope above its own; unresolvable means quarantined,
+    // never unconfined.
     let token_scope = if identity.kind == IdentityKind::Service {
         let anchor = chain.get(1).map(|node| node.id);
         if anchor.is_none() {
-            quarantined = true;
+            // Fail closed on the Principal the same way the flag used to.
+            return Ok(OwnerAuth::Denied {
+                reason: "service identity lost its anchor scope".to_owned(),
+            });
         }
         anchor
     } else {
@@ -1198,22 +1200,22 @@ async fn authorize_owner(
         policy_assignments::for_scopes(&mut *tx, tenant_id, &chain_ids).await?
     };
     let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
-    let bindings =
-        role_bindings::for_subject_on_scopes(&mut *tx, tenant_id, &subject, &chain_ids).await?;
-    let chain_nodes = ScopeNode::from_hierarchy_chain(&chain);
+    let anchor_set = anchors::resolve(
+        &mut *tx,
+        tenant_id,
+        &subject,
+        anchors::AnchorSelection::none(),
+    )
+    .await?;
+    let groups = anchors::groups_of(&mut *tx, tenant_id, &subject).await?;
     let context = AuthzContext {
-        scopes: &chain_nodes,
-        principal_scopes: &chain_nodes,
-        // The old hierarchy plane: no anchor is ever on a hierarchy chain, so
-        // the grant model contributes nothing here either way (CPR-6,
-        // ADR-0073).
-        anchors: &[],
-        groups: &[],
+        scopes: &chain,
+        principal_scopes: &chain,
+        anchors: anchor_set.as_slice(),
+        groups: &groups,
         resources: &[],
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
-        role_bindings: &bindings,
-        grant: None,
         sensitivity: None,
         // A lapse relaxes reads, never writes: the vocabulary has one
         // action and it is `MemoryRead` (ADR-0037 decision 2).
@@ -1226,10 +1228,14 @@ async fn authorize_owner(
         &context,
     )?;
     if decision.allowed {
-        let mut roles: Vec<String> = bindings
-            .iter()
-            .map(|binding| binding.role.as_str().to_owned())
-            .collect();
+        // The grant keys that reached this decision (CPR-6, ADR-0073
+        // decision 5): the record's provenance says who may act on it, and
+        // that is the set the decision actually weighed.
+        let mut roles: Vec<String> =
+            synveda_policy::effective_role_keys_at(Resource::Scope(identity.scope_id), &context)
+                .into_iter()
+                .map(|key| key.as_str().to_owned())
+                .collect();
         roles.sort_unstable();
         roles.dedup();
         // The same effective pack the decision came from, read for its

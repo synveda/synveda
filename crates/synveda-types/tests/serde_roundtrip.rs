@@ -7,8 +7,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use synveda_types::{
     CompositionConfig, Depth, Error, Graph, IdentityId, InjectChannels, ObserveKind, RecordClass,
-    RecordId, RecordKind, RedactionConfig, RedactionMode, Role, RoleBinding, ScopeId, Sensitivity,
-    Tenant, TenantId, TenantStatus,
+    RecordId, RecordKind, RedactionConfig, RedactionMode, ScopeId, Sensitivity, Tenant, TenantId,
+    TenantStatus,
 };
 
 fn json_roundtrip<T>(value: &T) -> T
@@ -331,38 +331,37 @@ fn graph_and_depth_reject_unknown_values() {
 }
 
 // ── Roles ────────────────────────────────────────────────────────────────────
+// The grant keys are the one vocabulary since CPR-7 (ADR-0074 decision 6);
+// the old binding vocabulary's roundtrips left with it.
 
 #[test]
-fn role_all_roundtrip_and_match_as_str() {
-    for role in Role::ALL {
-        json_roundtrip(&role);
-        let json = serde_json::to_string(&role).expect("serialize");
+fn role_keys_roundtrip_and_match_as_str() {
+    use std::str::FromStr;
+    use synveda_types::access::RoleKey;
+    for role in RoleKey::ALL {
+        json_roundtrip(role);
+        let json = serde_json::to_string(role).expect("serialize");
         assert_eq!(json, format!("\"{}\"", role.as_str()));
-        assert_eq!(Role::from_str(role.as_str()).unwrap(), role);
+        assert_eq!(RoleKey::from_str(role.as_str()).unwrap(), *role);
         assert_eq!(role.to_string(), role.as_str());
     }
 }
 
 #[test]
-fn role_rejects_unknown_values() {
-    assert!(serde_json::from_str::<Role>("\"admin\"").is_err());
-    assert!(
-        Role::from_str("OrgAdmin").is_err(),
-        "wire form is kebab-case"
-    );
-    assert!(Role::from_str("org_admin").is_err(), "kebab, not snake");
-}
-
-#[test]
-fn role_binding_roundtrips_scoped_and_tenant_wide() {
-    for scope_id in [Some(ScopeId::new()), None] {
-        json_roundtrip(&RoleBinding {
-            tenant_id: TenantId::new(),
-            subject: "idp|user-42".into(),
-            scope_id,
-            role: Role::Steward,
-            updated_at: "2026-07-19T12:00:00Z".parse().expect("timestamp"),
-        });
+fn role_keys_reject_the_old_vocabulary_by_name() {
+    use std::str::FromStr;
+    use synveda_types::access::RoleKey;
+    for old in [
+        "steward",
+        "org-admin",
+        "compliance",
+        "security-reviewer",
+        "contributor",
+    ] {
+        assert!(
+            RoleKey::from_str(old).is_err(),
+            "the binding vocabulary's {old:?} must fail by name"
+        );
     }
 }
 

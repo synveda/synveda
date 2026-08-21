@@ -52,8 +52,6 @@ pub mod directory;
 pub mod directory_sync;
 pub mod epoch;
 pub mod graph;
-pub mod group_mappings;
-pub mod hierarchy;
 pub mod idempotency;
 pub mod identities;
 pub mod keys;
@@ -71,8 +69,6 @@ pub mod repositories;
 pub mod reset;
 pub mod retention;
 pub mod rls;
-pub mod role_bindings;
-pub mod scope_chain;
 pub mod scopes;
 pub mod search;
 pub mod skill_reviews;
@@ -80,8 +76,6 @@ pub mod skills;
 pub mod tenant_secrets;
 pub mod tenants;
 pub mod workspaces;
-
-pub use scope_chain::ScopeChainCache;
 
 use sqlx::migrate::Migrator;
 use sqlx::{PgExecutor, PgPool};

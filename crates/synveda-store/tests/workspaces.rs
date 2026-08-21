@@ -208,44 +208,6 @@ fn a_workspace_and_a_project_mint_the_scopes_the_model_claims() {
     });
 }
 
-/// The tenant root is minted once, from the tenant's own row — and never from
-/// the old hierarchy, which this asserts by there being no `hierarchy_nodes`
-/// row to have come from.
-#[test]
-fn the_tenant_root_is_minted_once_from_the_tenant_row() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
-        new_workspace(&mut tx, tenant, "one")
-            .await
-            .expect("first workspace");
-        new_workspace(&mut tx, tenant, "two")
-            .await
-            .expect("second workspace");
-        tx.commit().await.expect("commit");
-
-        assert_eq!(
-            scope_count(&db.pool, tenant, ScopeKind::Tenant).await,
-            1,
-            "the second workspace reuses the root rather than minting another"
-        );
-        assert_eq!(scope_count(&db.pool, tenant, ScopeKind::Workspace).await, 2);
-
-        let hierarchy_rows = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from hierarchy_nodes where tenant_id = $1"#,
-            tenant.as_uuid(),
-        )
-        .fetch_one(&db.pool)
-        .await
-        .expect("count hierarchy nodes");
-        assert_eq!(
-            hierarchy_rows, 0,
-            "nothing here reads or writes the old hierarchy (ADR-0068 decision 3)"
-        );
-    });
-}
-
 /// **Failure leaves neither.** A workspace whose slug is taken fails after its
 /// scope insert, and the transaction takes both away — there is no
 /// compensating delete and there must not be one.

@@ -68,13 +68,14 @@ use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::records::RecordState;
-use synveda_store::{hierarchy, records, rls};
+use synveda_store::{records, rls, scopes};
+use synveda_types::scope::Scope;
 use synveda_types::{
     ApprovalRequirement, AssetKind, CastApproval, Channel, Checklist, ChecklistItem,
-    ChecklistVerdict, DocumentPath, Error, HierarchyNode, IdentityId, PromotionEvidence,
-    PromptName, ProposalEffect, ProposalId, ProposalState, ProposalView, QualityShortfall,
-    RecordId, Result, Role, ScopeId, Sensitivity, SkillFile, SkillFilePath, SkillName, SkillPath,
-    SkillQualityConfig, SkillScanConfig, TenantId, Verdict,
+    ChecklistVerdict, DocumentPath, Error, IdentityId, PromotionEvidence, PromptName,
+    ProposalEffect, ProposalId, ProposalState, ProposalView, QualityShortfall, RecordId, Result,
+    ScopeId, Sensitivity, SkillFile, SkillFilePath, SkillName, SkillPath, SkillQualityConfig,
+    SkillScanConfig, TenantId, Verdict,
 };
 use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
 
@@ -83,7 +84,7 @@ use crate::approvals::{self, RequirementView};
 use crate::audit;
 use crate::authz::{self, DecisionInput};
 use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::{
     PROPOSAL_CLIMBS_TOTAL, PROPOSAL_OPERATIONS_TOTAL, PUBLISH_REVIEW_REQUIRED_TOTAL,
 };
@@ -356,22 +357,36 @@ pub(crate) async fn list(
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let (input, resource) = match params.scope_id {
             None => (
-                authz::gather(&state, &mut tx, None).await?,
+                authz::gather(
+                    &state,
+                    &mut tx,
+                    None,
+                    synveda_store::anchors::AnchorSelection::none(),
+                    Vec::new(),
+                )
+                .await?,
                 Resource::Tenant(tenant_id),
             ),
             Some(scope_id) => {
                 let node = found(
-                    hierarchy::node(&mut *tx, scope_id).await?,
+                    scopes::get(&mut *tx, tenant_id, scope_id).await?,
                     tenant_id,
                     scope_id,
                 )?;
                 (
-                    authz::gather(&state, &mut tx, Some(&node)).await?,
+                    authz::gather(
+                        &state,
+                        &mut tx,
+                        Some(&node),
+                        synveda_store::anchors::AnchorSelection::none(),
+                        Vec::new(),
+                    )
+                    .await?,
                     Resource::Scope(scope_id),
                 )
             }
         };
-        let authorized = authz::decide(&state, &input, Action::ProposalRead, resource, None)?;
+        let authorized = authz::decide(&state, &input, Action::ProposalRead, resource)?;
         let stored = vedaflow::proposals::list(
             &mut tx,
             tenant_id,
@@ -429,13 +444,19 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let proposal = load(&mut tx, tenant_id, id).await?;
         let node = target_node(&mut tx, tenant_id, &proposal).await?;
-        let input = authz::gather(&state, &mut tx, Some(&node)).await?;
+        let input = authz::gather(
+            &state,
+            &mut tx,
+            Some(&node),
+            synveda_store::anchors::AnchorSelection::none(),
+            Vec::new(),
+        )
+        .await?;
         let authorized = authz::decide(
             &state,
             &input,
             Action::ProposalRead,
             Resource::Scope(node.id),
-            None,
         )?;
         let summary = summarise(&state, &mut tx, tenant_id, &input, &proposal).await?;
         let members = member_views(&mut tx, tenant_id, &proposal).await?;
@@ -667,19 +688,26 @@ async fn open_inner(
     let source_scope_id = body.source_scope_id.unwrap_or(body.scope_id);
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, body.scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, body.scope_id).await?,
         tenant_id,
         body.scope_id,
     )?;
     let source = found(
-        hierarchy::node(&mut *tx, source_scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, source_scope_id).await?,
         tenant_id,
         source_scope_id,
     )?;
     // Gathered at the *source* — the deeper node, whose chain contains
     // the target's as a suffix — so two scopes are decided from one set of
     // pack assignments and role bindings (ADR-0034 decision 12).
-    let input = authz::gather(state, &mut tx, Some(&source)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&source),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     // The climb's direction, checked before anything is decided about it:
     // the target has to be on the source's own chain. A peer scope is not,
     // has no authority over the source, and admitting one would turn the
@@ -700,7 +728,6 @@ async fn open_inner(
         target_position,
         Action::ProposalOpen,
         Resource::Scope(body.scope_id),
-        None,
     )?;
     let proposer = identity_of(&input)?;
 
@@ -885,7 +912,7 @@ async fn open_inner(
             scope.source = %source_scope_id,
             scope.target = %body.scope_id,
             climb.levels = target_position,
-            "proposal climbs {target_position} level(s) to {}", node.path
+            "proposal climbs {target_position} level(s) to {}", node.slug
         );
     }
 
@@ -947,8 +974,8 @@ async fn open_inner(
         summary: render(
             &proposal,
             &ScopePaths {
-                target: Some(node.path.clone()),
-                source: Some(source.path.clone()),
+                target: Some(node.slug.clone()),
+                source: Some(source.slug.clone()),
             },
             &requirement,
             &outstanding,
@@ -1013,13 +1040,19 @@ async fn approve_inner(
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let proposal = load(&mut tx, tenant_id, id).await?;
     let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::ProposalReview,
         Resource::Scope(node.id),
-        None,
     )?;
     require_open(&proposal)?;
     let approver = identity_of(&input)?;
@@ -1073,7 +1106,7 @@ async fn approve_inner(
     let mut now = cast;
     now.push(candidate.clone());
     let after = requirement.outstanding(&now);
-    let paths = ScopePaths::resolve(&mut tx, &proposal, &node).await?;
+    let paths = ScopePaths::resolve(&mut tx, tenant_id, &proposal, &node).await?;
     audit::record(
         &mut tx,
         tenant_id,
@@ -1139,13 +1172,19 @@ async fn reject_inner(
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let proposal = load(&mut tx, tenant_id, id).await?;
     let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::ProposalReview,
         Resource::Scope(node.id),
-        None,
     )?;
     require_open(&proposal)?;
     let reviewer = identity_of(&input)?;
@@ -1177,7 +1216,7 @@ async fn reject_inner(
     vedaflow::proposals::act("rejected", proposal.asset);
 
     let requirement = requirement_for(state, &mut tx, tenant_id, &input, &node, &proposal).await?;
-    let paths = ScopePaths::resolve(&mut tx, &proposal, &node).await?;
+    let paths = ScopePaths::resolve(&mut tx, tenant_id, &proposal, &node).await?;
     audit::record(
         &mut tx,
         tenant_id,
@@ -1223,13 +1262,19 @@ pub(crate) async fn withdraw(
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let proposal = load(&mut tx, tenant_id, id).await?;
         let node = target_node(&mut tx, tenant_id, &proposal).await?;
-        let input = authz::gather(&state, &mut tx, Some(&node)).await?;
+        let input = authz::gather(
+            &state,
+            &mut tx,
+            Some(&node),
+            synveda_store::anchors::AnchorSelection::none(),
+            Vec::new(),
+        )
+        .await?;
         let authorized = authz::decide(
             &state,
             &input,
             Action::ProposalOpen,
             Resource::Scope(node.id),
-            None,
         )?;
         require_open(&proposal)?;
         let actor = identity_of(&input)?;
@@ -1254,7 +1299,7 @@ pub(crate) async fn withdraw(
         vedaflow::proposals::act("withdrawn", proposal.asset);
         let requirement =
             requirement_for(&state, &mut tx, tenant_id, &input, &node, &proposal).await?;
-        let paths = ScopePaths::resolve(&mut tx, &proposal, &node).await?;
+        let paths = ScopePaths::resolve(&mut tx, tenant_id, &proposal, &node).await?;
         audit::record(
             &mut tx,
             tenant_id,
@@ -1362,13 +1407,19 @@ async fn checklist_inner(
         });
     }
     let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::ProposalReview,
         Resource::Scope(node.id),
-        None,
     )?;
     require_open(&proposal)?;
     let reviewer = identity_of(&input)?;
@@ -1562,13 +1613,19 @@ async fn quality_override_inner(
         });
     }
     let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::SkillQualityOverride,
         Resource::Scope(node.id),
-        None,
     )?;
     require_open(&proposal)?;
     let granter = identity_of(&input)?;
@@ -1710,7 +1767,14 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let proposal = load(&mut tx, tenant_id, id).await?;
     let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     // The same two decisions the direct route takes (ADR-0031
     // decision 12): may this principal publish here, and may it read what
     // it is about to declare reviewed. The approvals go *in front of*
@@ -1720,7 +1784,6 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
         &input,
         Action::ChannelPublish,
         Resource::Scope(node.id),
-        None,
     )?;
     // At the working tier, like the direct route (ADR-0038 decision 10):
     // running an approved effect governs material, it does not compose it,
@@ -2650,7 +2713,14 @@ async fn classify_inner(state: &AppState, id: ProposalId) -> Result<Json<Classif
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let proposal = load(&mut tx, tenant_id, id).await?;
     let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     // Two decisions, the shape every governed act over material takes: may
     // this principal classify here, and is it a stranger to the material.
     // The read is at the working tier (ADR-0038 decision 10) — a
@@ -2662,7 +2732,6 @@ async fn classify_inner(state: &AppState, id: ProposalId) -> Result<Json<Classif
         &input,
         Action::MemoryClassify,
         Resource::Scope(node.id),
-        None,
     )?;
     authz::decide_read(
         state,
@@ -2838,9 +2907,9 @@ async fn target_node(
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     proposal: &vedaflow::StoredProposal,
-) -> Result<HierarchyNode> {
+) -> Result<Scope> {
     found(
-        hierarchy::node(&mut *tx, proposal.target_scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, proposal.target_scope_id).await?,
         tenant_id,
         proposal.target_scope_id,
     )
@@ -2896,7 +2965,7 @@ async fn requirement_for(
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     input: &DecisionInput,
-    node: &HierarchyNode,
+    node: &Scope,
     proposal: &vedaflow::StoredProposal,
 ) -> Result<ApprovalRequirement> {
     let members = vedaflow::proposals::members(tx, tenant_id, proposal.commit).await?;
@@ -2928,7 +2997,7 @@ async fn summarise(
     // The listing decides against the *requested* resource; a proposal at
     // another scope is still rendered with its own target's requirement,
     // which is the honest answer to "what does this need".
-    let node = match hierarchy::node(&mut *tx, proposal.target_scope_id).await? {
+    let node = match scopes::get(&mut *tx, tenant_id, proposal.target_scope_id).await? {
         Some(node) => node,
         // The target vanished (TEN-5's disposal window): render what the
         // pack asks for at the tenant default rather than dropping the row.
@@ -2942,7 +3011,7 @@ async fn summarise(
             ));
         }
     };
-    let paths = ScopePaths::resolve(tx, proposal, &node).await?;
+    let paths = ScopePaths::resolve(tx, tenant_id, proposal, &node).await?;
     let requirement = requirement_for(state, tx, tenant_id, input, &node, proposal).await?;
     let recorded = vedaflow::proposals::approvals(tx, tenant_id, proposal.id).await?;
     let cast = vedaflow::proposals::cast_for(&recorded, proposal.commit);
@@ -2966,18 +3035,19 @@ impl ScopePaths {
     /// things.
     async fn resolve(
         tx: &mut sqlx::PgConnection,
+        tenant_id: synveda_types::TenantId,
         proposal: &vedaflow::StoredProposal,
-        target: &HierarchyNode,
+        target: &Scope,
     ) -> Result<Self> {
         let source = if proposal.source_scope_id == proposal.target_scope_id {
-            Some(target.path.clone())
+            Some(target.slug.clone())
         } else {
-            hierarchy::node(&mut *tx, proposal.source_scope_id)
+            scopes::get(&mut *tx, tenant_id, proposal.source_scope_id)
                 .await?
-                .map(|node| node.path)
+                .map(|node| node.slug)
         };
         Ok(Self {
-            target: Some(target.path.clone()),
+            target: Some(target.slug.clone()),
             source,
         })
     }
@@ -3854,7 +3924,7 @@ fn max_sensitivity(members: &[Proposed]) -> Sensitivity {
         .unwrap_or(Sensitivity::Public)
 }
 
-fn role_list(roles: &[Role]) -> String {
+fn role_list(roles: &[synveda_types::access::RoleKey]) -> String {
     if roles.is_empty() {
         return "none".to_owned();
     }

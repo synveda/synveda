@@ -30,14 +30,15 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::ChainVerification;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{OidcVerifier, parse_issuers, personal_slug};
+use synveda_identity::{OidcVerifier, parse_issuers};
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_ingest::extraction::{AnyExtractor, ClaudeExtractor, DeterministicExtractor};
 use synveda_ingest::worker::{self, WorkerConfig, WorkerDeps};
-use synveda_store::{hierarchy, identities, quarantine, rls, tenants};
+use synveda_store::{identities, quarantine, rls, scopes, tenants};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, ObserveEventId, RecordId, ScopeId,
-    ScopeKind, Sensitivity, TenantId, TenantStatus,
+    Identity, IdentityId, IdentityKind, ObserveEventId, RecordId, ScopeId, Sensitivity, TenantId,
+    TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -151,7 +152,6 @@ fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(
             synveda_retrieval::SearchIndex::open(
@@ -185,7 +185,6 @@ fn worker_deps(state: &AppState, extractor: AnyExtractor) -> WorkerDeps {
     WorkerDeps {
         pool: state.pool.clone(),
         pdp: Arc::clone(&state.pdp),
-        chains: Arc::clone(&state.scope_chains),
         extractor,
         embedder: AnyEmbedder::Deterministic(DeterministicEmbedder::new()),
     }
@@ -268,70 +267,47 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
     Some((pool, id, url))
 }
 
-/// Seeds acme-org → platform (team) plus the reserved quarantine team;
-/// returns (platform, quarantine).
-async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (HierarchyNode, HierarchyNode) {
+/// Seeds the tenant root and a platform org unit under an `eng` unit;
+/// returns the platform scope.
+async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Scope {
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let platform = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(org.id),
+            slug: "platform".to_owned(),
+            display_name: "Platform".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let platform = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
-    )
-    .await
-    .expect("create team");
-    let quarantine = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        "Quarantine",
-    )
-    .await
-    .expect("create quarantine");
+    .expect("create scope");
     tx.commit().await.expect("commit hierarchy");
-    (platform, quarantine)
+    platform
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -448,11 +424,11 @@ async fn observed_events_become_derived_records_with_provenance() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (platform, _) = seed_hierarchy(&pool, tenant).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
-    let alice = seed_user(&pool, tenant, "alice", platform.id).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
     let token = idp.user_token("alice");
 
     let occurred = "2026-07-21T09:00:00Z";
@@ -589,11 +565,11 @@ async fn released_quarantined_events_extract_identically() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (platform, _) = seed_hierarchy(&pool, tenant).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
-    seed_user(&pool, tenant, "alice", platform.id).await;
+    seed_user(&pool, tenant, "alice").await;
     let token = idp.user_token("alice");
 
     // The documentation-only AWS example key: quarantined under the
@@ -661,11 +637,11 @@ async fn since_quarantined_owner_is_denied_at_commit() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (platform, quarantine_node) = seed_hierarchy(&pool, tenant).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
-    let mallory = seed_user(&pool, tenant, "mallory", platform.id).await;
+    let mallory = seed_user(&pool, tenant, "mallory").await;
     let token = idp.user_token("mallory");
 
     let (status, _) = post_observe(
@@ -680,17 +656,16 @@ async fn since_quarantined_owner_is_denied_at_commit() {
     .await;
     assert_eq!(status, StatusCode::ACCEPTED);
 
-    // Quarantined between admission and extraction: placement under the
-    // reserved node (ADR-0013 decision 4), with the cache invalidation
-    // any out-of-band hierarchy writer owes (ADR-0016).
+    // Quarantined between admission and extraction: departed, which is
+    // the one shape quarantine takes now (CPR-7, ADR-0074 decision 3) —
+    // sealed at the identity, refused by the base layer's forbid.
     let mut tx = rls::begin_tenant_tx(&pool, tenant)
         .await
         .expect("tenant tx");
-    hierarchy::move_node(&mut tx, mallory.scope_id, quarantine_node.id)
+    identities::depart(&mut tx, tenant, mallory.id)
         .await
-        .expect("move mallory into quarantine");
-    tx.commit().await.expect("commit quarantine move");
-    state.scope_chains.invalidate(tenant);
+        .expect("depart mallory");
+    tx.commit().await.expect("commit departure");
 
     let deps = worker_deps(
         &state,
@@ -725,11 +700,11 @@ async fn exhausted_signals_dead_letter_with_an_audited_failure() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (platform, _) = seed_hierarchy(&pool, tenant).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
-    seed_user(&pool, tenant, "alice", platform.id).await;
+    seed_user(&pool, tenant, "alice").await;
     let token = idp.user_token("alice");
 
     let (status, _) = post_observe(
@@ -785,11 +760,11 @@ async fn redelivered_signals_extract_exactly_once() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (platform, _) = seed_hierarchy(&pool, tenant).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
-    seed_user(&pool, tenant, "alice", platform.id).await;
+    seed_user(&pool, tenant, "alice").await;
     let token = idp.user_token("alice");
 
     let (status, _) = post_observe(
@@ -839,11 +814,11 @@ async fn an_extractor_can_never_mint_the_top_tier() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (platform, _) = seed_hierarchy(&pool, tenant).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
-    seed_user(&pool, tenant, "alice", platform.id).await;
+    seed_user(&pool, tenant, "alice").await;
     let token = idp.user_token("alice");
 
     // A mock Claude endpoint that classifies its own output as the tier
@@ -915,11 +890,11 @@ async fn extractor_output_secrets_never_persist() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (platform, _) = seed_hierarchy(&pool, tenant).await;
+    let _platform = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
-    seed_user(&pool, tenant, "alice", platform.id).await;
+    seed_user(&pool, tenant, "alice").await;
     let token = idp.user_token("alice");
 
     // A mock Claude endpoint that "extracts" a memorised credential.

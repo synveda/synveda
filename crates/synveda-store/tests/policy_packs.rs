@@ -12,11 +12,42 @@
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_store::{hierarchy, policy_assignments, policy_packs, rls, tenants};
+use synveda_store::{policy_assignments, policy_packs, rls, tenants};
+use synveda_types::scope::ScopeKind;
 use synveda_types::{
-    CompositionConfig, Error, InjectChannels, PackConfig, ScopeId, ScopeKind, TenantId,
-    TenantStatus,
+    CompositionConfig, Error, InjectChannels, PackConfig, ScopeId, TenantId, TenantStatus,
 };
+
+/// Seeding shape the old hierarchy-create calls had, on the governed
+/// substrate (CPR-7, ADR-0074): caller-chosen id, the old kinds mapped —
+/// `org` is the tenant root, `division`/`department`/`team` are org
+/// units, `user` a principal.
+async fn mk_scope(
+    conn: &mut sqlx::PgConnection,
+    id: synveda_types::ScopeId,
+    tenant: synveda_types::TenantId,
+    parent: Option<synveda_types::ScopeId>,
+    kind: synveda_types::scope::ScopeKind,
+    slug: &str,
+    name: &str,
+) -> synveda_types::scope::Scope {
+    synveda_store::scopes::create(
+        conn,
+        &synveda_store::scopes::NewScope {
+            id,
+            tenant_id: tenant,
+            kind,
+            parent_scope_id: parent,
+            slug: slug.to_owned(),
+            display_name: name.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("seed scope")
+}
 
 /// Connects and migrates. `None` = no database configured; the test skips
 /// quietly.
@@ -227,9 +258,16 @@ async fn clear_refuses_while_assignments_reference_the_pack() {
         .await
         .expect("begin tenant tx");
     let root = ScopeId::new();
-    hierarchy::create(&mut tx, root, tenant, None, ScopeKind::Org, "acme", "ACME")
-        .await
-        .expect("create org root");
+    mk_scope(
+        &mut tx,
+        root,
+        tenant,
+        None,
+        ScopeKind::Tenant,
+        "acme",
+        "ACME",
+    )
+    .await;
     policy_packs::apply(
         &mut *tx,
         tenant,
@@ -289,20 +327,26 @@ async fn assignments_upsert_resolve_by_chain_and_cascade() {
         .expect("begin tenant tx");
     let root = ScopeId::new();
     let team = ScopeId::new();
-    hierarchy::create(&mut tx, root, tenant, None, ScopeKind::Org, "acme", "ACME")
-        .await
-        .expect("create org root");
-    hierarchy::create(
+    mk_scope(
+        &mut tx,
+        root,
+        tenant,
+        None,
+        ScopeKind::Tenant,
+        "acme",
+        "ACME",
+    )
+    .await;
+    mk_scope(
         &mut tx,
         team,
         tenant,
         Some(root),
-        ScopeKind::Team,
+        ScopeKind::OrgUnit,
         "core",
         "Core",
     )
-    .await
-    .expect("create team");
+    .await;
 
     let assigned = policy_assignments::assign(&mut *tx, tenant, team, "standard")
         .await
@@ -336,18 +380,13 @@ async fn assignments_upsert_resolve_by_chain_and_cascade() {
         Some("standard".to_owned())
     );
 
-    // Deleting the node deletes its assignment with it.
-    assert!(
-        hierarchy::delete(&mut tx, team).await.expect("delete team"),
-        "the leaf team must delete"
-    );
-    assert!(
-        policy_assignments::for_scopes(&mut *tx, tenant, &[team])
-            .await
-            .expect("post-delete lookup")
-            .is_empty(),
-        "the deleted node's assignment must cascade away"
-    );
+    // Nothing deletes a governed scope (CPR-7); the assignment survives
+    // until unassigned. The cascade the old model tested is gone with the
+    // verb, so the lookup still finds the row.
+    let post = policy_assignments::for_scopes(&mut *tx, tenant, &[team])
+        .await
+        .expect("post-unassign lookup");
+    assert_eq!(post.len(), 1);
 }
 
 #[tokio::test]

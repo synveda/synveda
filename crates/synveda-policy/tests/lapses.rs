@@ -23,23 +23,23 @@
 //! and every test below is about the edge of it.
 
 use chrono::{TimeDelta, Utc};
-use synveda_policy::ScopeNode;
 use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
-    lapsable, lapsed_scopes,
+    ScopeNode, lapsable, lapsed_scopes,
 };
+use synveda_types::scope::ScopeKind;
 use synveda_types::{
-    ApprovalMatrix, HierarchyNode, IdentityId, Lapse, LapseAction, LapseConfig, LapseId,
-    PackConfig, PolicyAssignment, ProposalId, ScopeId, ScopeKind, Sensitivity, TenantId,
+    ApprovalMatrix, IdentityId, Lapse, LapseAction, LapseConfig, LapseId, PackConfig,
+    PolicyAssignment, ProposalId, ScopeId, Sensitivity, TenantId,
 };
 
 struct Fixture {
     tenant: TenantId,
-    nodes: Vec<HierarchyNode>,
+    nodes: Vec<ScopeNode>,
 }
 
 impl Fixture {
-    fn node(&self, slug: &str) -> &HierarchyNode {
+    fn node(&self, slug: &str) -> &ScopeNode {
         self.nodes
             .iter()
             .find(|node| node.slug == slug)
@@ -62,7 +62,7 @@ impl Fixture {
             current = parent.parent_id;
             chain.push(parent.clone());
         }
-        chain.iter().map(ScopeNode::from_hierarchy).collect()
+        chain.clone()
     }
 
     fn assignment(&self, slug: &str, pack: &str) -> PolicyAssignment {
@@ -117,31 +117,27 @@ impl Fixture {
 fn fixture() -> Fixture {
     let tenant = TenantId::new();
     let mut nodes = Vec::new();
-    let mut add = |parent: Option<ScopeId>, kind: ScopeKind, slug: &str, depth: i32| -> ScopeId {
+    let mut add = |parent: Option<ScopeId>, kind: ScopeKind, slug: &str, _depth: i32| -> ScopeId {
         let id = ScopeId::new();
-        nodes.push(HierarchyNode {
+        nodes.push(ScopeNode {
             id,
             tenant_id: tenant,
             parent_id: parent,
             kind,
             slug: slug.to_owned(),
-            name: slug.to_owned(),
-            depth,
-            path: slug.to_owned(),
             sealed: false,
-            created_at: Utc::now(),
         });
         id
     };
-    let org = add(None, ScopeKind::Org, "org", 0);
-    let eng = add(Some(org), ScopeKind::Department, "eng", 1);
-    let sales = add(Some(org), ScopeKind::Department, "sales", 1);
-    let team_a = add(Some(eng), ScopeKind::Team, "team-a", 2);
-    let team_b = add(Some(eng), ScopeKind::Team, "team-b", 2);
-    let team_c = add(Some(sales), ScopeKind::Team, "team-c", 2);
-    add(Some(team_a), ScopeKind::User, "alice-user", 3);
-    add(Some(team_b), ScopeKind::User, "carol-user", 3);
-    add(Some(team_c), ScopeKind::User, "dave-user", 3);
+    let org = add(None, ScopeKind::Tenant, "org", 0);
+    let eng = add(Some(org), ScopeKind::OrgUnit, "eng", 1);
+    let sales = add(Some(org), ScopeKind::OrgUnit, "sales", 1);
+    let team_a = add(Some(eng), ScopeKind::OrgUnit, "team-a", 2);
+    let team_b = add(Some(eng), ScopeKind::OrgUnit, "team-b", 2);
+    let team_c = add(Some(sales), ScopeKind::OrgUnit, "team-c", 2);
+    add(Some(team_a), ScopeKind::Principal, "alice-user", 3);
+    add(Some(team_b), ScopeKind::Principal, "carol-user", 3);
+    add(Some(team_c), ScopeKind::Principal, "dave-user", 3);
     Fixture { tenant, nodes }
 }
 
@@ -448,7 +444,6 @@ fn only_the_lapsable_action_carries_a_grant() {
     for action in [
         Action::MemoryWrite,
         Action::PolicyAssign,
-        Action::RoleAssign,
         Action::ChannelPublish,
         Action::ProposalReview,
         Action::LapseGrant,

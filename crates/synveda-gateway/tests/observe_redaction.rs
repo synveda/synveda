@@ -33,13 +33,13 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::ChainVerification;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{OidcVerifier, parse_issuers, personal_slug};
-use synveda_store::{
-    hierarchy, identities, policy_assignments, policy_packs, rls, role_bindings, tenants,
-};
+use synveda_identity::{OidcVerifier, parse_issuers};
+use synveda_store::{access, identities, policy_assignments, policy_packs, rls, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, PackConfig, RedactionConfig, RedactionMode,
-    Role, ScopeId, ScopeKind, TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, PackConfig, RedactionConfig, RedactionMode,
+    ScopeId, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -154,7 +154,6 @@ fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(
             synveda_retrieval::SearchIndex::open(
@@ -242,72 +241,62 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
 
 /// Seeds acme-org → eng (dept) → platform (team). Returns (org, eng,
 /// platform).
-async fn seed_hierarchy(
-    pool: &PgPool,
-    tenant: TenantId,
-) -> (HierarchyNode, HierarchyNode, HierarchyNode) {
+async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope, Scope) {
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(org.id),
+            slug: "eng".to_owned(),
+            display_name: "Engineering".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let eng = hierarchy::create(
+    .expect("create scope");
+    let platform = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "eng",
-        "Engineering",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(eng.id),
+            slug: "platform".to_owned(),
+            display_name: "Platform".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create dept");
-    let platform = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
-    )
-    .await
-    .expect("create team");
+    .expect("create scope");
     tx.commit().await.expect("commit hierarchy");
     (org, eng, platform)
 }
 
 /// Provisions a user identity at the store level (the JIT shape).
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -315,12 +304,29 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind_role(pool: &PgPool, tenant: TenantId, subject: &str, role: Role) {
+async fn bind_role(pool: &PgPool, tenant: TenantId, subject: &str, role: RoleKey) {
     let mut tx = rls::begin_tenant_tx(pool, tenant).await.expect("tx");
-    role_bindings::bind(&mut *tx, tenant, subject, None, role)
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+        .expect("mint root");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: root.id,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 fn event(key: &str, text: &str) -> Value {
@@ -430,7 +436,7 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
     let app_state = state(&db_url, &idp.issuer, tenant);
     let pdp = Arc::clone(&app_state.pdp);
     let app = router(app_state);
-    seed_user(&pool, tenant, "alice", platform.id).await;
+    seed_user(&pool, tenant, "alice").await;
     let alice = idp.user_token("alice");
 
     // ── Quarantine mode: the embedded default, no assignment needed. ──
@@ -525,7 +531,7 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         permit (principal, action == Synveda::Action::"MemoryRead", resource)
         when { principal in resource };
         permit (principal, action == Synveda::Action::"MemoryWrite", resource)
-        when { principal has home && resource == principal.home };
+        when { principal has own_scope && resource == principal.own_scope };
     "#;
     let deny_config = RedactionConfig {
         secrets: RedactionMode::Deny,
@@ -652,8 +658,8 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         .await
         .expect("unassign deny pack");
     tx.commit().await.expect("commit unassign");
-    seed_user(&pool, tenant, "stew", platform.id).await;
-    bind_role(&pool, tenant, "stew", Role::Steward).await;
+    seed_user(&pool, tenant, "stew").await;
+    bind_role(&pool, tenant, "stew", RoleKey::Administrator).await;
     let steward = idp.user_token("stew");
 
     // The owner holds no review right: the queue and both verdicts are
@@ -694,9 +700,28 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         "{queue}"
     );
 
-    // Subtree filter: the platform team's queue holds it; a subtree
-    // listing is authorized at that node.
+    // Subtree filter. Since CPR-7 (ADR-0074 decision 3) a person's scope
+    // hangs under the tenant root rather than inside a team, so the root's
+    // subtree holds the event and an org unit's does not — which is the
+    // filter working, not failing. The *decision* is the tenant's either
+    // way (ADR-0074 decision 7); `scope_id` narrows what comes back.
     let (status, scoped) = send(
+        &app,
+        request(
+            Method::GET,
+            &format!("/v1/quarantine?scope_id={}", org.id),
+            &steward,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{scoped}");
+    assert_eq!(
+        scoped["pending"].as_array().expect("list").len(),
+        1,
+        "the root's subtree holds every principal scope: {scoped}"
+    );
+    let (status, elsewhere) = send(
         &app,
         request(
             Method::GET,
@@ -706,8 +731,12 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{scoped}");
-    assert_eq!(scoped["pending"].as_array().expect("list").len(), 1);
+    assert_eq!(status, StatusCode::OK, "{elsewhere}");
+    assert_eq!(
+        elsewhere["pending"].as_array().expect("list").len(),
+        0,
+        "and an org unit nobody's scope hangs under holds none: {elsewhere}"
+    );
 
     // Release: the signal goes out, the state flips, the chain records it.
     let signals_before = queued(&pool, tenant).await;
@@ -773,12 +802,12 @@ async fn quarantine_review_contract_holds() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (_, _, platform) = seed_hierarchy(&pool, tenant).await;
+    let (_, _, _platform) = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let app = router(state(&db_url, &idp.issuer, tenant));
-    seed_user(&pool, tenant, "alice", platform.id).await;
-    seed_user(&pool, tenant, "sec", platform.id).await;
-    bind_role(&pool, tenant, "sec", Role::SecurityReviewer).await;
+    seed_user(&pool, tenant, "alice").await;
+    seed_user(&pool, tenant, "sec").await;
+    bind_role(&pool, tenant, "sec", RoleKey::Reviewer).await;
     let alice = idp.user_token("alice");
     let reviewer = idp.user_token("sec");
 

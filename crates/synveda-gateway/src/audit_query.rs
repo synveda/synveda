@@ -49,7 +49,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::authz;
 use crate::error::ApiError;
-use crate::hierarchy::{commit, tenant_id};
+use crate::request::{commit, tenant_id};
 use crate::telemetry::AUDIT_QUERY_OPERATIONS_TOTAL;
 
 /// The page cap; `limit` above it is a 400, not a silent trim — a surface

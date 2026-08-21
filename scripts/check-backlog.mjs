@@ -34,8 +34,8 @@ const fail = (message) => problems.push(message);
 const lines = readFileSync(SRC, "utf8").split(/\r?\n/);
 
 const epicRe = /^EPIC ([A-Z]+) — (.+)$/;
-const blockRe = /^([A-Z]+-\d+)\s+(.+)\s\((S|M|L)\)(?:\s+\[([^\]]+)\])?\s*$/;
-const inlineRe = /^([A-Z]+-\d+)\s+(.+?)\s\((S|M|L)\)\s+—\s+(.*)$/;
+const blockRe = /^([A-Z]+-\d+)\s+(.+)\s\((S|M|L|XL)\)(?:\s+\[([^\]]+)\])?\s*$/;
+const inlineRe = /^([A-Z]+-\d+)\s+(.+?)\s\((S|M|L|XL)\)\s+—\s+(.*)$/;
 
 const features = new Map();
 let currentEpic = null;

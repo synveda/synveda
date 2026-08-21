@@ -42,6 +42,7 @@
 #![warn(missing_docs)]
 
 pub mod access;
+pub mod admin_scopes;
 pub mod app;
 mod approvals;
 mod audit;
@@ -55,7 +56,6 @@ pub mod curators;
 pub mod directory_admin;
 pub mod directory_sync;
 pub mod error;
-pub mod hierarchy;
 pub mod idempotency;
 mod inject;
 pub mod lapses;
@@ -69,7 +69,7 @@ pub mod proposals;
 pub mod provision;
 pub mod quarantine;
 mod recall;
-pub mod roles;
+mod request;
 pub mod scim;
 pub mod service_identities;
 pub mod skills;

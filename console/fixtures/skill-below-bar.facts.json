@@ -1,6 +1,6 @@
 {
   "state": "open",
-  "outstanding": "steward × 1, security-reviewer × 1, 2 distinct approver(s)",
+  "outstanding": "reviewer × 1, administrator × 1, 2 distinct approver(s)",
   "approvals": [],
   "members": [
     {

@@ -237,59 +237,51 @@ export async function reject(
   );
 }
 
-// ── The explorer (CNSL-2, ADR-0058) ─────────────────────────────────────
+// ── The explorer (CNSL-2, ADR-0058; the scope re-cut CPR-7, ADR-0074) ──
 //
-// Five reads, and the same rule as above: every one of them is a route the
-// CLI also has (`synveda hierarchy policy|roles|capabilities`, `synveda
-// lapse list`, `synveda whoami --capabilities`). ADR-0056 decision 9 is a
-// standing decision — no console-only route — and CNSL-2 honoured it by
-// giving the CLI the verbs rather than by giving the console a private
-// door.
+// Four reads, and the same rule as above: every one of them is a route the
+// CLI also has (`synveda scope list|show`, `synveda whoami
+// --capabilities`, `synveda lapse list`). ADR-0056 decision 9 is a
+// standing decision — no console-only route.
 //
 // The tree is **lazy**: children on expand, never `descendants` from the
-// root (ADR-0058 decision 5). HIER-1's own AC is a 10,000-node hierarchy,
-// and a screen that fetched a subtree to draw a sidebar would pull all of
-// it and then probe every node in it.
-
-/** The tenant's org root — where the tree starts. */
-export async function hierarchyRoot(fetchImpl: typeof fetch = fetch): Promise<Outcome> {
-  return call("/hierarchy/root", { method: "GET" }, fetchImpl);
-}
-
-/** One node's direct children, slug order. The tree's only expansion call. */
-export async function children(id: string, fetchImpl: typeof fetch = fetch): Promise<Outcome> {
-  return call(`/hierarchy/nodes/${encodeURIComponent(id)}/children`, { method: "GET" }, fetchImpl);
-}
-
-/** The pack in force at a node, and where it came from. */
-export async function nodePolicy(id: string, fetchImpl: typeof fetch = fetch): Promise<Outcome> {
-  return call(`/hierarchy/nodes/${encodeURIComponent(id)}/policy`, { method: "GET" }, fetchImpl);
-}
+// root (ADR-0058 decision 5). A screen that fetched a subtree to draw a
+// sidebar would pull all of it and then probe every scope in it.
+//
+// The roles panel is gone with role bindings (CPR-7): "who holds what
+// here" is the access plane's own surface, and grants are listed by
+// `/v1/admin/grants` — a later console prompt's screen, not this one's.
 
 /**
- * Role bindings at a node, or every binding in force there.
+ * The tenant's root scope and its children — where the tree starts.
  *
- * `effective` is the question this screen is for: roles inherit downward,
- * so "who holds what here" includes every ancestor's bindings and the
- * tenant-wide ones, and until CNSL-2 no route answered it — each client
- * walked `/ancestors` and unioned for itself, which is a second
- * implementation of an inheritance rule the PDP owns.
+ * The response carries the level's parent under `parent` and its children
+ * under `scopes`, which is also the shape [`childrenOf`] returns, so the
+ * tree renders one component for both.
  */
-export async function nodeRoles(
-  id: string,
-  effective: boolean,
+export async function scopeLevel(
+  parentId?: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<Outcome> {
-  const query = effective ? "?effective=true" : "";
-  return call(
-    `/hierarchy/nodes/${encodeURIComponent(id)}/roles${query}`,
-    { method: "GET" },
-    fetchImpl,
-  );
+  const query = parentId ? `?parent_id=${encodeURIComponent(parentId)}` : "";
+  return call(`/admin/scopes${query}`, { method: "GET" }, fetchImpl);
+}
+
+/** One scope's direct children, slug order. The tree's only expansion call. */
+export async function childrenOf(
+  id: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Outcome> {
+  return scopeLevel(id, fetchImpl);
+}
+
+/** The pack in force at a scope, and where it came from. */
+export async function scopePolicy(id: string, fetchImpl: typeof fetch = fetch): Promise<Outcome> {
+  return call(`/admin/scopes/${encodeURIComponent(id)}/policy`, { method: "GET" }, fetchImpl);
 }
 
 /**
- * What *this reader* may do at a node.
+ * What *this reader* may do at one scope.
  *
  * A forecast, never a grant (ADR-0058 decision 2). Nothing in this bundle
  * may use the answer to decide whether an act is allowed — only whether to
@@ -297,15 +289,12 @@ export async function nodeRoles(
  * pack effective then; if the two disagree the act's answer is the one that
  * counts and the reader sees the refusal.
  */
-export async function nodeCapabilities(
-  id: string,
+export async function scopeCapabilities(
+  ids: string[],
   fetchImpl: typeof fetch = fetch,
 ): Promise<Outcome> {
-  return call(
-    `/hierarchy/nodes/${encodeURIComponent(id)}/capabilities`,
-    { method: "GET" },
-    fetchImpl,
-  );
+  const query = ids.map((id) => encodeURIComponent(id)).join(",");
+  return call(`/capabilities?scopes=${query}`, { method: "GET" }, fetchImpl);
 }
 
 /**

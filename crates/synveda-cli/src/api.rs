@@ -201,6 +201,32 @@ impl Api {
             .await
     }
 
+    /// `PATCH path` with a JSON body, as a JSON value.
+    pub async fn patch(&self, path: &str, body: Value) -> Result<Value, String> {
+        let request = self.http.patch(format!("{}{path}", self.base)).json(&body);
+        self.send(request, "PATCH", path).await
+    }
+
+    /// `POST path` with a JSON body and one extra header — the
+    /// idempotency-keyed creations (CPR-4's discipline, kept by CPR-7's
+    /// scope plane).
+    pub async fn post_with_header(
+        &self,
+        path: &str,
+        body: Option<Value>,
+        header: (&str, &str),
+        _subject: &str,
+    ) -> Result<Value, String> {
+        let mut request = self
+            .http
+            .post(format!("{}{path}", self.base))
+            .header(header.0, header.1);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        self.send(request, "POST", path).await
+    }
+
     /// `POST path` with an optional JSON body, as a JSON value.
     pub async fn post(&self, path: &str, body: Option<Value>) -> Result<Value, String> {
         let mut request = self.http.post(format!("{}{path}", self.base));

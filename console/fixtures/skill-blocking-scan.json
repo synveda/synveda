@@ -2,8 +2,8 @@
   "id": "00000001-0000-4000-8000-000000000000",
   "target_scope_id": "00000002-0000-4000-8000-000000000000",
   "source_scope_id": "00000002-0000-4000-8000-000000000000",
-  "target_scope_path": "acme/eng/platform",
-  "source_scope_path": "acme/eng/platform",
+  "target_scope_path": "platform",
+  "source_scope_path": "platform",
   "asset": "skill",
   "effect": "published",
   "state": "open",
@@ -16,7 +16,7 @@
   "required": {
     "roles": [
       {
-        "role": "security-reviewer",
+        "role": "reviewer",
         "count": 1
       }
     ],
@@ -25,7 +25,7 @@
       "floor"
     ]
   },
-  "outstanding": "security-reviewer × 1, 2 distinct approver(s)",
+  "outstanding": "reviewer × 1, 2 distinct approver(s)",
   "members": [
     {
       "member": "bootstrap/scripts/setup.sh",

@@ -5,19 +5,19 @@
 # What they cannot show is the sentence the feature exists for: **a grant now
 # decides.** Before this, a workspace `owner` grant was a governed record of
 # authority and what actually let somebody administer a workspace was a role
-# binding on the hierarchy this programme is deleting. That is a claim about a
+# binding on the hierarchy CPR-7 has since deleted. That is a claim about a
 # running gateway, a real database and real tokens, so it is demonstrated
 # against all three or it is not demonstrated at all.
 #
-# There is **no `role bind` anywhere in this script**. That is the point: every
-# call below succeeds because of a grant, or is refused.
+# Every call below succeeds because of a grant, or is refused. There is no
+# other way left to succeed.
 #
 # What it asserts, in order:
 #
 #   1. `/v1/me` mints the caller's **own scope** and serves it as their first
 #      anchor — before anything else exists.
 #   2. One grant at the tenant root, and the founder can create a workspace and
-#      a project. No binding was minted, and `role_bindings` is **empty**.
+#      a project — with no second grant written anywhere on the way.
 #   3. `/v1/me` forecasts what the founder may do **at each anchor**, from real
 #      decisions: `workspace.update` true at the workspace they own.
 #   4. A **project-only** grant reaches the project and refuses the workspace
@@ -172,7 +172,7 @@ ROOT_SCOPE="$(field onboarding/tenant_scope_id)"
 [ -n "$ROOT_SCOPE" ] || fail "the product should have minted a tenant root: ${BODY}"
 ok "${FOUNDER} stands at ${OWN_SCOPE}, under a root nobody was asked to declare"
 
-step "2. One grant, and no role binding anywhere"
+step "2. One grant, and nothing else written"
 # Break-glass at the store level, because nothing mints a tenant's first grant
 # yet — the standing gap this feature records rather than solves. Everything
 # after this line goes through the API under the PDP.
@@ -180,8 +180,8 @@ psql_db -c "insert into scope_grants
               (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source)
             values (gen_random_uuid(), '${TENANT_ID}', '${ROOT_SCOPE}', 'principal',
                     '${FOUNDER}', 'owner', 'owner')" >/dev/null
-BINDINGS="$(psql_db -c "select count(*) from role_bindings")"
-[ "$BINDINGS" = "0" ] || fail "this demo must hold no role bindings; found ${BINDINGS}"
+GRANTS="$(psql_db -c "select count(*) from scope_grants")"
+[ "$GRANTS" = "1" ] || fail "the tenant should hold exactly one grant; found ${GRANTS}"
 
 api POST /v1/workspaces w-1 '{"slug":"payments","display_name":"Payments"}'
 [ "$STATUS" = "201" ] || fail "a tenant-root owner should create a workspace: ${STATUS} ${BODY}"
@@ -191,9 +191,9 @@ api POST "/v1/workspaces/${WORKSPACE_ID}/projects" p-1 '{"slug":"ledger","displa
 [ "$STATUS" = "201" ] || fail "expected 201, got ${STATUS}: ${BODY}"
 PROJECT_ID="$(field id)"
 PROJECT_SCOPE="$(field scope_id)"
-BINDINGS="$(psql_db -c "select count(*) from role_bindings")"
-[ "$BINDINGS" = "0" ] || fail "creating things must not mint a binding; found ${BINDINGS}"
-ok "a workspace and a project, decided by grants, with role_bindings empty"
+GRANTS="$(psql_db -c "select count(*) from scope_grants where scope_id = '${ROOT_SCOPE}'")"
+[ "$GRANTS" = "1" ] || fail "the tenant root should still hold one grant; found ${GRANTS}"
+ok "a workspace and a project, decided by the one grant at the root"
 
 step "3. /v1/me forecasts each anchor from real decisions"
 api GET /v1/me
@@ -301,4 +301,4 @@ printf '\n\033[1;32mCPR-6: a grant decides.\033[0m\n'
 printf '  own scope   %s\n' "$OWN_SCOPE"
 printf '  workspace   %s\n' "$WORKSPACE_SCOPE"
 printf '  project     %s\n' "$PROJECT_SCOPE"
-printf '  bindings    %s\n' "$(psql_db -c 'select count(*) from role_bindings')"
+printf '  grants      %s\n' "$(psql_db -c 'select count(*) from scope_grants')"

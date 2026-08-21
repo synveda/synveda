@@ -44,17 +44,17 @@ pub const DISCLOSURE_ACTIONS: [AuditAction; 2] =
 /// *authority* half of "who could see X on date D" (ADR-0045 decision 4).
 ///
 /// Deliberately a list of actions rather than a fold: this module hands
-/// back the events, and the caller that knows the hierarchy assembles the
-/// answer. Historical bindings, assignments and grants exist nowhere else —
-/// `role_bindings`, `policy_pack_assignments` and `policy_lapses` are
-/// current-state tables, and an unbound role leaves no row — so these
+/// back the events, and the caller that knows the scope tree assembles the
+/// answer. Historical grants, assignments and lapses exist nowhere else —
+/// `scope_grants`, `policy_pack_assignments` and `policy_lapses` are
+/// current-state tables, and a revoked grant leaves no row — so these
 /// events are not merely the tamper-evident record of what governed a scope
 /// in March, they are the only record.
 ///
 /// Pass to [`search`] via [`EventFilter::actions`].
 pub const AUTHORITY_ACTIONS: [AuditAction; 13] = [
-    AuditAction::RoleBound,
-    AuditAction::RoleUnbound,
+    AuditAction::AccessGranted,
+    AuditAction::AccessRevoked,
     AuditAction::PolicyDefaultSet,
     AuditAction::PolicyDefaultCleared,
     AuditAction::PolicyNodeAssigned,

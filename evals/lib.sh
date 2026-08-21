@@ -142,25 +142,29 @@ eval_up() {
   EVAL_SEED_PID=$!
   eval_wait_gateway "$EVAL_SEED_URL"
   admin=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT" --subject eval-admin)
-  ./target/debug/synveda role bind --tenant "$EVAL_TENANT" \
-    --subject eval-admin --role org-admin >/dev/null
   eval_node() {
-    curl -fsS -X POST "$EVAL_SEED_URL/v1/hierarchy/nodes" \
+    curl -fsS -X POST "$EVAL_SEED_URL/v1/admin/scopes" \
       -H "Authorization: Bearer $admin" -H 'Content-Type: application/json' \
+      -H "Idempotency-Key: $RANDOM$RANDOM" \
       -d "$1" | eval_json_field id
   }
-  org=$(eval_node '{"parent_id":null,"kind":"org","slug":"acme","name":"ACME"}')
-  eng=$(eval_node "{\"parent_id\":\"$org\",\"kind\":\"department\",\"slug\":\"eng\",\"name\":\"Engineering\"}")
-  platform=$(eval_node "{\"parent_id\":\"$eng\",\"kind\":\"team\",\"slug\":\"platform\",\"name\":\"Platform\"}")
-  payments=$(eval_node "{\"parent_id\":\"$eng\",\"kind\":\"team\",\"slug\":\"payments\",\"name\":\"Payments\"}")
+  eval_root() {
+    curl -fsS "$EVAL_SEED_URL/v1/admin/scopes" \
+      -H "Authorization: Bearer $admin" | python3 -c 'import json,sys
+print(json.load(sys.stdin)["parent"]["id"])'
+  }
+  org=$(eval_root)
+  eng=$(eval_node "{\"parent_id\":\"$org\",\"kind\":\"org_unit\",\"slug\":\"eng\",\"display_name\":\"Engineering\"}")
+  platform=$(eval_node "{\"parent_id\":\"$eng\",\"kind\":\"org_unit\",\"slug\":\"platform\",\"display_name\":\"Platform\"}")
+  payments=$(eval_node "{\"parent_id\":\"$eng\",\"kind\":\"org_unit\",\"slug\":\"payments\",\"display_name\":\"Payments\"}")
   # EVAL-5's own department, so the security corpus and the Q&A corpus do
   # not share a subtree: a sibling team and a second department are what
   # make a *scope* boundary distinguishable from a tier one, and a reader
   # whose sweep also enumerates another suite's promoted material is a
   # reader whose sweep is closer to the 32-record cap for no reason.
-  sec=$(eval_node "{\"parent_id\":\"$org\",\"kind\":\"department\",\"slug\":\"sec\",\"name\":\"Treasury\"}")
-  vault=$(eval_node "{\"parent_id\":\"$sec\",\"kind\":\"team\",\"slug\":\"vault\",\"name\":\"Vault\"}")
-  desk=$(eval_node "{\"parent_id\":\"$sec\",\"kind\":\"team\",\"slug\":\"desk\",\"name\":\"Settlement desk\"}")
+  sec=$(eval_node "{\"parent_id\":\"$org\",\"kind\":\"org_unit\",\"slug\":\"sec\",\"display_name\":\"Treasury\"}")
+  vault=$(eval_node "{\"parent_id\":\"$sec\",\"kind\":\"org_unit\",\"slug\":\"vault\",\"display_name\":\"Vault\"}")
+  desk=$(eval_node "{\"parent_id\":\"$sec\",\"kind\":\"org_unit\",\"slug\":\"desk\",\"display_name\":\"Settlement desk\"}")
   EVAL_ORG=$org
 
   # A SECOND ADMITTED TENANT (EVAL-5, ADR-0048 decision 8). The first time
@@ -172,15 +176,16 @@ eval_up() {
   EVAL_TENANT_B=$(./target/debug/synveda tenant create \
     --slug "eval-b-$$" --name "EVAL-5 foreign tenant" | eval_json_field id)
   admin_b=$(./target/debug/synveda token issue --tenant "$EVAL_TENANT_B" --subject eval-admin-b)
-  ./target/debug/synveda role bind --tenant "$EVAL_TENANT_B" \
-    --subject eval-admin-b --role org-admin >/dev/null
   eval_node_b() {
-    curl -fsS -X POST "$EVAL_SEED_URL/v1/hierarchy/nodes" \
+    curl -fsS -X POST "$EVAL_SEED_URL/v1/admin/scopes" \
       -H "Authorization: Bearer $admin_b" -H 'Content-Type: application/json' \
+      -H "Idempotency-Key: $RANDOM$RANDOM" \
       -d "$1" | eval_json_field id
   }
-  org_b=$(eval_node_b '{"parent_id":null,"kind":"org","slug":"northwind","name":"Northwind"}')
-  clearing=$(eval_node_b "{\"parent_id\":\"$org_b\",\"kind\":\"team\",\"slug\":\"clearing\",\"name\":\"Clearing\"}")
+  org_b=$(curl -fsS "$EVAL_SEED_URL/v1/admin/scopes" \
+      -H "Authorization: Bearer $admin_b" | python3 -c 'import json,sys
+print(json.load(sys.stdin)["parent"]["id"])')
+  clearing=$(eval_node_b "{\"parent_id\":\"$org_b\",\"kind\":\"org_unit\",\"slug\":\"clearing\",\"display_name\":\"Clearing\"}")
 
   kill "$EVAL_SEED_PID" 2>/dev/null || true
   wait "$EVAL_SEED_PID" 2>/dev/null || true
@@ -235,49 +240,29 @@ eval_up() {
     eval_lme=$((eval_lme + 1))
   done
 
-  # The reviewers every Q&A promotion goes through. Which roles a
-  # publication needs is the target scope's pack answer and not this
-  # script's: under the zero-config `regulated-strict` a team publication
-  # takes one curator and a department or org publication takes a curator
-  # *and* a steward, two distinct people (the FLOW-3 matrix golden). The
-  # runner approves until the surface says nothing is outstanding, so a
-  # pack that asks for a different set is followed rather than fought.
-  ./target/debug/synveda role bind --tenant "$EVAL_TENANT" \
-    --subject qa-curator --role curator --scope "$org" >/dev/null
-  ./target/debug/synveda role bind --tenant "$EVAL_TENANT" \
-    --subject qa-steward --role steward --scope "$org" >/dev/null
-
-  # The compliance approver EVAL-5's `restricted` classification needs
-  # (ADR-0048 decision 7). The invariant approval floor asks for this role
-  # plus two distinct approvers on anything at the top tier, under every
-  # pack and unauthorable away (ADR-0032 decision 4) — so without this
-  # binding the security corpus has no way to mint the tier its whole
-  # sensitivity boundary is about. `curator` comes with it for the reason
-  # the AUTHZ-5 leak suite gives: approving a restricted change means
-  # reading it, and the review surface shows content.
-  for role in compliance curator; do
-    ./target/debug/synveda role bind --tenant "$EVAL_TENANT" \
-      --subject sec-compliance --role "$role" --scope "$org" >/dev/null
-  done
-
-  # The auditor the extraction suite reads the chain as (ADR-0046
-  # decision 4). Deliberately NOT a service identity: AUTH-3's confinement
-  # forbid denies the tenant plane to those however they are bound, and
-  # `AuditRead` declares `resource: [Tenant]` and admits nothing narrower
-  # (ADR-0045 decision 2). It is also placed nowhere and registered as
-  # nothing — an auditor is a member of nothing, and every byte it sees
-  # comes from `AuditRead` rather than from the membership floor.
-  ./target/debug/synveda role bind --tenant "$EVAL_TENANT" \
-    --subject eval-auditor --role auditor >/dev/null
-  # And one for the foreign tenant. Not a convenience: `AuditRead` declares
-  # `resource: [Tenant]` and an audit answer covers one chain or is refused
-  # (ADR-0045 decision 2), so the security suite's wait — "every seeded
-  # event appears in a memory.extracted payload" — has to ask each record's
-  # OWN chain. The first cross-tenant run reported the pipeline unfinished
-  # for a record that had extracted perfectly well, because it asked the
-  # wrong one (EVAL-5, ADR-0048).
-  ./target/debug/synveda role bind --tenant "$EVAL_TENANT_B" \
-    --subject eval-auditor-b --role auditor >/dev/null
+  # The grants. Break-glass at the store level, in the open, on the same
+  # seam `role bind` used to be: the harness's reviewer and auditor roles
+  # and the two admin doors, as `scope_grants` rows (CPR-7, ADR-0074 —
+  # grants replaced bindings, and the operator door is an administrator
+  # grant at the tenant root). Role mapping per the floors' re-vocabulary:
+  # steward/compliance/auditor → administrator, curator → curator.
+  eval_grant() {  # tenant subject role scope
+    $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U synveda -d "$EVAL_DB" -c \
+      "insert into scope_grants (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source)
+       values (gen_random_uuid(), '$1', '$4', 'principal', '$2', '$3', 'automation')" >/dev/null
+  }
+  eval_root_of() {  # tenant -> the tenant root scope id
+    $COMPOSE exec -T postgres psql -qtAX -U synveda -d "$EVAL_DB" -c \
+      "select id from scopes where tenant_id = '$1' and kind = 'tenant'"
+  }
+  eval_grant "$EVAL_TENANT" eval-admin administrator "$(eval_root_of "$EVAL_TENANT")"
+  eval_grant "$EVAL_TENANT_B" eval-admin-b administrator "$(eval_root_of "$EVAL_TENANT_B")"
+  eval_grant "$EVAL_TENANT" qa-curator curator "$org"
+  eval_grant "$EVAL_TENANT" qa-steward administrator "$org"
+  eval_grant "$EVAL_TENANT" sec-compliance administrator "$org"
+  eval_grant "$EVAL_TENANT" sec-compliance-2 curator "$org"
+  eval_grant "$EVAL_TENANT" eval-auditor administrator "$(eval_root_of "$EVAL_TENANT")"
+  eval_grant "$EVAL_TENANT_B" eval-auditor-b administrator "$(eval_root_of "$EVAL_TENANT_B")"
 
   # Phase 2: the gateway under measurement.
   SYNVEDA_LISTEN_ADDR=${EVAL_GATEWAY_URL#http://}

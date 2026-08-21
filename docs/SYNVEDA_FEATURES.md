@@ -238,6 +238,8 @@ AUTHZ-2 Policy packs (M)
 AUTHZ-3 Roles & role bindings (M)
   viewer/contributor/curator/steward/org-admin/auditor/security-reviewer/compliance; bound
   per node, inherited downward. AC: full role×action matrix golden-tested.
+  DELETED WHOLE by CPR-7 on 2026-08-20 (ADR-0074 decisions 1 and 6). Authority is a grant of
+  one of six role keys at a governed scope, inherited by its subtree — CPR-5 and CPR-6.
 AUTHZ-4 Lapses (controlled relaxation) (L)
   Lapse = time-boxed policy override proposal; reason mandatory; dual approval under
   regulated-strict; Temporal timer auto-revert; all transitions audited.
@@ -276,12 +278,17 @@ EPIC HIER — Hierarchy & scopes
 HIER-1 Hierarchy store (M)
   Closure table + materialised path; org→division→department→team→user with configurable
   depth; CRUD via admin API. AC: 10k-node hierarchy; ancestor/descendant queries <1ms.
+  DELETED WHOLE by CPR-7 on 2026-08-20 (ADR-0074 decision 1). The closure-table shape
+  survives in `scopes` + `scope_closure`; the rank vocabulary does not.
 HIER-2 Scope chain resolver (S)
   Given identity → ordered scope chain for composition (user→…→org), cached with
   invalidation on hierarchy change. AC: cache invalidation test; p99 <0.5ms warm.
+  DELETED WHOLE by CPR-7 on 2026-08-20 (ADR-0074 decision 2). Chains resolve per request
+  through `scope_closure`; the warm cache went with the tree it cached.
 HIER-3 Cedar entity sync (M)
   Hierarchy changes stream into Cedar entity store transactionally. AC: move a team between
   departments → authz decisions reflect it in the same transaction boundary.
+  RE-CUT onto governed scopes by CPR-7 on 2026-08-20: read "move a scope between org units".
 
 ──────────────────────────────────────────────
 EPIC MEM — Memory core (write path)
@@ -1318,6 +1325,46 @@ CPR-6  Governed scope anchors: the PDP re-cut (L)
   and forecasts nothing at all for somebody holding nothing; and `/v1/me` mints the caller's
   own scope, serves its anchors and names how many the bound dropped.
 
+CPR-7  The hierarchy cutover: one scope tree (XL)
+  Filed 2026-08-20 by Prompt 7 of the CPR programme. Six prompts built the governed
+  scope model — substrate, workspaces, membership, the re-cut decision point — while the
+  old fixed hierarchy stood beside it, explicitly untouched until "the prompt that deletes
+  it whole" (ADR-0070, ADR-0073's records). This is that prompt. The old tree is deleted
+  **whole**: `hierarchy_nodes`, `hierarchy_closure` and `role_bindings` leave the schema,
+  the rank vocabulary (`org`/`division`/`department`/`team`/`user`, `rank()`, the
+  child-outranks-parent rule, the root-must-be-an-org CHECK) leaves the types, and
+  `/v1/hierarchy/*`, `synveda hierarchy`, `synveda role bind`, the placement-based
+  quarantine convention, the `synveda-{dept}-{team}` JIT convention, `group_mappings`
+  and the console's hierarchy explorer leave the product — replaced by six public
+  admin routes over governed scopes (`/v1/admin/scopes` list/create/get/patch/ancestors/
+  descendants), five operator CLI commands (`synveda scope list|show|create|move|tree`),
+  and pack assignment plus the VedaFlow curator file re-homed under the same prefix. One
+  decision-gathering path remains (the governed one); `context.roles` carries grant role
+  keys only, and the old `Role` vocabulary — bindings, proposals' approval records,
+  curator files, every Cedar role list — is deleted with the VedaFlow approval matrix
+  re-vocabularied onto the six grant keys. Placement becomes identity: an identity's
+  scope is its own principal scope, minted at first login for users, services and
+  directory identities alike, and "unmapped" means *ungranted* rather than quarantined,
+  decided per action by the anchor model and the base-layer privacy floor rather than
+  per person by placement. The `synveda-admins` convention now mints an `administrator`
+  grant at the tenant root — the operator door ADR-0073 recorded as missing. The schema
+  epoch bumps so every pre-cutover database is refused with the reset instruction, and
+  the migrations are rewritten in place (the scope substrate moves to `0004`) rather
+  than translated. ADR-0074.
+  AC: every `/v1/hierarchy` route answers 404 and every old scope kind
+  (`org`, `division`, `department`, `team`, `user`) fails validation by name, asserted
+  as negative API tests; the admin routes create, rename, archive and **move** scopes
+  with each mutation PDP-decided against the scope it is about, audited with both ends
+  of a move, and idempotent on creation; a move is refused into its own subtree and a
+  cross-tenant move is unrepresentable; the memory plane (observe/inject/recall,
+  channels, proposals, skills, prompts) decides over governed scope chains and grant
+  role keys with the old chain cache and the old bindings gone; an identity's scope is
+  a principal scope minted at first login — no hierarchy row, no quarantine node — and
+  a first-time admin-group login mints the tenant's first grant without any break-glass
+  step; pack assignment at a scope governs its subtree through `scope_closure`; the
+  approval matrix, proposal approvals and curator files speak grant keys only; and a
+  fresh database is the only database this build accepts.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1411,7 +1458,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

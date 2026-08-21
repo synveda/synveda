@@ -10,11 +10,73 @@
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_store::observe::{self, NewObserveEvent, ObserveMessage, QueuedSignal};
-use synveda_store::{hierarchy, identities, rls, tenants};
+use synveda_store::{identities, rls, tenants};
+use synveda_types::scope::ScopeKind;
 use synveda_types::{
-    IdentityId, IdentityKind, ObserveEventId, ObserveKind, ScopeId, ScopeKind, TenantId,
-    TenantStatus,
+    IdentityId, IdentityKind, ObserveEventId, ObserveKind, ScopeId, TenantId, TenantStatus,
 };
+
+/// Seeding shape the old hierarchy-create calls had, on the governed
+/// substrate (CPR-7, ADR-0074): caller-chosen id, the old kinds mapped —
+/// `org` is the tenant root, `division`/`department`/`team` are org
+/// units, `user` a principal.
+async fn mk_scope(
+    conn: &mut sqlx::PgConnection,
+    id: synveda_types::ScopeId,
+    tenant: synveda_types::TenantId,
+    parent: Option<synveda_types::ScopeId>,
+    kind: synveda_types::scope::ScopeKind,
+    slug: &str,
+    name: &str,
+) -> synveda_types::scope::Scope {
+    let mut new = new_scope(tenant, parent, kind, slug, name);
+    new.id = id;
+    synveda_store::scopes::create(conn, &new)
+        .await
+        .expect("seed scope")
+}
+
+fn new_scope(
+    tenant: synveda_types::TenantId,
+    parent: Option<synveda_types::ScopeId>,
+    kind: synveda_types::scope::ScopeKind,
+    slug: &str,
+    name: &str,
+) -> synveda_store::scopes::NewScope {
+    synveda_store::scopes::NewScope {
+        id: synveda_types::ScopeId::new(),
+        tenant_id: tenant,
+        kind,
+        parent_scope_id: parent,
+        slug: slug.to_owned(),
+        display_name: name.to_owned(),
+        attributes: serde_json::json!({}),
+        principal_id: None,
+        created_by: None,
+    }
+}
+
+/** A principal scope, which must name its subject (ADR-0073 decision 2). */
+async fn mk_principal_scope(
+    conn: &mut sqlx::PgConnection,
+    tenant: synveda_types::TenantId,
+    parent: Option<synveda_types::ScopeId>,
+    slug: &str,
+    name: &str,
+    subject: &str,
+) -> synveda_types::scope::Scope {
+    let mut new = new_scope(
+        tenant,
+        parent,
+        synveda_types::scope::ScopeKind::Principal,
+        slug,
+        name,
+    );
+    new.principal_id = Some(subject.to_owned());
+    synveda_store::scopes::create(conn, &new)
+        .await
+        .expect("seed principal scope")
+}
 
 /// Serialises the suite: both tests read the one shared queue, and each
 /// purges other suites' accumulated leftovers first.
@@ -72,29 +134,26 @@ async fn stage_one(
     kind: ObserveKind,
 ) -> (ScopeId, IdentityId, ObserveEventId) {
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = mk_scope(
         &mut tx,
         ScopeId::new(),
         tenant,
         None,
-        ScopeKind::Org,
+        ScopeKind::Tenant,
         "acme",
         "ACME",
     )
-    .await
-    .expect("create org");
+    .await;
     let owner = IdentityId::new();
-    let leaf = hierarchy::create(
+    let leaf = mk_principal_scope(
         &mut tx,
-        ScopeId::new(),
         tenant,
         Some(org.id),
-        ScopeKind::User,
         &format!("u-{}", owner.as_uuid().simple()),
         "queue-owner",
+        &format!("queue-owner-{owner}"),
     )
-    .await
-    .expect("create leaf");
+    .await;
     identities::create(
         &mut tx,
         owner,

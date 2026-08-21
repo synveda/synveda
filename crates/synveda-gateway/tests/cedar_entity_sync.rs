@@ -1,17 +1,19 @@
-//! The HIER-3 AC at the product surface (ADR-0017): move a team between
-//! departments and authz decisions reflect it in the same transaction
-//! boundary — the mutating request commits, the unified seam flushes the
-//! chain cache and the entity fragments, and the very next decision is
-//! made against the new hierarchy. Demonstrated twice:
+//! The HIER-3 AC at the product surface (ADR-0017), re-cut onto the scope
+//! substrate (CPR-7, ADR-0074): move an org unit between parents and
+//! authz decisions reflect it in the same transaction boundary — the
+//! mutating request commits, the unified seam flushes the entity
+//! fragments, and the very next decision is made against the new tree.
+//! Demonstrated twice:
 //!
-//! 1. At the HTTP surface: a steward bound at one department moves a
-//!    team out of it, and the steward's own authority over that team is
-//!    gone on the very next request.
+//! 1. At the HTTP surface: an administrator granted at one org unit
+//!    moves a sibling out of it, and the mover's own authority over that
+//!    scope is gone on the very next request.
 //! 2. At the composition seam (`MemoryRead`, what CTX-2/3 will ask): a
-//!    member's department read of the team flips when an admin moves it
-//!    back — chains resolved through the same scope-chain cache the
-//!    handlers use, decisions through the same facade, `standard`'s
-//!    department rule as the probe. Never a PDP bypass (CLAUDE.md).
+//!    member's grant reaches a scope while it lives in the granted
+//!    subtree and stops the moment an admin moves it out — chains
+//!    resolved through the store, decisions through the same embedded
+//!    facade, `standard`'s content-role rule as the probe. Never a PDP
+//!    bypass (CLAUDE.md).
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database); run them locally with
@@ -31,10 +33,12 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
-use synveda_policy::ScopeNode;
-use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD};
-use synveda_store::{rls, role_bindings};
-use synveda_types::{HierarchyNode, Role, ScopeId, Sensitivity, TenantId};
+use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD, ScopeNode};
+use synveda_store::{access, identities, rls, scopes};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::anchor::{AnchorSource, ScopeAnchor};
+use synveda_types::scope::{Scope, ScopeKind};
+use synveda_types::{GrantId, IdentityId, IdentityKind, ScopeId, Sensitivity, TenantId};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"hier-3-test-secret";
@@ -60,7 +64,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: std::time::Duration::from_secs(3600),
         search_index: Arc::new(
             synveda_retrieval::SearchIndex::open(
@@ -102,16 +105,64 @@ async fn admitted_tenant(pool: &PgPool) -> TenantId {
     )
     .await
     .expect("admit tenant");
-    // Seed the admin binding through the store — the CLI's bootstrap
+    // Seed the admin's authority through the store — the CLI's bootstrap
     // path (ADR-0015); enforcement still runs through the PDP.
     let mut tx = rls::begin_tenant_tx(pool, id)
         .await
         .expect("begin tenant tx");
-    role_bindings::bind(&mut *tx, id, ADMIN, None, Role::OrgAdmin)
+    let root = scopes::ensure_tenant_root(&mut tx, id)
         .await
-        .expect("bind admin");
-    tx.commit().await.expect("commit binding");
+        .expect("mint root");
+    grant(&mut tx, id, ADMIN, root.id, RoleKey::Administrator).await;
+    tx.commit().await.expect("commit grant");
     id
+}
+
+/// A direct grant write — the bootstrap shape, silent in the chain.
+async fn grant(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    subject: &str,
+    scope: ScopeId,
+    role: RoleKey,
+) {
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+}
+
+/// One org unit under a parent, seeded through the store.
+async fn unit(tx: &mut sqlx::PgConnection, tenant: TenantId, parent: ScopeId, slug: &str) -> Scope {
+    scopes::create(
+        tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(parent),
+            slug: slug.to_owned(),
+            display_name: slug.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("create org unit")
 }
 
 async fn api(
@@ -149,49 +200,82 @@ async fn api(
     (status, value)
 }
 
-async fn create_node(
-    app: &Router,
-    token: &str,
-    parent: Option<ScopeId>,
-    kind: &str,
-    slug: &str,
-) -> HierarchyNode {
-    let mut body = json!({"kind": kind, "slug": slug, "name": slug});
-    if let Some(parent) = parent {
-        body["parent_id"] = json!(parent);
-    }
-    let (status, node) = api(app, "POST", "/v1/hierarchy/nodes", token, Some(body)).await;
-    assert_eq!(status, StatusCode::CREATED, "create {slug}: {node}");
-    serde_json::from_value(node).expect("hierarchy node")
-}
-
-/// One `MemoryRead` decision for `member` on `target`, with both chains
-/// resolved through the gateway's scope-chain cache — exactly what the
-/// composition engine will feed the facade (ADR-0014 decision 5,
-/// ADR-0016).
+/// One `MemoryRead` decision for `member` on `target`, with the resource
+/// chain, the member's own chain and their anchors resolved from the
+/// store — the inputs the gateway's `gather` assembles for the same
+/// decision (ADR-0073), rebuilt here through public surfaces because the
+/// composition engine will feed the facade exactly this shape.
 async fn member_reads(
     state: &AppState,
     tenant_id: TenantId,
     member: &Principal,
     target: ScopeId,
+    granted: ScopeId,
 ) -> bool {
     let mut conn = state.pool.acquire().await.expect("acquire connection");
-    let scopes = state
-        .scope_chains
-        .resolve(&mut *conn, tenant_id, target)
+    // The resource's chain: the scope and its ancestors, nearest first.
+    let target_scope = scopes::get(&mut *conn, tenant_id, target)
+        .await
+        .expect("read target")
+        .expect("target exists");
+    let mut chain = vec![ScopeNode::from_scope(&target_scope, false)];
+    for ancestor in scopes::ancestors(&mut *conn, tenant_id, target)
         .await
         .expect("resolve resource chain")
-        .expect("resource exists");
-    let principal_scopes = state
-        .scope_chains
-        .resolve(
-            &mut *conn,
-            tenant_id,
-            member.scope_id.expect("member is placed"),
-        )
+    {
+        chain.push(ScopeNode::from_scope(&ancestor, false));
+    }
+    // The member's own chain.
+    let own = scopes::get(
+        &mut *conn,
+        tenant_id,
+        member.scope_id.expect("member has an own scope"),
+    )
+    .await
+    .expect("read own scope")
+    .expect("own scope exists");
+    let mut own_chain = vec![ScopeNode::from_scope(&own, false)];
+    for ancestor in scopes::ancestors(
+        &mut *conn,
+        tenant_id,
+        member.scope_id.expect("member has an own scope"),
+    )
+    .await
+    .expect("resolve own chain")
+    {
+        own_chain.push(ScopeNode::from_scope(&ancestor, false));
+    }
+    // Their anchors: the grant the world wrote for them, and the tenant
+    // root that is always applicable (roles empty there — the resolver's
+    // own shape).
+    let granted_scope = scopes::get(&mut *conn, tenant_id, granted)
         .await
-        .expect("resolve placement chain")
-        .expect("placement exists");
+        .expect("read granted scope")
+        .expect("granted scope exists");
+    let anchors = vec![
+        ScopeAnchor {
+            scope_id: granted_scope.id,
+            kind: granted_scope.kind,
+            parent_scope_id: granted_scope.parent_scope_id,
+            depth: 1,
+            source: AnchorSource::Grant,
+            roles: vec![RoleKey::Member],
+            granted_at: vec![granted_scope.id],
+            via_groups: Vec::new(),
+        },
+        ScopeAnchor {
+            scope_id: granted_scope
+                .parent_scope_id
+                .expect("the grant hangs under the root"),
+            kind: ScopeKind::Tenant,
+            parent_scope_id: None,
+            depth: 0,
+            source: AnchorSource::TenantRoot,
+            roles: Vec::new(),
+            granted_at: Vec::new(),
+            via_groups: Vec::new(),
+        },
+    ];
     state
         .pdp
         .authorize(
@@ -199,8 +283,9 @@ async fn member_reads(
             Action::MemoryRead,
             Resource::Scope(target),
             &AuthzContext {
-                scopes: &ScopeNode::from_hierarchy_chain(&scopes),
-                principal_scopes: &ScopeNode::from_hierarchy_chain(&principal_scopes),
+                scopes: &chain,
+                principal_scopes: &own_chain,
+                anchors: &anchors,
                 default_pack: Some(STANDARD),
                 sensitivity: Some(Sensitivity::WORKING),
                 ..Default::default()
@@ -210,12 +295,12 @@ async fn member_reads(
         .allowed
 }
 
-/// The HIER-3 AC end to end: a team moved between departments is
-/// decided against the new hierarchy on the very next request — the
-/// steward that moved it loses it, and the department read follows the
-/// team home again — with the entity fragments serving the warm calls.
+/// The HIER-3 AC end to end: a scope moved between parents is decided
+/// against the new tree on the very next request — the mover that moved
+/// it loses it, and the granted read follows the scope home again — with
+/// the entity fragments serving the warm calls.
 #[tokio::test]
-async fn a_team_move_governs_the_very_next_decision() {
+async fn a_scope_move_governs_the_very_next_decision() {
     let url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
         Err(_) => {
@@ -237,59 +322,98 @@ async fn a_team_move_governs_the_very_next_decision() {
     let admin = issue(tenant_id, ADMIN);
     let steward = issue(tenant_id, STEWARD);
 
-    let org = create_node(&app, &admin, None, "org", "acme").await;
-    let dept_x = create_node(&app, &admin, Some(org.id), "department", "dept-x").await;
-    let dept_y = create_node(&app, &admin, Some(org.id), "department", "dept-y").await;
-    let team_a = create_node(&app, &admin, Some(dept_x.id), "team", "team-a").await;
-    let team_b = create_node(&app, &admin, Some(dept_x.id), "team", "team-b").await;
-    let alice = create_node(&app, &admin, Some(team_a.id), "user", "alice-user").await;
-
-    // A steward bound at dept-x: authority over exactly that subtree
-    // (ADR-0015 decision 3).
+    // Seed the tree through the store: a root, two org units, and the
+    // scopes the move will carry between them.
     let mut tx = rls::begin_tenant_tx(&pool, tenant_id)
         .await
         .expect("begin tenant tx");
-    role_bindings::bind(&mut *tx, tenant_id, STEWARD, Some(dept_x.id), Role::Steward)
+    let root = scopes::ensure_tenant_root(&mut tx, tenant_id)
         .await
-        .expect("bind steward");
-    tx.commit().await.expect("commit binding");
+        .expect("mint root");
+    let dept_x = unit(&mut tx, tenant_id, root.id, "dept-x").await;
+    let dept_y = unit(&mut tx, tenant_id, root.id, "dept-y").await;
+    let team_b = unit(&mut tx, tenant_id, dept_x.id, "team-b").await;
+    // A member with a grant at dept-x: authority over exactly that
+    // subtree (ADR-0015 decision 3).
+    grant(
+        &mut tx,
+        tenant_id,
+        STEWARD,
+        dept_x.id,
+        RoleKey::Administrator,
+    )
+    .await;
+    grant(&mut tx, tenant_id, "alice", dept_x.id, RoleKey::Member).await;
+    let alice = scopes::ensure_principal_scope(&mut tx, tenant_id, "alice", "Alice")
+        .await
+        .expect("mint alice's scope");
+    identities::create(
+        &mut tx,
+        IdentityId::new(),
+        tenant_id,
+        Some("alice"),
+        IdentityKind::User,
+        None,
+        None,
+        alice.id,
+    )
+    .await
+    .expect("create alice's identity");
+    tx.commit().await.expect("commit fixture");
 
-    // The steward governs team-b while it lives under dept-x.
+    // The mover governs team-b while it lives under dept-x.
     let (status, renamed) = api(
         &app,
         "PATCH",
-        &format!("/v1/hierarchy/nodes/{}", team_b.id),
+        &format!("/v1/admin/scopes/{}", team_b.id),
         &steward,
-        Some(json!({"name": "Payments"})),
+        Some(json!({"display_name": "Payments"})),
     )
     .await;
     assert_eq!(
         status,
         StatusCode::OK,
-        "steward renames own team: {renamed}"
+        "the mover renames a scope in their subtree: {renamed}"
     );
 
-    // The steward moves team-b to dept-y — and that very commit takes
-    // team-b out of the steward's bound subtree.
+    // The mover cannot move it *out*: a move is decided at both ends
+    // (ADR-0074 decision 5), and dept-y is not in their subtree. Holding
+    // one end of a reorganisation is exactly half the authority it needs.
+    let (status, refused) = api(
+        &app,
+        "PATCH",
+        &format!("/v1/admin/scopes/{}", team_b.id),
+        &steward,
+        Some(json!({"parent_scope_id": dept_y.id})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "one end of a move is half the authority: {refused}"
+    );
+
+    // The tenant admin holds both ends, so the move lands — and that very
+    // commit takes team-b out of the steward's granted subtree.
     let (status, moved) = api(
         &app,
         "PATCH",
-        &format!("/v1/hierarchy/nodes/{}", team_b.id),
-        &steward,
-        Some(json!({"parent_id": dept_y.id})),
+        &format!("/v1/admin/scopes/{}", team_b.id),
+        &admin,
+        Some(json!({"parent_scope_id": dept_y.id})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "steward moves team out: {moved}");
+    assert_eq!(status, StatusCode::OK, "the admin moves it out: {moved}");
 
     // The same request that succeeded a moment ago is denied on the
-    // very next call: the decision rides the post-move hierarchy — no
+    // very next call: the decision rides the post-move tree — no
     // refresh interval, no eventual consistency.
     let (status, denied) = api(
         &app,
         "PATCH",
-        &format!("/v1/hierarchy/nodes/{}", team_b.id),
+        &format!("/v1/admin/scopes/{}", team_b.id),
         &steward,
-        Some(json!({"name": "Payments Platform"})),
+        Some(json!({"display_name": "Payments Platform"})),
     )
     .await;
     assert_eq!(
@@ -298,10 +422,10 @@ async fn a_team_move_governs_the_very_next_decision() {
         "the mover's authority must not survive the move: {denied}"
     );
 
-    // The composition seam (`standard`'s department rule): alice sits in
-    // team-a under dept-x; team-b now lives in dept-y, so her
-    // department read of it denies — warm the decision twice so the
-    // repeat serves prebuilt fragments.
+    // The composition seam (`standard`'s content-role rule): alice's
+    // grant is at dept-x; team-b now lives under dept-y, so her read of
+    // it denies — warm the decision twice so the repeat serves prebuilt
+    // fragments.
     let member = Principal {
         tenant_id,
         subject: "alice".to_owned(),
@@ -309,24 +433,24 @@ async fn a_team_move_governs_the_very_next_decision() {
         scope_id: Some(alice.id),
         token_scope: None,
     };
-    assert!(!member_reads(&state, tenant_id, &member, team_b.id).await);
-    assert!(!member_reads(&state, tenant_id, &member, team_b.id).await);
+    assert!(!member_reads(&state, tenant_id, &member, team_b.id, dept_x.id).await);
+    assert!(!member_reads(&state, tenant_id, &member, team_b.id, dept_x.id).await);
 
     // The admin brings team-b home; the handler's unified seam flushes
-    // chains and fragments post-commit (ADR-0017 decision 5), and the
-    // very next decision sees the team back in alice's department.
+    // the entity fragments post-commit (ADR-0017 decision 5), and the
+    // very next decision sees the scope back inside alice's grant.
     let (status, back) = api(
         &app,
         "PATCH",
-        &format!("/v1/hierarchy/nodes/{}", team_b.id),
+        &format!("/v1/admin/scopes/{}", team_b.id),
         &admin,
-        Some(json!({"parent_id": dept_x.id})),
+        Some(json!({"parent_scope_id": dept_x.id})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "admin moves team back: {back}");
+    assert_eq!(status, StatusCode::OK, "admin moves it back: {back}");
     assert!(
-        member_reads(&state, tenant_id, &member, team_b.id).await,
-        "the department read must follow the team on the very next decision"
+        member_reads(&state, tenant_id, &member, team_b.id, dept_x.id).await,
+        "the granted read must follow the scope on the very next decision"
     );
 
     // The entity store carried the warm calls and rebuilt on the moves.

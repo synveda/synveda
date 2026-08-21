@@ -135,6 +135,17 @@ export type AttachRepositoryBody = {
   };
 
 /**
+ * `GET /v1/admin/scopes/{scope_id}/ancestors` — the chain to the tenant
+ * root, nearest first.
+ */
+export type ChainResponse = {
+    /**
+     * The chain or subtree, nearest first.
+     */
+    scopes: ScopeView[];
+  };
+
+/**
  * `POST /v1/admin/groups`.
  */
 export type CreateGroupBody = {
@@ -187,6 +198,36 @@ export type CreateProjectBody = {
     display_name: string;
     /**
      * Workspace-unique handle, same grammar as a workspace slug.
+     */
+    slug: string;
+  };
+
+/**
+ * `POST /v1/admin/scopes` — create a scope under a parent. The tenant
+ * root is minted by the substrate, so `parent_id` is required.
+ */
+export type CreateScopeBody = {
+    /**
+     * Open labelling bag; never an authorisation input.
+     */
+    attributes?: unknown;
+    /**
+     * Display name.
+     */
+    display_name: string;
+    /**
+     * The scope's shape — `org_unit`, `workspace`, `project` or
+     * `principal`. The old rank vocabulary (`org`, `division`,
+     * `department`, `team`, `user`) fails validation by name.
+     */
+    kind: string;
+    /**
+     * The parent. The tenant root is minted by the first thing that needs
+     * a parent and cannot be created here.
+     */
+    parent_id: string;
+    /**
+     * Sibling-unique handle, immutable.
      */
     slug: string;
   };
@@ -452,6 +493,18 @@ export type InviteView = {
   };
 
 /**
+ * One level of the scope tree: the parent the level hangs from, and its
+ * children.
+ */
+export type ListResponse = {
+    parent?: unknown | null | ScopeView;
+    /**
+     * The parent's children, sorted by slug.
+     */
+    scopes: ScopeView[];
+  };
+
+/**
  * Everything a client needs before it renders anything.
  */
 export type MeView = {
@@ -592,6 +645,29 @@ export type OnboardingView = {
      * How many workspaces this caller can see.
      */
     workspace_count: number;
+  };
+
+/**
+ * `PATCH /v1/admin/scopes/{scope_id}` — rename, re-describe, archive or
+ * move. Omitted fields change nothing; a `parent_scope_id` is a move.
+ */
+export type PatchScopeBody = {
+    /**
+     * The new labelling bag, replacing the old one whole.
+     */
+    attributes?: unknown;
+    /**
+     * The new display name.
+     */
+    display_name?: string | null;
+    /**
+     * Naming a parent **moves the scope and its subtree**.
+     */
+    parent_scope_id?: string | null;
+    /**
+     * `active` or `archived`.
+     */
+    status?: string | null;
   };
 
 /**
@@ -745,6 +821,66 @@ export type RepositoryView = {
   };
 
 /**
+ * `GET /v1/admin/scopes/{scope_id}` — the scope and its path.
+ */
+export type ScopeDetail = {
+    /**
+     * The slug chain from the tenant root — display and ordering only.
+     */
+    path: string;
+    /**
+     * The scope itself.
+     */
+    scope: ScopeView;
+  };
+
+/**
+ * One governed scope as the admin surface serves it.
+ */
+export type ScopeView = {
+    /**
+     * The open labelling bag.
+     */
+    attributes: unknown;
+    /**
+     * When the scope was created.
+     */
+    created_at: string;
+    /**
+     * Display name, renameable.
+     */
+    display_name: string;
+    /**
+     * The scope's stable id.
+     */
+    id: string;
+    /**
+     * The scope's shape.
+     */
+    kind: string;
+    /**
+     * Its parent; absent only on the tenant root.
+     */
+    parent_scope_id?: string | null;
+    /**
+     * The subject this scope belongs to, on a `principal`-shaped scope.
+     */
+    principal_id?: string | null;
+    /**
+     * Sibling-unique handle, immutable.
+     */
+    slug: string;
+    /**
+     * `active` or `archived`.
+     */
+    status: string;
+    /**
+     * When the scope last changed.
+     */
+    updated_at: string;
+  };
+
+/**
  * What the caller may do on the **tenant** plane — `whoami`'s block, and
  * since CPR-4 `/v1/me`'s.
  *
@@ -761,25 +897,11 @@ export type TenantCapabilities = {
      */
     actions: Record<string, boolean>;
     /**
-     * `RoleAssign` per role, because it fails closed without
-     * `context.grant`.
-     */
-    role_assign: Record<string, boolean>;
-    /**
-     * The caller's role keys at the **tenant root scope** — the grants that
-     * reach the whole boundary (CPR-6, ADR-0073 decision 5). Separate from
-     * `roles` rather than merged into it because the two are different closed
-     * vocabularies over different trees, and a client that displayed them as
-     * one list would be inventing a translation nothing in this product has.
+     * The caller's role keys at the **tenant root scope** — the grants
+     * that reach the whole boundary (CPR-6, ADR-0073 decision 5; since
+     * the cutover, the only roles there are).
      */
     role_keys: string[];
-    /**
-     * The caller's tenant-wide effective roles. Node bindings are absent
-     * by construction: [`effective_roles_at`] keeps only the tenant-wide
-     * rows for a tenant resource, which is the same rule the decisions
-     * beside it ran under.
-     */
-    roles: string[];
   };
 
 /**
@@ -986,6 +1108,42 @@ export type Operations = {
     readonly method: "PATCH";
     readonly body: UpdateGroupBody;
     readonly response: GroupView;
+  };
+  readonly list_scopes: {
+    readonly path: "/v1/admin/scopes";
+    readonly method: "GET";
+    readonly response: ListResponse;
+  };
+  readonly create_scope: {
+    readonly path: "/v1/admin/scopes";
+    readonly method: "POST";
+    readonly body: CreateScopeBody;
+    readonly response: ScopeView;
+  };
+  readonly get_scope: {
+    readonly path: "/v1/admin/scopes/{scope_id}";
+    readonly method: "GET";
+    readonly response: ScopeDetail;
+  };
+  readonly update_scope: {
+    readonly path: "/v1/admin/scopes/{scope_id}";
+    readonly method: "PATCH";
+    readonly body: PatchScopeBody;
+    readonly response: ScopeView;
+  };
+  readonly list_scope_ancestors: {
+    readonly path: "/v1/admin/scopes/{scope_id}/ancestors";
+    readonly method: "GET";
+    readonly response: ChainResponse;
+  };
+  /**
+   * `GET /v1/admin/scopes/{scope_id}/descendants` — the whole subtree,
+   * nearest first, the scope itself excluded.
+   */
+  readonly list_scope_descendants: {
+    readonly path: "/v1/admin/scopes/{scope_id}/descendants";
+    readonly method: "GET";
+    readonly response: ChainResponse;
   };
   /**
    * `POST /v1/invites/{invite_token}/accept` — redeem one.

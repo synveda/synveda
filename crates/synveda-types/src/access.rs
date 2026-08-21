@@ -787,17 +787,26 @@ mod tests {
     }
 
     #[test]
-    fn the_product_role_vocabulary_and_the_grant_role_vocabulary_are_different_things() {
-        // Two closed vocabularies with two overlapping words. `curator` and
-        // `viewer` appear in both and mean different things — one is a
-        // binding on the old hierarchy, the other a grant on a governed
-        // scope — so nothing may translate between them (ADR-0072
-        // decision 3).
-        let bindings: Vec<&str> = crate::Role::ALL.iter().map(crate::Role::as_str).collect();
+    fn the_grant_role_vocabulary_is_the_one_vocabulary() {
+        // Since CPR-7 deleted the role-binding vocabulary (ADR-0074
+        // decision 6) these six keys are the product's only role words —
+        // asserted so a quietly reintroduced second vocabulary fails here
+        // rather than in a pack.
         let grants: Vec<&str> = RoleKey::ALL.iter().map(RoleKey::as_str).collect();
-        assert_ne!(bindings, grants);
-        assert!(grants.contains(&"owner") && !bindings.contains(&"owner"));
-        assert!(bindings.contains(&"steward") && !grants.contains(&"steward"));
+        assert_eq!(
+            grants,
+            vec![
+                "owner",
+                "member",
+                "viewer",
+                "reviewer",
+                "curator",
+                "administrator"
+            ]
+        );
+        assert!(!grants.contains(&"steward"));
+        assert!(!grants.contains(&"org-admin"));
+        assert!(!grants.contains(&"compliance"));
     }
 
     #[test]

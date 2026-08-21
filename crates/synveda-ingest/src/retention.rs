@@ -40,9 +40,11 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 use sqlx::PgPool;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
-use synveda_policy::{AuthzContext, Pdp, Resource, ScopeNode};
+use synveda_policy::{AuthzContext, Pdp, Resource};
 use synveda_store::retention::{self, DueRecord};
-use synveda_store::{ScopeChainCache, hierarchy, policy_assignments, rls, tenants};
+use synveda_store::{policy_assignments, rls, scopes, tenants};
+
+use crate::chain::scope_chain as resolve_scope_chain;
 use synveda_types::{
     Error, RecordClass, RecordId, Result, RetentionConfig, ScopeId, Sensitivity, TenantId,
 };
@@ -91,9 +93,6 @@ pub struct SweepDeps {
     /// retention answers "does this still exist", which is not an access
     /// question (ADR-0040 compliance notes).
     pub pdp: Arc<Pdp>,
-    /// The gateway's scope-chain cache — pass a clone of the gateway's
-    /// `Arc`, never a fresh cache, or hierarchy moves are lost.
-    pub chains: Arc<ScopeChainCache>,
 }
 
 /// What one pass did, across every tenant.
@@ -173,7 +172,7 @@ pub async fn run_tenant(
         // not per hierarchy node — a tenant with 10,000 scopes and records
         // at three of them resolves three packs.
         let scopes = retention::populated_scopes(&mut *tx, tenant_id).await?;
-        let root = hierarchy::root(&mut *tx, tenant_id).await?;
+        let root = scopes::tenant_root(&mut *tx, tenant_id).await?;
         let holds_history = retention::holds_closed_versions(&mut *tx, tenant_id).await?;
         let holds_staging = retention::holds_staging(&mut *tx, tenant_id).await?;
         tx.rollback().await.map_err(|err| Error::Storage {
@@ -206,7 +205,7 @@ pub async fn run_tenant(
     // The root's pack governs the staging plane and stands in for scopes
     // whose live records have all gone (ADR-0040 decision 10).
     let Some(root) = root else {
-        // A tenant with no hierarchy has nothing placed and nothing to
+        // A tenant with no root scope has nothing placed and nothing to
         // resolve a pack against. Nothing to do, and nothing wrong.
         return Ok(pass);
     };
@@ -274,25 +273,23 @@ async fn effective_retention(
     tenant_id: TenantId,
     scope_id: ScopeId,
 ) -> Result<RetentionConfig> {
-    let Some(chain) = deps.chains.resolve(&mut *conn, tenant_id, scope_id).await? else {
+    let chain = resolve_scope_chain(&mut *conn, tenant_id, scope_id).await?;
+    if chain.is_empty() {
         // A scope deleted since the work list was taken takes its
         // material's schedule with it; the next pass will not see it.
         return Ok(RetentionConfig::OFF);
-    };
+    }
     let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
     let assignments = policy_assignments::for_scopes(&mut *conn, tenant_id, &chain_ids).await?;
     let default_pack = policy_assignments::default_pack(&mut *conn, tenant_id).await?;
-    let chain_nodes = ScopeNode::from_hierarchy_chain(&chain);
     let context = AuthzContext {
-        scopes: &chain_nodes,
+        scopes: &chain,
         principal_scopes: &[],
         anchors: &[],
         groups: &[],
         resources: &[],
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
-        role_bindings: &[],
-        grant: None,
         sensitivity: Some(Sensitivity::WORKING),
         lapses: &[],
     };

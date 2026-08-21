@@ -22,8 +22,8 @@ use cedar_policy::{
 use synveda_types::access::{RoleKey, inherits_into};
 use synveda_types::{
     ApprovalMatrix, CompositionConfig, DedupConfig, Error, Lapse, LapseAction, LapseConfig,
-    MoverConfig, PackConfig, PromotionConfig, RedactionConfig, Result, RetentionConfig, Role,
-    ScopeId, Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId,
+    MoverConfig, PackConfig, PromotionConfig, RedactionConfig, Result, RetentionConfig, ScopeId,
+    Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId,
 };
 
 use synveda_types::scope::ScopeKind;
@@ -110,11 +110,29 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// default stopped reading `principal.department`, which is gone: it now
 /// shares within `principal.anchors`, the scopes a grant actually reaches this
 /// caller at, so the default follows what somebody was given rather than where
-/// an org chart put them.
+/// an org chart put them. `@18`: CPR-7 finished the cut (ADR-0074). The
+/// binding vocabulary left every role list — `steward`, `org-admin`,
+/// `auditor`, `contributor`, `security-reviewer` and `compliance` are
+/// gone, and the six grant keys are the whole of `context.roles` — and
+/// the `Hierarchy*` actions became `ScopeCreate`/`ScopeRead`/
+/// `ScopeUpdate` (no delete: retiring a scope is a status transition).
+/// The base layer lost the role-binding escalation guard with the action
+/// it guarded. No permit changed who it lets in beyond that rename: the
+/// keys these packs already named since `@17` are the keys that remain.
+/// Four rules did move, and each is a hole the re-vocabulary opened rather
+/// than a widening anybody wanted: the approval matrix's SHARED cell got
+/// the **tenant root** back (it fell out of both cells and made the widest
+/// publication in the tenant the cheapest one); `DirectoryManage` and
+/// `DirectorySealAuthorise` got `administrator` back (the old `org-admin`
+/// was mapped to `owner` alone, which locked every directory operator
+/// out); `ProposalOpen`'s membership floor climbs by `principal.ambit`
+/// (ADR-0074 decision 8 — anchors are not entity parents, so
+/// `principal in resource` no longer reached the scope above); and the
+/// quarantine review plane decides at the tenant (decision 7).
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 17),
-    (STANDARD, 17),
-    (OPEN_COLLABORATION, 17),
+    (REGULATED_STRICT, 18),
+    (STANDARD, 18),
+    (OPEN_COLLABORATION, 18),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -669,7 +687,7 @@ impl Pdp {
     ) -> Result<PermittedTiers> {
         let resource = Resource::Scope(scope_id);
         let (pack, origin) = self.resolve_pack(principal.tenant_id, resource, context, false);
-        let roles = effective_roles(principal, resource, context);
+        let roles = effective_roles(resource, context);
         let mut memory = Vec::with_capacity(Sensitivity::ALL.len());
         let mut context_pack = Vec::with_capacity(Sensitivity::ALL.len());
         let mut skill = Vec::with_capacity(Sensitivity::ALL.len());
@@ -734,7 +752,7 @@ impl Pdp {
         // custom pack cannot seal its own node against reassignment.
         let skip_self = action == Action::PolicyAssign;
         let (pack, origin) = self.resolve_pack(principal.tenant_id, resource, context, skip_self);
-        let roles = effective_roles(principal, resource, context);
+        let roles = effective_roles(resource, context);
         let owned;
         let entities = match batch {
             Some(batch) => &batch.entities,
@@ -780,7 +798,6 @@ impl Pdp {
             resource,
             roles,
             RequestContext {
-                grant: context.grant,
                 lapsed: !lapsed.is_empty(),
                 sensitivity: context.sensitivity,
             },
@@ -1337,9 +1354,7 @@ impl Pdp {
     }
 
     /// Builds the schema-checked request, `context.roles` included
-    /// (ADR-0015 decision 3). `RoleAssign` additionally requires the
-    /// grant role (`context.grant`): absent, the request cannot be built
-    /// and the decision fails closed (decision 5).
+    /// (ADR-0015 decision 3).
     fn request(
         &self,
         principal: &Principal,
@@ -1349,7 +1364,6 @@ impl Pdp {
         extras: RequestContext,
     ) -> Result<Request> {
         let RequestContext {
-            grant,
             lapsed,
             sensitivity,
         } = extras;
@@ -1371,21 +1385,12 @@ impl Pdp {
                     .map(|role| RestrictedExpression::new_string((*role).to_owned())),
             ),
         )];
-        if action == Action::RoleAssign {
-            let grant = grant.ok_or_else(|| Error::Internal {
-                message: "RoleAssign decided without the grant role in context".to_owned(),
-            })?;
-            pairs.push((
-                "grant".to_owned(),
-                RestrictedExpression::new_string(grant.as_str().to_owned()),
-            ));
-        }
         if action == Action::MemoryRead {
-            // Both required by the schema, exactly like `grant` on
-            // RoleAssign and for the same reason: a missing attribute makes
-            // the base layer's lapse permit — and, since AUTHZ-5, its
-            // `restricted` forbid — error, and Cedar drops a policy that
-            // errors (ADR-0015 decision 5's shape, ADR-0037 decision 9,
+            // Both required by the schema, and for the reason a required
+            // attribute always is: a missing attribute makes the base
+            // layer's lapse permit — and, since AUTHZ-5, its `restricted`
+            // forbid — error, and Cedar drops a policy that errors
+            // (ADR-0015 decision 5's shape, ADR-0037 decision 9,
             // ADR-0038 decision 2).
             pairs.push(("lapsed".to_owned(), RestrictedExpression::new_bool(lapsed)));
         }
@@ -1448,62 +1453,19 @@ impl Pdp {
         Ok(EntityUid::from_type_name_and_id(type_name.clone(), eid))
     }
 }
-
 /// The per-action context attributes, resolved by the PDP rather than
-/// supplied: which role a `RoleAssign` grants (ADR-0015 decision 5),
-/// whether a standing lapse covers a `MemoryRead` (ADR-0037 decision 9),
-/// and which tier that read is asking about (ADR-0038 decision 2).
+/// supplied: whether a standing lapse covers a `MemoryRead` (ADR-0037
+/// decision 9), and which tier that read is asking about (ADR-0038
+/// decision 2).
 ///
-/// One struct rather than three parameters because they arrive together and
+/// A struct rather than two parameters because they arrive together and
 /// are set together — and because the schema requires each of them for its
 /// action, so a caller that forgets one gets a build error rather than a
 /// dropped policy.
 #[derive(Debug, Clone, Copy)]
 struct RequestContext {
-    grant: Option<Role>,
     lapsed: bool,
     sensitivity: Option<Sensitivity>,
-}
-
-/// The principal's effective **legacy** roles at the resource (AUTHZ-3,
-/// ADR-0015 decision 3): tenant-wide bindings always, node bindings when the
-/// bound node is on the resource's chain. For a tenant resource the chain is
-/// empty, so only tenant-wide bindings apply — a root-scoped steward manages
-/// nodes, never the tenant plane. Foreign-tenant rows are dropped defensively
-/// (the store's RLS already makes them unrepresentable). Sorted for a
-/// deterministic decision log.
-///
-/// Public because FLOW-3 records the roles an approval counted under
-/// (ADR-0032 decision 5), and that set has to be *the same* set the
-/// `ProposalReview` decision weighed — one implementation, so the two can
-/// never drift into disagreeing about who held what.
-///
-/// This is the vocabulary of the hierarchy the programme has not deleted yet.
-/// The governed scope model's answer is [`effective_role_keys_at`], and the
-/// two are unioned into `context.roles` by [`effective_roles`].
-#[must_use]
-pub fn effective_roles_at(
-    principal: &Principal,
-    resource: Resource,
-    context: &AuthzContext<'_>,
-) -> Vec<Role> {
-    let chain: HashSet<ScopeId> = match resource {
-        Resource::Tenant(_) | Resource::Group(_) => HashSet::new(),
-        _ => context.scopes.iter().map(|node| node.id).collect(),
-    };
-    let mut roles: Vec<Role> = context
-        .role_bindings
-        .iter()
-        .filter(|binding| binding.tenant_id == principal.tenant_id)
-        .filter(|binding| match binding.scope_id {
-            None => true,
-            Some(scope) => chain.contains(&scope),
-        })
-        .map(|binding| binding.role)
-        .collect();
-    roles.sort_unstable();
-    roles.dedup();
-    roles
 }
 
 /// The principal's effective **role keys** at the resource (CPR-6, ADR-0073
@@ -1566,32 +1528,18 @@ pub fn effective_role_keys_at(resource: Resource, context: &AuthzContext<'_>) ->
     keys
 }
 
-/// `context.roles`: both vocabularies, as one set of strings.
+/// `context.roles`: the grant keys in force at the resource, as one set of
+/// strings.
 ///
-/// The two closed vocabularies coexist while both scope trees do — a
-/// [`Role`] binds on the old hierarchy, a [`RoleKey`] is granted on a governed
-/// scope — and they meet here because a Cedar `Set<String>` is what a pack
-/// reads. They cannot be confused into widening each other, and the reason is
-/// structural rather than careful naming: the two trees are disjoint, so an
-/// anchor's scope id is never a node of a hierarchy chain and a node binding
-/// is never at a governed scope. What *does* reach both is a tenant-wide
-/// binding and a tenant-root grant, and the overlap there — `viewer` and
-/// `curator`, the two words both vocabularies use — is priced identically by
-/// every shipped pack.
-fn effective_roles(
-    principal: &Principal,
-    resource: Resource,
-    context: &AuthzContext<'_>,
-) -> Vec<&'static str> {
-    let mut roles: Vec<&'static str> = effective_roles_at(principal, resource, context)
+/// These are the six role keys of the access plane and nothing else — a
+/// Cedar `Set<String>` is what a pack reads, and since the cutover there is
+/// one vocabulary and one tree (CPR-7, ADR-0074 decision 1). The words the
+/// old hierarchy's bindings used are gone with it.
+fn effective_roles(resource: Resource, context: &AuthzContext<'_>) -> Vec<&'static str> {
+    let mut roles: Vec<&'static str> = effective_role_keys_at(resource, context)
         .into_iter()
-        .map(|role| role.as_str())
+        .map(|key| key.as_str())
         .collect();
-    roles.extend(
-        effective_role_keys_at(resource, context)
-            .into_iter()
-            .map(|key| key.as_str()),
-    );
     roles.sort_unstable();
     roles.dedup();
     roles

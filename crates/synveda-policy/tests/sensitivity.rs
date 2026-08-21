@@ -22,34 +22,33 @@
 //! ```
 
 use chrono::{TimeDelta, Utc};
-use synveda_policy::ScopeNode;
 use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
+    ScopeNode,
 };
 use synveda_types::access::RoleKey;
 use synveda_types::anchor::{AnchorSource, ScopeAnchor};
+use synveda_types::scope::ScopeKind;
 use synveda_types::{
-    HierarchyNode, IdentityId, Lapse, LapseAction, LapseId, PolicyAssignment, ProposalId, Role,
-    RoleBinding, ScopeId, ScopeKind, Sensitivity, TenantId,
+    IdentityId, Lapse, LapseAction, LapseId, PolicyAssignment, ProposalId, ScopeId, Sensitivity,
+    TenantId,
 };
 
 struct Fixture {
     tenant: TenantId,
-    nodes: Vec<HierarchyNode>,
+    nodes: Vec<ScopeNode>,
 }
 
 impl Fixture {
-    fn node(&self, slug: &str) -> &HierarchyNode {
+    fn node(&self, slug: &str) -> &ScopeNode {
         self.nodes
             .iter()
             .find(|node| node.slug == slug)
             .unwrap_or_else(|| panic!("fixture has no node {slug}"))
     }
 
-    /// The chain the PDP takes: the old hierarchy's rows projected onto
-    /// the shape vocabulary at the caller's edge (CPR-6, ADR-0073
-    /// decision 1). The fixture still holds `HierarchyNode`s because the
-    /// hierarchy plane still exists; nothing below this line does.
+    /// The chain the PDP takes — governed scopes, nearest first (CPR-7,
+    /// ADR-0074: one tree, no projection).
     fn chain(&self, slug: &str) -> Vec<ScopeNode> {
         let mut chain = vec![self.node(slug).clone()];
         let mut current = chain[0].parent_id;
@@ -62,7 +61,7 @@ impl Fixture {
             current = parent.parent_id;
             chain.push(parent.clone());
         }
-        chain.iter().map(ScopeNode::from_hierarchy).collect()
+        chain
     }
 
     fn assignment(&self, slug: &str, pack: &str) -> PolicyAssignment {
@@ -74,6 +73,23 @@ impl Fixture {
         }
     }
 
+    /// A grant standing over this caller at `slug`, carrying `roles`
+    /// (CPR-6; since the cutover the only way a test can give anybody a
+    /// role — CPR-7, ADR-0074).
+    fn anchor(&self, slug: &str, roles: &[RoleKey]) -> ScopeAnchor {
+        let node = self.node(slug);
+        ScopeAnchor {
+            scope_id: node.id,
+            kind: node.kind,
+            parent_scope_id: node.parent_id,
+            depth: 0,
+            source: AnchorSource::Grant,
+            roles: roles.to_vec(),
+            granted_at: vec![node.id],
+            via_groups: Vec::new(),
+        }
+    }
+
     fn placed(&self, subject: &str, slug: &str) -> Principal {
         Principal {
             tenant_id: self.tenant,
@@ -81,16 +97,6 @@ impl Fixture {
             quarantined: false,
             scope_id: Some(self.node(slug).id),
             token_scope: None,
-        }
-    }
-
-    fn binding(&self, subject: &str, slug: &str, role: Role) -> RoleBinding {
-        RoleBinding {
-            tenant_id: self.tenant,
-            subject: subject.to_owned(),
-            scope_id: Some(self.node(slug).id),
-            role,
-            updated_at: Utc::now(),
         }
     }
 
@@ -121,31 +127,27 @@ impl Fixture {
 fn fixture() -> Fixture {
     let tenant = TenantId::new();
     let mut nodes = Vec::new();
-    let mut add = |parent: Option<ScopeId>, kind: ScopeKind, slug: &str, depth: i32| -> ScopeId {
+    let mut add = |parent: Option<ScopeId>, kind: ScopeKind, slug: &str, _depth: i32| -> ScopeId {
         let id = ScopeId::new();
-        nodes.push(HierarchyNode {
+        nodes.push(ScopeNode {
             id,
             tenant_id: tenant,
             parent_id: parent,
             kind,
             slug: slug.to_owned(),
-            name: slug.to_owned(),
-            depth,
-            path: slug.to_owned(),
             sealed: false,
-            created_at: Utc::now(),
         });
         id
     };
-    let org = add(None, ScopeKind::Org, "org", 0);
-    let eng = add(Some(org), ScopeKind::Department, "eng", 1);
-    let sales = add(Some(org), ScopeKind::Department, "sales", 1);
-    let team_a = add(Some(eng), ScopeKind::Team, "team-a", 2);
-    let team_b = add(Some(eng), ScopeKind::Team, "team-b", 2);
-    let team_c = add(Some(sales), ScopeKind::Team, "team-c", 2);
-    add(Some(team_a), ScopeKind::User, "alice-user", 3);
-    add(Some(team_b), ScopeKind::User, "carol-user", 3);
-    add(Some(team_c), ScopeKind::User, "dave-user", 3);
+    let org = add(None, ScopeKind::Tenant, "org", 0);
+    let eng = add(Some(org), ScopeKind::OrgUnit, "eng", 1);
+    let sales = add(Some(org), ScopeKind::OrgUnit, "sales", 1);
+    let team_a = add(Some(eng), ScopeKind::OrgUnit, "team-a", 2);
+    let team_b = add(Some(eng), ScopeKind::OrgUnit, "team-b", 2);
+    let team_c = add(Some(sales), ScopeKind::OrgUnit, "team-c", 2);
+    add(Some(team_a), ScopeKind::Principal, "alice-user", 3);
+    add(Some(team_b), ScopeKind::Principal, "carol-user", 3);
+    add(Some(team_c), ScopeKind::Principal, "dave-user", 3);
     Fixture { tenant, nodes }
 }
 
@@ -156,7 +158,6 @@ struct Ask<'a> {
     target: &'a str,
     sensitivity: Sensitivity,
     assignments: &'a [PolicyAssignment],
-    bindings: &'a [RoleBinding],
     /// The governed-scope grants standing over this caller (CPR-6, ADR-0073).
     /// Empty for every ask about the old hierarchy; `standard`'s sharing
     /// default reads them, because that is what it shares by.
@@ -176,7 +177,6 @@ fn read(pdp: &Pdp, fx: &Fixture, ask: &Ask<'_>) -> bool {
             principal_scopes: &principal_scopes,
             anchors: ask.anchors,
             assignments: ask.assignments,
-            role_bindings: ask.bindings,
             lapses: ask.lapses,
             sensitivity: Some(ask.sensitivity),
             ..Default::default()
@@ -216,7 +216,6 @@ fn ask<'a>(
         target,
         sensitivity: Sensitivity::Internal,
         assignments,
-        bindings: &[],
         anchors: &[],
         lapses: &[],
     }
@@ -250,7 +249,7 @@ fn an_explicit_content_role_binding_is_what_reaches_confidential() {
     let fx = fixture();
     let alice = fx.placed("alice", "alice-user");
     let assignments = [fx.assignment("org", REGULATED_STRICT)];
-    let bound = [fx.binding("alice", "team-b", Role::Contributor)];
+    let bound = [fx.anchor("team-b", &[RoleKey::Member])];
 
     // Without the binding, team-b is closed at every tier.
     assert!(
@@ -268,7 +267,7 @@ fn an_explicit_content_role_binding_is_what_reaches_confidential() {
             &pdp,
             &fx,
             &Ask {
-                bindings: &bound,
+                anchors: &bound,
                 ..ask(&alice, "alice-user", "team-b", &assignments)
             }
         ),
@@ -327,14 +326,10 @@ fn restricted_is_denied_under_every_pack_at_every_scope_including_your_own() {
     let pdp = Pdp::new().expect("build pdp");
     let fx = fixture();
     let alice = fx.placed("alice", "alice-user");
-    let every_role = [
-        fx.binding("alice", "org", Role::Curator),
-        fx.binding("alice", "org", Role::Steward),
-        fx.binding("alice", "org", Role::OrgAdmin),
-        fx.binding("alice", "org", Role::Compliance),
-        fx.binding("alice", "org", Role::SecurityReviewer),
-        fx.binding("alice", "org", Role::Auditor),
-    ];
+    let every_role = [fx.anchor(
+        "org",
+        &[RoleKey::Curator, RoleKey::Reviewer, RoleKey::Administrator],
+    )];
 
     for pack in [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION] {
         let assignments = [fx.assignment("org", pack)];
@@ -345,7 +340,7 @@ fn restricted_is_denied_under_every_pack_at_every_scope_including_your_own() {
                     &fx,
                     &Ask {
                         sensitivity: Sensitivity::Restricted,
-                        bindings: &every_role,
+                        anchors: &every_role,
                         ..ask(&alice, "alice-user", target, &assignments)
                     }
                 ),
@@ -470,7 +465,7 @@ fn standard_shares_what_you_hold_at_the_working_tiers_only() {
         scope_id: team_a.id,
         kind: synveda_types::scope::ScopeKind::Workspace,
         parent_scope_id: team_a.parent_id,
-        depth: 2,
+        depth: 0,
         source: AnchorSource::Grant,
         roles: vec![RoleKey::Member],
         granted_at: vec![team_a.id],
@@ -494,7 +489,7 @@ fn standard_shares_what_you_hold_at_the_working_tiers_only() {
             &pdp,
             &fx,
             &Ask {
-                bindings: &[fx.binding("alice", "team-b", Role::Curator)],
+                anchors: &[fx.anchor("team-b", &[RoleKey::Curator])],
                 ..ask(&alice, "alice-user", "team-b", &assignments)
             }
         ),
@@ -629,8 +624,8 @@ fn the_prompt_plane_mirrors_the_memory_plane_and_stops_below_restricted() {
                     &AuthzContext {
                         scopes: &scopes,
                         principal_scopes: &principal_scopes,
+                        anchors: ask.anchors,
                         assignments: ask.assignments,
-                        role_bindings: ask.bindings,
                         lapses: ask.lapses,
                         sensitivity: Some(*tier),
                         ..Default::default()
@@ -644,19 +639,19 @@ fn the_prompt_plane_mirrors_the_memory_plane_and_stops_below_restricted() {
 
     for pack in [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION] {
         let assignments = [fx.assignment("org", pack)];
-        let binding = [fx.binding("alice", "eng", Role::Viewer)];
+        let grant = [fx.anchor("eng", &[RoleKey::Viewer])];
         for target in ["alice-user", "team-a", "eng", "org", "team-b", "team-c"] {
-            for bindings in [&[][..], &binding[..]] {
+            for anchors in [&[][..], &grant[..]] {
                 let asking = Ask {
-                    bindings,
+                    anchors,
                     ..ask(&alice, "alice-user", target, &assignments)
                 };
                 assert_eq!(
                     prompt_tiers(&asking),
                     tiers(&pdp, &fx, &asking),
                     "{pack}: the prompt and memory planes disagree at {target} \
-                     (bindings: {})",
-                    bindings.len()
+                     (anchors: {})",
+                    anchors.len()
                 );
             }
         }
@@ -666,22 +661,21 @@ fn the_prompt_plane_mirrors_the_memory_plane_and_stops_below_restricted() {
     // scope, for a principal holding every content role — including her own
     // home, which is the one place a prompt's author might expect an
     // exception and does not get one.
-    let every_role: Vec<RoleBinding> = [
-        Role::Viewer,
-        Role::Contributor,
-        Role::Curator,
-        Role::Steward,
-        Role::OrgAdmin,
-        Role::Compliance,
-    ]
-    .into_iter()
-    .map(|role| fx.binding("alice", "org", role))
-    .collect();
+    let every_role = [fx.anchor(
+        "org",
+        &[
+            RoleKey::Viewer,
+            RoleKey::Member,
+            RoleKey::Curator,
+            RoleKey::Reviewer,
+            RoleKey::Administrator,
+        ],
+    )];
     for pack in [REGULATED_STRICT, STANDARD, OPEN_COLLABORATION] {
         let assignments = [fx.assignment("org", pack)];
         for target in ["alice-user", "team-a", "eng", "org"] {
             let asking = Ask {
-                bindings: &every_role,
+                anchors: &every_role,
                 sensitivity: Sensitivity::Restricted,
                 ..ask(&alice, "alice-user", target, &assignments)
             };

@@ -1,9 +1,8 @@
 /**
  * The console's half of the explorer parity corpus (CNSL-2, ADR-0058
- * decision 10).
+ * decision 10; the scope re-cut CPR-7).
  *
- * The same four payloads the CLI answers in
- * `crates/synveda-cli/src/hierarchy.rs`, recorded from the real gateway by
+ * The same payloads the gateway answers, recorded from the real gateway by
  * `crates/synveda-gateway/tests/explorer.rs`. Two renderers that agree on
  * the day they are written is not parity; it is a coincidence with a
  * maintenance schedule, and this is what makes the divergence fail a test.
@@ -34,7 +33,6 @@ import {
   mayRead,
   deniedCount,
   type Capabilities,
-  type EffectiveBindings,
   type EffectivePack,
   type LapseListing,
 } from "./explorer.mjs";
@@ -42,7 +40,6 @@ import { toText } from "./text.mjs";
 
 const CASES = [
   "pack-inherited",
-  "roles-mixed-origins",
   "capabilities-with-denial",
   "lapses-standing-and-ended",
 ] as const;
@@ -78,24 +75,6 @@ function render(name: string, asked: string, payload: unknown): string {
             </strong>{" "}
             <span>{describeOrigin(pack.origin, asked)}</span>
           </p>,
-        ),
-      );
-    }
-    case "roles-mixed-origins": {
-      const view = payload as EffectiveBindings;
-      return toText(
-        renderToStaticMarkup(
-          <table>
-            <tbody>
-              {view.bindings.map((binding, index) => (
-                <tr key={index}>
-                  <td>{binding.role}</td>
-                  <td>{binding.subject}</td>
-                  <td>{describeOrigin(binding.origin, asked)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>,
         ),
       );
     }

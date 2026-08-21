@@ -5,6 +5,16 @@
 - **Feature(s)**: AUTHZ-3
 - **Deciders**: sujitn
 
+> **Superseded by ADR-0074 (CPR-7, 2026-08-20).** `role_bindings`, the
+> eight-role vocabulary and `/v1/roles/*` are deleted. Authority is a
+> **grant** of one of six role keys at a governed scope, inherited by that
+> scope's subtree (ADR-0072) and resolved into `context.roles` by the anchor
+> model (ADR-0073). Two of this ADR's decisions survive on the new noun:
+> decision 3 (roles are decision *context*, never a second decision point)
+> and decision 6 (the `synveda-admins` convention, now upserting an
+> `administrator` grant at the tenant root). Decision 5's escalation guard
+> went with the action it guarded.
+
 ## Context
 
 AUTHZ-3 lands the product's roles (seed §5): `viewer`, `contributor`,

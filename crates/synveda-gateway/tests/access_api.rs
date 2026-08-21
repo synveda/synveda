@@ -26,7 +26,8 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
-use synveda_types::{Role, TenantId};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::{GrantId, TenantId};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"cpr-5-access-test-secret";
@@ -68,7 +69,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(
             synveda_retrieval::SearchIndex::open(
@@ -130,10 +130,27 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
     let mut tx = synveda_store::rls::begin_tenant_tx(&pool, id)
         .await
         .expect("begin tenant tx");
-    synveda_store::role_bindings::bind(&mut *tx, id, ADMIN, None, Role::OrgAdmin)
+    let root = synveda_store::scopes::ensure_tenant_root(&mut tx, id)
         .await
-        .expect("bind admin");
-    tx.commit().await.expect("commit binding");
+        .expect("mint root");
+    synveda_store::access::create_grant(
+        &mut *tx,
+        &synveda_store::access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: id,
+            scope_id: root.id,
+            subject: GrantSubject::Principal {
+                principal_id: ADMIN.to_owned(),
+            },
+            role_key: RoleKey::Administrator,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant administrator at the root");
+    tx.commit().await.expect("commit grant");
     pool.close().await;
     Some((state(&url), id))
 }
@@ -253,16 +270,33 @@ async fn creating_a_workspace_makes_its_creator_the_owner() {
     .await;
     assert_eq!(status, StatusCode::OK, "{members}");
     let list = members["members"].as_array().expect("members");
-    assert_eq!(list.len(), 1, "{members}");
-    assert_eq!(list[0]["principal_id"], ADMIN);
-    assert_eq!(list[0]["role"], "owner");
+    // Exactly one grant is *written here*, and it is the creator's. The
+    // harness's bootstrap `administrator` at the tenant root shows up too
+    // and must show up marked `inherited` — a member list that hid it
+    // would be hiding real authority over the workspace.
+    let here: Vec<_> = list.iter().filter(|m| m["inherited"] == false).collect();
     assert_eq!(
-        list[0]["source"], "owner",
+        here.len(),
+        1,
+        "one grant written at the workspace: {members}"
+    );
+    assert_eq!(here[0]["principal_id"], ADMIN);
+    assert_eq!(here[0]["role"], "owner");
+    assert_eq!(
+        here[0]["source"], "owner",
         "the one source no route hands out"
     );
-    assert_eq!(list[0]["inherited"], false);
+    assert_eq!(list[0]["inherited"], false, "nearest first");
+    assert!(
+        list.iter().any(|m| m["inherited"] == true
+            && m["role"] == "administrator"
+            && m["source"] == "automation"),
+        "the tenant root's bootstrap grant reaches the workspace: {members}"
+    );
 
-    // The project has its own owner grant *and* inherits the workspace's.
+    // The project has its own owner grant *and* inherits both the
+    // workspace's owner and the root's administrator — with no row written
+    // at the project for either.
     let (status, members) = call(
         &app,
         "GET",
@@ -276,11 +310,14 @@ async fn creating_a_workspace_makes_its_creator_the_owner() {
     let list = members["members"].as_array().expect("members");
     assert_eq!(
         list.len(),
-        2,
-        "own owner grant plus the inherited one: {members}"
+        3,
+        "own owner grant plus the two inherited ones: {members}"
     );
     assert_eq!(list[0]["inherited"], false, "nearest first");
-    assert_eq!(list[1]["inherited"], true);
+    assert!(
+        list[1..].iter().all(|m| m["inherited"] == true),
+        "everything above the project is inherited: {members}"
+    );
 
     let actions = chain_actions(&state, tenant_id).await;
     assert_eq!(
@@ -1352,13 +1389,28 @@ async fn a_replay_still_takes_the_pdp_decision() {
     .await;
     assert_eq!(first, StatusCode::CREATED);
 
-    // The binding goes away between the two calls.
+    // The grant goes away between the two calls.
     let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
         .await
         .expect("begin");
-    synveda_store::role_bindings::unbind(&mut *tx, tenant_id, ADMIN, None, Role::OrgAdmin)
+    let grants = synveda_store::access::list_grants(
+        &mut *tx,
+        tenant_id,
+        &synveda_store::access::GrantFilter {
+            scope_id: None,
+            principal_id: Some(ADMIN.to_owned()),
+        },
+    )
+    .await
+    .expect("list grants");
+    let grant_id = grants
+        .iter()
+        .find(|grant| grant.role_key == RoleKey::Administrator)
+        .map(|grant| grant.id)
+        .expect("the admin grant");
+    synveda_store::access::revoke_grant(&mut tx, tenant_id, grant_id)
         .await
-        .expect("unbind");
+        .expect("revoke");
     tx.commit().await.expect("commit");
 
     let (replay, response) = call(

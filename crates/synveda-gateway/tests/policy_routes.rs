@@ -25,8 +25,9 @@ use synveda_gateway::app::{AppState, router};
 use synveda_gateway::{authz, telemetry};
 use synveda_identity::Hs256Verifier;
 use synveda_policy::{Pdp, REGULATED_STRICT};
-use synveda_store::{policy_packs, rls, role_bindings};
-use synveda_types::{PackConfig, Role, TenantId};
+use synveda_store::{access, policy_packs, rls, scopes};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::{GrantId, PackConfig, TenantId};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"authz-2-test-secret";
@@ -35,7 +36,7 @@ const SECRET: &[u8] = b"authz-2-test-secret";
 const FROZEN_PACK: &str = r#"
 permit (
     principal,
-    action == Synveda::Action::"HierarchyRead",
+    action == Synveda::Action::"ScopeRead",
     resource
 ) when { resource in principal.tenant };
 "#;
@@ -64,7 +65,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: std::time::Duration::from_secs(3600),
         search_index: Arc::new(
             synveda_retrieval::SearchIndex::open(
@@ -107,16 +107,33 @@ async fn admitted_tenant(pool: &PgPool, label: &str) -> TenantId {
     .await
     .expect("admit tenant");
     // Since AUTHZ-3 the policy admin plane requires a role (ADR-0015):
-    // seed a tenant-wide org-admin binding for the dev test subject
-    // through the store — the CLI's bootstrap path. Enforcement still
-    // runs through the PDP with this row as data.
+    // seed an `administrator` grant at the tenant root for the dev test
+    // subject through the store — the CLI's bootstrap path. Enforcement
+    // still runs through the PDP with this row as data.
     let mut tx = rls::begin_tenant_tx(pool, id)
         .await
         .expect("begin tenant tx");
-    role_bindings::bind(&mut *tx, id, "authz2-admin", None, Role::OrgAdmin)
+    let root = scopes::ensure_tenant_root(&mut tx, id)
         .await
-        .expect("bind admin");
-    tx.commit().await.expect("commit binding");
+        .expect("mint root");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: id,
+            scope_id: root.id,
+            subject: GrantSubject::Principal {
+                principal_id: "authz2-admin".to_owned(),
+            },
+            role_key: RoleKey::Administrator,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant administrator");
+    tx.commit().await.expect("commit grant");
     id
 }
 
@@ -125,12 +142,16 @@ async fn api(
     method: &str,
     path: &str,
     token: &str,
+    key: Option<&str>,
     body: Option<Value>,
 ) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method(method)
         .uri(path)
         .header("authorization", format!("Bearer {token}"));
+    if let Some(key) = key {
+        builder = builder.header("idempotency-key", key);
+    }
     let request = match body {
         Some(body) => {
             builder = builder.header("content-type", "application/json");
@@ -156,23 +177,28 @@ async fn api(
 }
 
 fn node_id(body: &Value) -> String {
-    body["id"].as_str().expect("node id").to_owned()
+    body["id"].as_str().expect("scope id").to_owned()
 }
 
-async fn create_node(
-    app: &Router,
-    token: &str,
-    parent: Option<&str>,
-    kind: &str,
-    slug: &str,
-) -> String {
-    let mut body = json!({"kind": kind, "slug": slug, "name": slug});
-    if let Some(parent) = parent {
-        body["parent_id"] = json!(parent);
-    }
-    let (status, node) = api(app, "POST", "/v1/hierarchy/nodes", token, Some(body)).await;
-    assert_eq!(status, StatusCode::CREATED, "create {slug}: {node}");
-    node_id(&node)
+async fn create_scope(app: &Router, token: &str, parent: &str, kind: &str, slug: &str) -> String {
+    let (status, scope) = api(
+        app,
+        "POST",
+        "/v1/admin/scopes",
+        token,
+        Some(&format!("authz2-create-{slug}")),
+        Some(json!({"parent_id": parent, "kind": kind, "slug": slug, "display_name": slug})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "create {slug}: {scope}");
+    node_id(&scope)
+}
+
+/// The tenant root's id, read through the level listing.
+async fn root_id(app: &Router, token: &str) -> String {
+    let (status, level) = api(app, "GET", "/v1/admin/scopes", token, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{level}");
+    level["parent"]["id"].as_str().expect("root id").to_owned()
 }
 
 /// The whole product surface in one flow: listing, default, per-node
@@ -201,14 +227,14 @@ async fn assignments_govern_per_node_from_the_next_request() {
     let app = router(state);
     let token = issue(tenant_id);
 
-    let org = create_node(&app, &token, None, "org", "acme").await;
-    let eng = create_node(&app, &token, Some(&org), "department", "eng").await;
-    let team_a = create_node(&app, &token, Some(&eng), "team", "team-a").await;
-    let team_b = create_node(&app, &token, Some(&eng), "team", "team-b").await;
+    let root = root_id(&app, &token).await;
+    let eng = create_scope(&app, &token, &root, "org_unit", "eng").await;
+    let team_a = create_scope(&app, &token, &eng, "org_unit", "team-a").await;
+    let team_b = create_scope(&app, &token, &eng, "org_unit", "team-b").await;
 
     // The pack listing: the three embedded product packs, before any
     // stored pack exists.
-    let (status, listing) = api(&app, "GET", "/v1/policy/packs", &token, None).await;
+    let (status, listing) = api(&app, "GET", "/v1/policy/packs", &token, None, None).await;
     assert_eq!(status, StatusCode::OK, "{listing}");
     let names: Vec<&str> = listing["packs"]
         .as_array()
@@ -223,7 +249,7 @@ async fn assignments_govern_per_node_from_the_next_request() {
     );
 
     // Zero-config default: nothing stored, regulated-strict effective.
-    let (status, default) = api(&app, "GET", "/v1/policy/default", &token, None).await;
+    let (status, default) = api(&app, "GET", "/v1/policy/default", &token, None, None).await;
     assert_eq!(status, StatusCode::OK, "{default}");
     assert_eq!(default["pack_name"], Value::Null);
     assert_eq!(default["effective"], REGULATED_STRICT);
@@ -232,8 +258,9 @@ async fn assignments_govern_per_node_from_the_next_request() {
     let (status, shown) = api(
         &app,
         "GET",
-        &format!("/v1/hierarchy/nodes/{team_a}/policy"),
+        &format!("/v1/admin/scopes/{team_a}/policy"),
         &token,
+        None,
         None,
     )
     .await;
@@ -247,8 +274,9 @@ async fn assignments_govern_per_node_from_the_next_request() {
     let (status, assigned) = api(
         &app,
         "PUT",
-        &format!("/v1/hierarchy/nodes/{eng}/policy"),
+        &format!("/v1/admin/scopes/{eng}/policy"),
         &token,
+        None,
         Some(json!({"name": "standard"})),
     )
     .await;
@@ -256,8 +284,9 @@ async fn assignments_govern_per_node_from_the_next_request() {
     let (status, shown) = api(
         &app,
         "GET",
-        &format!("/v1/hierarchy/nodes/{team_a}/policy"),
+        &format!("/v1/admin/scopes/{team_a}/policy"),
         &token,
+        None,
         None,
     )
     .await;
@@ -276,8 +305,9 @@ async fn assignments_govern_per_node_from_the_next_request() {
         let (status, refused) = api(
             &app,
             "PUT",
-            &format!("/v1/hierarchy/nodes/{team_a}/policy"),
+            &format!("/v1/admin/scopes/{team_a}/policy"),
             &token,
+            None,
             Some(json!({"name": unknown})),
         )
         .await;
@@ -307,7 +337,7 @@ async fn assignments_govern_per_node_from_the_next_request() {
     );
 
     // The stored pack now shows in the listing.
-    let (status, listing) = api(&app, "GET", "/v1/policy/packs", &token, None).await;
+    let (status, listing) = api(&app, "GET", "/v1/policy/packs", &token, None, None).await;
     assert_eq!(status, StatusCode::OK, "{listing}");
     assert!(
         listing["packs"]
@@ -324,8 +354,9 @@ async fn assignments_govern_per_node_from_the_next_request() {
     let (status, switched) = api(
         &app,
         "PUT",
-        &format!("/v1/hierarchy/nodes/{team_b}/policy"),
+        &format!("/v1/admin/scopes/{team_b}/policy"),
         &token,
+        None,
         Some(json!({"name": "authz2-frozen"})),
     )
     .await;
@@ -334,9 +365,10 @@ async fn assignments_govern_per_node_from_the_next_request() {
     let (status, denied) = api(
         &app,
         "PATCH",
-        &format!("/v1/hierarchy/nodes/{team_b}"),
+        &format!("/v1/admin/scopes/{team_b}"),
         &token,
-        Some(json!({"name": "Frozen Team"})),
+        None,
+        Some(json!({"display_name": "Frozen Unit"})),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
@@ -349,9 +381,10 @@ async fn assignments_govern_per_node_from_the_next_request() {
     let (status, renamed) = api(
         &app,
         "PATCH",
-        &format!("/v1/hierarchy/nodes/{team_a}"),
+        &format!("/v1/admin/scopes/{team_a}"),
         &token,
-        Some(json!({"name": "Team A"})),
+        None,
+        Some(json!({"display_name": "Unit A"})),
     )
     .await;
     assert_eq!(
@@ -366,8 +399,9 @@ async fn assignments_govern_per_node_from_the_next_request() {
     let (status, rescued) = api(
         &app,
         "DELETE",
-        &format!("/v1/hierarchy/nodes/{team_b}/policy"),
+        &format!("/v1/admin/scopes/{team_b}/policy"),
         &token,
+        None,
         None,
     )
     .await;
@@ -375,9 +409,10 @@ async fn assignments_govern_per_node_from_the_next_request() {
     let (status, thawed) = api(
         &app,
         "PATCH",
-        &format!("/v1/hierarchy/nodes/{team_b}"),
+        &format!("/v1/admin/scopes/{team_b}"),
         &token,
-        Some(json!({"name": "Team B"})),
+        None,
+        Some(json!({"display_name": "Unit B"})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{thawed}");
@@ -386,8 +421,9 @@ async fn assignments_govern_per_node_from_the_next_request() {
     let (status, missing) = api(
         &app,
         "DELETE",
-        &format!("/v1/hierarchy/nodes/{team_b}/policy"),
+        &format!("/v1/admin/scopes/{team_b}/policy"),
         &token,
+        None,
         None,
     )
     .await;
@@ -399,7 +435,7 @@ async fn assignments_govern_per_node_from_the_next_request() {
         exposition
             .lines()
             .any(|line| line.starts_with("synveda_policy_operations_total")
-                && line.contains("op=\"assign_node_policy\"")
+                && line.contains("op=\"assign_scope_policy\"")
                 && line.contains("outcome=\"ok\"")),
         "assign op missing from exposition:\n{exposition}"
     );
@@ -429,7 +465,9 @@ async fn cross_tenant_policy_probes_see_uniform_404() {
     let intruder = admitted_tenant(&pool, "authz2i").await;
     let app = router(state);
 
-    let org = create_node(&app, &issue(victim), None, "org", "acme").await;
+    let victim_token = issue(victim);
+    let root = root_id(&app, &victim_token).await;
+    let org = create_scope(&app, &victim_token, &root, "org_unit", "acme").await;
     let foreign = issue(intruder);
     for (method, body) in [
         ("GET", None),
@@ -439,8 +477,9 @@ async fn cross_tenant_policy_probes_see_uniform_404() {
         let (status, response) = api(
             &app,
             method,
-            &format!("/v1/hierarchy/nodes/{org}/policy"),
+            &format!("/v1/admin/scopes/{org}/policy"),
             &foreign,
+            None,
             body,
         )
         .await;

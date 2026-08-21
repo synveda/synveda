@@ -39,15 +39,17 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, role_bindings, tenants};
+use synveda_store::{access, identities, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, Role,
-    ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, ScopeId,
+    Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -86,7 +88,6 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -139,79 +140,61 @@ fn database_url() -> String {
 }
 
 /// acme → eng → platform, plus the quarantine scope AUTH-2 needs.
-async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (HierarchyNode, HierarchyNode) {
+async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope) {
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(org.id),
+            slug: "eng".to_owned(),
+            display_name: "Engineering".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let eng = hierarchy::create(
+    .expect("create scope");
+    let platform = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "eng",
-        "Engineering",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(eng.id),
+            slug: "platform".to_owned(),
+            display_name: "Platform".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create dept");
-    let platform = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
-    )
-    .await
-    .expect("create team");
-    hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        "Quarantine",
-    )
-    .await
-    .expect("create quarantine scope");
+    .expect("create scope");
     tx.commit().await.expect("commit hierarchy");
     (platform, eng)
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -219,12 +202,26 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: Role) {
+async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, Some(scope), role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 fn record_state(scope: ScopeId, owner: IdentityId, content: &str) -> RecordState {
@@ -351,10 +348,10 @@ async fn open_proposal(
 /// which is the two-act sequence ADR-0032 decision 9 requires.
 ///
 /// The approver set is the pack's, not this test's convenience: under
-/// `regulated-strict` a team asks for one curator and a department asks
-/// for a curator *and* a steward, and the steward cannot run the effect
-/// because steward reads no content in any pack (ADR-0034). So the first
-/// approver is the curator, and the publish goes to them.
+/// `regulated-strict` an org-unit publish asks for a curator *and* an
+/// administrator, two distinct people, and the member who proposed cannot
+/// run the effect — publishing is priced above a member grant. So the
+/// first approver is the curator, and the publish goes to them.
 async fn approve_and_publish(app: &Router, approvers: &[&str], id: &str) {
     for token in approvers {
         let (status, approved) = post(
@@ -413,12 +410,22 @@ async fn a_proposal_renders_its_effect_on_the_channel_member_by_member() {
         return;
     };
     let (team, _) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "dana@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cora@acme.test", team.id).await;
-    bind(&pool, tenant, "dana@acme.test", team.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora@acme.test", team.id, Role::Curator).await;
+    let author = seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "cora@acme.test").await;
+    seed_user(&pool, tenant, "sam@acme.test").await;
+    bind(&pool, tenant, "dana@acme.test", team.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora@acme.test", team.id, RoleKey::Curator).await;
+    bind(
+        &pool,
+        tenant,
+        "sam@acme.test",
+        team.id,
+        RoleKey::Administrator,
+    )
+    .await;
     let dana = issue("dana@acme.test", tenant);
     let cora = issue("cora@acme.test", tenant);
+    let sam = issue("sam@acme.test", tenant);
     let app = router(state(&database_url()));
 
     let runbook = seed_record(&pool, tenant, team.id, author.id, RUNBOOK).await;
@@ -450,7 +457,7 @@ async fn a_proposal_renders_its_effect_on_the_channel_member_by_member() {
         RUNBOOK,
         "the proposed side is the object under review"
     );
-    approve_and_publish(&app, &[&cora], &first).await;
+    approve_and_publish(&app, &[&cora, &sam], &first).await;
 
     // Round two: the runbook is edited, and proposed again beside an
     // untouched second record and the *unedited* published one.
@@ -505,7 +512,7 @@ async fn a_proposal_renders_its_effect_on_the_channel_member_by_member() {
         "the rota again, unchanged",
     )
     .await;
-    approve_and_publish(&app, &[&cora], &second).await;
+    approve_and_publish(&app, &[&cora, &sam], &second).await;
     let (_, detail) = get(&app, &cora, &format!("/v1/proposals/{third}")).await;
     let repeated = member_for(&detail, rota);
     assert_eq!(
@@ -531,10 +538,10 @@ async fn an_edited_record_still_renders_the_bytes_that_were_proposed() {
         return;
     };
     let (team, _) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "dana@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cora@acme.test", team.id).await;
-    bind(&pool, tenant, "dana@acme.test", team.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora@acme.test", team.id, Role::Curator).await;
+    let author = seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "cora@acme.test").await;
+    bind(&pool, tenant, "dana@acme.test", team.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora@acme.test", team.id, RoleKey::Curator).await;
     let dana = issue("dana@acme.test", tenant);
     let cora = issue("cora@acme.test", tenant);
     let app = router(state(&database_url()));
@@ -563,25 +570,34 @@ async fn an_edited_record_still_renders_the_bytes_that_were_proposed() {
 
 // ── The disclosure ───────────────────────────────────────────────────────────
 
-/// A `compliance` reviewer holds no `MemoryRead` in any pack, and is shown
-/// both sides of the change anyway (ADR-0035 decision 8).
+/// A reviewer whose own composition cannot reach the scope is shown both
+/// sides of the change anyway (ADR-0035 decision 8).
 ///
 /// Asserted rather than assumed, because it is a deliberate widening of
-/// ADR-0034 decision 1's carve-out: the alternative is that the one role
-/// the invariant floor requires on everything `restricted` must approve
-/// replacements sight unseen.
+/// ADR-0034 decision 1's carve-out. Placement is identity since CPR-7, so
+/// cleo — an administrator by grant, at her own scope at the root — composes
+/// nothing from the team her inject's chain never runs through; the one
+/// role the invariant floor requires on everything `restricted` must still
+/// be able to approve replacements sight *seen*.
 #[tokio::test]
 async fn compliance_sees_both_sides_of_the_change_it_must_approve() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
     let (team, _) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "dana@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cora@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cleo@acme.test", team.id).await;
-    bind(&pool, tenant, "dana@acme.test", team.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora@acme.test", team.id, Role::Curator).await;
-    bind(&pool, tenant, "cleo@acme.test", team.id, Role::Compliance).await;
+    let author = seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "cora@acme.test").await;
+    seed_user(&pool, tenant, "cleo@acme.test").await;
+    bind(&pool, tenant, "dana@acme.test", team.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora@acme.test", team.id, RoleKey::Curator).await;
+    bind(
+        &pool,
+        tenant,
+        "cleo@acme.test",
+        team.id,
+        RoleKey::Administrator,
+    )
+    .await;
     let dana = issue("dana@acme.test", tenant);
     let cora = issue("cora@acme.test", tenant);
     let cleo = issue("cleo@acme.test", tenant);
@@ -589,11 +605,13 @@ async fn compliance_sees_both_sides_of_the_change_it_must_approve() {
 
     let runbook = seed_record(&pool, tenant, team.id, author.id, RUNBOOK).await;
     let (_, first) = open_proposal(&app, &dana, team.id, None, &[runbook], "publish it").await;
-    approve_and_publish(&app, &[&cora], &first).await;
+    approve_and_publish(&app, &[&cora, &cleo], &first).await;
     rewrite(&pool, runbook, team.id, author.id, REVISED).await;
     let (_, second) = open_proposal(&app, &dana, team.id, None, &[runbook], "revise it").await;
 
-    // The premise: compliance genuinely cannot read this scope's memory.
+    // The premise: her own composition genuinely cannot reach this scope's
+    // memory — the walk is the caller's own chain, and cleo's never runs
+    // through the team (CPR-7, ADR-0074 decision 3).
     let (status, denied) = post(
         &app,
         &cleo,
@@ -603,11 +621,12 @@ async fn compliance_sees_both_sides_of_the_change_it_must_approve() {
     .await;
     assert_eq!(status, StatusCode::OK, "{denied}");
     assert!(
-        !denied["block"]
+        !denied["text"]
             .as_str()
             .unwrap_or_default()
             .contains("rotate the signing key"),
-        "compliance holds no MemoryRead, so inject composes nothing for it: {denied}"
+        "cleo's own chain composes nothing from the team, so inject serves \
+         none of its memory: {denied}"
     );
 
     // And yet the review shows the change, both sides.
@@ -638,16 +657,24 @@ async fn a_listing_names_the_scopes_a_proposal_moves_between() {
         return;
     };
     let (team, eng) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "dana@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cora@acme.test", team.id).await;
-    bind(&pool, tenant, "dana@acme.test", team.id, Role::Contributor).await;
-    // Tenant-wide, so the same principal can read both scopes' listings
-    // and the tenant-wide one — the case the packs grant to review roles.
-    let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, "cora@acme.test", None, Role::Curator)
-        .await
-        .expect("bind tenant-wide curator");
-    tx.commit().await.expect("commit binding");
+    let author = seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "cora@acme.test").await;
+    bind(&pool, tenant, "dana@acme.test", team.id, RoleKey::Member).await;
+    // The climb's target is not on the team's own chain — grants never
+    // climb — so dana needs her member grant at the department too to ask
+    // the department for anything.
+    bind(&pool, tenant, "dana@acme.test", eng.id, RoleKey::Member).await;
+    // At the root, so the same principal can read both scopes' listings
+    // and the root-wide one — the case the packs grant to review roles.
+    let root = {
+        let mut tx = pool.begin().await.expect("begin");
+        let root = scopes::ensure_tenant_root(&mut tx, tenant)
+            .await
+            .expect("mint root");
+        tx.commit().await.expect("commit");
+        root
+    };
+    bind(&pool, tenant, "cora@acme.test", root.id, RoleKey::Curator).await;
     let dana = issue("dana@acme.test", tenant);
     let cora = issue("cora@acme.test", tenant);
     let app = router(state(&database_url()));
@@ -662,12 +689,17 @@ async fn a_listing_names_the_scopes_a_proposal_moves_between() {
         "publish at the team",
     )
     .await;
-    assert_eq!(
-        same_scope["target_scope_path"], "acme/eng/platform",
+    // The tenant root's slug is the tenant's own, so a path assertion
+    // matches on the tail — the slugs this fixture controls.
+    assert!(
+        same_scope["target_scope_path"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("platform"),
         "{same_scope}"
     );
     assert_eq!(
-        same_scope["source_scope_path"], "acme/eng/platform",
+        same_scope["source_scope_path"], same_scope["target_scope_path"],
         "a same-scope proposal names one scope twice: {same_scope}"
     );
 
@@ -680,17 +712,38 @@ async fn a_listing_names_the_scopes_a_proposal_moves_between() {
         "climb it to the department",
     )
     .await;
-    assert_eq!(climb["target_scope_path"], "acme/eng", "{climb}");
-    assert_eq!(
-        climb["source_scope_path"], "acme/eng/platform",
+    assert!(
+        climb["target_scope_path"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("eng"),
+        "{climb}"
+    );
+    assert!(
+        climb["source_scope_path"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("platform"),
         "a climb names where it came from: {climb}"
     );
 
     // The paths survive the round trip through both read surfaces, which
     // is where a reviewer meets them.
     let (_, detail) = get(&app, &cora, &format!("/v1/proposals/{climb_id}")).await;
-    assert_eq!(detail["target_scope_path"], "acme/eng", "{detail}");
-    assert_eq!(detail["source_scope_path"], "acme/eng/platform", "{detail}");
+    assert!(
+        detail["target_scope_path"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("eng"),
+        "{detail}"
+    );
+    assert!(
+        detail["source_scope_path"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("platform"),
+        "{detail}"
+    );
 
     let (status, listing) = get(&app, &cora, "/v1/proposals").await;
     assert_eq!(status, StatusCode::OK, "{listing}");
@@ -701,9 +754,14 @@ async fn a_listing_names_the_scopes_a_proposal_moves_between() {
         "every row names its target: {listing}"
     );
     assert!(
-        rows.iter()
-            .any(|row| row["source_scope_path"] == "acme/eng/platform"
-                && row["target_scope_path"] == "acme/eng"),
+        rows.iter().any(|row| row["source_scope_path"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("platform")
+            && row["target_scope_path"]
+                .as_str()
+                .unwrap_or_default()
+                .ends_with("eng")),
         "the climb is readable from the listing alone: {listing}"
     );
 }
@@ -719,21 +777,33 @@ async fn a_climbs_baseline_is_the_scope_it_would_land_on() {
         return;
     };
     let (team, eng) = seed_hierarchy(&pool, tenant).await;
-    let author = seed_user(&pool, tenant, "dana@acme.test", team.id).await;
-    seed_user(&pool, tenant, "cora@acme.test", team.id).await;
-    seed_user(&pool, tenant, "sam@acme.test", team.id).await;
-    bind(&pool, tenant, "dana@acme.test", team.id, Role::Contributor).await;
-    // Tenant-wide, so one curator and one steward can act at both levels.
-    // The pair is the pack's: `regulated-strict` asks for a curator at a
-    // team and a curator *and* a steward at a department (ADR-0034).
-    let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, "cora@acme.test", None, Role::Curator)
-        .await
-        .expect("bind tenant-wide curator");
-    role_bindings::bind(&mut *tx, tenant, "sam@acme.test", None, Role::Steward)
-        .await
-        .expect("bind tenant-wide steward");
-    tx.commit().await.expect("commit binding");
+    let author = seed_user(&pool, tenant, "dana@acme.test").await;
+    seed_user(&pool, tenant, "cora@acme.test").await;
+    seed_user(&pool, tenant, "sam@acme.test").await;
+    bind(&pool, tenant, "dana@acme.test", team.id, RoleKey::Member).await;
+    // The climb asks the department, and a team grant never climbs: dana
+    // holds her member grant at eng too.
+    bind(&pool, tenant, "dana@acme.test", eng.id, RoleKey::Member).await;
+    // At the root, so one curator and one administrator can act at both
+    // levels. The pair is the pack's: `regulated-strict` asks for a
+    // curator and an administrator at every org unit (ADR-0034).
+    let root = {
+        let mut tx = pool.begin().await.expect("begin");
+        let root = scopes::ensure_tenant_root(&mut tx, tenant)
+            .await
+            .expect("mint root");
+        tx.commit().await.expect("commit");
+        root
+    };
+    bind(&pool, tenant, "cora@acme.test", root.id, RoleKey::Curator).await;
+    bind(
+        &pool,
+        tenant,
+        "sam@acme.test",
+        root.id,
+        RoleKey::Administrator,
+    )
+    .await;
     let dana = issue("dana@acme.test", tenant);
     let cora = issue("cora@acme.test", tenant);
     let sam = issue("sam@acme.test", tenant);
@@ -749,7 +819,7 @@ async fn a_climbs_baseline_is_the_scope_it_would_land_on() {
         "publish at the team",
     )
     .await;
-    approve_and_publish(&app, &[&cora], &at_team).await;
+    approve_and_publish(&app, &[&cora, &sam], &at_team).await;
 
     let (_, climb) = open_proposal(
         &app,
@@ -773,8 +843,8 @@ async fn a_climbs_baseline_is_the_scope_it_would_land_on() {
 
     // And once the department holds it, a second climb of the same bytes
     // is the no-op — read off the target's tree, one level up. Two
-    // approvers here, and the curator runs the effect: a steward reads no
-    // content in any pack, so it cannot publish what it approved.
+    // approvers here, and the curator runs the effect: a member grant
+    // cannot publish what it proposed.
     approve_and_publish(&app, &[&cora, &sam], &climb).await;
     let (_, again) = open_proposal(
         &app,

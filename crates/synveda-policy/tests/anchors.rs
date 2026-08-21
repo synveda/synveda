@@ -49,11 +49,13 @@ struct Tree {
 }
 
 fn node(tenant: TenantId, parent: Option<&ScopeNode>, kind: ScopeKind) -> ScopeNode {
+    let id = ScopeId::new();
     ScopeNode {
-        id: ScopeId::new(),
+        id,
         tenant_id: tenant,
         parent_id: parent.map(|node| node.id),
         kind,
+        slug: format!("s-{}", id.as_uuid().simple()),
         sealed: false,
     }
 }
@@ -88,14 +90,14 @@ impl Tree {
     /// Every node of the tree, so a chain can be walked from any of them.
     fn all(&self) -> Vec<ScopeNode> {
         vec![
-            self.root,
-            self.unit,
-            self.payments,
-            self.risk,
-            self.ledger,
-            self.models,
-            self.alice_scope,
-            self.bob_scope,
+            self.root.clone(),
+            self.unit.clone(),
+            self.payments.clone(),
+            self.risk.clone(),
+            self.ledger.clone(),
+            self.models.clone(),
+            self.alice_scope.clone(),
+            self.bob_scope.clone(),
         ]
     }
 
@@ -103,34 +105,28 @@ impl Tree {
     /// `AuthzContext::scopes`.
     fn chain(&self, scope: &ScopeNode) -> Vec<ScopeNode> {
         let all = self.all();
-        let mut chain = vec![*scope];
-        let mut current = *scope;
+        let mut chain = vec![scope.clone()];
+        let mut current = scope.clone();
         while let Some(parent_id) = current.parent_id {
             let Some(parent) = all.iter().find(|node| node.id == parent_id) else {
                 break;
             };
-            chain.push(*parent);
-            current = *parent;
+            chain.push(parent.clone());
+            current = parent.clone();
         }
         chain
-    }
-
-    /// The depth of a scope: edges from the root, which is what orders an
-    /// anchor set and nothing else reads.
-    fn depth(&self, scope: &ScopeNode) -> i32 {
-        i32::try_from(self.chain(scope).len() - 1).expect("shallow tree")
     }
 }
 
 // ── Anchors and principals ───────────────────────────────────────────────────
 
 /// An anchor this caller **holds**: a grant written at `scope`.
-fn held(tree: &Tree, scope: &ScopeNode, source: AnchorSource, roles: &[RoleKey]) -> ScopeAnchor {
+fn held(_tree: &Tree, scope: &ScopeNode, source: AnchorSource, roles: &[RoleKey]) -> ScopeAnchor {
     ScopeAnchor {
         scope_id: scope.id,
         kind: scope.kind,
         parent_scope_id: scope.parent_id,
-        depth: tree.depth(scope),
+        depth: 0,
         source,
         roles: roles.to_vec(),
         granted_at: vec![scope.id],
@@ -196,8 +192,6 @@ impl<'a> Ask<'a> {
             resources: self.resources,
             assignments: self.assignments,
             default_pack: Some(self.pack),
-            role_bindings: &[],
-            grant: None,
             lapses: &[],
             sensitivity: None,
         }
@@ -866,7 +860,14 @@ fn depth_is_not_authority() {
     let deep_b = node(tree.tenant, Some(&deep_a), ScopeKind::OrgUnit);
     let deep_c = node(tree.tenant, Some(&deep_b), ScopeKind::OrgUnit);
     let deep_ws = node(tree.tenant, Some(&deep_c), ScopeKind::Workspace);
-    let deep_chain = vec![deep_ws, deep_c, deep_b, deep_a, tree.unit, tree.root];
+    let deep_chain = vec![
+        deep_ws.clone(),
+        deep_c,
+        deep_b,
+        deep_a,
+        tree.unit.clone(),
+        tree.root.clone(),
+    ];
 
     let shallow_anchors = vec![held(
         &tree,
@@ -878,7 +879,7 @@ fn depth_is_not_authority() {
         scope_id: deep_ws.id,
         kind: deep_ws.kind,
         parent_scope_id: deep_ws.parent_id,
-        depth: 5,
+        depth: 0,
         source: AnchorSource::SelectedWorkspace,
         roles: vec![RoleKey::Member],
         granted_at: vec![deep_ws.id],
@@ -929,7 +930,7 @@ fn a_foreign_tenants_scope_grants_nothing() {
         scope_id: theirs.payments.id,
         kind: ScopeKind::Workspace,
         parent_scope_id: theirs.payments.parent_id,
-        depth: 2,
+        depth: 0,
         source: AnchorSource::SelectedWorkspace,
         roles: vec![RoleKey::Owner, RoleKey::Administrator],
         granted_at: vec![theirs.payments.id],
@@ -991,7 +992,11 @@ fn a_spliced_chain_cannot_launder_a_foreign_scope() {
     let alice = principal(&ours, "alice", Some(&ours.alice_scope));
     let alice_chain = ours.chain(&ours.alice_scope);
 
-    let spliced = vec![theirs.payments, ours.unit, ours.root];
+    let spliced = vec![
+        theirs.payments.clone(),
+        ours.unit.clone(),
+        ours.root.clone(),
+    ];
     let anchors = vec![
         held(
             &ours,
@@ -1003,7 +1008,7 @@ fn a_spliced_chain_cannot_launder_a_foreign_scope() {
             scope_id: theirs.payments.id,
             kind: ScopeKind::Workspace,
             parent_scope_id: Some(ours.unit.id),
-            depth: 2,
+            depth: 0,
             source: AnchorSource::Grant,
             roles: vec![RoleKey::Owner],
             granted_at: vec![ours.root.id],

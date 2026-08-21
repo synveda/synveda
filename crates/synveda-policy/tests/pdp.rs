@@ -8,30 +8,29 @@
 //! bypass (CLAUDE.md, seed §2.2).
 
 use chrono::Utc;
-use synveda_policy::ScopeNode;
 use synveda_policy::{
-    Action, AuthzContext, Pdp, Principal, REGULATED_STRICT, Resource, is_reserved,
+    Action, AuthzContext, Pdp, Principal, REGULATED_STRICT, Resource, ScopeNode, is_reserved,
 };
-use synveda_types::{
-    Error, HierarchyNode, PackConfig, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind,
-    Sensitivity, TenantId,
-};
+use synveda_types::access::RoleKey;
+use synveda_types::anchor::{AnchorSource, ScopeAnchor};
+use synveda_types::scope::ScopeKind;
+use synveda_types::{Error, PackConfig, PolicyAssignment, ScopeId, Sensitivity, TenantId};
 
 const ADMIN_ACTIONS: [Action; 6] = [
-    Action::HierarchyCreate,
-    Action::HierarchyRead,
-    Action::HierarchyUpdate,
-    Action::HierarchyDelete,
+    Action::ScopeCreate,
+    Action::ScopeRead,
+    Action::ScopeUpdate,
+    Action::ScopeUpdate,
     Action::PolicyRead,
     Action::PolicyAssign,
 ];
 
-/// A pack that only permits hierarchy reads; everything else falls to
+/// A pack that only permits scope reads; everything else falls to
 /// Cedar's default-deny.
 const READ_ONLY_PACK: &str = r#"
 permit (
     principal,
-    action == Synveda::Action::"HierarchyRead",
+    action == Synveda::Action::"ScopeRead",
     resource
 ) when { resource in principal.tenant };
 "#;
@@ -42,20 +41,16 @@ fn node(
     parent_id: Option<ScopeId>,
     kind: ScopeKind,
     slug: &str,
-    depth: i32,
-    path: &str,
-) -> HierarchyNode {
-    HierarchyNode {
+    _depth: i32,
+    _path: &str,
+) -> ScopeNode {
+    ScopeNode {
         id,
         tenant_id,
         parent_id,
         kind,
         slug: slug.to_owned(),
-        name: slug.to_owned(),
-        depth,
-        path: path.to_owned(),
         sealed: false,
-        created_at: Utc::now(),
     }
 }
 
@@ -67,25 +62,25 @@ fn chain(tenant: TenantId) -> Vec<ScopeNode> {
     let dept = ScopeId::new();
     let team = ScopeId::new();
     vec![
-        ScopeNode::from_hierarchy(&node(tenant, org, None, ScopeKind::Org, "acme", 0, "acme")),
-        ScopeNode::from_hierarchy(&node(
+        node(tenant, org, None, ScopeKind::Tenant, "acme", 0, "acme"),
+        node(
             tenant,
             dept,
             Some(org),
-            ScopeKind::Department,
+            ScopeKind::OrgUnit,
             "payments",
             1,
             "acme/payments",
-        )),
-        ScopeNode::from_hierarchy(&node(
+        ),
+        node(
             tenant,
             team,
             Some(dept),
-            ScopeKind::Team,
+            ScopeKind::OrgUnit,
             "core",
             2,
             "acme/payments/core",
-        )),
+        ),
     ]
 }
 
@@ -120,13 +115,16 @@ fn principal(tenant_id: TenantId) -> Principal {
 /// product packs' admin planes require a role (ADR-0015 decision 4), so
 /// facade-mechanics tests that expect admin allows bind their principal
 /// the same way production would.
-fn admin_binding(tenant_id: TenantId) -> RoleBinding {
-    RoleBinding {
-        tenant_id,
-        subject: "alice".to_owned(),
-        scope_id: None,
-        role: Role::OrgAdmin,
-        updated_at: Utc::now(),
+fn admin_anchor(kind: synveda_types::scope::ScopeKind, scope_id: ScopeId) -> ScopeAnchor {
+    ScopeAnchor {
+        scope_id,
+        kind,
+        parent_scope_id: None,
+        depth: 0,
+        source: AnchorSource::Grant,
+        roles: vec![RoleKey::Administrator],
+        granted_at: vec![scope_id],
+        via_groups: Vec::new(),
     }
 }
 
@@ -142,11 +140,11 @@ fn the_default_pack_is_regulated_strict_and_admits_bound_admins() {
     let scopes = chain(tenant);
     let team = team_of(&scopes);
     let alice = principal(tenant);
-    let bindings = [admin_binding(tenant)];
+    let anchors = [admin_anchor(scopes[0].kind, scopes[0].id)];
     let context = AuthzContext {
         sensitivity: Some(Sensitivity::Internal),
         scopes: &scopes,
-        role_bindings: &bindings,
+        anchors: &anchors,
         ..Default::default()
     };
 
@@ -156,7 +154,7 @@ fn the_default_pack_is_regulated_strict_and_admits_bound_admins() {
             .expect("authorize");
         assert!(decision.allowed, "{action} must be allowed on own scope");
         assert_eq!(decision.pack_name, REGULATED_STRICT);
-        assert_eq!(decision.pack_version, 17);
+        assert_eq!(decision.pack_version, 18);
         assert!(
             !decision.determining.is_empty(),
             "an allow must name its permitting policies"
@@ -164,19 +162,10 @@ fn the_default_pack_is_regulated_strict_and_admits_bound_admins() {
     }
 
     // Tenant-level resources (creating the org root, reading the root)
-    // need no chain at all: the tenant-wide binding carries them.
-    for action in [Action::HierarchyCreate, Action::PolicyAssign] {
+    // need no chain at all: the tenant-root grant carries them.
+    for action in [Action::ScopeCreate, Action::PolicyAssign] {
         let decision = pdp
-            .authorize(
-                &alice,
-                action,
-                Resource::Tenant(tenant),
-                &AuthzContext {
-                    sensitivity: Some(Sensitivity::Internal),
-                    role_bindings: &bindings,
-                    ..Default::default()
-                },
-            )
+            .authorize(&alice, action, Resource::Tenant(tenant), &context)
             .expect("authorize");
         assert!(decision.allowed, "{action} must be allowed on own tenant");
     }
@@ -210,7 +199,7 @@ fn the_base_quarantine_forbid_is_compiled_into_stored_packs() {
     let allowed = pdp
         .authorize(
             &principal(tenant),
-            Action::HierarchyRead,
+            Action::ScopeRead,
             Resource::Scope(team),
             &context,
         )
@@ -227,7 +216,7 @@ fn the_base_quarantine_forbid_is_compiled_into_stored_packs() {
                 quarantined: true,
                 ..principal(tenant)
             },
-            Action::HierarchyRead,
+            Action::ScopeRead,
             Resource::Scope(team),
             &context,
         )
@@ -266,7 +255,7 @@ fn the_default_pack_denies_a_foreign_principal_everything() {
     let denial = pdp
         .require(
             &intruder,
-            Action::HierarchyRead,
+            Action::ScopeRead,
             Resource::Tenant(victim),
             &AuthzContext::default(),
         )
@@ -277,10 +266,10 @@ fn the_default_pack_denies_a_foreign_principal_everything() {
             resource,
             reason,
         } => {
-            assert_eq!(action, "hierarchy.read");
+            assert_eq!(action, "scope.read");
             assert_eq!(resource, format!("tenant {victim}"));
             assert!(
-                reason.contains(&format!("{REGULATED_STRICT}@17")),
+                reason.contains(&format!("{REGULATED_STRICT}@18")),
                 "denial must name pack@version, got: {reason}"
             );
         }
@@ -297,7 +286,7 @@ fn a_scope_without_its_chain_fails_closed() {
     let decision = pdp
         .authorize(
             &principal(tenant),
-            Action::HierarchyRead,
+            Action::ScopeRead,
             Resource::Scope(ScopeId::new()),
             &AuthzContext::default(),
         )
@@ -316,7 +305,6 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
     let scopes = chain(tenant);
     let (org, dept, team) = (scopes[0].id, scopes[1].id, scopes[2].id);
     let alice = principal(tenant);
-    let bindings = [admin_binding(tenant)];
     pdp.install_source(
         tenant,
         "authz2-readonly",
@@ -331,13 +319,12 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
     let denied = pdp
         .authorize(
             &alice,
-            Action::HierarchyDelete,
+            Action::ScopeUpdate,
             Resource::Scope(team),
             &AuthzContext {
                 sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 assignments: &at_dept,
-                role_bindings: &bindings,
                 ..Default::default()
             },
         )
@@ -347,16 +334,17 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
     assert_eq!(denied.pack_version, 4);
 
     // The org above the assignment is out of its reach: default applies.
+    let anchors = [admin_anchor(scopes[0].kind, scopes[0].id)];
     let org_decision = pdp
         .authorize(
             &alice,
-            Action::HierarchyDelete,
+            Action::ScopeUpdate,
             Resource::Scope(org),
             &AuthzContext {
                 sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes[..1],
                 assignments: &at_dept,
-                role_bindings: &bindings,
+                anchors: &anchors,
                 ..Default::default()
             },
         )
@@ -372,13 +360,13 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
     let nearest = pdp
         .authorize(
             &alice,
-            Action::HierarchyDelete,
+            Action::ScopeUpdate,
             Resource::Scope(team),
             &AuthzContext {
                 sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 assignments: &overridden,
-                role_bindings: &bindings,
+                anchors: &anchors,
                 ..Default::default()
             },
         )
@@ -390,13 +378,13 @@ fn effective_pack_resolution_walks_nearest_assignment_first() {
     let by_default = pdp
         .authorize(
             &alice,
-            Action::HierarchyDelete,
+            Action::ScopeUpdate,
             Resource::Scope(team),
             &AuthzContext {
                 sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 default_pack: Some("authz2-readonly"),
-                role_bindings: &bindings,
+                anchors: &anchors,
                 ..Default::default()
             },
         )
@@ -424,23 +412,18 @@ fn policy_assign_is_decided_under_the_inherited_pack() {
     )
     .expect("install test pack");
     let assignments = [assignment(tenant, team, "authz2-frozen")];
-    let bindings = [admin_binding(tenant)];
+    let anchors = [admin_anchor(scopes[0].kind, scopes[0].id)];
     let context = AuthzContext {
         sensitivity: Some(Sensitivity::Internal),
         scopes: &scopes,
         assignments: &assignments,
-        role_bindings: &bindings,
+        anchors: &anchors,
         ..Default::default()
     };
 
     // The frozen pack governs the node's ordinary actions...
     let frozen = pdp
-        .authorize(
-            &alice,
-            Action::HierarchyDelete,
-            Resource::Scope(team),
-            &context,
-        )
+        .authorize(&alice, Action::ScopeUpdate, Resource::Scope(team), &context)
         .expect("authorize");
     assert!(!frozen.allowed);
     assert_eq!(frozen.pack_name, "authz2-frozen");
@@ -476,17 +459,17 @@ fn a_dangling_assignment_falls_back_to_regulated_strict() {
     let scopes = chain(tenant);
     let team = team_of(&scopes);
     let assignments = [assignment(tenant, team, "never-stored")];
-    let bindings = [admin_binding(tenant)];
+    let anchors = [admin_anchor(scopes[0].kind, scopes[0].id)];
     let decision = pdp
         .authorize(
             &principal(tenant),
-            Action::HierarchyRead,
+            Action::ScopeRead,
             Resource::Scope(team),
             &AuthzContext {
                 sensitivity: Some(Sensitivity::Internal),
                 scopes: &scopes,
                 assignments: &assignments,
-                role_bindings: &bindings,
+                anchors: &anchors,
                 ..Default::default()
             },
         )
@@ -531,17 +514,17 @@ fn stored_packs_install_and_remove_by_name_per_tenant() {
         team_of(&other_scopes),
         "authz2-readonly",
     )];
-    let other_bindings = [admin_binding(other_tenant)];
+    let other_anchors = [admin_anchor(other_scopes[0].kind, other_scopes[0].id)];
     let other_decision = pdp
         .authorize(
             &principal(other_tenant),
-            Action::HierarchyDelete,
+            Action::ScopeUpdate,
             Resource::Scope(team_of(&other_scopes)),
             &AuthzContext {
                 sensitivity: Some(Sensitivity::Internal),
                 scopes: &other_scopes,
                 assignments: &other_assignments,
-                role_bindings: &other_bindings,
+                anchors: &other_anchors,
                 ..Default::default()
             },
         )
@@ -551,12 +534,12 @@ fn stored_packs_install_and_remove_by_name_per_tenant() {
 
     // Removal: assigned scopes fall back to the default at decision time.
     let assignments = [assignment(tenant, team, "authz2-readonly")];
-    let bindings = [admin_binding(tenant)];
+    let anchors = [admin_anchor(scopes[0].kind, scopes[0].id)];
     let context = AuthzContext {
         sensitivity: Some(Sensitivity::Internal),
         scopes: &scopes,
         assignments: &assignments,
-        role_bindings: &bindings,
+        anchors: &anchors,
         ..Default::default()
     };
     assert!(pdp.remove_pack(tenant, "authz2-readonly"));
@@ -566,12 +549,7 @@ fn stored_packs_install_and_remove_by_name_per_tenant() {
     );
     assert!(pdp.installed_versions(tenant).is_empty());
     let restored = pdp
-        .authorize(
-            &alice,
-            Action::HierarchyDelete,
-            Resource::Scope(team),
-            &context,
-        )
+        .authorize(&alice, Action::ScopeUpdate, Resource::Scope(team), &context)
         .expect("authorize after removal");
     assert!(restored.allowed);
     assert_eq!(restored.pack_name, REGULATED_STRICT);
@@ -611,7 +589,7 @@ fn an_explicit_forbid_reports_its_determining_policy() {
         1,
         r#"
         permit (principal, action, resource) when { resource in principal.tenant };
-        forbid (principal, action == Synveda::Action::"HierarchyDelete", resource);
+        forbid (principal, action == Synveda::Action::"ScopeUpdate", resource);
         "#,
         PackConfig::default(),
     )
@@ -621,7 +599,7 @@ fn an_explicit_forbid_reports_its_determining_policy() {
     let decision = pdp
         .authorize(
             &principal(tenant),
-            Action::HierarchyDelete,
+            Action::ScopeUpdate,
             Resource::Scope(team),
             &AuthzContext {
                 sensitivity: Some(Sensitivity::Internal),
@@ -690,7 +668,7 @@ fn invalid_packs_are_rejected_and_leave_the_previous_pack_in_force() {
     let decision = pdp
         .authorize(
             &alice,
-            Action::HierarchyDelete,
+            Action::ScopeUpdate,
             Resource::Scope(team),
             &AuthzContext {
                 sensitivity: Some(Sensitivity::Internal),

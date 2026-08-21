@@ -2,8 +2,8 @@
   "id": "00000001-0000-4000-8000-000000000000",
   "target_scope_id": "00000002-0000-4000-8000-000000000000",
   "source_scope_id": "00000002-0000-4000-8000-000000000000",
-  "target_scope_path": "acme/eng/platform",
-  "source_scope_path": "acme/eng/platform",
+  "target_scope_path": "platform",
+  "source_scope_path": "platform",
   "asset": "skill",
   "effect": "published",
   "state": "open",
@@ -16,11 +16,11 @@
   "required": {
     "roles": [
       {
-        "role": "steward",
+        "role": "reviewer",
         "count": 1
       },
       {
-        "role": "security-reviewer",
+        "role": "administrator",
         "count": 1
       }
     ],
@@ -30,7 +30,7 @@
       "pack"
     ]
   },
-  "outstanding": "steward × 1, 1 distinct approver(s)",
+  "outstanding": "administrator × 1, 1 distinct approver(s)",
   "members": [
     {
       "member": "release-notes/SKILL.md",
@@ -49,7 +49,7 @@
       "approver_subject": "sec",
       "verdict": "approve",
       "roles": [
-        "security-reviewer"
+        "reviewer"
       ],
       "commit": "0000000100000000000000000000000000000000000000000000000000000000",
       "counts": true,

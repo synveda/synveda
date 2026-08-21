@@ -37,15 +37,16 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::ChainVerification;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder, Embedder as _};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{hierarchy, identities, policy_assignments, rls, tenants};
+use synveda_store::{identities, policy_assignments, rls, scopes, tenants};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    CompositionConfig, HierarchyNode, Identity, IdentityId, IdentityKind, IndexTier, PackConfig,
-    RecordClass, RecordId, RecordKind, ScopeId, ScopeKind, Sensitivity, TenantId, TenantStatus,
+    CompositionConfig, Identity, IdentityId, IdentityKind, IndexTier, PackConfig, RecordClass,
+    RecordId, RecordKind, ScopeId, Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -96,7 +97,6 @@ fn state_with(url: &str, search_index: Arc<SearchIndex>, pdp: Arc<Pdp>) -> AppSt
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index,
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -148,68 +148,45 @@ fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("checked by admitted_tenant")
 }
 
-async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (HierarchyNode, HierarchyNode) {
+async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope) {
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let platform = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(org.id),
+            slug: "platform".to_owned(),
+            display_name: "Platform".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let platform = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
-    )
-    .await
-    .expect("create team");
-    hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        "Quarantine",
-    )
-    .await
-    .expect("create quarantine");
+    .expect("create scope");
     tx.commit().await.expect("commit hierarchy");
     (org, platform)
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -330,21 +307,26 @@ struct World {
 /// The budget: room for alice's short note in full and the runbook only
 /// by name. Chosen once, used by every test, so the tier's behaviour is
 /// what varies between them and never the budget.
-const TIGHT_BUDGET: u32 = 240;
+///
+/// Recalibrated for CPR-7: the runbook composes from the tenant root now
+/// (ADR-0074 decision 3 — nobody's own chain runs through a team any
+/// more, so material meant to reach a session has to sit on a scope that
+/// does), and root's own section header costs a few tokens more than the
+/// team header this budget used to be measured against. The shape is
+/// unchanged — one record in full, one named by index — only the margin
+/// moved.
+const TIGHT_BUDGET: u32 = 260;
 
 async fn world(index_tier: IndexTier) -> Option<World> {
     let (pool, tenant) = admitted_tenant().await?;
-    let (org, platform) = seed_hierarchy(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice", platform.id).await;
-    let runbook = seed_record(
-        &pool,
-        tenant,
-        platform.id,
-        alice.id,
-        RecordKind::Pinned,
-        RUNBOOK,
-    )
-    .await;
+    // `platform` is part of the tree `seed_hierarchy` builds but unused
+    // here: since placement is identity (ADR-0074 decision 3) alice's own
+    // chain no longer runs through it, and the root is the one shared
+    // scope every session composes from without a grant (bare membership
+    // reaches the working tier the record below is seeded at).
+    let (org, _platform) = seed_hierarchy(&pool, tenant).await;
+    let alice = seed_user(&pool, tenant, "alice").await;
+    let runbook = seed_record(&pool, tenant, org.id, alice.id, RecordKind::Pinned, RUNBOOK).await;
     let note = seed_record(
         &pool,
         tenant,
@@ -634,7 +616,7 @@ async fn refusals_are_uniform_and_silent() {
         return;
     };
     let (_, other_team) = seed_hierarchy(&other_pool, other_tenant).await;
-    let bob = seed_user(&other_pool, other_tenant, "bob", other_team.id).await;
+    let bob = seed_user(&other_pool, other_tenant, "bob").await;
     let foreign = seed_record(
         &other_pool,
         other_tenant,

@@ -51,6 +51,10 @@ const DECLARED_PATHS: &[&str] = &[
     "/v1/admin/grants/{grant_id}",
     "/v1/admin/groups",
     "/v1/admin/groups/{group_id}",
+    "/v1/admin/scopes",
+    "/v1/admin/scopes/{scope_id}",
+    "/v1/admin/scopes/{scope_id}/ancestors",
+    "/v1/admin/scopes/{scope_id}/descendants",
     "/v1/invites/{invite_token}/accept",
     "/v1/me",
     "/v1/projects/{project_id}",
@@ -95,7 +99,6 @@ fn app() -> Router {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(
             synveda_retrieval::SearchIndex::open(
@@ -303,8 +306,8 @@ fn the_document_is_generatable() {
     }
     assert_eq!(
         operation_ids.len(),
-        26,
-        "CPR-4's twelve operations plus CPR-5's fourteen: {operation_ids:?}"
+        32,
+        "CPR-4's twelve, CPR-5's fourteen, CPR-7's six: {operation_ids:?}"
     );
 }
 

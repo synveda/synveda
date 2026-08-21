@@ -39,14 +39,15 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::{hierarchy, identities, policy_assignments, role_bindings, tenants};
+use synveda_store::{access, identities, policy_assignments, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, PackConfig, Role, ScopeId, ScopeKind,
-    TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, PackConfig, ScopeId, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -83,7 +84,6 @@ fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
         search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
@@ -114,20 +114,20 @@ struct World {
     org: ScopeId,
     eng: ScopeId,
     platform: ScopeId,
-    /// The author: a contributor at the platform team.
+    /// The author: a member grant at the platform team.
     alice: String,
     /// The curator who reviews and runs the effect.
     cora: String,
-    /// The steward whose approval the pack also asks for — placed in the
-    /// *other* team on purpose, so his authority at the platform team is a
-    /// role binding and nothing else. That is what makes "a steward cannot
-    /// run the effect" true: steward is no content role in any pack, and
-    /// the membership floor a placed principal holds is the one thing that
-    /// would otherwise supply the read.
+    /// The administrator whose approval the pack also asks for. Under the
+    /// grant vocabulary the administrator *can* read content, so the
+    /// separation this suite demonstrates is the one the model still
+    /// draws: the member who proposed cannot run the effect — publishing
+    /// is priced at curator and above.
     sam: String,
-    /// The consumer: placed at the platform team, holding no role at all.
+    /// The consumer: an agent anchored at the platform team, holding no
+    /// grant at all — the membership floor is the whole of its reach.
     bea: String,
-    /// Someone in the other team, for the gradient.
+    /// An agent anchored at the other team, for the gradient.
     dave: String,
 }
 
@@ -163,32 +163,27 @@ async fn world() -> Option<World> {
     .expect("admit tenant");
 
     let mut tx = pool.begin().await.expect("begin");
-    let org = node(&mut tx, tenant, None, ScopeKind::Org, "acme").await;
-    let eng = node(&mut tx, tenant, Some(org.id), ScopeKind::Department, "eng").await;
-    let platform = node(&mut tx, tenant, Some(eng.id), ScopeKind::Team, "platform").await;
-    let payments = node(&mut tx, tenant, Some(eng.id), ScopeKind::Team, "payments").await;
-    node(
-        &mut tx,
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-    )
-    .await;
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = unit(&mut tx, tenant, root.id, "eng").await;
+    let platform = unit(&mut tx, tenant, eng.id, "platform").await;
+    let payments = unit(&mut tx, tenant, eng.id, "payments").await;
     tx.commit().await.expect("commit hierarchy");
 
-    for (subject, parent) in [
-        ("alice", platform.id),
-        ("cora", platform.id),
-        ("sam", payments.id),
-        ("bea", platform.id),
-        ("dave", payments.id),
-    ] {
-        seed_user(&pool, tenant, subject, parent).await;
+    for subject in ["alice", "cora", "sam"] {
+        seed_user(&pool, tenant, subject).await;
     }
-    bind(&pool, tenant, "alice", platform.id, Role::Contributor).await;
-    bind(&pool, tenant, "cora", platform.id, Role::Curator).await;
-    bind(&pool, tenant, "sam", platform.id, Role::Steward).await;
+    // The consumers are headless agents anchored at their teams: placement
+    // is identity since CPR-7 (ADR-0074 decision 3), so "a member of the
+    // platform team" is an own scope under the platform org unit — which
+    // is exactly the base layer's carve-out shape (ADR-0018 decision 4),
+    // and the zero-config consumer the membership floor exists for.
+    seed_agent(&pool, tenant, "bea", platform.id).await;
+    seed_agent(&pool, tenant, "dave", payments.id).await;
+    bind(&pool, tenant, "alice", platform.id, RoleKey::Member).await;
+    bind(&pool, tenant, "cora", platform.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "sam", platform.id, RoleKey::Administrator).await;
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
     let app = router(state(&url, pdp.clone()));
@@ -197,7 +192,7 @@ async fn world() -> Option<World> {
         tenant,
         app,
         pdp,
-        org: org.id,
+        org: root.id,
         eng: eng.id,
         platform: platform.id,
         alice: issue("alice", tenant),
@@ -208,41 +203,46 @@ async fn world() -> Option<World> {
     })
 }
 
-async fn node(
+/// One org unit under a parent — the shape every grouping takes now that
+/// rank is gone (ADR-0073 decision 4).
+async fn unit(
     tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
     tenant: TenantId,
-    parent: Option<ScopeId>,
-    kind: ScopeKind,
+    parent: ScopeId,
     slug: &str,
-) -> HierarchyNode {
-    hierarchy::create(tx, ScopeId::new(), tenant, parent, kind, slug, slug)
-        .await
-        .expect("create node")
-}
-
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
-    let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
+) -> Scope {
+    scopes::create(
+        &mut *tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(parent),
+            slug: slug.to_owned(),
+            display_name: slug.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create personal scope");
+    .expect("create org unit")
+}
+
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
+    let mut tx = pool.begin().await.expect("begin");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -250,12 +250,64 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: Role) {
+/// Seeds a headless consumer: a service identity whose own `principal`
+/// scope nests under `anchor` — the shape the registration route mints
+/// (`POST /v1/admin/service-identities`), and the only chain that runs
+/// leaf → team → department → org since placement became identity.
+async fn seed_agent(pool: &PgPool, tenant: TenantId, subject: &str, anchor: ScopeId) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    role_bindings::bind(&mut *tx, tenant, subject, Some(scope), role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    let leaf = scopes::create(
+        &mut tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::Principal,
+            parent_scope_id: Some(anchor),
+            slug: scopes::principal_slug(subject),
+            display_name: subject.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: Some(subject.to_owned()),
+            created_by: None,
+        },
+    )
+    .await
+    .expect("mint agent scope");
+    let identity = identities::create(
+        &mut tx,
+        IdentityId::new(),
+        tenant,
+        Some(subject),
+        IdentityKind::Service,
+        None,
+        None,
+        leaf.id,
+    )
+    .await
+    .expect("create identity");
+    tx.commit().await.expect("commit agent");
+    identity
+}
+
+async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
+    let mut tx = pool.begin().await.expect("begin");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 async fn call(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
@@ -438,7 +490,7 @@ async fn a_prompt_change_reaches_a_consumer_only_through_review() {
     );
     let refusal = detail(&refused);
     assert!(
-        refusal.contains("steward"),
+        refusal.contains("administrator"),
         "the refusal must name what the pack is short of: {refusal}"
     );
     assert!(
@@ -448,10 +500,11 @@ async fn a_prompt_change_reaches_a_consumer_only_through_review() {
     let (status, still_absent) = resolve(&w, &w.bea, "support/triage").await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{still_absent}");
 
-    // 3. The review the pack asks for. Two distinct people, and the steward
-    //    cannot run the effect — steward reads no content in any pack, and
-    //    publishing takes the asset kind's read action beside
-    //    `ChannelPublish` (ADR-0031 decision 12, ADR-0049 decision 4).
+    // 3. The review the pack asks for. Two distinct people, and the
+    //    proposer cannot run the effect — publishing is priced at curator
+    //    and above, beside the asset kind's read action (ADR-0031
+    //    decision 12, ADR-0049 decision 4), so a member's approval is one
+    //    thing and their authority to ship it is another.
     let (status, opened) = post(
         &w.app,
         "/v1/proposals",
@@ -498,15 +551,16 @@ async fn a_prompt_change_reaches_a_consumer_only_through_review() {
     let (status, refused) = post(
         &w.app,
         &format!("/v1/proposals/{id}/publish"),
-        &w.sam,
+        &w.alice,
         json!({}),
     )
     .await;
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
-        "the steward approved it and still cannot run it: they read no \
-         content in any pack, and publishing takes PromptRead: {refused}"
+        "the member who proposed it still cannot run the effect: publishing \
+         takes `ChannelPublish` beside `PromptRead`, and a member grant holds \
+         neither at the curator tier the pack prices this at: {refused}"
     );
     let (status, published) = post(
         &w.app,
@@ -892,12 +946,12 @@ async fn resolution_walks_the_chain_nearest_first_and_skips_what_it_may_not_read
     // The org publishes the house version. Cora is bound curator at the
     // platform team only, so the org's publication needs its own
     // authority: bind her there for the two publications this test needs.
-    bind(&w.pool, w.tenant, "cora", w.org, Role::Curator).await;
-    bind(&w.pool, w.tenant, "sam", w.org, Role::Steward).await;
-    bind(&w.pool, w.tenant, "alice", w.org, Role::Contributor).await;
-    bind(&w.pool, w.tenant, "cora", w.eng, Role::Curator).await;
-    bind(&w.pool, w.tenant, "sam", w.eng, Role::Steward).await;
-    bind(&w.pool, w.tenant, "alice", w.eng, Role::Contributor).await;
+    bind(&w.pool, w.tenant, "cora", w.org, RoleKey::Curator).await;
+    bind(&w.pool, w.tenant, "sam", w.org, RoleKey::Administrator).await;
+    bind(&w.pool, w.tenant, "alice", w.org, RoleKey::Member).await;
+    bind(&w.pool, w.tenant, "cora", w.eng, RoleKey::Curator).await;
+    bind(&w.pool, w.tenant, "sam", w.eng, RoleKey::Administrator).await;
+    bind(&w.pool, w.tenant, "alice", w.eng, RoleKey::Member).await;
 
     let org_text = "House style: plain words, no exclamation marks.";
     author(&w, &w.alice, w.org, "house-style", org_text).await;
@@ -977,9 +1031,16 @@ async fn resolution_walks_the_chain_nearest_first_and_skips_what_it_may_not_read
     assert_eq!(skipped["scope_id"], json!(w.org), "{skipped}");
 
     // Cora holds curator at the department, which is the explicit grant
-    // `confidential` is defined by — so the same call gets her the nearer
-    // one.
-    let (status, reached) = resolve(&w, &w.cora, "eng-style").await;
+    // `confidential` is defined by. Her own chain no longer runs through
+    // the department — placement is identity — so the nearer copy is
+    // something she *names*, and the grant is what the named read turns
+    // on.
+    let (status, reached) = get(
+        &w.app,
+        &format!("/v1/prompts/eng-style?scope_id={}", w.eng),
+        &w.cora,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{reached}");
     assert_eq!(reached["template"], json!(dept_text), "{reached}");
     assert_eq!(reached["scope_id"], json!(w.eng), "{reached}");

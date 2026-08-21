@@ -50,11 +50,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{Actor, AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::{hierarchy, lapses, rls};
+use synveda_store::{lapses, rls, scopes};
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    AssetKind, Error, HierarchyNode, IdentityId, Lapse, LapseAction, LapseId, LapseOutcome,
-    LapseTerms, ProposalEffect, ProposalId, ProposalState, Result, ScopeId, ScopeKind, Sensitivity,
-    TenantId,
+    AssetKind, Error, IdentityId, Lapse, LapseAction, LapseId, LapseOutcome, LapseTerms,
+    ProposalEffect, ProposalId, ProposalState, Result, ScopeId, Sensitivity, TenantId,
 };
 use synveda_vedaflow::{self as vedaflow, LapseAsset, PolicySnapshot, Signer};
 
@@ -63,7 +63,7 @@ use crate::approvals;
 use crate::audit;
 use crate::authz::{self, DecisionInput};
 use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::{LAPSE_EXPIRIES_TOTAL, LAPSE_OPERATIONS_TOTAL};
 
 /// The tier a lapse declares when its request names none (ADR-0038
@@ -211,22 +211,28 @@ async fn propose_inner(
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let target = found(
-        hierarchy::node(&mut *tx, request.scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, request.scope_id).await?,
         tenant_id,
         request.scope_id,
     )?;
     let grantee = found(
-        hierarchy::node(&mut *tx, request.grantee_scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, request.grantee_scope_id).await?,
         tenant_id,
         request.grantee_scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&target)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&target),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::ProposalOpen,
         Resource::Scope(target.id),
-        None,
     )?;
     let proposer = identity_of(&input)?;
 
@@ -244,7 +250,13 @@ async fn propose_inner(
         .pdp
         .effective(tenant_id, Resource::Scope(target.id), &input.context());
     terms.validate(&effective.lapse)?;
-    validate_shape(&terms, &target, &grantee)?;
+    let target_path = scopes::path(&mut *tx, tenant_id, target.id)
+        .await?
+        .unwrap_or_else(|| target.slug.clone());
+    let grantee_path = scopes::path(&mut *tx, tenant_id, grantee.id)
+        .await?
+        .unwrap_or_else(|| grantee.slug.clone());
+    validate_shape(&terms, &target, &grantee, &target_path, &grantee_path)?;
 
     // The reviewed object: one member, the terms in canonical form. This is
     // what the approvals bind, and because it is the *only* copy of the
@@ -343,9 +355,9 @@ async fn propose_inner(
         "state": ProposalState::Open.as_str(),
         "effect": ProposalEffect::Lapse.as_str(),
         "target_scope_id": target.id,
-        "target_scope_path": target.path,
+        "target_scope_slug": target.slug,
         "grantee_scope_id": grantee.id,
-        "grantee_scope_path": grantee.path,
+        "grantee_scope_slug": grantee.slug,
         "action": terms.action.as_str(),
         "max_sensitivity": terms.max_sensitivity.as_str(),
         "duration_secs": terms.duration_secs,
@@ -357,16 +369,23 @@ async fn propose_inner(
 
 /// The two refusals that need the hierarchy, which `LapseTerms::validate`
 /// cannot make because `synveda-types` knows no nodes.
+///
+/// The containment check takes the two scopes' **paths** rather than their
+/// leaf slugs: since the scope cutover a slug names one node, not the chain
+/// to it (ADR-0070), so subtree containment is a path prefix — the same
+/// derivation `scopes::path` gives the closure.
 fn validate_shape(
     terms: &LapseTerms,
-    target: &HierarchyNode,
-    grantee: &HierarchyNode,
+    target: &Scope,
+    grantee: &Scope,
+    target_path: &str,
+    grantee_path: &str,
 ) -> Result<()> {
     // The privacy floor, refused loudly here as well as excluded silently
     // in the permit (ADR-0037 decision 8). Nobody's personal memory is
     // disclosed by a lapse, and an investigation that genuinely needs one
     // person's corpus is a different feature with a different name.
-    if target.kind == ScopeKind::User {
+    if target.kind == ScopeKind::Principal {
         return Err(Error::Invalid {
             message: format!(
                 "scope {} is a personal scope; no lapse discloses one, under any pack. \
@@ -378,7 +397,7 @@ fn validate_shape(
     // A target the grantee already reaches through its own chain grants
     // nothing: `lapsed_scopes` would drop it from every plan, and the
     // proposal would consume two stewards' review to change nothing.
-    if grantee.path == target.path || grantee.path.starts_with(&format!("{}/", target.path)) {
+    if grantee_path == target_path || grantee_path.starts_with(&format!("{target_path}/")) {
         return Err(Error::Invalid {
             message: format!(
                 "scope {} already composes {} through its own chain; a lapse there \
@@ -422,17 +441,23 @@ async fn grant_inner(state: &AppState, id: ProposalId) -> Result<Json<LapseView>
         });
     }
     let target = found(
-        hierarchy::node(&mut *tx, proposal.target_scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, proposal.target_scope_id).await?,
         tenant_id,
         proposal.target_scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&target)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&target),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::LapseGrant,
         Resource::Scope(target.id),
-        None,
     )?;
     if proposal.state.is_terminal() {
         return Err(Error::Conflict {
@@ -548,7 +573,7 @@ async fn grant_inner(state: &AppState, id: ProposalId) -> Result<Json<LapseView>
     );
     Ok(Json(render(
         &granted,
-        (None, Some(target.path)),
+        (None, Some(target.slug)),
         Utc::now(),
     )))
 }
@@ -601,17 +626,23 @@ async fn revoke_inner(
             entity: format!("lapse {id}"),
         })?;
     let target = found(
-        hierarchy::node(&mut *tx, existing.target_scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, existing.target_scope_id).await?,
         tenant_id,
         existing.target_scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&target)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&target),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::LapseRevoke,
         Resource::Scope(target.id),
-        None,
     )?;
     let revoker = identity_of(&input)?;
     let revoked = lapses::revoke(&mut *tx, tenant_id, id, revoker, reason).await?;
@@ -643,7 +674,7 @@ async fn revoke_inner(
     tracing::info!(lapse.id = %revoked.id, "lapse revoked early");
     Ok(Json(render(
         &revoked,
-        (None, Some(target.path)),
+        (None, Some(target.slug)),
         Utc::now(),
     )))
 }
@@ -686,7 +717,7 @@ pub(crate) struct ListParams {
 /// `POST /v1/lapses/{id}/revoke` has existed since AUTHZ-4. Each row is now
 /// visible if the caller holds `PolicyRead` at **either** end, decided per
 /// scope exactly as the scoped form decides it. No tenant-wide grant is
-/// invented: that shape exists next door on `GET /v1/roles/bindings` and is
+/// invented: that shape exists next door on `GET /v1/admin/grants` and is
 /// held by org-admins, who are not the people this view is for.
 #[tracing::instrument(name = "lapses.list", skip_all)]
 pub(crate) async fn list(
@@ -715,28 +746,37 @@ async fn list_at_target(
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let target = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&target)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&target),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     authz::decide(
         state,
         &input,
         Action::PolicyRead,
         Resource::Scope(target.id),
-        None,
     )?;
     let rows = lapses::at_target(&mut *tx, tenant_id, target.id).await?;
     let now = Utc::now();
+    let path = scopes::path(&mut *tx, tenant_id, target.id)
+        .await?
+        .unwrap_or_else(|| target.slug.clone());
     let views: Vec<LapseView> = rows
         .iter()
         .filter(|lapse| !standing_only || lapse.outcome_at(now) == LapseOutcome::Active)
-        .map(|lapse| render(lapse, (None, Some(target.path.clone())), now))
+        .map(|lapse| render(lapse, (None, Some(path.clone())), now))
         .collect();
     Ok(Json(json!({
         "scope_id": target.id,
-        "scope_path": target.path,
+        "scope_path": path,
         "lapses": views,
     })))
 }
@@ -768,18 +808,28 @@ async fn list_in_tenant(state: &AppState, standing_only: bool) -> Result<Json<se
         // A scope that has been deleted since the grant was made decides
         // nothing and is not readable — fail closed, the same reading
         // `gather_lapsed` gives a target whose chain no longer resolves.
-        let permitted = match hierarchy::node(&mut *tx, scope_id).await? {
+        let permitted = match scopes::get(&mut *tx, tenant_id, scope_id).await? {
             Some(node) if node.tenant_id == tenant_id => {
-                let input = authz::gather(state, &mut tx, Some(&node)).await?;
-                let allowed = authz::decide(
+                let input = authz::gather(
                     state,
-                    &input,
-                    Action::PolicyRead,
-                    Resource::Scope(node.id),
-                    None,
+                    &mut tx,
+                    Some(&node),
+                    synveda_store::anchors::AnchorSelection::none(),
+                    Vec::new(),
                 )
-                .is_ok();
-                allowed.then_some(node.path)
+                .await?;
+                let allowed =
+                    authz::decide(state, &input, Action::PolicyRead, Resource::Scope(node.id))
+                        .is_ok();
+                if allowed {
+                    Some(
+                        scopes::path(&mut *tx, tenant_id, node.id)
+                            .await?
+                            .unwrap_or_else(|| node.slug.clone()),
+                    )
+                } else {
+                    None
+                }
             }
             _ => None,
         };

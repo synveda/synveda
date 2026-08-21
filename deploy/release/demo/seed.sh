@@ -84,15 +84,14 @@ api() { # method path [body]
 }
 
 # ── reading the tree ────────────────────────────────────────────────────
-# `synveda hierarchy list --json` serves an array of nodes; `tr '{' '\n'`
-# puts one node on each line, after which a node's own fields can be read
-# with `grep` and `sed` and no field of one node can be confused with a
+# `synveda scope list --json` serves an array of scopes; `tr '{' '\n'`
+# puts one scope on each line, after which a scope's own fields can be read
+# with `grep` and `sed` and no field of one scope can be confused with a
 # field of another.
 #
 # **This deliberately does not read the human rendering**, and the reason is
-# worth the comment. `hierarchy list` prefixes each line with a kind marker —
-# `▪` org, `▸` department, `·` team, space for a personal leaf — and reading
-# it means comparing those glyphs in `awk`. macOS's BSD awk reports
+# worth the comment. The tree rendering prefixes each line with glyphs —
+# and reading it means comparing those glyphs in `awk`. macOS's BSD awk reports
 # `"▪" == "▸"` as **true**: it coerces multibyte strings numerically, both
 # become 0, and every marker compares equal to every other. Concatenating
 # `""` to force a string comparison does not fix it. gawk and mawk get it
@@ -108,7 +107,11 @@ api() { # method path [body]
 # can correlate them. Found by running this: the seeder created both
 # departments and then could not find either.
 tree_json() {
-  "$SYNVEDA" hierarchy list --json 2>/dev/null | tr -d ' \n' | tr '{' '\n' || true
+  # The governed tree since CPR-7: `scope list --json --under <root>`
+  # serves the subtree as one pretty-printed array. Same ASCII-throughout
+  # reasoning as before — per-line grep over JSON, never glyphs.
+  "$SYNVEDA" scope list --json --under "$root" 2>/dev/null \
+    | tr -d ' \n' | tr '{' '\n' || true
 }
 
 # `"id":"` needs a quote before the `i`, so it cannot match inside
@@ -130,8 +133,9 @@ known() { # kind slug -> is it one this seeder creates?
     END { exit !found }' "$work/shape"
 }
 
-root=$("$SYNVEDA" hierarchy root 2>/dev/null) ||
-  fail "could not read the org root. Is the gateway up, and have you logged in?"
+root=$(api GET /v1/admin/scopes 2>/dev/null | python3 -c 'import json,sys
+print(json.load(sys.stdin)["parent"]["id"])' 2>/dev/null) ||
+  fail "could not read the tenant root. Is the gateway up, and have you logged in?"
 
 # The tenant's own id, for the closing summary. `synveda audit verify` takes
 # `--tenant` with no default, so a summary that printed the bare verb would
@@ -173,7 +177,7 @@ if [ "$dry_run" = yes ]; then
   echo "seed.sh --dry-run"
   echo
   echo "  gateway        $GATEWAY"
-  echo "  org root       $root"
+  echo "  tenant root    $root"
   echo "  shape          $SHAPE"
   echo
   echo "  would create"
@@ -186,7 +190,7 @@ if [ "$dry_run" = yes ]; then
   echo "    (inherited)        elsewhere — the tenant default stands"
   echo
   echo "  would observe  $(grep -c '^corpus|' "$work/shape") turns through /v1/observe"
-  echo "  would open     one proposal climbing memory to the org root"
+  echo "  would open     one proposal climbing memory to the tenant root"
   echo
   echo "  would NOT      publish anything. Every publication this organisation"
   echo "                 can make needs two distinct people and there is one"
@@ -205,28 +209,28 @@ echo
 echo "[1/4] scopes"
 awk -F'|' '$1=="department" {print $2 "|" $3}' "$work/shape" > "$work/departments"
 while IFS='|' read -r slug name; do
-  if [ -n "$(id_of department "$slug")" ]; then
+  if [ -n "$(id_of org_unit "$slug")" ]; then
     echo "      = $slug"
     continue
   fi
-  "$SYNVEDA" hierarchy create --parent "$root" --kind department \
-    --slug "$slug" --name "$name" >/dev/null || fail "create the $slug department"
+  "$SYNVEDA" scope create --parent "$root" --kind org_unit \
+    --slug "$slug" --name "$name" >/dev/null || fail "create the $slug unit"
   echo "      + $slug"
 done < "$work/departments"
 
 awk -F'|' '$1=="team" {print $2 "|" $3 "|" $4}' "$work/shape" > "$work/teams"
 while IFS='|' read -r department slug name; do
-  if [ -n "$(id_of team "$slug")" ]; then
+  if [ -n "$(id_of org_unit "$slug")" ]; then
     echo "      = $department/$slug"
     continue
   fi
   # Resolved per team rather than once, because the departments may have
   # just been created and a list read before them would send every team to
   # the wrong parent.
-  parent=$(id_of department "$department")
-  [ -n "$parent" ] || fail "the $department department is missing after creating it"
-  "$SYNVEDA" hierarchy create --parent "$parent" --kind team \
-    --slug "$slug" --name "$name" >/dev/null || fail "create the $department/$slug team"
+  parent=$(id_of org_unit "$department")
+  [ -n "$parent" ] || fail "the $department unit is missing after creating it"
+  "$SYNVEDA" scope create --parent "$parent" --kind org_unit \
+    --slug "$slug" --name "$name" >/dev/null || fail "create the $department/$slug unit"
   echo "      + $department/$slug"
 done < "$work/teams"
 
@@ -234,11 +238,10 @@ done < "$work/teams"
 echo "[2/4] policy packs"
 awk -F'|' '$1=="pack" {print $2 "|" $3}' "$work/shape" > "$work/packs"
 while IFS='|' read -r department pack; do
-  node_id=$(id_of department "$department")
-  [ -n "$node_id" ] || fail "no $department department to assign $pack to"
-  # The one write here the product does not surface as a verb:
-  # `synveda hierarchy policy` is a read.
-  api PUT "/v1/hierarchy/nodes/$node_id/policy" "{\"name\":\"$pack\"}" >/dev/null ||
+  node_id=$(id_of org_unit "$department")
+  [ -n "$node_id" ] || fail "no $department unit to assign $pack to"
+  # Per-scope pack assignment, re-homed under the scope plane by CPR-7.
+  api PUT "/v1/admin/scopes/$node_id/policy" "{\"name\":\"$pack\"}" >/dev/null ||
     fail "assign $pack at $department"
   echo "      $pack at $department"
 done < "$work/packs"
@@ -294,10 +297,10 @@ echo "      $found records extracted and embedded"
 # A climb rather than a same-scope publication, because of where the records
 # are: extraction lands them in the *observer's* personal scope
 # (`observe.rs`: `let home = identity.scope_id`), and FLOW-5's rule is that a
-# climb goes up the chain composition walks down — so the org root is the
-# only target available. `regulated-strict` prices a memory there at curator
-# + steward, two distinct people, which is exactly the refusal the tour asks
-# the tester to go and meet.
+# climb goes up the chain composition walks down — so the tenant root is the
+# only target available. `regulated-strict` prices a memory there at
+# `curator` + `administrator`, two distinct people, which is exactly the
+# refusal the tour asks the tester to go and meet.
 echo "[4/4] a proposal awaiting review"
 if "$SYNVEDA" proposal list 2>/dev/null | grep -qF "$PROPOSAL_TITLE"; then
   echo "      already open — left alone"
@@ -311,7 +314,7 @@ else
     "{\"scope_id\":\"$root\",\"source_scope_id\":\"$scope\",\"record_ids\":[\"$first\"],\"title\":\"$PROPOSAL_TITLE\"}") ||
     fail "open the demo proposal"
   id=$(printf '%s' "$opened" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
-  echo "      opened ${id:-a proposal} — memory climbing to the org root"
+  echo "      opened ${id:-a proposal} — memory climbing to the tenant root"
 fi
 
 echo
@@ -319,7 +322,7 @@ echo "ACME is standing."
 echo
 echo "Look at it:"
 echo
-echo "    synveda hierarchy list"
+echo "    synveda scope tree"
 echo "    synveda recall --query \"how do we roll out payments\""
 # `audit verify` takes a tenant UUID and there is no default, so the id is
 # resolved here rather than left as an exercise. Printing a command that
