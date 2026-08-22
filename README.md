@@ -193,11 +193,11 @@ Being explicit, so nothing here misleads:
   OPS-8 the plugin had never loaded at all: its manifest declared two keys
   Claude Code discovers on its own, and nothing noticed because a harness that
   replaces the harness cannot.
-- **Four console pages have no plane behind them.** CPR-8 made the console a
+- **Three console pages have no plane behind them.** CPR-8 made the console a
   product shell — routes, switchers, People, first-run onboarding, and the
   proposals inbox (CNSL-1) and scope explorer (CNSL-2) re-homed under
-  **Advanced** — but Sessions, Knowledge, New Learnings and Tools are in the
-  navigation with no API behind them, waiting on Prompts 9–15 of the
+  **Advanced** — and CPR-10 gave **Sessions** its plane, so Knowledge, New
+  Learnings and Tools are what remain, waiting on Prompts 11–15 of the
   context-platform programme. Each page says so rather than rendering an empty
   list. Seven console surfaces also still call hand-written paths, because the
   OpenAPI contract covers the context-platform plane only until Prompt 19.
@@ -329,8 +329,9 @@ Read in this order:
    and `console/src/generated/api.ts` is generated from it in turn
    ([ADR-0071](docs/adr/adr-0071-workspaces-projects-and-repository-identity.md)
    decision 7). It covers the context-platform plane — `/v1/me`, workspaces,
-   projects and repositories — and says so in its own description; the rest of
-   `/v1` joins it later in the programme.
+   projects and repositories, the access plane, the scope admin plane and the
+   session ledger — and says so in its own description; the rest of `/v1`
+   joins it later in the programme.
 7. **[docs/implementation/synveda-context-platform.md](docs/implementation/synveda-context-platform.md)**
    — the Phase 5 context-platform redesign, on `feat/context-platform-mvp`:
    the base-commit inventory, the deletion map from old concepts to new, the

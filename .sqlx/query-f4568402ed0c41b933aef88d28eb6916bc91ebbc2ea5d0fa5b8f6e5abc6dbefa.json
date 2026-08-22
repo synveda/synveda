@@ -1,0 +1,153 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select s.id, s.tenant_id, s.workspace_id, s.project_id, s.scope_id,\n               s.principal_id, s.client_name, s.client_version,\n               s.client_installation_id, s.external_session_id, s.agent_name,\n               s.model_name, s.repository_id, s.branch, s.task_summary, s.status,\n               s.started_at, s.ended_at, s.last_observed_at, s.metadata,\n               s.created_at, s.updated_at\n        from sessions s\n        where s.tenant_id = $1\n          and ($2::uuid is null or exists (\n                  select 1 from scope_closure c\n                  where c.tenant_id = s.tenant_id\n                    and c.ancestor_id = $2::uuid\n                    and c.descendant_id = s.scope_id\n              ))\n          and ($3::uuid is null or s.workspace_id = $3::uuid)\n          and ($4::uuid is null or s.project_id = $4::uuid)\n          and ($5::text is null or s.status = $5::text)\n        order by s.started_at desc, s.id\n        limit $6\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "client_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "client_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "client_installation_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "external_session_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "agent_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "model_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "repository_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 13,
+        "name": "branch",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "task_summary",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "last_observed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 20,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f4568402ed0c41b933aef88d28eb6916bc91ebbc2ea5d0fa5b8f6e5abc6dbefa"
+}

@@ -1465,6 +1465,69 @@ CPR-9  The foundation audit: hardening the scope and access cutover (M)
   pointer; and no migration in the chain runs DML outside a function body but the three pinned
   statements.
 
+CPR-10  The session ledger and runtime API (XL)
+  Filed 2026-08-23 by Prompt 10 of the CPR programme, and the first of Stage B. ADR-0068
+  decision 5 in one line: sessions are the root of agent runtime activity, and
+  `session_id: String` as a correlation hint is deleted. What exists before this is that
+  string — `observe_events.session_id`, an opaque harness identifier with a length CHECK and
+  nothing else, copied into an audit payload by `/v1/inject` and `/v1/recall` and read back by
+  nothing. Four things follow, and each is something this product claims to do and cannot: a
+  run an agent only *read* in does not exist (ADPT-8 measured it — a headless Claude Code run,
+  three sessions, three `inject.ok`, **zero** `observe.done`, exit 0); a run cannot be
+  governed, because there is no resource for the PDP to decide about; a run cannot be
+  retained, ended or audited; and the console cannot show one, which is why CPR-8 had to
+  render a placeholder on the page it put first in the primary menu.
+  What it adds: three tables — `sessions` (one run: its workspace, optionally its project,
+  the **derived** governed scope it is decided at, who opened it, the client and version and
+  installation, the harness's own id, the agent, the model, the repository and branch, a task
+  summary, a five-state lifecycle and a bounded metadata bag), `session_events` (immutable,
+  append-only, ordered, idempotent by the client's own `client_event_id`, over a closed
+  twelve-name vocabulary spanning lifecycle, messages, tools, files, commands, skills, context
+  requests and adapter warnings) and `session_context_runs` (one act of composing context for
+  a run, with the rendered block and its watermark). Seven routes — open, list, get, append
+  events, end, timeline, context-runs — all on the OpenAPI contract from the day they exist.
+  Two Cedar actions (`SessionRead`, `SessionWrite`), a `Session` entity parented to the scope
+  it runs at, permits in all three shipped packs (@18 → @19), four audit action types, and the
+  console's Sessions page, which is the first of CPR-8's four planned pages to get a plane.
+  Six decisions worth reading, all in ADR-0076. **The governed scope is derived, never
+  submitted**: three columns and two composite foreign keys hold `scope_id =
+  coalesce(project_scope_id, workspace_scope_id)` as a row-local fact, because a client that
+  could name the scope could name one its workspace is not in. **Five states, because the
+  close is two-phase**: an adapter learns a run is over at a hook that must return quickly and
+  usually still has events buffered, so `ending` means *no new work, I am flushing* and still
+  accepts them — and `abandoned` (nobody closed it) is kept apart from `failed` (it broke)
+  because the two call for different things. **No revision and no `expected_revision`**: a
+  precondition stops a lost update, and ending has one target state, so two concurrent ends
+  are one transition and one refusal that already names the state the run is in. **Two
+  idempotency mechanisms, not redundant**: opening and composing take the header; appending
+  is idempotent per *event*, because a redelivered batch overlapping a previous one by three
+  of ten must append seven and report `duplicate` for three, which a request-level key cannot
+  express. **Nothing on the wire carries a tenant or an acting principal**, and a body naming
+  one is refused rather than ignored — a server that silently dropped the field would behave
+  correctly and teach every client author that it works. And **the timeline is a projection**
+  over the two tables, never a third: a materialised transcript would be a second copy of
+  `session_events` that disagrees the first time one is written and the other is not.
+  The old observe/inject/recall routes are untouched, and nothing bridges or synchronises the
+  two: Prompt 11 re-cuts the observe path onto sessions and deletes the string.
+  AC: an agent opens a run whose governed scope is the project's, derived with no request
+  naming it; a body naming `tenant_id`, `principal_id` or `scope_id` is a 400 and the stored
+  principal is the token's; opening replays 200 on the same key, 409 on the same key with a
+  different body, and 400 with no key; a redelivered batch appends only what is new, reports
+  `duplicate` for the rest at their **original** positions, and a batch repeating an id inside
+  itself is refused by name; `ending` still accepts buffered events while a closed run accepts
+  none, never reopens and never changes how it closed — at the API and against direct SQL;
+  `POST …/context-runs` composes through the existing retrieval engine and persists the
+  identity and the block; the timeline merges both sources in one order and no timeline table
+  exists; every route refuses a caller who holds nothing with a 403 naming the action; a
+  member granted at one project sees that project's runs and no others, with the listing and
+  the per-object route agreeing; another tenant's session id is a 404 with the same error kind
+  as a fictional one; a tenant with no governed scopes is answered rather than errored; a
+  session's `metadata` never reaches the audit chain and its size does; an append chains one
+  event however many it carried, with counts, the sequence range and the per-type breakdown
+  and never the events; an administrator is offered neither `session.read` nor `session.write`
+  at somebody else's `principal` scope; and all three tables are tenant-bound with forced RLS,
+  with no UPDATE or DELETE on the two append-only ones and no DELETE on `sessions`.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1558,7 +1621,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

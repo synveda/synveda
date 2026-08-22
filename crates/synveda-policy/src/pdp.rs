@@ -129,10 +129,23 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// (ADR-0074 decision 8 — anchors are not entity parents, so
 /// `principal in resource` no longer reached the scope above); and the
 /// quarantine review plane decides at the tenant (decision 7).
+/// `@19`: CPR-10 added the session ledger (ADR-0076). Two actions —
+/// `SessionRead` and `SessionWrite` — and nothing else moved. Reading a
+/// run is priced with the **content** reads rather than with
+/// `ProjectRead`, because a project's name discloses nothing and a
+/// session's timeline is a transcript of what somebody and their agent
+/// did, said, read and changed; writing is the usual pack-uniform floor,
+/// own scope role-free and a content key beyond it. `standard` shares
+/// runs across `principal.ambit` exactly as it shares memory, and
+/// `open-collaboration` reads tenant-wide and still writes on the
+/// uniform floor. The membership floor is two clauses in every pack
+/// rather than one, and each says why: `principal in resource` walks
+/// *up* from the caller's own scope and can never reach a `Session`,
+/// which hangs *below* one.
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 18),
-    (STANDARD, 18),
-    (OPEN_COLLABORATION, 18),
+    (REGULATED_STRICT, 19),
+    (STANDARD, 19),
+    (OPEN_COLLABORATION, 19),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -343,6 +356,7 @@ pub struct Pdp {
     grant_type: EntityTypeName,
     workspace_type: EntityTypeName,
     project_type: EntityTypeName,
+    session_type: EntityTypeName,
     action_type: EntityTypeName,
     embedded: HashMap<&'static str, Arc<LoadedPack>>,
     tenant_packs: RwLock<HashMap<TenantId, HashMap<String, Arc<LoadedPack>>>>,
@@ -478,6 +492,7 @@ impl Pdp {
             grant_type: type_name("Synveda::ScopeGrant")?,
             workspace_type: type_name("Synveda::Workspace")?,
             project_type: type_name("Synveda::Project")?,
+            session_type: type_name("Synveda::Session")?,
             action_type: type_name("Synveda::Action")?,
             embedded,
             tenant_packs: RwLock::new(HashMap::new()),
@@ -1017,7 +1032,7 @@ impl Pdp {
     ///   `parent_id` with the root parented to its tenant. Served from the
     ///   entity store's prebuilt fragments when the chain's shape matches.
     /// - `Group`, one per group this principal is in.
-    /// - `Workspace`, `Project` and `ScopeGrant`, one per
+    /// - `Workspace`, `Project`, `Session` and `ScopeGrant`, one per
     ///   [`ResourceEntity`] the caller named, each parented to the scope it
     ///   belongs to — which is what makes every containment rule written over
     ///   scopes reach them without being restated.
@@ -1263,6 +1278,18 @@ impl Pdp {
                 let entity = new_entity(uid.clone(), attrs, HashSet::from([scope]))?;
                 Ok((uid, entity))
             }
+            ResourceEntity::Session { id, scope_id } => {
+                let uid = self.uid(&self.session_type, &id.to_string())?;
+                let scope = self.scope_uid(scope_id)?;
+                let mut attrs = HashMap::new();
+                tenant_attr(&mut attrs);
+                attrs.insert(
+                    "scope".to_owned(),
+                    RestrictedExpression::new_entity_uid(scope.clone()),
+                );
+                let entity = new_entity(uid.clone(), attrs, HashSet::from([scope]))?;
+                Ok((uid, entity))
+            }
             ResourceEntity::Group { id } => {
                 let uid = self.group_uid(id)?;
                 let mut attrs = HashMap::new();
@@ -1374,6 +1401,7 @@ impl Pdp {
             Resource::Scope(id) => self.scope_uid(id)?,
             Resource::Workspace(id) => self.uid(&self.workspace_type, &id.to_string())?,
             Resource::Project(id) => self.uid(&self.project_type, &id.to_string())?,
+            Resource::Session(id) => self.uid(&self.session_type, &id.to_string())?,
             Resource::Group(id) => self.group_uid(id)?,
             Resource::Grant(id) => self.uid(&self.grant_type, &id.to_string())?,
         };
@@ -1595,15 +1623,16 @@ fn lapsing<'a>(
     context: AuthzContext<'a>,
 ) -> impl Iterator<Item = &'a Lapse> {
     let wanted = lapsable(action);
-    // A lapse names a scope. Nothing else it could name is one: a workspace or
-    // a project is decided at its own scope and would be reached through that,
-    // and a lapse over a group or a grant is not in the closed vocabulary
-    // (ADR-0037 decision 2).
+    // A lapse names a scope. Nothing else it could name is one: a workspace, a
+    // project or a session is decided at its own scope and would be reached
+    // through that, and a lapse over a group or a grant is not in the closed
+    // vocabulary (ADR-0037 decision 2).
     let target = match resource {
         Resource::Scope(id) => Some(id),
         Resource::Tenant(_)
         | Resource::Workspace(_)
         | Resource::Project(_)
+        | Resource::Session(_)
         | Resource::Group(_)
         | Resource::Grant(_) => None,
     };

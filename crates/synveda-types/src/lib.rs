@@ -25,6 +25,10 @@ mod error;
 mod graph;
 mod id;
 mod identity;
+// Canonical JSON (CPR-10). Public as a module because both callers hash a
+// **caller-supplied** object and neither is in this crate: the gateway's
+// idempotency digest and the session ledger's payload hash.
+pub mod json;
 mod lapse;
 mod mover;
 mod observe;
@@ -47,6 +51,11 @@ mod retention;
 // still says which model a caller is written against.
 pub mod scope;
 mod sensitivity;
+// The session ledger (CPR-10, ADR-0076). Public as a module for
+// `workspace`'s reason: a "session" is an ordinary word, and the module path
+// is what says this one is an agent run recorded by Synveda rather than a
+// login session, a console session or an HTTP one.
+pub mod session;
 mod skill;
 mod skillquality;
 mod skillscan;
@@ -71,9 +80,9 @@ pub use directory::{DirectoryGroup, DirectoryUser, ScimCredential};
 pub use error::{Error, Result};
 pub use graph::{Depth, Graph};
 pub use id::{
-    DirectoryGroupId, DirectoryUserId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId,
-    InviteId, LapseId, ObserveEventId, ProjectId, ProposalId, RecordId, RepositoryId,
-    ScimCredentialId, ScopeId, TenantId, WorkspaceId,
+    ContextRunId, DirectoryGroupId, DirectoryUserId, GrantId, GraphEdgeId, GraphVertexId, GroupId,
+    IdentityId, InviteId, LapseId, ObserveEventId, ProjectId, ProposalId, RecordId, RepositoryId,
+    ScimCredentialId, ScopeId, SessionEventId, SessionId, TenantId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use lapse::{

@@ -71,6 +71,7 @@ pub mod retention;
 pub mod rls;
 pub mod scopes;
 pub mod search;
+pub mod sessions;
 pub mod skill_reviews;
 pub mod skills;
 pub mod tenant_secrets;

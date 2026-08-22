@@ -182,9 +182,11 @@ delivered**: the console product shell, the first prompt of this programme
 whose deliverable is a screen, and the one that makes six prompts of platform
 reachable by somebody who is not holding a terminal — and **CPR-9 on
 2026-08-22**, making it **106 with 73 delivered**: the foundation audit, the
-first prompt asked to check its predecessors rather than build on them.
-Prompts 10–33 of its programme are filed by the prompts that run them, so this
-number will keep moving.)
+first prompt asked to check its predecessors rather than build on them — and
+**CPR-10 on 2026-08-23**, making it **107 with 74 delivered**: the session
+ledger, the first of Stage B and the prompt that makes what an agent *does* a
+governed record. Prompts 11–33 of its programme are filed by the prompts that
+run them, so this number will keep moving.)
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and
@@ -204,6 +206,28 @@ pre-epoch statements by name; they are unreachable (a pre-cut database never
 reaches the migrator) and deleting them would trade the reset instruction for
 a checksum error on every existing database, so the epoch stays at **2** and
 Prompt 33's squash removes them.
+
+Since CPR-10 **a run is a record** (ADR-0076). `sessions`, `session_events`
+and `session_context_runs` replace `session_id: text` as the answer to "what
+has this agent been doing": a run names a workspace and optionally a project,
+and the governed scope it is decided at is **derived** from those by two
+composite foreign keys and a CHECK, never sent by a client — which is also the
+rule for the tenant and the acting principal, and a body naming either is
+refused rather than ignored. Five states, because closing is two-phase: an
+adapter says `ending` at a hook that must return fast and still has events
+buffered, and `ending` still accepts them. Events are immutable, ordered by a
+**server-assigned** `sequence`, and idempotent by the client's own
+`client_event_id` — so a redelivered batch appends only what is new and
+answers `duplicate` for the rest, at their original positions, which is why
+this route takes no `Idempotency-Key` while opening a run and composing
+context both do. A **timeline is a projection** over two tables and never a
+third, merged rather than sorted so a skewed client clock can misplace a
+context run and can never reorder a transcript.
+`POST /v1/sessions/{id}/context-runs` is the **final shape** of the context
+endpoint and calls the existing retrieval engine; Prompt 18 adds
+explainability behind it without changing it. The old `/v1/observe`,
+`/v1/inject` and `/v1/recall` are **untouched** and nothing bridges them in
+either direction: Prompt 11 re-cuts the observe path and deletes the string.
 
 Phase 3 was reordered on 2026-08-04 by demo-readiness (see the Sequencing
 note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,

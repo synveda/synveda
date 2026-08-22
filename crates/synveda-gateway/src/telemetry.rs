@@ -54,6 +54,12 @@ pub const WORKSPACE_OPERATIONS_TOTAL: &str = "synveda_workspace_operations_total
 /// three-outcome taxonomy every other admin plane uses.
 pub const ACCESS_OPERATIONS_TOTAL: &str = "synveda_access_operations_total";
 
+/// Counter: session-plane operations, labelled `op` (`session.open`,
+/// `session.list`, `session.get`, `session.events.append`, `session.end`,
+/// `session.timeline`, `session.context_run`) and `outcome`
+/// (`ok`/`rejected`/`error`). CPR-10, ADR-0076.
+pub const SESSION_OPERATIONS_TOTAL: &str = "synveda_session_operations_total";
+
 /// Policy pack reload sweeps' per-pack outcomes: `installed`, `removed`,
 /// `unchanged`, or `error` (a stored pack that fails to compile keeps the
 /// last-good compile in force — ADR-0012 decision 5). AUTHZ-1/AUTHZ-2.
@@ -436,6 +442,16 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         ACCESS_OPERATIONS_TOTAL,
         "Group, grant, member and invitation operations by op and outcome (ok/rejected/error)"
+    );
+    // CPR-10 counters (ADR-0076): the session plane's own operations here, its
+    // store-side ledger counter beside the other store counters below.
+    metrics::describe_counter!(
+        SESSION_OPERATIONS_TOTAL,
+        "Session, event, timeline and context-run operations by op and outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        synveda_store::sessions::SESSION_MUTATIONS_TOTAL,
+        "Session-ledger row mutations by table (session/event/context_run) and operation"
     );
     // AUTHZ-1 counters (ADR-0012): the decision counter is emitted in
     // synveda-policy through the facade, the reload counter in the

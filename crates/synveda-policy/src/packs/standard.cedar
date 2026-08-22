@@ -1,4 +1,4 @@
-// standard@18 — shares by default inside what you belong to (seed §6,
+// standard@19 — shares by default inside what you belong to (seed §6,
 // ADR-0014, ADR-0015, ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032,
 // ADR-0036, ADR-0037, ADR-0038, ADR-0072, ADR-0073).
 //
@@ -181,6 +181,77 @@ permit (
 permit (
     principal,
     action == Synveda::Action::"MemoryWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["curator", "member", "owner", "administrator"])
+};
+
+// The session ledger (CPR-10, ADR-0076 decision 6).
+//
+// regulated-strict's shape plus this pack's one step outward: the
+// neighbourhood of everything you hold. Under `standard` a workspace's runs
+// are its members' runs, which is the same default this pack applies to memory
+// and to conventions — and the argument is a little stronger here, because the
+// thing a teammate most often needs is *what the last agent already tried*.
+//
+// Other people's `principal` scopes are excluded by the base layer, so
+// somebody's own runs stay their own under this pack exactly as under the
+// strict one.
+// The membership floor, in two clauses because this is the one rule that
+// cannot be uniform over the resource union: `principal in resource` walks
+// *up* from the caller's own scope, which reaches a `Scope` resource and can
+// never reach a `Session` — a session hangs *below* a scope. So the session
+// case asks the same question about the scope it hangs below.
+permit (
+    principal,
+    action == Synveda::Action::"SessionRead",
+    resource
+) when { resource is Synveda::Scope && principal in resource };
+
+permit (
+    principal,
+    action == Synveda::Action::"SessionRead",
+    resource
+) when { resource is Synveda::Session && principal in resource.scope };
+
+// The neighbourhood, uniform over the union: a session is parented to the
+// scope it runs at, so `resource in principal.ambit` is true for a run inside
+// something one hop out from anything this caller holds.
+permit (
+    principal,
+    action == Synveda::Action::"SessionRead",
+    resource
+) when { resource in principal.ambit };
+
+permit (
+    principal,
+    action == Synveda::Action::"SessionRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "curator", "member", "reviewer", "owner", "administrator"])
+};
+
+// Writing is pack-uniform, like every other write floor: sharing defaults
+// differ on the read side, and opening a run beyond your own scope always
+// takes an explicit grant.
+// The write floor, role-free: your own scope, and the runs that hang below it.
+// `resource in principal.own_scope` is uniform over the union — Cedar's `in`
+// is reflexive, so it is "this scope is mine" for a `Scope` and "this run is
+// at a scope of mine" for a `Session`.
+permit (
+    principal,
+    action == Synveda::Action::"SessionWrite",
+    resource
+) when {
+    principal has own_scope
+        && resource in principal.own_scope
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SessionWrite",
     resource
 ) when {
     resource in principal.tenant

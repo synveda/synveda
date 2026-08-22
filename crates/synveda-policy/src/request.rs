@@ -9,7 +9,7 @@ use synveda_types::anchor::ScopeAnchor;
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
     Error, GrantId, GroupId, Lapse, PolicyAssignment, ProjectId, Result, ScopeId, Sensitivity,
-    TenantId, WorkspaceId,
+    SessionId, TenantId, WorkspaceId,
 };
 
 /// The PDP's own view of a governed scope: a node with a parent, a tenant, a
@@ -92,6 +92,13 @@ pub enum ResourceEntity {
         scope_id: ScopeId,
         /// Its workspace.
         workspace_id: WorkspaceId,
+    },
+    /// A session and the governed scope it runs at (CPR-10, ADR-0076).
+    Session {
+        /// The session.
+        id: SessionId,
+        /// The scope it is decided at — its project's, or its workspace's.
+        scope_id: ScopeId,
     },
     /// A group. Tenant-wide: a group is not anchored anywhere in the tree.
     Group {
@@ -199,6 +206,31 @@ pub enum Action {
     /// separate authority over it would be one nobody could describe without
     /// describing this one.
     ProjectUpdate,
+    /// Read a session, its events, its context runs or its timeline
+    /// (CPR-10, ADR-0076 decision 6).
+    ///
+    /// **Content, not structure**, which is why it is not folded into
+    /// [`Action::ProjectRead`] the way a repository attachment is folded into
+    /// [`Action::ProjectUpdate`]. A project's name discloses nothing; a
+    /// session's timeline is a transcript of what somebody and their agent
+    /// did, said, read and changed. A pack must be able to let a member see
+    /// the project they work in without handing them everybody's runs.
+    SessionRead,
+    /// Open a session, append events to it, compose context for it, or close
+    /// it (CPR-10, ADR-0076 decision 6).
+    ///
+    /// One authority for all four, on [`Action::ChannelRollback`]'s
+    /// separability rule read the other way: an agent that may open a session
+    /// must be able to close it, and an authority to open that could not
+    /// close would produce runs nobody can end. Closing *somebody else's*
+    /// session at a shared scope takes the same key, and that is correct — a
+    /// project's owner should be able to close a runaway agent's session in
+    /// their own project.
+    ///
+    /// It does **not** admit any material: composing context for a session
+    /// additionally takes [`Action::MemoryRead`] at every scope that
+    /// contributes, decided by the same composition walk `inject` runs.
+    SessionWrite,
     /// Read who holds what on the access plane: a scope's effective members,
     /// the tenant's groups, its grants and its outstanding invitations
     /// (CPR-5, ADR-0072 decision 7).
@@ -524,7 +556,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 41] = [
+    pub const ALL: [Action; 43] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -534,6 +566,8 @@ impl Action {
         Action::ProjectRead,
         Action::ProjectCreate,
         Action::ProjectUpdate,
+        Action::SessionRead,
+        Action::SessionWrite,
         Action::MembershipRead,
         Action::MembershipGrant,
         Action::GroupManage,
@@ -583,7 +617,7 @@ impl Action {
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 32] = [
+    pub const PROBED_AT_SCOPE: [Action; 34] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -593,6 +627,8 @@ impl Action {
         Action::ProjectRead,
         Action::ProjectCreate,
         Action::ProjectUpdate,
+        Action::SessionRead,
+        Action::SessionWrite,
         Action::MembershipRead,
         Action::MembershipGrant,
         Action::MemoryWrite,
@@ -675,6 +711,8 @@ impl Action {
             Action::ProjectRead => "project.read",
             Action::ProjectCreate => "project.create",
             Action::ProjectUpdate => "project.update",
+            Action::SessionRead => "session.read",
+            Action::SessionWrite => "session.write",
             Action::MembershipRead => "membership.read",
             Action::MembershipGrant => "membership.grant",
             Action::GroupManage => "group.manage",
@@ -722,6 +760,8 @@ impl Action {
             Action::ProjectRead => "ProjectRead",
             Action::ProjectCreate => "ProjectCreate",
             Action::ProjectUpdate => "ProjectUpdate",
+            Action::SessionRead => "SessionRead",
+            Action::SessionWrite => "SessionWrite",
             Action::MembershipRead => "MembershipRead",
             Action::MembershipGrant => "MembershipGrant",
             Action::GroupManage => "GroupManage",
@@ -785,6 +825,8 @@ pub enum Resource {
     Workspace(WorkspaceId),
     /// One project.
     Project(ProjectId),
+    /// One session — one run of an agent (CPR-10, ADR-0076).
+    Session(SessionId),
     /// One group. Tenant-wide, like the action over it.
     Group(GroupId),
     /// One grant — what a revocation names.
@@ -803,9 +845,10 @@ impl Resource {
     pub fn anchor_scope(&self, context: &AuthzContext<'_>) -> Option<ScopeId> {
         match self {
             Resource::Scope(id) => Some(*id),
-            Resource::Workspace(_) | Resource::Project(_) | Resource::Grant(_) => {
-                context.scopes.first().map(|node| node.id)
-            }
+            Resource::Workspace(_)
+            | Resource::Project(_)
+            | Resource::Session(_)
+            | Resource::Grant(_) => context.scopes.first().map(|node| node.id),
             Resource::Tenant(_) | Resource::Group(_) => None,
         }
     }
@@ -818,6 +861,7 @@ impl fmt::Display for Resource {
             Resource::Scope(id) => write!(f, "scope {id}"),
             Resource::Workspace(id) => write!(f, "workspace {id}"),
             Resource::Project(id) => write!(f, "project {id}"),
+            Resource::Session(id) => write!(f, "session {id}"),
             Resource::Group(id) => write!(f, "group {id}"),
             Resource::Grant(id) => write!(f, "grant {id}"),
         }

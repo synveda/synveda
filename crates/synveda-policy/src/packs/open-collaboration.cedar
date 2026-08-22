@@ -1,4 +1,4 @@
-// open-collaboration@18 — tenant-wide read (seed §6, ADR-0014, ADR-0015,
+// open-collaboration@19 — tenant-wide read (seed §6, ADR-0014, ADR-0015,
 // ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032, ADR-0036,
 // ADR-0037, ADR-0038).
 //
@@ -176,6 +176,45 @@ permit (
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["curator", "member", "owner", "administrator"])
+};
+
+// The session ledger (CPR-10, ADR-0076 decision 6).
+//
+// This pack's own shape: anything inside the tenant is readable, personal
+// scopes excepted — and that exception is the base layer's now, so it is not
+// restated here. A team that chose this pack chose it because "what did the
+// last agent try" should never need a grant.
+permit (
+    principal,
+    action == Synveda::Action::"SessionRead",
+    resource
+) when { resource in principal.tenant };
+
+// Writing stays pack-uniform even here (ADR-0020 decision 3's rule, applied to
+// runs): your own scope role-free, a role key beyond it. An open *read*
+// default is a choice about disclosure; an open *write* default would let any
+// principal open runs against any project in the tenant, which is not the same
+// decision and is not the one this pack's name offers.
+// The write floor, role-free: your own scope, and the runs that hang below it.
+// `resource in principal.own_scope` is uniform over the union — Cedar's `in`
+// is reflexive, so it is "this scope is mine" for a `Scope` and "this run is
+// at a scope of mine" for a `Session`.
+permit (
+    principal,
+    action == Synveda::Action::"SessionWrite",
+    resource
+) when {
+    principal has own_scope
+        && resource in principal.own_scope
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SessionWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "curator", "member", "reviewer", "owner", "administrator"])
 };
 
 // The prompt registry (PRMT-1, ADR-0049 decision 4). Reading mirrors this

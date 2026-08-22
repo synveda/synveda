@@ -1,12 +1,15 @@
 /**
  * The planes this epoch has not built yet (CPR-8, ADR-0075 decision 7).
  *
- * Sessions, Knowledge, New Learnings and Tools are in the primary
- * navigation because they are what the product *is* — and none of them has
- * an API at this commit. The context-platform programme's own order says
- * why: sessions are its next prompt, candidates and knowledge versions the
- * two after that, the tool registry two stages later. This page is what
- * those four routes render meanwhile.
+ * Knowledge, New Learnings and Tools are in the primary navigation because
+ * they are what the product *is* — and none of them has an API at this
+ * commit. The context-platform programme's own order says why: candidates
+ * and knowledge versions are the next two prompts, the tool registry two
+ * stages later. This page is what those three routes render meanwhile.
+ *
+ * **Sessions left this page at CPR-10** (ADR-0076), which is what the page is
+ * for: an entry here is a debt with a name, and it is paid by deleting the
+ * entry rather than by editing it.
  *
  * # Why a page rather than a hidden nav item
  *
@@ -28,13 +31,6 @@ import type { RouteId } from "./routes.mjs";
 
 /** What each planned plane will hold, and what delivers it. */
 const PLANNED: Record<string, { what: string; owed: string }> = {
-  sessions: {
-    what:
-      "Every run of an agent against this project: when it started, what it observed, what " +
-      "it was given, and what it produced — each one a governed aggregate you can read, " +
-      "retain and audit rather than a correlation string on some other table.",
-    owed: "the session aggregate, next in the context-platform programme",
-  },
   knowledge: {
     what:
       "What has been reviewed and published, as immutable versions: a stable id, a revision " +

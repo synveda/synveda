@@ -1,4 +1,4 @@
-// regulated-strict@18 — the default product pack (seed §6, ADR-0014,
+// regulated-strict@19 — the default product pack (seed §6, ADR-0014,
 // ADR-0015, ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032, ADR-0036,
 // ADR-0037, ADR-0038).
 //
@@ -181,6 +181,79 @@ permit (
 permit (
     principal,
     action == Synveda::Action::"MemoryWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["curator", "member", "owner", "administrator"])
+};
+
+// The session ledger (CPR-10, ADR-0076 decision 6).
+//
+// Reading a run is **content**, not structure, so it is priced with the
+// content reads and never with `ProjectRead`: a project's name discloses
+// nothing, and a session's timeline is a transcript of what somebody and their
+// agent did, said, read and changed.
+//
+// Under this pack that means the membership floor — your own chain, which is
+// where your own `principal` scope's runs live — plus an explicit content
+// grant, and nothing else. There is no `ambit` clause here, exactly as there
+// is none for `MemoryRead`: this is the deny-first pack, and a neighbouring
+// project's transcripts are not a default.
+//
+// It carries no tier. A session has no sensitivity of its own; what a run
+// *produced* is classified when it becomes a candidate, on the other side of
+// the trust boundary (ADR-0068 decision 6).
+// The membership floor, in two clauses because this is the one rule that
+// cannot be uniform over the resource union: `principal in resource` walks
+// *up* from the caller's own scope, which reaches a `Scope` resource and can
+// never reach a `Session` — a session hangs *below* a scope. So the session
+// case asks the same question about the scope it hangs below.
+permit (
+    principal,
+    action == Synveda::Action::"SessionRead",
+    resource
+) when { resource is Synveda::Scope && principal in resource };
+
+permit (
+    principal,
+    action == Synveda::Action::"SessionRead",
+    resource
+) when { resource is Synveda::Session && principal in resource.scope };
+
+permit (
+    principal,
+    action == Synveda::Action::"SessionRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "curator", "member", "reviewer", "owner", "administrator"])
+};
+
+// Opening, appending, composing and closing — one authority, because an agent
+// that may open a run must be able to close it. Pack-uniform, like every other
+// write floor: your own scope role-free — a person's own agent runs without
+// anybody granting them anything — and a content key beyond it. `viewer` and
+// `reviewer` are absent by name: reading somebody's runs is not running one.
+//
+// Composing context for a session additionally takes `MemoryRead` at every
+// scope that contributes, decided by the same walk `inject` runs, so this
+// permit admits no material of its own.
+// The write floor, role-free: your own scope, and the runs that hang below it.
+// `resource in principal.own_scope` is uniform over the union — Cedar's `in`
+// is reflexive, so it is "this scope is mine" for a `Scope` and "this run is
+// at a scope of mine" for a `Session`.
+permit (
+    principal,
+    action == Synveda::Action::"SessionWrite",
+    resource
+) when {
+    principal has own_scope
+        && resource in principal.own_scope
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"SessionWrite",
     resource
 ) when {
     resource in principal.tenant

@@ -42,6 +42,8 @@
       "scope.update": true,
       "service_identity.manage": true,
       "service_identity.read": true,
+      "session.read": true,
+      "session.write": true,
       "skill.quality.override": true,
       "skill.write": true,
       "workspace.create": true,

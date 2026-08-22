@@ -705,6 +705,7 @@ ul.client-choices {
 ul.anchors li,
 ul.invites li,
 ul.repositories li,
+ul.sessions li,
 ul.skills li,
 ul.packs li,
 ul.client-choices li {
@@ -816,4 +817,67 @@ ol.commands li {
 
 .planned {
   max-width: 44rem;
+}
+
+/* Sessions (CPR-10). A run is a *row you open*, so the whole row is the
+   control — a small chevron would make the hit area a fifth of what a reader
+   aims at, and a run is the one thing on this page anybody clicks. It is a
+   real <button> rather than a clickable <div>, so the keyboard and a screen
+   reader get it for free. */
+ul.sessions button.row {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+ul.sessions button.row:hover strong {
+  text-decoration: underline;
+}
+
+/* A running agent is the one state worth seeing across a list at a glance. */
+.tag.live {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* A run nobody closed and a run that broke are both worth noticing, and the
+   page keeps them apart in words; the tone only says "look at this". */
+.tag.warn {
+  border-color: var(--error-line);
+  background: var(--error-bg);
+  color: inherit;
+}
+
+.tag.done {
+  opacity: 0.7;
+}
+
+.timeline {
+  margin: 0.4rem 0 0.8rem 0;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--line);
+}
+
+.timeline ol {
+  list-style: none;
+  margin: 0.3rem 0 0 0;
+  padding: 0;
+  font-size: 0.92rem;
+}
+
+.timeline li {
+  padding: 0.2rem 0;
+  border: 0;
+}
+
+/* Context runs read as a different kind of thing from what the agent said or
+   did: one is the product answering, the rest is the run. */
+.timeline li.context {
+  color: var(--accent);
 }

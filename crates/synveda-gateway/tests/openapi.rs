@@ -62,6 +62,13 @@ const DECLARED_PATHS: &[&str] = &[
     "/v1/projects/{project_id}/members/{principal_id}",
     "/v1/projects/{project_id}/repositories",
     "/v1/projects/{project_id}/repositories/{repository_id}",
+    // CPR-10 (ADR-0076): the session ledger and runtime API.
+    "/v1/sessions",
+    "/v1/sessions/{session_id}",
+    "/v1/sessions/{session_id}/context-runs",
+    "/v1/sessions/{session_id}/end",
+    "/v1/sessions/{session_id}/events",
+    "/v1/sessions/{session_id}/timeline",
     "/v1/workspaces",
     "/v1/workspaces/{workspace_id}",
     "/v1/workspaces/{workspace_id}/invites",
@@ -179,6 +186,7 @@ async fn every_documented_path_is_mounted() {
             .replace("{grant_id}", &id)
             .replace("{group_id}", &id)
             .replace("{principal_id}", "sam")
+            .replace("{session_id}", &id)
             .replace("{invite_token}", TOKEN_PLACEHOLDER);
         let response = app
             .clone()
@@ -230,7 +238,8 @@ async fn a_path_this_plane_does_not_declare_is_not_mounted() {
             .replace("{workspace_id}", &id)
             .replace("{project_id}", &id)
             .replace("{group_id}", &id)
-            .replace("{principal_id}", "sam");
+            .replace("{principal_id}", "sam")
+            .replace("{session_id}", &id);
         let response = app
             .clone()
             .oneshot(
@@ -306,8 +315,8 @@ fn the_document_is_generatable() {
     }
     assert_eq!(
         operation_ids.len(),
-        32,
-        "CPR-4's twelve, CPR-5's fourteen, CPR-7's six: {operation_ids:?}"
+        39,
+        "CPR-4's twelve, CPR-5's fourteen, CPR-7's six, CPR-10's seven: {operation_ids:?}"
     );
 }
 

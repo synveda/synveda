@@ -141,6 +141,27 @@ namespace Synveda {
         workspace: Workspace,
     };
 
+    // One run of an agent (CPR-10, ADR-0076). Parented to the governed scope
+    // it runs at — its project's when it has one, its workspace's when it does
+    // not — so every containment rule written over scopes reaches it without
+    // being restated, and a decision *names the run* rather than the place the
+    // run happened at.
+    //
+    // It carries `scope` as an attribute as well as as a parent for the reason
+    // `Workspace` does: a pack may want to name it rather than only test
+    // containment.
+    //
+    // It deliberately carries **no principal**. The ownership distinction a
+    // pack might write over one is already expressed by *which scope the
+    // session was opened at* — a run at somebody's own `principal` scope is
+    // theirs and the base layer's privacy forbid makes it nobody else's — and a
+    // second way to say the same thing would be a second answer to one
+    // question. ADR-0076 decision 6 records the reversal trigger.
+    entity Session in [Tenant, Scope] {
+        tenant: Tenant,
+        scope: Scope,
+    };
+
     // One grant: a subject's role at a scope (CPR-5, ADR-0072).
     //
     // It is an entity so that revoking *this* grant is a decidable act. Before
@@ -209,6 +230,51 @@ namespace Synveda {
         appliesTo {
             principal: [Principal],
             resource: [Tenant, Scope, Workspace, Project],
+            context: { roles: Set<String> },
+        };
+
+    // The session ledger (/v1/sessions — CPR-10, ADR-0076 decision 6).
+    //
+    // `SessionRead` covers the session, its events, its context runs and the
+    // timeline projected over them. It is **not** `ProjectRead`, and the split
+    // is the same one `MembershipRead` makes against `WorkspaceRead`: a
+    // project's name discloses nothing, and a session's timeline is a
+    // transcript of what somebody and their agent did, said, read and changed.
+    // A pack must be able to let a member see the project they work in without
+    // handing them everybody's runs.
+    //
+    // `SessionWrite` covers opening, appending, composing and closing. One
+    // authority rather than four, on `ChannelRollback`'s separability rule read
+    // the other way: an agent that may open a session must be able to close it,
+    // and an authority to open that could not close would produce runs nobody
+    // can end.
+    //
+    // Composing context for a session takes `SessionWrite` **here** and
+    // `MemoryRead` at every scope that contributes, decided by the same
+    // composition walk `inject` runs — so this action admits no material of its
+    // own. It is the authority to *ask*, never the authority to *receive*.
+    //
+    // There is no delete: a session is what events, candidates, knowledge
+    // provenance and audit events name, and disposal belongs to the retention
+    // plane.
+    //
+    // Two resource types and not four. A **listing** is decided at the scope it
+    // is anchored at, and each **row** is decided as the session it is about
+    // (ADR-0073 decision 3) — so `Workspace` and `Project` never appear here,
+    // because a session is not addressed through the subtype that owns its
+    // scope. `Tenant` is absent too: a run always happens somewhere, so there
+    // is no tenant-wide session question to ask.
+    //
+    // Keeping the union to two is what lets every pack clause below stay
+    // uniform over it: `resource in principal.tenant`, `resource in
+    // principal.ambit` and `resource in principal.own_scope` all mean the same
+    // thing for a `Session` as for a `Scope`, because a session is parented to
+    // the scope it runs at. The one asymmetric rule — the membership floor —
+    // is written as two clauses in each pack, and says so.
+    action SessionRead, SessionWrite
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope, Session],
             context: { roles: Set<String> },
         };
 

@@ -160,6 +160,34 @@ pub enum AuditAction {
     /// stamp, because the row asserts a present fact about a project; what it
     /// was is here, in the chain.
     ProjectRepositoryDetached,
+    /// A session was opened (CPR-10, ADR-0076). The payload carries the
+    /// workspace, the project when there is one, the governed scope the run
+    /// is decided at, and the client that opened it — never the client's
+    /// `metadata`, which is where an agent's environment would land and
+    /// therefore where a credential would (seed: no secret in an audit
+    /// payload). That metadata was present, and how large it was, is
+    /// recorded; its contents are not.
+    SessionOpened,
+    /// A session moved through its lifecycle: `ending`, or one of the three
+    /// closed states. The payload carries both ends of the transition, so the
+    /// chain says what a run was doing when somebody closed it.
+    SessionEnded,
+    /// Events were appended to a session. **One event per batch**, carrying
+    /// counts and the sequence range rather than the events themselves — a
+    /// hundred-turn run would otherwise put its whole transcript in the chain
+    /// twice, and the chain is not the transcript store.
+    ///
+    /// The per-type breakdown rides the payload, because "what did that agent
+    /// actually do" should be answerable from the chain without reading the
+    /// events, and because the *shape* of a run is what an auditor reads
+    /// first.
+    SessionEventsAppended,
+    /// Context was composed for a session (CPR-10, ADR-0076 decision 7). The
+    /// payload carries the block's watermark — its hash, the entry count, the
+    /// tokens against the budget — and not the block, for
+    /// [`AuditAction::ContextInjected`]'s reason: the chain records what an
+    /// agent was given, and the run row holds what that was.
+    SessionContextComposed,
     /// A group was created (CPR-5, ADR-0072). The payload carries the
     /// group's handle and whether a directory owns it — a group nobody here
     /// maintains is a different fact from one somebody here made.
@@ -535,7 +563,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 73] = [
+    pub const ALL: [AuditAction; 77] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -557,6 +585,10 @@ impl AuditAction {
         AuditAction::ProjectUpdated,
         AuditAction::ProjectRepositoryAttached,
         AuditAction::ProjectRepositoryDetached,
+        AuditAction::SessionOpened,
+        AuditAction::SessionEnded,
+        AuditAction::SessionEventsAppended,
+        AuditAction::SessionContextComposed,
         AuditAction::GroupCreated,
         AuditAction::GroupUpdated,
         AuditAction::AccessGranted,
@@ -635,6 +667,10 @@ impl AuditAction {
             AuditAction::ProjectUpdated => "project.updated",
             AuditAction::ProjectRepositoryAttached => "project.repository.attached",
             AuditAction::ProjectRepositoryDetached => "project.repository.detached",
+            AuditAction::SessionOpened => "session.opened",
+            AuditAction::SessionEnded => "session.ended",
+            AuditAction::SessionEventsAppended => "session.events.appended",
+            AuditAction::SessionContextComposed => "session.context.composed",
             AuditAction::GroupCreated => "access.group.created",
             AuditAction::GroupUpdated => "access.group.updated",
             AuditAction::AccessGranted => "access.granted",

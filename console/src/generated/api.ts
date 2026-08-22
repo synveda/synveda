@@ -99,6 +99,50 @@ export type ApiErrorBody = {
   };
 
 /**
+ * `POST /v1/sessions/{session_id}/events`.
+ */
+export type AppendEventsBody = {
+    /**
+     * The batch, at most 200 events, each `client_event_id` at most once.
+     */
+    events: NewEventBody[];
+  };
+
+/**
+ * The append response.
+ */
+export type AppendResponse = {
+    /**
+     * How many were written.
+     */
+    appended: number;
+    /**
+     * How many were already here.
+     */
+    duplicates: number;
+    /**
+     * Per-event outcomes, in the order the batch listed them.
+     */
+    events: AppendedEventView[];
+  };
+
+/**
+ * What one appended event did, and the row it names.
+ */
+export type AppendedEventView = {
+    /**
+     * The stored row — this deployment's version of it, never the caller's,
+     * because a retry must be told what is held rather than handed back what
+     * it just sent.
+     */
+    event: SessionEventView;
+    /**
+     * `appended` or `duplicate`.
+     */
+    outcome: string;
+  };
+
+/**
  * `POST /v1/projects/{project_id}/repositories`.
  *
  * The server derives `provider`, `canonical_uri`, `repository_owner` and
@@ -143,6 +187,84 @@ export type ChainResponse = {
      * The chain or subtree, nearest first.
      */
     scopes: ScopeView[];
+  };
+
+/**
+ * `POST /v1/sessions/{session_id}/context-runs`.
+ *
+ * The **final shape** of this endpoint (ADR-0076 decision 7). What it does
+ * today is call the existing retrieval engine and persist the identity and
+ * the rendered block; Prompt 18 adds the explainability — which scopes were
+ * considered, which were denied, why each entry made the cut — behind the
+ * same request and the same response envelope.
+ */
+export type ContextRunBody = {
+    /**
+     * Narrow the block's token budget. The caller may narrow and never
+     * widen: the pack's budget is the ceiling.
+     */
+    budget_tokens?: number | null;
+    /**
+     * Ceiling on the sensitivity tier that may compose.
+     */
+    max_sensitivity?: string | null;
+    /**
+     * What the agent is about to do. Ranks the material; omitting it is the
+     * session-start shape — everything pinned, nothing ranked.
+     */
+    query?: string | null;
+  };
+
+/**
+ * A context run, as the API serves it.
+ */
+export type ContextRunView = {
+    /**
+     * BLAKE3 over the composed entries, hex.
+     */
+    block_hash: string;
+    /**
+     * The budget it composed under.
+     */
+    budget_tokens: number;
+    /**
+     * When it was composed.
+     */
+    created_at: string;
+    /**
+     * Which retrieval legs degraded — `embedder`, `retrieval`. Empty is the
+     * ordinary answer.
+     */
+    degraded: string[];
+    /**
+     * How many records composed.
+     */
+    entry_count: number;
+    /**
+     * The run's id.
+     */
+    id: string;
+    /**
+     * The task, when one was named.
+     */
+    query?: string | null;
+    /**
+     * The rendered block, watermark line included. Empty when nothing
+     * composed — a result, not an error.
+     */
+    rendered: string;
+    /**
+     * The scope it was anchored at.
+     */
+    scope_id: string;
+    /**
+     * The session it was composed for.
+     */
+    session_id: string;
+    /**
+     * Estimated tokens of `rendered`.
+     */
+    tokens: number;
   };
 
 /**
@@ -275,6 +397,18 @@ export type CreatedInviteView = {
      * The token. **Shown once.**
      */
     token: string;
+  };
+
+/**
+ * `POST /v1/sessions/{session_id}/end`.
+ */
+export type EndSessionBody = {
+    status: "ending" | "ended" | "abandoned" | "failed";
+    /**
+     * What the run turned out to be about, when the client only knows at the
+     * end. Replaces whatever was set at open.
+     */
+    task_summary?: string | null;
   };
 
 /**
@@ -616,6 +750,30 @@ export type MemberView = {
   };
 
 /**
+ * One event of a `POST /v1/sessions/{session_id}/events` batch.
+ */
+export type NewEventBody = {
+    /**
+     * The client's own id for this event. **The idempotency unit**: a
+     * redelivered batch appends nothing twice.
+     */
+    client_event_id: string;
+    /**
+     * The payload shape this client declares. Defaults to the current one.
+     */
+    event_schema_version?: number;
+    event_type: "session.started" | "session.ended" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning";
+    /**
+     * When the client says it happened.
+     */
+    occurred_at: string;
+    /**
+     * The content: a JSON object, at most 64 KiB encoded.
+     */
+    payload?: Record<string, unknown> | null;
+  };
+
+/**
  * The onboarding vocabulary. Closed, so a client's branch is exhaustive and
  * a new state is a compile error somewhere rather than a silently unhandled
  * string.
@@ -645,6 +803,69 @@ export type OnboardingView = {
      * How many workspaces this caller can see.
      */
     workspace_count: number;
+  };
+
+/**
+ * `POST /v1/sessions`.
+ *
+ * There is no `tenant_id` and no `principal_id` here, and
+ * `deny_unknown_fields` is what makes sending one an error rather than a
+ * silent no-op (ADR-0076 decision 8). There is no `scope_id` either: the
+ * governed scope is derived from `workspace_id` and `project_id` by the
+ * store, because a client that could name the scope could name one its
+ * workspace is not in.
+ */
+export type OpenSessionBody = {
+    /**
+     * Which agent is running.
+     */
+    agent_name?: string | null;
+    /**
+     * The branch the run is on.
+     */
+    branch?: string | null;
+    /**
+     * A stable id for this installation of the client.
+     */
+    client_installation_id?: string | null;
+    /**
+     * The agent client, as it names itself: a lowercase label of letters,
+     * digits, `-` and `.`.
+     */
+    client_name: string;
+    /**
+     * Its version.
+     */
+    client_version?: string | null;
+    /**
+     * The harness's own id for this run. Unique per caller and client.
+     */
+    external_session_id?: string | null;
+    /**
+     * A labelling bag: a JSON object, at most 8 KiB encoded. Never copied
+     * into an audit payload.
+     */
+    metadata?: Record<string, unknown> | null;
+    /**
+     * The model, as the client names it.
+     */
+    model_name?: string | null;
+    /**
+     * The project, when the run is against one.
+     */
+    project_id?: string | null;
+    /**
+     * A repository attached to the named project.
+     */
+    repository_id?: string | null;
+    /**
+     * What the run is about.
+     */
+    task_summary?: string | null;
+    /**
+     * The workspace the run is in.
+     */
+    workspace_id: string;
   };
 
 /**
@@ -881,6 +1102,160 @@ export type ScopeView = {
   };
 
 /**
+ * One immutable session event, as the API serves it.
+ */
+export type SessionEventView = {
+    /**
+     * The client's own id for it.
+     */
+    client_event_id: string;
+    /**
+     * The payload shape the client declared.
+     */
+    event_schema_version: number;
+    event_type: "session.started" | "session.ended" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning";
+    /**
+     * The event's id in this deployment.
+     */
+    id: string;
+    /**
+     * When the client says it happened.
+     */
+    occurred_at: string;
+    /**
+     * The content.
+     */
+    payload: Record<string, unknown>;
+    /**
+     * BLAKE3-256 of the canonical payload, hex — the server's.
+     */
+    payload_hash: string;
+    /**
+     * When the gateway received it.
+     */
+    received_at: string;
+    /**
+     * Position in the session, assigned by the server.
+     */
+    sequence: number;
+    /**
+     * The session it belongs to.
+     */
+    session_id: string;
+  };
+
+/**
+ * The session listing.
+ */
+export type SessionList = {
+    /**
+     * The sessions this caller may read, newest first.
+     */
+    sessions: SessionView[];
+    /**
+     * Whether there are more than this answer carries.
+     *
+     * Named rather than hidden. A recency-ordered feed can honestly serve
+     * "the newest N"; what it must never do is serve them as though they were
+     * all of them (ADR-0058 decision 5's rule, one plane over).
+     */
+    truncated: boolean;
+  };
+
+/**
+ * A session, as the API serves it.
+ *
+ * A view rather than `synveda_types::session::Session` itself, for
+ * [`crate::workspaces::WorkspaceView`]'s reason: this is the **contract** and
+ * the domain type is not. `tenant_id` is deliberately absent — every `/v1`
+ * response is already scoped to the caller's tenant.
+ */
+export type SessionView = {
+    /**
+     * Which agent ran.
+     */
+    agent_name?: string | null;
+    /**
+     * The branch it was on.
+     */
+    branch?: string | null;
+    /**
+     * A stable id for that installation of the client.
+     */
+    client_installation_id?: string | null;
+    /**
+     * The agent client, as it named itself.
+     */
+    client_name: string;
+    /**
+     * Its version, when it said one.
+     */
+    client_version?: string | null;
+    /**
+     * When the row was created.
+     */
+    created_at: string;
+    /**
+     * When it closed.
+     */
+    ended_at?: string | null;
+    /**
+     * The harness's own id for the run.
+     */
+    external_session_id?: string | null;
+    /**
+     * The session's stable id.
+     */
+    id: string;
+    /**
+     * The newest appended event's own instant.
+     */
+    last_observed_at?: string | null;
+    /**
+     * The client's labelling bag, echoed back.
+     */
+    metadata: Record<string, unknown>;
+    /**
+     * The model, as the client named it.
+     */
+    model_name?: string | null;
+    /**
+     * The token subject that opened it.
+     */
+    principal_id: string;
+    /**
+     * The project, when the run was against one.
+     */
+    project_id?: string | null;
+    /**
+     * The repository the run was against.
+     */
+    repository_id?: string | null;
+    /**
+     * The governed scope this session is decided at — **derived** from the
+     * workspace and project, never submitted.
+     */
+    scope_id: string;
+    /**
+     * When it began.
+     */
+    started_at: string;
+    status: "active" | "ending" | "ended" | "abandoned" | "failed";
+    /**
+     * What the run is about, in the client's words.
+     */
+    task_summary?: string | null;
+    /**
+     * When the row last changed.
+     */
+    updated_at: string;
+    /**
+     * The workspace the run happened in.
+     */
+    workspace_id: string;
+  };
+
+/**
  * What the caller may do on the **tenant** plane — `whoami`'s block, and
  * since CPR-4 `/v1/me`'s.
  *
@@ -924,6 +1299,66 @@ export type TenantView = {
      * `active` or `suspended`.
      */
     status: string;
+  };
+
+/**
+ * One entry of the timeline projection.
+ *
+ * Deliberately **not** a union of the two row shapes. A timeline is a reading
+ * surface: it answers "what happened, in order, and roughly what was it", and
+ * a client that wants an event's full payload fetches the event. Flattening
+ * two tables into one wide row with half its fields null per entry would make
+ * every consumer branch on which half is populated.
+ */
+export type TimelineEntry = {
+    /**
+     * When it happened: an event's `occurred_at`, a run's `created_at`.
+     */
+    at: string;
+    /**
+     * The event type, for an event.
+     */
+    event_type?: string | null;
+    /**
+     * The entry's own id, as a string, because the two sources have
+     * different id types and a timeline is read rather than joined.
+     */
+    id: string;
+    /**
+     * `event` or `context_run` — which table this came from.
+     */
+    kind: string;
+    /**
+     * The event's position, for an event.
+     */
+    sequence?: number | null;
+    /**
+     * One line about what this entry is — a run's query, an event's family.
+     */
+    summary: string;
+  };
+
+/**
+ * The timeline projection.
+ */
+export type TimelineView = {
+    /**
+     * The merged entries, oldest first.
+     */
+    entries: TimelineEntry[];
+    /**
+     * How many events the session has appended, of every type — the shape of
+     * the run, which is what an auditor reads before any single entry.
+     */
+    event_counts: Record<string, number>;
+    /**
+     * The session this is about.
+     */
+    session_id: string;
+    /**
+     * Whether either source hit its bound.
+     */
+    truncated: boolean;
   };
 
 /**
@@ -1236,6 +1671,68 @@ export type Operations = {
     readonly response: void;
   };
   /**
+   * `GET /v1/sessions` — the runs this caller may read, newest first.
+   */
+  readonly list_sessions: {
+    readonly path: "/v1/sessions";
+    readonly method: "GET";
+    readonly response: SessionList;
+  };
+  /**
+   * `POST /v1/sessions` — open a run.
+   */
+  readonly open_session: {
+    readonly path: "/v1/sessions";
+    readonly method: "POST";
+    readonly body: OpenSessionBody;
+    readonly idempotent: true;
+    readonly response: SessionView;
+  };
+  /**
+   * `GET /v1/sessions/{session_id}`.
+   */
+  readonly get_session: {
+    readonly path: "/v1/sessions/{session_id}";
+    readonly method: "GET";
+    readonly response: SessionView;
+  };
+  /**
+   * `POST /v1/sessions/{session_id}/context-runs` — compose context for a run.
+   */
+  readonly create_context_run: {
+    readonly path: "/v1/sessions/{session_id}/context-runs";
+    readonly method: "POST";
+    readonly body: ContextRunBody;
+    readonly idempotent: true;
+    readonly response: ContextRunView;
+  };
+  /**
+   * `POST /v1/sessions/{session_id}/end` — move a run through its close.
+   */
+  readonly end_session: {
+    readonly path: "/v1/sessions/{session_id}/end";
+    readonly method: "POST";
+    readonly body: EndSessionBody;
+    readonly response: SessionView;
+  };
+  /**
+   * `POST /v1/sessions/{session_id}/events` — append to the ledger.
+   */
+  readonly append_session_events: {
+    readonly path: "/v1/sessions/{session_id}/events";
+    readonly method: "POST";
+    readonly body: AppendEventsBody;
+    readonly response: AppendResponse;
+  };
+  /**
+   * `GET /v1/sessions/{session_id}/timeline` — the projection.
+   */
+  readonly get_session_timeline: {
+    readonly path: "/v1/sessions/{session_id}/timeline";
+    readonly method: "GET";
+    readonly response: TimelineView;
+  };
+  /**
    * `GET /v1/workspaces` — the tenant's workspaces.
    */
   readonly list_workspaces: {
@@ -1358,6 +1855,13 @@ export const OPERATIONS = {
   list_repositories: { path: "/v1/projects/{project_id}/repositories", method: "GET" },
   attach_repository: { path: "/v1/projects/{project_id}/repositories", method: "POST", idempotent: true },
   detach_repository: { path: "/v1/projects/{project_id}/repositories/{repository_id}", method: "DELETE" },
+  list_sessions: { path: "/v1/sessions", method: "GET" },
+  open_session: { path: "/v1/sessions", method: "POST", idempotent: true },
+  get_session: { path: "/v1/sessions/{session_id}", method: "GET" },
+  create_context_run: { path: "/v1/sessions/{session_id}/context-runs", method: "POST", idempotent: true },
+  end_session: { path: "/v1/sessions/{session_id}/end", method: "POST" },
+  append_session_events: { path: "/v1/sessions/{session_id}/events", method: "POST" },
+  get_session_timeline: { path: "/v1/sessions/{session_id}/timeline", method: "GET" },
   list_workspaces: { path: "/v1/workspaces", method: "GET" },
   create_workspace: { path: "/v1/workspaces", method: "POST", idempotent: true },
   get_workspace: { path: "/v1/workspaces/{workspace_id}", method: "GET" },

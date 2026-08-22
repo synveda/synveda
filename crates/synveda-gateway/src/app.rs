@@ -229,6 +229,35 @@ pub fn router(state: AppState) -> Router {
             "/v1/projects/{project_id}/repositories/{repository_id}",
             axum::routing::delete(crate::workspaces::detach_repository),
         )
+        // The session ledger and runtime API (CPR-10, ADR-0076): what an agent
+        // does, as governed records rather than a correlation string. Opening a
+        // run and composing context for it take a required `Idempotency-Key`;
+        // appending events is idempotent per **event**, by the client's own
+        // `client_event_id`, because a redelivered batch that overlaps a
+        // previous one must append what is new and say `duplicate` for the
+        // rest. Nothing on this plane accepts a tenant or an acting principal
+        // from a client — both come from the verified token.
+        .route(
+            "/v1/sessions",
+            get(crate::sessions::list).post(crate::sessions::open),
+        )
+        .route("/v1/sessions/{session_id}", get(crate::sessions::get))
+        .route(
+            "/v1/sessions/{session_id}/events",
+            post(crate::sessions::append_events),
+        )
+        .route("/v1/sessions/{session_id}/end", post(crate::sessions::end))
+        .route(
+            "/v1/sessions/{session_id}/timeline",
+            get(crate::sessions::timeline),
+        )
+        // The final-shaped context endpoint (ADR-0076 decision 7). It calls
+        // the retrieval engine `/v1/inject` calls; what Prompt 18 adds is
+        // explainability behind this same request and response.
+        .route(
+            "/v1/sessions/{session_id}/context-runs",
+            post(crate::sessions::create_context_run),
+        )
         // Membership and access assignment (CPR-5, ADR-0072). One model for a
         // person working alone, four people sharing agent context, and a
         // company with a directory: a grant gives a principal or a group a

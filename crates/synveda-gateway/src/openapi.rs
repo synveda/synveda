@@ -34,6 +34,7 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 
 use crate::access;
 use crate::me;
+use crate::sessions;
 use crate::workspaces;
 
 /// The document root.
@@ -47,7 +48,9 @@ Governed organisational memory and context for AI agents.
 **Coverage.** This document describes the context-platform surface: `/v1/me`, \
 the workspace, project and repository planes (CPR-4), the access plane — \
 members, groups, grants and invitations (CPR-5), and the scope admin plane \
-(CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants). \
+(CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants), \
+and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, \
+append events, end, timeline, and the context-run endpoint). \
 The rest of the `/v1` surface — observe, inject, recall, proposals, channels, \
 the registries and the older admin planes — predates the OpenAPI contract and \
 is brought onto it by a later prompt of the context-platform programme. Its \
@@ -60,7 +63,14 @@ no response body echoes a tenant id.
 **Idempotency.** Every creation takes a required `Idempotency-Key` header. \
 Reusing a key with the same request replays the original resource with `200`; \
 a fresh key creates and answers `201`; reusing a key with a *different* request \
-is `409`.
+is `409`. Appending session events is the one exception, and it is idempotent \
+by a finer unit: each event carries the client's own `client_event_id`, unique \
+within its session, so a redelivered batch appends what is new and reports \
+`duplicate` for the rest.
+
+**Identity.** No request body on this surface accepts a tenant or an acting \
+principal. Both are resolved from the bearer credential; a body naming either \
+is refused rather than ignored.
 
 **Preconditions.** Every update on the workspace plane — workspaces, \
 projects, repositories — takes a required `expected_revision`; a mismatch is \
@@ -89,6 +99,13 @@ revision, and its mutations are last-writer-wins under the PDP.",
         workspaces::list_repositories,
         workspaces::attach_repository,
         workspaces::detach_repository,
+        sessions::open,
+        sessions::list,
+        sessions::get,
+        sessions::append_events,
+        sessions::end,
+        sessions::timeline,
+        sessions::create_context_run,
         access::list_workspace_members,
         access::list_invites,
         access::create_invite,
@@ -122,6 +139,19 @@ revision, and its mutations are last-writer-wins under the PDP.",
         workspaces::UpdateBody,
         workspaces::AttachRepositoryBody,
         workspaces::ApiErrorBody,
+        sessions::SessionView,
+        sessions::SessionList,
+        sessions::SessionEventView,
+        sessions::AppendedEventView,
+        sessions::AppendResponse,
+        sessions::ContextRunView,
+        sessions::TimelineEntry,
+        sessions::TimelineView,
+        sessions::OpenSessionBody,
+        sessions::NewEventBody,
+        sessions::AppendEventsBody,
+        sessions::EndSessionBody,
+        sessions::ContextRunBody,
         access::MemberView,
         access::MemberList,
         access::GroupRefView,
@@ -144,6 +174,7 @@ revision, and its mutations are last-writer-wins under the PDP.",
         (name = "projects", description = "Units of work inside a workspace"),
         (name = "repositories", description = "What a project is about, by canonical identity"),
         (name = "access", description = "Who may act where: members, groups, grants and invitations"),
+        (name = "sessions", description = "Agent runs, their immutable event ledger, and the context composed for them"),
     ),
     modifiers(&BearerAuth),
 )]

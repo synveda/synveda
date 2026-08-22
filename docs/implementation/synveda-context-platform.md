@@ -1937,7 +1937,226 @@ frontend changes, deletions, tests, and the resulting commit hash.
   re-cut's (Prompt 24).
 - **Commit.** `test(foundation): harden scope and access cutover` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by Prompt 10, on Prompt 1's rule. Attempted in
-  place first, which is why the rule exists: writing the hash into the
-  commit changes the hash, and the amended entry then named a commit that
-  no longer existed.
+- **Commit hash.** `1caebba` (`feat/context-platform-mvp`). Written by
+  **Prompt 10**, on Prompt 1's rule. Attempted in place first, which is why
+  the rule exists: writing the hash into the commit changes the hash, and the
+  amended entry then named a commit that no longer existed.
+
+### Prompt 10 — The session ledger and runtime API (CPR-10)
+
+- **Implemented.** ADR-0068 decision 5, in full: sessions become the root of
+  agent runtime activity, and the correlation string stops being the only
+  thing that knows a run happened. Three tables, seven routes, two Cedar
+  actions, four audit action types, a console page, and a demo that drives all
+  of it against a live gateway.
+- **Divergence from §9.** §9's Prompt 10 reads *"Knowledge versions — stable
+  aggregate id, immutable revision, content addressing"*. The prompt as it
+  arrived is Stage B's **first** item — §9's Prompt 7, "Sessions as the root of
+  agent runtime activity" — merged with its Prompt 8 (session events) and
+  reaching forward into Prompt 17 for one endpoint's *shape*. The prompt's own
+  text is authoritative (§9's preamble). Recorded rather than absorbed, and
+  the reason is different from the last three divergences: those moved *other*
+  prompts forward, this one **starts the stage §9 planned**, one prompt wider
+  than §9 cut it. Stage B's remaining items — candidates, knowledge versions,
+  promotion, redaction — are unstarted and keep their §9 order. The numbered
+  order is not renumbered.
+- **Schema/domain changes.** Migration **`0044_sessions.sql`**, three tables,
+  41 → **42** migrations. The epoch stays at **2**: this is an addition to a
+  chain nothing has shipped against, not a change to one.
+  - `sessions` — one run. Its workspace (required), its project (optional),
+    the **derived** governed scope it is decided at, the token subject that
+    opened it, the client and its version and installation id, the harness's
+    own `external_session_id`, the agent, the model, the repository and
+    branch, a task summary, a five-state lifecycle, `started_at` /
+    `ended_at` / `last_observed_at`, and a bounded metadata bag.
+  - `session_events` — immutable, append-only, ordered, idempotent. Twelve
+    event types as a CHECK, the client's declared `event_schema_version`, its
+    own `client_event_id`, a **server-assigned** `sequence`, both
+    `occurred_at` and `received_at`, a bounded payload and the server's
+    BLAKE3 digest of it.
+  - `session_context_runs` — one act of composing context for a run: the
+    query, the rendered block, its hash, tokens against budget, the entry
+    count and which legs degraded.
+  - Two unique indexes added to existing tables, in this migration because
+    they exist for its keys: `projects (tenant_id, id, workspace_id,
+    scope_id)` and `project_repositories (tenant_id, project_id, id)`.
+- **The anchor is a row-local fact, not a service's discipline.** This is the
+  part worth reading twice. `sessions` carries `workspace_scope_id` and
+  `project_scope_id`, each pinned to its owner by a **composite** foreign key,
+  and `scope_id` held equal to `coalesce(project_scope_id,
+  workspace_scope_id)` by a CHECK — so "a session is decided at its project's
+  scope, or its workspace's when it has no project" is enforced against
+  anything holding a connection. `projects.workspace_scope_id` is the same
+  device one plane up (migration 0041) and exists for the same reason. The
+  first cut had one `scope_id` and two contradictory foreign keys over it; the
+  contradiction was found by writing the migration out and reading it, before
+  it reached a database.
+- **API and frontend changes.** Seven routes, all on the OpenAPI contract from
+  the day they exist — **32 → 39 operations, 39 → 52 schemas**, with
+  `docs/api/openapi.json` and `console/src/generated/api.ts` regenerated. No
+  existing route changed. `/v1/observe`, `/v1/inject` and `/v1/recall` are
+  untouched and still take the old string; **nothing bridges them**, in either
+  direction, and Prompt 11 deletes it.
+  - `POST /v1/sessions` (`Idempotency-Key`) · `GET /v1/sessions` ·
+    `GET /v1/sessions/{id}` · `POST /v1/sessions/{id}/events` ·
+    `POST /v1/sessions/{id}/end` · `GET /v1/sessions/{id}/timeline` ·
+    `POST /v1/sessions/{id}/context-runs` (`Idempotency-Key`).
+- **`POST …/context-runs` is the final shape and today's minimum depth.** It
+  decides `SessionWrite` at the session, then calls the **existing** retrieval
+  engine — `composition_plan`, the embed seam, `hybrid_search`, `compose` —
+  and persists the identity and the rendered block. Two sources feed the
+  universe: the caller's own chain as `chain`, and the **session's** scope
+  chain as CTX-5's `candidates` (ADR-0042 decision 2), which is the mechanism
+  built for exactly this. Handing the session's chain in as `chain` instead
+  would have silently made the caller's own notes unreachable from every
+  project session, which is the kind of thing that reads correct and is not.
+  Lapses are deliberately not gathered here — a narrowing, never a widening —
+  because a second relaxation path is Prompt 26's to build once. `inject.rs`
+  was **not** refactored to share the orchestration: the prompt says leave the
+  old routes untouched, and Prompt 18 re-cuts this endpoint's internals
+  anyway.
+- **Policy.** `SessionRead` and `SessionWrite`, a `Session` entity parented to
+  the scope it runs at (`tenant` + `scope`, and deliberately **no principal**
+  — the ownership distinction a pack might write is already expressed by
+  *which scope the run was opened at*), and permits in all three packs,
+  **@18 → @19**. Reading a run is priced with the **content** reads and never
+  with `ProjectRead`: a project's name discloses nothing, and a run's timeline
+  is a transcript of what somebody and their agent did, said, read and
+  changed. The action applies to `[Scope, Session]` and nothing else — a
+  listing is decided at the scope it is anchored at, each row as the session
+  it is about — which is what lets every clause stay uniform over the union
+  except the membership floor, written as two clauses per pack with the reason
+  beside them: `principal in resource` walks *up* from the caller's own scope
+  and can never reach a `Session`, which hangs *below* one.
+- **Privacy holds without a new rule.** `SessionRead` and `SessionWrite` are
+  **not** on the base layer's governance carve-out, so a run opened at
+  somebody's own `principal` scope is unreachable by a tenant administrator —
+  the one caller who reaches everything else. Asserted by name
+  (`a_run_at_somebody_s_own_scope_is_not_the_administrator_s_to_read`), because
+  the mistake worth pinning is somebody adding these two actions to that list.
+- **One defect this feature's own tests found in its own code.**
+  `SessionEventType` derived `serde(rename_all = "snake_case")` beside an
+  `as_str()` of `message.user`, so the API **answered with one spelling and
+  refused the other** — a request body naming `message.user` was a 400 quoting
+  twelve names nobody would send. Four integration tests failed at once, which
+  is the good version of that mistake. Fixed with per-variant renames and a
+  unit test that walks every variant asserting serde and `as_str` agree; the
+  original unit test had asserted the *divergence* and rationalised it, which
+  is the more interesting failure and is recorded in the test that replaced it.
+- **A second defect, and it was not this feature's.** `payload_hash` hashed
+  `Value::to_string()` on the belief that `serde_json::Map` is a `BTreeMap`, so
+  an event re-sent with its keys in a different order would have got a
+  different digest. It is an `IndexMap` here: **`cedar-policy-core` enables
+  `serde_json/preserve_order`**, and Cargo unifies features across a workspace.
+  What makes this worth recording is where it led. CPR-4 had already written
+  the same recursion inside the gateway's idempotency seam — with a comment
+  saying it was a no-op "today", kept only against the day somebody turned the
+  flag on. The flag was already on when that comment was written. The
+  mechanism was right and its stated reason was wrong, which is the failure a
+  comment is worst at catching. The canonicaliser now lives once, in
+  `synveda_types::json`, both callers use it, the gateway's private copy is
+  deleted and its comment corrected. The behaviour also **changes with the
+  build's scope** — `cargo test -p synveda-types` has no Cedar in its graph and
+  the two encodings match there, `cargo test --workspace` unifies the feature
+  in and they do not — which is recorded in the module and is why nothing
+  asserts the raw strings differ.
+- **Two idempotency mechanisms, and the reason they are not redundant.**
+  Opening a run and composing a context run each take a required
+  `Idempotency-Key`. Appending events does not: its unit is the **event**,
+  keyed by the client's own `client_event_id`, because a redelivered batch
+  overlapping a previous one by three of ten must append seven and answer
+  `duplicate` for three — at their *original* positions — and a request-level
+  key cannot express that. A batch that repeats an id **inside itself** is
+  refused by name, because the two would race for a position and one would
+  silently become the other's duplicate.
+- **Ordering is serialised per session, deliberately.** `append_events` takes
+  the session's row lock before reading `max(sequence)`. The optimistic
+  alternative is more code, is only faster when two clients append to *one*
+  run at once, and has to get its retry right to be correct at all.
+- **What the chain carries, and what it refuses to.** Four action types.
+  `session.opened` records the run's shape and **`metadata_bytes`** — never
+  the metadata, because an agent's environment is where credentials live and
+  that bag is where a harness would put an environment. Asserted by putting a
+  `ghp_`-shaped value in and sweeping the **whole** chain for it, not just the
+  event that would obviously carry it. An append chains **one** event however
+  many it carried, with counts, the sequence range and the per-type breakdown
+  — so "what did that agent actually do" is answerable from the chain without
+  reading the events, and a hundred-turn run is not written twice.
+- **The listing decides per row against the row** (CPR-9's rule, from the
+  start rather than retrofitted) and is **bounded and says so**: at most 500
+  candidates, newest first, with `truncated` on the envelope. That is a
+  different thing from the cap CPR-9 refused — a complete inventory of
+  workspaces silently losing rows — because this is a recency-ordered feed of
+  an unbounded event-like table where "the most recent N" is a well-defined
+  answer. A tenant with **no governed scopes at all** is answered with an
+  empty list rather than a denial: the Cedar action admits no `Tenant`
+  resource (a run always happens somewhere), so there is nothing to decide
+  about and nothing disclosed.
+- **Console.** `Sessions.tsx` and `sessions.mts` — the first of CPR-8's four
+  planned pages to get a plane behind it, and the first plane in this
+  programme driven entirely through the **generated** client from day one
+  rather than from Prompt 19. Opening a run fetches its timeline under its own
+  cache key, because a transcript is the largest thing on this plane and the
+  one a reader asks for least often. There is deliberately **no "start a
+  session" button**: a run is opened by an agent from a harness, and a browser
+  opening one would create a run that never ran. `Planned.tsx` lost its
+  `sessions` entry, which is what that page is for — an entry there is a debt
+  with a name, paid by deleting the entry rather than editing it.
+- **Tests.** New: `crates/synveda-gateway/tests/sessions_api.rs` (**14**) —
+  the whole path once (open → append → compose → timeline → two-phase close →
+  refused), the identity rules a client may not submit, both idempotency
+  mechanisms in one test because the pair *is* the design, every route
+  refusing a caller who holds nothing, the project member who sees one run of
+  two with the listing and the per-object route agreeing, another tenant's id
+  answering exactly as a fictional one, the places a run may not be opened,
+  the forward-only lifecycle, the metadata that never reaches the chain, the
+  one-event-per-batch chain, the context run's watermark, the bare tenant, and
+  the filters and their bounds. New in `crates/synveda-store/tests/rls.rs`
+  (**5**) — cross-tenant blindness including a search for the victim's
+  *transcript text*, the cross-tenant refusal, the missing UPDATE/DELETE
+  privileges on the two append-only tables, the row rules against **direct
+  SQL**, and the lifecycle end to end under RLS. New unit tests: 8 in
+  `synveda_types::session`, 3 in `synveda_store::sessions`, 6 in
+  `synveda_gateway::sessions`. Console: `sessions.test.mts` (**7**),
+  121 → **128**.
+- **Run record.** `make ci` **PASS** and `make db-test` **PASS**, the latter on
+  a fresh scratch database over the whole workspace with no filter. Three
+  things failed on the way and each is recorded above or here rather than
+  smoothed over: the event-type spelling (four integration tests at once), the
+  payload digest (one unit test), and — only under `db-test` — **CNSL-2's
+  explorer parity corpus**, which is a recording of what the capability probe
+  serves and now has two more actions in it. That last one is the reason
+  `db-test` exists beside `ci`: the parity test skips without a database, so
+  `cargo test --workspace` was green while a committed fixture disagreed with
+  the gateway. Re-recorded with `SYNVEDA_RECORD_FIXTURES=1`, and the diff read
+  before accepting it — exactly two lines, `session.read` and `session.write`,
+  both `true` under a test pack that permits every action to a `viewer`. **No
+  test was weakened**: the outsider's 403s, the cross-tenant 404s and every
+  existing access-plane assertion are unchanged, and the listing and privacy
+  properties were verified against them rather than around them. The demo also
+  failed three times before it passed, and two of those were the demo's own
+  fault (a grant body shape, and fixture events dated in the future); the
+  third was not — see the seeding note below.
+- **A third defect, in the demo's seeding, and it is not this feature's
+  either.** A scope inserted by raw SQL has **no self-row in
+  `scope_closure`** — closure maintenance is store code inside the caller's
+  transaction with no trigger behind it (ADR-0011) — and the anchor resolver
+  joins that table to find a grant. So the break-glass block CPR-7's demo
+  established seeds a root scope whose administrator grant reaches nothing,
+  and the first `POST /v1/workspaces` is a 403 quoting the pack. CPR-5's demo
+  already knew this and seeds the closure row; CPR-7's does not. This demo
+  seeds it, with the reason written where the next script to copy the block
+  will read it. **`demos/cpr-7-scopes.sh` is left alone** — it is another
+  feature's demo and fixing it is not this prompt's — and it is reported here
+  so that the next prompt to touch it knows.
+- **What this prompt does not carry.** The observe path is untouched: Prompt
+  11 re-cuts it onto sessions and deletes `observe_events.session_id`. There
+  is no CLI verb for this plane — the CLI re-cut is Prompt 24, and a run is
+  opened by an agent rather than by somebody at a terminal. Candidates do not
+  exist yet, so nothing a run produced is attributable to it beyond its own
+  events. The context run holds a rendered block and a watermark and **not**
+  the per-scope explainability Prompt 18 adds behind the same endpoint. And
+  the 43 Phase-3 demos are still unchanged, for CPR-7's reason.
+- **Commit.** `feat(sessions): add session ledger and runtime API` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by Prompt 11, on Prompt 1's rule.

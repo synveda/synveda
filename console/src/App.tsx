@@ -41,6 +41,7 @@ import { Onboarding } from "./Onboarding.js";
 import { People } from "./People.js";
 import { Planned } from "./Planned.js";
 import { Reviews } from "./Reviews.js";
+import { Sessions } from "./Sessions.js";
 import { Scopes } from "./Scopes.js";
 import { Settings } from "./Settings.js";
 import { Skills } from "./Skills.js";
@@ -195,6 +196,7 @@ function Page({ route, me }: { route: RouteId | null; me: MeView }) {
     case "skills":
       return <Skills />;
     case "sessions":
+      return <Sessions />;
     case "knowledge":
     case "learnings":
     case "tools":

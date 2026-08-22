@@ -21,17 +21,18 @@ use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
 use synveda_store::{
     access, idempotency, identities, observe, policy_assignments, policy_packs, projects,
-    quarantine, repositories, rls, scopes, tenants, workspaces,
+    quarantine, repositories, rls, scopes, sessions, tenants, workspaces,
 };
 // The generic scope vocabulary, reached through its module because the old
 // hierarchy still owns the root name until Prompt 6 (CPR-3, ADR-0070).
 use synveda_types::access::{GrantSource, GrantSubject, GroupSource, RoleKey};
 use synveda_types::repository;
 use synveda_types::scope;
+use synveda_types::session::{SessionEventType, SessionStatus};
 use synveda_types::{
-    Error, GrantId, GroupId, IdentityId, IdentityKind, InviteId, ObserveKind, PackConfig,
-    ProjectId, RecordClass, RecordId, RecordKind, RepositoryId, ScopeId, Sensitivity, TenantId,
-    TenantStatus, WorkspaceId,
+    ContextRunId, Error, GrantId, GroupId, IdentityId, IdentityKind, InviteId, ObserveKind,
+    PackConfig, ProjectId, RecordClass, RecordId, RecordKind, RepositoryId, ScopeId, Sensitivity,
+    SessionId, TenantId, TenantStatus, WorkspaceId,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -265,6 +266,13 @@ const COVERED: &[&str] = &[
     // would turn into an org chart.
     "scope_grants",
     "scopes",
+    // CPR-10 (ADR-0076): the session ledger. A run's events are a transcript
+    // of what somebody and their agent said, read and changed, and a context
+    // run holds the composed block itself — so all three carry material one
+    // tenant must never see of another, and all three are forced.
+    "session_context_runs",
+    "session_events",
+    "sessions",
     "skill_files",
     "skill_quality_overrides",
     "skill_reviews",
@@ -6019,5 +6027,515 @@ fn a_seal_authorisation_arrives_whole_or_not_at_all() {
             "an authorisation expiring before it is granted is refused"
         );
         tx.rollback().await.expect("rollback");
+    });
+}
+
+// ── The session ledger (CPR-10, ADR-0076) ───────────────────────────────────
+
+/// What [`seed_session`] built.
+struct SessionFixture {
+    tenant: TenantId,
+    workspace: WorkspaceId,
+    scope: ScopeId,
+    session: SessionId,
+}
+
+/// Admits a tenant with a workspace, one session in it, two events and one
+/// context run. Runs on the (RLS-exempt) test connection.
+async fn seed_session(pool: &PgPool) -> SessionFixture {
+    let tenant = TenantId::new();
+    let slug = format!("rlss-{}", tenant.as_uuid().simple());
+    tenants::create(
+        pool,
+        tenant,
+        &slug,
+        "RLS session fixture",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create tenant");
+    let mut tx = pool.begin().await.expect("begin transaction");
+    let workspace = workspaces::create(
+        &mut tx,
+        &workspaces::NewWorkspace {
+            id: WorkspaceId::new(),
+            tenant_id: tenant,
+            slug: "runs".to_owned(),
+            display_name: "Runs".to_owned(),
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("create workspace");
+    let session = sessions::create(
+        &mut tx,
+        &sessions::NewSession {
+            id: SessionId::new(),
+            tenant_id: tenant,
+            workspace_id: workspace.id,
+            project_id: None,
+            principal_id: "rls-agent".to_owned(),
+            client_name: "claude-code".to_owned(),
+            client_version: None,
+            client_installation_id: None,
+            external_session_id: Some("harness-1".to_owned()),
+            agent_name: None,
+            model_name: None,
+            repository_id: None,
+            branch: None,
+            task_summary: None,
+            metadata: serde_json::json!({}),
+        },
+    )
+    .await
+    .expect("open session");
+    sessions::append_events(
+        &mut tx,
+        tenant,
+        session.id,
+        &[
+            sessions::NewSessionEvent {
+                event_type: SessionEventType::MessageUser,
+                event_schema_version: 1,
+                client_event_id: "e1".to_owned(),
+                occurred_at: chrono::Utc::now(),
+                payload: serde_json::json!({"text": "a secret plan"}),
+            },
+            sessions::NewSessionEvent {
+                event_type: SessionEventType::ToolInvoked,
+                event_schema_version: 1,
+                client_event_id: "e2".to_owned(),
+                occurred_at: chrono::Utc::now(),
+                payload: serde_json::json!({"tool": "grep"}),
+            },
+        ],
+    )
+    .await
+    .expect("append events");
+    sessions::record_context_run(
+        &mut tx,
+        tenant,
+        &sessions::NewContextRun {
+            id: ContextRunId::new(),
+            session_id: session.id,
+            scope_id: workspace.scope_id,
+            principal_id: "rls-agent".to_owned(),
+            query: Some("what do we know".to_owned()),
+            rendered: "composed material".to_owned(),
+            block_hash: "abc123".to_owned(),
+            tokens: 4,
+            budget_tokens: 1500,
+            entry_count: 0,
+            degraded: Vec::new(),
+        },
+    )
+    .await
+    .expect("record context run");
+    tx.commit().await.expect("commit session fixture");
+    SessionFixture {
+        tenant,
+        workspace: workspace.id,
+        scope: workspace.scope_id,
+        session: session.id,
+    }
+}
+
+/// Rows of `tenant` visible through the three tables, in the order
+/// (sessions, session_events, session_context_runs).
+async fn visible_session_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64, i64) {
+    let sessions = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from sessions where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count sessions");
+    let events = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from session_events where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count session_events");
+    let runs = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from session_context_runs where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count session_context_runs");
+    (sessions, events, runs)
+}
+
+/// The wrong (or absent) tenant GUC sees zero rows in all three tables; the
+/// right one sees exactly its own.
+#[test]
+fn wrong_tenant_guc_sees_no_session_rows() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let victim = seed_session(&db.pool).await;
+        let adversary = seed_session(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(adversary.tenant)).await;
+        assert_eq!(
+            visible_session_rows(&mut tx, victim.tenant).await,
+            (0, 0, 0),
+            "session-ledger rows leaked across tenants under the wrong GUC"
+        );
+        assert_eq!(
+            visible_session_rows(&mut tx, adversary.tenant).await,
+            (1, 2, 1)
+        );
+        // Not a count: the *content*. An event payload is a transcript and a
+        // context run holds composed material, so a leak here is the leak this
+        // whole product exists to prevent.
+        let leaked = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from session_events
+               where payload::text like '%a secret plan%'
+                 and tenant_id = $1"#,
+            victim.tenant.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("search for the victim's transcript");
+        assert_eq!(leaked, 0, "another tenant's transcript was readable");
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(
+            visible_session_rows(&mut tx, victim.tenant).await,
+            (0, 0, 0),
+            "session-ledger rows visible without any tenant GUC"
+        );
+    });
+}
+
+/// Opening a session into another tenant than the GUC's trips the policy's
+/// WITH CHECK — an application defect, surfaced as internal.
+#[test]
+fn cross_tenant_session_is_rejected() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let mine = seed_session(&db.pool).await;
+        let theirs = seed_session(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(mine.tenant)).await;
+        let result = sessions::create(
+            &mut tx,
+            &sessions::NewSession {
+                id: SessionId::new(),
+                tenant_id: theirs.tenant,
+                workspace_id: theirs.workspace,
+                project_id: None,
+                principal_id: "intruder".to_owned(),
+                client_name: "claude-code".to_owned(),
+                client_version: None,
+                client_installation_id: None,
+                external_session_id: None,
+                agent_name: None,
+                model_name: None,
+                repository_id: None,
+                branch: None,
+                task_summary: None,
+                metadata: serde_json::json!({}),
+            },
+        )
+        .await;
+        assert!(
+            matches!(
+                result,
+                Err(Error::NotFound { .. }) | Err(Error::Internal { .. })
+            ),
+            "a cross-tenant session must be refused, got {result:?}"
+        );
+    });
+}
+
+/// The application role holds **no UPDATE and no DELETE** on `session_events`
+/// or `session_context_runs`: "immutable" is a privilege here, not a
+/// discipline, so a defect in this crate cannot rewrite a transcript.
+#[test]
+fn the_app_role_cannot_rewrite_or_delete_a_transcript() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let fixture = seed_session(&db.pool).await;
+
+        for statement in [
+            "update session_events set payload = '{}'::jsonb where session_id = $1",
+            "delete from session_events where session_id = $1",
+            "update session_context_runs set rendered = '' where session_id = $1",
+            "delete from session_context_runs where session_id = $1",
+        ] {
+            let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+            let err = sqlx::query(statement)
+                .bind(fixture.session.as_uuid())
+                .execute(&mut *tx)
+                .await
+                .expect_err(&format!("{statement} must be refused"));
+            assert!(
+                err.as_database_error()
+                    .and_then(sqlx::error::DatabaseError::code)
+                    .as_deref()
+                    == Some("42501"),
+                "{statement}: expected insufficient_privilege, got {err:?}"
+            );
+            tx.rollback().await.expect("rollback");
+        }
+
+        // And no DELETE on `sessions` either: a run is what events, candidates,
+        // knowledge provenance and audit events name, so disposal belongs to
+        // the retention plane.
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let err = sqlx::query("delete from sessions where id = $1")
+            .bind(fixture.session.as_uuid())
+            .execute(&mut *tx)
+            .await
+            .expect_err("sessions must not be deletable");
+        assert!(
+            err.as_database_error()
+                .and_then(sqlx::error::DatabaseError::code)
+                .as_deref()
+                == Some("42501"),
+            "sessions: expected insufficient_privilege, got {err:?}"
+        );
+    });
+}
+
+/// The structural rules the migration makes facts, checked against **direct
+/// SQL** rather than through the store — because a rule that only the store
+/// enforces holds only for callers who went through the store.
+#[test]
+fn the_session_row_rules_hold_against_direct_sql() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let fixture = seed_session(&db.pool).await;
+
+        // 1. The anchor is derived, not chosen: a scope that is not the
+        //    workspace's is refused by `sessions_anchor_check`.
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let forged = sqlx::query(
+            "insert into sessions (id, tenant_id, workspace_id, workspace_scope_id, scope_id, \
+                                   principal_id, client_name) \
+             values ($1, $2, $3, $4, $5, 'forger', 'claude-code')",
+        )
+        .bind(SessionId::new().as_uuid())
+        .bind(fixture.tenant.as_uuid())
+        .bind(fixture.workspace.as_uuid())
+        .bind(fixture.scope.as_uuid())
+        .bind(ScopeId::new().as_uuid())
+        .execute(&mut *tx)
+        .await;
+        assert!(
+            forged.is_err(),
+            "a session must not be anchored at a scope its workspace does not own"
+        );
+        tx.rollback().await.expect("rollback");
+
+        // 2. A closed run never reopens, and never changes how it closed.
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        sessions::transition(
+            &mut tx,
+            fixture.tenant,
+            fixture.session,
+            SessionStatus::Ended,
+            None,
+        )
+        .await
+        .expect("close it");
+        let reopened = sqlx::query("update sessions set status = 'active' where id = $1")
+            .bind(fixture.session.as_uuid())
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            reopened.is_err(),
+            "a closed run reopened through direct SQL"
+        );
+        tx.rollback().await.expect("rollback");
+
+        // 3. `ended_at` and the status agree in both directions.
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let dangling = sqlx::query("update sessions set ended_at = now() where id = $1")
+            .bind(fixture.session.as_uuid())
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            dangling.is_err(),
+            "an active run must not carry an end time"
+        );
+        tx.rollback().await.expect("rollback");
+
+        // 4. One position per session, and one client event id per session.
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let duplicate = sqlx::query(
+            "insert into session_events (id, tenant_id, session_id, event_type, \
+                                         client_event_id, sequence, occurred_at, payload_hash) \
+             values ($1, $2, $3, 'message.user', 'e1', 99, now(), $4)",
+        )
+        .bind(uuid::Uuid::new_v4())
+        .bind(fixture.tenant.as_uuid())
+        .bind(fixture.session.as_uuid())
+        .bind("ab".repeat(32))
+        .execute(&mut *tx)
+        .await;
+        assert!(duplicate.is_err(), "one client event id per session");
+        tx.rollback().await.expect("rollback");
+
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let collision = sqlx::query(
+            "insert into session_events (id, tenant_id, session_id, event_type, \
+                                         client_event_id, sequence, occurred_at, payload_hash) \
+             values ($1, $2, $3, 'message.user', 'e99', 1, now(), $4)",
+        )
+        .bind(uuid::Uuid::new_v4())
+        .bind(fixture.tenant.as_uuid())
+        .bind(fixture.session.as_uuid())
+        .bind("ab".repeat(32))
+        .execute(&mut *tx)
+        .await;
+        assert!(collision.is_err(), "one position per session");
+        tx.rollback().await.expect("rollback");
+
+        // 5. The event vocabulary is closed at the row, not only in Rust.
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let unknown = sqlx::query(
+            "insert into session_events (id, tenant_id, session_id, event_type, \
+                                         client_event_id, sequence, occurred_at, payload_hash) \
+             values ($1, $2, $3, 'message.system', 'e100', 100, now(), $4)",
+        )
+        .bind(uuid::Uuid::new_v4())
+        .bind(fixture.tenant.as_uuid())
+        .bind(fixture.session.as_uuid())
+        .bind("ab".repeat(32))
+        .execute(&mut *tx)
+        .await;
+        assert!(unknown.is_err(), "the event vocabulary is closed");
+        tx.rollback().await.expect("rollback");
+    });
+}
+
+/// The ledger works end to end as `synveda_app` under the right GUC: the
+/// backstop isolates, it does not deny service.
+#[test]
+fn same_tenant_session_lifecycle_works_under_rls() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let fixture = seed_session(&db.pool).await;
+
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        // A harness that forgot everything but its own id finds its run again.
+        let found = sessions::by_external_ref(
+            &mut *tx,
+            fixture.tenant,
+            "rls-agent",
+            "claude-code",
+            "harness-1",
+        )
+        .await
+        .expect("look up by harness id")
+        .expect("found");
+        assert_eq!(found.id, fixture.session);
+
+        // A redelivered batch appends nothing twice and answers with the
+        // stored rows.
+        let again = sessions::append_events(
+            &mut tx,
+            fixture.tenant,
+            fixture.session,
+            &[sessions::NewSessionEvent {
+                event_type: SessionEventType::MessageUser,
+                event_schema_version: 1,
+                client_event_id: "e1".to_owned(),
+                occurred_at: chrono::Utc::now(),
+                payload: serde_json::json!({"text": "a secret plan"}),
+            }],
+        )
+        .await
+        .expect("re-append under RLS");
+        assert_eq!(again.len(), 1);
+        assert_eq!(again[0].outcome, sessions::AppendOutcome::Duplicate);
+        assert_eq!(
+            again[0].event.sequence, 1,
+            "the stored position, not a new one"
+        );
+
+        // `last_observed_at` moved with the first append and does not move
+        // back for a duplicate.
+        let session = sessions::get(&mut *tx, fixture.tenant, fixture.session)
+            .await
+            .expect("read under RLS")
+            .expect("still there");
+        assert!(session.last_observed_at.is_some());
+
+        let (listed, truncated) = sessions::list(
+            &mut *tx,
+            fixture.tenant,
+            &sessions::SessionFilter {
+                scope_id: Some(fixture.scope),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("list under RLS");
+        assert_eq!(listed.len(), 1);
+        assert!(!truncated);
+
+        sessions::transition(
+            &mut tx,
+            fixture.tenant,
+            fixture.session,
+            SessionStatus::Ending,
+            None,
+        )
+        .await
+        .expect("begin closing");
+        // `ending` still accepts the events already buffered — the whole
+        // reason there are five states rather than three.
+        sessions::append_events(
+            &mut tx,
+            fixture.tenant,
+            fixture.session,
+            &[sessions::NewSessionEvent {
+                event_type: SessionEventType::SessionEnded,
+                event_schema_version: 1,
+                client_event_id: "e3".to_owned(),
+                occurred_at: chrono::Utc::now(),
+                payload: serde_json::json!({}),
+            }],
+        )
+        .await
+        .expect("a buffered event still lands while ending");
+        let closed = sessions::transition(
+            &mut tx,
+            fixture.tenant,
+            fixture.session,
+            SessionStatus::Ended,
+            Some("done"),
+        )
+        .await
+        .expect("close it");
+        assert_eq!(closed.status, SessionStatus::Ended);
+        assert!(closed.ended_at.is_some());
+        assert_eq!(closed.task_summary.as_deref(), Some("done"));
+
+        let refused = sessions::append_events(
+            &mut tx,
+            fixture.tenant,
+            fixture.session,
+            &[sessions::NewSessionEvent {
+                event_type: SessionEventType::MessageUser,
+                event_schema_version: 1,
+                client_event_id: "e4".to_owned(),
+                occurred_at: chrono::Utc::now(),
+                payload: serde_json::json!({}),
+            }],
+        )
+        .await;
+        assert!(
+            matches!(refused, Err(Error::Conflict { .. })),
+            "a closed run takes no more events, got {refused:?}"
+        );
     });
 }

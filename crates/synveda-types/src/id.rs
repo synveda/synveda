@@ -207,3 +207,25 @@ define_id!(
     /// exists once in one response.
     InviteId
 );
+
+define_id!(
+    /// Identifies one agent session — a run of an agent in a workspace
+    /// (CPR-10, ADR-0076). The root of runtime activity: every session
+    /// event, context run and audit entry for that run names it.
+    SessionId
+);
+
+define_id!(
+    /// Identifies one immutable session event (CPR-10, ADR-0076).
+    ///
+    /// Distinct from the client's own `client_event_id`, deliberately: that
+    /// one is the caller's idempotency key and is unique only inside a
+    /// session, while this is the row's identity in this deployment.
+    SessionEventId
+);
+
+define_id!(
+    /// Identifies one context run — one act of composing context for a
+    /// session (CPR-10, ADR-0076 decision 7).
+    ContextRunId
+);

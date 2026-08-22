@@ -1,0 +1,95 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, session_id, scope_id, principal_id, query, rendered,\n               block_hash, tokens, budget_tokens, entry_count, degraded, created_at\n        from session_context_runs\n        where id = $1 and tenant_id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "query",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "rendered",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "block_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "tokens",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "budget_tokens",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "entry_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "degraded",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0c40ec4443b5eb293b63268b6119b958e380583b2b8c2e10cac76c53b5e3a34f"
+}

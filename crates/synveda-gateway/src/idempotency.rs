@@ -96,7 +96,20 @@ impl Claim {
             operation,
             key,
             subject: subject.to_owned(),
-            digest: *blake3::hash(canonicalise(canonical).to_string().as_bytes()).as_bytes(),
+            // `canonicalise` first, and CPR-10 corrected the reason CPR-4
+            // wrote here. This is **not** a no-op waiting for somebody to turn
+            // `preserve_order` on: `cedar-policy-core` already has, Cargo
+            // unifies features across the workspace, and a `Value`'s object
+            // therefore iterates in the order the client wrote its keys.
+            // Without the sort, a retry that reformatted its JSON would read
+            // as a conflict — the exact failure this seam exists to prevent,
+            // arriving through the door built to prevent it.
+            digest: *blake3::hash(
+                synveda_types::json::canonicalise(canonical)
+                    .to_string()
+                    .as_bytes(),
+            )
+            .as_bytes(),
         })
     }
 
@@ -124,32 +137,6 @@ impl Claim {
             resource_id,
         )
         .await
-    }
-}
-
-/// Sorts every object's keys, recursively, so the digest is over the request
-/// rather than over how it happened to be written.
-///
-/// `serde_json`'s default map is already ordered, which makes this a no-op
-/// today — and that is exactly why it is here rather than assumed: the
-/// ordering is a *feature flag* away from becoming insertion order, and the
-/// day some crate in the graph turns `preserve_order` on, a client's retry
-/// would start reading as a conflict for a reason nobody would look for.
-fn canonicalise(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(map) => {
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            serde_json::Value::Object(
-                keys.into_iter()
-                    .map(|key| (key.clone(), canonicalise(&map[key])))
-                    .collect(),
-            )
-        }
-        serde_json::Value::Array(items) => {
-            serde_json::Value::Array(items.iter().map(canonicalise).collect())
-        }
-        scalar => scalar.clone(),
     }
 }
 

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Synveda",
-    "description": "Governed organisational memory and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface: `/v1/me`, the workspace, project and repository planes (CPR-4), the access plane — members, groups, grants and invitations (CPR-5), and the scope admin plane (CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants). The rest of the `/v1` surface — observe, inject, recall, proposals, channels, the registries and the older admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
+    "description": "Governed organisational memory and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface: `/v1/me`, the workspace, project and repository planes (CPR-4), the access plane — members, groups, grants and invitations (CPR-5), and the scope admin plane (CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants), and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, append events, end, timeline, and the context-run endpoint). The rest of the `/v1` surface — observe, inject, recall, proposals, channels, the registries and the older admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`. Appending session events is the one exception, and it is idempotent by a finer unit: each event carries the client's own `client_event_id`, unique within its session, so a redelivered batch appends what is new and reports `duplicate` for the rest.\n\n**Identity.** No request body on this surface accepts a tenant or an acting principal. Both are resolved from the bearer credential; a body naming either is refused rather than ignored.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
     "license": {
       "name": "Proprietary"
     },
@@ -1555,6 +1555,613 @@
         ]
       }
     },
+    "/v1/sessions": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "`GET /v1/sessions` — the runs this caller may read, newest first.",
+        "operationId": "list_sessions",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "query",
+            "description": "Only runs at or under this governed scope — the subtree, so a\nworkspace's scope lists its projects' runs.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "description": "Only runs in this workspace.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Only runs in this project.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Only runs in this state: `active`, `ending`, `ended`, `abandoned` or\n`failed`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many rows to serve: 1–200, default 50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The sessions this caller may read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A filter outside its bounds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `session.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such scope in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "`POST /v1/sessions` — open a run.",
+        "operationId": "open_session",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required. A unique value per request, reused verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenSessionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "This key already opened this session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, or no `Idempotency-Key`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `session.write`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace or project in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The workspace is archived, the harness id is taken, or the key was reused for a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "`GET /v1/sessions/{session_id}`.",
+        "operationId": "get_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "The session's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `session.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/context-runs": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "`POST /v1/sessions/{session_id}/context-runs` — compose context for a run.",
+        "description": "**The final shape of this endpoint** (ADR-0076 decision 7). What it does\ntoday is decide `SessionWrite` at the session, call the existing retrieval\nengine over the session's scope chain and the caller's own, persist the\nidentity and the rendered block, and chain the watermark. Prompt 18 adds\nthe explainability — which scopes were considered, which were denied, why\neach entry made the cut — behind this same request and this same envelope.",
+        "operationId": "create_context_run",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "The session's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required. A unique value per request, reused verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextRunBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "This key already composed this run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextRunView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Composed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextRunView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body, or no `Idempotency-Key`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `session.write`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The key was reused for a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/end": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "`POST /v1/sessions/{session_id}/end` — move a run through its close.",
+        "operationId": "end_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "The session's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndSessionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The session, in its new state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A status this session cannot be moved to",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `session.write`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The session is already past this state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/events": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "`POST /v1/sessions/{session_id}/events` — append to the ledger.",
+        "operationId": "append_session_events",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "The session's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppendEventsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Per-event outcomes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppendResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An empty or oversized batch, a repeated `client_event_id`, or an event outside its bounds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `session.write`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The session is closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/timeline": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "`GET /v1/sessions/{session_id}/timeline` — the projection.",
+        "operationId": "get_session_timeline",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "The session's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Only entries after this event sequence. A sequence rather than an\noffset, so a client following a live run can ask for \"everything\nsince\" and get a stable answer while events are still arriving.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The merged timeline",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelineView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `session.read`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/workspaces": {
       "get": {
         "tags": [
@@ -2384,6 +2991,69 @@
           }
         }
       },
+      "AppendEventsBody": {
+        "type": "object",
+        "description": "`POST /v1/sessions/{session_id}/events`.",
+        "required": [
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NewEventBody"
+            },
+            "description": "The batch, at most 200 events, each `client_event_id` at most once."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AppendResponse": {
+        "type": "object",
+        "description": "The append response.",
+        "required": [
+          "events",
+          "appended",
+          "duplicates"
+        ],
+        "properties": {
+          "appended": {
+            "type": "integer",
+            "description": "How many were written.",
+            "minimum": 0
+          },
+          "duplicates": {
+            "type": "integer",
+            "description": "How many were already here.",
+            "minimum": 0
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AppendedEventView"
+            },
+            "description": "Per-event outcomes, in the order the batch listed them."
+          }
+        }
+      },
+      "AppendedEventView": {
+        "type": "object",
+        "description": "What one appended event did, and the row it names.",
+        "required": [
+          "outcome",
+          "event"
+        ],
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/SessionEventView",
+            "description": "The stored row — this deployment's version of it, never the caller's,\nbecause a retry must be told what is held rather than handed back what\nit just sent."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "`appended` or `duplicate`."
+          }
+        }
+      },
       "AttachRepositoryBody": {
         "type": "object",
         "description": "`POST /v1/projects/{project_id}/repositories`.\n\nThe server derives `provider`, `canonical_uri`, `repository_owner` and\n`repository_name`; a client sends what it knows and never what it\nconcluded, because two clients concluding separately is how one repository\nbecomes two rows.",
@@ -2450,6 +3120,111 @@
               "$ref": "#/components/schemas/ScopeView"
             },
             "description": "The chain or subtree, nearest first."
+          }
+        }
+      },
+      "ContextRunBody": {
+        "type": "object",
+        "description": "`POST /v1/sessions/{session_id}/context-runs`.\n\nThe **final shape** of this endpoint (ADR-0076 decision 7). What it does\ntoday is call the existing retrieval engine and persist the identity and\nthe rendered block; Prompt 18 adds the explainability — which scopes were\nconsidered, which were denied, why each entry made the cut — behind the\nsame request and the same response envelope.",
+        "properties": {
+          "budget_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Narrow the block's token budget. The caller may narrow and never\nwiden: the pack's budget is the ceiling.",
+            "minimum": 0
+          },
+          "max_sensitivity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Ceiling on the sensitivity tier that may compose."
+          },
+          "query": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the agent is about to do. Ranks the material; omitting it is the\nsession-start shape — everything pinned, nothing ranked."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ContextRunView": {
+        "type": "object",
+        "description": "A context run, as the API serves it.",
+        "required": [
+          "id",
+          "session_id",
+          "scope_id",
+          "rendered",
+          "block_hash",
+          "tokens",
+          "budget_tokens",
+          "entry_count",
+          "degraded",
+          "created_at"
+        ],
+        "properties": {
+          "block_hash": {
+            "type": "string",
+            "description": "BLAKE3 over the composed entries, hex."
+          },
+          "budget_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The budget it composed under."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was composed."
+          },
+          "degraded": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Which retrieval legs degraded — `embedder`, `retrieval`. Empty is the\nordinary answer."
+          },
+          "entry_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many records composed."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The run's id."
+          },
+          "query": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The task, when one was named."
+          },
+          "rendered": {
+            "type": "string",
+            "description": "The rendered block, watermark line included. Empty when nothing\ncomposed — a result, not an error."
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The scope it was anchored at."
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The session it was composed for."
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Estimated tokens of `rendered`."
           }
         }
       },
@@ -2628,6 +3403,32 @@
             "description": "The token. **Shown once.**"
           }
         }
+      },
+      "EndSessionBody": {
+        "type": "object",
+        "description": "`POST /v1/sessions/{session_id}/end`.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ending",
+              "ended",
+              "abandoned",
+              "failed"
+            ]
+          },
+          "task_summary": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the run turned out to be about, when the client only knows at the\nend. Replaces whatever was set at open."
+          }
+        },
+        "additionalProperties": false
       },
       "GrantList": {
         "type": "object",
@@ -3177,6 +3978,56 @@
           }
         }
       },
+      "NewEventBody": {
+        "type": "object",
+        "description": "One event of a `POST /v1/sessions/{session_id}/events` batch.",
+        "required": [
+          "event_type",
+          "client_event_id",
+          "occurred_at"
+        ],
+        "properties": {
+          "client_event_id": {
+            "type": "string",
+            "description": "The client's own id for this event. **The idempotency unit**: a\nredelivered batch appends nothing twice."
+          },
+          "event_schema_version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The payload shape this client declares. Defaults to the current one."
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "session.started",
+              "session.ended",
+              "message.user",
+              "message.assistant",
+              "tool.invoked",
+              "tool.result",
+              "file.read",
+              "file.changed",
+              "command.executed",
+              "skill.loaded",
+              "context.requested",
+              "adapter.warning"
+            ]
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the client says it happened."
+          },
+          "payload": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The content: a JSON object, at most 64 KiB encoded."
+          }
+        },
+        "additionalProperties": false
+      },
       "OnboardingState": {
         "type": "string",
         "description": "The onboarding vocabulary. Closed, so a client's branch is exhaustive and\na new state is a compile error somewhere rather than a silently unhandled\nstring.",
@@ -3219,6 +4070,98 @@
             "minimum": 0
           }
         }
+      },
+      "OpenSessionBody": {
+        "type": "object",
+        "description": "`POST /v1/sessions`.\n\nThere is no `tenant_id` and no `principal_id` here, and\n`deny_unknown_fields` is what makes sending one an error rather than a\nsilent no-op (ADR-0076 decision 8). There is no `scope_id` either: the\ngoverned scope is derived from `workspace_id` and `project_id` by the\nstore, because a client that could name the scope could name one its\nworkspace is not in.",
+        "required": [
+          "workspace_id",
+          "client_name"
+        ],
+        "properties": {
+          "agent_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which agent is running."
+          },
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The branch the run is on."
+          },
+          "client_installation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A stable id for this installation of the client."
+          },
+          "client_name": {
+            "type": "string",
+            "description": "The agent client, as it names itself: a lowercase label of letters,\ndigits, `-` and `.`."
+          },
+          "client_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its version."
+          },
+          "external_session_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The harness's own id for this run. Unique per caller and client."
+          },
+          "metadata": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "A labelling bag: a JSON object, at most 8 KiB encoded. Never copied\ninto an audit payload."
+          },
+          "model_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The model, as the client names it."
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The project, when the run is against one."
+          },
+          "repository_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A repository attached to the named project."
+          },
+          "task_summary": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the run is about."
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The workspace the run is in."
+          }
+        },
+        "additionalProperties": false
       },
       "PatchScopeBody": {
         "type": "object",
@@ -3571,6 +4514,255 @@
           }
         }
       },
+      "SessionEventView": {
+        "type": "object",
+        "description": "One immutable session event, as the API serves it.",
+        "required": [
+          "id",
+          "session_id",
+          "event_type",
+          "event_schema_version",
+          "client_event_id",
+          "sequence",
+          "occurred_at",
+          "received_at",
+          "payload",
+          "payload_hash"
+        ],
+        "properties": {
+          "client_event_id": {
+            "type": "string",
+            "description": "The client's own id for it."
+          },
+          "event_schema_version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The payload shape the client declared."
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "session.started",
+              "session.ended",
+              "message.user",
+              "message.assistant",
+              "tool.invoked",
+              "tool.result",
+              "file.read",
+              "file.changed",
+              "command.executed",
+              "skill.loaded",
+              "context.requested",
+              "adapter.warning"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The event's id in this deployment."
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the client says it happened."
+          },
+          "payload": {
+            "type": "object",
+            "description": "The content."
+          },
+          "payload_hash": {
+            "type": "string",
+            "description": "BLAKE3-256 of the canonical payload, hex — the server's."
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the gateway received it."
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Position in the session, assigned by the server."
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The session it belongs to."
+          }
+        }
+      },
+      "SessionList": {
+        "type": "object",
+        "description": "The session listing.",
+        "required": [
+          "sessions",
+          "truncated"
+        ],
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionView"
+            },
+            "description": "The sessions this caller may read, newest first."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Whether there are more than this answer carries.\n\nNamed rather than hidden. A recency-ordered feed can honestly serve\n\"the newest N\"; what it must never do is serve them as though they were\nall of them (ADR-0058 decision 5's rule, one plane over)."
+          }
+        }
+      },
+      "SessionView": {
+        "type": "object",
+        "description": "A session, as the API serves it.\n\nA view rather than `synveda_types::session::Session` itself, for\n[`crate::workspaces::WorkspaceView`]'s reason: this is the **contract** and\nthe domain type is not. `tenant_id` is deliberately absent — every `/v1`\nresponse is already scoped to the caller's tenant.",
+        "required": [
+          "id",
+          "workspace_id",
+          "scope_id",
+          "principal_id",
+          "client_name",
+          "status",
+          "started_at",
+          "metadata",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "agent_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which agent ran."
+          },
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The branch it was on."
+          },
+          "client_installation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A stable id for that installation of the client."
+          },
+          "client_name": {
+            "type": "string",
+            "description": "The agent client, as it named itself."
+          },
+          "client_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its version, when it said one."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the row was created."
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it closed."
+          },
+          "external_session_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The harness's own id for the run."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The session's stable id."
+          },
+          "last_observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The newest appended event's own instant."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "The client's labelling bag, echoed back."
+          },
+          "model_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The model, as the client named it."
+          },
+          "principal_id": {
+            "type": "string",
+            "description": "The token subject that opened it."
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The project, when the run was against one."
+          },
+          "repository_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The repository the run was against."
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The governed scope this session is decided at — **derived** from the\nworkspace and project, never submitted."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it began."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "ending",
+              "ended",
+              "abandoned",
+              "failed"
+            ]
+          },
+          "task_summary": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the run is about, in the client's words."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the row last changed."
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The workspace the run happened in."
+          }
+        }
+      },
       "TenantCapabilities": {
         "type": "object",
         "description": "What the caller may do on the **tenant** plane — `whoami`'s block, and\nsince CPR-4 `/v1/me`'s.\n\nCarries a `ToSchema` because `/v1/me` embeds it and that route is on the\nOpenAPI contract. The three fields are declared to the document by\n`value_type` rather than derived: `Role` and the `&'static str` map keys\nlive in `synveda-types`, where `utoipa` deliberately does not reach — a\ncontract is a property of the surface, and no crate below the gateway has\none.",
@@ -3624,6 +4816,89 @@
           "status": {
             "type": "string",
             "description": "`active` or `suspended`."
+          }
+        }
+      },
+      "TimelineEntry": {
+        "type": "object",
+        "description": "One entry of the timeline projection.\n\nDeliberately **not** a union of the two row shapes. A timeline is a reading\nsurface: it answers \"what happened, in order, and roughly what was it\", and\na client that wants an event's full payload fetches the event. Flattening\ntwo tables into one wide row with half its fields null per entry would make\nevery consumer branch on which half is populated.",
+        "required": [
+          "kind",
+          "id",
+          "at",
+          "summary"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it happened: an event's `occurred_at`, a run's `created_at`."
+          },
+          "event_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The event type, for an event."
+          },
+          "id": {
+            "type": "string",
+            "description": "The entry's own id, as a string, because the two sources have\ndifferent id types and a timeline is read rather than joined."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`event` or `context_run` — which table this came from."
+          },
+          "sequence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The event's position, for an event."
+          },
+          "summary": {
+            "type": "string",
+            "description": "One line about what this entry is — a run's query, an event's family."
+          }
+        }
+      },
+      "TimelineView": {
+        "type": "object",
+        "description": "The timeline projection.",
+        "required": [
+          "session_id",
+          "entries",
+          "event_counts",
+          "truncated"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimelineEntry"
+            },
+            "description": "The merged entries, oldest first."
+          },
+          "event_counts": {
+            "type": "object",
+            "description": "How many events the session has appended, of every type — the shape of\nthe run, which is what an auditor reads before any single entry.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The session this is about."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Whether either source hit its bound."
           }
         }
       },
@@ -3826,6 +5101,10 @@
     {
       "name": "access",
       "description": "Who may act where: members, groups, grants and invitations"
+    },
+    {
+      "name": "sessions",
+      "description": "Agent runs, their immutable event ledger, and the context composed for them"
     }
   ]
 }

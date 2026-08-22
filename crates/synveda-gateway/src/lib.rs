@@ -72,6 +72,7 @@ mod recall;
 mod request;
 pub mod scim;
 pub mod service_identities;
+pub mod sessions;
 pub mod skills;
 pub mod telemetry;
 pub mod tenant;

@@ -26,6 +26,8 @@
     "scope.update",
     "service_identity.manage",
     "service_identity.read",
+    "session.read",
+    "session.write",
     "skill.quality.override",
     "skill.write",
     "workspace.create",
