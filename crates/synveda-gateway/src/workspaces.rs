@@ -459,6 +459,24 @@ async fn require(
     tenant_id: TenantId,
     subject: Subject<'_>,
 ) -> Result<(Authorized, Resource)> {
+    let (authorized, resource, _) =
+        require_with_input(state, tx, action, tenant_id, subject).await?;
+    Ok((authorized, resource))
+}
+
+/// [`require`], keeping the gathered input — for the listings that take the
+/// gate decision *and* a decision per row (CPR-9, [`decide_each`]).
+///
+/// The input is the caller's, not the resource's, so one gather serves both:
+/// re-gathering per row would read the same identity, anchors and groups back
+/// once per workspace and could observe them changing mid-response.
+async fn require_with_input(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    action: Action,
+    tenant_id: TenantId,
+    subject: Subject<'_>,
+) -> Result<(Authorized, Resource, authz::DecisionInput)> {
     let (anchor, selection, resources, resource) = match subject {
         Subject::Tenant => {
             let root = synveda_store::scopes::tenant_root(&mut *tx, tenant_id).await?;
@@ -490,7 +508,7 @@ async fn require(
     };
     let input = authz::gather(state, tx, anchor.as_ref(), selection, resources).await?;
     let authorized = authz::decide(state, &input, action, resource)?;
-    Ok((authorized, resource))
+    Ok((authorized, resource, input))
 }
 
 /// The allowed-read decision event (ADR-0019 decision 4): a read has no
@@ -576,6 +594,241 @@ fn workspace_not_found(id: WorkspaceId) -> Error {
     }
 }
 
+/// What a filtered listing produced: the rows this caller may read, and one of
+/// the decisions that admitted them.
+pub(crate) struct Readable<T> {
+    /// The rows, in the order the store returned them.
+    pub(crate) rows: Vec<T>,
+    /// The first admitting decision, for the listing's audit event. `None`
+    /// when nothing was readable — there is then no decision to report,
+    /// which is exactly what the caller is told.
+    pub(crate) authorized: Option<Authorized>,
+}
+
+impl<T> Readable<T> {
+    fn from(rows: Vec<T>, verdicts: Vec<Option<Authorized>>) -> Self {
+        let mut authorized = None;
+        let kept = rows
+            .into_iter()
+            .zip(verdicts)
+            .filter_map(|(row, verdict)| {
+                let allowed = verdict?;
+                authorized.get_or_insert(allowed);
+                Some(row)
+            })
+            .collect();
+        Readable {
+            rows: kept,
+            authorized,
+        }
+    }
+}
+
+/// One scoped row a listing must decide about, before the decision is taken.
+pub(crate) struct Decidable {
+    /// What the decision names.
+    pub(crate) resource: Resource,
+    /// The scope the row owns — the head of the chain it is decided under.
+    pub(crate) scope_id: ScopeId,
+    /// The row's own Cedar entity, so a pack can name the thing itself
+    /// rather than only the scope beneath it (ADR-0073 decision 3).
+    pub(crate) entity: ResourceEntity,
+}
+
+/// Which of `rows` this caller may `action`, decided **one row at a time
+/// against the row itself** (CPR-9).
+///
+/// # Why a listing cannot take one decision
+///
+/// Until this function every listing on this plane took a single decision at
+/// the **tenant root** and applied the verdict to every row. For an
+/// administrator — who holds a grant at the root — that is the right answer by
+/// accident. For everybody else it is the wrong answer twice over, and the
+/// second way round is the one that mattered: a caller granted `member` at one
+/// workspace holds nothing at the root, so the single decision denied, the
+/// listing came back **empty**, and `/v1/me` reported `needs_workspace` to
+/// somebody who had just been added to one. The grant model says a grant
+/// reaches its own scope and that scope's subtree (ADR-0072 decision 1) and
+/// the anchor block on the very same response said so — `workspace.read: true`
+/// at the workspace — while the listing beside it said the workspace did not
+/// exist. Two answers to one question, from one response.
+///
+/// So the decision is taken where the grant is: about the row. That is the
+/// same decision `GET /v1/workspaces/{id}` already takes, which is why the two
+/// now agree by construction rather than by coincidence.
+///
+/// # One gather, one entity batch, N evaluations
+///
+/// [`crate::capabilities::at_anchors`]'s shape, and its reasoning: the
+/// principal, the anchors and the groups are properties of the *caller* and
+/// are gathered once, while the chain and the pack assignments are properties
+/// of the *resource* and are read per row — because the effective pack is the
+/// resource's (ADR-0014 decision 3) and a workspace governed by a stricter
+/// profile than the tenant default must answer under that profile.
+///
+/// There is deliberately **no fast path** for a caller permitted at the root.
+/// "Permitted above ⇒ permitted below" is not a property Cedar has — a forbid
+/// overrides a permit at any depth, and a stored pack may write one — so a
+/// shortcut there would be a second decision point quietly disagreeing with
+/// the first.
+///
+/// # Every row, and no cap
+///
+/// There is no bound here, deliberately. A cap would silently drop rows an
+/// administrator can see today — the failure ADR-0058 decision 5 refuses one
+/// plane over — and the honest alternatives are both worse than paying for
+/// the reads: a `not_answered` count on a *listing* asks a client to page
+/// something it cannot sort, and a truncated list is indistinguishable from a
+/// tenant with fewer workspaces.
+///
+/// The cost is three indexed reads per row (the scope, its ancestors, its
+/// assignments) and one Cedar evaluation, which is microsecond-level against
+/// a shared entity batch. Chains on this plane are two and three nodes deep,
+/// so the reads are the price and they are the thing to batch if measurement
+/// ever asks: every row's chain could come from one `scope_closure` query.
+/// Recorded rather than pre-optimised.
+///
+/// Returns the verdicts positionally.
+pub(crate) async fn decide_each(
+    state: &AppState,
+    conn: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    input: &authz::DecisionInput,
+    action: Action,
+    rows: &[Decidable],
+) -> Result<Vec<Option<Authorized>>> {
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut chains: Vec<Vec<synveda_policy::ScopeNode>> = Vec::with_capacity(rows.len());
+    let mut assignments: Vec<Vec<synveda_types::PolicyAssignment>> = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Some(scope) = synveda_store::scopes::get(&mut *conn, tenant_id, row.scope_id).await?
+        else {
+            // Listed a moment ago and gone now. An empty chain denies, which
+            // is the same fail-closed reading an unresolvable anchor gets.
+            chains.push(Vec::new());
+            assignments.push(Vec::new());
+            continue;
+        };
+        let mut nodes = vec![synveda_policy::ScopeNode::from_scope(&scope, false)];
+        for ancestor in synveda_store::scopes::ancestors(&mut *conn, tenant_id, scope.id).await? {
+            nodes.push(synveda_policy::ScopeNode::from_scope(&ancestor, false));
+        }
+        let ids: Vec<ScopeId> = nodes.iter().map(|node| node.id).collect();
+        assignments.push(
+            synveda_store::policy_assignments::for_scopes(&mut *conn, tenant_id, &ids).await?,
+        );
+        chains.push(nodes);
+    }
+
+    // Every row's entity is in the batch, so a pack that names one row can
+    // resolve it whichever row is being decided.
+    let entities: Vec<ResourceEntity> = rows.iter().map(|row| row.entity).collect();
+    let borrowed: Vec<&[synveda_policy::ScopeNode]> = chains.iter().map(Vec::as_slice).collect();
+    let seed = row_context(input, &[], &[], &entities);
+    let batch = state.pdp.materialise(&input.principal, &borrowed, &seed)?;
+
+    let mut verdicts = Vec::with_capacity(rows.len());
+    for (index, row) in rows.iter().enumerate() {
+        if chains[index].is_empty() {
+            verdicts.push(None);
+            continue;
+        }
+        let context = row_context(input, &chains[index], &assignments[index], &entities);
+        let decision =
+            state
+                .pdp
+                .authorize_with(&batch, &input.principal, action, row.resource, &context)?;
+        if !decision.allowed {
+            verdicts.push(None);
+            continue;
+        }
+        // The same `Authorized` `authz::decide` would have built, so a
+        // listing chains the pack and the determining policies that actually
+        // decided it rather than a verdict taken about something else.
+        let mut roles: Vec<String> = synveda_policy::effective_role_keys_at(row.resource, &context)
+            .into_iter()
+            .map(|key| key.as_str().to_owned())
+            .collect();
+        roles.sort_unstable();
+        roles.dedup();
+        verdicts.push(Some(Authorized { decision, roles }));
+    }
+    Ok(verdicts)
+}
+
+/// The decision context for one listed row: the caller's own principal,
+/// anchors and groups, with that row's chain, assignments and the batch's
+/// entities.
+fn row_context<'a>(
+    input: &'a authz::DecisionInput,
+    scopes: &'a [synveda_policy::ScopeNode],
+    assignments: &'a [synveda_types::PolicyAssignment],
+    resources: &'a [ResourceEntity],
+) -> synveda_policy::AuthzContext<'a> {
+    synveda_policy::AuthzContext {
+        scopes,
+        principal_scopes: &input.principal_scopes,
+        anchors: input.anchors.as_slice(),
+        groups: &input.groups,
+        resources,
+        assignments,
+        default_pack: input.default_pack.as_deref(),
+        lapses: &[],
+        sensitivity: None,
+    }
+}
+
+/// The workspaces this caller may read, and how many the bound left
+/// unanswered.
+pub(crate) async fn readable_workspaces(
+    state: &AppState,
+    conn: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    input: &authz::DecisionInput,
+    workspaces: Vec<Workspace>,
+) -> Result<Readable<Workspace>> {
+    let rows: Vec<Decidable> = workspaces
+        .iter()
+        .map(|workspace| Decidable {
+            resource: Resource::Workspace(workspace.id),
+            scope_id: workspace.scope_id,
+            entity: ResourceEntity::Workspace {
+                id: workspace.id,
+                scope_id: workspace.scope_id,
+            },
+        })
+        .collect();
+    let verdicts = decide_each(state, conn, tenant_id, input, Action::WorkspaceRead, &rows).await?;
+    Ok(Readable::from(workspaces, verdicts))
+}
+
+/// The projects this caller may read, and how many the bound left unanswered.
+pub(crate) async fn readable_projects(
+    state: &AppState,
+    conn: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    input: &authz::DecisionInput,
+    projects: Vec<Project>,
+) -> Result<Readable<Project>> {
+    let rows: Vec<Decidable> = projects
+        .iter()
+        .map(|project| Decidable {
+            resource: Resource::Project(project.id),
+            scope_id: project.scope_id,
+            entity: ResourceEntity::Project {
+                id: project.id,
+                scope_id: project.scope_id,
+                workspace_id: project.workspace_id,
+            },
+        })
+        .collect();
+    let verdicts = decide_each(state, conn, tenant_id, input, Action::ProjectRead, &rows).await?;
+    Ok(Readable::from(projects, verdicts))
+}
+
 fn project_not_found(id: ProjectId) -> Error {
     Error::NotFound {
         entity: format!("project {id}"),
@@ -601,15 +854,44 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let (authorized, resource) = require(
+        let root = synveda_store::scopes::tenant_root(&mut *tx, tenant_id).await?;
+        let resource = match &root {
+            Some(scope) => Resource::Scope(scope.id),
+            None => Resource::Tenant(tenant_id),
+        };
+        let input = authz::gather(
             &state,
             &mut tx,
-            Action::WorkspaceRead,
-            tenant_id,
-            Subject::Tenant,
+            root.as_ref(),
+            AnchorSelection::none(),
+            Vec::new(),
         )
         .await?;
-        let workspaces = workspaces::list(&mut *tx, tenant_id).await?;
+        // Two questions, not one (CPR-9). The **tenant-plane** verdict answers
+        // "may this caller read the tenant's inventory as such", which is what
+        // a grant at the root confers; the **per-row** verdicts answer "which
+        // of these may they read", which is what a grant at a workspace
+        // confers. Before CPR-9 only the first was asked and its answer was
+        // applied to every row, so a member of one workspace — who holds
+        // nothing at the root — was served an empty listing while the anchor
+        // block of the very same `/v1/me` said they could read it.
+        let at_root = authz::decide(&state, &input, Action::WorkspaceRead, resource);
+        let all = workspaces::list(&mut *tx, tenant_id).await?;
+        let Readable {
+            rows,
+            authorized: at_row,
+        } = readable_workspaces(&state, &mut tx, tenant_id, &input, all).await?;
+        // Refused only when both answers are no: a caller who holds nothing at
+        // the root and nothing below it is told so, which is the contract an
+        // outsider has always had.
+        let (authorized, resource) = match (at_root, at_row) {
+            (Ok(authorized), _) => (authorized, resource),
+            (Err(_), Some(authorized)) => (
+                authorized,
+                Resource::Workspace(rows.first().expect("a readable row").id),
+            ),
+            (Err(denial), None) => return Err(denial),
+        };
         read_event(
             &mut tx,
             tenant_id,
@@ -617,12 +899,12 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
             Action::WorkspaceRead,
             &authorized,
             resource,
-            json!({"count": workspaces.len()}),
+            json!({"count": rows.len()}),
         )
         .await?;
         commit(tx).await?;
         Ok(Json(WorkspaceList {
-            workspaces: workspaces.into_iter().map(Into::into).collect(),
+            workspaces: rows.into_iter().map(Into::into).collect(),
         }))
     }
     .await;
@@ -956,7 +1238,7 @@ pub(crate) async fn list_projects(
         let workspace = workspaces::get(&mut *tx, tenant_id, workspace_id)
             .await?
             .ok_or_else(|| workspace_not_found(workspace_id))?;
-        let (authorized, resource) = require(
+        let (authorized, resource, input) = require_with_input(
             &state,
             &mut tx,
             Action::ProjectRead,
@@ -964,7 +1246,14 @@ pub(crate) async fn list_projects(
             Subject::Workspace(&workspace),
         )
         .await?;
-        let projects = projects::in_workspace(&mut *tx, tenant_id, workspace_id).await?;
+        // The gate above says this caller may read *this workspace's*
+        // projects; the filter below says which of them (CPR-9). Both, because
+        // a project may carry a stricter profile than the workspace it sits in
+        // — ADR-0014 decision 3 makes the effective pack the resource's — and a
+        // listing that skipped the second would disclose a row the route that
+        // serves it one at a time refuses.
+        let all = projects::in_workspace(&mut *tx, tenant_id, workspace_id).await?;
+        let readable = readable_projects(&state, &mut tx, tenant_id, &input, all).await?;
         read_event(
             &mut tx,
             tenant_id,
@@ -972,12 +1261,12 @@ pub(crate) async fn list_projects(
             Action::ProjectRead,
             &authorized,
             resource,
-            json!({"workspace_id": workspace_id, "count": projects.len()}),
+            json!({"workspace_id": workspace_id, "count": readable.rows.len()}),
         )
         .await?;
         commit(tx).await?;
         Ok(Json(ProjectList {
-            projects: projects.into_iter().map(Into::into).collect(),
+            projects: readable.rows.into_iter().map(Into::into).collect(),
         }))
     }
     .await;

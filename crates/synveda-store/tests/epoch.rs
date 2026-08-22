@@ -593,7 +593,7 @@ fn reset_refuses_a_database_name_it_will_not_quote() {
 /// `reset_creates_a_working_current_epoch_database_and_is_idempotent` (a
 /// reset carries nothing).
 ///
-/// Two facts, both checkable without a database:
+/// Three facts, all checkable without a database:
 ///
 /// 1. **The epoch migration is pure DDL.** It is the one file a translator
 ///    would live in — the moment the schema learns about the epoch is the
@@ -602,6 +602,33 @@ fn reset_refuses_a_database_name_it_will_not_quote() {
 /// 2. **There are no down-migrations.** sqlx's reversible pairs are the other
 ///    place a translation hides, and a `.down.sql` would also imply the epoch
 ///    is reversible, which it is not.
+/// 3. **The whole chain carries no DML but the three inherited statements
+///    named below** (CPR-9). Fact 1 checked exactly one file, which is the
+///    file a translator written *today* would go in — and left the other
+///    forty unchecked, which is where the ones written *before* the cut
+///    already were. The foundation audit found three, all of them in-place
+///    upgrade steps from the pre-epoch chain.
+///
+/// # Why those three are inherited rather than deleted
+///
+/// They are **unreachable**. A database from before the cut never reaches the
+/// migrator at all — `epoch::preflight` refuses it first, which is what
+/// `a_database_from_before_the_cut_is_refused_and_not_touched` asserts — so
+/// the only databases that run migration 8 or 38 are fresh ones, where the
+/// tables those statements touch are empty at that point in the chain. They
+/// cannot translate anything, because on every database the product accepts
+/// there is nothing there to translate.
+///
+/// Deleting them is not free: editing an applied migration changes its
+/// checksum, so every existing epoch-2 database would fail its next migrate
+/// with `migration 8 was previously applied but has been modified` — a
+/// checksum error instead of the reset instruction the guard exists to give
+/// (ADR-0069 decision 3). Doing it properly means bumping the epoch, which is
+/// a reset for every deployment in exchange for removing statements that
+/// cannot run. Prompt 33 squashes the chain and they go with it.
+///
+/// So they are pinned by name here instead. The value of this list is not the
+/// three entries; it is that a **fourth** fails the build.
 #[test]
 fn no_old_to_new_data_migrator_exists() {
     let migrations = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
@@ -630,19 +657,7 @@ fn no_old_to_new_data_migrator_exists() {
 
     let path = epoch_migration.expect("the epoch migration is in the chain");
     let source = std::fs::read_to_string(&path).expect("read the epoch migration");
-    // Comments carry prose about what is *not* done here, so they are
-    // stripped before the body is judged. Statements are judged by the verb
-    // they start with rather than by substring: `grant select on ...` is a
-    // privilege, not a read, and a check that could not tell the two apart
-    // would be a check somebody deletes.
-    let body: String = source
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.starts_with("--"))
-        .collect::<Vec<_>>()
-        .join("\n")
-        .to_lowercase();
-    for statement in body.split(';') {
+    for statement in top_level_statements(&source) {
         let verb = statement.split_whitespace().next().unwrap_or_default();
         assert!(
             !matches!(
@@ -656,6 +671,103 @@ fn no_old_to_new_data_migrator_exists() {
             statement.trim(),
         );
     }
+
+    // Fact 3: the rest of the chain. The three inherited statements, by the
+    // file they are in and the words that identify them.
+    const INHERITED: &[(&str, &str)] = &[
+        // AUTHZ-1's stored packs took names AUTHZ-2 reserved. Renames rows
+        // that a fresh database has none of.
+        ("0008_policy_pack_assignments.sql", "update policy_packs"),
+        // AUTHZ-1's one tenant-wide pack becomes the tenant default. Selects
+        // from the table the statement above just failed to find anything in.
+        (
+            "0008_policy_pack_assignments.sql",
+            "insert into policy_pack_defaults",
+        ),
+        // TEN-4 could not seal a plaintext it had no key for, so every open
+        // console session ended. A fresh database has none open.
+        ("0038_envelope_keys.sql", "delete from console_sessions"),
+    ];
+
+    let mut found: Vec<String> = Vec::new();
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&migrations)
+        .expect("read the migrations directory")
+        .map(|entry| entry.expect("a directory entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
+        .collect();
+    files.sort();
+    for path in files {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        let source = std::fs::read_to_string(&path).expect("read a migration");
+        for statement in top_level_statements(&source) {
+            let verb = statement.split_whitespace().next().unwrap_or_default();
+            if !matches!(verb, "insert" | "update" | "delete" | "copy") {
+                continue;
+            }
+            let head: String = statement
+                .split_whitespace()
+                .take(3)
+                .collect::<Vec<_>>()
+                .join(" ");
+            if INHERITED
+                .iter()
+                .any(|(file, prefix)| *file == name && head.starts_with(prefix))
+            {
+                found.push(format!("{name}: {head}"));
+                continue;
+            }
+            panic!(
+                "{name} runs a `{verb}` statement outside a function body:\n  {}\n\n\
+                 A migration that writes rows is either seeding the product (which \
+                 belongs behind the PDP, not in DDL — seed §2.2) or carrying pre-cut \
+                 data forward (which ADR-0068 decision 3 refuses). If it is neither, \
+                 add it to INHERITED with the reason it cannot run.",
+                statement.trim(),
+            );
+        }
+    }
+    assert_eq!(
+        found.len(),
+        INHERITED.len(),
+        "the inherited-DML list names {} statements and the chain has {}: {found:?}. \
+         A statement that left the chain should leave this list with it.",
+        INHERITED.len(),
+        found.len(),
+    );
+}
+
+/// A migration's statements, comments stripped and **function bodies
+/// skipped**.
+///
+/// The bodies matter: `0001` and `0026` define trigger functions whose
+/// `insert into ..._history` lines are the history mechanism itself, written
+/// once as DDL and executed per row forever after. A scanner that could not
+/// tell a `create function` body from a top-level statement would either miss
+/// real DML or condemn every audit trigger in the schema.
+fn top_level_statements(source: &str) -> Vec<String> {
+    let stripped: String = source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with("--"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_lowercase();
+    // `$$` opens and closes a dollar-quoted body; everything between is the
+    // function's, not the migration's.
+    let mut top = String::with_capacity(stripped.len());
+    for (index, part) in stripped.split("$$").enumerate() {
+        if index % 2 == 0 {
+            top.push_str(part);
+        }
+    }
+    top.split(';')
+        .map(|statement| statement.trim().to_owned())
+        .filter(|statement| !statement.is_empty())
+        .collect()
 }
 
 async fn has_marker(pool: &PgPool) -> bool {

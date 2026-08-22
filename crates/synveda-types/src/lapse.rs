@@ -252,10 +252,10 @@ fn working_tier() -> Sensitivity {
 impl LapseTerms {
     /// Whether these terms mean anything and fit inside `config`.
     ///
-    /// Structural only. Two refusals that need the hierarchy — a `user`-kind
-    /// target, and a target already on the grantee's own chain — are the
-    /// gateway's, because this crate is the root of the graph and knows no
-    /// nodes.
+    /// Structural only. Two refusals that need the scope tree — a
+    /// `principal`-shaped target, and a target already on the grantee's own
+    /// chain — are the gateway's, because this crate is the root of the graph
+    /// and knows no scopes.
     ///
     /// # Errors
     ///

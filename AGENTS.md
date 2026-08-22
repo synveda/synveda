@@ -75,10 +75,12 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. 104 features filed, 71 delivered;
+Cursor frame has been replayed. **106 features filed, 73 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
-headline number has drifted three times, which is why the counting trail
-in CLAUDE.md exists. Append to that trail when filing a feature.
+headline number has drifted four times, the fourth being this file itself,
+which still read 104/71 after CPR-8 filed the 105th. That is why the
+counting trail in CLAUDE.md exists. Append to it — and to this line —
+when filing a feature.
 
 Load-bearing facts about Phase 5:
 
@@ -132,6 +134,23 @@ Load-bearing facts about Phase 5:
   workspaces, projects, repositories, the access plane and the six admin
   scope routes — 32 operations); the rest of `/v1` joins it at
   Prompt 19.
+- CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
+  per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
+  tenant root and applied it to every row, so a caller granted `member` at a
+  workspace saw nothing and was told `needs_workspace`, while the same
+  response's `anchors` block said `workspace.read: true` there. They now
+  decide about the row, under the row's own chain and pack, with **no fast
+  path** for a caller permitted at the root (a forbid overrides a permit at
+  any depth). Two CLI surfaces CPR-7 had silently broken are repaired and
+  **pinned from both sides** — `synveda login` required a deleted
+  `identity.quarantined`, so every login failed to parse its own session,
+  and `synveda whoami --capabilities` read the deleted `roles`/`role_assign`
+  shape. `crates/synveda-gateway/tests/foundation_audit.rs` is the
+  adversarial suite: valid ids from another tenant, a second workspace in
+  one tenant, and somebody else's principal scope, each checked against
+  counts, error kinds and the navigation capabilities. The
+  no-data-migrator guard now scans the whole migration chain, not the epoch
+  file alone.
 
 ## Commands
 

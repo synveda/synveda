@@ -177,12 +177,33 @@ reason the trail exists. CPR-5 filed and delivered 2026-08-18, making it 102,
 CPR-6 on 2026-08-19, making it 103 with 70 delivered, and **CPR-7 on
 2026-08-20**, making it **104 with 71 delivered** — the hierarchy cutover,
 which deletes whole subsystems six earlier prompts had recorded as standing
-beside the new model — and **CPR-8 on 2026-08-21**, making it **105 with 72
+beside the new model — **CPR-8 on 2026-08-21**, making it **105 with 72
 delivered**: the console product shell, the first prompt of this programme
 whose deliverable is a screen, and the one that makes six prompts of platform
-reachable by somebody who is not holding a terminal. Prompts 9–33 of its
-programme are filed by the prompts that run them, so this number will keep
-moving.)
+reachable by somebody who is not holding a terminal — and **CPR-9 on
+2026-08-22**, making it **106 with 73 delivered**: the foundation audit, the
+first prompt asked to check its predecessors rather than build on them.
+Prompts 10–33 of its programme are filed by the prompts that run them, so this
+number will keep moving.)
+
+Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
+`GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and
+applied it to every row, so a caller granted `member` at a workspace — who
+holds nothing at the root — was served an empty list and an
+`onboarding.state` of `needs_workspace`, while the `anchors` block of the same
+response said `workspace.read: true` at that workspace. Listings now decide
+about the row, under the row's own chain and pack, with **no fast path** for a
+caller permitted at the root (a forbid overrides a permit at any depth). Two
+CLI surfaces that CPR-7 had silently broken are repaired and pinned from both
+sides: `synveda login` required an `identity.quarantined` the server had
+deleted — so **every login failed to parse its own session** — and `synveda
+whoami --capabilities` read the deleted `roles`/`role_assign` shape. And the
+no-data-migrator guard now scans **the whole migration chain** rather than the
+epoch file alone, skipping function bodies and pinning the three inherited
+pre-epoch statements by name; they are unreachable (a pre-cut database never
+reaches the migrator) and deleting them would trade the reset instruction for
+a checksum error on every existing database, so the epoch stays at **2** and
+Prompt 33's squash removes them.
 
 Phase 3 was reordered on 2026-08-04 by demo-readiness (see the Sequencing
 note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,

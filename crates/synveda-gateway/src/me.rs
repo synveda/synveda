@@ -319,6 +319,16 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
         Some(root) => Resource::Scope(root.id),
         None => Resource::Tenant(tenant_id),
     };
+    // **The tenant-plane verdicts are a floor, not the whole answer** (CPR-9).
+    // They say whether a grant at the root lets this caller read the tenant's
+    // inventory as such. What a grant at a *workspace* lets them read is
+    // decided per row by `readable_workspaces`, below — and before CPR-9 it
+    // was not decided at all, so a caller granted `member` at one workspace
+    // was served an empty `workspaces` list, a `workspace_count` of zero and
+    // an `onboarding.state` of `needs_workspace`, while the `anchors` block of
+    // this very response reported `workspace.read: true` at that workspace.
+    // The listing and the navigation capabilities disagreed, and the console
+    // renders both.
     let may_read_workspaces =
         crate::authz::decide(state, &input, Action::WorkspaceRead, resource).is_ok();
     let may_read_projects =
@@ -328,17 +338,29 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
     let (anchors, anchors_not_answered) =
         crate::capabilities::at_anchors(state, &mut tx, &input).await?;
     let anchor_count = input.anchors.len();
-    drop(input);
-    let workspaces = if may_read_workspaces {
+    // Every row the tenant has, then only the rows this caller may read. The
+    // tenant-plane verdict short-circuits the read for a caller who holds
+    // nothing at the root *and* nothing below it — `readable_*` would filter
+    // the same rows away, one decision at a time, for no answer.
+    let all_workspaces = if may_read_workspaces || !input.anchors.is_empty() {
         workspaces::list(&mut *tx, tenant_id).await?
     } else {
         Vec::new()
     };
-    let projects = if may_read_projects {
+    let all_projects = if may_read_projects || !input.anchors.is_empty() {
         projects::list(&mut *tx, tenant_id).await?
     } else {
         Vec::new()
     };
+    let workspaces =
+        crate::workspaces::readable_workspaces(state, &mut tx, tenant_id, &input, all_workspaces)
+            .await?
+            .rows;
+    let projects =
+        crate::workspaces::readable_projects(state, &mut tx, tenant_id, &input, all_projects)
+            .await?
+            .rows;
+    drop(input);
     let onboarding = OnboardingView {
         state: OnboardingState::resolve(quarantined, workspaces.len(), projects.len()),
         tenant_scope_id: tenant_scope.map(|scope| scope.id),

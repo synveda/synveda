@@ -80,15 +80,19 @@ define_id!(
 );
 
 define_id!(
-    /// Identifies a node in the tenancy hierarchy (org, division, department,
-    /// team, or user level). Every scope is an attachment point for memories,
-    /// skills, prompts, and policies (seed §4.1).
+    /// Identifies a node of the governed scope tree (CPR-3, ADR-0070): a
+    /// named node with a parent and a subtree, shaped `tenant`, `org_unit`,
+    /// `workspace`, `project` or `principal`. A shape, never a rank — the
+    /// `org`/`division`/`department`/`team`/`user` ladder this doc used to
+    /// name left with the hierarchy (CPR-7, ADR-0074). Every scope is an
+    /// attachment point for memories, skills, prompts, and policies.
     ScopeId
 );
 
 define_id!(
     /// Identifies an actor: a user or a service identity. Every agent runs
-    /// *as* an identity in the hierarchy, never as a shared key (seed §5).
+    /// *as* an identity holding its own `principal` scope, never as a shared
+    /// key (seed §5; CPR-7, ADR-0074 decision 3).
     IdentityId
 );
 

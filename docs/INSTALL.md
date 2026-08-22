@@ -453,7 +453,7 @@ new model; see ADR-0068 for why that is a decision rather than an omission.
 ```sh
 synveda reset --database --force   # destroys the database, builds a fresh one
 synveda init                       # brings the deployment back up
-synveda login                      # provisions your org root and admin binding again
+synveda login                      # provisions your identity and admin grant again
 ```
 
 `reset` drops and recreates **the application database** — not the volumes,

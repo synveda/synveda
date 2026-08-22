@@ -1744,4 +1744,200 @@ frontend changes, deletions, tests, and the resulting commit hash.
   event to emit. Every route it calls already chains the events it chained.
 - **Commit.** `feat(console): add workspace product shell and onboarding` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by Prompt 9, on Prompt 1's rule.
+- **Commit hash.** `6cc4a39` (`feat/context-platform-mvp`). Written by
+  **Prompt 9**, on Prompt 1's rule.
+
+### Prompt 9 — The foundation audit (CPR-9)
+
+- **Implemented.** An audit of Prompts 1–7 rather than a ninth plane on top of
+  them. Prompts 1–8 each shipped green, and each suite proved that its own
+  plane worked; none had asked the question that spans all of them — **what
+  does a caller learn, or fail to learn, that their grants do not say?** This
+  prompt asks it, with an adversarial suite
+  (`crates/synveda-gateway/tests/foundation_audit.rs`, 6 tests), fixes the
+  three defects it found, and widens the one guard that was checking a
+  fortieth of what it claims.
+- **Divergence from §9.** §9's Prompt 9 reads *"Candidates — extraction output,
+  separated from published knowledge"*. The prompt as it arrived is an audit
+  of the completed foundation, with "do not start session or knowledge work"
+  in its own text, and the prompt's own text is authoritative (§9's preamble).
+  Recorded rather than absorbed because this is the third consecutive
+  divergence and the reason differs from the first two: CPR-7 and CPR-8 moved
+  *other prompts* forward, while this one inserts work §9 never planned. Stage
+  B remains unstarted; the numbered order is not renumbered.
+- **Schema/domain changes.** **None.** No migration added, altered or removed;
+  the epoch stays at **2**. That is a decision rather than an absence — see
+  the guard bullet below.
+- **API and frontend changes.** No route added, changed or removed; the
+  OpenAPI document and `console/src/generated/api.ts` are byte-identical
+  (`make check-api-types` passes). What changed is **what two existing
+  listings return**: `GET /v1/workspaces` and `GET /v1/me` now serve the rows
+  the caller may read rather than all-or-nothing on a single tenant-root
+  verdict, and `GET /v1/workspaces/{id}/projects` filters the same way behind
+  its existing gate. Two CLI surfaces were repaired (below). No console source
+  changed: the shell already read `/v1/me`, and the fix is that `/v1/me` now
+  answers correctly.
+- **Defect 1 — a grant at a workspace did not reach the listings.** The
+  listings took **one** decision, at the tenant root, and applied its verdict
+  to every row. For an administrator, who holds a grant at the root, that is
+  the right answer by accident. For a member it was wrong in the direction
+  that matters: a caller granted `member` at one workspace holds nothing at
+  the root, so the decision denied, the listing came back **empty**, and
+  `/v1/me` reported `workspace_count: 0` and `onboarding.state:
+  needs_workspace` — while the `anchors` block of that same response said
+  `workspace.read: true` at that workspace. Two answers to one question in one
+  payload, and CPR-8's console renders both, so an invited member was sent to
+  the first-run wizard to create the workspace they had just been added to.
+  Fixed by deciding **per row against the row**, which is the decision
+  `GET /v1/workspaces/{id}` already took and passed: one gather, one
+  materialised entity batch, one Cedar evaluation per row under that row's own
+  chain and pack assignments (`workspaces::decide_each`, shaped after
+  `capabilities::at_anchors` and for its reason — the effective pack is the
+  resource's, ADR-0014 decision 3). **Unbounded**, and that was a correction
+  made to this feature's own first cut: it capped at 128 rows with a
+  `not_answered` count, which would have silently dropped the 129th workspace
+  from an administrator who can see it today — introducing, in an audit, the
+  exact class of failure the audit exists to find. The cost is three indexed
+  reads per row, and the batched `scope_closure` read that would remove them is
+  recorded in the function rather than pre-written. There is deliberately **no
+  fast path** for a caller permitted at the root: "permitted above ⇒ permitted
+  below" is not a property Cedar has — a forbid overrides a permit at any
+  depth and a stored pack may write one — so a shortcut there would be a
+  second decision point quietly disagreeing with the first. The route still
+  refuses a caller who holds nothing at the root *and* nothing below it, so
+  the outsider contract `every_route_denies_without_the_action` pins is
+  unchanged.
+- **Defect 2 — two client/server contracts had drifted apart**, both on routes
+  Prompt 19 has not yet put on the contract, so both sides are hand-written
+  and nothing checked they agreed. **`synveda login` could not parse a
+  successful login**: CPR-7 deleted `identity.quarantined` from the gateway's
+  session response (placement is identity, so it could only ever be `false`)
+  and the CLI kept requiring it — serde has no default for a missing field, so
+  every login failed *after* the browser round trip, *after* the code
+  exchange, with the credential already minted. And **`synveda whoami
+  --capabilities` could not parse any response**: CPR-7 renamed `roles` to
+  `role_keys` and deleted `role_assign` with the binding vocabulary; the CLI
+  read the old shape. Plain `synveda whoami` shares the route and never asks
+  for the block, which is why nothing noticed. Both fixed and **pinned from
+  each side** — the CLI parses a literal of what the gateway serves, the
+  gateway asserts the exact key set it serialises, and each test names the
+  other's file — so the server cannot drop a field the CLI needs without one
+  of them going red.
+- **Defect 3 — the no-data-migrator guard checked one file of forty-one.**
+  `no_old_to_new_data_migrator_exists` scanned the epoch migration, which is
+  the file a translator written *today* would live in, and left unchecked the
+  forty where ones written *before* the cut already were. It now scans the
+  whole chain, skipping dollar-quoted function bodies so `0001`'s and `0026`'s
+  history triggers are not mistaken for translations, and pins the **three**
+  inherited pre-epoch upgrade statements by name: `0008`'s
+  `update policy_packs … '-legacy'` and `insert into policy_pack_defaults …
+  select`, and `0038`'s `delete from console_sessions`.
+- **Why those three are pinned rather than deleted, and why the epoch did not
+  bump.** They are **unreachable**: `epoch::preflight` refuses a pre-cut
+  database before the migrator runs, so the only databases that reach
+  migrations 8 and 38 are fresh ones, where the tables those statements touch
+  are empty at that point in the chain. Deleting them was tried and measured —
+  editing an applied migration changes its checksum, and an existing epoch-2
+  database then fails with `migration 8 was previously applied but has been
+  modified`, which is a checksum error where ADR-0069 decision 3 promises the
+  reset instruction. Doing it properly therefore means bumping the epoch to 3:
+  a reset for every deployment and every developer, to remove statements that
+  cannot run, in a chain Prompt 33 squashes anyway. Pinned instead, with the
+  reasoning in the test rather than here — and the value of the list is not
+  its three entries but that a **fourth** fails the build, which was verified
+  by adding one.
+- **Verified sound, independently of the suites that assert it.** 52
+  tenant-bound tables, every one `ENABLE` + `FORCE` with at least one policy,
+  read straight out of `pg_class`/`pg_policy` rather than through
+  `rls.rs`'s own inventory; the four exempt tables are the documented
+  structural ones and `hierarchy_nodes`, `hierarchy_closure`, `role_bindings`
+  and `group_mappings` are absent. The scope closure holds over the ~23,000
+  scopes the suite produces: a distance-0 self row per scope, no cross-tenant
+  pair, no cycle, a distance-1 edge per parent pointer, one parentless
+  `tenant`-shaped root per tenant, `principal_id` present exactly on
+  `principal`-shaped scopes, and only the five shapes present. The privacy
+  forbid holds against a tenant administrator; the capability probe serves no
+  `scope_path`, `pack` or roles at a scope the caller holds nothing at; an
+  invitation refuses a cross-tenant redemption **and survives it**, still
+  spendable by its rightful recipient; and the console's `offersRoute` fails
+  closed on a missing capability key.
+- **Residue classified.** Every match of the audit's search terms
+  (`Division`, `Department`, `hierarchy rank`, `RoleBinding`, `serde(alias)`,
+  `legacy`, `compat`, `fallback`, `dual read`, `dual write`, `/v1/hierarchy`)
+  was classified. `RoleBinding`, `serde(alias)`, `hierarchy rank` and `dual
+  write` match **no code at all**: what they match is prose — ADR-0074
+  recording that role bindings were deleted, three ADRs (0039, 0043, 0044)
+  each *refusing* a dual write by name, and this section's own list of the
+  terms. `/v1/hierarchy` has two matches in production source, both comments
+  narrating the deletion, plus the negative tests that assert the 404s. The `legacy`, `compat` and `fallback` matches
+  are the MCP protocol era, the pack-compilation fallback, the SPA fallback
+  and the correspondence-rule ordering — all live mechanisms with those
+  names, none of them old-model compatibility. What *was* deleted is stale
+  prose a reader would act on: `synveda init` told operators to run `synveda
+  hierarchy list` and claimed the first login provisions an org root and binds
+  `org-admin`; `synveda whoami` pointed at `synveda hierarchy capabilities`;
+  `--demo` printed its org units as "what the IdP groups resolve to", which no
+  group has done since placement became identity; and `ScopeId`'s own doc
+  comment still defined a scope as a rung of the
+  `org`/`division`/`department`/`team`/`user` ladder. The remaining matches
+  are narration, negative assertions, and test-local variable names for org
+  units.
+- **The headline count had drifted a fourth time, in the other file.**
+  `AGENTS.md` states the feature count beside CLAUDE.md's and says "when the
+  project's state moves, both files move". It still read **104 filed, 71
+  delivered** — CPR-8's own numbers, never applied there — against a checker
+  that had said 105 since. CLAUDE.md's counting trail exists because this
+  drift has now happened four times; the fourth was the file that carries the
+  rule. Both are now 106/73, and `AGENTS.md`'s line says to update itself.
+- **The 43 demos were counted again rather than trusted.** CPR-7 recorded that
+  forty-three Phase-3 demos still seed through `role bind`,
+  `hierarchy_closure` or `/v1/hierarchy`. Re-counted here over non-comment
+  lines: 44 files match, one of which is `demos/cpr-7-scopes.sh` asserting the
+  404s on purpose. **Forty-three.** The number in STATUS.md is exactly right,
+  and they stay for the prompts that re-anchor their subsystems.
+- **Tests.** New: `crates/synveda-gateway/tests/foundation_audit.rs` (**6**) —
+  the cross-tenant table (21 method-paths, each compared against a fictional
+  control for status *and* error kind), the invitation that survives the
+  attempt, the member who sees their workspace and not the other, the probe
+  that offers no plane it cannot name, the administrator refused at somebody
+  else's own scope, and the caller who holds nothing being answered rather
+  than errored. Widened:
+  `crates/synveda-store/tests/epoch.rs::no_old_to_new_data_migrator_exists`
+  (one file → forty-one, with `top_level_statements`). New unit tests:
+  `the_session_shape_is_the_one_the_gateway_serves` and
+  `a_session_without_a_refresh_token_still_parses` (CLI),
+  `the_cli_session_shape_is_the_one_the_cli_parses` (gateway `auth`),
+  `the_tenant_capability_block_is_the_shape_the_cli_parses` (gateway
+  `capabilities`).
+- **Run record.** `make ci` **PASS** and `make db-test` **PASS** — the latter
+  on a fresh scratch database (`synveda_test_8767`), the whole workspace, no
+  filter: **113 suites green, 0 failed**. That is the run CPR-7's record names
+  as the one that finds what suites verified in isolation miss, and it found
+  nothing here. Individually along the way: `synveda-gateway` (49 binaries),
+  `synveda-store` (18, incl. `rls` 76 and `epoch` 10), `synveda-policy` (84),
+  `synveda-cli` (150) and the console suite (121). **No test was
+  weakened to make this pass**: the outsider's 403 on `GET /v1/workspaces`,
+  the cross-tenant 404s and every existing access-plane assertion are
+  unchanged, and the listing fix was verified against them rather than around
+  them. Three of the six new tests failed on first run against the code as it
+  stood, which is what produced defect 1; two more failed on **my own** test's
+  wrong assumptions (an invitation redemption answers 201, and a malformed
+  token is refused by grammar before the lookup so it is not a control for a
+  well-formed unknown one) and were corrected in the test, not the product.
+- **What this prompt does not carry.** It fixes what a *listing* discloses and
+  leaves what a *session composes* alone: CPR-7's standing note — anchors
+  reach `composition_plan` as decision context rather than as the candidate
+  set, so joining a workspace still gives that session no material — is
+  Prompts 16–18's, and touching it here would have been starting them. The
+  three pinned migration statements leave with Prompt 33's squash. The 43
+  demos stay. And the per-scope capability probe still has no CLI verb: CPR-7
+  deleted `synveda hierarchy capabilities` and did not replace it, so
+  `synveda whoami` now names the console page that renders it rather than a
+  command that no longer exists — filing the replacement verb is the CLI
+  re-cut's (Prompt 24).
+- **Commit.** `test(foundation): harden scope and access cutover` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by Prompt 10, on Prompt 1's rule. Attempted in
+  place first, which is why the rule exists: writing the hash into the
+  commit changes the hash, and the amended entry then named a commit that
+  no longer existed.

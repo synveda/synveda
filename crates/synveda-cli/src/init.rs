@@ -3,16 +3,21 @@
 //! The whole design of this file is what it *does not* do. It applies
 //! migrations and admits a tenant, both of which are pre-existing audited
 //! break-glass paths with no governed surface and no operator to run them
-//! yet (ADR-0055 decision 1). It writes no scope, no identity, no role
-//! binding and no record. Those arrive the way a customer's do:
+//! yet (ADR-0055 decision 1). It writes no scope, no identity, no grant and
+//! no record. Those arrive the way a customer's do:
 //!
-//!   * the **org root**, the operator's **identity** and their tenant-wide
-//!     **org-admin** binding on the first `synveda login`, inside AUTH-2's
-//!     provisioning transaction, chained under the operator's own subject
-//!     (`ensure_root` + ADR-0015 decision 6, reused rather than copied);
-//!   * **departments and teams** through `synveda hierarchy create`, a PDP
-//!     decision at the parent scope per node;
+//!   * the operator's **identity**, their own `principal` scope and — because
+//!     `init` puts them in the `synveda-admins` IdP group — an
+//!     **`administrator` grant at the tenant root**, on the first `synveda
+//!     login`, inside AUTH-2's provisioning transaction and chained under the
+//!     operator's own subject (CPR-7, ADR-0074 decision 4);
+//!   * **workspaces, projects and org units** through the governed surfaces —
+//!     `POST /v1/workspaces` and `synveda scope create`, a PDP decision each;
 //!   * **memory** through observe → extract → embed.
+//!
+//! There is no placement convention and no role binding left for it to write:
+//! CPR-7 deleted both, so an identity's scope is its own and everything else
+//! is a grant (ADR-0074 decision 3).
 //!
 //! That is not fastidiousness. An installer runs once, as root-equivalent,
 //! before anybody is watching, and whatever it writes becomes the tenant's
@@ -46,7 +51,9 @@ const GATEWAY_URL: &str = "http://127.0.0.1:8120";
 /// none (OPS-8).
 const INSTALL_COMMAND: &str =
     "curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh";
-/// The group AUTHZ-3 binds tenant-wide `org-admin` from at login.
+/// The one IdP group the product reads: its members are granted
+/// `administrator` at the tenant root on every login (CPR-7, ADR-0074
+/// decision 4, over AUTHZ-3's tenant-wide `org-admin` binding).
 const ADMIN_GROUP: &str = "synveda-admins";
 
 /// What one `init` was asked for.
@@ -59,19 +66,25 @@ pub struct Plan {
     pub dry_run: bool,
 }
 
-/// The demo organisation (ADR-0055 decision 8). Two departments, three
-/// teams; the people are IdP users in convention-shaped groups, so AUTH-2
-/// places each of them by the same mapping rule a customer's directory
-/// drives (ADR-0013 decision 3) — nothing here assigns a scope directly.
+/// The demo organisation (ADR-0055 decision 8). Two units and three teams
+/// under them, created as `org_unit` scopes by the demo seeder — the rank
+/// words are what this fictional company calls its own parts, not a
+/// vocabulary the product has (CPR-7, ADR-0074 deleted that one).
 const DEMO_DEPARTMENTS: &[(&str, &str)] = &[("eng", "Engineering"), ("sales", "Sales")];
 const DEMO_TEAMS: &[(&str, &str, &str)] = &[
     ("eng", "platform", "Platform"),
     ("eng", "payments", "Payments"),
     ("sales", "emea", "EMEA"),
 ];
-/// `(local-part, given, family, group)` — the group is convention-shaped
-/// (`synveda-<department>-<team>`), which is what makes placement a
-/// mapping rather than an assignment.
+/// `(local-part, given, family, group)` — the group is a **directory
+/// fixture**, so a demo has more than one group to look at and the SCIM and
+/// grant surfaces have something to name.
+///
+/// It confers nothing on its own. Until CPR-7 a `synveda-<unit>-<team>` group
+/// placed its members in the hierarchy; placement is identity now, so these
+/// people arrive at their own `principal` scopes and reach anything else
+/// through a grant (ADR-0074 decision 3). `synveda-admins` is the one group
+/// name the product still reads, and it is the operator's, not theirs.
 ///
 /// The address is completed with the tenant slug by [`demo_email`], for the
 /// same reason [`operator_email`] does it: two deployments on one laptop
@@ -273,18 +286,19 @@ pub async fn init(plan: Plan) -> Result<(), String> {
     println!();
     println!("synveda: initialised in {}s", elapsed.as_secs());
     println!();
-    println!("Next, and this is where the organisation starts to exist:");
+    println!("Next, and this is where the workspace starts to exist:");
     println!();
     println!("    synveda login --gateway {GATEWAY_URL}");
     println!();
+    println!("That first login provisions your identity and your own scope, and — because");
+    println!("you are in the `{ADMIN_GROUP}` group — grants you `administrator` at the root");
     println!(
-        "That first login provisions the org root `{}` from the tenant you just admitted,",
+        "of tenant `{}`, all of it audited under your own subject",
         plan.slug
     );
-    println!("places you under it, and binds you tenant-wide org-admin — all of it audited");
-    println!("under your own subject rather than an installer's. Then:");
+    println!("rather than an installer's. Then:");
     println!();
-    println!("    synveda hierarchy list");
+    println!("    synveda scope tree");
     if plan.demo {
         println!();
         println!("    # then build ACME — scopes, packs, memory and a proposal —");
@@ -356,7 +370,7 @@ fn dry_run(plan: &Plan, profile: &Profile, issuer: &str, bundled: bool) -> Resul
         if plan.embedder == "tei" { ", tei" } else { "" },
     );
     println!("  would write    migrations, one tenant row (audited break-glass)");
-    println!("  would NOT      write any scope, identity, role binding or record");
+    println!("  would NOT      write any scope, identity, grant or record");
     if plan.demo {
         println!();
         println!("  after `synveda login`, ACME is built by the demo seeder — the same");
@@ -370,13 +384,16 @@ fn dry_run(plan: &Plan, profile: &Profile, issuer: &str, bundled: bool) -> Resul
             None => println!("    (this profile carries no demo/seed.sh — it predates OPS-9)"),
         }
         println!();
-        println!("  the scopes it creates, which are what the IdP groups resolve to:");
+        println!("  the org-unit scopes it creates:");
         for (slug, name) in DEMO_DEPARTMENTS {
-            println!("    department  {slug:<10} ({name})");
+            println!("    org unit    {slug:<10} ({name})");
         }
         for (department, slug, name) in DEMO_TEAMS {
-            println!("    team        {slug:<10} ({name}, under {department})");
+            println!("    org unit    {slug:<10} ({name}, under {department})");
         }
+        println!();
+        println!("  the demo people arrive at their own scopes; reaching anything else takes");
+        println!("  a grant (`synveda scope tree`, then People in the console).");
     }
     Ok(())
 }
@@ -524,7 +541,8 @@ async fn ensure_group(http: &reqwest::Client, group: &str) -> Result<(), String>
 /// so they are the reason this stays simple rather than growing a
 /// delete-and-recreate path — which would be wrong here anyway: the
 /// operator goes through this function, and minting a new `sub` for them
-/// would orphan the org-admin binding their deployment depends on.
+/// would orphan the `administrator` grant their deployment depends on — a
+/// grant is keyed by token subject (ADR-0072 decision 4).
 async fn ensure_user(
     http: &reqwest::Client,
     email: &str,

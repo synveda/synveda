@@ -70,22 +70,24 @@ enum Command {
     /// What it does is deliberately small, because everything else the
     /// product has a governed surface for is created *through* that
     /// surface: `init` applies migrations, admits the tenant, configures
-    /// the issuer, and starts the stack. The org root, the operator's
-    /// identity and their `org-admin` binding all arrive on the first
-    /// `synveda login`, from AUTH-2's provisioning transaction, chained
-    /// under the operator's own subject. Departments and teams are
-    /// `synveda hierarchy create` after that.
+    /// the issuer, and starts the stack. The operator's identity, their own
+    /// scope and their `administrator` grant at the tenant root all arrive
+    /// on the first `synveda login`, from AUTH-2's provisioning transaction,
+    /// chained under the operator's own subject. Workspaces, projects and
+    /// org units are `POST /v1/workspaces` and `synveda scope create` after
+    /// that.
     ///
-    /// There is no path in here that writes a scope, an identity, a role
-    /// binding or a record behind the PDP's back — an installer runs once,
-    /// as root-equivalent, before anybody is watching, which makes it the
+    /// There is no path in here that writes a scope, an identity, a grant
+    /// or a record behind the PDP's back — an installer runs once, as
+    /// root-equivalent, before anybody is watching, which makes it the
     /// worst place in the product to keep a shortcut (seed §2.2).
     Init {
         /// Tenant slug to admit: lowercase, hyphenated. Also becomes the
-        /// org root's slug when the first admin logs in.
+        /// tenant root scope's slug when the first thing that needs a parent
+        /// mints it.
         #[arg(long, default_value = "acme")]
         slug: String,
-        /// Tenant display name; becomes the org root's name.
+        /// Tenant display name; becomes the tenant root scope's name.
         #[arg(long, default_value = "ACME")]
         name: String,
         /// Which embedder the corpus will be written with. Permanent in

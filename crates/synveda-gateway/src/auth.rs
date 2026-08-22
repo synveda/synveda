@@ -617,7 +617,44 @@ fn not_configured() -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::urlencode;
+    use super::{IdentitySummary, urlencode};
+
+    /// **The other half of the CLI's `the_session_shape_is_the_one_the_gateway
+    /// _serves`** (CPR-9).
+    ///
+    /// `synveda login` hand-writes the type it parses this with, because
+    /// `/auth/cli/exchange` is not on the OpenAPI contract yet (Prompt 19).
+    /// Until this test, nothing anywhere checked the two agreed — and they had
+    /// not since CPR-7 deleted `quarantined` from this struct, which made
+    /// every CLI login fail after a successful exchange.
+    ///
+    /// So this pins the served key set exactly. A field added here is a field
+    /// this assertion makes somebody look at the CLI for; a field removed is
+    /// one it stops them shipping.
+    #[test]
+    fn the_cli_session_shape_is_the_one_the_cli_parses() {
+        let summary = IdentitySummary {
+            id: synveda_types::IdentityId::new(),
+            scope_id: synveda_types::ScopeId::new(),
+            scope_path: "acme/alice".to_owned(),
+        };
+        let rendered = serde_json::to_value(&summary).expect("serialises");
+        let mut keys: Vec<&str> = rendered
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["id", "scope_id", "scope_path"],
+            "the session's `identity` block changed shape. `synveda login` \
+             parses it with its own `IdentitySummary` (crates/synveda-cli/src/\
+             login.rs) — update that too, or the next login fails after the \
+             browser round trip."
+        );
+    }
 
     #[test]
     fn query_values_are_percent_encoded() {

@@ -65,10 +65,21 @@ struct TenantSummary {
     slug: String,
 }
 
+/// The `identity` block of a completed session.
+///
+/// Mirrors `synveda_gateway::auth::IdentitySummary`, which serves
+/// `{id, scope_id, scope_path}`. It carried a fourth field, `quarantined`,
+/// until CPR-7 deleted it from the server: placement is identity now, so an
+/// identity row is never quarantined and the field could only ever be `false`
+/// (ADR-0074 decision 3). This side was not updated with it, and because
+/// serde requires a field with no default, **every `synveda login` failed to
+/// parse the session it had just been handed** — after the browser round trip,
+/// after the code exchange, with the credential already minted. Found by the
+/// CPR-9 foundation audit; `the_session_shape_is_the_one_the_gateway_serves`
+/// below is what would have caught it.
 #[derive(serde::Deserialize)]
 struct IdentitySummary {
     scope_path: String,
-    quarantined: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -162,12 +173,6 @@ pub async fn login(
         eprintln!(
             "synveda: warning — this issuer granted no refresh token, so this \
              login lasts only as long as its access token"
-        );
-    }
-    if session.identity.quarantined {
-        eprintln!(
-            "synveda: note — this identity is quarantined; sessions will receive \
-             an empty context block until an administrator places it"
         );
     }
     credentials::store(
@@ -552,6 +557,62 @@ mod tests {
         let mut unknown = profile_expiring_in(0);
         unknown.expires_at = None;
         assert_eq!(recover(&unknown, "issuer said no"), Recovery::UseStored);
+    }
+
+    /// **The seam that broke.** `synveda login` parses the gateway's completed
+    /// session with the types above, and nothing in either crate checked that
+    /// they still describe what the gateway serves — so when CPR-7 deleted
+    /// `identity.quarantined` from the server, this side kept requiring it and
+    /// every login failed at the last step.
+    ///
+    /// The literal below is the body
+    /// `synveda_gateway::auth::CliSessionResponse` serialises, and the
+    /// gateway's own `the_cli_session_shape_is_the_one_the_cli_parses` pins the
+    /// same field set from the other side. Two tests, one shape: the server
+    /// cannot drop a field this parses without one of them going red.
+    #[test]
+    fn the_session_shape_is_the_one_the_gateway_serves() {
+        let served = serde_json::json!({
+            "subject": "alice@example.test",
+            "tenant": {
+                "id": "01a02843-83c7-7d50-8c3b-d50c80e699d8",
+                "slug": "acme",
+                "name": "Acme",
+                "status": "active"
+            },
+            "identity": {
+                "id": "01a02843-8442-7073-b0e4-298430d820f8",
+                "scope_id": "01a02843-8455-7922-b96f-ad7c142a5684",
+                "scope_path": "acme/alice-example-test"
+            },
+            "access_token": "header.payload.signature",
+            "token_type": "Bearer",
+            "expires_in": 1800,
+            "issuer": "https://idp.example.test/",
+            "refresh_token": "refresh"
+        });
+        let session: CliSession =
+            serde_json::from_value(served).expect("the CLI parses what the gateway serves");
+        assert_eq!(session.identity.scope_path, "acme/alice-example-test");
+        assert_eq!(session.tenant.slug, "acme");
+    }
+
+    /// An issuer that granted no refresh token is a documented degradation
+    /// (ADR-0027 decision 6), not a parse failure — so the optional fields
+    /// stay optional.
+    #[test]
+    fn a_session_without_a_refresh_token_still_parses() {
+        let served = serde_json::json!({
+            "subject": "alice@example.test",
+            "tenant": {"id": "01a02843-83c7-7d50-8c3b-d50c80e699d8", "slug": "acme"},
+            "identity": {"scope_path": "acme/alice-example-test"},
+            "access_token": "header.payload.signature",
+            "token_type": "Bearer",
+            "issuer": "https://idp.example.test/"
+        });
+        let session: CliSession = serde_json::from_value(served).expect("parses");
+        assert!(session.refresh_token.is_none());
+        assert!(session.expires_in.is_none());
     }
 
     #[test]

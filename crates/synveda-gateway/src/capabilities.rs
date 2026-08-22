@@ -626,6 +626,36 @@ fn permitted_prompt_tiers(
 mod tests {
     use super::*;
 
+    /// The same pin, for `whoami?capabilities=true` (CPR-9).
+    ///
+    /// `synveda whoami --capabilities` parses this block with its own type,
+    /// and read `{roles, actions, role_assign}` — CPR-7's vocabulary — until
+    /// the foundation audit found the command could not parse a single
+    /// response. Plain `synveda whoami` shares the route and never asks for
+    /// the block, which is why the break stayed invisible.
+    #[test]
+    fn the_tenant_capability_block_is_the_shape_the_cli_parses() {
+        let block = TenantCapabilities {
+            role_keys: vec![RoleKey::Administrator],
+            actions: BTreeMap::from([("workspace.read", true)]),
+        };
+        let rendered = serde_json::to_value(&block).expect("serialises");
+        let mut keys: Vec<&str> = rendered
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["actions", "role_keys"],
+            "the tenant capability block changed shape. `synveda whoami \
+             --capabilities` parses it with its own type (crates/synveda-cli/\
+             src/whoami.rs) — update that too."
+        );
+    }
+
     #[test]
     fn scopes_parse_trims_dedups_and_keeps_order() {
         let a = ScopeId::new();

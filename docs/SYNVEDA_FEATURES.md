@@ -1411,6 +1411,60 @@ CPR-8  The console product shell & first-run onboarding (L)
   and what it waits on rather than rendering an empty list; and `make check-api-types` passes
   with no dependency added.
 
+CPR-9  The foundation audit: hardening the scope and access cutover (M)
+  Filed 2026-08-22 by Prompt 9 of the CPR programme, which was asked to audit Prompts 1–7
+  rather than build on them. Eight prompts delivered a schema epoch, a governed scope tree,
+  workspaces and projects, membership and invitations, a re-cut decision point and a console —
+  each with its own green suite, and each suite proving that its own plane works. Nobody had
+  yet asked the opposite question of all of them at once: what does a caller learn, or fail to
+  learn, that their grants do not say? This is that pass. It adds an adversarial suite that
+  probes every per-object route with **valid identifiers from another tenant** — real
+  workspace, project, scope, group, grant and invitation ids, minted by that tenant's own
+  administrator — and asserts each is not merely refused but **indistinguishable from an id
+  nobody ever minted**, in status and in error kind, because a caller who can tell the two
+  apart can enumerate another tenant's inventory a uuid at a time; probes a second workspace
+  inside **one** tenant, where RLS cannot help and only the PDP and the anchor resolver stand;
+  and probes somebody else's `principal` scope with the tenant administrator, the one caller
+  who reaches everything else. It checks the three channels a denial leaks through when the
+  status code is right — counts, error text and the navigation capabilities the console builds
+  its menu from.
+  Three defects it found, all of them cutover residue rather than design faults. **A grant at a
+  workspace did not reach the listings**: `GET /v1/workspaces` and `/v1/me` took one decision
+  at the tenant root and applied it to every row, so a caller granted `member` at a workspace —
+  who holds nothing at the root — was served an empty list, a `workspace_count` of zero and an
+  `onboarding.state` of `needs_workspace`, while the `anchors` block of that same response said
+  `workspace.read: true` at that workspace. The listing and the navigation capabilities
+  disagreed and the console renders both, so an invited member was sent to the first-run wizard
+  to create the workspace they had just been added to. Listings now decide **per row against
+  the row**, which is the decision the per-object route already took. And **two client/server
+  contracts had drifted apart**: `synveda login` still required an `identity.quarantined` field
+  CPR-7 deleted, so every login failed to parse the session it had just been handed, after the
+  browser round trip and after the code exchange; `synveda whoami --capabilities` still read
+  the `roles`/`role_assign` shape CPR-7 renamed and dropped, so the flag could not parse a
+  single response. Both are hand-written DTOs on routes Prompt 19 has not put on the contract,
+  and nothing on either side checked they still agreed.
+  It also widens the no-data-migrator guard from the epoch migration to **the whole chain**,
+  with function bodies skipped so an audit trigger is not mistaken for a translation, and pins
+  the three inherited pre-epoch upgrade statements by name and by the reason each is
+  unreachable — a fourth fails the build. No epoch bump: the three cannot run on any database
+  the guard admits, and deleting them would trade a checksum error for the reset instruction on
+  every existing deployment for no behavioural change. Prompt 33's squash removes them.
+  AC: a valid workspace, project, scope, group, grant or invitation id from another tenant is a
+  404 with the same error kind as a fictional one on every per-object route, and no listing,
+  `/v1/me` field or onboarding tally names it; an invitation minted in one tenant cannot be
+  redeemed from another **and survives the attempt**, still spendable by its rightful
+  recipient; a member of one workspace sees exactly that workspace and its project in
+  `/v1/me` and `GET /v1/workspaces`, with the two agreeing, and is refused the other workspace
+  and its project; the capability probe answers a scope the caller holds nothing at with every
+  verdict false and no `scope_path`, `pack` or role, and answers somebody else's `principal`
+  scope the same way for a tenant administrator; a caller who holds nothing is answered rather
+  than errored; `synveda login` and `synveda whoami --capabilities` parse what the gateway
+  serves, pinned from both sides so neither can drift alone; every tenant-bound table is
+  enabled + forced with a policy and the four hierarchy tables are absent; the scope closure
+  carries a self row per scope, no cross-tenant pair, no cycle and a distance-1 edge per parent
+  pointer; and no migration in the chain runs DML outside a function body but the three pinned
+  statements.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1504,7 +1558,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who
