@@ -14,6 +14,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { beforeEach, test } from "node:test";
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -36,6 +37,9 @@ import type {
 
 const WORKSPACE_SCOPE = "scope-w-1";
 const PROJECT_SCOPE = "scope-p-1";
+const CLAUDE_TIMELINE = JSON.parse(
+  readFileSync(new URL("../src/fixtures/claude-timeline.json", import.meta.url), "utf8"),
+) as TimelineView;
 
 function workspace(): WorkspaceView {
   return {
@@ -351,6 +355,32 @@ test("raw payloads are not on the page, and the expansion is offered only where 
   // clicked, which is why no payload text is on the page either way.
   const privileged = renderDetail(me({ "session.diagnostics": true }));
   assert.match(privileged, /Show raw payload/);
+});
+
+test("the database-backed Claude replay timeline renders without transcript content", async () => {
+  await seed(
+    "sessions/one/s-1",
+    ok(session({ status: "ended", ended_at: "2026-08-23T21:05:00Z" })),
+  );
+  await seed("sessions/timeline/s-1", ok(CLAUDE_TIMELINE));
+  await seed("projects/p-1/repositories", ok({ repositories: [] }));
+
+  const rendered = renderDetail(me({ "session.diagnostics": true }));
+  for (const summary of [
+    "message.user (50 characters)",
+    "tool.invoked",
+    "tool.result",
+    "message.assistant (111 characters)",
+    "context composed: 1 entries, 109 tokens",
+  ]) {
+    assert.ok(rendered.includes(summary), "missing gateway-produced summary: " + summary);
+  }
+  assert.ok(
+    rendered.indexOf("tool.invoked") < rendered.indexOf("tool.result"),
+    "the gateway's server-assigned order is the console's order",
+  );
+  assert.doesNotMatch(rendered, /Read notes\.txt|full jitter|Write that budget down/);
+  assert.match(rendered, /Show raw payload/);
 });
 
 test("a run in a project this caller may not read renders the refusal and nothing about the run", async () => {

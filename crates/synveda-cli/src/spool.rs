@@ -37,6 +37,8 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write as _;
+#[cfg(unix)]
+use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -346,7 +348,7 @@ pub fn write(path: &Path, spool: &Spool) -> Result<(), String> {
     let dir = path
         .parent()
         .ok_or_else(|| "spool path has no directory".to_owned())?;
-    fs::create_dir_all(dir).map_err(|err| format!("create {}: {err}", dir.display()))?;
+    private_dir_all(dir).map_err(|err| format!("create {}: {err}", dir.display()))?;
     let temporary = dir.join(format!(
         ".{}.{}.tmp",
         path.file_name()
@@ -356,8 +358,19 @@ pub fn write(path: &Path, spool: &Spool) -> Result<(), String> {
     ));
     let encoded = serde_json::to_vec(spool).map_err(|err| format!("encode: {err}"))?;
     {
-        let mut file =
-            fs::File::create(&temporary).map_err(|err| format!("create temporary: {err}"))?;
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options
+            .open(&temporary)
+            .map_err(|err| format!("create temporary: {err}"))?;
+        // `OpenOptionsExt::mode` applies only on creation. A killed process
+        // can leave this pid-derived name behind and pids are reusable, so
+        // also tighten an existing temporary through the open handle.
+        #[cfg(unix)]
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|err| format!("make temporary private: {err}"))?;
         file.write_all(&encoded)
             .map_err(|err| format!("write temporary: {err}"))?;
         file.sync_all()
@@ -367,6 +380,21 @@ pub fn write(path: &Path, spool: &Spool) -> Result<(), String> {
         let _ = fs::remove_file(&temporary);
         format!("rename into place: {err}")
     })
+}
+
+/// Creates a private directory tree for payload-bearing spool state.
+fn private_dir_all(path: &Path) -> std::io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    builder.mode(0o700);
+    builder.create(path)?;
+    // Recursive creation applies the mode only to directories it creates.
+    // Tighten the final spool directory as well when an older adapter left it
+    // behind under a permissive umask; never chmod its existing ancestors.
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -488,7 +516,17 @@ mod tests {
     #[test]
     fn a_spool_round_trips_through_an_atomic_write() {
         let dir = std::env::temp_dir().join(format!("synveda-spool-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("pre-existing spool dir");
+        #[cfg(unix)]
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755))
+            .expect("make the prior mode permissive");
         let path = dir.join("session.json");
+        let temporary = dir.join(format!(".session.json.{}.tmp", std::process::id()));
+        fs::write(&temporary, b"abandoned").expect("pre-existing temporary");
+        #[cfg(unix)]
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o666))
+            .expect("make the prior temporary mode permissive");
         let original = spool(vec![entry("e1", 1)]);
         write(&path, &original).expect("write");
         let read_back = read(&path).expect("read");
@@ -503,6 +541,18 @@ mod tests {
             .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(leftovers.is_empty(), "temporary files left behind");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -15,14 +15,24 @@
  * they are separate events — which is what makes a timeline read as a
  * transcript rather than as a list of turns, and what lets
  * `SessionEventType::carries_memory` keep bookkeeping out of extraction.
+ *
+ * **`tool.invoked` was named here and never emitted** until CPR-14 replayed a
+ * real tool-using transcript: an assistant entry whose content is a single
+ * `tool_use` block has no text and no tool *result*, so it fell through both
+ * branches and the entry was skipped whole. A session that read six files and
+ * ran four commands therefore reached the gateway as the sentence it wrote at
+ * the end. That is now three branches, and the acceptance harness asserts the
+ * call and its result arrive as separate ordered events.
  */
 
 import { basename } from "node:path";
 
 import {
   messageText,
+  toolInvocations,
   toolResults,
   truncateChars,
+  type ToolInvocation,
   type ToolResult,
   type TranscriptEntry,
 } from "./transcript.mjs";
@@ -58,6 +68,7 @@ export interface RecordedEvent {
 interface Payload {
   text?: string;
   tools?: ToolResult[];
+  calls?: ToolInvocation[];
   context?: PayloadContext;
   truncated?: true;
 }
@@ -73,9 +84,16 @@ interface PayloadContext {
 /**
  * Turns transcript entries into session events.
  *
- * A turn can yield two events — what was said, and what its tools returned —
- * so the ids are suffixed to stay unique. The suffix is stable across retries
- * because it is derived from the entry, never from a counter or a clock.
+ * A turn can yield three events — what was said, what it called, and what its
+ * tools returned — so the ids are suffixed to stay unique. The suffix is
+ * stable across retries because it is derived from the entry, never from a
+ * counter or a clock, which is what makes a redelivery answer `duplicate`
+ * rather than append a second copy.
+ *
+ * Existing message/result ids keep CPR-12's spelling. That matters across an
+ * adapter upgrade: learning to see a tool call must not rename a message the
+ * previous build may already have appended. A new call takes `:call` whenever
+ * it shares its entry with anything else.
  */
 export function toSessionEvents(
   entries: TranscriptEntry[],
@@ -84,20 +102,33 @@ export function toSessionEvents(
   const events: RecordedEvent[] = [];
   for (const entry of entries) {
     const tools = toolResults(entry.message);
+    const calls = toolInvocations(entry.message);
     const text = messageText(entry.message).trim();
-    // Nothing to say: an entry with neither text nor tool output is structure,
-    // and structure is not memory.
-    if (text.length === 0 && tools.length === 0) continue;
+    // Nothing to say: an entry with no text, no tool call and no tool output
+    // is structure, and structure is not memory.
+    if (text.length === 0 && tools.length === 0 && calls.length === 0) continue;
 
     const context = contextOf(entry, model);
     const occurred_at = occurredAt(entry.timestamp);
-
     if (text.length > 0) {
       const payload: Payload = { text };
       if (context !== undefined) payload.context = context;
       events.push({
         event_type: entry.type === "user" ? "message.user" : "message.assistant",
         client_event_id: eventId(entry.uuid, tools.length > 0 ? "msg" : undefined),
+        occurred_at,
+        payload: fit(payload),
+      });
+    }
+    if (calls.length > 0) {
+      const payload: Payload = { calls };
+      if (context !== undefined) payload.context = context;
+      events.push({
+        event_type: "tool.invoked",
+        client_event_id: eventId(
+          entry.uuid,
+          text.length > 0 || tools.length > 0 ? "call" : undefined,
+        ),
         occurred_at,
         payload: fit(payload),
       });
@@ -180,6 +211,9 @@ function fit(payload: Payload): Payload {
   if (candidate.tools !== undefined) {
     candidate.tools = candidate.tools.map((tool) => ({ ...tool }));
   }
+  if (candidate.calls !== undefined) {
+    candidate.calls = candidate.calls.map((call) => ({ ...call }));
+  }
   // Each pass removes half of the largest contributor, so even a pathological
   // payload converges in a few dozen passes.
   for (let pass = 0; pass < 64; pass += 1) {
@@ -190,29 +224,40 @@ function fit(payload: Payload): Payload {
   // the content rather than send a batch the gateway will reject.
   const stripped: Payload = { ...candidate, text: TRUNCATION_MARKER.trim() };
   delete stripped.tools;
+  delete stripped.calls;
   return stripped;
 }
 
 function shorten(payload: Payload): boolean {
   let longest = payload.text?.length ?? 0;
-  let target = -1;
+  let target: { list: "tools" | "calls"; index: number } | undefined;
   payload.tools?.forEach((tool, index) => {
     if (tool.text.length > longest) {
       longest = tool.text.length;
-      target = index;
+      target = { list: "tools", index };
+    }
+  });
+  payload.calls?.forEach((call, index) => {
+    if (call.input.length > longest) {
+      longest = call.input.length;
+      target = { list: "calls", index };
     }
   });
   if (longest === 0) return false;
-  if (target < 0) {
+  if (target === undefined) {
     if (payload.text === undefined) return false;
     payload.text = half(payload.text);
     return true;
   }
-  const tools = payload.tools;
-  if (tools === undefined) return false;
-  const tool = tools[target];
-  if (tool === undefined) return false;
-  tool.text = half(tool.text);
+  if (target.list === "tools") {
+    const tool = payload.tools?.[target.index];
+    if (tool === undefined) return false;
+    tool.text = half(tool.text);
+    return true;
+  }
+  const call = payload.calls?.[target.index];
+  if (call === undefined) return false;
+  call.input = half(call.input);
   return true;
 }
 

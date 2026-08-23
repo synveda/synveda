@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -20,9 +20,15 @@ test("a whole missing chain is created, and creating it again is not an error", 
   const deep = join(scratch(), "one", "two", "three");
   ensureDir(deep);
   assert.ok(statSync(deep).isDirectory());
+  if (process.platform !== "win32") assert.equal(statSync(deep).mode & 0o777, 0o700);
   assert.doesNotThrow(() => {
     ensureDir(deep);
   });
+  if (process.platform !== "win32") {
+    chmodSync(deep, 0o755);
+    ensureDir(deep);
+    assert.equal(statSync(deep).mode & 0o777, 0o700, "an existing state dir is tightened");
+  }
 });
 
 test("a file standing in the way is an error the caller can catch", () => {

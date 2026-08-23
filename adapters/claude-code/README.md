@@ -4,7 +4,9 @@ A Claude Code plugin that gives a session governed memory: it composes a
 context block at session start and records the transcript as the session runs.
 Design and rationale: [ADR-0027](../../docs/adr/adr-0027-claude-code-adapter.md),
 re-cut onto the session API by
-[ADR-0078](../../docs/adr/adr-0078-durable-session-delivery.md).
+[ADR-0078](../../docs/adr/adr-0078-durable-session-delivery.md). The
+installed-client and deterministic replay evidence tiers are defined by
+[ADR-0079](../../docs/adr/adr-0079-live-claude-session-acceptance.md).
 
 The adapter decides nothing. It maps hook events to the session plane with the
 caller's own bearer, and inherits whatever the PDP allows that identity
@@ -168,6 +170,9 @@ Environment (highest precedence):
   workspace the adapter asks `/v1/me` and takes the answer; with more than one
   it needs telling, because guessing would put one team's transcript in
   another team's scope
+- `SYNVEDA_PROJECT` — the project runs belong to. Optional, but it must be
+  explicit when project-scoped context is required; project list order is not
+  an identity
 - `SYNVEDA_TIMEOUT_MS` — per-call deadline, default 3000
 
 Per project, optional, at `.synveda/config.json`:
@@ -180,6 +185,7 @@ Per project, optional, at `.synveda/config.json`:
   "skills": true,
   "gateway_url": "http://127.0.0.1:8120",
   "workspace_id": "0198e4c1-0000-7000-8000-000000000001",
+  "project_id": "0198e4c1-0000-7000-8000-000000000002",
   "timeout_ms": 3000,
   "budget_tokens": 4000,
   "compact_budget_tokens": 1500
@@ -189,7 +195,7 @@ Per project, optional, at `.synveda/config.json`:
 A budget narrows and never widens: the effective budget is
 `min(pack budget, this)` (ADR-0026 decision 7).
 
-`workspace_id` is safe to set in a checked-out repository, unlike
+`workspace_id` and `project_id` are safe to set in a checked-out repository, unlike
 `gateway_url`: naming a workspace inside a tenant you are already
 authenticated to cannot redirect a credential anywhere.
 
@@ -283,11 +289,13 @@ compile alongside the source into `dist/`.
 
 ### The recorded-payload driver
 
-`fixtures/` holds real hook payloads and a real session transcript
-(shapes recorded from Claude Code 2.1.220, content synthetic), and
+`fixtures/` holds genuine captured hook payloads and session transcripts
+(Claude Code 2.1.220 and 2.1.241, private content and paths replaced), and
 `dist/driver.mjs` replays them through the built entry point as a child
 process — the same `node dist/hook.mjs <mode>` line `hooks/hooks.json`
-registers. Fifteen cases: dead gateway, degraded header, refused composition,
+registers. `fixtures/manifest.json` binds every byte to exact client version,
+capture provenance, sanitisation and SHA-256; the fixture schema and denylist
+are checked in every adapter test. Fifteen cases: dead gateway, degraded header, refused composition,
 a turn kept on disk when nothing could be delivered, the next start draining
 that backlog, a redelivered batch answered `duplicate`, a compaction that
 cannot eat a turn, a close owed over a backlog, a damaged transcript line, an
@@ -295,7 +303,7 @@ unreadable payload, and a stale hook argument. Every one must exit 0.
 
 ```sh
 node dist/driver.mjs                                                  # mock gateway
-node dist/driver.mjs --gateway URL --token BEARER --workspace ID      # live gateway
+node dist/driver.mjs --gateway URL --token BEARER --workspace ID --project ID
 ```
 
 The mock run is part of `npm test`. The live run is the last section of
@@ -318,3 +326,16 @@ A clean HOME, the prebuilt plugin, `synveda login` against live Rauthy,
 and a session that receives its watermarked block and contributes its
 turn back — timed against ADPT-1's two-minute budget, then joined in one
 verifying audit chain by the run it all belongs to.
+
+CPR-14 adds the current session-plane acceptance targets:
+
+```sh
+make claude-acceptance       # authentic frames, real gateway/PDP/Postgres; CI
+make claude-acceptance-live  # installed marketplace + real authenticated client
+```
+
+The first is always labelled replay. The second's runner exits 77 when the
+executable or authentication is unavailable (`make` surfaces that as recipe
+`Error 77`). On 2026-08-23 Claude Code 2.1.241 was installed
+but unauthenticated, so no real-client session ran and live verification remains
+pending; the replay does not stand in for it.

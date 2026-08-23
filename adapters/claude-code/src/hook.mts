@@ -16,9 +16,14 @@
  * `SessionStart`, stdout is context the model reads.
  */
 
+import { randomUUID } from "node:crypto";
+import { closeSync, openSync, writeSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+
 import { loadConfig } from "./config.mjs";
 import { turn } from "./turn.mjs";
 import { log } from "./log.mjs";
+import { ensureDir } from "./paths.mjs";
 import { sessionStart } from "./session-start.mjs";
 import { syncSkills } from "./skills.mjs";
 import type { HookInput, HookOutput } from "./types.mjs";
@@ -149,6 +154,7 @@ async function readInput(): Promise<HookInput | undefined> {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      captureInput(raw, parsed as HookInput);
       return parsed as HookInput;
     }
   } catch {
@@ -157,6 +163,38 @@ async function readInput(): Promise<HookInput | undefined> {
   }
   log("hook.stdin_unparsed", { bytes: raw.length });
   return undefined;
+}
+
+/**
+ * Opt-in raw-frame capture for the separately run CPR-14 live gate.
+ *
+ * Off unless an absolute scratch directory is named. The gate needs the real
+ * client's bytes to update a replay corpus when Claude's private protocol
+ * moves; writing them into the project or normal logs would turn a diagnostic
+ * facility into a second transcript store. Files are private and the live
+ * runner removes the whole scratch tree after producing its redacted report.
+ */
+function captureInput(raw: string, input: HookInput): void {
+  const directory = process.env.SYNVEDA_CAPTURE_DIR;
+  if (directory === undefined || !isAbsolute(directory)) return;
+  try {
+    ensureDir(directory);
+    const event =
+      typeof input.hook_event_name === "string"
+        ? input.hook_event_name.replace(/[^A-Za-z0-9._-]/g, "_")
+        : "unknown";
+    const name = String(Date.now()) + "-" + event + "-" + randomUUID() + ".json";
+    const path = join(directory, name);
+    const handle = openSync(path, "wx", 0o600);
+    try {
+      writeSync(handle, raw);
+    } finally {
+      closeSync(handle);
+    }
+    log("fixture.captured", { event, bytes: Buffer.byteLength(raw) });
+  } catch (error) {
+    log("fixture.capture_failed", { error: String(error) });
+  }
 }
 
 function emit(output: HookOutput): void {

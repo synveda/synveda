@@ -1,0 +1,86 @@
+{
+  "session_id": "SESSION",
+  "entries": [
+    {
+      "kind": "event",
+      "id": "ID",
+      "at": "INSTANT",
+      "event_type": "message.user",
+      "sequence": 1,
+      "received_at": "INSTANT",
+      "delayed": true,
+      "summary": "message.user (50 characters)"
+    },
+    {
+      "kind": "event",
+      "id": "ID",
+      "at": "INSTANT",
+      "event_type": "tool.invoked",
+      "sequence": 2,
+      "received_at": "INSTANT",
+      "delayed": true,
+      "summary": "tool.invoked"
+    },
+    {
+      "kind": "event",
+      "id": "ID",
+      "at": "INSTANT",
+      "event_type": "tool.result",
+      "sequence": 3,
+      "received_at": "INSTANT",
+      "delayed": true,
+      "summary": "tool.result"
+    },
+    {
+      "kind": "event",
+      "id": "ID",
+      "at": "INSTANT",
+      "event_type": "message.assistant",
+      "sequence": 4,
+      "received_at": "INSTANT",
+      "delayed": true,
+      "summary": "message.assistant (64 characters)"
+    },
+    {
+      "kind": "event",
+      "id": "ID",
+      "at": "INSTANT",
+      "event_type": "message.user",
+      "sequence": 5,
+      "received_at": "INSTANT",
+      "delayed": true,
+      "summary": "message.user (63 characters)"
+    },
+    {
+      "kind": "event",
+      "id": "ID",
+      "at": "INSTANT",
+      "event_type": "message.assistant",
+      "sequence": 6,
+      "received_at": "INSTANT",
+      "delayed": true,
+      "summary": "message.assistant (111 characters)"
+    },
+    {
+      "kind": "context_run",
+      "id": "ID",
+      "at": "INSTANT",
+      "delayed": false,
+      "summary": "context composed: 1 entries, 109 tokens"
+    },
+    {
+      "kind": "context_run",
+      "id": "ID",
+      "at": "INSTANT",
+      "delayed": false,
+      "summary": "context composed: 1 entries, 109 tokens"
+    }
+  ],
+  "event_counts": {
+    "message.assistant": 2,
+    "message.user": 2,
+    "tool.invoked": 1,
+    "tool.result": 1
+  },
+  "truncated": false
+}

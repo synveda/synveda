@@ -1,0 +1,41 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": 1,
+  "fixture_sets": [
+    {
+      "id": "claude-code-2.1.220",
+      "client": { "name": "Claude Code", "version": "2.1.220" },
+      "provenance": {
+        "kind": "captured-real-client",
+        "captured_at": "2026-07-24T10:00:00.000Z",
+        "source": "ADPT-1 recorded-payload driver capture (ADR-0027 decision 14); content and paths sanitised before commit",
+        "sanitised": true
+      },
+      "files": [
+        { "path": "hooks/pre-compact.json", "kind": "hook-frame", "sha256": "8ff1dda90d1d731a9473237962f931f2bdedf20b1da9d038d6a7b360351a35ae" },
+        { "path": "hooks/session-end.json", "kind": "hook-frame", "sha256": "6173e1054fa8a07e1e6e2d872160b08fb7c856cc6b35ee62bb4c6755036fc938" },
+        { "path": "hooks/session-start-compact.json", "kind": "hook-frame", "sha256": "dee3f11699f9672d1800813dc16e9e861f5bbaf62ee95b12bf6400d1b0360799" },
+        { "path": "transcripts/damaged.jsonl", "kind": "damaged-transcript", "sha256": "48d666aed8f4c32417e44db90882fc1b079f17a824137f3fb20ae69b28a79e91" },
+        { "path": "transcripts/turn.jsonl", "kind": "transcript", "sha256": "6103a3d049b7359b991f7474dac56c3956ce2e28e37898a5e627e61dd7089032" }
+      ]
+    },
+    {
+      "id": "claude-code-2.1.241",
+      "client": { "name": "Claude Code", "version": "2.1.241" },
+      "provenance": {
+        "kind": "captured-real-client",
+        "captured_at": "2026-08-23T21:02:09.202Z",
+        "source": "CPR-14 headless and interactive Claude Code capture; protocol shapes retained and private content replaced before commit",
+        "sanitised": true
+      },
+      "files": [
+        { "path": "hooks/session-end-headless.json", "kind": "hook-frame", "sha256": "8d380ef1f1e793a5cc1d24b5ff5cdea2639c6165d52f10abf49607cc1e3a1f1b" },
+        { "path": "hooks/session-start-interactive.json", "kind": "hook-frame", "sha256": "5f831fc987571837708997e0498bbe9317c508dd9f760711fb09352dda7f998d" },
+        { "path": "hooks/session-start-startup.json", "kind": "hook-frame", "sha256": "28fe212b4f76aa0a3aed13466c1ca75051b7e3c199ca7a99f236915d14198716" },
+        { "path": "hooks/stop.json", "kind": "hook-frame", "sha256": "7c92c9321fbc1a1e800da242e9f6fe70c486917f9441e39029ec1b63465b59ca" },
+        { "path": "transcripts/second-turn.jsonl", "kind": "transcript", "sha256": "8e949423d6e1d9fa01782e2a1e3d2c8b0e3fa6e18d3d3c19925abce86e23f20f" },
+        { "path": "transcripts/tool-turn.jsonl", "kind": "transcript", "sha256": "3239982df4ac1a612731266e64024c036cb59e75def034e47a6b8f7977a05531" }
+      ]
+    }
+  ]
+}

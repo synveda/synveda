@@ -47,6 +47,16 @@ export interface AdapterConfig {
    * cannot redirect a credential anywhere.
    */
   workspaceId?: string;
+  /**
+   * The project inside `workspaceId` that owns this checkout's runs.
+   *
+   * A project is optional in the session API, but it must not be guessed: a
+   * workspace can contain many projects and choosing one by order would write
+   * the transcript into the wrong governed subtree. CPR-14's real-client gate
+   * found that the spool and API already carried `project_id`, while no
+   * supported adapter setting could put it there.
+   */
+  projectId?: string;
 }
 
 /** The project file's shape — every field unknown until proven. */
@@ -57,6 +67,7 @@ interface ProjectConfig {
   skills?: unknown;
   gateway_url?: unknown;
   workspace_id?: unknown;
+  project_id?: unknown;
   timeout_ms?: unknown;
   budget_tokens?: unknown;
   compact_budget_tokens?: unknown;
@@ -79,6 +90,7 @@ export function loadConfig(cwd: string | undefined): AdapterConfig {
     budgetTokens: positive(project.budget_tokens),
     compactBudgetTokens: positive(project.compact_budget_tokens),
     workspaceId: str(process.env.SYNVEDA_WORKSPACE) ?? str(project.workspace_id),
+    projectId: str(process.env.SYNVEDA_PROJECT) ?? str(project.project_id),
   };
 }
 

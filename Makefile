@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-ann-bench check-api-types check-backlog check-benchmarks check-chart-images check-corpus-licences check-npm-licences chart-lint ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-ann-bench check-api-types check-backlog check-benchmarks check-chart-images check-corpus-licences check-npm-licences chart-lint ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -163,6 +163,21 @@ eval-read:
 # scripts/db-test.sh for what that cost.
 db-test:
 	DATABASE_URL=$(DATABASE_URL) bash scripts/db-test.sh
+
+# CPR-14's deterministic tier: authentic Claude Code frames through the built
+# hook, the real gateway/PDP/schema, persisted events, timeline and audit chain.
+# A fresh scratch database is created and dropped by db-test.sh.
+claude-acceptance:
+	pnpm --filter @synveda/claude-code-adapter build
+	DATABASE_URL=$(DATABASE_URL) bash scripts/db-test.sh \
+		-p synveda-gateway --test claude_lifecycle \
+		a_claude_code_session_is_a_governed_record_from_start_to_end \
+		-- --exact --nocapture --test-threads=1
+
+# Tier 3 is never substituted by replay. The wrapper exits 77, with the exact
+# missing prerequisite, when Claude Code or authentication is unavailable.
+claude-acceptance-live:
+	bash scripts/claude-acceptance-live.sh
 
 fmt:
 	cargo fmt --all --check

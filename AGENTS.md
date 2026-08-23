@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **108 features filed, 75 delivered**;
+Cursor frame has been replayed. **111 features filed, 76 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -157,6 +157,18 @@ Load-bearing facts about Phase 5:
   strictly narrower than each pack's own `SessionRead` (**packs @19 → @20**).
   `sessions.end_reason` (migration `0045`) says *why* a run stopped. And a run
   has an address: `/console/sessions/{id}`.
+- CPR-12 (ADR-0078): **the session plane is the only adapter plane**.
+  `/v1/observe`, `/v1/inject` and `/v1/recall` are deleted with the old
+  storage and queue; extraction consumes `session_events`; context enters
+  through `POST /v1/sessions/{id}/context-runs`; and the Claude adapter writes
+  a versioned, atomic local spool that retries per-event idempotently.
+- CPR-14 (ADR-0079) is implemented at **replay/live-gateway** level but not
+  delivered: genuine Claude Code 2.1.220/2.1.241 frames now run through the
+  built hook, public session API, PDP, current Postgres, timeline and audit in
+  CI, including outage and lost-ack recovery. The installed Claude Code
+  2.1.241 executable was unauthenticated on 2026-08-23, so no real client run
+  occurred and no live session has yet composed or appended through the
+  installed plugin on the new plane. `make claude-acceptance-live` is the gate.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

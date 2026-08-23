@@ -8,7 +8,16 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -172,12 +181,20 @@ describe("the spool", () => {
     record(spool, [
       { event_type: "message.user", client_event_id: "a", occurred_at: "2026-08-25T10:00:00Z", payload: {} },
     ]);
+    mkdirSync(spoolDir(), { recursive: true });
+    const stale = `${spoolFile("harness-g")}.${String(process.pid)}.tmp`;
+    writeFileSync(stale, "abandoned", { mode: 0o666 });
+    if (process.platform !== "win32") chmodSync(stale, 0o666);
     saveSpool(spool);
     const leftovers = readdirSync(spoolDir()).filter((name) => name.endsWith(".tmp"));
     assert.deepEqual(leftovers, []);
     // And the file that landed is complete JSON, not a partial write.
     const raw = readFileSync(spoolFile("harness-g"), "utf8");
     assert.doesNotThrow(() => JSON.parse(raw));
+    if (process.platform !== "win32") {
+      assert.equal(statSync(spoolDir()).mode & 0o777, 0o700);
+      assert.equal(statSync(spoolFile("harness-g")).mode & 0o777, 0o600);
+    }
   });
 
   /**

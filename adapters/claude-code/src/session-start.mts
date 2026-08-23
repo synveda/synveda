@@ -61,6 +61,13 @@ export async function sessionStart(
   const externalId = harnessSessionId(input.session_id);
   const spool =
     loadSpool(externalId) ?? newSpool(externalId, CLIENT_NAME, installationId());
+  // Placement is fixed before the first open. Once a run exists, its
+  // workspace/project pair is server-owned and a later config edit cannot
+  // move it; `resolveRun` returns early for that case.
+  if (spool.session_id === undefined) {
+    if (configured.workspaceId !== undefined) spool.workspace_id = configured.workspaceId;
+    if (configured.projectId !== undefined) spool.project_id = configured.projectId;
+  }
   if (input.transcript_path !== undefined) spool.transcript_path = input.transcript_path;
   if (input.model !== undefined) spool.model = input.model;
 

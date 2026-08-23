@@ -2489,4 +2489,153 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `feat(adapter): make Claude session delivery durable` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by Prompt 13, on Prompt 1's rule.
+- **Commit hash.** `a065830349eff6c7ebac9b8e979e479690c8419b`, written by
+  this acceptance prompt on Prompt 1's rule.
+
+### External acceptance objective — Live Claude Code session gate (CPR-14)
+
+- **Numbering and scope.** The external handover called this the next prompt;
+  the repository already reserves **CPR-13** for the demo-corpus re-point, so
+  the next free feature id is **CPR-14**. No CPR-13 work is included here. The
+  candidate, Knowledge, New Learnings, explainable-context, skills, MCP-registry,
+  OKF and graph objectives remain unstarted.
+
+- **State: implementation and replay complete; live-client acceptance
+  pending.** CPR-12 proved adapter functions and the new server seams. This
+  adds the missing acceptance join, split into the three evidence tiers
+  ADR-0079 names: captured/mock, replay/live-gateway, and live-client. A lower
+  tier never reports the one above it. CPR-14 therefore remains open and the
+  delivered count stays at 76 until an authenticated real client completes the
+  last tier.
+
+- **Authentic fixture contract.** `adapters/claude-code/fixtures/manifest.json`
+  binds every committed hook frame and transcript to a genuine Claude Code
+  capture, its exact version, capture provenance, a sanitisation declaration
+  and SHA-256. The corpus covers **2.1.220** and **2.1.241**. A committed schema
+  and adapter test check the manifest shape, complete on-disk coverage, hashes,
+  version fields, synthetic paths and a credential/personal-path denylist.
+  Raw live capture is opt-in through an absolute `SYNVEDA_CAPTURE_DIR`, writes
+  a 0700 path and 0600 frames, logs only the event name and byte count, and
+  lives inside the live runner's disposable scratch directory.
+
+- **Adapter seams closed.** `project_id` joins `workspace_id` in
+  `.synveda/config.json`, `SYNVEDA_PROJECT` and the recorded-payload driver's
+  `--project`: project list order is not an identity, and a session that should
+  compose at a project could not previously say which one. The configured
+  pair is stored before the first open; once the server answers, its stored
+  placement wins. Authentic 2.1.241 transcript bytes also found that a
+  `tool_use` block emitted no `tool.invoked` event — only the later result was
+  kept. Invocation ids are now stable, payloads bounded, and the user,
+  invocation, result and assistant event families are all preserved.
+
+  The Node adapter and Rust CLI now create every spool path component at 0700
+  and every file/temp file at 0600 independently of umask. The previous code
+  constrained the final file on one path and inherited ambient permissions for
+  parent directories and Node temporary files.
+
+- **Replay/live-gateway acceptance.** `crates/synveda-gateway/tests/
+  claude_lifecycle.rs` runs the built `node dist/hook.mjs <mode>` child over the
+  authentic frames against an epoch-2 database and the real gateway. Tenant
+  admission uses the system seam; production JIT provisioning with the
+  `synveda-admins` group mints the principal scope and first administrator
+  grant; workspace and project are public HTTP creates; and the non-empty seed
+  block is produced by a public seed session/event plus the real ingestion
+  worker. No governed application table is inserted directly.
+
+  The first SessionStart opens one project-scoped run and persists a context
+  run. Stop appends user, tool invocation, tool result and assistant activity.
+  The gateway then disappears after the next two events are durable: four
+  entries are acknowledged and two remain pending with attempts and local
+  SHA-256s intact. After restore, the test appends the first pending event
+  through the public route but deliberately leaves the local acknowledgement
+  unchanged — a server commit with a lost answer. The next SessionStart sends
+  the overlapping two-event batch, receiving `duplicate` at original server
+  sequence **5** and `appended` at sequence **6**. Six unique client event ids
+  produce six rows exactly once; the server's own BLAKE3 hashes are present.
+  Normal headless SessionEnd drains and closes the run with reason `other`.
+
+  The timeline is six events plus two context runs, in server order. Its
+  summaries carry type and length rather than transcript text, and the exact
+  gateway response is the golden fixture the console renders. The audit chain
+  contains the session actions and verifies; a sweep over every nested payload
+  finds none of the fixture's user, assistant or tool content. CLI spool tests
+  separately prove `purge --acknowledged` removes acknowledged entries and
+  retains pending ones.
+
+- **Live runner, and the result is not a live run.** `make
+  claude-acceptance-live` creates isolated HOME/Claude/Synveda/XDG state,
+  builds the adapter and CLI, packages plugin **0.2.0** through
+  `scripts/package-plugin.sh`, installs through the real `synveda plugin
+  install` → `claude plugin` path, asks Claude Code itself for the enabled
+  plugin/four hooks/one MCP server, and would then invoke deterministic real
+  `claude -p`, inspect persistence/audit and write a content-free version report
+  under `target/`. It cleans its temporary credentials, config and captures.
+
+  On 2026-08-23 the executable resolved on `PATH` as **Claude Code 2.1.241**,
+  but `claude auth status` answered `{"loggedIn":false,"authMethod":"none",
+  "apiProvider":"firstParty"}` and no isolated-run credential was set. The
+  runner printed that prerequisite and exited **77 before packaging or invoking
+  a session** (`make` reported recipe `Error 77` and exited 2). The real
+  executable did not run a session; the plugin was not installed into the
+  isolated HOME; no live result or live timing exists.
+
+- **Versions.** Replay fixtures: Claude Code **2.1.220** and **2.1.241**.
+  Installed but unauthenticated live prerequisite: Claude Code **2.1.241**.
+  Plugin and Synveda workspace: **0.2.0**. Node **v24.18.0**, pnpm **11.13.1**,
+  rustc/cargo **1.96.0**. Host: **macOS 26.5.2 (25F84)**, Darwin **25.5.0**,
+  arm64.
+
+- **Schema and API.** **No migration, epoch change, Cedar action, audit action,
+  public HTTP route or OpenAPI change.** The public session contract remains 40
+  operations. The changed contracts are the adapter's optional `project_id` /
+  `SYNVEDA_PROJECT`, the versioned fixture manifest/schema, the private raw
+  capture opt-in, `make claude-acceptance`, `make claude-acceptance-live`, and
+  CI's explicitly named Postgres-backed `claude-replay` job.
+
+- **Measurements.** On the final replay/live-gateway run: SessionStart **81ms**,
+  Stop **62ms**, SessionEnd flush/close **54ms**, append **9ms**, two context
+  runs **15ms** and **12ms**, bounded backlog recovery **70ms**. Every value is
+  below its existing ceiling (8s start, 5s Stop, 8s SessionEnd, configured
+  request deadline and 2s recovery budget); no limit moved. The dedicated
+  1,000-event append load test remains green against its <20ms product SLO and
+  completed in **10.52s** wall time.
+
+- **Security checks.** Session wire deserialisation still refuses tenant and
+  acting-principal fields; scope is still server-derived. The focused session
+  suite proves a project member sees only that project's runs, a cross-tenant
+  id is the same 404 as fiction, and somebody else's principal scope remains
+  private. Timeline summaries contain no message text; diagnostics remain a
+  separate `SessionDiagnostics` decision. Fixture, log and whole-audit-payload
+  sweeps find no credentials or transcript content. Spool and capture modes are
+  asserted 0700/0600. Setup uses supported identity/product/session paths and
+  no test policy pack or direct governed-table mutation bypasses the PDP.
+
+- **Tests and exact results.** The inherited handover tree's first baseline
+  `make ci` stopped at `cargo fmt --check` on its unfinished
+  `claude_lifecycle.rs`; the first `make db-test` could not reach Docker. After
+  preserving and completing that work, OrbStack/Postgres became available.
+  Focused results: adapter **96 passed, 0 failed**; CLI spool **10/10**; console
+  **150/150**; audit/context/extraction/load/redaction/session gateway suites
+  **43/43**; CPR-14 replay **1 passed**, live **1 ignored**. Final `make ci`
+  **PASS** (Rust workspace including doctests **1,679 passed, 0 failed, 10
+  ignored**; console **150/150**; adapter **96/96**, plus every repository
+  checker). Final `make db-test` **PASS** on scratch database
+  `synveda_test_8147`, with the same **1,679 passed, 0 failed, 10 ignored**;
+  the scratch database was dropped by the harness. The first non-escalated CI
+  rerun's two CLI failures were the managed sandbox refusing loopback binds
+  with `EPERM`; the permitted rerun is the recorded product result.
+
+- **Limitations and remaining work.** The host-killed-before-any-hook boundary
+  is unchanged: that in-flight tail may be lost, and nothing here claims
+  otherwise. A genuine authenticated installed-client run is still required to
+  close CPR-14, replace the no-live-session support statement, and record its
+  version/timings. Live Entra/Okta and Cursor evidence remain absent. The three
+  intentionally blocked eval suites still fail by name and were not changed to
+  measure a different question. CPR-13 remains untouched. The next bounded
+  objective is therefore **run `make claude-acceptance-live` with a current
+  isolated Claude credential and review the persisted version report**; it is
+  acceptance completion, not candidate or Knowledge work.
+
+- **Commit.** `test(adapter): verify live Claude session lifecycle` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the next prompt on Prompt 1's rule.

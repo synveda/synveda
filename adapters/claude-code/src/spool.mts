@@ -39,6 +39,7 @@
 import { createHash } from "node:crypto";
 import {
   closeSync,
+  fchmodSync,
   fsyncSync,
   openSync,
   readdirSync,
@@ -212,8 +213,15 @@ export function saveSpool(spool: Spool, path?: string): boolean {
   const temporary = `${target}.${process.pid}.tmp`;
   try {
     ensureDir(spoolDir());
-    const handle = openSync(temporary, "w");
+    // A transcript payload is sensitive even before the gateway classifies
+    // it. The explicit mode survives a permissive process umask and is kept by
+    // the atomic rename.
+    const handle = openSync(temporary, "w", 0o600);
     try {
+      // `mode` applies only when this call creates the file. Tighten an
+      // abandoned temporary from a killed process too: pids are reusable, so
+      // such a name can exist before this writer opens it.
+      if (process.platform !== "win32") fchmodSync(handle, 0o600);
       writeSync(handle, JSON.stringify(spool));
       fsyncSync(handle);
     } finally {

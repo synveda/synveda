@@ -124,7 +124,50 @@ test("a tool-only turn keeps the unsuffixed id", () => {
   assert.equal(events[0]?.client_event_id, "u1");
 });
 
-test("an entry with neither text nor tools yields nothing", () => {
+test("a tool invocation is its own event with a stable id", () => {
+  const events = toSessionEvents(
+    [
+      entry({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "toolu_01", name: "Read", input: { file_path: "x" } }],
+        },
+      }),
+    ],
+    undefined,
+  );
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.event_type, "tool.invoked");
+  assert.equal(events[0]?.client_event_id, "u1");
+  assert.deepEqual(payloadOf(events[0]?.payload).calls, [
+    { tool_use_id: "toolu_01", name: "Read", input: '{"file_path":"x"}' },
+  ]);
+});
+
+test("learning a call does not rename a message an older adapter already sent", () => {
+  const events = toSessionEvents(
+    [
+      entry({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "text", text: "I will read it." },
+            { type: "tool_use", id: "toolu_01", name: "Read", input: { file_path: "x" } },
+          ],
+        },
+      }),
+    ],
+    undefined,
+  );
+  assert.deepEqual(
+    events.map((event) => event.client_event_id),
+    ["u1", "u1:call"],
+  );
+});
+
+test("an entry with neither text nor tool calls or results yields nothing", () => {
   assert.deepEqual(toSessionEvents([entry({ message: { role: "user", content: "" } })], undefined), []);
 });
 

@@ -61,6 +61,10 @@ base64 = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }
+# CPR-14's acceptance harness spawns the real hook binary as a child process
+# and writes its recorded frame to stdin, so the test profile needs the two
+# tokio features the gateway itself has no use for.
+tokio = { workspace = true, features = ["process", "io-util"] }
 http-body-util = { workspace = true }
 # `InMemorySpanExporter`, so FND-5's traceparent test can read the spans the
 # gateway would have exported instead of asserting on a header it parsed.

@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,6 +55,7 @@ function config(gatewayUrl: string, overrides: Partial<AdapterConfig> = {}): Ada
     gatewayUrl,
     timeoutMs: 2000,
     workspaceId: "11111111-1111-1111-1111-111111111111",
+    projectId: undefined,
     ...overrides,
   };
 }
@@ -159,6 +160,33 @@ test("a session start opens a run and injects the block as additionalContext", a
     assert.equal(open.body.external_session_id, "s1");
     assert.equal(open.body.client_name, "claude-code");
     assert.ok(mock.requests.some((request) => request.path.endsWith("/context-runs")));
+  } finally {
+    await mock.close();
+  }
+});
+
+test("a configured project is sent on the first open and retained in the spool", async () => {
+  const mock = await gateway(
+    script((request) =>
+      request.path === "/v1/sessions"
+        ? {
+            status: 201,
+            body: {
+              ...session(),
+              project_id: "44444444-4444-4444-4444-444444444444",
+            },
+          }
+        : undefined,
+    ),
+  );
+  try {
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "s-project", source: "startup" },
+      config(mock.url, { projectId: "44444444-4444-4444-4444-444444444444" }),
+    );
+    const open = mock.requests.find((request) => request.path === "/v1/sessions");
+    assert.equal(open?.body.project_id, "44444444-4444-4444-4444-444444444444");
+    assert.equal(loadSpool("s-project")?.project_id, "44444444-4444-4444-4444-444444444444");
   } finally {
     await mock.close();
   }
@@ -678,6 +706,31 @@ test("the entry point exits 0 and emits context on the happy path", async () => 
     );
   } finally {
     await mock.close();
+  }
+});
+
+test("the live-gate capture is opt-in, private, and outside the project", async () => {
+  const capture = mkdtempSync(join(tmpdir(), "synveda-capture-"));
+  const result = await runHook(
+    "session-start",
+    JSON.stringify({
+      hook_event_name: "SessionStart",
+      session_id: "captured",
+      source: "startup",
+      cwd: stateHome,
+    }),
+    {
+      SYNVEDA_CAPTURE_DIR: capture,
+      SYNVEDA_DISABLED: "1",
+      XDG_STATE_HOME: stateHome,
+    },
+  );
+  assert.equal(result.code, 0);
+  const files = readdirSync(capture);
+  assert.equal(files.length, 1);
+  if (process.platform !== "win32") {
+    assert.equal(statSync(capture).mode & 0o777, 0o700);
+    assert.equal(statSync(join(capture, files[0] as string)).mode & 0o777, 0o600);
   }
 });
 

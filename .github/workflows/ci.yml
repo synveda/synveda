@@ -6,6 +6,24 @@ on:
   pull_request:
 
 jobs:
+  # CPR-14 tier 2: captured real-client frames, but no Claude credential,
+  # through the public session API and a real current-epoch database. This is
+  # labelled replay in both the test and its output; only the separately run
+  # make claude-acceptance-live target may claim a real client execution.
+  claude-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile --filter @synveda/claude-code-adapter...
+      - run: make claude-acceptance
+
   rust:
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -47,6 +47,7 @@ const END_FLUSH_BUDGET_MS = 3000;
 const TURN_DELIVERY_BUDGET_MS = 2000;
 
 export async function turn(input: HookInput, configured: AdapterConfig): Promise<HookOutput> {
+  const hookStarted = Date.now();
   if (!configured.observe) return {};
   const externalId = harnessSessionId(input.session_id);
   const spool = loadSpool(externalId) ?? newSpool(externalId, CLIENT_NAME, installationId());
@@ -88,6 +89,7 @@ export async function turn(input: HookInput, configured: AdapterConfig): Promise
     acknowledged: result.acknowledged,
     pending: result.pending,
     complete: result.complete,
+    elapsed_ms: Date.now() - hookStarted,
   });
   return {};
 }

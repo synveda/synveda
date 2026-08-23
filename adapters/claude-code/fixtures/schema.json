@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synveda.example/schemas/claude-code-fixture-manifest-v1.json",
+  "title": "Synveda Claude Code replay fixture manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "fixture_sets"],
+  "properties": {
+    "$schema": { "const": "./schema.json" },
+    "schema_version": { "const": 1 },
+    "fixture_sets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "client", "provenance", "files"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "client": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "version"],
+            "properties": {
+              "name": { "const": "Claude Code" },
+              "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+            }
+          },
+          "provenance": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "captured_at", "source", "sanitised"],
+            "properties": {
+              "kind": { "const": "captured-real-client" },
+              "captured_at": { "type": "string", "format": "date-time" },
+              "source": { "type": "string", "minLength": 1 },
+              "sanitised": { "const": true }
+            }
+          },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "kind", "sha256"],
+              "properties": {
+                "path": { "type": "string", "pattern": "^(hooks/.+\\.json|transcripts/.+\\.jsonl)$" },
+                "kind": { "enum": ["hook-frame", "transcript", "damaged-transcript"] },
+                "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

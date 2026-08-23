@@ -106,10 +106,10 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR, gateway scale | ⬜ 0/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger and its product surface | 🚧 11/33 |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger, durable adapter delivery and its product surface | 🚧 12/33 |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **108
-in total, 75 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **111
+in total, 76 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
@@ -156,7 +156,9 @@ Published benchmark scores, and what they do and do not measure:
 - **Governed assets** — prompt templates, context packs, and an
   agentskills.io-compliant skills registry where publishing executable code
   requires a `reviewer` and two distinct approvers.
-- **A live Claude Code integration** — hooks plus an MCP recall tool.
+- **A Claude Code integration** — installed hooks plus an MCP recall tool,
+  with deterministic session-plane replay in CI; the real-client gate remains
+  pending authentication as described below.
 - **A quality gate in CI** — extraction, retrieval, injection and security evals
   with committed baselines; the security gate is zero-tolerance on leaks.
 
@@ -172,7 +174,8 @@ treat them as shape, not as an SLO.
 | a context run at 1,000 concurrent sessions | p50 **18.6ms**, p99 24ms (budget: 150ms) |
 | Graph traversal | 1-hop 1.17ms, 2-hop 23.4ms (gate: 50ms) |
 | Extraction over a 50-fixture labelled corpus | macro precision **0.983**, recall 0.914 — the deterministic extractor; a live model reads 0.820/0.783 against the same corpus, which is mostly the corpus's exact-match predicate penalising paraphrase |
-| Clean machine → personalised Claude Code session | **1.5s** (budget: 120s) |
+| Claude SessionStart → persisted context run (replay/live gateway) | **81ms** (budget: 8s) |
+| Claude Stop / SessionEnd hooks (replay/live gateway) | **62ms / 54ms** (budgets: 5s / 8s) |
 
 ### What is *not* built yet
 
@@ -195,13 +198,14 @@ Being explicit, so nothing here misleads:
 - **No real Cursor frame either.** The generic MCP server ships as `synveda mcp`
   (ADPT-2), and its acceptance corpus was recorded from Claude Desktop and Zed.
   Cursor remains an install target rather than a measured one.
-- **No live Claude Code session has composed or appended.** The plugin now
-  installs into Claude Code and is proven to *load* there — `✔ enabled`, four
-  hooks, one MCP server (OPS-8). What runs the hooks in ADPT-1's acceptance
-  demo is still that demo's own driver, replaying recorded payloads. Until
-  OPS-8 the plugin had never loaded at all: its manifest declared two keys
-  Claude Code discovers on its own, and nothing noticed because a harness that
-  replaces the harness cannot.
+- **No live Claude Code session has yet composed or appended on the new session
+  plane.** CPR-14 now replays genuine Claude Code 2.1.220/2.1.241 frames through
+  the built hook, public session API, current Postgres, PDP, timeline and audit
+  chain, including outage and duplicate recovery. That is replay evidence, not
+  a live-client result. The separately runnable installed-client gate found
+  Claude Code 2.1.241 present but unauthenticated on 2026-08-23 and exited before
+  invoking a session. The plugin itself is proven to load — `✔ enabled`, four
+  hooks, one MCP server (OPS-8).
 - **Three console pages have no plane behind them.** CPR-8 made the console a
   product shell — routes, switchers, People, first-run onboarding, and the
   proposals inbox (CNSL-1) and scope explorer (CNSL-2) re-homed under
@@ -261,6 +265,8 @@ Other useful targets:
 ```sh
 make ci          # exactly what CI runs: fmt, clippy -D warnings, test, build,
                  # cargo-deny, dependency-rule check, eval parse, TS build+test
+make claude-acceptance       # authentic-frame replay through the live gateway
+make claude-acceptance-live  # real client; runner reports prerequisite exit 77
 make eval        # the eval harness against a live stack, gated by baselines
 ```
 

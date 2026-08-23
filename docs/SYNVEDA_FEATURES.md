@@ -1657,6 +1657,40 @@ CPR-13  The demo corpus re-point (L)
   dead command; and a representative demo from each of MEM, CTX, FLOW, AUTHZ and ADPT runs
   green against a live stack.
 
+CPR-14  Live Claude Code session acceptance gate (L)
+  Filed 2026-08-23 by the post-CPR-12 acceptance handover. CPR-12 made the session plane the
+  only adapter path and made delivery durable, but its evidence stopped one layer short of the
+  product claim: adapter functions, recorded hook payloads and gateway tests do not prove that
+  a current installed Claude Code client discovers the marketplace, invokes those hooks, takes
+  context through a session context run, appends its own activity and closes the same run. The
+  old live evidence belongs to the deleted observe/inject plane and cannot prove the replacement.
+  What it adds: a separately runnable **live-client gate** that packages and installs the plugin
+  through `synveda plugin install`, asks Claude Code itself to report the plugin, four hooks and
+  MCP server, and drives a deterministic headless `claude -p` session against a fresh epoch-2
+  deployment; plus a **replay/live-gateway gate** for credential-free CI, using genuine,
+  versioned Claude Code frames whose manifest binds every fixture to capture provenance,
+  sanitisation and a SHA-256. Both tiers use the built hook child process and public session
+  routes. The live tier alone may close the live criterion; without a current authenticated
+  executable its runner exits 77 (`make` reports recipe `Error 77`) and the feature remains open
+  rather than promoting replay into live evidence.
+  The replay deliberately loses an acknowledgement: it takes the gateway away after a turn is
+  durable, proves the unacknowledged spool survives, restores the gateway, commits one pending
+  event without changing local acknowledgement state, then lets the next SessionStart redeliver
+  an overlapping batch. The server must answer `duplicate` at the original sequence for the
+  first and `appended` at the next sequence for the second, with one stored row per client event
+  id. It also pins private spool/capture permissions, message-free timeline summaries, separately
+  authorised diagnostics, content-free audit/log evidence and the boundary CPR-12 documented:
+  a host killed before any hook writes may lose the in-flight tail.
+  AC: the real authenticated executable, installed plugin and real hooks create or resume exactly
+  one governed session; context arrives through `POST /v1/sessions/{id}/context-runs`; authentic
+  user, assistant and tool activity reaches ordered `session_events`; normal completion flushes
+  and ends the run; timeline and verifying audit chain show actions but no message content; spool
+  ids, SHA-256s, server BLAKE3 hashes, attempts and acknowledgements agree; the outage/lost-ack
+  replay stores every event exactly once and purge removes acknowledged entries while retaining
+  pending ones; exact Claude Code, plugin, Synveda and OS versions and SessionStart, Stop,
+  SessionEnd, append, context-run and recovery durations are recorded; and ordinary CI runs the
+  schema-validated authentic-frame replay under its own name without claiming a live client ran.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1750,7 +1784,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

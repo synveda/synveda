@@ -49,7 +49,9 @@ until CPR-7 a tenant's hierarchy root *had* to be `kind = 'org'`. Phase 5
 re-cuts that as 33 ordered prompts on `feat/context-platform-mvp`, with the
 decisions locked in ADR-0068 and the running record in
 docs/implementation/synveda-context-platform.md. **Prompts 1–12 are
-delivered**; 13 onward are open. **It is a pre-1.0 hard
+delivered**; 13 onward are open. CPR-14's replay/live-gateway implementation
+is complete, but its real-client criterion is pending and it is not delivered.
+**It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
 enforced rather than planned (ADR-0069), and since CPR-7 the epoch is **2**
@@ -156,7 +158,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 76 of 110 features delivered — see docs/backlog/STATUS.md for
+features done. 76 of 111 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -196,7 +198,11 @@ were still this product's actual write path. It filed **CPR-13** the same day,
 making it **110 with 76 delivered** — the demo corpus re-point, which exists
 because CPR-12 went looking for the demos it had to change and found 43 of 65
 already dead. Prompts 13–33 of its programme are filed by the prompts that run
-them, so this number will keep moving. **The headline above read 70 of 103
+them, so this number will keep moving. **CPR-14 was filed on 2026-08-23**, making
+it **111 with 76 delivered**: the live Claude Code session acceptance gate. Its
+replay/live-gateway implementation is complete, but the installed 2.1.241
+client was unauthenticated, so the real-client criterion remains open. **The
+headline above read 70 of 103
 against a trail that had said 108 since CPR-11 and a checker that had said 110
 since CPR-12 filed** — the same drift, a fourth time, and once again found by
 reading the trail rather than by any gate.)
@@ -290,6 +296,22 @@ both waiting on Prompt 18. **Three eval suites fail by name rather than
 measure**: extraction, security and QA-index enumerated a corpus through
 `/v1/recall`'s sweep, and a context run ranks and budgets where a sweep
 enumerates. `make ci`'s `eval-check` is parse-only and green.
+
+CPR-14 makes the missing join executable without blurring its evidence tiers
+(ADR-0079). `make claude-acceptance` replays genuine, versioned Claude Code
+2.1.220/2.1.241 frames through the built hook child, public session routes,
+epoch-2 Postgres, the PDP, ingestion, timeline and verifying audit chain. It
+also takes the gateway away with two entries pending, restores it, deliberately
+loses one acknowledgement and proves the overlap answers `duplicate` at the
+original sequence before appending the new event exactly once. Fixture bytes
+are schema-validated, provenance-bound and hashed. `make
+claude-acceptance-live` is separate: it packages and installs through the
+supported marketplace path, asks Claude Code itself for the plugin/hook/MCP
+state and invokes real `claude -p`. On 2026-08-23 that executable was present
+at **2.1.241** and unauthenticated, so the gate exited 77 before a session ran.
+**No live Claude Code session has yet composed or appended through the
+installed plugin on the new session plane.** Replay success does not close
+CPR-14.
 
 **CPR-12 also found that 43 of the 65 scripts under `demos/` do not run**,
 and have not since CPR-7 deleted `synveda role bind` and

@@ -80,6 +80,8 @@ export interface DriverOptions {
   token?: string;
   /** The workspace a live run opens sessions in. */
   workspace?: string;
+  /** The project the live run is anchored to, when one is selected. */
+  project?: string;
   /**
    * Require the composition cases to come back with context. The demo sets it
    * because it seeded memory the caller can read; a bare gateway may
@@ -612,6 +614,7 @@ export async function runDriver(options: DriverOptions = {}): Promise<DriverRepo
         url: options.gateway ?? mock?.url ?? DEAD_GATEWAY,
         token: options.token ?? "driver-bearer",
         workspace: options.workspace ?? WORKSPACE,
+        projectId: options.project,
         requests: mock?.requests ?? [],
         expectContext: options.expectContext === true,
       });
@@ -644,6 +647,7 @@ interface CaseSetup {
   url: string;
   token: string;
   workspace: string;
+  projectId?: string;
   requests: RecordedRequest[];
   expectContext: boolean;
 }
@@ -701,6 +705,7 @@ function makeCase(root: string, index: number, setup: CaseSetup): DriverCase {
         SYNVEDA_GATEWAY: setup.url,
         SYNVEDA_TOKEN: setup.token,
         SYNVEDA_WORKSPACE: setup.workspace,
+        ...(setup.projectId === undefined ? {} : { SYNVEDA_PROJECT: setup.projectId }),
         // The credential seam has its own suite; pin it away from any
         // `synveda` this machine happens to have installed.
         SYNVEDA_CLI: join(scratch, "no-cli-here"),
@@ -827,10 +832,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (flag === "--gateway") options.gateway = argv[(index += 1)];
     else if (flag === "--token") options.token = argv[(index += 1)];
     else if (flag === "--workspace") options.workspace = argv[(index += 1)];
+    else if (flag === "--project") options.project = argv[(index += 1)];
     else if (flag === "--expect-context") options.expectContext = true;
     else {
       process.stderr.write(
-        "usage: driver.mjs [--gateway URL] [--token BEARER] [--workspace ID] [--expect-context]\n",
+        "usage: driver.mjs [--gateway URL] [--token BEARER] [--workspace ID] [--project ID] [--expect-context]\n",
       );
       process.exit(2);
     }
@@ -840,6 +846,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
   if (options.gateway !== undefined && options.workspace === undefined) {
     options.workspace = process.env.SYNVEDA_WORKSPACE;
+  }
+  if (options.gateway !== undefined && options.project === undefined) {
+    options.project = process.env.SYNVEDA_PROJECT;
   }
   const report = await runDriver(options);
   process.exit(report.failed > 0 ? 1 : 0);
