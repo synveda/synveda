@@ -1,7 +1,8 @@
 //! MEM-5 acceptance (ADR-0039): the store stops being ADD-only.
 //!
 //! The AC has two halves and both are here, over the real product path —
-//! `POST /v1/observe`, the extraction worker, `POST /v1/inject` — never a
+//! `POST /v1/sessions/{id}/events`, the extraction worker,
+//! `POST /v1/sessions/{id}/context-runs` — never a
 //! seeded row:
 //!
 //! * **superseded facts are excluded from current inject**: a session states
@@ -44,6 +45,7 @@ use synveda_ingest::extraction::{AnyExtractor, DeterministicExtractor};
 use synveda_ingest::worker::{self, WorkerConfig, WorkerDeps};
 use synveda_store::records;
 use synveda_store::{access, identities, policy_packs, rls, scopes, tenants};
+use synveda_types::SessionId;
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
@@ -251,34 +253,79 @@ async fn post(app: &Router, uri: &str, bearer: &str, body: Value) -> (StatusCode
     (status, body_json(response).await)
 }
 
+/// `POST` with an `Idempotency-Key`, which the context-run route requires.
+async fn post_keyed(
+    app: &Router,
+    uri: &str,
+    bearer: &str,
+    key: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header("authorization", format!("Bearer {bearer}"))
+        .header("idempotency-key", key)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("build request");
+    let response = app.clone().oneshot(request).await.expect("send request");
+    let status = response.status();
+    (status, body_json(response).await)
+}
+
 /// One observed statement, through the product's own write path.
-async fn observe(app: &Router, bearer: &str, session: &str, at: DateTime<Utc>, text: &str) {
+///
+/// `label` discriminates the event within the run, exactly as the old
+/// `session_id` discriminated it within a tenant: the pair `(label, instant)`
+/// is what makes a re-delivery recognisable.
+async fn observe(
+    app: &Router,
+    bearer: &str,
+    run: SessionId,
+    label: &str,
+    at: DateTime<Utc>,
+    text: &str,
+) {
     let (status, body) = post(
         app,
-        "/v1/observe",
+        &format!("/v1/sessions/{run}/events"),
         bearer,
         json!({
-            "session_id": session,
             "events": [{
-                "idempotency_key": format!("{session}:{}", at.timestamp_micros()),
-                "kind": "decision",
-                "payload": {"text": text},
+                "event_type": "message.user",
+                "client_event_id": format!("{label}:{}", at.timestamp_micros()),
                 "occurred_at": at.to_rfc3339(),
+                "payload": {"text": text},
             }],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED, "observe: {body}");
-    assert_eq!(body["accepted"], json!(1), "observe: {body}");
+    assert_eq!(status, StatusCode::OK, "append: {body}");
+    assert_eq!(body["appended"], json!(1), "append: {body}");
 }
 
 /// The composed block a cold session start receives — the taskless,
-/// recency-ordered branch, which is what "current inject" means for a
+/// recency-ordered branch, which is what "current context" means for a
 /// scenario with no query.
-async fn inject_text(app: &Router, bearer: &str, session: &str) -> String {
-    let (status, body) = post(app, "/v1/inject", bearer, json!({"session_id": session})).await;
-    assert_eq!(status, StatusCode::OK, "inject: {body}");
-    body["text"].as_str().expect("block text").to_owned()
+async fn inject_text(app: &Router, bearer: &str, run: SessionId, key: &str) -> String {
+    let (status, body) = post_keyed(
+        app,
+        &format!("/v1/sessions/{run}/context-runs"),
+        bearer,
+        key,
+        json!({}),
+    )
+    .await;
+    // 201 on the first composition, 200 when an `Idempotency-Key` replays one.
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "context run: {status} {body}"
+    );
+    body["rendered"]
+        .as_str()
+        .expect("rendered block")
+        .to_owned()
 }
 
 async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
@@ -300,10 +347,10 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
     synveda_store::migrate(&pool)
         .await
         .expect("apply migrations");
-    sqlx::query_scalar!(r#"select pgmq.purge_queue('observe') as "purged!""#)
+    sqlx::query_scalar!(r#"select pgmq.purge_queue('session_events') as "purged!""#)
         .fetch_one(&pool)
         .await
-        .expect("purge observe queue");
+        .expect("purge the session-events queue");
     let id = TenantId::new();
     let slug = format!("mem5-{}", id.as_uuid().simple());
     tenants::create(&pool, id, &slug, "MEM-5 test tenant", TenantStatus::Active)
@@ -311,6 +358,9 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         .expect("admit tenant");
     Some((pool, id, url))
 }
+
+#[path = "session_seed.rs"]
+mod session_seed;
 
 /// acme-org → platform (team) plus the reserved quarantine team.
 async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Scope {
@@ -489,14 +539,26 @@ async fn valid_at(
         .collect()
 }
 
-/// The permits this suite's own material needs — write to your own home,
-/// read your own chain — and nothing else, so the only thing a pack built
-/// on it changes is the configuration under test.
+/// The permits this suite's own material needs — open a run, write to it,
+/// read what came out — and nothing else, so the only thing a pack built on it
+/// changes is the configuration under test.
+///
+/// Grant-keyed since CPR-12: a memory lands at the scope its **run** was
+/// decided at (ADR-0078 decision 3), so the role-free own-home floor this pack
+/// used to lean on no longer reaches the material it writes.
 const MEMBER_PACK: &str = r#"
-    permit (principal, action == Synveda::Action::"MemoryRead", resource)
-    when { principal in resource };
-    permit (principal, action == Synveda::Action::"MemoryWrite", resource)
-    when { principal has own_scope && resource == principal.own_scope };
+    permit (
+        principal,
+        action in [
+            Synveda::Action::"MemoryRead",
+            Synveda::Action::"MemoryWrite",
+            Synveda::Action::"SessionRead",
+            Synveda::Action::"SessionWrite"
+        ],
+        resource
+    ) when {
+        context.roles.containsAny(["member", "curator", "owner", "administrator"])
+    };
 "#;
 
 /// A tenant pack carrying a dedup configuration, made the default.
@@ -554,7 +616,16 @@ async fn an_updated_fact_supersedes_the_one_it_replaces_and_stays_readable_as_of
         return;
     };
     let _platform = seed_hierarchy(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice").await;
+    let _alice = seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run(&pool, tenant, "mem5", "alice").await;
+    bind(
+        &pool,
+        tenant,
+        "alice",
+        run.workspace_scope_id,
+        RoleKey::Member,
+    )
+    .await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
@@ -567,21 +638,21 @@ async fn an_updated_fact_supersedes_the_one_it_replaces_and_stays_readable_as_of
     let monday = Utc::now() - ChronoDuration::days(2);
     let tuesday = Utc::now() - ChronoDuration::days(1);
 
-    observe(&app, &token, "sess-before", monday, BEFORE).await;
+    observe(&app, &token, run.session_id, "sess-before", monday, BEFORE).await;
     drain(&deps, &config).await;
 
     // Before the update, the fact is what the session start receives.
-    let block = inject_text(&app, &token, "cold-1").await;
+    let block = inject_text(&app, &token, run.session_id, "cold-1").await;
     assert!(
         block.contains("ledger-archive"),
         "the fact is known: {block}"
     );
 
-    observe(&app, &token, "sess-after", tuesday, AFTER).await;
+    observe(&app, &token, run.session_id, "sess-after", tuesday, AFTER).await;
     drain(&deps, &config).await;
 
     // ── The first half of the AC, from the reader's side ────────────────
-    let block = inject_text(&app, &token, "cold-2").await;
+    let block = inject_text(&app, &token, run.session_id, "cold-2").await;
     assert!(
         block.contains("ledger-live"),
         "the replacement composes: {block}"
@@ -627,7 +698,7 @@ async fn an_updated_fact_supersedes_the_one_it_replaces_and_stays_readable_as_of
     let then = valid_at(
         &pool,
         tenant,
-        alice.scope_id,
+        run.workspace_scope_id,
         monday + ChronoDuration::hours(1),
     )
     .await;
@@ -640,7 +711,7 @@ async fn an_updated_fact_supersedes_the_one_it_replaces_and_stays_readable_as_of
         !then.iter().any(|content| content.contains("ledger-live")),
         "and the fact that replaced it had not happened yet: {then:?}"
     );
-    let now = valid_at(&pool, tenant, alice.scope_id, Utc::now()).await;
+    let now = valid_at(&pool, tenant, run.workspace_scope_id, Utc::now()).await;
     assert_eq!(now.len(), 1, "one current assertion: {now:?}");
     assert!(now[0].contains("ledger-live"));
 
@@ -686,10 +757,14 @@ async fn an_updated_fact_supersedes_the_one_it_replaces_and_stays_readable_as_of
     let mut tx = rls::begin_tenant_tx(&pool, tenant)
         .await
         .expect("tenant tx");
-    let channels =
-        synveda_vedaflow::read_memory_members(&mut tx, tenant, &[alice.scope_id], Channel::Derived)
-            .await
-            .expect("read derived channel");
+    let channels = synveda_vedaflow::read_memory_members(
+        &mut tx,
+        tenant,
+        &[run.workspace_scope_id],
+        Channel::Derived,
+    )
+    .await
+    .expect("read derived channel");
     tx.commit().await.expect("commit");
     let members = &channels.first().expect("a derived channel exists").members;
     assert!(
@@ -715,6 +790,15 @@ async fn a_restated_fact_merges_into_the_record_it_restates() {
     };
     let _platform = seed_hierarchy(&pool, tenant).await;
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run(&pool, tenant, "mem5", "alice").await;
+    bind(
+        &pool,
+        tenant,
+        "alice",
+        run.workspace_scope_id,
+        RoleKey::Member,
+    )
+    .await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
@@ -723,13 +807,14 @@ async fn a_restated_fact_merges_into_the_record_it_restates() {
     let token = idp.user_token("alice");
 
     let monday = Utc::now() - ChronoDuration::days(2);
-    observe(&app, &token, "sess-1", monday, BEFORE).await;
+    observe(&app, &token, run.session_id, "sess-1", monday, BEFORE).await;
     drain(&deps, &config).await;
     // The same thing said again, in a later session — the ordinary case,
     // and the one an ADD-only store turns into two records.
     observe(
         &app,
         &token,
+        run.session_id,
         "sess-2",
         monday + ChronoDuration::hours(6),
         BEFORE,
@@ -785,14 +870,30 @@ async fn a_contradiction_against_published_material_is_refused_and_recorded() {
     };
     let platform = seed_hierarchy(&pool, tenant).await;
     let alice = seed_user(&pool, tenant, "alice").await;
-    // A curator **at her own personal scope**, which is where the material
-    // she is about to publish lives. A grant at `platform` would not reach
-    // it: a principal scope inherits nothing, and the one door into it is a
-    // grant written directly there (CPR-6, ADR-0073 decision 4). She can
-    // therefore read her own material, which is what publishing it requires
-    // (ADR-0031 decision 12).
-    let _ = platform;
-    bind(&pool, tenant, "alice", alice.scope_id, RoleKey::Curator).await;
+    let run = session_seed::seed_run(&pool, tenant, "mem5", "alice").await;
+    bind(
+        &pool,
+        tenant,
+        "alice",
+        run.workspace_scope_id,
+        RoleKey::Member,
+    )
+    .await;
+    // A curator **at the workspace scope**, which is where the material she is
+    // about to publish lives since CPR-12: a memory lands at the scope its run
+    // was decided at (ADR-0078 decision 3), not on a personal leaf. A grant at
+    // `platform` would not reach it either — the workspace hangs off the
+    // tenant root rather than under a team — so the grant goes where the
+    // material is, which is what publishing it requires (ADR-0031 decision 12).
+    let _ = (platform, &alice);
+    bind(
+        &pool,
+        tenant,
+        "alice",
+        run.workspace_scope_id,
+        RoleKey::Curator,
+    )
+    .await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
@@ -801,13 +902,13 @@ async fn a_contradiction_against_published_material_is_refused_and_recorded() {
     let token = idp.user_token("alice");
 
     let monday = Utc::now() - ChronoDuration::days(2);
-    observe(&app, &token, "sess-before", monday, BEFORE).await;
+    observe(&app, &token, run.session_id, "sess-before", monday, BEFORE).await;
     drain(&deps, &config).await;
     let published_id = stored_records(&pool, tenant).await[0].id;
 
     let (status, body) = post(
         &app,
-        &format!("/v1/channels/{}/publish", alice.scope_id),
+        &format!("/v1/channels/{}/publish", run.workspace_scope_id),
         &token,
         json!({"record_ids": [published_id], "message": "reviewed"}),
     )
@@ -818,6 +919,7 @@ async fn a_contradiction_against_published_material_is_refused_and_recorded() {
     observe(
         &app,
         &token,
+        run.session_id,
         "sess-after",
         monday + ChronoDuration::days(1),
         AFTER,
@@ -838,7 +940,7 @@ async fn a_contradiction_against_published_material_is_refused_and_recorded() {
 
     // Both compose — which is the honest state: the estate holds a reviewed
     // fact its own members have contradicted, and somebody has to decide.
-    let block = inject_text(&app, &token, "cold").await;
+    let block = inject_text(&app, &token, run.session_id, "cold").await;
     assert!(
         block.contains("ledger-archive") && block.contains("ledger-live"),
         "{block}"
@@ -872,7 +974,16 @@ async fn a_late_arriving_older_fact_lands_already_closed() {
         return;
     };
     let _platform = seed_hierarchy(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice").await;
+    let _alice = seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run(&pool, tenant, "mem5", "alice").await;
+    bind(
+        &pool,
+        tenant,
+        "alice",
+        run.workspace_scope_id,
+        RoleKey::Member,
+    )
+    .await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
@@ -885,9 +996,9 @@ async fn a_late_arriving_older_fact_lands_already_closed() {
 
     // The newer statement is observed first — an offline session syncing
     // late, a replayed spool, a clock that was behind.
-    observe(&app, &token, "sess-current", tuesday, AFTER).await;
+    observe(&app, &token, run.session_id, "sess-current", tuesday, AFTER).await;
     drain(&deps, &config).await;
-    observe(&app, &token, "sess-late", monday, BEFORE).await;
+    observe(&app, &token, run.session_id, "sess-late", monday, BEFORE).await;
     drain(&deps, &config).await;
 
     let stored = stored_records(&pool, tenant).await;
@@ -900,7 +1011,7 @@ async fn a_late_arriving_older_fact_lands_already_closed() {
         "and it lands already closed, where the newer assertion begins"
     );
 
-    let block = inject_text(&app, &token, "cold").await;
+    let block = inject_text(&app, &token, run.session_id, "cold").await;
     assert!(block.contains("ledger-live"), "{block}");
     assert!(
         !block.contains("ledger-archive"),
@@ -911,7 +1022,7 @@ async fn a_late_arriving_older_fact_lands_already_closed() {
     let then = valid_at(
         &pool,
         tenant,
-        alice.scope_id,
+        run.workspace_scope_id,
         monday + ChronoDuration::hours(1),
     )
     .await;
@@ -938,6 +1049,15 @@ async fn a_pack_can_turn_the_feature_off() {
     };
     let _platform = seed_hierarchy(&pool, tenant).await;
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run(&pool, tenant, "mem5", "alice").await;
+    bind(
+        &pool,
+        tenant,
+        "alice",
+        run.workspace_scope_id,
+        RoleKey::Member,
+    )
+    .await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let off = DedupConfig {
@@ -952,11 +1072,12 @@ async fn a_pack_can_turn_the_feature_off() {
     let token = idp.user_token("alice");
 
     let monday = Utc::now() - ChronoDuration::days(2);
-    observe(&app, &token, "sess-before", monday, BEFORE).await;
+    observe(&app, &token, run.session_id, "sess-before", monday, BEFORE).await;
     drain(&deps, &config).await;
     observe(
         &app,
         &token,
+        run.session_id,
         "sess-after",
         monday + ChronoDuration::days(1),
         AFTER,
@@ -970,7 +1091,7 @@ async fn a_pack_can_turn_the_feature_off() {
         stored.iter().all(|record| record.valid_to.is_none()),
         "with dedup off nothing closes: {stored:?}"
     );
-    let block = inject_text(&app, &token, "cold").await;
+    let block = inject_text(&app, &token, run.session_id, "cold").await;
     assert!(
         block.contains("ledger-archive") && block.contains("ledger-live"),
         "the ADD-only store, on request: {block}"

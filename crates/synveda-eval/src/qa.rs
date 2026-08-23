@@ -24,6 +24,8 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::fixtures::EVENT_TYPES;
+
 /// Where a batch's material ends up, which is also the axis it reports
 /// into (`qa_scope_team` and friends). Closed, because the gradient it
 /// names is closed (seed §4.4).
@@ -34,8 +36,6 @@ pub const TIERS: [&str; 4] = ["user", "team", "department", "org"];
 pub const NEEDS: [&str; 2] = ["lexical", "semantic"];
 
 /// The observe kinds MEM-1 accepts.
-const KINDS: [&str; 3] = ["transcript_delta", "tool_result", "decision"];
-
 /// Words too common to count as lexical overlap between a question and
 /// its answer. Small and deliberately unclever: the guard it serves is
 /// "did the fixture author mislabel `semantic`", and a stopword list that
@@ -87,13 +87,16 @@ pub struct SeedBatch {
 pub struct SeedEvent {
     /// How questions refer to this event.
     pub key: String,
-    #[serde(default = "default_kind")]
-    pub kind: String,
+    /// A session event type that carries memory (CPR-12, ADR-0078 decision 2).
+    /// Defaults to `message.user`, which is what an unlabelled line of a
+    /// transcript is.
+    #[serde(default = "default_event_type")]
+    pub event_type: String,
     pub text: String,
 }
 
-fn default_kind() -> String {
-    "transcript_delta".to_owned()
+fn default_event_type() -> String {
+    "message.user".to_owned()
 }
 
 /// One probe of the seeded corpus.
@@ -253,10 +256,10 @@ fn validate(corpora: &[Corpus]) -> Result<(), String> {
                 ));
             }
             for event in &batch.events {
-                if !KINDS.contains(&event.kind.as_str()) {
+                if !EVENT_TYPES.contains(&event.event_type.as_str()) {
                     return Err(at(&format!(
-                        "kind `{}` is not one of {KINDS:?}",
-                        event.kind
+                        "event type `{}` is not one of {EVENT_TYPES:?}",
+                        event.event_type
                     )));
                 }
                 if keys.insert(&event.key, event).is_some() {
@@ -354,7 +357,7 @@ mod tests {
              "events": [{"key": "own", "text": "I always run cargo nextest before pushing."}]},
             {"actor": "qa-team", "session_id": "s-team", "tier": "team",
              "promote_to": "payments",
-             "events": [{"key": "team", "kind": "decision",
+             "events": [{"key": "team", "event_type": "message.assistant",
                          "text": "Payments retries are capped at three attempts."}]}
         ],
         "questions": [
@@ -374,7 +377,7 @@ mod tests {
     fn a_corpus_round_trips_with_its_defaults() {
         let corpora = parse(CLEAN).expect("parses");
         let corpus = &corpora[0];
-        assert_eq!(corpus.seed[0].events[0].kind, "transcript_delta");
+        assert_eq!(corpus.seed[0].events[0].event_type, "message.user");
         assert_eq!(corpus.questions[0].needs, "lexical");
         assert!(!corpus.questions[0].is_semantic());
         assert_eq!(
@@ -473,7 +476,11 @@ mod tests {
             "unknown tier must not validate"
         );
         assert!(
-            parse(&CLEAN.replace(r#""kind": "decision""#, r#""kind": "thought""#)).is_err(),
+            parse(&CLEAN.replace(
+                r#""event_type": "message.assistant""#,
+                r#""event_type": "thought""#
+            ))
+            .is_err(),
             "unknown kind must not validate"
         );
         assert!(

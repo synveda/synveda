@@ -77,11 +77,11 @@ pub(crate) fn candidates_schema() -> serde_json::Value {
     })
 }
 
-/// The user message: the event's kind, time, and redacted payload, as
+/// The user message: the event's type, time, and redacted payload, as
 /// compact JSON the model reads as data.
 pub(crate) fn user_message(input: &ExtractionInput) -> String {
     serde_json::json!({
-        "kind": input.kind.as_str(),
+        "event_type": input.event_type.as_str(),
         "occurred_at": input.occurred_at.to_rfc3339(),
         "payload": input.payload,
     })

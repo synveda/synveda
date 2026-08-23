@@ -29,8 +29,27 @@ export function stateDir(): string {
   return xdg("XDG_STATE_HOME", [".local", "state"]);
 }
 
-/** Per-session cursors and transcript paths (ADR-0027 decision 7). */
-export function sessionDir(): string {
+/**
+ * The durable spool (CPR-12, ADR-0078 decision 6): one file per harness
+ * session, holding recorded events and their delivery state.
+ *
+ * `synveda session flush` resolves the same directory the same way. Two
+ * programs that disagree about where the spool lives is a spool that silently
+ * never drains, so this resolution and `crates/synveda-cli/src/spool.rs`'s
+ * must stay identical.
+ */
+export function spoolDir(): string {
+  return join(stateDir(), "spool");
+}
+
+/**
+ * Where the pre-cut per-session cursors lived (ADR-0027 decision 7).
+ *
+ * Named only so it can be **removed**. Nothing reads it: the old format held a
+ * cursor into somebody else's transcript file and no events, so there is
+ * nothing in one to migrate.
+ */
+export function legacySessionDir(): string {
   return join(stateDir(), "sessions");
 }
 

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        delete from session_event_quarantine\n        where tenant_id = $1 and event_id = any($2)\n        returning state as \"state!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c747c587887819ce133960531d701940206aa2fc11e5381e94a7bc2958a999b9"
+}

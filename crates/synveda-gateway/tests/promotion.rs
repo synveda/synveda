@@ -3,7 +3,7 @@
 //! reviewer** — over the product's own surfaces, against a live Postgres.
 //!
 //! The signal is real throughout. Nothing here writes a usage counter:
-//! every recall in these tests is an actual `POST /v1/inject` that
+//! every recall in these tests is an actual context run that
 //! composed the record into a block and chained a `context.injected`
 //! event, and the engine folds those events out of the audit chain
 //! exactly as it does in production. That matters for the AC's second
@@ -348,18 +348,26 @@ async fn converge(pool: &PgPool, index: &SearchIndex, tenant: TenantId) {
 }
 
 /// One real inject: composes a block and chains one `context.injected`.
-async fn inject(app: &Router, token: &str, session: &str) -> Value {
+async fn inject(app: &Router, token: &str, session: synveda_types::SessionId) -> Value {
     let request = Request::builder()
         .method("POST")
-        .uri("/v1/inject")
+        .uri(format!("/v1/sessions/{session}/context-runs"))
+        .header(
+            "idempotency-key",
+            synveda_types::ContextRunId::new().to_string(),
+        )
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
         .body(Body::from(
-            json!({"task": "ingest worker deploy", "session_id": session}).to_string(),
+            json!({"query": "ingest worker deploy"}).to_string(),
         ))
         .expect("build request");
     let response = app.clone().oneshot(request).await.expect("route responds");
-    assert_eq!(response.status(), StatusCode::OK, "inject must succeed");
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "the composition must succeed"
+    );
     let bytes = response
         .into_body()
         .collect()
@@ -369,13 +377,33 @@ async fn inject(app: &Router, token: &str, session: &str) -> Value {
     serde_json::from_slice(&bytes).expect("json body")
 }
 
-/// `count` real injects as `subject`, each its own session.
-async fn recall_times(app: &Router, tenant: TenantId, subject: &str, count: usize) {
+/// `count` real compositions as `subject`, each its own run.
+async fn recall_times(app: &Router, pool: &PgPool, tenant: TenantId, subject: &str, count: usize) {
     let token = issue(subject, tenant);
+    // A fresh workspace per call: this helper is invoked several times per
+    // test to build up a recall count, and a workspace slug is unique per
+    // tenant.
+    let slug = format!("flow4-{subject}-{}", synveda_types::WorkspaceId::new());
+    let run = session_seed::seed_run_for(pool, tenant, &slug, subject).await;
     for round in 0..count {
-        inject(app, &token, &format!("{subject}-sess-{round}")).await;
+        let session = if round == 0 {
+            run.session_id
+        } else {
+            session_seed::open_run(
+                pool,
+                tenant,
+                run.workspace_id,
+                &format!("{slug}-{round}"),
+                subject,
+            )
+            .await
+        };
+        inject(app, &token, session).await;
     }
 }
+
+#[path = "session_seed.rs"]
+mod session_seed;
 
 async fn api(app: &Router, method: &str, uri: &str, token: &str, body: Option<Value>) -> Value {
     let request = Request::builder()
@@ -503,7 +531,7 @@ async fn a_rule_fires_on_real_use_and_its_proposal_carries_evidence() {
     let Some(fx) = fixture().await else { return };
 
     // Below the threshold, nothing fires: two recalls against min 3.
-    recall_times(&fx.app, fx.tenant, "alice", 2).await;
+    recall_times(&fx.app, &fx.pool, fx.tenant, "alice", 2).await;
     assert_eq!(
         run_engine(&fx).await,
         0,
@@ -515,7 +543,7 @@ async fn a_rule_fires_on_real_use_and_its_proposal_carries_evidence() {
     );
 
     // The third recall crosses it.
-    recall_times(&fx.app, fx.tenant, "alice", 1).await;
+    recall_times(&fx.app, &fx.pool, fx.tenant, "alice", 1).await;
     assert_eq!(
         run_engine(&fx).await,
         1,
@@ -547,10 +575,15 @@ async fn a_rule_fires_on_real_use_and_its_proposal_carries_evidence() {
     assert_eq!(evidence.pack_name, "flow4-promoting");
     assert_eq!(
         evidence.actions,
-        vec!["context.injected".to_owned(), "context.recalled".to_owned()],
-        "the set grew when CTX-5 landed (ADR-0042 decision 16), and the evidence \
-         says so — which is what keeps a proposal opened before that day from \
-         reading as though it had counted an explicit recall"
+        vec![
+            "context.injected".to_owned(),
+            "context.recalled".to_owned(),
+            "session.context.composed".to_owned(),
+        ],
+        "the set grew when CTX-5 landed (ADR-0042 decision 16) and again at the \
+         observe cutover (CPR-12, ADR-0078), and the evidence says so — which \
+         is what keeps a proposal opened before either day from reading as \
+         though it had counted an action added later"
     );
     assert_eq!(evidence.members.len(), 1);
     let member = &evidence.members[0];
@@ -627,15 +660,16 @@ async fn a_rule_fires_on_real_use_and_its_proposal_carries_evidence() {
 #[tokio::test]
 async fn evidence_is_checkable_against_the_chain() {
     let Some(fx) = fixture().await else { return };
-    recall_times(&fx.app, fx.tenant, "alice", 4).await;
+    recall_times(&fx.app, &fx.pool, fx.tenant, "alice", 4).await;
     run_engine(&fx).await;
 
     let proposals = open_proposals(&fx.pool, fx.tenant).await;
     let evidence = proposals[0].evidence.as_ref().expect("evidence").clone();
     let claimed = &evidence.members[0];
 
-    // Re-derive the claim from the chain itself.
-    let injected = events(&fx.pool, fx.tenant, "context.injected").await;
+    // Re-derive the claim from the chain itself. Since CPR-12 a composition is
+    // a context run, so that is the action the disclosures are written under.
+    let injected = events(&fx.pool, fx.tenant, "session.context.composed").await;
     let mut counted = 0;
     let mut subjects = std::collections::BTreeSet::new();
     for event in &injected {
@@ -674,13 +708,13 @@ async fn evidence_is_checkable_against_the_chain() {
 #[tokio::test]
 async fn a_soak_never_opens_the_same_bytes_twice() {
     let Some(fx) = fixture().await else { return };
-    recall_times(&fx.app, fx.tenant, "alice", 3).await;
+    recall_times(&fx.app, &fx.pool, fx.tenant, "alice", 3).await;
     assert_eq!(run_engine(&fx).await, 1);
 
     // Ten more passes over ten more recalls: the material keeps
     // qualifying, and keeps being the same bytes already under review.
     for _ in 0..10 {
-        recall_times(&fx.app, fx.tenant, "alice", 1).await;
+        recall_times(&fx.app, &fx.pool, fx.tenant, "alice", 1).await;
         assert_eq!(
             run_engine(&fx).await,
             0,
@@ -712,7 +746,7 @@ async fn a_rejection_binds_bytes_and_an_edit_frees_them() {
     .await;
     let carol = issue("carol", fx.tenant);
 
-    recall_times(&fx.app, fx.tenant, "alice", 3).await;
+    recall_times(&fx.app, &fx.pool, fx.tenant, "alice", 3).await;
     run_engine(&fx).await;
     let proposal = open_proposals(&fx.pool, fx.tenant).await.remove(0);
 
@@ -729,7 +763,7 @@ async fn a_rejection_binds_bytes_and_an_edit_frees_them() {
         "the curator's rejection must land: {rejected}"
     );
 
-    recall_times(&fx.app, fx.tenant, "alice", 3).await;
+    recall_times(&fx.app, &fx.pool, fx.tenant, "alice", 3).await;
     assert_eq!(
         run_engine(&fx).await,
         0,
@@ -743,7 +777,7 @@ async fn a_rejection_binds_bytes_and_an_edit_frees_them() {
         "restart the ingest worker only after the queue reports zero visible messages",
     )
     .await;
-    recall_times(&fx.app, fx.tenant, "alice", 3).await;
+    recall_times(&fx.app, &fx.pool, fx.tenant, "alice", 3).await;
     assert_eq!(
         run_engine(&fx).await,
         1,
@@ -757,7 +791,7 @@ async fn a_rejection_binds_bytes_and_an_edit_frees_them() {
 #[tokio::test]
 async fn the_projection_rebuilds_from_the_chain() {
     let Some(fx) = fixture().await else { return };
-    recall_times(&fx.app, fx.tenant, "alice", 5).await;
+    recall_times(&fx.app, &fx.pool, fx.tenant, "alice", 5).await;
     run_engine(&fx).await;
 
     let before = {
@@ -821,7 +855,7 @@ async fn an_unconfigured_pack_promotes_nothing() {
     let state = state_with(&database_url(), index);
     let app = router(state.clone());
 
-    recall_times(&app, tenant, "alice", 10).await;
+    recall_times(&app, &pool, tenant, "alice", 10).await;
     assert_eq!(
         run_engine_for(&state, tenant).await,
         0,
@@ -856,8 +890,8 @@ async fn another_members_recalls_never_reach_a_personal_record() {
     let bob = seed_user(&fx.pool, fx.tenant, "bob").await;
     assert_ne!(bob.scope_id, fx.alice.scope_id);
 
-    recall_times(&fx.app, fx.tenant, "alice", 2).await;
-    recall_times(&fx.app, fx.tenant, "bob", 20).await;
+    recall_times(&fx.app, &fx.pool, fx.tenant, "alice", 2).await;
+    recall_times(&fx.app, &fx.pool, fx.tenant, "bob", 20).await;
     run_engine(&fx).await;
 
     let usage = {
@@ -886,7 +920,7 @@ async fn another_members_recalls_never_reach_a_personal_record() {
 #[tokio::test]
 async fn a_quarantined_owner_proposes_nothing() {
     let Some(fx) = fixture().await else { return };
-    recall_times(&fx.app, fx.tenant, "alice", 3).await;
+    recall_times(&fx.app, &fx.pool, fx.tenant, "alice", 3).await;
 
     // Quarantine is departure now — the one shape it takes (CPR-7,
     // ADR-0074 decision 3): a sealed identity, refused by the base

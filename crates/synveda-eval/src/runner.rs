@@ -68,14 +68,16 @@ pub async fn run_scenario(
     let bearer = &environment.actor(&scenario.probe.actor)?.token;
     let request = InjectRequest {
         task: scenario.probe.task.as_deref(),
-        session_id: &scenario.probe.session_id,
         budget_tokens: scenario.probe.budget_tokens,
     };
-    let first = client.inject(bearer, &request).await?;
+    let probe_run = client
+        .session_for(bearer, &scenario.probe.session_id)
+        .await?;
+    let first = client.inject(bearer, &probe_run, &request).await?;
     let mut latency_ms = vec![round(first.elapsed_ms)];
     note_degraded(&mut degraded, &first.degraded);
     for _ in 1..scenario.probe.repeat {
-        let repeat = client.inject(bearer, &request).await?;
+        let repeat = client.inject(bearer, &probe_run, &request).await?;
         latency_ms.push(round(repeat.elapsed_ms));
         note_degraded(&mut degraded, &repeat.degraded);
     }
@@ -126,7 +128,7 @@ async fn seed(
                 // nothing (ADR-0020 decision 2 would report duplicates,
                 // and the scenario would then measure the previous run).
                 idempotency_key: format!("{}:{}", batch.session_id, event.key),
-                kind: &event.kind,
+                kind: &event.event_type,
                 payload: serde_json::json!({ "text": event.text }),
                 occurred_at: occurred_at.clone(),
             })
@@ -134,10 +136,8 @@ async fn seed(
         let response = client
             .observe(
                 bearer,
-                &ObserveRequest {
-                    session_id: &batch.session_id,
-                    events,
-                },
+                &client.session_for(bearer, &batch.session_id).await?,
+                &ObserveRequest { events },
             )
             .await?;
         note_degraded(degraded, &response.degraded);
@@ -199,12 +199,13 @@ async fn wait_for_seed(
             // recency-ordered branch, so this asks only whether the
             // pipeline has made a record, with no retrieval involved.
             let bearer = &environment.actor(&entry.actor)?.token;
+            let run = client.session_for(bearer, &session).await?;
             let landed = client
                 .inject(
                     bearer,
+                    &run,
                     &InjectRequest {
                         task: None,
-                        session_id: &session,
                         budget_tokens: None,
                     },
                 )
@@ -220,12 +221,13 @@ async fn wait_for_seed(
             // in that window would be measuring the sweep.
             if scenario.probe.task.is_some() {
                 let probe = &environment.actor(&scenario.probe.actor)?.token;
+                let probe_run = client.session_for(probe, &session).await?;
                 let ranked = client
                     .inject(
                         probe,
+                        &probe_run,
                         &InjectRequest {
                             task: scenario.probe.task.as_deref(),
-                            session_id: &session,
                             budget_tokens: scenario.probe.budget_tokens,
                         },
                     )

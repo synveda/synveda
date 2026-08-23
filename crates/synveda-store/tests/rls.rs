@@ -20,8 +20,8 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
 use synveda_store::{
-    access, idempotency, identities, observe, policy_assignments, policy_packs, projects,
-    quarantine, repositories, rls, scopes, sessions, tenants, workspaces,
+    access, idempotency, identities, policy_assignments, policy_packs, projects, quarantine,
+    repositories, rls, scopes, sessions, tenants, workspaces,
 };
 // The generic scope vocabulary, reached through its module because the old
 // hierarchy still owns the root name until Prompt 6 (CPR-3, ADR-0070).
@@ -30,9 +30,9 @@ use synveda_types::repository;
 use synveda_types::scope;
 use synveda_types::session::{SessionEventType, SessionStatus};
 use synveda_types::{
-    ContextRunId, Error, GrantId, GroupId, IdentityId, IdentityKind, InviteId, ObserveKind,
-    PackConfig, ProjectId, RecordClass, RecordId, RecordKind, RepositoryId, ScopeId, Sensitivity,
-    SessionId, TenantId, TenantStatus, WorkspaceId,
+    ContextRunId, Error, GrantId, GroupId, IdentityId, IdentityKind, InviteId, PackConfig,
+    ProjectId, RecordClass, RecordId, RecordKind, RepositoryId, ScopeId, Sensitivity, SessionId,
+    TenantId, TenantStatus, WorkspaceId,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -233,8 +233,6 @@ const COVERED: &[&str] = &[
     "idempotency_records",
     "identities",
     "memory_usage",
-    "observe_events",
-    "observe_quarantine",
     // CPR-5 (ADR-0072): an outstanding invitation is a live credential's
     // shadow. Tenant-bound so a hash lookup runs inside one tenant's own row
     // policy — the shape ADR-0059 decision 13 set for the provisioning
@@ -271,6 +269,7 @@ const COVERED: &[&str] = &[
     // run holds the composed block itself — so all three carry material one
     // tenant must never see of another, and all three are forced.
     "session_context_runs",
+    "session_event_quarantine",
     "session_events",
     "sessions",
     "skill_files",
@@ -2172,281 +2171,326 @@ fn record_supersessions_are_tenant_isolated_and_append_only() {
     });
 }
 
-// ── Observe buffer (MEM-1, ADR-0020) ────────────────────────────────────────
+// ── Session ingestion (CPR-12, ADR-0078) ────────────────────────────────────
+//
+// The observe staging buffer and its review queue lived here until the observe
+// cutover. `session_events` carries the ingestion plane now, so these are the
+// same properties over the table that replaced it: cross-tenant blindness, an
+// immutability that is a *privilege* rather than a discipline, a work signal
+// per admitted event, and a review queue whose verdict is one-shot.
+//
+// The seeding fixture is [`seed_session`], shared with the session-ledger
+// block below: a run is what an event now hangs off, so there is one fixture
+// rather than two.
 
-fn observe_event(key: &str) -> observe::NewObserveEvent {
-    observe::NewObserveEvent {
-        idempotency_key: key.to_owned(),
-        kind: ObserveKind::TranscriptDelta,
-        payload: serde_json::json!({"text": "rls fixture"}),
-        occurred_at: chrono::Utc::now(),
-        redactions: None,
-        quarantine: false,
-    }
+/// A tenant with a run holding one quarantined event, and that event's id.
+async fn seed_quarantined(pool: &PgPool) -> (TenantId, SessionId, synveda_types::SessionEventId) {
+    let fixture = seed_session(pool).await;
+    let mut tx = pool.begin().await.expect("begin");
+    let admitted = sessions::append_events(
+        &mut tx,
+        fixture.tenant,
+        fixture.session,
+        &[sessions::NewSessionEvent {
+            event_type: SessionEventType::MessageUser,
+            event_schema_version: 1,
+            client_event_id: "rls-q1".to_owned(),
+            occurred_at: chrono::Utc::now(),
+            payload: serde_json::json!({"text": "[REDACTED:aws-access-key-id] fixture"}),
+            redactions: Some(serde_json::json!([
+                {"rule": "aws-access-key-id", "category": "secret", "count": 1}
+            ])),
+            quarantine: true,
+        }],
+    )
+    .await
+    .expect("append a quarantined event");
+    assert!(
+        admitted[0].quarantined,
+        "the fixture must actually quarantine"
+    );
+    tx.commit().await.expect("commit quarantine fixture");
+    (fixture.tenant, fixture.session, admitted[0].event.id)
 }
 
-/// An event staged behind the review queue (MEM-2, ADR-0021 decision 5).
-fn quarantined_event(key: &str) -> observe::NewObserveEvent {
-    observe::NewObserveEvent {
-        idempotency_key: key.to_owned(),
-        kind: ObserveKind::TranscriptDelta,
-        payload: serde_json::json!({"text": "[REDACTED:aws-access-key-id] fixture"}),
-        occurred_at: chrono::Utc::now(),
-        redactions: Some(serde_json::json!([
-            {"rule": "aws-access-key-id", "category": "secret", "count": 1}
-        ])),
-        quarantine: true,
-    }
-}
-
-/// Admits a tenant with an org root, a personal scope, an identity, and
-/// two buffered observe events. Runs on the (RLS-exempt) test connection.
-async fn seed_observe(pool: &PgPool) -> (TenantId, ScopeId, IdentityId) {
-    let tenant = TenantId::new();
-    let slug = format!("rlso-{}", tenant.as_uuid().simple());
-    tenants::create(
-        pool,
-        tenant,
-        &slug,
-        "RLS observe fixture",
-        TenantStatus::Active,
-    )
-    .await
-    .expect("create tenant");
-    let mut tx = pool.begin().await.expect("begin transaction");
-    let root = scopes::ensure_tenant_root(&mut tx, tenant)
-        .await
-        .expect("ensure tenant root");
-    let personal = scopes::create(
-        &mut tx,
-        &scopes::NewScope {
-            id: ScopeId::new(),
-            tenant_id: tenant,
-            kind: synveda_types::scope::ScopeKind::Principal,
-            parent_scope_id: Some(root.id),
-            slug: "alice".to_owned(),
-            display_name: "Alice".to_owned(),
-            attributes: serde_json::json!({}),
-            principal_id: Some("rls-alice".to_owned()),
-            created_by: None,
-        },
-    )
-    .await
-    .expect("create own scope");
-    let identity = identities::create(
-        &mut tx,
-        IdentityId::new(),
-        tenant,
-        Some("alice"),
-        IdentityKind::User,
-        None,
-        None,
-        personal.id,
-    )
-    .await
-    .expect("create identity");
-    observe::buffer_batch(
-        &mut tx,
-        tenant,
-        personal.id,
-        identity.id,
-        "rls-session",
-        &[observe_event("rls-1"), observe_event("rls-2")],
-    )
-    .await
-    .expect("buffer events");
-    tx.commit().await.expect("commit observe fixture");
-    (tenant, personal.id, identity.id)
-}
-
-async fn visible_observe_rows(tx: &mut Transaction<'static, Postgres>, tenant: TenantId) -> i64 {
+async fn visible_event_rows(tx: &mut Transaction<'static, Postgres>, tenant: TenantId) -> i64 {
     sqlx::query_scalar!(
-        r#"select count(*) as "count!" from observe_events where tenant_id = $1"#,
+        r#"select count(*) as "count!" from session_events where tenant_id = $1"#,
         tenant.as_uuid(),
     )
     .fetch_one(&mut **tx)
     .await
-    .expect("count observe_events")
+    .expect("count session_events")
 }
 
-/// The wrong (or absent) tenant GUC sees zero staged events — raw
-/// pre-redaction session content is exactly what the backstop exists to
-/// protect (ADR-0020 decision 1); the right one sees its own.
+/// The wrong (or absent) tenant GUC sees zero events — raw session content is
+/// exactly what the backstop exists to protect.
 #[test]
-fn wrong_tenant_guc_sees_no_observe_rows() {
+fn wrong_tenant_guc_sees_no_session_event_rows() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (victim, _, _) = seed_observe(&db.pool).await;
-        let (adversary, _, _) = seed_observe(&db.pool).await;
+        let victim = seed_session(&db.pool).await;
+        let adversary = seed_session(&db.pool).await;
 
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let mut tx = app_tx(&db.pool, Some(adversary.tenant)).await;
         assert_eq!(
-            visible_observe_rows(&mut tx, victim).await,
+            visible_event_rows(&mut tx, victim.tenant).await,
             0,
-            "observe rows leaked across tenants under the wrong GUC"
+            "session events leaked across tenants under the wrong GUC"
         );
-        assert_eq!(visible_observe_rows(&mut tx, adversary).await, 2);
+        assert_eq!(visible_event_rows(&mut tx, adversary.tenant).await, 2);
         drop(tx);
 
         let mut tx = app_tx(&db.pool, None).await;
         assert_eq!(
-            visible_observe_rows(&mut tx, victim).await,
+            visible_event_rows(&mut tx, victim.tenant).await,
             0,
-            "observe rows visible without any tenant GUC"
+            "session events visible without any tenant GUC"
         );
     });
 }
 
-/// Buffering events for another tenant than the GUC's trips the policy's
-/// WITH CHECK — an application defect, surfaced as internal.
+/// Appending events to another tenant's run trips the policy's WITH CHECK —
+/// an application defect, surfaced as internal or as a missing row.
 #[test]
-fn cross_tenant_observe_write_is_rejected() {
+fn cross_tenant_session_append_is_rejected() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (tenant, _, _) = seed_observe(&db.pool).await;
-        let (other, other_scope, other_identity) = seed_observe(&db.pool).await;
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let result = observe::buffer_batch(
+        let tenant = seed_session(&db.pool).await;
+        let other = seed_session(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant.tenant)).await;
+        let result = sessions::append_events(
             &mut tx,
-            other,
-            other_scope,
-            other_identity,
-            "forged-session",
-            &[observe_event("forged")],
+            other.tenant,
+            other.session,
+            &[sessions::NewSessionEvent {
+                event_type: SessionEventType::MessageUser,
+                event_schema_version: 1,
+                client_event_id: "forged".to_owned(),
+                occurred_at: chrono::Utc::now(),
+                payload: serde_json::json!({"text": "forged"}),
+                redactions: None,
+                quarantine: false,
+            }],
         )
         .await;
         assert!(
-            matches!(result, Err(Error::Internal { .. })),
-            "cross-tenant observe write must be rejected by RLS as an \
-             internal defect, got {result:?}"
+            matches!(
+                result,
+                Err(Error::NotFound { .. }) | Err(Error::Internal { .. })
+            ),
+            "a cross-tenant append must be refused, got {result:?}"
         );
     });
 }
 
-/// The app role cannot rewrite what was observed even inside its own tenant
-/// scope: UPDATE on `observe_events` was never granted — staging rows are
-/// provenance (ADR-0020 decision 1).
+/// The app role cannot rewrite what was recorded even inside its own tenant:
+/// UPDATE on `session_events` was never granted, so immutability is a
+/// privilege rather than a discipline (migration 0044).
 ///
-/// DELETE *is* granted since migration 0025, and deliberately: disposal is
-/// the obligation ADR-0020 parked on MEM-6 and migration 0012 said would
-/// "bring its own grants" (ADR-0040 decision 7). What bounds it is the
-/// horizon the sweep reads from the pack, not the absence of a grant — so
-/// what this test still holds is the immutability of a staged payload,
-/// which is the property the provenance doctrine was ever about.
+/// DELETE *is* granted since migration 0046, and deliberately: disposal is the
+/// obligation 0044 parked on the retention plane. What bounds it is the
+/// transaction-local `synveda.retention_purge` flag, not the absence of a
+/// grant — so a handler that has not declared itself a disposal still cannot
+/// retire a run's transcript.
 #[test]
-fn observe_events_are_immutable_and_only_retention_removes_them() {
+fn session_events_are_immutable_and_only_retention_removes_them() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (tenant, _, _) = seed_observe(&db.pool).await;
+        let fixture = seed_session(&db.pool).await;
 
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let update = sqlx::raw_sql("update observe_events set payload = '{}'")
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let update = sqlx::raw_sql("update session_events set payload = '{}'")
             .execute(&mut *tx)
             .await;
         assert!(
             update.is_err(),
-            "the app role must not hold UPDATE on observe_events"
+            "the app role must not hold UPDATE on session_events"
         );
         drop(tx);
 
-        // A payload cannot be edited into something else...
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let rewritten = sqlx::raw_sql("update observe_events set occurred_at = now()")
+        // A delete that has not declared itself a disposal is refused by the
+        // trigger, grant or no grant.
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let undeclared = sqlx::raw_sql("delete from session_events")
             .execute(&mut *tx)
             .await;
         assert!(
-            rewritten.is_err(),
-            "nor may its stamps move: a staging row is what was observed"
+            undeclared.is_err(),
+            "a delete outside a declared retention purge must be refused"
         );
         drop(tx);
 
-        // ...and disposal removes it whole, which is a different act.
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let disposed = sqlx::raw_sql("delete from observe_events")
+        // The sanctioned path removes whole rows, and only this tenant's.
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        sqlx::raw_sql("set local synveda.retention_purge = 'on'")
             .execute(&mut *tx)
             .await
-            .expect("disposal is granted since MEM-6")
+            .expect("declare the purge");
+        let disposed = sqlx::raw_sql("delete from session_events")
+            .execute(&mut *tx)
+            .await
+            .expect("disposal is granted since CPR-12")
             .rows_affected();
         assert!(disposed > 0, "and it takes whole rows, never part of one");
-        let left = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from observe_events where tenant_id = $1"#,
-            tenant.as_uuid(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count staging");
-        assert_eq!(left, 0, "the tenant's own staging plane, and only its own");
+        let left = visible_event_rows(&mut tx, fixture.tenant).await;
+        assert_eq!(left, 0, "the tenant's own events, and only its own");
     });
 }
 
-/// The full admission shape — insert, duplicate suppression, enqueue —
-/// works as `synveda_app` with the right GUC, PGMQ grants included: the
-/// backstop isolates, it does not deny service.
+/// The full admission shape — insert, duplicate suppression, enqueue — works
+/// as `synveda_app` with the right GUC, PGMQ grants included: the backstop
+/// isolates, it does not deny service.
 #[test]
-fn same_tenant_observe_admission_works_under_rls() {
+fn same_tenant_session_admission_works_under_rls() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (tenant, scope, identity) = seed_observe(&db.pool).await;
+        let fixture = seed_session(&db.pool).await;
 
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let admitted = observe::buffer_batch(
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let admitted = sessions::append_events(
             &mut tx,
-            tenant,
-            scope,
-            identity,
-            "rls-session",
-            // rls-1 was admitted by the seed; rls-3 is new.
-            &[observe_event("rls-1"), observe_event("rls-3")],
+            fixture.tenant,
+            fixture.session,
+            // e1 was appended by the seed; e3 is new.
+            &[
+                sessions::NewSessionEvent {
+                    event_type: SessionEventType::MessageUser,
+                    event_schema_version: 1,
+                    client_event_id: "e1".to_owned(),
+                    occurred_at: chrono::Utc::now(),
+                    payload: serde_json::json!({"text": "redelivered"}),
+                    redactions: None,
+                    quarantine: false,
+                },
+                sessions::NewSessionEvent {
+                    event_type: SessionEventType::MessageUser,
+                    event_schema_version: 1,
+                    client_event_id: "e3".to_owned(),
+                    occurred_at: chrono::Utc::now(),
+                    payload: serde_json::json!({"text": "fresh"}),
+                    redactions: None,
+                    quarantine: false,
+                },
+            ],
         )
         .await
-        .expect("buffer under RLS (pgmq grants included)");
+        .expect("append under RLS (pgmq grants included)");
         assert_eq!(
             admitted
                 .iter()
-                .map(|event| event.duplicate)
+                .map(|event| event.outcome)
                 .collect::<Vec<_>>(),
-            vec![true, false],
-            "the redelivered key must be reported, the fresh one admitted"
+            vec![
+                sessions::AppendOutcome::Duplicate,
+                sessions::AppendOutcome::Appended
+            ],
+            "the redelivered id must be reported, the fresh one appended"
         );
         tx.commit().await.expect("commit admission");
 
-        // Exactly one queue signal per admitted event: the seed's two plus
-        // rls-3 — the duplicate enqueued nothing (messages carry only ids,
-        // and this count is per-tenant via the message body).
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        // One queue signal per *memory-carrying* event actually appended: the
+        // seed's `message.user` plus e3. The seed's `tool.invoked` carries
+        // memory too, and the duplicate enqueued nothing.
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
         let signals = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from pgmq.q_observe
+            r#"select count(*) as "count!" from pgmq.q_session_events
                where message ->> 'tenant_id' = $1"#,
-            tenant.to_string(),
+            fixture.tenant.to_string(),
         )
         .fetch_one(&mut *tx)
         .await
         .expect("count queue signals as synveda_app");
         assert_eq!(
             signals, 3,
-            "one signal per admitted event, none per duplicate"
+            "one signal per appended memory-carrying event, none per duplicate"
         );
     });
 }
 
-// ── Quarantine review queue (MEM-2, ADR-0021) ───────────────────────────────
+/// A type that carries no memory is recorded and **not** signalled: the
+/// timeline holds it, the extractor never sees it (ADR-0078 decision 2).
+#[test]
+fn bookkeeping_events_are_recorded_without_a_work_signal() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let fixture = seed_session(&db.pool).await;
+        let before = {
+            let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+            sqlx::query_scalar!(
+                r#"select count(*) as "count!" from pgmq.q_session_events
+                   where message ->> 'tenant_id' = $1"#,
+                fixture.tenant.to_string(),
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .expect("count before")
+        };
 
-/// Admits a tenant with one quarantined observe event; returns its ids.
-async fn seed_quarantined(pool: &PgPool) -> (TenantId, synveda_types::ObserveEventId) {
-    let (tenant, scope, identity) = seed_observe(pool).await;
-    let mut tx = pool.begin().await.expect("begin");
-    let admitted = observe::buffer_batch(
-        &mut tx,
-        tenant,
-        scope,
-        identity,
-        "rls-quarantine-session",
-        &[quarantined_event("rls-q1")],
-    )
-    .await
-    .expect("buffer quarantined event");
-    tx.commit().await.expect("commit quarantine fixture");
-    (tenant, admitted[0].id)
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        sessions::append_events(
+            &mut tx,
+            fixture.tenant,
+            fixture.session,
+            &[sessions::NewSessionEvent {
+                event_type: SessionEventType::AdapterWarning,
+                event_schema_version: 1,
+                client_event_id: "warn-1".to_owned(),
+                occurred_at: chrono::Utc::now(),
+                payload: serde_json::json!({"text": "dropped a batch"}),
+                redactions: None,
+                quarantine: false,
+            }],
+        )
+        .await
+        .expect("append a warning");
+        tx.commit().await.expect("commit");
+
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+        let after = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from pgmq.q_session_events
+               where message ->> 'tenant_id' = $1"#,
+            fixture.tenant.to_string(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count after");
+        assert_eq!(
+            after, before,
+            "an adapter warning must reach the timeline and never the extractor"
+        );
+    });
+}
+
+// ── Quarantine review queue (MEM-2, ADR-0021; ADR-0078 decision 4) ──────────
+
+/// A quarantined event is recorded like any other and simply gets **no work
+/// signal**: the review state lives in its own table, because `session_events`
+/// has no UPDATE grant and must not acquire one.
+#[test]
+fn a_quarantined_event_is_recorded_and_withheld_from_the_pipeline() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, session, event_id) = seed_quarantined(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let stored = sessions::event(&mut *tx, tenant, session, event_id)
+            .await
+            .expect("read the event")
+            .expect("the quarantined event is stored like any other");
+        assert!(
+            stored.redactions.is_some(),
+            "the finding summary rides the row as immutable provenance"
+        );
+        let signals = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from pgmq.q_session_events
+               where message ->> 'event_id' = $1"#,
+            event_id.to_string(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count signals for the withheld event");
+        assert_eq!(signals, 0, "a quarantined event must not be signalled");
+    });
 }
 
 /// The wrong (or absent) tenant GUC sees zero quarantine rows, and a
@@ -2456,12 +2500,12 @@ async fn seed_quarantined(pool: &PgPool) -> (TenantId, synveda_types::ObserveEve
 fn wrong_tenant_guc_sees_no_quarantine_rows() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (victim, event_id) = seed_quarantined(&db.pool).await;
-        let (adversary, _) = seed_quarantined(&db.pool).await;
+        let (victim, _, event_id) = seed_quarantined(&db.pool).await;
+        let (adversary, _, _) = seed_quarantined(&db.pool).await;
 
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
         let visible = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from observe_quarantine
+            r#"select count(*) as "count!" from session_event_quarantine
                where tenant_id = $1"#,
             victim.as_uuid(),
         )
@@ -2469,8 +2513,8 @@ fn wrong_tenant_guc_sees_no_quarantine_rows() {
         .await
         .expect("count quarantine rows");
         assert_eq!(visible, 0, "quarantine rows leaked across tenants");
-        // The store surfaces reach nothing either: get is None, review
-        // touches no row — the gateway's uniform 404.
+        // The store surfaces reach nothing either: get is None, review touches
+        // no row — the gateway's uniform 404.
         assert_eq!(
             quarantine::get(&mut tx, victim, event_id)
                 .await
@@ -2493,19 +2537,20 @@ fn wrong_tenant_guc_sees_no_quarantine_rows() {
     });
 }
 
-/// The app role's write power over the review queue is exactly the
-/// one-shot review: findings/provenance columns are not updatable, rows
-/// are not deletable, and a reviewed row cannot be re-reviewed — column
-/// grants and the transition trigger, exercised as `synveda_app`.
+/// The app role's write power over the review queue is exactly the one-shot
+/// review: findings/provenance columns are not updatable, rows are not
+/// deletable outside a declared purge, and a reviewed row cannot be
+/// re-reviewed — column grants and the transition trigger, exercised as
+/// `synveda_app`.
 #[test]
 fn quarantine_review_is_one_shot_and_column_bound_for_the_app_role() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (tenant, event_id) = seed_quarantined(&db.pool).await;
+        let (tenant, _, event_id) = seed_quarantined(&db.pool).await;
 
         // Rewriting findings: no column grant.
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let rewrite = sqlx::raw_sql("update observe_quarantine set findings = '[]'")
+        let rewrite = sqlx::raw_sql("update session_event_quarantine set findings = '[]'")
             .execute(&mut *tx)
             .await;
         assert!(
@@ -2514,14 +2559,14 @@ fn quarantine_review_is_one_shot_and_column_bound_for_the_app_role() {
         );
         drop(tx);
 
-        // Deleting: no grant, and the trigger raises even for owners.
+        // Deleting outside a declared purge: the trigger raises.
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let delete = sqlx::raw_sql("delete from observe_quarantine")
+        let delete = sqlx::raw_sql("delete from session_event_quarantine")
             .execute(&mut *tx)
             .await;
         assert!(
             delete.is_err(),
-            "the app role must not hold DELETE on observe_quarantine"
+            "a quarantine row is retired by retention disposal, never by a handler"
         );
         drop(tx);
 
@@ -2558,11 +2603,11 @@ fn quarantine_review_is_one_shot_and_column_bound_for_the_app_role() {
         );
         drop(tx);
 
-        // Even a raw update aimed back at pending trips the transition
-        // trigger — the state machine is schema-enforced.
+        // Even a raw update aimed back at pending trips the transition trigger
+        // — the state machine is schema-enforced.
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
         let unreview = sqlx::query!(
-            "update observe_quarantine set state = 'pending', \
+            "update session_event_quarantine set state = 'pending', \
              reviewer_subject = null, reviewed_at = null, review_reason = null \
              where event_id = $1",
             event_id.as_uuid(),
@@ -2572,6 +2617,43 @@ fn quarantine_review_is_one_shot_and_column_bound_for_the_app_role() {
         assert!(
             unreview.is_err(),
             "a reviewed row must never return to pending"
+        );
+    });
+}
+
+/// A release enqueues the signal admission withheld, so the pipeline cannot
+/// tell a released event from an admitted one.
+#[test]
+fn releasing_a_quarantined_event_enqueues_its_withheld_signal() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _, event_id) = seed_quarantined(&db.pool).await;
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        quarantine::review(
+            &mut tx,
+            tenant,
+            event_id,
+            quarantine::ReviewDecision::Release,
+            "rls-reviewer",
+            None,
+        )
+        .await
+        .expect("release under RLS")
+        .expect("the quarantined event exists");
+        tx.commit().await.expect("commit release");
+
+        let mut tx = app_tx(&db.pool, Some(tenant)).await;
+        let signals = sqlx::query_scalar!(
+            r#"select count(*) as "count!" from pgmq.q_session_events
+               where message ->> 'event_id' = $1"#,
+            event_id.to_string(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("count signals after release");
+        assert_eq!(
+            signals, 1,
+            "a release sends exactly the signal admission withheld"
         );
     });
 }
@@ -4073,15 +4155,15 @@ fn a_purge_is_flag_gated_scoped_to_its_tenant_and_never_a_rewrite() {
     });
 }
 
-/// The staging plane's new DELETE grants (migration 0025), under the same
-/// adversarial reading: disposal is per tenant, and the marker cannot
-/// outlive the row it points at.
+/// The ingestion plane's DELETE grants (migration 0046), under the same
+/// adversarial reading: disposal is per tenant, and the marker cannot outlive
+/// the row it points at.
 #[test]
 fn staging_disposal_is_scoped_to_its_tenant_and_takes_its_markers_with_it() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (victim, victim_event) = seed_quarantined(&db.pool).await;
-        let (adversary, _) = seed_quarantined(&db.pool).await;
+        let (victim, _, victim_event) = seed_quarantined(&db.pool).await;
+        let (adversary, _, _) = seed_quarantined(&db.pool).await;
 
         // A disposal naming another tenant's staging rows matches nothing.
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
@@ -4090,7 +4172,7 @@ fn staging_disposal_is_scoped_to_its_tenant_and_takes_its_markers_with_it() {
             .await
             .expect("declare the disposal");
         let reached = sqlx::query!(
-            "delete from observe_quarantine where tenant_id = $1",
+            "delete from session_event_quarantine where tenant_id = $1",
             victim.as_uuid(),
         )
         .execute(&mut *tx)
@@ -4099,7 +4181,7 @@ fn staging_disposal_is_scoped_to_its_tenant_and_takes_its_markers_with_it() {
         .rows_affected();
         assert_eq!(reached, 0);
         let reached = sqlx::query!(
-            "delete from observe_events where tenant_id = $1",
+            "delete from session_events where tenant_id = $1",
             victim.as_uuid(),
         )
         .execute(&mut *tx)
@@ -4114,7 +4196,7 @@ fn staging_disposal_is_scoped_to_its_tenant_and_takes_its_markers_with_it() {
         // decision 7).
         let mut tx = app_tx(&db.pool, Some(victim)).await;
         let orphaned = sqlx::query!(
-            "delete from observe_events where tenant_id = $1 and id = $2",
+            "delete from session_events where tenant_id = $1 and id = $2",
             victim.as_uuid(),
             victim_event.as_uuid(),
         )
@@ -4126,13 +4208,13 @@ fn staging_disposal_is_scoped_to_its_tenant_and_takes_its_markers_with_it() {
         );
         drop(tx);
 
-        // Migration 0013's trigger refuses a marker delete outright until
-        // the transaction says it is a retention disposal — the same flag
-        // the history purge sets, and the reason a handler cannot retire a
-        // pending review by accident.
+        // Migration 0046's trigger refuses a marker delete outright until the
+        // transaction says it is a retention disposal — the same flag the
+        // history purge sets, and the reason a handler cannot retire a pending
+        // review by accident.
         let mut tx = app_tx(&db.pool, Some(victim)).await;
         let undeclared = sqlx::query!(
-            "delete from observe_quarantine where tenant_id = $1 and event_id = $2",
+            "delete from session_event_quarantine where tenant_id = $1 and event_id = $2",
             victim.as_uuid(),
             victim_event.as_uuid(),
         )
@@ -4150,7 +4232,7 @@ fn staging_disposal_is_scoped_to_its_tenant_and_takes_its_markers_with_it() {
             .await
             .expect("declare the disposal");
         sqlx::query!(
-            "delete from observe_quarantine where tenant_id = $1 and event_id = $2",
+            "delete from session_event_quarantine where tenant_id = $1 and event_id = $2",
             victim.as_uuid(),
             victim_event.as_uuid(),
         )
@@ -4158,7 +4240,7 @@ fn staging_disposal_is_scoped_to_its_tenant_and_takes_its_markers_with_it() {
         .await
         .expect("dispose of the marker");
         let disposed = sqlx::query!(
-            "delete from observe_events where tenant_id = $1 and id = $2",
+            "delete from session_events where tenant_id = $1 and id = $2",
             victim.as_uuid(),
             victim_event.as_uuid(),
         )
@@ -6101,6 +6183,8 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
                 client_event_id: "e1".to_owned(),
                 occurred_at: chrono::Utc::now(),
                 payload: serde_json::json!({"text": "a secret plan"}),
+                redactions: None,
+                quarantine: false,
             },
             sessions::NewSessionEvent {
                 event_type: SessionEventType::ToolInvoked,
@@ -6108,6 +6192,8 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
                 client_event_id: "e2".to_owned(),
                 occurred_at: chrono::Utc::now(),
                 payload: serde_json::json!({"tool": "grep"}),
+                redactions: None,
+                quarantine: false,
             },
         ],
     )
@@ -6118,6 +6204,7 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
         tenant,
         &sessions::NewContextRun {
             id: ContextRunId::new(),
+            skills: serde_json::json!([]),
             session_id: session.id,
             scope_id: workspace.scope_id,
             principal_id: "rls-agent".to_owned(),
@@ -6275,12 +6362,20 @@ fn the_app_role_cannot_rewrite_or_delete_a_transcript() {
                 .execute(&mut *tx)
                 .await
                 .expect_err(&format!("{statement} must be refused"));
+            // Two mechanisms, one property. An UPDATE is refused by the
+            // missing grant (`42501`); a DELETE from `session_events` is
+            // refused by migration 0046's trigger (`P0001`), because retention
+            // disposal does need the grant and declares itself with a
+            // transaction-local flag. What matters is that neither reaches a
+            // row, and that a handler which has not said it is retention
+            // cannot retire a transcript.
+            let code = err
+                .as_database_error()
+                .and_then(sqlx::error::DatabaseError::code)
+                .map(std::borrow::Cow::into_owned);
             assert!(
-                err.as_database_error()
-                    .and_then(sqlx::error::DatabaseError::code)
-                    .as_deref()
-                    == Some("42501"),
-                "{statement}: expected insufficient_privilege, got {err:?}"
+                matches!(code.as_deref(), Some("42501" | "P0001")),
+                "{statement}: expected a refusal, got {err:?}"
             );
             tx.rollback().await.expect("rollback");
         }
@@ -6375,7 +6470,7 @@ fn the_session_row_rules_hold_against_direct_sql() {
                                          client_event_id, sequence, occurred_at, payload_hash) \
              values ($1, $2, $3, 'message.user', 'e1', 99, now(), $4)",
         )
-        .bind(uuid::Uuid::new_v4())
+        .bind(synveda_types::SessionEventId::new().as_uuid())
         .bind(fixture.tenant.as_uuid())
         .bind(fixture.session.as_uuid())
         .bind("ab".repeat(32))
@@ -6390,7 +6485,7 @@ fn the_session_row_rules_hold_against_direct_sql() {
                                          client_event_id, sequence, occurred_at, payload_hash) \
              values ($1, $2, $3, 'message.user', 'e99', 1, now(), $4)",
         )
-        .bind(uuid::Uuid::new_v4())
+        .bind(synveda_types::SessionEventId::new().as_uuid())
         .bind(fixture.tenant.as_uuid())
         .bind(fixture.session.as_uuid())
         .bind("ab".repeat(32))
@@ -6406,7 +6501,7 @@ fn the_session_row_rules_hold_against_direct_sql() {
                                          client_event_id, sequence, occurred_at, payload_hash) \
              values ($1, $2, $3, 'message.system', 'e100', 100, now(), $4)",
         )
-        .bind(uuid::Uuid::new_v4())
+        .bind(synveda_types::SessionEventId::new().as_uuid())
         .bind(fixture.tenant.as_uuid())
         .bind(fixture.session.as_uuid())
         .bind("ab".repeat(32))
@@ -6451,6 +6546,8 @@ fn same_tenant_session_lifecycle_works_under_rls() {
                 client_event_id: "e1".to_owned(),
                 occurred_at: chrono::Utc::now(),
                 payload: serde_json::json!({"text": "a secret plan"}),
+                redactions: None,
+                quarantine: false,
             }],
         )
         .await
@@ -6525,6 +6622,8 @@ fn same_tenant_session_lifecycle_works_under_rls() {
                 client_event_id: "e3".to_owned(),
                 occurred_at: chrono::Utc::now(),
                 payload: serde_json::json!({}),
+                redactions: None,
+                quarantine: false,
             }],
         )
         .await
@@ -6560,6 +6659,8 @@ fn same_tenant_session_lifecycle_works_under_rls() {
                 client_event_id: "e4".to_owned(),
                 occurred_at: chrono::Utc::now(),
                 payload: serde_json::json!({}),
+                redactions: None,
+                quarantine: false,
             }],
         )
         .await;

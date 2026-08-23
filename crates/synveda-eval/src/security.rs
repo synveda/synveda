@@ -22,9 +22,9 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-/// The observe kinds MEM-1 accepts.
-const KINDS: [&str; 3] = ["transcript_delta", "tool_result", "decision"];
+use crate::fixtures::EVENT_TYPES;
 
+/// The observe kinds MEM-1 accepts.
 /// The tiers a classify proposal may install. `public` and `internal` are
 /// absent on purpose: the pipeline already floors at `internal`
 /// (ADR-0022) and a proposal that installed a tier below the working one
@@ -66,8 +66,11 @@ pub struct Material {
     /// decision 3).
     pub actor: String,
     pub session_id: String,
-    #[serde(default = "default_kind")]
-    pub kind: String,
+    /// A session event type that carries memory (CPR-12, ADR-0078 decision 2).
+    /// Defaults to `message.user`, which is what an unlabelled line of a
+    /// transcript is.
+    #[serde(default = "default_event_type")]
+    pub event_type: String,
     pub text: String,
     /// The distinctive phrase the containment predicate looks for. The
     /// second of the two graders (decision 6) — identity says "this record
@@ -100,8 +103,8 @@ pub struct Material {
     pub note: String,
 }
 
-fn default_kind() -> String {
-    "transcript_delta".to_owned()
+fn default_event_type() -> String {
+    "message.user".to_owned()
 }
 
 impl Material {
@@ -307,10 +310,10 @@ fn validate(corpora: &[Corpus]) -> Result<(), String> {
                 ));
             }
             sessions.insert(&record.session_id, &corpus.corpus);
-            if !KINDS.contains(&record.kind.as_str()) {
+            if !EVENT_TYPES.contains(&record.event_type.as_str()) {
                 return Err(at(&format!(
-                    "kind `{}` is not one of {KINDS:?}",
-                    record.kind
+                    "event type `{}` is not one of {EVENT_TYPES:?}",
+                    record.event_type
                 )));
             }
             if let Some(tier) = &record.classify
@@ -403,7 +406,7 @@ mod tests {
              "readable_by": [],
              "forbidden_to": ["sec-owner", "sec-mate", "sec-neighbour"]},
             {"key": "rota", "actor": "sec-owner", "session_id": "s-rota",
-             "kind": "decision",
+             "event_type": "message.assistant",
              "text": "The incident bridge rota is maintained by the platform leads.",
              "marker": "incident bridge rota",
              "promote_to": "vault",
@@ -423,7 +426,7 @@ mod tests {
     fn a_corpus_round_trips_with_its_defaults() {
         let corpora = parse(CLEAN).expect("parses");
         let corpus = &corpora[0];
-        assert_eq!(corpus.material[0].kind, "transcript_delta");
+        assert_eq!(corpus.material[0].event_type, "message.user");
         assert!(corpus.material[0].is_classified());
         assert!(!corpus.material[1].is_classified());
         assert!(corpus.material[0].forges.is_none());
@@ -486,7 +489,11 @@ mod tests {
     #[test]
     fn the_vocabularies_are_closed() {
         assert!(
-            parse(&CLEAN.replace(r#""kind": "decision""#, r#""kind": "thought""#)).is_err(),
+            parse(&CLEAN.replace(
+                r#""event_type": "message.assistant""#,
+                r#""event_type": "thought""#
+            ))
+            .is_err(),
             "unknown kind must not validate"
         );
         assert!(

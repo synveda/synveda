@@ -37,8 +37,16 @@ use crate::event::{AuditAction, Outcome};
 ///
 /// This is exactly the predicate of migration 0028's partial GIN index; a
 /// query that widens it stops using that index.
-pub const DISCLOSURE_ACTIONS: [AuditAction; 2] =
-    [AuditAction::ContextInjected, AuditAction::ContextRecalled];
+/// `session.context.composed` joined the set with the observe cutover
+/// (CPR-12, ADR-0078 decision 5): `/v1/inject` and `/v1/recall` are deleted, so
+/// a context run is the **only** way material reaches an agent, and a
+/// disclosure query that did not count it would answer "nobody was served
+/// anything" about every deployment on the new plane.
+pub const DISCLOSURE_ACTIONS: [AuditAction; 3] = [
+    AuditAction::ContextInjected,
+    AuditAction::ContextRecalled,
+    AuditAction::SessionContextComposed,
+];
 
 /// The actions that open or close authority over a scope's material — the
 /// *authority* half of "who could see X on date D" (ADR-0045 decision 4).
@@ -311,7 +319,8 @@ pub async fn disclosures(
         r#"select seq, occurred_at, actor_kind, actor_subject, action, payload
            from audit_log
            where tenant_id = $1
-             and action in ('context.injected', 'context.recalled')
+             and action in ('context.injected', 'context.recalled',
+                            'session.context.composed')
              and payload @> $2::jsonb
              and seq > $3
              and occurred_at >= $4
@@ -395,7 +404,8 @@ pub async fn knowledge(
         r#"select seq, occurred_at, actor_kind, actor_subject, action, payload
            from audit_log
            where tenant_id = $1
-             and action in ('context.injected', 'context.recalled')
+             and action in ('context.injected', 'context.recalled',
+                            'session.context.composed')
              and actor_subject = $2
              and occurred_at <= $3
            order by seq desc
@@ -691,12 +701,21 @@ mod tests {
 
     #[test]
     fn the_disclosure_actions_are_exactly_the_partial_index_predicate() {
-        // Migration 0028's index is partial on these two action names; a
-        // rename here without a migration silently stops using it.
+        // The index is partial on exactly these action names — migration
+        // 0028's originally, rebuilt by 0046 when the observe cutover made a
+        // context run the only way material reaches anybody. A rename or an
+        // addition here without a matching migration silently stops using it.
         let names: Vec<&str> = DISCLOSURE_ACTIONS
             .iter()
             .map(|action| action.as_str())
             .collect();
-        assert_eq!(names, ["context.injected", "context.recalled"]);
+        assert_eq!(
+            names,
+            [
+                "context.injected",
+                "context.recalled",
+                "session.context.composed"
+            ]
+        );
     }
 }

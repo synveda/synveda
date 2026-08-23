@@ -58,6 +58,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
+use synveda_ingest::ScanOutcome;
 use synveda_ingest::embedding::Embedder as _;
 use synveda_policy::{Action, Resource, ResourceEntity, ScopeNode};
 use synveda_retrieval::{
@@ -74,8 +75,8 @@ use synveda_types::session::{
     SessionStatus,
 };
 use synveda_types::{
-    ContextRunId, Error, PolicyAssignment, ProjectId, RepositoryId, Result, ScopeId, SessionId,
-    TenantId, WorkspaceId,
+    ContextRunId, Error, PolicyAssignment, ProjectId, RedactionMode, RepositoryId, Result, ScopeId,
+    SessionId, TenantId, WorkspaceId,
 };
 use utoipa::ToSchema;
 
@@ -85,7 +86,7 @@ use crate::authz::{self, Authorized};
 use crate::error::ApiError;
 use crate::idempotency::{Claim, Dispatch};
 use crate::request::{body, commit, tenant_id};
-use crate::telemetry::SESSION_OPERATIONS_TOTAL;
+use crate::telemetry::{REDACTION_FINDINGS_TOTAL, SESSION_OPERATIONS_TOTAL};
 use crate::workspaces::{ApiErrorBody, Decidable, string_enum, subject};
 
 /// Default rows in a session listing. The scan bound above it is the store's
@@ -292,12 +293,25 @@ impl From<SessionEvent> for SessionEventView {
 /// What one appended event did, and the row it names.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AppendedEventView {
-    /// `appended` or `duplicate`.
+    /// `appended`, `duplicate`, `quarantined` or `denied`.
     pub outcome: String,
+    /// The client's own id for the event, echoed on every outcome — including
+    /// the ones that store nothing, which is what lets a spooling client mark
+    /// exactly the entries this call resolved.
+    pub client_event_id: String,
     /// The stored row — this deployment's version of it, never the caller's,
     /// because a retry must be told what is held rather than handed back what
     /// it just sent.
-    pub event: SessionEventView,
+    ///
+    /// Absent for a `denied` event: nothing was stored, so there is no row to
+    /// name (CPR-12, ADR-0078 decision 1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event: Option<SessionEventView>,
+    /// The scan's finding summary — rule ids, categories and counts, never
+    /// matched text. Absent when the payload was clean.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub redactions: Option<serde_json::Value>,
 }
 
 /// The append response.
@@ -309,6 +323,12 @@ pub struct AppendResponse {
     pub appended: usize,
     /// How many were already here.
     pub duplicates: usize,
+    /// How many were stored but withheld from the extraction pipeline pending
+    /// a reviewer's decision (MEM-2, ADR-0021 decision 5).
+    pub quarantined: usize,
+    /// How many were refused outright by the redaction policy. Nothing of a
+    /// denied event persists — not its payload, not a row, not a position.
+    pub denied: usize,
 }
 
 /// A context run, as the API serves it.
@@ -337,6 +357,11 @@ pub struct ContextRunView {
     pub budget_tokens: i32,
     /// How many records composed.
     pub entry_count: i32,
+    /// The skills this block advertised (ADR-0054 decision 8): name, scope,
+    /// commit and object address, so an adapter can materialise exactly what
+    /// was named without asking twice.
+    #[schema(value_type = Object)]
+    pub skills: serde_json::Value,
     /// Which retrieval legs degraded — `embedder`, `retrieval`. Empty is the
     /// ordinary answer.
     pub degraded: Vec<String>,
@@ -356,6 +381,7 @@ impl From<ContextRun> for ContextRunView {
             tokens: run.tokens,
             budget_tokens: run.budget_tokens,
             entry_count: run.entry_count,
+            skills: run.skills,
             degraded: run.degraded,
             created_at: run.created_at,
         }
@@ -901,12 +927,30 @@ async fn load(
     id: SessionId,
     action: Action,
 ) -> Result<(Session, Authorized, Resource)> {
+    let (session, authorized, resource, _) =
+        load_with_input(state, tx, tenant_id, id, action).await?;
+    Ok((session, authorized, resource))
+}
+
+/// [`load`], keeping the decision input.
+///
+/// The append path needs it: the redaction config comes off the **effective
+/// pack for the session's scope**, which is the same resolution the
+/// `SessionWrite` decision just performed, and re-gathering it would be a
+/// second walk that could disagree with the first.
+async fn load_with_input(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    id: SessionId,
+    action: Action,
+) -> Result<(Session, Authorized, Resource, authz::DecisionInput)> {
     let session = sessions::get(&mut *tx, tenant_id, id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    let (authorized, resource, _) =
+    let (authorized, resource, input) =
         require(state, tx, action, tenant_id, Subject::Session(&session)).await?;
-    Ok((session, authorized, resource))
+    Ok((session, authorized, resource, input))
 }
 
 // ── Open ─────────────────────────────────────────────────────────────────────
@@ -1432,26 +1476,113 @@ pub(crate) async fn append_events(
         let body = body(payload)?;
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let (session, authorized, _) =
-            load(&state, &mut tx, tenant_id, id, Action::SessionWrite).await?;
+        let (session, authorized, _, input) =
+            load_with_input(&state, &mut tx, tenant_id, id, Action::SessionWrite).await?;
 
-        let events: Vec<NewSessionEvent> = body
+        // ── The scan seam (MEM-2, ADR-0021 decision 1; moved here from
+        // `/v1/observe` by CPR-12, ADR-0078 decision 1) ──
+        //
+        // Every payload is scanned and redacted **before anything persists**,
+        // and the effective pack's redaction config picks each event's
+        // disposition. The raw finding text survives in no table, no response,
+        // no metric and no audit payload — only the summary of rule ids,
+        // categories and counts does.
+        //
+        // The config comes off the pack that governs the session's scope,
+        // which is the same resolution the `SessionWrite` decision above
+        // performed. `SessionWrite` is not `PolicyAssign`, so there is no
+        // skip-self divergence to worry about.
+        let config = state
+            .pdp
+            .effective(
+                tenant_id,
+                Resource::Scope(session.scope_id),
+                &input.context(),
+            )
+            .redaction;
+        let payloads: Vec<serde_json::Value> = body
             .events
             .iter()
-            .map(|event| NewSessionEvent {
+            .map(|event| event.payload.clone().unwrap_or_else(|| json!({})))
+            .collect();
+        // CPU work, O(payload bytes): off the reactor. The request span travels
+        // along so the scan spans nest under it.
+        let span = tracing::Span::current();
+        let scans: Vec<ScanOutcome> = tokio::task::spawn_blocking(move || {
+            let _entered = span.enter();
+            payloads.into_iter().map(synveda_ingest::scan).collect()
+        })
+        .await
+        .map_err(|err| Error::Internal {
+            message: format!("redaction scan task failed: {err}"),
+        })?;
+
+        // Dispositions (ADR-0021 decision 4): a denied event never reaches the
+        // store, the rest are appended with their finding summary, and a
+        // quarantined one is appended **without a work signal**.
+        //
+        // Denial is per event and not per batch, deliberately: a hook
+        // delivering a turn's worth of events should not lose nineteen of them
+        // because the twentieth quoted a live credential.
+        let mut denied_views: Vec<AppendedEventView> = Vec::new();
+        let mut events: Vec<NewSessionEvent> = Vec::with_capacity(body.events.len());
+        let mut submitted_order: Vec<Option<usize>> = Vec::with_capacity(body.events.len());
+        let mut rule_summary: BTreeMap<&'static str, u64> = BTreeMap::new();
+        for (event, scan) in body.events.iter().zip(scans) {
+            for finding in &scan.findings {
+                metrics::counter!(
+                    REDACTION_FINDINGS_TOTAL,
+                    "rule" => finding.rule,
+                    "category" => finding.category.as_str(),
+                )
+                .increment(finding.count as u64);
+                *rule_summary.entry(finding.rule).or_default() += finding.count as u64;
+            }
+            let disposition = scan.disposition(&config);
+            let redactions = if scan.findings.is_empty() {
+                None
+            } else {
+                Some(
+                    serde_json::to_value(&scan.findings).map_err(|err| Error::Internal {
+                        message: format!("serialise finding summary: {err}"),
+                    })?,
+                )
+            };
+            if disposition == Some(RedactionMode::Deny) {
+                denied_views.push(AppendedEventView {
+                    outcome: "denied".to_owned(),
+                    client_event_id: event.client_event_id.clone(),
+                    redactions,
+                    event: None,
+                });
+                submitted_order.push(None);
+                continue;
+            }
+            submitted_order.push(Some(events.len()));
+            events.push(NewSessionEvent {
                 event_type: event.event_type,
                 event_schema_version: event.event_schema_version,
                 client_event_id: event.client_event_id.clone(),
                 occurred_at: event.occurred_at,
-                payload: event.payload.clone().unwrap_or_else(|| json!({})),
-            })
-            .collect();
-        let appended = sessions::append_events(&mut tx, tenant_id, id, &events).await?;
+                payload: scan.payload,
+                redactions,
+                quarantine: disposition == Some(RedactionMode::Quarantine),
+            });
+        }
+
+        let appended = if events.is_empty() {
+            Vec::new()
+        } else {
+            sessions::append_events(&mut tx, tenant_id, id, &events).await?
+        };
 
         let written = appended
             .iter()
             .filter(|event| event.outcome == AppendOutcome::Appended)
             .count();
+        let quarantined = appended.iter().filter(|event| event.quarantined).count();
+        let denied = denied_views.len();
+        let written_total = appended.len();
         // One event per batch, carrying counts and the sequence range rather
         // than the events themselves: a hundred-turn run would otherwise put
         // its whole transcript in the chain twice, and the chain is not the
@@ -1478,27 +1609,60 @@ pub(crate) async fn append_events(
             json!({
                 "authz": audit::decision_context(Action::SessionWrite, &authorized),
                 "session_id": session.id,
-                "submitted": appended.len(),
+                "submitted": body.events.len(),
                 "appended": written,
-                "duplicates": appended.len() - written,
+                "duplicates": written_total - written,
+                "quarantined": quarantined,
+                "denied": denied,
                 "by_type": by_type,
                 "first_sequence": sequences.first(),
                 "last_sequence": sequences.last(),
+                // Rule ids and counts only. The finding summary is already
+                // content-free (ADR-0021 decision 1) and the matched text
+                // exists in no table, response, metric or payload — asserted
+                // by sweeping the whole chain for a planted credential.
+                "redaction_rules": rule_summary,
             }),
         )
         .await?;
         commit(tx).await?;
 
+        // Re-interleave into submission order: a client keyed on position must
+        // get one outcome per event it sent, in the order it sent them, even
+        // though the denied ones never reached the store.
+        let mut stored = appended.into_iter().map(Some).collect::<Vec<_>>();
+        let mut denied_iter = denied_views.into_iter();
+        let mut views: Vec<AppendedEventView> = Vec::with_capacity(submitted_order.len());
+        for slot in submitted_order {
+            match slot {
+                Some(index) => {
+                    let item = stored[index].take().ok_or_else(|| Error::Internal {
+                        message: "an append outcome was claimed twice".to_owned(),
+                    })?;
+                    let outcome = if item.quarantined {
+                        "quarantined".to_owned()
+                    } else {
+                        item.outcome.as_str().to_owned()
+                    };
+                    views.push(AppendedEventView {
+                        outcome,
+                        client_event_id: item.event.client_event_id.clone(),
+                        redactions: item.event.redactions.clone(),
+                        event: Some(item.event.into()),
+                    });
+                }
+                None => views.push(denied_iter.next().ok_or_else(|| Error::Internal {
+                    message: "a denied event lost its outcome".to_owned(),
+                })?),
+            }
+        }
+
         Ok(Json(AppendResponse {
             appended: written,
-            duplicates: appended.len() - written,
-            events: appended
-                .into_iter()
-                .map(|appended| AppendedEventView {
-                    outcome: appended.outcome.as_str().to_owned(),
-                    event: appended.event.into(),
-                })
-                .collect(),
+            duplicates: written_total - written,
+            quarantined,
+            denied,
+            events: views,
         }))
     }
     .await;
@@ -1735,11 +1899,28 @@ fn merge_timeline(events: Vec<TimelineEntry>, runs: Vec<TimelineEntry>) -> Vec<T
 fn event_summary(event: &SessionEvent) -> String {
     let text = |key: &str| event.payload.get(key).and_then(|value| value.as_str());
     match event.event_type {
+        // **A message's summary never carries what was said.**
+        //
+        // CPR-11 put the first 120 characters here and asserted, in the same
+        // feature, that "a timeline is not a transcript" — two statements that
+        // cannot both hold, and the integration test is the one that was
+        // right. `SessionDiagnostics` exists precisely because a timeline says
+        // *that* a message was sent and a payload is what was said (ADR-0077
+        // decision 3); a summary that reproduces the text hands most of a
+        // transcript to every holder of the strictly wider `SessionRead`.
+        //
+        // The length is the most a reader gets for free, and it is genuinely
+        // useful: a one-word reply and a pasted stack trace are different
+        // events, and saying which is which discloses neither.
         SessionEventType::MessageUser | SessionEventType::MessageAssistant => {
-            text("text").or_else(|| text("content")).map_or_else(
-                || event.event_type.as_str().to_owned(),
-                |t| truncate(t, 120),
-            )
+            match text("text").or_else(|| text("content")) {
+                Some(said) => format!(
+                    "{} ({} characters)",
+                    event.event_type.as_str(),
+                    said.chars().count()
+                ),
+                None => event.event_type.as_str().to_owned(),
+            }
         }
         SessionEventType::ToolInvoked | SessionEventType::ToolResult => {
             text("tool").or_else(|| text("name")).map_or_else(
@@ -1778,6 +1959,32 @@ fn truncate(text: &str, max: usize) -> String {
 }
 
 // ── Context runs ─────────────────────────────────────────────────────────────
+
+/// The query, as the chain records it: a digest, never the words.
+fn task_hash(task: &str) -> String {
+    blake3::hash(task.as_bytes()).to_hex().to_string()
+}
+
+/// The composed run, with the degradation ladder on the header as well as in
+/// the body (ADR-0026 decision 4).
+///
+/// The header is part of a **successful** response, not an error: a client
+/// that degraded still got context, and the one that ships with this product
+/// reads exactly this header to decide whether to say so. `/v1/inject` set it
+/// and this is what replaced that route.
+fn context_run_response(status: StatusCode, run: ContextRun) -> Response {
+    let header = run
+        .degraded
+        .join(",")
+        .parse::<axum::http::HeaderValue>()
+        .ok()
+        .filter(|_| !run.degraded.is_empty());
+    let mut rendered = (status, Json(ContextRunView::from(run))).into_response();
+    if let Some(value) = header {
+        rendered.headers_mut().insert("x-synveda-degraded", value);
+    }
+    rendered
+}
 
 /// `POST /v1/sessions/{session_id}/context-runs` — compose context for a run.
 ///
@@ -1848,7 +2055,7 @@ pub(crate) async fn create_context_run(
             Dispatch::Replay(run_id) => Some(run_id),
             Dispatch::Create => {
                 match compose_for_session(&state, tenant_id, &subject, id, &body, &claim).await {
-                    Ok(run) => return Ok((StatusCode::CREATED, Json(ContextRunView::from(run)))),
+                    Ok(run) => return Ok(context_run_response(StatusCode::CREATED, run)),
                     Err(conflict @ Error::Conflict { .. }) => Some(
                         crate::idempotency::resolve_conflict(
                             &state.pool,
@@ -1864,7 +2071,7 @@ pub(crate) async fn create_context_run(
         };
         let run_id = ContextRunId::from_uuid(replayed.expect("replay id"));
         let run = replay_context_run(&state, tenant_id, id, run_id, &claim).await?;
-        Ok((StatusCode::OK, Json(ContextRunView::from(run))))
+        Ok(context_run_response(StatusCode::OK, run))
     }
     .await;
     respond(&state, "session.context_run", result).await
@@ -1928,7 +2135,28 @@ async fn compose_for_session(
     }
     let session_chain: Vec<ScopeNode> = input.chain.to_vec();
     let own_chain: Vec<ScopeNode> = input.principal_scopes.to_vec();
+    // The scopes a standing lapse reaches, each with its own chain and
+    // assignments — read in the same transaction, because the effective pack
+    // is a property of the resource (AUTHZ-4, ADR-0037 decision 10). Empty for
+    // every caller holding no lapse, which is almost all of them.
+    //
+    // CPR-10 left these out on the reasoning that omitting them can only
+    // narrow, and that a second relaxation path was Prompt 26's to build once.
+    // That reasoning held while `/v1/inject` still existed and still carried
+    // them. CPR-12 deleted it, so this is now the **only** governed read path
+    // — and a lapse nothing honours is not a narrowing, it is a shipped
+    // feature that silently stopped working. Gathered the same way inject
+    // gathered them, through the same seam, so there is still one path.
+    let lapsed_chains = authz::gather_lapsed(state, &mut tx, &input).await?;
     drop(tx);
+    let lapsed: Vec<synveda_retrieval::LapsedScope<'_>> = lapsed_chains
+        .iter()
+        .map(|resolved| synveda_retrieval::LapsedScope {
+            lapse: &resolved.lapse,
+            chain: &resolved.chain,
+            assignments: &resolved.assignments,
+        })
+        .collect();
 
     let candidates: Vec<CandidateScope<'_>> = session_chain
         .iter()
@@ -1953,12 +2181,8 @@ async fn compose_for_session(
             groups: &input.groups,
             assignments: &assignments,
             default_pack: input.default_pack.as_deref(),
-            // Lapses are not gathered here, which can only ever *narrow* what
-            // composes. Widening a session's context by a standing relaxation
-            // is Prompt 26's, and doing it half-way now would be a second
-            // relaxation path to keep true.
-            lapses: &[],
-            lapsed: &[],
+            lapses: &input.lapses,
+            lapsed: &lapsed,
             candidates: &candidates,
         },
     )?;
@@ -2057,6 +2281,24 @@ async fn compose_for_session(
             tokens: i32::try_from(block.tokens).unwrap_or(i32::MAX),
             budget_tokens: i32::try_from(block.budget_tokens).unwrap_or(i32::MAX),
             entry_count: i32::try_from(block.entries.len()).unwrap_or(i32::MAX),
+            // Shaped here rather than by deriving `Serialize` on the
+            // retrieval type: this is a wire contract, and a derive would
+            // make every field of an internal struct part of it (the
+            // `WorkspaceView` rule).
+            skills: json!(
+                block
+                    .skills
+                    .iter()
+                    .map(|skill| json!({
+                        "name": skill.name,
+                        "scope_id": skill.scope_id,
+                        "position": skill.position,
+                        "commit": skill.commit,
+                        "object_hash": skill.object_hash,
+                        "sensitivity": skill.sensitivity,
+                    }))
+                    .collect::<Vec<_>>()
+            ),
             degraded: degraded.clone(),
         },
     )
@@ -2072,20 +2314,82 @@ async fn compose_for_session(
             "authz": audit::decision_context(Action::SessionWrite, &authorized),
             "session_id": session_id,
             "context_run_id": run.id,
+            // Correlation without content (ADR-0021's discipline): the query
+            // rides as a hash or not at all. The run row holds the text —
+            // that row is governed content behind the PDP; the chain is not.
+            "task_hash": body.query.as_deref().map(task_hash),
             // The watermark, never the block: the chain records *what an agent
-            // was given*, and the run row holds what that was.
+            // was given*, and the run row holds the text.
             "block_hash": run.block_hash,
-            "entries": run.entry_count,
+            "entry_count": run.entry_count,
+            // The full per-entry watermark (ADR-0025 decision 7, as ADR-0031
+            // decision 11 upgraded it): the VedaFlow object address of exactly
+            // the version that composed, plus the channel it composed from —
+            // the trust label an auditor reads before the content.
+            //
+            // This is the disclosure record. `/v1/inject` carried it and this
+            // endpoint is what replaced that route (CPR-12, ADR-0078
+            // decision 5), so it carries it too — without this the audit
+            // plane's "what was that agent given" question has no answer at
+            // all, because there is no other composition surface left.
+            "entries": block.entries.iter().map(|entry| json!({
+                "record_id": entry.record_id,
+                "object_hash": entry.object_hash,
+                "channel": entry.channel,
+                // "Was that agent given the payments runbook, or only told it
+                // exists" is a question an auditor asks about a corpus that has
+                // since moved, so the chain answers it rather than a
+                // re-derivation (ADR-0041 decision 9).
+                "tier": entry.tier,
+                // Integer per mille, never a float: audit canonicalisation
+                // refuses one (ADR-0019 decision 2).
+                "staleness_permille": entry.staleness_permille,
+            })).collect::<Vec<_>>(),
+            // Where each scope's published channel pointed when the block was
+            // composed: tech plan §2.5's "responses cite commit hashes", paid
+            // for out of the audit event rather than the token budget.
+            "channels": block.channels.iter().map(|channel| json!({
+                "scope_id": channel.scope_id,
+                "ref": channel.channel,
+                "commit": channel.commit,
+                // Whether a pin chose that commit (FLOW-7, ADR-0036
+                // decision 10).
+                "pinned": channel.pinned,
+            })).collect::<Vec<_>>(),
+            // What the agent was told it could install, and never the
+            // description (ADR-0054 decision 8): a name, where it came from
+            // and the bytes it names. The prose lives in the block; the chain
+            // records the claim.
+            "skills": block.skills.iter().map(|skill| json!({
+                "name": skill.name.as_str(),
+                "scope_id": skill.scope_id,
+                "commit": skill.commit,
+                "object_hash": skill.object_hash,
+                "sensitivity": skill.sensitivity.as_str(),
+            })).collect::<Vec<_>>(),
+            "skill_tokens": block.skill_tokens,
+            "skills_omitted": block.skills_omitted,
             "tokens": run.tokens,
             "budget_tokens": run.budget_tokens,
             "degraded": run.degraded,
-            "scopes": plan
+            // The aggregated per-scope `MemoryRead` decisions (ADR-0019
+            // decision 4): one event, every scope's verdict. Each carries the
+            // **tiers** the walk permitted rather than a bare allow (AUTHZ-5,
+            // ADR-0038 decision 13): "who could see this scope's restricted
+            // material on date D" is the question a regulator asks, and this
+            // is what answers it.
+            "decisions": plan
                 .decisions
                 .iter()
                 .map(|decision| json!({
                     "scope_id": decision.scope_id,
                     "allowed": decision.allowed,
+                    "sensitivities": decision.sensitivities
+                        .iter()
+                        .map(|tier| tier.as_str())
+                        .collect::<Vec<_>>(),
                     "pack": format!("{}@{}", decision.pack_name, decision.pack_version),
+                    "lapse_id": decision.lapse,
                 }))
                 .collect::<Vec<_>>(),
             "idempotency_key": claim.key,
@@ -2263,13 +2567,19 @@ mod tests {
             received_at: Utc::now(),
             payload,
             payload_hash: "ab".repeat(32),
+            redactions: None,
         };
+        // A message is summarised by its shape, never its words: the payload
+        // is `SessionDiagnostics`' to serve, and a summary that quoted it
+        // would hand the transcript to every `SessionRead` holder.
+        // `a_payload_takes_diagnostics_and_a_timeline_does_not` is the
+        // integration-level statement of the same rule.
         assert_eq!(
             event_summary(&event(
                 SessionEventType::MessageUser,
                 json!({"text": "fix it"})
             )),
-            "fix it"
+            "message.user (6 characters)"
         );
         assert_eq!(
             event_summary(&event(

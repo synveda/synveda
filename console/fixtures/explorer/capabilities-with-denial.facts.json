@@ -26,6 +26,7 @@
     "scope.update",
     "service_identity.manage",
     "service_identity.read",
+    "session.diagnostics",
     "session.read",
     "session.write",
     "skill.quality.override",

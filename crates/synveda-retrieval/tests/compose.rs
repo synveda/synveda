@@ -1260,7 +1260,7 @@ fn a_restatement_refreshes_the_staleness_clock_without_moving_the_retention_one(
             &mut *tx,
             tenant,
             id,
-            synveda_types::ObserveEventId::new(),
+            synveda_types::SessionEventId::new(),
             now - Duration::days(1),
         )
         .await
@@ -1382,9 +1382,13 @@ fn material_that_does_not_fit_is_named_rather_than_dropped() {
         !block.text.contains(runbook.trim_end()),
         "the body itself never composed"
     );
+    // The legend stopped naming a command with the observe cutover:
+    // `/v1/recall` is deleted and nothing fetches a body by id today
+    // (CPR-12, ADR-0078 decision 5), so it says what a handle *is* rather than
+    // what to run on it. Prompt 18 is where a handle becomes fetchable again.
     assert!(
-        block.text.contains("synveda recall"),
-        "and the block says how to navigate:\n{}",
+        block.text.contains("recall handle"),
+        "and the block says what a handle is:\n{}",
         block.text
     );
     // An index entry is a disclosure, so it is watermarked like any other
@@ -1404,8 +1408,8 @@ fn material_that_does_not_fit_is_named_rather_than_dropped() {
         block.index_tokens,
         block.entries[1].tokens
             + estimated_tokens(
-                "Summarised entries end with a recall handle; \
-                 `synveda recall <id>` fetches the full text.\n",
+                "Summarised entries end with a recall handle naming the record \
+                 they came from.\n",
             ),
         "the index tier's cost is its lines plus the legend it had to place"
     );

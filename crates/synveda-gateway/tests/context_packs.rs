@@ -4,7 +4,7 @@
 //! is fetched by name. **Almost nothing here can be asserted that way.** A
 //! context pack is the first authored asset whose content has to enter the
 //! corpus the read path ranks, so every load-bearing claim is measured
-//! where a session actually sees it — at `POST /v1/inject`:
+//! where a session actually sees it — in a composed context run:
 //!
 //! - **a pack reaches a session only through review**, and under
 //!   `regulated-strict` above a team that is now a curator *and* a steward,
@@ -113,6 +113,30 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 
 /// The fixture: one tenant, `root → eng → platform`, and the
 /// people a governed publication needs.
+#[path = "session_seed.rs"]
+mod session_seed;
+
+impl World {
+    /// The run belonging to whoever holds `token`.
+    ///
+    /// Matched by token rather than by name because that is what the callers
+    /// already pass, and a composition has to name the run it is for.
+    fn run_for(&self, token: &str) -> synveda_types::SessionId {
+        let subject = if token == self.alice {
+            "alice"
+        } else if token == self.cora {
+            "cora"
+        } else if token == self.sam {
+            "sam"
+        } else if token == self.bea {
+            "bea"
+        } else {
+            panic!("no run seeded for this token");
+        };
+        self.runs[subject]
+    }
+}
+
 struct World {
     pool: PgPool,
     tenant: TenantId,
@@ -137,6 +161,9 @@ struct World {
     /// The consumer: holding no role at all, so her chain is her own
     /// scope and the tenant root and nothing else.
     bea: String,
+    /// A run per reader that composes: a composition names the session it was
+    /// for since CPR-12 (ADR-0078 decision 5).
+    runs: std::collections::BTreeMap<String, synveda_types::SessionId>,
 }
 
 async fn world() -> Option<World> {
@@ -198,6 +225,12 @@ async fn world() -> Option<World> {
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
     let app = router(state(&url, pdp.clone()));
+    let mut runs = std::collections::BTreeMap::new();
+    for subject in ["alice", "cora", "sam", "bea"] {
+        let run =
+            session_seed::seed_run_for(&pool, tenant, &format!("prmt2-{subject}"), subject).await;
+        runs.insert(subject.to_owned(), run.session_id);
+    }
     Some(World {
         pool,
         tenant,
@@ -210,6 +243,7 @@ async fn world() -> Option<World> {
         cora: issue("cora", tenant),
         sam: issue("sam", tenant),
         bea: issue("bea", tenant),
+        runs,
     })
 }
 
@@ -360,26 +394,54 @@ async fn author(
 /// What a session composes right now.
 async fn inject(w: &World, token: &str, task: Option<&str>) -> Value {
     let body = match task {
-        Some(task) => json!({"task": task, "session_id": "sess-prmt2"}),
-        None => json!({"session_id": "sess-prmt2"}),
+        Some(task) => json!({"query": task}),
+        None => json!({}),
     };
-    let (status, block) = post(&w.app, "/v1/inject", token, body).await;
-    assert_eq!(status, StatusCode::OK, "inject must succeed: {block}");
+    let run = w.run_for(token);
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/sessions/{run}/context-runs"))
+        .header("authorization", format!("Bearer {token}"))
+        .header(
+            "idempotency-key",
+            synveda_types::ContextRunId::new().to_string(),
+        )
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("build context-run request");
+    let (status, block) = call(&w.app, request).await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "the composition must succeed: {status} {block}"
+    );
     block
 }
 
 fn text(block: &Value) -> String {
-    block["text"].as_str().unwrap_or_default().to_owned()
+    block["rendered"].as_str().unwrap_or_default().to_owned()
 }
 
 /// The pack channels a block cited, by scope.
-fn pack_watermarks(block: &Value) -> Vec<&Value> {
-    block["channels"]
+/// The pack channels a composition cited, read off its chained audit event.
+///
+/// `/v1/inject` carried them in its response; the context run that replaced it
+/// keeps a deliberately minimal body (ADR-0076 decision 7) and the watermark
+/// lives on the chain, which is where an auditor reads it anyway. Same facts,
+/// one surface.
+async fn pack_watermarks(w: &World) -> Vec<Value> {
+    let chain = events(&w.pool, w.tenant).await;
+    let last = chain
+        .iter()
+        .rev()
+        .find(|event| event.action == "session.context.composed")
+        .expect("a context-run event");
+    last.payload["channels"]
         .as_array()
         .map(|channels| {
             channels
                 .iter()
                 .filter(|channel| channel["ref"] == json!("context-pack/published"))
+                .cloned()
                 .collect()
         })
         .unwrap_or_default()
@@ -594,7 +656,7 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
         composed.contains("three days"),
         "the reviewed runbook composes into a session that never authored it: {composed}"
     );
-    let watermarks = pack_watermarks(&after);
+    let watermarks = pack_watermarks(&w).await;
     assert!(
         watermarks
             .iter()
@@ -813,9 +875,12 @@ async fn a_pack_too_large_for_the_budget_is_named_rather_than_dropped() {
         block["tokens"],
         block["budget_tokens"]
     );
+    // The index tier, counted from the block itself: the context run's body is
+    // deliberately minimal (ADR-0076 decision 7) and does not carry a count,
+    // but a handle is a visible thing in the rendered text.
     assert!(
-        block["index_entries"].as_u64().unwrap_or(0) > 0,
-        "and what did not fit was named: {block}"
+        composed.matches("(recall ").count() > 0,
+        "and what did not fit was named: {composed}"
     );
     // Decision 10's line: the pack, the document, the section, the title —
     // a better description than any truncation of the prose.
@@ -832,28 +897,32 @@ async fn a_pack_too_large_for_the_budget_is_named_rather_than_dropped() {
         "and hands back a recall handle: {composed}"
     );
 
-    // The handle is a name, not a capability — and it resolves, which is
-    // what makes "named rather than dropped" a promise rather than a label.
+    // The handle names a real record — which is what "named rather than
+    // dropped" means at this end.
+    //
+    // **What it does not do yet is resolve.** `/v1/recall` fetched a body by
+    // id and is deleted (CPR-12, ADR-0078 decision 5); the context run that
+    // replaced it composes for a question and takes no ids. So the assertion
+    // this test used to make — that the handle hands back the chunk the block
+    // could not hold — has no surface to make it against. Prompt 18 re-cuts
+    // recall over the new model and is where it comes back; asserting it
+    // against a route that does not exist would be worse than saying so.
     let handle = composed
         .split("(recall ")
         .nth(1)
         .and_then(|rest| rest.split(')').next())
         .expect("a recall handle")
         .to_owned();
-    let (status, recalled) = post(&w.app, "/v1/recall", &w.bea, json!({"ids": [handle]})).await;
-    assert_eq!(status, StatusCode::OK, "the handle resolves: {recalled}");
-    // Recall serves records rather than a rendered block: the caller named
-    // what it wants, which is what makes it the deep surface (ADR-0041
-    // decision 5). The chunk comes back in full.
-    let entries = recalled["entries"].as_array().cloned().unwrap_or_default();
-    assert_eq!(entries.len(), 1, "one handle, one record: {recalled}");
-    assert!(
-        entries[0]["content"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("reviewed every quarter"),
-        "and returns the body the block could not hold: {recalled}"
-    );
+    let id: synveda_types::RecordId = handle.parse().expect("a handle is a record id");
+    let stored: i64 = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from records where tenant_id = $1 and id = $2"#,
+        w.tenant.as_uuid(),
+        id.as_uuid(),
+    )
+    .fetch_one(&w.pool)
+    .await
+    .expect("look the handle up");
+    assert_eq!(stored, 1, "the handle names a record that exists: {handle}");
 }
 
 /// **`ContextPackRead` admits pack chunks and `MemoryRead` never does**
@@ -1147,8 +1216,8 @@ async fn every_act_is_on_the_chain_and_no_payload_carries_document_text() {
     let injected = chain
         .iter()
         .rev()
-        .find(|event| event.action == "context.injected")
-        .expect("a context.injected event");
+        .find(|event| event.action == "session.context.composed")
+        .expect("a context-run event");
     let channels = injected.payload["channels"]
         .as_array()
         .cloned()

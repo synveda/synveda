@@ -7,7 +7,7 @@
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "session-start"],
-            "timeout": 5,
+            "timeout": 8,
             "statusMessage": "Synveda: composing context"
           },
           {
@@ -27,7 +27,7 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "observe"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "turn"],
             "timeout": 5,
             "async": true
           }
@@ -40,7 +40,7 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "flush"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "turn"],
             "timeout": 5,
             "async": true
           }
@@ -53,9 +53,8 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "flush"],
-            "timeout": 5,
-            "async": true
+            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "turn"],
+            "timeout": 8
           }
         ]
       }

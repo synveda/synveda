@@ -103,12 +103,18 @@ pub async fn run_corpus(
             outcome.questions.push(skipped(question));
             continue;
         }
+        let probe_run = client
+            .session_for(
+                reader,
+                &format!("eval:qa:{}:{}", corpus.corpus, question.name),
+            )
+            .await?;
         let probe = client
             .inject(
                 reader,
+                &probe_run,
                 &InjectRequest {
                     task: question.task.as_deref(),
-                    session_id: &format!("eval:qa:{}:{}", corpus.corpus, question.name),
                     budget_tokens: question.budget_tokens,
                 },
             )
@@ -168,7 +174,7 @@ async fn seed(
             .iter()
             .map(|event| ObserveEvent {
                 idempotency_key: format!("{}:{}", batch.session_id, event.key),
-                kind: &event.kind,
+                kind: &event.event_type,
                 payload: serde_json::json!({ "text": event.text }),
                 occurred_at: occurred_at.clone(),
             })
@@ -176,10 +182,8 @@ async fn seed(
         let response = client
             .observe(
                 bearer,
-                &ObserveRequest {
-                    session_id: &batch.session_id,
-                    events,
-                },
+                &client.session_for(bearer, &batch.session_id).await?,
+                &ObserveRequest { events },
             )
             .await?;
         let acked = &response.value;
@@ -196,7 +200,7 @@ async fn seed(
                 .events
                 .iter()
                 .find(|entry| entry.idempotency_key == key)
-                .and_then(|entry| entry.event_id.clone())
+                .and_then(|entry| entry.event_id().map(str::to_owned))
                 .ok_or_else(|| {
                     format!(
                         "seeding `{}` acked no event id, so nothing downstream can be attributed \
@@ -544,12 +548,15 @@ async fn wait_for_index(
                 continue;
             };
             let author = &environment.actor(&slot.actor)?.token;
+            let index_run = client
+                .session_for(author, &format!("eval:qa:index:{}", corpus.corpus))
+                .await?;
             let found = client
                 .recall_query(
                     author,
+                    &index_run,
                     &RecallQueryRequest {
                         query: &slot.text,
-                        session_id: &format!("eval:qa:index:{}", corpus.corpus),
                         limit: SWEEP_LIMIT,
                     },
                 )

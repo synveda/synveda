@@ -11,8 +11,9 @@
 # it is demonstrated against all three or it is not demonstrated at all.
 #
 # There is **no `/v1/observe` and no `/v1/inject` anywhere in this script**.
-# That is the point: the old correlation string is untouched by this feature
-# and nothing here reads or writes it (Prompt 11 deletes it).
+# When this was written that was a statement about scope: the old correlation
+# string was untouched by this feature. CPR-12 deleted both routes outright
+# (ADR-0078 decision 1), so it is now simply the only plane there is.
 #
 # What it asserts, in order:
 #

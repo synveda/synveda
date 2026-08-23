@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            insert into session_event_quarantine\n                (event_id, tenant_id, session_id, scope_id, findings)\n            select u.event_id, $1, $2, $3, u.findings\n            from unnest($4::uuid[], $5::jsonb[]) as u(event_id, findings)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "UuidArray",
+        "JsonbArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "30471d48437d8967f21a0384938e0352a33410de69fafd155bed30e4758b3d26"
+}

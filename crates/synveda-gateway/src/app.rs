@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use crate::service_identities;
 
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, MatchedPath, Query, Request, State};
+use axum::extract::{MatchedPath, Query, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
@@ -33,14 +33,11 @@ use crate::channels;
 use crate::curators;
 use crate::directory_admin;
 use crate::error::ApiError;
-use crate::inject;
-use crate::observe;
 use crate::packs;
 use crate::policy;
 use crate::prompts;
 use crate::proposals;
 use crate::quarantine;
-use crate::recall;
 use crate::skills;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
@@ -257,9 +254,10 @@ pub fn router(state: AppState) -> Router {
             "/v1/sessions/{session_id}/timeline",
             get(crate::sessions::timeline),
         )
-        // The final-shaped context endpoint (ADR-0076 decision 7). It calls
-        // the retrieval engine `/v1/inject` calls; what Prompt 18 adds is
-        // explainability behind this same request and response.
+        // The context endpoint (ADR-0076 decision 7), and since CPR-12 the
+        // **only** one: `/v1/inject` is deleted and this is what composes.
+        // What Prompt 18 adds is explainability behind this same request and
+        // response.
         .route(
             "/v1/sessions/{session_id}/context-runs",
             post(crate::sessions::create_context_run),
@@ -360,24 +358,8 @@ pub fn router(state: AppState) -> Router {
                 .get(policy::get_scope_policy)
                 .delete(policy::unassign_scope_policy),
         )
-        // The observe primitive (MEM-1, ADR-0020): the data plane's write
-        // seam. Its body limit covers the worst-case batch; every other
-        // route keeps axum's default. The redaction scan runs inside it
-        // (MEM-2, ADR-0021).
-        .route(
-            "/v1/observe",
-            post(observe::create).layer(DefaultBodyLimit::max(observe::BODY_LIMIT_BYTES)),
-        )
-        // The inject primitive (CTX-3, ADR-0026): the read path's
-        // session-start seam — plan, retrieve, compose, one chained
-        // audit event.
-        .route("/v1/inject", post(inject::create))
-        // The recall primitive (CTX-4, ADR-0041): the bodies behind the
-        // handles an inject block's index tier handed out. The plan is
-        // re-decided per call — a handle is a name, not a capability —
-        // and the same `admit` the block composed under answers here.
-        .route("/v1/recall", post(recall::create))
-        // The quarantine review plane (MEM-2, ADR-0021 decisions 5–7).
+        // The quarantine review plane (MEM-2, ADR-0021 decisions 5–7),
+        // re-anchored on session events by CPR-12 (ADR-0078 decision 4).
         .route("/v1/quarantine", get(quarantine::list))
         .route(
             "/v1/quarantine/{event_id}/release",
@@ -436,7 +418,7 @@ pub fn router(state: AppState) -> Router {
         // `GET /v1/context-packs/{name}` resolve route, and that is the
         // difference between the two authored asset types rather than an
         // omission: a prompt is fetched by name, and a pack's content
-        // arrives through `/v1/inject` as ranked pinned material.
+        // arrives through a context run as ranked pinned material.
         .route("/v1/context-packs", get(packs::list).post(packs::author))
         // The skills registry (SKIL-1, ADR-0051). Shaped like the prompt
         // registry and not the pack one, because a skill IS fetched by name

@@ -18,7 +18,7 @@
         },
         {
           "key": "own-review",
-          "kind": "decision",
+          "event_type": "message.assistant",
           "text": "I decided to review incoming pull requests in the morning before standup."
         },
         {
@@ -43,7 +43,7 @@
       "events": [
         {
           "key": "team-retries",
-          "kind": "decision",
+          "event_type": "message.assistant",
           "text": "Payments caps card retries at three attempts with full jitter."
         },
         {
@@ -71,7 +71,7 @@
       "events": [
         {
           "key": "dept-otel",
-          "kind": "decision",
+          "event_type": "message.assistant",
           "text": "Engineering standardised on OpenTelemetry for every service trace."
         },
         {
@@ -88,7 +88,7 @@
       "events": [
         {
           "key": "org-retention",
-          "kind": "decision",
+          "event_type": "message.assistant",
           "text": "ACME retains customer support transcripts for exactly ninety days."
         },
         {

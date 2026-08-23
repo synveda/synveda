@@ -18,8 +18,8 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use synveda_types::{
-    Error, IdentityId, ObserveEventId, RecordClass, RecordId, RecordKind, Result, ScopeId,
-    Sensitivity, TenantId,
+    Error, IdentityId, RecordClass, RecordId, RecordKind, Result, ScopeId, Sensitivity,
+    SessionEventId, TenantId,
 };
 use uuid::Uuid;
 
@@ -428,7 +428,7 @@ pub async fn reinforce(
     executor: impl PgExecutor<'_>,
     tenant_id: TenantId,
     id: RecordId,
-    event_id: ObserveEventId,
+    event_id: SessionEventId,
     observed_at: DateTime<Utc>,
 ) -> Result<Option<RecordVersion>> {
     let row = sqlx::query_as!(

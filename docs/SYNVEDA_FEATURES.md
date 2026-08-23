@@ -1585,6 +1585,78 @@ CPR-11  The session product experience (L)
   and in place, a refusal with not one fact about the run in it, and another tenant's id exactly
   as it renders a fictional one.
 
+CPR-12  Durable Claude session delivery (XL)
+  Filed 2026-08-23 by Prompt 12 of the CPR programme. CPR-10 and CPR-11 built the record and
+  made it usable; nothing wrote to it. The Claude Code adapter still posted to the global
+  `POST /v1/observe` with a `session_id` string it invented, composed through `POST /v1/inject`,
+  and buffered to a spool whose only durability was the process staying alive: a Stop hook wrote
+  a file and fired a delivery, and a delivery that failed was **gone** — no attempt count, no
+  acknowledgement state, nothing for a later hook to retry. The three global routes were
+  therefore not merely superseded, they were the only writers of a plane the product had
+  stopped describing, and the two planes could not both be true.
+  What it adds: **a durable local spool** with a versioned format — spool version, client
+  installation id, Synveda session id, client event id, sequence, event type, occurred time,
+  payload, payload hash, delivery attempts, last attempt time and acknowledgement state —
+  persisted atomically (write to a temp file, fsync, rename) and never read in its predecessor's
+  format. Hooks own delivery: SessionStart opens or resumes a run and retries the backlog, Stop
+  records fast and starts a delivery, SessionEnd flushes within a bounded budget, and the next
+  SessionStart retries whatever is still unacknowledged. Three diagnostic commands —
+  `synveda session flush`, `synveda session spool status` and
+  `synveda session spool purge --acknowledged`. Context injection is a context run. And the
+  cutover itself: `/v1/observe`, `/v1/inject` and `/v1/recall` deleted with their DTOs, their
+  staging table, their queue and their quarantine table, extraction re-anchored on
+  `session_events`, and every caller — gateway, ingest worker, CLI, MCP server, eval harness —
+  moved or refused by name.
+  Eight decisions in ADR-0078. **One write seam**, because two ways in is two authorisation
+  paths and one of them is always the one nobody re-checked. **A session event is the
+  extraction unit**, so the thing a policy decides about and the thing a memory is attributed
+  to are the same row. **A memory lands at the scope the run was decided at**, not at the
+  submitter's home — which is the difference between a workspace remembering what happened in
+  it and every agent accumulating a private pile. **Quarantine is a withheld signal, never a
+  mutated event**: the row a caller redelivers must hash to what it sent. **The spool hashes
+  with SHA-256 rather than BLAKE3**, because the thing that has to verify it is Node and Node
+  has no BLAKE3 — a chain hash and a spool checksum answer different questions. **Only
+  acknowledged events may be automatically deleted**, so `purge` requires `--acknowledged` and
+  offers no `--all`. **And the event-loss boundary is real, bounded and documented**: a host
+  that dies before any lifecycle hook runs takes the un-flushed tail with it, and the honest
+  number is "since the last Stop", not "nothing".
+  AC: a spool survives a kill -9 mid-write and reads back as either the old state or the new
+  one and never as a truncated file; a redelivered batch appends only what is new and answers
+  `duplicate` for the rest, at their original sequence positions; an event whose payload hash
+  does not match its payload is refused rather than stored; SessionEnd returns inside its
+  budget with the spool flushed or the backlog intact; a SessionStart after a failed delivery
+  retries it and acknowledges it; `spool purge --acknowledged` deletes only acknowledged
+  entries and `spool purge` alone is refused; a memory extracted from a run lands at the run's
+  scope and is readable by a workspace member who is not its author; `/v1/observe`, `/v1/inject`
+  and `/v1/recall` are 404 by name; and the whole round trip — hook writes, gateway appends,
+  worker extracts, context run composes — runs against a live stack.
+
+CPR-13  The demo corpus re-point (L)
+  Filed 2026-08-23 by Prompt 12, which went looking for the demos it had to re-point and found
+  that **45 of the 67 shell scripts under `demos/` were dead**, and had been since
+  CPR-7 (2026-08-20). That
+  prompt deleted `synveda role bind`, `synveda hierarchy` and `/v1/hierarchy/*` whole — which
+  was right, and is what ADR-0074 decided — and re-pointed the code, the tests and the docs.
+  It did not re-point the demos, and nothing said so: CPR-7, CPR-8, CPR-9, CPR-10 and CPR-11
+  all record clean runs, because no gate runs a demo. So the acceptance evidence for most of
+  Phases 1–3 currently consists of scripts that exit non-zero on their fourth line.
+  This is not CPR-12's to fix. Its 32 observe/inject/recall call sites live almost entirely
+  inside those same 45 files, so re-pointing them onto the session plane would produce scripts
+  that are still dead one command earlier — and re-pointing the placement half means rewriting
+  each script's whole setup narrative on the governed scope model, which is a prompt, not a
+  side effect. CPR-12 fixed the four that were live (`cpr-10-sessions`, `eval-2-extraction`,
+  `eval-4-qa`, `ops-2-helm-install` with its client fixture) and deleted `ctx-5-recall`, whose
+  subject no longer exists.
+  What it adds: every remaining demo re-pointed onto workspaces, scopes and grants, and — the
+  half that matters more — **a gate that fails when a demo names a command or route the product
+  does not have**, so this cannot happen invisibly a fourth time. `make check-backlog`,
+  `check-adr-status`, `check-api-types` and `check-benchmarks` are the precedent: each exists
+  because a document drifted from the tree once.
+  AC: no script under `demos/` names a CLI subcommand `synveda --help` does not list or a
+  `/v1` path absent from `docs/api/openapi.json`; the gate catches a deliberately reintroduced
+  dead command; and a representative demo from each of MEM, CTX, FLOW, AUTHZ and ADPT runs
+  green against a live stack.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1678,7 +1750,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

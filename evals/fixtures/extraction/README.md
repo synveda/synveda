@@ -1,12 +1,12 @@
 # The labelled extraction corpus (EVAL-2, ADR-0046)
 
-Transcript-shaped observe events with the records a careful reader would
+Transcript-shaped session events with the records a careful reader would
 say they contain. One corpus, two readers:
 
 - `crates/synveda-ingest/tests/extraction_precision.rs` reads it as a fast,
   hermetic, no-stack tripwire on the extractor **function**.
 - `crates/synveda-eval` reads the same files to measure the **product
-  path** — observe → redact → extract → embed → dedup → commit → serve —
+  path** — append → redact → extract → embed → dedup → commit → serve —
   over HTTP only.
 
 Both deserialize the *full* format with `deny_unknown_fields`, so a field
@@ -28,7 +28,7 @@ One file per **group**; a group is one eval actor's worth of fixtures.
       "name": "alpha-decision-blake3",
       "note": "optional — why this fixture is interesting, or what it is expected to miss and why",
       "input": {
-        "kind": "transcript_delta | tool_result | decision | assertion",
+        "event_type": "message.user | message.assistant | tool.invoked | tool.result | file.changed | command.executed | memory.asserted",
         "session_id": "alpha-1",
         "occurred_at": "2026-07-20T10:00:00Z",
         "payload": { "text": "..." }

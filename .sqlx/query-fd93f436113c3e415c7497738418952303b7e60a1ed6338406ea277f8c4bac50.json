@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into session_context_runs\n            (id, tenant_id, session_id, scope_id, principal_id, query, rendered,\n             block_hash, tokens, budget_tokens, entry_count, skills, degraded)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)\n        returning id, tenant_id, session_id, scope_id, principal_id, query,\n                  rendered, block_hash, tokens, budget_tokens, entry_count,\n                  skills, degraded, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "query",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "rendered",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "block_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "tokens",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "budget_tokens",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "entry_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "skills",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 12,
+        "name": "degraded",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Jsonb",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fd93f436113c3e415c7497738418952303b7e60a1ed6338406ea277f8c4bac50"
+}

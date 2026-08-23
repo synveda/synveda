@@ -2,29 +2,34 @@
 /**
  * The recorded-payload driver (ADR-0027 decision 14).
  *
- * It feeds recorded Claude Code hook JSON to the built entry point as a
- * child process — the very `node dist/hook.mjs <mode>` line `hooks.json`
- * registers — and checks what the harness would have seen. No harness is
- * involved and none is needed: a hook is a process that reads JSON on
- * stdin and writes JSON on stdout, so a recording of one is a complete
- * test input.
+ * It feeds recorded Claude Code hook JSON to the built entry point as a child
+ * process — the very `node dist/hook.mjs <mode>` line `hooks.json` registers —
+ * and checks what the harness would have seen. No harness is involved and none
+ * is needed: a hook is a process that reads JSON on stdin and writes JSON on
+ * stdout, so a recording of one is a complete test input.
  *
- * The invariant every case shares is decision 3: whatever the gateway
- * does — refuse, hang up, degrade, 401 — the hook exits 0 and the session
- * continues. A case that fails that fails outright; a case may then
- * assert whatever else it is about.
+ * The invariant every case shares is decision 3: whatever the gateway does —
+ * refuse, hang up, degrade, 401 — the hook exits 0 and the session continues.
+ * A case that fails that fails outright; a case may then assert whatever else
+ * it is about.
+ *
+ * Since CPR-12 there is a second invariant with equal standing: **whatever the
+ * gateway does, the events are on disk first**. So the failure cases here
+ * assert what the spool holds, not only that nothing crashed — that is the
+ * difference between the old design and this one, and a driver that only
+ * checked exit codes would pass on both.
  *
  * Two modes, one set of cases:
  *
  *     node dist/driver.mjs                                   # mock gateway
  *     node dist/driver.mjs --gateway URL --token BEARER      # live gateway
  *
- * The mock proves the contract; the live run proves the contract is the
- * one the product implements. `demos/adpt-1-claude-code.sh` runs the live
- * half after its timed section, and `driver.test.mts` runs the mock half
- * in the unit suite. A handful of cases can only be posed to a mock (a
- * degradation header is a server-side condition, not a client request);
- * they say so and are reported as skipped rather than quietly dropped.
+ * The mock proves the contract; the live run proves the contract is the one
+ * the product implements. `demos/adpt-1-claude-code.sh` runs the live half
+ * after its timed section, and `driver.test.mts` runs the mock half in the
+ * unit suite. A handful of cases can only be posed to a mock (a degradation
+ * header is a server-side condition, not a client request); they say so and
+ * are reported as skipped rather than quietly dropped.
  */
 
 import { spawn } from "node:child_process";
@@ -43,8 +48,7 @@ import { fileURLToPath } from "node:url";
 
 import { startGateway, type RecordedRequest, type Reply, type Responder } from "./mock-gateway.mjs";
 import { ensureDir } from "./paths.mjs";
-import { qualifiedSessionId } from "./session-start.mjs";
-import type { SessionState } from "./spool.mjs";
+import type { Spool } from "./spool.mjs";
 
 const HOOK = fileURLToPath(new URL("./hook.mjs", import.meta.url));
 const FIXTURES = new URL("../fixtures/", import.meta.url);
@@ -52,10 +56,10 @@ const FIXTURES = new URL("../fixtures/", import.meta.url);
 /** Nothing listens on port 1, and the connection is refused rather than hanging. */
 const DEAD_GATEWAY = "http://127.0.0.1:1";
 
-/** Comfortably over the 64 KiB per-event cap, so truncation has to happen. */
-const OVERSIZED_CHARS = 200_000;
+/** A workspace id the mock accepts and a live run is given by the demo. */
+const WORKSPACE = "0198e4c1-0000-7000-8000-0000000000w1".replace("w", "a");
 
-type Mode = "session-start" | "observe" | "flush";
+type Mode = "session-start" | "turn" | "skills";
 
 interface HookRun {
   code: number | null;
@@ -74,8 +78,10 @@ export interface DriverOptions {
   gateway?: string;
   /** The bearer to present. Required in live mode. */
   token?: string;
+  /** The workspace a live run opens sessions in. */
+  workspace?: string;
   /**
-   * Require the inject cases to come back with context. The demo sets it
+   * Require the composition cases to come back with context. The demo sets it
    * because it seeded memory the caller can read; a bare gateway may
    * legitimately have nothing to say.
    */
@@ -96,6 +102,7 @@ interface Case {
   readonly live: boolean;
   readonly url: string;
   readonly token: string;
+  readonly workspace: string;
   /** What the mock gateway received. Empty in live mode. */
   readonly requests: RecordedRequest[];
   readonly stateHome: string;
@@ -108,10 +115,15 @@ interface Case {
   transcript(fixture: string): string;
   /** A synthesised transcript, for shapes no recording sensibly holds. */
   synthesise(name: string, entries: unknown[]): string;
-  spool(sessionId: string): SessionState | undefined;
-  forgetCursor(sessionId: string): void;
+  /** The spool for one harness session id. */
+  spool(externalSessionId: string): Spool | undefined;
   logged(event: string): Record<string, unknown>[];
 }
+
+/** The case, plus the one mutation a replay scenario needs. */
+type DriverCase = Case & {
+  rewriteSpool(externalSessionId: string, mutate: (spool: Spool) => void): void;
+};
 
 interface Scenario {
   readonly name: string;
@@ -119,62 +131,76 @@ interface Scenario {
   readonly mockOnly?: string;
   /** How the mock answers. Unused in live mode. */
   readonly respond?: Responder;
-  run(subject: Case): Promise<void>;
+  run(subject: DriverCase): Promise<void>;
 }
 
 // ── Canned gateway replies ───────────────────────────────────────────────────
 
-function block(text: string, records: string[] = ["0198e4c1-0000-7000-8000-00000000ab01"]): unknown {
+const RUN_ID = "0198e4c1-0000-7000-8000-00000000ru01".replace("ru", "aa");
+
+function session(status = "active"): unknown {
+  return { id: RUN_ID, workspace_id: WORKSPACE, status };
+}
+
+function block(rendered: string, entries = 1): unknown {
   return {
-    text,
+    id: "0198e4c1-0000-7000-8000-00000000cc01".replace("cc", "bb"),
+    rendered,
     block_hash: "b3-2f1c9d0e",
-    record_ids: records,
     tokens: 128,
     budget_tokens: 1500,
-    as_of: "2026-07-25T09:00:00.000Z",
+    entry_count: entries,
     degraded: [],
+    created_at: "2026-08-25T09:00:00.000Z",
   };
 }
 
-/** The mock's inject leg, with an observe leg that answers nothing useful. */
-function injects(reply: (index: number) => Reply): Responder {
-  return (request, index) =>
-    request.path === "/v1/inject"
-      ? reply(index)
-      : { status: 200, body: buffered(request, new Set()) };
+/**
+ * The append route's idempotency, mocked: an event id seen before comes back
+ * `duplicate` rather than being appended twice.
+ *
+ * This is the property the whole redelivery design rests on, so the mock has
+ * to have it or the replay case proves nothing.
+ */
+function appendLeg(): (request: RecordedRequest) => unknown {
+  const seen = new Set<string>();
+  return (request) => {
+    const events = Array.isArray(request.body.events) ? request.body.events : [];
+    const outcomes = events.map((event) => {
+      const id = String((event as { client_event_id?: unknown }).client_event_id);
+      const duplicate = seen.has(id);
+      seen.add(id);
+      return { outcome: duplicate ? "duplicate" : "appended", client_event_id: id };
+    });
+    return {
+      events: outcomes,
+      appended: outcomes.filter((outcome) => outcome.outcome === "appended").length,
+      duplicates: outcomes.filter((outcome) => outcome.outcome === "duplicate").length,
+      quarantined: 0,
+      denied: 0,
+    };
+  };
 }
 
 /**
- * MEM-1's idempotency, mocked: a key seen before is a duplicate and is not
- * re-enqueued (ADR-0020 decision 2). This is the property the whole cursor
- * design rests on, so the mock has to have it or the replay case proves
- * nothing.
+ * The default script. Cases override one leg at a time, so the thing under
+ * test is the only thing that differs from a working deployment.
  */
-function buffer(): Responder {
-  const seen = new Set<string>();
-  return (request) => ({ status: 200, body: buffered(request, seen) });
-}
-
-function buffered(request: RecordedRequest, seen: Set<string>): unknown {
-  const events = Array.isArray(request.body.events) ? request.body.events : [];
-  let accepted = 0;
-  let duplicates = 0;
-  for (const event of events) {
-    const key = String((event as { idempotency_key?: unknown }).idempotency_key);
-    if (seen.has(key)) {
-      duplicates += 1;
-    } else {
-      seen.add(key);
-      accepted += 1;
+function gatewayScript(
+  overrides: (request: RecordedRequest, index: number) => Reply | undefined = () => undefined,
+): Responder {
+  const append = appendLeg();
+  return (request, index) => {
+    const override = overrides(request, index);
+    if (override !== undefined) return override;
+    if (request.path === "/v1/me") {
+      return { status: 200, body: { workspaces: [{ id: WORKSPACE, name: "driver" }] } };
     }
-  }
-  return {
-    session_id: request.body.session_id,
-    accepted,
-    duplicates,
-    quarantined: 0,
-    denied: 0,
-    events: [],
+    if (request.path === "/v1/sessions") return { status: 201, body: session() };
+    if (request.path.endsWith("/context-runs")) return { status: 200, body: block("# memory") };
+    if (request.path.endsWith("/events")) return { status: 200, body: append(request) };
+    if (request.path.endsWith("/end")) return { status: 200, body: session("ended") };
+    return { status: 404, body: { message: "no such route" } };
   };
 }
 
@@ -182,303 +208,307 @@ function buffered(request: RecordedRequest, seen: Set<string>): unknown {
 
 const SCENARIOS: Scenario[] = [
   {
-    name: "a recorded session start injects the block as additionalContext",
-    respond: injects(() => ({ status: 200, body: block("# Core team\n- deploys go through make deploy") })),
+    name: "a recorded session start opens a run and injects the block",
+    respond: gatewayScript(() => undefined),
     async run(subject) {
       const payload = subject.recorded("session-start-startup");
-      const run = await subject.hook("session-start", payload);
-      exits(run);
+      const run = exits(await subject.hook("session-start", payload));
       const output = parse(run);
-      if (subject.live && !subject.expectContext) return;
-      expect(
-        (output.hookSpecificOutput?.additionalContext ?? "").length > 0,
-        "the session received no context",
-      );
-      expect(
-        output.hookSpecificOutput?.hookEventName === "SessionStart",
-        "additionalContext must be tagged with its hook event",
-      );
+      if (subject.expectContext) {
+        expect(
+          (output.hookSpecificOutput?.additionalContext ?? "").length > 0,
+          "a session start with memory to serve must contribute context",
+        );
+        expect(
+          output.hookSpecificOutput?.hookEventName === "SessionStart",
+          "the context must be labelled for the hook that emitted it",
+        );
+      }
       if (subject.live) return;
-      const request = subject.requests[0];
-      expect(request?.path === "/v1/inject", `posted to ${String(request?.path)}`);
+      const open = subject.requests.find((request) => request.path === "/v1/sessions");
+      expect(open !== undefined, "the run must be opened before anything else");
       expect(
-        request?.body.session_id === qualifiedSessionId(String(payload.session_id)),
-        "the audit correlation must ride the request (decision 10)",
+        open?.body.external_session_id === String(payload.session_id),
+        "the harness session id is what makes opening idempotent",
       );
-      expect(request?.body.task === undefined, "a cold start has no task to send");
       expect(
-        request?.authorization === `Bearer ${subject.token}`,
-        "the caller's own bearer must be presented, and nothing else",
+        open?.idempotencyKey === `cc-open-${String(payload.session_id)}`,
+        `open carried ${String(open?.idempotencyKey)} rather than a key derived from the harness id`,
+      );
+      expect(
+        subject.requests.some((request) => request.path.endsWith("/context-runs")),
+        "the block is composed through the session's own context-run endpoint",
       );
     },
   },
   {
-    name: "a recorded compact start carries the last prompt as its task",
-    respond: injects(() => ({ status: 200, body: block("# Core team\n- deploys go through make deploy") })),
+    name: "a recorded post-compaction start carries the last prompt as its query",
+    respond: gatewayScript(() => undefined),
     async run(subject) {
-      const transcript = subject.transcript("turn.jsonl");
-      const run = await subject.hook(
-        "session-start",
-        subject.recorded("session-start-compact", { transcript_path: transcript }),
-      );
-      exits(run);
-      if (subject.live) return;
-      expect(
-        String(subject.requests[0]?.body.task ?? "").startsWith("Give the payments client"),
-        "post-compaction inject must carry the last real prompt (decision 11)",
-      );
-    },
-  },
-  {
-    name: "an unreachable gateway costs the session nothing",
-    async run(subject) {
-      const run = await subject.hook("session-start", subject.recorded("session-start-startup"), {
-        SYNVEDA_GATEWAY: DEAD_GATEWAY,
-      });
-      exits(run);
-      expect(run.stdout === "", `a dead gateway must contribute nothing, got: ${run.stdout}`);
-    },
-  },
-  {
-    name: "a rejected credential is the one failure the user is told about",
-    respond: () => ({ status: 401, body: { message: "unauthenticated" } }),
-    async run(subject) {
-      // Live: a token the gateway will refuse. Mock: a gateway that
-      // refuses whatever it is given. Same 401, same expectation.
-      const run = await subject.hook("session-start", subject.recorded("session-start-startup"), {
-        SYNVEDA_TOKEN: "not-a-token-this-gateway-will-accept",
-      });
-      exits(run);
-      const output = parse(run);
-      expect(
-        /synveda login/.test(output.systemMessage ?? ""),
-        "an expired login is the one thing the user can act on",
-      );
-      expect(
-        output.hookSpecificOutput === undefined,
-        "a refused inject must contribute no context",
-      );
-    },
-  },
-  {
-    name: "a degraded inject still delivers context and stays silent",
-    mockOnly: "degradation is a server-side condition; CTX-3's demo stops TEI to produce it live",
-    respond: injects(() => ({
-      status: 200,
-      body: { ...(block("# Core team\n- deploys go through make deploy") as object), degraded: ["embedder"] },
-      headers: { "x-synveda-degraded": "embedder" },
-    })),
-    async run(subject) {
-      const run = await subject.hook("session-start", subject.recorded("session-start-startup"));
-      exits(run);
-      const output = parse(run);
-      expect(
-        (output.hookSpecificOutput?.additionalContext ?? "").length > 0,
-        "a degraded inject still delivers context",
-      );
-      expect(
-        !/synveda login/.test(output.systemMessage ?? ""),
-        "a degradation is recorded server-side; the user is not asked to do anything",
-      );
-    },
-  },
-  {
-    name: "the first session in a project discloses what is sent, exactly once",
-    respond: injects(() => ({ status: 200, body: block("# Core team\n- deploys go through make deploy") })),
-    async run(subject) {
-      const first = parse(exits(await subject.hook("session-start", subject.recorded("session-start-startup"))));
-      const second = parse(exits(await subject.hook("session-start", subject.recorded("session-start-startup"))));
-      expect(
-        /transcripts are sent to/.test(first.systemMessage ?? ""),
-        "capture must be disclosed on the first session in a project (decision 13)",
-      );
-      expect(
-        second.systemMessage === undefined,
-        "the disclosure is once per project, not once per session",
-      );
-    },
-  },
-  {
-    name: "a recorded stop flush posts the turn and advances the cursor",
-    respond: buffer(),
-    async run(subject) {
-      const payload = subject.recorded("stop", { transcript_path: subject.transcript("turn.jsonl") });
-      exits(await subject.hook("observe", payload));
-      const session = qualifiedSessionId(String(payload.session_id));
-      expect(
-        subject.spool(session)?.cursor === "11111111-0000-4000-8000-000000000004",
-        "the cursor must sit on the last accepted entry",
-      );
-      const done = subject.logged("observe.done").at(-1);
-      expect(done?.events === 3, `meta and sidechain entries must be skipped, sent ${String(done?.events)}`);
-      if (subject.live) return;
-      const kinds = (subject.requests[0]?.body.events as { kind: string }[]).map((event) => event.kind);
-      expect(
-        kinds.join(",") === "transcript_delta,transcript_delta,tool_result",
-        `unexpected event kinds: ${kinds.join(",")}`,
-      );
-    },
-  },
-  {
-    name: "an oversized tool result is truncated, never dropped",
-    respond: buffer(),
-    async run(subject) {
-      const transcript = subject.synthesise("oversized.jsonl", [
-        {
-          type: "user",
-          uuid: "33333333-0000-4000-8000-000000000001",
-          timestamp: "2026-07-25T09:30:00.000Z",
-          isSidechain: false,
-          cwd: subject.project,
-          gitBranch: "feat/retry-budget",
-          message: {
-            role: "user",
-            content: [
-              {
-                tool_use_id: "toolu_01Oversized",
-                type: "tool_result",
-                content: `cargo test --workspace\n${"a passing test line that nobody will read\n".repeat(OVERSIZED_CHARS / 42)}`,
-                is_error: false,
-              },
-            ],
-          },
-        },
-      ]);
-      const payload = subject.recorded("stop", { transcript_path: transcript });
-      exits(await subject.hook("observe", payload));
-      const session = qualifiedSessionId(String(payload.session_id));
-      expect(
-        subject.spool(session)?.cursor === "33333333-0000-4000-8000-000000000001",
-        "an oversized event must still be accepted, not silently dropped",
-      );
-      if (subject.live) return;
-      const events = subject.requests[0]?.body.events as { payload: { truncated?: boolean } }[];
-      expect(events.length === 1, `expected one event, got ${String(events.length)}`);
-      const bytes = Buffer.byteLength(JSON.stringify(events[0]?.payload), "utf8");
-      expect(bytes <= 64 * 1024, `payload is ${String(bytes)} bytes, over the 64 KiB cap`);
-      expect(events[0]?.payload.truncated === true, "a truncated payload must say so (decision 8)");
-    },
-  },
-  {
-    name: "a replayed batch is reported as duplicates and re-enqueued nowhere",
-    respond: buffer(),
-    async run(subject) {
-      const payload = subject.recorded("stop", { transcript_path: subject.transcript("turn.jsonl") });
-      const session = qualifiedSessionId(String(payload.session_id));
-      exits(await subject.hook("observe", payload));
-      // A machine that lost its spool — or any of the half-dozen ways a
-      // cursor can be behind what the gateway already holds.
-      subject.forgetCursor(session);
-      exits(await subject.hook("observe", payload));
-      const replay = subject.logged("observe.done").at(-1);
-      expect(replay?.events === 3, "the whole delta must be resent when the cursor is gone");
-      expect(
-        replay?.duplicates === 3 && replay?.accepted === 0,
-        `the replay must be all duplicates, got accepted=${String(replay?.accepted)} duplicates=${String(replay?.duplicates)}`,
-      );
-      expect(
-        subject.spool(session)?.cursor === "11111111-0000-4000-8000-000000000004",
-        "a duplicate batch still advances the cursor: the gateway holds it",
-      );
-    },
-  },
-  {
-    name: "a failed flush leaves the cursor, and the next hook resends",
-    respond: buffer(),
-    async run(subject) {
-      const payload = subject.recorded("stop", { transcript_path: subject.transcript("turn.jsonl") });
-      const session = qualifiedSessionId(String(payload.session_id));
-      exits(await subject.hook("observe", payload, { SYNVEDA_GATEWAY: DEAD_GATEWAY }));
-      expect(
-        subject.spool(session)?.cursor === undefined,
-        "a failed flush must not advance the cursor",
-      );
-      exits(await subject.hook("observe", payload));
-      expect(
-        subject.spool(session)?.cursor === "11111111-0000-4000-8000-000000000004",
-        "the recovery flush must resend and then advance",
-      );
-      const done = subject.logged("observe.done").at(-1);
-      expect(done?.events === 3, "the recovery flush must resend the whole delta");
-    },
-  },
-  {
-    name: "a damaged transcript line is skipped, never fatal to the flush",
-    respond: buffer(),
-    async run(subject) {
-      const payload = subject.recorded("stop", { transcript_path: subject.transcript("damaged.jsonl") });
-      exits(await subject.hook("observe", payload));
-      const done = subject.logged("observe.done").at(-1);
-      expect(done?.events === 2, `expected the two readable entries, sent ${String(done?.events)}`);
-      expect(
-        subject.spool(qualifiedSessionId(String(payload.session_id)))?.cursor ===
-          "22222222-0000-4000-8000-000000000003",
-        "the readable entries either side of the damage must still land",
-      );
-    },
-  },
-  {
-    name: "a recorded PreCompact flushes before the transcript is rewritten",
-    respond: buffer(),
-    async run(subject) {
-      const transcript = subject.transcript("turn.jsonl");
-      const payload = subject.recorded("pre-compact", { transcript_path: transcript });
-      exits(await subject.hook("flush", payload));
-      expect(
-        subject.spool(qualifiedSessionId(String(payload.session_id)))?.cursor ===
-          "11111111-0000-4000-8000-000000000004",
-        "PreCompact must flush the turn the compaction is about to rewrite",
-      );
-    },
-  },
-  {
-    name: "a PreCompact carrying no transcript path falls back to the spool",
-    respond: buffer(),
-    async run(subject) {
-      const transcript = subject.transcript("turn.jsonl");
-      // The session start is what puts the path in the spool. A payload
-      // without one is not what this harness build sends, and is exactly
-      // what the fallback exists for: the payload is another program's
-      // internal format, and the adapter must not need any given field.
-      exits(
-        await subject.hook(
-          "session-start",
-          subject.recorded("session-start-startup", { transcript_path: transcript }),
-          { SYNVEDA_GATEWAY: DEAD_GATEWAY },
-        ),
-      );
-      const payload = subject.recorded("pre-compact");
-      delete payload.transcript_path;
-      exits(await subject.hook("flush", payload));
-      expect(
-        subject.spool(qualifiedSessionId(String(payload.session_id)))?.cursor ===
-          "11111111-0000-4000-8000-000000000004",
-        "the spooled transcript path must carry a pathless flush",
-      );
-    },
-  },
-  {
-    name: "a recorded SessionEnd flush closes the session out",
-    respond: buffer(),
-    async run(subject) {
-      const payload = subject.recorded("session-end", {
+      const payload = subject.recorded("session-start-compact", {
         transcript_path: subject.transcript("turn.jsonl"),
       });
-      exits(await subject.hook("flush", payload));
+      exits(await subject.hook("session-start", payload));
+      if (subject.live) return;
+      const compose = subject.requests.find((request) => request.path.endsWith("/context-runs"));
       expect(
-        subject.spool(qualifiedSessionId(String(payload.session_id)))?.cursor ===
-          "11111111-0000-4000-8000-000000000004",
-        "the last flush of a session is where the final turn lands",
+        typeof compose?.body.query === "string" && (compose.body.query as string).length > 0,
+        "post-compaction composition must carry the last real prompt (decision 11)",
+      );
+    },
+  },
+  {
+    name: "a recorded stop records the turn and delivers it",
+    respond: gatewayScript(() => undefined),
+    async run(subject) {
+      const transcript = subject.transcript("turn.jsonl");
+      const start = subject.recorded("session-start-startup", { transcript_path: transcript });
+      exits(await subject.hook("session-start", start));
+      const payload = subject.recorded("stop", { transcript_path: transcript });
+      exits(await subject.hook("turn", payload));
+      const spool = subject.spool(String(payload.session_id));
+      expect(spool !== undefined, "a stop must leave a spool behind");
+      expect(
+        (spool?.entries.length ?? 0) > 0,
+        "the turn must be recorded as events, not merely posted",
+      );
+      expect(
+        (spool?.entries ?? []).every((entry) => entry.acknowledged),
+        "a reachable gateway must leave nothing pending",
+      );
+    },
+  },
+  {
+    name: "a dead gateway keeps the turn on disk rather than losing it",
+    // The whole point of the feature, and the case the previous design could
+    // not have passed: the events existed only as a byte range of the
+    // harness's transcript file, which nothing had copied.
+    respond: gatewayScript(() => undefined),
+    async run(subject) {
+      // A run first, against the reachable gateway, so what fails below is the
+      // *delivery* rather than there being nowhere to deliver to. The
+      // transcript starts empty so the start has nothing to deliver and the
+      // turn below is genuinely new work.
+      const transcript = subject.synthesise("growing.jsonl", []);
+      const start = subject.recorded("session-start-startup", { transcript_path: transcript });
+      exits(await subject.hook("session-start", start));
+
+      // The turn the client just had, arriving after the run was opened.
+      subject.synthesise("growing.jsonl", [
+        {
+          type: "user",
+          uuid: "b9f0e1a2-0000-4000-8000-00000000d001",
+          timestamp: "2026-08-25T09:05:00.000Z",
+          message: { role: "user", content: "the ask nobody delivered" },
+        },
+      ]);
+      const payload = subject.recorded("stop", {
+        session_id: start.session_id,
+        transcript_path: transcript,
+      });
+      exits(
+        await subject.hook("turn", payload, { SYNVEDA_GATEWAY: DEAD_GATEWAY }),
+        "a stop against a dead gateway",
+      );
+      const spool = subject.spool(String(payload.session_id));
+      expect(spool !== undefined, "a failed delivery must still leave a spool");
+      expect(
+        (spool?.entries.length ?? 0) > 0,
+        "the events must be recorded even though nothing was delivered",
+      );
+      expect(
+        (spool?.entries ?? []).some((entry) => !entry.acknowledged),
+        "nothing may be marked delivered when the gateway was never reached",
+      );
+      expect(
+        (spool?.entries ?? []).some((entry) => entry.delivery_attempts >= 1),
+        "the attempt must be counted so `spool status` can report it",
+      );
+    },
+  },
+  {
+    name: "the next session start delivers what a dead gateway left behind",
+    respond: gatewayScript(() => undefined),
+    async run(subject) {
+      const transcript = subject.transcript("turn.jsonl");
+      const stop = subject.recorded("stop", { transcript_path: transcript });
+      exits(await subject.hook("turn", stop, { SYNVEDA_GATEWAY: DEAD_GATEWAY }));
+      const held = subject.spool(String(stop.session_id));
+      expect(
+        (held?.entries ?? []).some((entry) => !entry.acknowledged),
+        "precondition: the events are held",
+      );
+
+      const start = subject.recorded("session-start-startup", {
+        session_id: stop.session_id,
+        transcript_path: transcript,
+      });
+      exits(await subject.hook("session-start", start));
+      const after = subject.spool(String(stop.session_id));
+      expect(
+        (after?.entries ?? []).every((entry) => entry.acknowledged),
+        "the backlog must be delivered once a gateway is reachable again",
+      );
+    },
+  },
+  {
+    name: "a redelivered event is answered duplicate and is not appended twice",
+    mockOnly: "asserting the duplicate count needs a gateway whose whole history is visible",
+    respond: gatewayScript(() => undefined),
+    async run(subject) {
+      const transcript = subject.transcript("turn.jsonl");
+      const start = subject.recorded("session-start-startup", { transcript_path: transcript });
+      exits(await subject.hook("session-start", start));
+      const stop = subject.recorded("stop", { transcript_path: transcript });
+      exits(await subject.hook("turn", stop));
+
+      // Forget the delivery state, keeping the recording: exactly what a
+      // spool restored from a backup, or a crash between the append and the
+      // spool write, produces.
+      const spool = subject.spool(String(stop.session_id));
+      expect(spool !== undefined, "precondition: a spool exists");
+      subject.rewriteSpool(String(stop.session_id), (held) => {
+        for (const entry of held.entries) {
+          entry.acknowledged = false;
+          delete entry.outcome;
+        }
+      });
+
+      exits(await subject.hook("turn", subject.recorded("stop", { transcript_path: transcript })));
+      const appends = subject.requests.filter((request) => request.path.endsWith("/events"));
+      const last = appends.at(-1);
+      const outcomes = ((last?.body.events ?? []) as unknown[]).length;
+      expect(outcomes > 0, "the redelivery must actually resend the events");
+      const replayed = subject.spool(String(stop.session_id));
+      expect(
+        (replayed?.entries ?? []).every((entry) => entry.outcome === "duplicate"),
+        "a redelivered event must come back as a duplicate rather than appending twice",
+      );
+    },
+  },
+  {
+    name: "a precompact records before the transcript can be rewritten",
+    respond: gatewayScript(() => undefined),
+    async run(subject) {
+      const transcript = subject.transcript("turn.jsonl");
+      const start = subject.recorded("session-start-startup", { transcript_path: transcript });
+      exits(await subject.hook("session-start", start, { SYNVEDA_GATEWAY: DEAD_GATEWAY }));
+      const payload = subject.recorded("pre-compact", { transcript_path: transcript });
+      exits(await subject.hook("turn", payload, { SYNVEDA_GATEWAY: DEAD_GATEWAY }));
+      // Compaction now rewrites the transcript out from under the adapter.
+      writeFileSync(transcript, "");
+      const spool = subject.spool(String(payload.session_id));
+      expect(
+        (spool?.entries.length ?? 0) > 0,
+        "a compaction must not be able to eat a turn the adapter was handed",
+      );
+    },
+  },
+  {
+    name: "a recorded SessionEnd flushes and closes the run",
+    respond: gatewayScript(() => undefined),
+    async run(subject) {
+      const transcript = subject.transcript("turn.jsonl");
+      const start = subject.recorded("session-start-startup", { transcript_path: transcript });
+      exits(await subject.hook("session-start", start));
+      const payload = subject.recorded("session-end", { transcript_path: transcript });
+      exits(await subject.hook("turn", payload));
+      if (subject.live) return;
+      const close = subject.requests.find((request) => request.path.endsWith("/end"));
+      expect(close !== undefined, "the last hook of a run must close it");
+      expect(
+        close?.body.status === "ended",
+        `a drained close must say ended, said ${String(close?.body.status)}`,
+      );
+    },
+  },
+  {
+    name: "a SessionEnd that cannot drain says ending and owes the close",
+    mockOnly: "a gateway that accepts a close and refuses an append is a scripted condition",
+    respond: gatewayScript((request) =>
+      request.path.endsWith("/events") ? { status: 503, body: { message: "unavailable" } } : undefined,
+    ),
+    async run(subject) {
+      const transcript = subject.transcript("turn.jsonl");
+      const start = subject.recorded("session-start-startup", { transcript_path: transcript });
+      exits(await subject.hook("session-start", start));
+      const payload = subject.recorded("session-end", { transcript_path: transcript });
+      exits(await subject.hook("turn", payload));
+      const close = subject.requests.find((request) => request.path.endsWith("/end"));
+      expect(
+        close?.body.status === "ending",
+        `a close over a backlog must say ending, said ${String(close?.body.status)}`,
+      );
+      const spool = subject.spool(String(payload.session_id));
+      expect(
+        spool?.close_requested === true,
+        "the close must be recorded as owed so a later flush can finish it",
+      );
+    },
+  },
+  {
+    name: "a degraded composition still delivers context and stays silent",
+    mockOnly: "a degradation header is a server-side condition, not a client request",
+    respond: gatewayScript((request) =>
+      request.path.endsWith("/context-runs")
+        ? {
+            status: 200,
+            body: { ...(block("# still ranked") as Record<string, unknown>), degraded: ["embedder"] },
+            headers: { "x-synveda-degraded": "embedder" },
+          }
+        : undefined,
+    ),
+    async run(subject) {
+      // Twice, and the second run is the one that asserts silence. The first
+      // start in a project also carries the capture disclosure (ADR-0027
+      // decision 13), which is a different message for a different reason —
+      // asserting `systemMessage === undefined` on the first run would be
+      // testing the disclosure, not the degradation.
+      const payload = subject.recorded("session-start-startup");
+      const first = parse(exits(await subject.hook("session-start", payload)));
+      expect(
+        (first.systemMessage ?? "").includes("Synveda is active"),
+        "the first start in a project discloses that it is capturing",
+      );
+
+      const run = exits(await subject.hook("session-start", payload));
+      const output = parse(run);
+      expect(
+        (output.hookSpecificOutput?.additionalContext ?? "").includes("still ranked"),
+        "a degraded composition still delivers context",
+      );
+      expect(
+        output.systemMessage === undefined,
+        "a degradation is recorded in the audit event and the metrics, not said to the user",
+      );
+    },
+  },
+  {
+    name: "a refused composition contributes no context and never fails the session",
+    respond: gatewayScript((request) =>
+      request.path.endsWith("/context-runs") ? { status: 403, body: { message: "denied" } } : undefined,
+    ),
+    async run(subject) {
+      const overrides: Record<string, string> = subject.live
+        ? { SYNVEDA_GATEWAY: `${subject.url}/no-such-prefix` }
+        : {};
+      const run = exits(
+        await subject.hook("session-start", subject.recorded("session-start-startup"), overrides),
+      );
+      const output = parse(run);
+      expect(
+        output.hookSpecificOutput === undefined,
+        "a refused composition must contribute no context",
       );
     },
   },
   {
     name: "a payload the adapter cannot parse asks the gateway for nothing",
     // A reachable gateway is the point: the mode argument alone would be
-    // enough to inject, and injecting for a payload this process cannot
+    // enough to dispatch, and dispatching for a payload this process cannot
     // read would mean composing for a session it cannot name, in a project
     // whose opt-out it cannot see.
-    respond: injects(() => ({ status: 200, body: block("# should never be asked for") })),
+    respond: gatewayScript(() => undefined),
     async run(subject) {
       const run = await subject.hook("session-start", "this is not the json you are looking for");
       exits(run);
@@ -491,11 +521,31 @@ const SCENARIOS: Scenario[] = [
     },
   },
   {
+    name: "a pre-cut hook argument is not honoured",
+    // `observe` and `flush` named a plane that no longer exists. A stale
+    // hooks.json still passing one must do nothing rather than guess.
+    respond: gatewayScript(() => undefined),
+    async run(subject) {
+      for (const stale of ["observe", "flush", "inject"]) {
+        const run = await subject.hook(
+          stale as Mode,
+          subject.recorded("stop", { transcript_path: subject.transcript("turn.jsonl") }),
+        );
+        exits(run, `the stale argument ${stale}`);
+      }
+      if (subject.live) return;
+      expect(
+        subject.requests.length === 0,
+        "no stale hook argument may reach the gateway",
+      );
+    },
+  },
+  {
     name: "every recorded payload survives a gateway that answers an error",
     respond: () => ({ status: 500, body: { message: "boom" } }),
     async run(subject) {
-      // Live: a path the gateway does not serve, which is a real non-2xx
-      // from a real gateway rather than a mock's opinion of one.
+      // Live: a path the gateway does not serve, which is a real non-2xx from
+      // a real gateway rather than a mock's opinion of one.
       const overrides: Record<string, string> = subject.live
         ? { SYNVEDA_GATEWAY: `${subject.url}/no-such-prefix` }
         : {};
@@ -503,9 +553,9 @@ const SCENARIOS: Scenario[] = [
       for (const [fixture, mode] of [
         ["session-start-startup", "session-start"],
         ["session-start-compact", "session-start"],
-        ["stop", "observe"],
-        ["pre-compact", "flush"],
-        ["session-end", "flush"],
+        ["stop", "turn"],
+        ["pre-compact", "turn"],
+        ["session-end", "turn"],
       ] as [string, Mode][]) {
         const run = await subject.hook(
           mode,
@@ -517,6 +567,16 @@ const SCENARIOS: Scenario[] = [
       }
     },
   },
+  {
+    name: "a damaged transcript costs the session nothing",
+    respond: gatewayScript(() => undefined),
+    async run(subject) {
+      const payload = subject.recorded("stop", {
+        transcript_path: subject.transcript("damaged.jsonl"),
+      });
+      exits(await subject.hook("turn", payload));
+    },
+  },
 ];
 
 // ── The runner ───────────────────────────────────────────────────────────────
@@ -526,6 +586,9 @@ export async function runDriver(options: DriverOptions = {}): Promise<DriverRepo
   const live = options.gateway !== undefined;
   if (live && (options.token ?? "").length === 0) {
     throw new Error("a live run needs --token (or SYNVEDA_TOKEN): the adapter never mints one");
+  }
+  if (live && (options.workspace ?? "").length === 0) {
+    throw new Error("a live run needs --workspace: a run happens in one");
   }
   const root = mkdtempSync(join(tmpdir(), "synveda-driver-"));
   const result: DriverReport = { passed: 0, failed: 0, skipped: 0, failures: [] };
@@ -543,13 +606,12 @@ export async function runDriver(options: DriverOptions = {}): Promise<DriverRepo
         continue;
       }
       const mock =
-        live || scenario.respond === undefined
-          ? undefined
-          : await startGateway(scenario.respond);
-      const subject = makeCase(root, result.passed + result.failed, {
+        live || scenario.respond === undefined ? undefined : await startGateway(scenario.respond);
+      const subject = makeCase(root, result.passed + result.failed + result.skipped, {
         live,
         url: options.gateway ?? mock?.url ?? DEAD_GATEWAY,
         token: options.token ?? "driver-bearer",
+        workspace: options.workspace ?? WORKSPACE,
         requests: mock?.requests ?? [],
         expectContext: options.expectContext === true,
       });
@@ -581,21 +643,43 @@ interface CaseSetup {
   live: boolean;
   url: string;
   token: string;
+  workspace: string;
   requests: RecordedRequest[];
   expectContext: boolean;
 }
 
-function makeCase(root: string, index: number, setup: CaseSetup): Case {
+function makeCase(root: string, index: number, setup: CaseSetup): DriverCase {
   const scratch = join(root, `case-${String(index).padStart(2, "0")}`);
   const stateHome = join(scratch, "state");
+  const configHome = join(scratch, "config");
   const project = join(scratch, "project");
   const transcripts = join(scratch, "transcripts");
   // These are all under a scratch root this driver made itself, so none of
-  // them can reach the hazard in `ensureDir`'s docstring. It is used anyway
-  // so the adapter has exactly one way to make a directory.
-  for (const dir of [stateHome, project, transcripts]) ensureDir(dir);
+  // them can reach the hazard in `ensureDir`'s docstring. It is used anyway so
+  // the adapter has exactly one way to make a directory.
+  for (const dir of [stateHome, configHome, project, transcripts]) ensureDir(dir);
 
-  const sessions = join(stateHome, "synveda", "sessions");
+  const spoolRoot = join(stateHome, "synveda", "spool");
+
+  function spoolFiles(): { file: string; spool: Spool }[] {
+    let names: string[];
+    try {
+      names = readdirSync(spoolRoot);
+    } catch {
+      return [];
+    }
+    const found: { file: string; spool: Spool }[] = [];
+    for (const name of names) {
+      if (!name.endsWith(".json")) continue;
+      const file = join(spoolRoot, name);
+      try {
+        found.push({ file, spool: JSON.parse(readFileSync(file, "utf8")) as Spool });
+      } catch {
+        // A file mid-write, or something that is not ours.
+      }
+    }
+    return found;
+  }
 
   return {
     ...setup,
@@ -605,16 +689,18 @@ function makeCase(root: string, index: number, setup: CaseSetup): Case {
     async hook(mode, payload, overrides = {}) {
       const environment: Record<string, string> = {};
       for (const [key, value] of Object.entries(process.env)) {
-        // Whatever this machine has configured is not what is under test:
-        // an ambient SYNVEDA_DISABLED or a real login would quietly change
-        // the answer.
+        // Whatever this machine has configured is not what is under test: an
+        // ambient SYNVEDA_DISABLED or a real login would quietly change the
+        // answer.
         if (key.startsWith("SYNVEDA_") || key.startsWith("XDG_") || value === undefined) continue;
         environment[key] = value;
       }
       Object.assign(environment, {
         XDG_STATE_HOME: stateHome,
+        XDG_CONFIG_HOME: configHome,
         SYNVEDA_GATEWAY: setup.url,
         SYNVEDA_TOKEN: setup.token,
+        SYNVEDA_WORKSPACE: setup.workspace,
         // The credential seam has its own suite; pin it away from any
         // `synveda` this machine happens to have installed.
         SYNVEDA_CLI: join(scratch, "no-cli-here"),
@@ -626,8 +712,8 @@ function makeCase(root: string, index: number, setup: CaseSetup): Case {
     recorded(name, patch = {}) {
       const raw = readFileSync(new URL(`hooks/${name}.json`, FIXTURES), "utf8");
       const parsed = JSON.parse(raw) as Record<string, unknown>;
-      // A recording points at the machine it was taken from; the replay
-      // points at this case's scratch and nothing else.
+      // A recording points at the machine it was taken from; the replay points
+      // at this case's scratch and nothing else.
       return { ...parsed, cwd: project, ...patch };
     },
 
@@ -643,31 +729,16 @@ function makeCase(root: string, index: number, setup: CaseSetup): Case {
       return target;
     },
 
-    spool(sessionId) {
-      let names: string[];
-      try {
-        names = readdirSync(sessions);
-      } catch {
-        return undefined;
-      }
-      for (const name of names) {
-        try {
-          const state = JSON.parse(readFileSync(join(sessions, name), "utf8")) as SessionState;
-          if (state.session_id === sessionId) return state;
-        } catch {
-          // A file mid-write, or something that is not ours.
-        }
-      }
-      return undefined;
+    spool(externalSessionId) {
+      return spoolFiles().find(({ spool }) => spool.external_session_id === externalSessionId)
+        ?.spool;
     },
 
-    forgetCursor(sessionId) {
-      for (const name of readdirSync(sessions)) {
-        const file = join(sessions, name);
-        const state = JSON.parse(readFileSync(file, "utf8")) as SessionState;
-        if (state.session_id !== sessionId) continue;
-        delete state.cursor;
-        writeFileSync(file, JSON.stringify(state));
+    rewriteSpool(externalSessionId, mutate) {
+      for (const { file, spool } of spoolFiles()) {
+        if (spool.external_session_id !== externalSessionId) continue;
+        mutate(spool);
+        writeFileSync(file, JSON.stringify(spool));
       }
     },
 
@@ -755,14 +826,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const flag = argv[index];
     if (flag === "--gateway") options.gateway = argv[(index += 1)];
     else if (flag === "--token") options.token = argv[(index += 1)];
+    else if (flag === "--workspace") options.workspace = argv[(index += 1)];
     else if (flag === "--expect-context") options.expectContext = true;
     else {
-      process.stderr.write(`usage: driver.mjs [--gateway URL] [--token BEARER] [--expect-context]\n`);
+      process.stderr.write(
+        "usage: driver.mjs [--gateway URL] [--token BEARER] [--workspace ID] [--expect-context]\n",
+      );
       process.exit(2);
     }
   }
   if (options.gateway !== undefined && options.token === undefined) {
     options.token = process.env.SYNVEDA_TOKEN;
+  }
+  if (options.gateway !== undefined && options.workspace === undefined) {
+    options.workspace = process.env.SYNVEDA_WORKSPACE;
   }
   const report = await runDriver(options);
   process.exit(report.failed > 0 ? 1 : 0);

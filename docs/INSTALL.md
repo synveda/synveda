@@ -198,7 +198,7 @@ The release carries a plugin — a **marketplace**, which is the unit Claude
 Code installs — and this adds it and installs the one plugin in it by running
 `claude plugin` itself. That gets you more than an MCP server: four hooks, so
 a session composes a watermarked context block at `SessionStart` and every
-turn is observed back at `Stop`, `PreCompact` and `SessionEnd`. Start a new
+turn is recorded back at `Stop`, `PreCompact` and `SessionEnd`. Start a new
 session to pick it up, and check it loaded:
 
 ```sh
@@ -219,11 +219,52 @@ JSON files it keeps.
 It needs a login to do anything: `synveda login` stores the bearer, and the
 plugin reads it per call. There is no other configuration.
 
+#### What happens when the gateway is unreachable
+
+Nothing is lost, and you do not have to do anything about it.
+
+Every event the plugin records is written to a **local spool** first — one
+file per session under `~/.config/synveda/spool/` — and only then delivered.
+A write is a temp file, an `fsync` and a rename, so a machine that dies
+mid-write leaves the previous state or the new one and never half of either.
+An event is deleted only once the gateway has acknowledged it.
+
+Delivery happens on the hooks: `Stop` records the turn and starts one,
+`SessionEnd` flushes what it can inside a bounded budget, and the **next**
+`SessionStart` retries whatever is still unacknowledged. So a session worked
+on a plane, or against a gateway that was down for the afternoon, delivers
+itself the next time you start Claude Code with a network.
+
+Three commands if you want to look, or to hurry it along:
+
+```sh
+synveda session spool status                # what is held, and how old
+synveda session flush                       # deliver everything now
+synveda session spool purge --acknowledged  # reclaim the delivered
+```
+
+`purge` **requires** `--acknowledged` and there is no `--all`. It will not
+delete an observation the gateway has not confirmed.
+
+> **The one thing that is lost.** If the host client is killed outright —
+> SIGKILL, a kernel panic, a battery dying — before any lifecycle hook can
+> run, the events since the last `Stop` go with it. No hook fires, so nothing
+> writes.
+>
+> Claude Code fires `Stop` at the end of every turn, so the window is one
+> turn, not one session: usually seconds. Closing it entirely would mean
+> writing to disk on every token, which costs more than it saves. What is
+> guaranteed is the other half — **nothing that reached the spool is ever
+> lost.**
+
 ### Everything else — Claude Desktop, Cursor, Zed
 
 `synveda mcp` serves governed memory to any MCP client over stdio: `recall` to
-search or fetch, and `remember` to store one durable fact in your own personal
-scope. You do not have to write the config by hand —
+search, and `remember` to store one durable fact in your own personal scope.
+(`recall` used to fetch by handle and read the corpus at a past instant. It
+composes a context run now, and both went with `/v1/recall`; Prompt 18 of the
+context-platform programme is where they return.) You do not have to write the
+config by hand —
 
 ```sh
 synveda mcp install --client claude-desktop   # or: --client cursor

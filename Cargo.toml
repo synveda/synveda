@@ -2,6 +2,27 @@
 resolver = "3"
 members = ["crates/*"]
 
+# Full debuginfo is what makes `target/debug` grow without bound: unpacked
+# `.o` files are the macOS default, and this workspace's dep graph turns
+# that into hundreds of gigabytes and over a million files. Cargo never
+# GCs `target/`, so the cost lands on every later invocation as fingerprint
+# stat traffic — a no-op `cargo check` measured 151s of system time at 9%
+# CPU against a 295G tree. Line tables keep backtraces pointing at
+# file:line, which is what the test suites and demos actually read;
+# stepping through locals in a debugger needs `debug = 2` set back.
+[profile.dev]
+debug = "line-tables-only"
+# Build scripts and proc-macro crates are dependencies of `cargo check`,
+# not just of `cargo build` — check still expands every macro. This tree
+# expands 578 `sqlx::query!`/`query_as!` invocations, each of which parses
+# SQL and type-checks it against `.sqlx`, plus `utoipa-gen` over the
+# gateway's handlers and `serde_derive` almost everywhere. Compiling the
+# expanders unoptimized makes every one of those slower. Same reasoning as
+# the cedar/tantivy overrides below, applied to compile time instead of
+# request time.
+[profile.dev.build-override]
+opt-level = 3
+
 # Cedar evaluation is pure CPU on the request hot path. Keep the engine
 # optimized even in dev/test builds (test inherits dev) so the AUTHZ-1
 # µs-level decision benchmark measures reality — unoptimized Cedar is an

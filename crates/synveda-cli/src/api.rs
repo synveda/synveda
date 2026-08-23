@@ -250,6 +250,30 @@ impl Api {
         decode(self.post(path, body).await?, path)
     }
 
+    /// [`Api::post_as`] carrying an `Idempotency-Key`.
+    ///
+    /// The context-platform plane requires one on every creation (ADR-0071):
+    /// the same key with the same body replays with 200, and with a different
+    /// body is refused with 409. So the key has to be **stable for the request
+    /// it names** rather than fresh per attempt — a retry that minted a new
+    /// key would create a second row, which is the thing the header exists to
+    /// prevent.
+    pub async fn post_idempotent_as<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: Option<Value>,
+        key: &str,
+    ) -> Result<T, String> {
+        let mut request = self
+            .http
+            .post(format!("{}{path}", self.base))
+            .header("Idempotency-Key", key);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        decode(self.send(request, "POST", path).await?, path)
+    }
+
     async fn send(
         &self,
         request: reqwest::RequestBuilder,
@@ -398,8 +422,20 @@ mod tests {
                     seen.lock()
                         .await
                         .push((field("traceparent: "), field("x-synveda-client: ")));
+                    // `connection: close` is load-bearing, not politeness.
+                    // HTTP/1.1 keep-alive is the default, so without it
+                    // `reqwest` pools the socket and sends the second
+                    // request down a connection this loop has already
+                    // stopped reading — it is blocked in `accept()` waiting
+                    // for a new one. Whether the pool is consulted before
+                    // the first response is fully drained is a race, which
+                    // is why this failed about a third of the time under a
+                    // parallel suite and never in isolation.
                     stream
-                        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}")
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\
+                              connection: close\r\n\r\n{}",
+                        )
                         .await
                         .expect("write");
                 }
@@ -414,7 +450,7 @@ mod tests {
         }
         let (api, _origin) = Api::connect("default").await.expect("connect");
         api.get("/v1/whoami").await.expect("first call");
-        api.post("/v1/recall", None).await.expect("second call");
+        api.post("/v1/sessions", None).await.expect("second call");
         unsafe {
             std::env::remove_var("SYNVEDA_TOKEN");
             std::env::remove_var("SYNVEDA_GATEWAY");

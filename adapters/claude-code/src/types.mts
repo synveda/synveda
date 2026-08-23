@@ -1,10 +1,15 @@
 /**
- * Wire and hook types (ADPT-1, ADR-0027).
+ * Wire and hook types (ADPT-1, ADR-0027; re-cut onto the session API by
+ * CPR-12, ADR-0078).
  *
- * Everything the adapter reads from the harness is optional and checked
- * at the edge: a hook payload and a session transcript are internal
- * formats of another program (ADR-0027 decision 9), so the adapter
- * declares only the fields it uses and treats the rest as opaque.
+ * Everything the adapter reads from the harness is optional and checked at the
+ * edge: a hook payload and a session transcript are internal formats of
+ * another program (ADR-0027 decision 9), so the adapter declares only the
+ * fields it uses and treats the rest as opaque.
+ *
+ * The three global primitives these types used to describe — `/v1/observe`,
+ * `/v1/inject` and `/v1/recall` — are deleted. What replaced them names the
+ * run it belongs to, which is why every request shape below carries a session.
  */
 
 /** The subset of a Claude Code hook payload the adapter reads. */
@@ -17,14 +22,16 @@ export interface HookInput {
   cwd?: string;
   /** `SessionStart` only: startup | resume | clear | compact | fork. */
   source?: string;
-  /** `SessionStart` only, which is why the spool carries it to the flush. */
+  /** `SessionStart` only, which is why the spool carries it forward. */
   model?: string;
+  /** `SessionEnd` only: why the harness stopped, when it says. */
+  reason?: string;
 }
 
 /**
- * What a hook prints on stdout. Of the four events this adapter
- * registers for, only `SessionStart` can contribute context; the
- * observe hooks print nothing at all (ADR-0027 decision 2).
+ * What a hook prints on stdout. Of the four events this adapter registers
+ * for, only `SessionStart` can contribute context; the delivery hooks print
+ * nothing at all (ADR-0027 decision 2).
  */
 export interface HookOutput {
   systemMessage?: string;
@@ -34,53 +41,108 @@ export interface HookOutput {
   };
 }
 
-/** `POST /v1/inject` request (CTX-3, ADR-0026 decision 1). */
-export interface InjectRequest {
-  task?: string;
-  session_id?: string;
-  budget_tokens?: number;
+/** The session event vocabulary (`SessionEventType` in synveda-types). */
+export type SessionEventType =
+  | "session.started"
+  | "session.ended"
+  | "message.user"
+  | "message.assistant"
+  | "tool.invoked"
+  | "tool.result"
+  | "file.read"
+  | "file.changed"
+  | "command.executed"
+  | "skill.loaded"
+  | "context.requested"
+  | "adapter.warning"
+  | "memory.asserted";
+
+/** `POST /v1/sessions` — open a run. */
+export interface OpenSessionRequest {
+  workspace_id: string;
+  project_id?: string;
+  client_name: string;
+  client_version?: string;
+  client_installation_id?: string;
+  /** The harness's own id: what makes opening idempotent across hooks. */
+  external_session_id?: string;
+  agent_name?: string;
+  model_name?: string;
+  branch?: string;
+  task_summary?: string;
 }
 
-/** `POST /v1/inject` response. */
-export interface InjectResponse {
-  text: string;
-  block_hash: string;
-  record_ids: string[];
-  tokens: number;
-  budget_tokens: number;
-  as_of: string;
-  degraded: string[];
+/** `POST /v1/sessions` — the run, as much of it as the adapter reads. */
+export interface SessionResponse {
+  id: string;
+  workspace_id: string;
+  project_id?: string;
+  status: string;
 }
 
-// `POST /v1/recall`'s request and response shapes lived here until
-// ADR-0057 decision 4. They were read by one caller — the hand-written MCP
-// loop — and `synveda mcp` now holds that surface in Rust, typed against
-// the gateway's own structs. Two copies of one wire contract is what
-// decision 4 deleted; a spare set of interfaces nobody deserialises into
-// is the same defect with the compiler no longer watching it.
-
-/** The observe vocabulary (`ObserveKind` in synveda-types). */
-export type ObserveKind = "transcript_delta" | "tool_result" | "decision";
-
-/** One buffered event (MEM-1, ADR-0020). */
-export interface ObserveEvent {
-  idempotency_key: string;
-  kind: ObserveKind;
-  payload: unknown;
+/** One event of a `POST /v1/sessions/{id}/events` batch. */
+export interface NewEvent {
+  event_type: SessionEventType;
+  /** The client's own id — the idempotency unit. */
+  client_event_id: string;
   occurred_at: string;
+  payload: unknown;
 }
 
-/** `POST /v1/observe` request. */
-export interface ObserveRequest {
-  session_id: string;
-  events: ObserveEvent[];
+/** `POST /v1/sessions/{id}/events`. */
+export interface AppendEventsRequest {
+  events: NewEvent[];
 }
 
-/** `POST /v1/observe` response — the counts the adapter logs. */
-export interface ObserveResponse {
-  session_id: string;
-  accepted: number;
+/**
+ * One event's outcome. Four values, and all four are terminal: `appended` and
+ * `duplicate` mean it is held, `quarantined` means it is held and withheld
+ * from the pipeline pending review, and `denied` means the redaction policy
+ * refused it and nothing persisted. Re-sending any of them produces the same
+ * answer forever, so the spool acknowledges all four.
+ */
+export interface AppendedEvent {
+  outcome: "appended" | "duplicate" | "quarantined" | "denied";
+  client_event_id: string;
+  redactions?: unknown;
+}
+
+/** `POST /v1/sessions/{id}/events` — the response. */
+export interface AppendEventsResponse {
+  events: AppendedEvent[];
+  appended: number;
   duplicates: number;
   quarantined: number;
   denied: number;
+}
+
+/** `POST /v1/sessions/{id}/context-runs`. */
+export interface ContextRunRequest {
+  query?: string;
+  budget_tokens?: number;
+}
+
+/** `POST /v1/sessions/{id}/context-runs` — the composed block. */
+export interface ContextRunResponse {
+  id: string;
+  rendered: string;
+  block_hash: string;
+  tokens: number;
+  budget_tokens: number;
+  entry_count: number;
+  degraded: string[];
+  created_at: string;
+}
+
+/** `POST /v1/sessions/{id}/end`. */
+export interface EndSessionRequest {
+  /** `ending` to announce the close while events are still arriving, or one
+   *  of `ended`, `abandoned`, `failed` to close it. */
+  status: "ending" | "ended" | "abandoned" | "failed";
+  end_reason?: string;
+}
+
+/** As much of `GET /v1/me` as choosing a workspace needs. */
+export interface MeResponse {
+  workspaces?: { id?: unknown; name?: unknown }[];
 }

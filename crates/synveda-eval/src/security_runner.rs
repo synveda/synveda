@@ -243,14 +243,15 @@ async fn seed(
     let mut seeded = Vec::new();
     for record in &corpus.material {
         let bearer = &environment.actor(&record.actor)?.token;
+        let run = client.session_for(bearer, &record.session_id).await?;
         let response = client
             .observe(
                 bearer,
+                &run,
                 &ObserveRequest {
-                    session_id: &record.session_id,
                     events: vec![ObserveEvent {
                         idempotency_key: format!("{}:{}", record.session_id, record.key),
-                        kind: &record.kind,
+                        kind: &record.event_type,
                         payload: serde_json::json!({ "text": record.text }),
                         occurred_at: chrono::Utc::now().to_rfc3339(),
                     }],
@@ -269,7 +270,7 @@ async fn seed(
         let event_id = acked
             .events
             .first()
-            .and_then(|entry| entry.event_id.clone())
+            .and_then(|entry| entry.event_id().map(str::to_owned))
             .ok_or_else(|| {
                 format!(
                     "seeding `{}` acked no event id, so nothing downstream can be attributed to it",
@@ -443,12 +444,15 @@ async fn wait_for_index(
                 continue;
             };
             let author = &environment.actor(&record.actor)?.token;
+            let index_run = client
+                .session_for(author, &format!("eval:sec:index:{}", corpus.corpus))
+                .await?;
             let found = client
                 .recall_query(
                     author,
+                    &index_run,
                     &RecallQueryRequest {
                         query: &record.text,
-                        session_id: &format!("eval:sec:index:{}", corpus.corpus),
                         limit: SWEEP_LIMIT,
                     },
                 )
@@ -809,12 +813,13 @@ async fn ask(
 
     let served = match surface {
         Surface::Inject => {
+            let run = client.session_for(bearer, &session).await?;
             let block = client
                 .inject(
                     bearer,
+                    &run,
                     &InjectRequest {
                         task: query,
-                        session_id: &session,
                         budget_tokens: None,
                     },
                 )
@@ -826,19 +831,22 @@ async fn ask(
                 block_hash: Some(block.block_hash.clone()),
             }
         }
-        Surface::RecallQuery => served_from(
-            client
-                .recall_query(
-                    bearer,
-                    &RecallQueryRequest {
-                        query: query.unwrap_or_default(),
-                        session_id: &session,
-                        limit: SWEEP_LIMIT,
-                    },
-                )
-                .await?
-                .value,
-        ),
+        Surface::RecallQuery => {
+            let run = client.session_for(bearer, &session).await?;
+            served_from(
+                client
+                    .recall_query(
+                        bearer,
+                        &run,
+                        &RecallQueryRequest {
+                            query: query.unwrap_or_default(),
+                            limit: SWEEP_LIMIT,
+                        },
+                    )
+                    .await?
+                    .value,
+            )
+        }
         Surface::RecallSweep => served_from(
             client
                 .recall_sweep(

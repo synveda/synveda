@@ -15,8 +15,9 @@ use axum::{Extension, Router};
 use chrono::Utc;
 use serde_json::{Value, json};
 use synveda_ingest::extraction::{ClaudeExtractor, ExtractionInput, Extractor, VllmExtractor};
+use synveda_types::session::SessionEventType;
 use synveda_types::{
-    Error, IdentityId, ObserveEventId, ObserveKind, RecordClass, ScopeId, Sensitivity, TenantId,
+    Error, RecordClass, ScopeId, Sensitivity, SessionEventId, SessionId, TenantId,
 };
 
 const API_KEY: &str = "test-key-never-real";
@@ -37,12 +38,12 @@ async fn spawn_mock(router: Router) -> String {
 
 fn sample_input() -> ExtractionInput {
     ExtractionInput {
-        event_id: ObserveEventId::new(),
+        event_id: SessionEventId::new(),
         tenant_id: TenantId::new(),
         scope_id: ScopeId::new(),
-        owner_id: IdentityId::new(),
-        session_id: "sess-http".to_owned(),
-        kind: ObserveKind::TranscriptDelta,
+        session_id: SessionId::new(),
+        principal_id: "sess-http".to_owned(),
+        event_type: SessionEventType::MessageUser,
         payload: json!({"text": "We decided the value [REDACTED:github-pat] stays redacted."}),
         occurred_at: Utc::now(),
         redactions: None,

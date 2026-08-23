@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Synveda",
-    "description": "Governed organisational memory and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface: `/v1/me`, the workspace, project and repository planes (CPR-4), the access plane — members, groups, grants and invitations (CPR-5), and the scope admin plane (CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants), and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, append events, end, timeline, and the context-run endpoint), with CPR-11's paginated and filtered listing and its diagnostic expansion of one event. The rest of the `/v1` surface — observe, inject, recall, proposals, channels, the registries and the older admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`. Appending session events is the one exception, and it is idempotent by a finer unit: each event carries the client's own `client_event_id`, unique within its session, so a redelivered batch appends what is new and reports `duplicate` for the rest.\n\n**Identity.** No request body on this surface accepts a tenant or an acting principal. Both are resolved from the bearer credential; a body naming either is refused rather than ignored.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
+    "description": "Governed organisational memory and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface: `/v1/me`, the workspace, project and repository planes (CPR-4), the access plane — members, groups, grants and invitations (CPR-5), and the scope admin plane (CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants), and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, append events, end, timeline, and the context-run endpoint), with CPR-11's paginated and filtered listing and its diagnostic expansion of one event. Since CPR-12 the session plane is also the **only** runtime plane: `POST /v1/sessions/{session_id}/events` is where observations are admitted and `POST /v1/sessions/{session_id}/context-runs` is where context is composed. The global `/v1/observe`, `/v1/inject` and `/v1/recall` routes that used to do both are deleted, not merely undocumented. The rest of the `/v1` surface — proposals, channels, the registries and the older admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`. Appending session events is the one exception, and it is idempotent by a finer unit: each event carries the client's own `client_event_id`, unique within its session, so a redelivered batch appends what is new and reports `duplicate` for the rest.\n\n**Identity.** No request body on this surface accepts a tenant or an acting principal. Both are resolved from the bearer credential; a body naming either is refused rather than ignored.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
     "license": {
       "name": "Proprietary"
     },
@@ -3128,12 +3128,19 @@
         "required": [
           "events",
           "appended",
-          "duplicates"
+          "duplicates",
+          "quarantined",
+          "denied"
         ],
         "properties": {
           "appended": {
             "type": "integer",
             "description": "How many were written.",
+            "minimum": 0
+          },
+          "denied": {
+            "type": "integer",
+            "description": "How many were refused outright by the redaction policy. Nothing of a\ndenied event persists — not its payload, not a row, not a position.",
             "minimum": 0
           },
           "duplicates": {
@@ -3147,6 +3154,11 @@
               "$ref": "#/components/schemas/AppendedEventView"
             },
             "description": "Per-event outcomes, in the order the batch listed them."
+          },
+          "quarantined": {
+            "type": "integer",
+            "description": "How many were stored but withheld from the extraction pipeline pending\na reviewer's decision (MEM-2, ADR-0021 decision 5).",
+            "minimum": 0
           }
         }
       },
@@ -3155,16 +3167,34 @@
         "description": "What one appended event did, and the row it names.",
         "required": [
           "outcome",
-          "event"
+          "client_event_id"
         ],
         "properties": {
+          "client_event_id": {
+            "type": "string",
+            "description": "The client's own id for the event, echoed on every outcome — including\nthe ones that store nothing, which is what lets a spooling client mark\nexactly the entries this call resolved."
+          },
           "event": {
-            "$ref": "#/components/schemas/SessionEventView",
-            "description": "The stored row — this deployment's version of it, never the caller's,\nbecause a retry must be told what is held rather than handed back what\nit just sent."
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SessionEventView",
+                "description": "The stored row — this deployment's version of it, never the caller's,\nbecause a retry must be told what is held rather than handed back what\nit just sent.\n\nAbsent for a `denied` event: nothing was stored, so there is no row to\nname (CPR-12, ADR-0078 decision 1)."
+              }
+            ]
           },
           "outcome": {
             "type": "string",
-            "description": "`appended` or `duplicate`."
+            "description": "`appended`, `duplicate`, `quarantined` or `denied`."
+          },
+          "redactions": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The scan's finding summary — rule ids, categories and counts, never\nmatched text. Absent when the payload was clean."
           }
         }
       },
@@ -3279,6 +3309,7 @@
           "tokens",
           "budget_tokens",
           "entry_count",
+          "skills",
           "degraded",
           "created_at"
         ],
@@ -3334,6 +3365,10 @@
             "type": "string",
             "format": "uuid",
             "description": "The session it was composed for."
+          },
+          "skills": {
+            "type": "object",
+            "description": "The skills this block advertised (ADR-0054 decision 8): name, scope,\ncommit and object address, so an adapter can materialise exactly what\nwas named without asking twice."
           },
           "tokens": {
             "type": "integer",
@@ -4131,7 +4166,8 @@
               "command.executed",
               "skill.loaded",
               "context.requested",
-              "adapter.warning"
+              "adapter.warning",
+              "memory.asserted"
             ]
           },
           "occurred_at": {
@@ -4674,7 +4710,8 @@
               "command.executed",
               "skill.loaded",
               "context.requested",
-              "adapter.warning"
+              "adapter.warning",
+              "memory.asserted"
             ]
           },
           "id": {

@@ -11,9 +11,10 @@
 #
 # That is not only untidy. The sidecar indexer, the pack refresher, the
 # promotion sweep and the retention sweep all visit **every active tenant
-# per cycle**, which is why `demos/ctx-5-recall.sh` takes a scratch database
-# and says so: "on the shared dev database a just-admitted tenant waits
-# minutes for its first pass". A suite whose fixtures wait on a sweep gets
+# per cycle**, which is why `demos/ctx-5-recall.sh` took a scratch database
+# and said so: "on the shared dev database a just-admitted tenant waits
+# minutes for its first pass". (That demo is deleted — CPR-12 — but the
+# measurement below is why this script still does the same thing.) A suite whose fixtures wait on a sweep gets
 # slower as the database fills, and eventually flaky. Measured before this
 # change, same tests either side: `synveda-store --test hierarchy` 6.49s
 # shared against 4.54s fresh, `--test rls` 0.90s against 0.47s.

@@ -48,7 +48,8 @@ audience. Everything above Phase 5 was built for an organisation — and
 until CPR-7 a tenant's hierarchy root *had* to be `kind = 'org'`. Phase 5
 re-cuts that as 33 ordered prompts on `feat/context-platform-mvp`, with the
 decisions locked in ADR-0068 and the running record in
-docs/implementation/synveda-context-platform.md. **It is a pre-1.0 hard
+docs/implementation/synveda-context-platform.md. **Prompts 1–12 are
+delivered**; 13 onward are open. **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
 enforced rather than planned (ADR-0069), and since CPR-7 the epoch is **2**
@@ -155,7 +156,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 70 of 103 features delivered — see docs/backlog/STATUS.md for
+features done. 76 of 110 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -188,8 +189,17 @@ first prompt asked to check its predecessors rather than build on them — and
 ledger, the first of Stage B and the prompt that makes what an agent *does* a
 governed record — and **CPR-11 on 2026-08-24**, making it **108 with 75
 delivered**: the session product experience, which turns that record into one
-somebody with a question can use. Prompts 12–33 of its programme are filed by
-the prompts that run them, so this number will keep moving.)
+somebody with a question can use — and **CPR-12 on 2026-08-23**, making it
+**109 with 76 delivered**: durable Claude session delivery, the prompt that
+makes the session plane the only one by deleting the three global routes that
+were still this product's actual write path. It filed **CPR-13** the same day,
+making it **110 with 76 delivered** — the demo corpus re-point, which exists
+because CPR-12 went looking for the demos it had to change and found 43 of 65
+already dead. Prompts 13–33 of its programme are filed by the prompts that run
+them, so this number will keep moving. **The headline above read 70 of 103
+against a trail that had said 108 since CPR-11 and a checker that had said 110
+since CPR-12 filed** — the same drift, a fourth time, and once again found by
+reading the trail rather than by any gate.)
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and
@@ -252,6 +262,41 @@ the chain records which event was expanded and never what was in it. A close
 carries an **`end_reason`** (migration `0045`), which is not `task_summary`.
 And a run has an **address**: `/console/sessions/{id}`, reached by one level of
 `:param` in the console's route table.
+
+Since CPR-12 **that record is the only one** (ADR-0078). The Claude Code
+adapter, the extraction pipeline, the CLI, the MCP server and the eval
+harness all move onto the session plane, and `/v1/observe`, `/v1/inject`
+and `/v1/recall` are **deleted** with `observe_events`, the `observe`
+queue, `observe_quarantine` and `ObserveKind` (migration `0046`). Which
+closes the divergence CPR-11 left open in §10 of the implementation
+record. `POST /v1/sessions/{id}/events` is the only write seam and a
+session event is the **extraction unit**, so seven of the thirteen types
+enqueue work (`carries_memory()`) and the rest are ordered, auditable and
+not remembered. **A memory lands at the scope the run was decided at**,
+not the submitter's home — the difference between a workspace remembering
+what happened in it and every agent accumulating a private pile.
+Delivery is durable: a **versioned local spool**, one file per run, written
+temp → `fsync` → `rename`, holding attempt counts and an acknowledgement
+state, retried by the next `SessionStart` and never read in its
+predecessor's format. Hooks own delivery; the CLI diagnoses
+(`synveda session flush | spool status | spool purge --acknowledged`, and
+`purge` has no `--all`). The spool hashes with **SHA-256, not BLAKE3**,
+because the thing that verifies it is Node. **The event-loss boundary is
+documented rather than closed**: a host killed before any lifecycle hook
+runs loses the turn since the last `Stop`; nothing that reached the spool
+is ever lost. `synveda recall` and the `recall` MCP tool compose a context
+run now and say what they lost — the by-id tier and the bitemporal read,
+both waiting on Prompt 18. **Three eval suites fail by name rather than
+measure**: extraction, security and QA-index enumerated a corpus through
+`/v1/recall`'s sweep, and a context run ranks and budgets where a sweep
+enumerates. `make ci`'s `eval-check` is parse-only and green.
+
+**CPR-12 also found that 43 of the 65 scripts under `demos/` do not run**,
+and have not since CPR-7 deleted `synveda role bind` and
+`synveda hierarchy` three prompts earlier — four prompts recorded clean
+runs in between, because no gate runs a demo. Filed as **CPR-13**, whose
+larger half is `make check-demos`. **Do not trust a demo under `demos/`
+to run** unless it is one of the 22 CPR-13 lists as current.
 
 Phase 3 was reordered on 2026-08-04 by demo-readiness (see the Sequencing
 note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,

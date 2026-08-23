@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select exists (\n            select 1 from session_events\n            where tenant_id = $1\n              and (payload::text like '%' || $2 || '%'\n                   or payload::text like '%' || $3 || '%'\n                   or coalesce(redactions::text, '') like '%' || $2 || '%')\n            union all\n            select 1 from session_event_quarantine\n            where tenant_id = $1\n              and (findings::text like '%' || $2 || '%'\n                   or coalesce(review_reason, '') like '%' || $2 || '%')\n            union all\n            select 1 from audit_log\n            where tenant_id = $1\n              and (payload::text like '%' || $2 || '%'\n                   or resource like '%' || $2 || '%')\n            union all\n            select 1 from pgmq.q_session_events\n            where message ->> 'tenant_id' = $4\n              and message::text like '%' || $2 || '%'\n            union all\n            select 1 from pgmq.a_session_events\n            where message ->> 'tenant_id' = $4\n              and message::text like '%' || $2 || '%'\n        ) as \"found!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "found!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e2a11ba43a2809cc1e86df48cb85a1d247503fc379c63aa0d37630b37ddcafa0"
+}

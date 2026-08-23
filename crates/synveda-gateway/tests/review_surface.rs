@@ -181,6 +181,9 @@ async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope) {
     (platform, eng)
 }
 
+#[path = "session_seed.rs"]
+mod session_seed;
+
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
@@ -612,16 +615,27 @@ async fn compliance_sees_both_sides_of_the_change_it_must_approve() {
     // The premise: her own composition genuinely cannot reach this scope's
     // memory — the walk is the caller's own chain, and cleo's never runs
     // through the team (CPR-7, ADR-0074 decision 3).
-    let (status, denied) = post(
-        &app,
-        &cleo,
-        "/v1/inject",
-        json!({"task": "what is the rotation interval"}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{denied}");
+    let cleo_run = session_seed::seed_run_for(&pool, tenant, "flow3-cleo", "cleo@acme.test").await;
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/sessions/{}/context-runs", cleo_run.session_id))
+        .header("authorization", format!("Bearer {cleo}"))
+        .header(
+            "idempotency-key",
+            synveda_types::ContextRunId::new().to_string(),
+        )
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({"query": "what is the rotation interval"}).to_string(),
+        ))
+        .expect("build context-run request");
+    let (status, denied) = call(&app, request).await;
     assert!(
-        !denied["text"]
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "{status} {denied}"
+    );
+    assert!(
+        !denied["rendered"]
             .as_str()
             .unwrap_or_default()
             .contains("rotate the signing key"),

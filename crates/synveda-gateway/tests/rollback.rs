@@ -320,14 +320,28 @@ async fn get(app: &Router, token: &str, path: &str) -> (StatusCode, Value) {
     call(app, request).await
 }
 
-async fn inject(app: &Router, token: &str) -> Value {
-    let (status, body) = post(app, token, "/v1/inject", json!({"session_id": "flow-7"})).await;
-    assert_eq!(status, StatusCode::OK, "inject: {body}");
+async fn inject(app: &Router, token: &str, run: synveda_types::SessionId) -> Value {
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/sessions/{run}/context-runs"))
+        .header("authorization", format!("Bearer {token}"))
+        .header(
+            "idempotency-key",
+            synveda_types::ContextRunId::new().to_string(),
+        )
+        .header("content-type", "application/json")
+        .body(Body::from("{}"))
+        .expect("build context-run request");
+    let (status, body) = call(app, request).await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "context run: {status} {body}"
+    );
     body
 }
 
 fn text(block: &Value) -> String {
-    block["text"].as_str().expect("block text").to_owned()
+    block["rendered"].as_str().expect("block text").to_owned()
 }
 
 /// Whether the block presents `line` as **reviewed** material: present,
@@ -459,6 +473,9 @@ async fn chain_verifies(pool: &PgPool, tenant: TenantId) -> bool {
 
 /// The whole estate the AC needs, wired: a runbook line published at the
 /// department through review, and two readers in different teams.
+#[path = "session_seed.rs"]
+mod session_seed;
+
 struct Fixture {
     pool: PgPool,
     tenant: TenantId,
@@ -471,6 +488,10 @@ struct Fixture {
     bea: String,
     good: RecordId,
     bad: RecordId,
+    /// A run per reader, so a composition names the session it was for
+    /// (CPR-12, ADR-0078 decision 5).
+    alice_run: synveda_types::SessionId,
+    bea_run: synveda_types::SessionId,
     /// The PDP behind `app`, so a test can install a stored pack and have
     /// the very next request decide under it (the refresher's own path).
     pdp: Arc<Pdp>,
@@ -518,7 +539,11 @@ async fn fixture() -> Option<Fixture> {
     let good = seed_record(&pool, tenant, estate.platform.id, tara_identity.id, GOOD).await;
     let bad = seed_record(&pool, tenant, estate.platform.id, tara_identity.id, BAD).await;
 
+    let alice_run = session_seed::seed_run_for(&pool, tenant, "flow7-alice", "alice").await;
+    let bea_run = session_seed::seed_run_for(&pool, tenant, "flow7-bea", "bea").await;
     Some(Fixture {
+        alice_run: alice_run.session_id,
+        bea_run: bea_run.session_id,
         tara: issue("tara", tenant),
         cora: issue("cora", tenant),
         steve: issue("steve", tenant),
@@ -560,8 +585,11 @@ fn a_rewind_reaches_every_agent_under_the_scope_on_the_next_session() {
 
         // The fleet, before. Both readers hold no roles and configured
         // nothing; the department's channel is simply on their chain.
-        for (who, token) in [("alice", &fx.alice), ("bea", &fx.bea)] {
-            let block = inject(app, token).await;
+        for (who, token, run) in [
+            ("alice", &fx.alice, fx.alice_run),
+            ("bea", &fx.bea, fx.bea_run),
+        ] {
+            let block = inject(app, token, run).await;
             assert!(
                 reads_as_reviewed(&block, BAD),
                 "{who} must be receiving the bad line as reviewed material: {}",
@@ -607,7 +635,7 @@ fn a_rewind_reaches_every_agent_under_the_scope_on_the_next_session() {
         // department's tree no longer naming it there is nothing to
         // compose. Alice's keeps it and marks it `[unreviewed]`: it still
         // lives in her chain, and what the rewind took away is its trust.
-        let bea = inject(app, &fx.bea).await;
+        let bea = inject(app, &fx.bea, fx.bea_run).await;
         assert!(
             !mentions(&bea, BAD),
             "a payments engineer must not see the retracted line at all: {}",
@@ -615,7 +643,7 @@ fn a_rewind_reaches_every_agent_under_the_scope_on_the_next_session() {
         );
         assert!(reads_as_reviewed(&bea, GOOD), "the good runbook survives");
 
-        let alice = inject(app, &fx.alice).await;
+        let alice = inject(app, &fx.alice, fx.alice_run).await;
         assert!(
             !reads_as_reviewed(&alice, BAD),
             "a platform engineer must not see the retracted line as reviewed: {}",
@@ -1160,14 +1188,20 @@ fn a_pin_holds_what_readers_compose_while_the_channel_keeps_moving() {
 
         // The reader is held, and the block says so rather than implying
         // it holds the latest reviewed material.
-        let block = inject(app, &fx.alice).await;
+        let block = inject(app, &fx.alice, fx.alice_run).await;
         assert!(reads_as_reviewed(&block, GOOD), "the pinned state composes");
         assert!(
             !reads_as_reviewed(&block, BAD),
             "what landed after the pin does not: {}",
             text(&block)
         );
-        let citation = block["channels"]
+        // The citation rides the chain rather than the response since CPR-12:
+        // a context run's body is deliberately minimal (ADR-0076 decision 7)
+        // and the per-channel watermark is what an auditor reads. Same fact,
+        // one surface.
+        let composed = events(&fx.pool, fx.tenant, "session.context.composed").await;
+        let last = composed.last().expect("a context-run event");
+        let citation = last.payload["channels"]
             .as_array()
             .expect("channel citations")
             .iter()
@@ -1218,9 +1252,15 @@ fn a_pin_holds_what_readers_compose_while_the_channel_keeps_moving() {
         assert_eq!(status, StatusCode::OK, "unpin: {released}");
         assert_eq!(released["released"].as_str(), Some(held.as_str()));
 
-        let block = inject(app, &fx.alice).await;
+        let block = inject(app, &fx.alice, fx.alice_run).await;
         assert!(reads_as_reviewed(&block, BAD), "the reader caught up");
-        let citation = block["channels"]
+        // The citation rides the chain rather than the response since CPR-12:
+        // a context run's body is deliberately minimal (ADR-0076 decision 7)
+        // and the per-channel watermark is what an auditor reads. Same fact,
+        // one surface.
+        let composed = events(&fx.pool, fx.tenant, "session.context.composed").await;
+        let last = composed.last().expect("a context-run event");
+        let citation = last.payload["channels"]
             .as_array()
             .expect("channel citations")
             .iter()
@@ -1339,7 +1379,7 @@ fn a_climbed_record_survives_its_sources_rewind() {
         // session reaches since CPR-7 (ADR-0074 decision 3). The team's
         // own channel carries it too, and reaches nobody — which is the
         // fact the rewind below is about.
-        let block = inject(app, &fx.alice).await;
+        let block = inject(app, &fx.alice, fx.alice_run).await;
         assert!(reads_as_reviewed(&block, GOOD));
         assert!(
             text(&block).contains("(tenant)"),
@@ -1368,7 +1408,7 @@ fn a_climbed_record_survives_its_sources_rewind() {
 
         // And the reader still has the line, under the scope that still
         // publishes it — which is true rather than cosmetic.
-        let block = inject(app, &fx.alice).await;
+        let block = inject(app, &fx.alice, fx.alice_run).await;
         assert!(
             reads_as_reviewed(&block, GOOD),
             "a climbed record survives its source's rewind: {}",

@@ -1,9 +1,37 @@
 # ADR-0042: recall becomes a query — the universe is the scopes that can contribute, as-of rewinds the corpus but never the authority, and one MCP tool over the route that already exists
 
-- **Status**: Accepted
+- **Status**: Accepted, **superseded in part 2026-08-23 by ADR-0078** (CPR-12): the route is deleted and two of its three shapes have no successor
 - **Date**: 2026-07-27
 - **Feature(s)**: CTX-5
 - **Deciders**: sujitn
+
+## Superseded in part (2026-08-23, CPR-12): `POST /v1/recall` is deleted
+
+ADR-0078 decision 5 deletes the route. Its three shapes did not fare alike,
+and saying which is which is the point of this note.
+
+- **`query`** — served by a context run, and **narrower**. This ADR's whole
+  subject was the widening: recall asked about every scope that could
+  contribute, where inject asked only about the caller's chain. A context
+  run is inject's descendant, so *the widening is gone with the route.*
+  `synveda recall --query` and the `recall` MCP tool both still work and
+  both now compose a run; neither reaches the sibling-team material this
+  ADR was written to reach.
+- **`as_of`** — no successor. A context run reads the live corpus. The
+  bitemporal read this ADR built, and the finding that as-of rewinds the
+  corpus and never the authority, are unexercised until Prompt 18.
+- **`ids`** — no successor. A context run takes no handles, so the
+  re-decide-on-the-way-in property of ADR-0041 has no caller.
+
+The **sweep**, which is `as_of` with no query, is what three eval suites
+enumerated a corpus with; they fail by name rather than measure something
+else (ADR-0078 decision 5). `demos/ctx-5-recall.sh` is deleted: both of its
+claims were properties of the route.
+
+Prompt 18 re-cuts recall over the governed scope model; Prompt 32
+re-measures. Nothing here is a decision reversed — it is a surface removed
+ahead of being rebuilt, and this ADR is the specification of what has to
+come back.
 
 ## Context
 

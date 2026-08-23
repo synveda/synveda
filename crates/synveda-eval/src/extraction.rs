@@ -2,11 +2,11 @@
 //! (EVAL-2, ADR-0046).
 //!
 //! Nothing here reads a record the product would not serve. Transcripts go
-//! in through `/v1/observe` and the records they became come back through
-//! `/v1/recall`'s sweep, so every number is a number a caller could have
-//! measured for themselves — MEM-1's buffer, MEM-2's redaction, MEM-3's
-//! extraction, MEM-4's embedding, MEM-5's dedup and CTX's admission all
-//! included, because they are all between the two calls.
+//! in through `POST /v1/sessions/{id}/events` and the records they became
+//! come back through `/v1/recall`'s sweep, so every number is a number a
+//! caller could have measured for themselves — MEM-1's buffer, MEM-2's
+//! redaction, MEM-3's extraction, MEM-4's embedding, MEM-5's dedup and
+//! CTX's admission all included, because they are all between the two calls.
 //!
 //! **Two lenses, two questions** (decision 4). The sweep says what a
 //! *reader is served*; `GET /v1/audit/events?action=memory.extracted` says
@@ -15,6 +15,17 @@
 //! difference between them is reported as its own number rather than
 //! absorbed into recall. The gated axes come from the sweep, because that
 //! is the product claim.
+//!
+//! **This suite does not run as of CPR-12** (ADR-0078 decision 5).
+//! `/v1/recall` is deleted and its sweep has no successor: the served lens
+//! enumerates a corpus, and a context run ranks and truncates one, so what
+//! it left out would be a property of the budget rather than of extraction.
+//! The committed lens alone cannot stand in either — the chain carries
+//! per-event *counts*, not the record text every per-class score reads. The
+//! seed leg is fully re-pointed onto the session plane and the sweep leg
+//! fails by name, so `make eval-extraction-live` fails with the reason
+//! rather than reporting a number measured against a different question.
+//! Prompt 18 re-cuts recall; Prompt 32 re-measures.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
@@ -67,18 +78,21 @@ pub async fn run_group(
         })?
         .token;
 
-    // Seed. One call per fixture, because a batch carries one session id
-    // and the session is the fixture's own label.
+    // Seed. One call per fixture, because a run is the fixture's own label —
+    // opened here rather than sent as a string (CPR-12, ADR-0078).
     let mut event_ids: BTreeMap<String, String> = BTreeMap::new();
     for fixture in &group.fixtures {
+        let session = client
+            .session_for(bearer, &fixture.input.session_id)
+            .await?;
         let response = client
             .observe(
                 bearer,
+                &session,
                 &ObserveRequest {
-                    session_id: &fixture.input.session_id,
                     events: vec![ObserveEvent {
                         idempotency_key: fixture.name.clone(),
-                        kind: &fixture.input.kind,
+                        kind: &fixture.input.event_type,
                         payload: fixture.input.payload.clone(),
                         occurred_at: fixture.input.occurred_at.clone(),
                     }],
@@ -97,7 +111,7 @@ pub async fn run_group(
             .events
             .iter()
             .find(|entry| entry.idempotency_key == fixture.name)
-            .and_then(|entry| entry.event_id.clone())
+            .and_then(|entry| entry.event_id().map(str::to_owned))
             .ok_or_else(|| {
                 format!(
                     "seeding `{}` acked no event id, so nothing downstream can be attributed \

@@ -158,9 +158,11 @@ pub struct SeedBatch {
 pub struct SeedEvent {
     /// How expectations refer to this event.
     pub key: String,
-    /// `transcript_delta` | `tool_result` | `decision` (MEM-1's vocabulary).
-    #[serde(default = "default_kind")]
-    pub kind: String,
+    /// A session event type that carries memory (CPR-12, ADR-0078 decision 2).
+    /// Defaults to `message.user`, which is what an unlabelled line of a
+    /// transcript is.
+    #[serde(default = "default_event_type")]
+    pub event_type: String,
     pub text: String,
     /// The phrase that must survive extraction and summarisation. The
     /// full text is the default, which is right for short fixtures and
@@ -176,8 +178,8 @@ impl SeedEvent {
     }
 }
 
-fn default_kind() -> String {
-    "transcript_delta".to_owned()
+fn default_event_type() -> String {
+    "message.user".to_owned()
 }
 
 /// The `/v1/inject` call under measurement.
@@ -356,7 +358,7 @@ mod tests {
     fn a_scenario_round_trips_with_its_defaults() {
         let scenario = parse(MINIMAL).expect("parses");
         assert_eq!(scenario.probe.repeat, 3);
-        assert_eq!(scenario.seed[0].events[0].kind, "transcript_delta");
+        assert_eq!(scenario.seed[0].events[0].event_type, "message.user");
         assert_eq!(scenario.seed[0].events[0].marker(), "make deploy");
         assert!(!scenario.expect.abstain);
     }

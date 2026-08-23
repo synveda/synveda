@@ -395,12 +395,18 @@ pub async fn measure_instance(
     // The measurement. The question is the task, which is the whole point:
     // a memory system is being asked to bring back what a reader would
     // need in order to answer it.
+    let probe_session = client
+        .session_for(
+            bearer,
+            &format!("eval:{SESSION_PREFIX}:{}", instance.question_id),
+        )
+        .await?;
     let probe = client
         .inject(
             bearer,
+            &probe_session,
             &InjectRequest {
                 task: Some(&instance.question),
-                session_id: &format!("eval:{SESSION_PREFIX}:{}", instance.question_id),
                 budget_tokens: options.budget_tokens,
             },
         )
@@ -638,14 +644,9 @@ async fn seed(
                 occurred_at: (started + chrono::Duration::minutes(index as i64)).to_rfc3339(),
             })
             .collect();
+        let run = client.session_for(bearer, &session_id).await?;
         let response = client
-            .observe(
-                bearer,
-                &ObserveRequest {
-                    session_id: &session_id,
-                    events,
-                },
-            )
+            .observe(bearer, &run, &ObserveRequest { events })
             .await?;
         let acked = &response.value;
         if acked.denied > 0 || acked.quarantined > 0 {
@@ -665,7 +666,7 @@ async fn seed(
                 .events
                 .iter()
                 .find(|entry| entry.idempotency_key == key)
-                .and_then(|entry| entry.event_id.clone())
+                .and_then(|entry| entry.event_id().map(str::to_owned))
             else {
                 outcome.failures.push(format!(
                     "seeding turn `{key}` acked no event id, so nothing downstream can be \
@@ -789,16 +790,20 @@ async fn wait_for_index(
                 continue;
             };
             let planted = seeded_id(instance, session_id);
+            let index_run = suite
+                .client
+                .session_for(
+                    bearer,
+                    &format!("eval:{SESSION_PREFIX}:index:{}", instance.question_id),
+                )
+                .await?;
             let found = suite
                 .client
                 .recall_query(
                     bearer,
+                    &index_run,
                     &RecallQueryRequest {
                         query: &render(&session),
-                        session_id: &format!(
-                            "eval:{SESSION_PREFIX}:index:{}",
-                            instance.question_id
-                        ),
                         limit: MAX_RECALL_IDS,
                     },
                 )

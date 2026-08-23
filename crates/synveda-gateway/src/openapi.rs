@@ -52,10 +52,15 @@ members, groups, grants and invitations (CPR-5), and the scope admin plane \
 and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, \
 append events, end, timeline, and the context-run endpoint), with CPR-11's \
 paginated and filtered listing and its diagnostic expansion of one event. \
-The rest of the `/v1` surface — observe, inject, recall, proposals, channels, \
-the registries and the older admin planes — predates the OpenAPI contract and \
-is brought onto it by a later prompt of the context-platform programme. Its \
-absence here is a statement about this document, not about the gateway.
+Since CPR-12 the session plane is also the **only** runtime plane: \
+`POST /v1/sessions/{session_id}/events` is where observations are admitted and \
+`POST /v1/sessions/{session_id}/context-runs` is where context is composed. \
+The global `/v1/observe`, `/v1/inject` and `/v1/recall` routes that used to do \
+both are deleted, not merely undocumented. \
+The rest of the `/v1` surface — proposals, channels, the registries and the \
+older admin planes — predates the OpenAPI contract and is brought onto it by a \
+later prompt of the context-platform programme. Its absence here is a \
+statement about this document, not about the gateway.
 
 **Tenancy.** Every path below sits behind bearer authentication and tenant \
 resolution. A response is always scoped to the caller's tenant, which is why \

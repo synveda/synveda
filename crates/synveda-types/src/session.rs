@@ -31,18 +31,18 @@
 //! cannot open a session as somebody else or in somebody else's tenant even
 //! by accident.
 //!
-//! ## `session_id: String` is not this
+//! ## `session_id: String` was not this
 //!
-//! Until this feature a "session" was an opaque string on
+//! Until CPR-10 a "session" was an opaque string on
 //! `observe_events.session_id`, and `/v1/inject` and `/v1/recall` copied it
 //! into an audit payload. It meant a session an agent only *read* in did not
 //! exist — which ADPT-8 measured against a headless Claude Code run: three
-//! runs, three `inject.ok`, **zero** `observe.done`. The old string is
-//! untouched by this feature and leaves with the observe re-cut, which is
-//! **open and unscheduled**: CPR-10 forecast it as Prompt 11 and Prompt 11
-//! turned out to be CPR-11, the session product experience (see §10 of
-//! `docs/implementation/synveda-context-platform.md`). Nothing here reads it
-//! and nothing there reads these.
+//! runs, three `inject.ok`, **zero** `observe.done`.
+//!
+//! **That plane is gone.** CPR-12 (ADR-0078) deleted `/v1/observe`,
+//! `/v1/inject`, `/v1/recall`, `observe_events` and the correlation string
+//! with them, and re-anchored the extraction pipeline on these tables. There
+//! is one runtime write path and it is `POST /v1/sessions/{id}/events`.
 
 use std::fmt;
 use std::str::FromStr;
@@ -213,9 +213,9 @@ impl FromStr for SessionStatus {
 /// and because an open vocabulary makes "what did this agent do" a question
 /// answered differently by every adapter.
 ///
-/// Eight families: the run's own lifecycle, the conversation, tools, files,
-/// commands, skills, context requests, and what the adapter itself could not
-/// do. The last one is not decoration: an adapter that silently dropped half a
+/// Nine families: the run's own lifecycle, the conversation, tools, files,
+/// commands, skills, context requests, what the adapter itself could not do,
+/// and what a model chose to remember. The last one is not decoration: an adapter that silently dropped half a
 /// run is indistinguishable from a quiet run, which is exactly the failure
 /// ADPT-8 found by measuring.
 ///
@@ -266,6 +266,24 @@ pub enum SessionEventType {
     /// dropping it silently.
     #[serde(rename = "adapter.warning")]
     AdapterWarning,
+    /// A fact **a model composed and chose to store**, arriving because the
+    /// model called a write tool rather than because a hook observed a run.
+    ///
+    /// The distinction is epistemic and cannot be recovered later (ADR-0057
+    /// decision 8): a hook records what happened whether or not the model
+    /// thinks to call it, while an assertion is the model's own claim, shaped
+    /// by the model, for the recorder. This carried `ObserveKind::Assertion`
+    /// until CPR-12 and it is here rather than deleted with the rest of that
+    /// vocabulary for exactly the reason decision 8 gives: once a model's
+    /// assertion and a host's observation share a name, no later feature can
+    /// separate them, and the corpus can never answer "did a person say this
+    /// or did a model decide it" about anything written before somebody
+    /// noticed.
+    ///
+    /// It buys provenance, not privilege: the same route, the same
+    /// `SessionWrite` decision, the same redaction scan, the same scope.
+    #[serde(rename = "memory.asserted")]
+    MemoryAsserted,
 }
 
 impl SessionEventType {
@@ -283,6 +301,7 @@ impl SessionEventType {
         SessionEventType::SkillLoaded,
         SessionEventType::ContextRequested,
         SessionEventType::AdapterWarning,
+        SessionEventType::MemoryAsserted,
     ];
 
     /// Stable wire name, identical to the serde form and to the stored value.
@@ -307,6 +326,45 @@ impl SessionEventType {
             SessionEventType::SkillLoaded => "skill.loaded",
             SessionEventType::ContextRequested => "context.requested",
             SessionEventType::AdapterWarning => "adapter.warning",
+            SessionEventType::MemoryAsserted => "memory.asserted",
+        }
+    }
+
+    /// Whether an event of this type is worth extracting a memory from.
+    ///
+    /// A distinction the old four-value `ObserveKind` never had to make: all
+    /// four of its values carried content somebody said or a tool returned.
+    /// Thirteen names include bookkeeping — a run starting, a skill being
+    /// materialised, an adapter reporting that it dropped something — and
+    /// running an extractor over "session started" is LLM spend that can only
+    /// produce noise.
+    ///
+    /// So the gateway enqueues a work signal only for the types that answer
+    /// `true` here. The others are still appended, still ordered, still on the
+    /// timeline and still auditable: they are part of what happened, they are
+    /// just not part of what is *remembered*.
+    #[must_use]
+    pub const fn carries_memory(&self) -> bool {
+        match self {
+            SessionEventType::MessageUser
+            | SessionEventType::MessageAssistant
+            | SessionEventType::ToolInvoked
+            | SessionEventType::ToolResult
+            | SessionEventType::FileChanged
+            | SessionEventType::CommandExecuted
+            | SessionEventType::MemoryAsserted => true,
+            // Structure, not memory. `file.read` is here rather than above
+            // deliberately: that a file was opened is provenance about the
+            // run, and a memory saying "the agent read src/main.rs" is the
+            // kind of derived record that fills a corpus without informing
+            // anything. What the agent *did* with it lands as a message or a
+            // change.
+            SessionEventType::SessionStarted
+            | SessionEventType::SessionEnded
+            | SessionEventType::FileRead
+            | SessionEventType::SkillLoaded
+            | SessionEventType::ContextRequested
+            | SessionEventType::AdapterWarning => false,
         }
     }
 
@@ -324,6 +382,7 @@ impl SessionEventType {
             SessionEventType::SkillLoaded => "skill",
             SessionEventType::ContextRequested => "context",
             SessionEventType::AdapterWarning => "adapter",
+            SessionEventType::MemoryAsserted => "memory",
         }
     }
 }
@@ -488,6 +547,14 @@ pub struct SessionEvent {
     /// what it is for is telling two events with one `client_event_id` apart,
     /// and a digest a client supplied could not do that.
     pub payload_hash: String,
+    /// The admission scan's finding summary — `[{rule, category, count}]`,
+    /// never matched text (CPR-12, ADR-0078 decision 1). `None` when the
+    /// payload was clean.
+    ///
+    /// Immutable provenance rather than state: it is decided once, at
+    /// admission, and stays true of this payload forever. Which is why it
+    /// lives on an append-only row and the quarantine *review* does not.
+    pub redactions: Option<serde_json::Value>,
 }
 
 /// One act of composing context for a session.
@@ -524,6 +591,14 @@ pub struct ContextRun {
     pub budget_tokens: i32,
     /// How many records composed.
     pub entry_count: i32,
+    /// The skills this block advertised, as it advertised them (ADR-0054
+    /// decision 8): name, scope, commit and object address, so an adapter can
+    /// materialise exactly what was named without asking twice.
+    ///
+    /// Stored rather than recomputed because this endpoint is idempotent — a
+    /// replay must serve the body the original served, and a channel that has
+    /// moved since would otherwise change the answer.
+    pub skills: serde_json::Value,
     /// Which legs degraded, if any — `embedder`, `retrieval`. Empty is the
     /// ordinary answer.
     pub degraded: Vec<String>,
@@ -709,7 +784,7 @@ mod tests {
     }
 
     #[test]
-    fn every_event_type_has_a_family_and_the_families_are_the_eight_named() {
+    fn every_event_type_has_a_family_and_the_families_are_the_nine_named() {
         let mut families: Vec<&str> = SessionEventType::ALL
             .iter()
             .map(SessionEventType::family)
@@ -724,6 +799,7 @@ mod tests {
                 "context",
                 "file",
                 "lifecycle",
+                "memory",
                 "message",
                 "skill",
                 "tool"
@@ -874,6 +950,7 @@ mod tests {
             received_at: Utc::now(),
             payload: serde_json::json!({"tool": "grep"}),
             payload_hash: "ab".repeat(32),
+            redactions: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert_eq!(serde_json::from_str::<SessionEvent>(&json).unwrap(), event);

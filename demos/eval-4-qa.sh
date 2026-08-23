@@ -18,7 +18,7 @@
 # green with all four tiers reaching the reader -> the COMPOSITION BUDGET
 # is narrowed for real, which is the change this demo exists for: nothing
 # is deleted, no permit changes, every record is still committed and still
-# served by /v1/recall, and the block simply cannot hold it all -> the very
+# served, and the block simply cannot hold it all -> the very
 # next run fails the gate naming the axis and the delta, and the per-tier
 # table shows the FURTHEST material going first while the reader's own
 # survives, which is the seed §4.4 gradient doing exactly what it is for
@@ -138,7 +138,7 @@ echo
 echo "==> [1/4] the suite: a corpus seeded at three personal leaves, then"
 echo "    climbed to acme/eng/payments, acme/eng and acme through"
 echo "    POST /v1/proposals under each level's own approvers, then ten"
-echo "    questions asked of the reader's own /v1/inject block and graded"
+echo "    questions asked of the reader's own context-run block and graded"
 echo "    by record identity — never by string containment, because an"
 echo "    index entry carries a truncated head and 'demoted' and 'absent'"
 echo "    would otherwise be one measurement"
@@ -161,7 +161,7 @@ echo "    tenant $EVAL_TENANT"
 echo "    The pack is the default pack's OWN source with one number"
 echo "    changed, so not one permit differs. Nothing is deleted. Every"
 echo "    record is still committed, still admitted, and still returned by"
-echo "    /v1/recall — there is simply less room in the block."
+echo "    a context run — there is simply less room in the block."
 ./target/debug/synveda policy apply --tenant "$EVAL_TENANT" \
   --name eval-narrow-budget \
   --composition-budget "$NARROW_BUDGET" \

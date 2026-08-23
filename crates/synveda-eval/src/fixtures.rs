@@ -30,7 +30,21 @@ pub const CLASSES: [&str; 6] = [
     "procedure",
 ];
 
-const KINDS: [&str; 3] = ["transcript_delta", "tool_result", "decision"];
+/// The session event types that carry memory (CPR-12, ADR-0078 decision 2).
+/// A fixture whose event type is outside this list would be appended,
+/// ordered and auditable and would enqueue no extraction work at all — so
+/// it would score zero and read as a quality collapse rather than as the
+/// corpus error it is. Declared here rather than imported for the same
+/// reason [`CLASSES`] is.
+pub const EVENT_TYPES: [&str; 7] = [
+    "message.user",
+    "message.assistant",
+    "tool.invoked",
+    "tool.result",
+    "file.changed",
+    "command.executed",
+    "memory.asserted",
+];
 
 /// One group file: one eval actor's worth of fixtures. The partition is
 /// load-bearing — records land at the caller's home scope (ADR-0020), so
@@ -69,7 +83,9 @@ pub struct Fixture {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FixtureInput {
-    pub kind: String,
+    /// A session event type, not the old observe `kind`: the vocabulary
+    /// changed with the plane (CPR-12, ADR-0078 decision 2).
+    pub event_type: String,
     pub session_id: String,
     pub occurred_at: String,
     pub payload: serde_json::Value,
@@ -175,10 +191,12 @@ fn validate(groups: &[Group]) -> Result<(), String> {
                     fixture.input.session_id, fixture.name
                 ));
             }
-            if !KINDS.contains(&fixture.input.kind.as_str()) {
+            if !EVENT_TYPES.contains(&fixture.input.event_type.as_str()) {
                 return Err(at(&format!(
-                    "kind `{}` is not one of {KINDS:?}",
-                    fixture.input.kind
+                    "event type `{}` is not one of {EVENT_TYPES:?} — a type outside \
+                     this list carries no memory, so the fixture would score zero \
+                     without anything having gone wrong",
+                    fixture.input.event_type
                 )));
             }
             if chrono::DateTime::parse_from_rfc3339(&fixture.input.occurred_at).is_err() {
@@ -232,7 +250,7 @@ mod tests {
 
     const CLEAN: &str = r#"{
         "name": "f1",
-        "input": {"kind": "transcript_delta", "session_id": "s1",
+        "input": {"event_type": "message.user", "session_id": "s1",
                   "occurred_at": "2026-07-20T10:00:00Z",
                   "payload": {"text": "We chose Cedar over OpenFGA."}},
         "expected": [{"class": "decision", "content_contains": "Cedar"}]
@@ -297,8 +315,19 @@ mod tests {
             group(&bad_class).is_err(),
             "unknown class must not validate"
         );
-        let bad_kind = CLEAN.replace("\"transcript_delta\"", "\"thought\"");
-        assert!(group(&bad_kind).is_err(), "unknown kind must not validate");
+        let bad_type = CLEAN.replace("\"message.user\"", "\"thought\"");
+        assert!(
+            group(&bad_type).is_err(),
+            "unknown event type must not validate"
+        );
+        // And a type the *session plane* accepts but which carries no
+        // memory is refused here too: it would append cleanly, enqueue
+        // nothing, and score as a quality collapse (ADR-0078 decision 2).
+        let no_memory = CLEAN.replace("\"message.user\"", "\"session.started\"");
+        assert!(
+            group(&no_memory).is_err(),
+            "a type that carries no memory must not validate"
+        );
         let bad_instant = CLEAN.replace("\"2026-07-20T10:00:00Z\"", "\"last Tuesday\"");
         assert!(
             group(&bad_instant).is_err(),

@@ -313,13 +313,24 @@ async fn grant_over_http(
     call(app, request).await.0
 }
 
-async fn inject(app: &Router, token: &str, session: &str) -> (StatusCode, Value) {
+#[path = "session_seed.rs"]
+mod session_seed;
+
+async fn inject(
+    app: &Router,
+    token: &str,
+    session: synveda_types::SessionId,
+) -> (StatusCode, Value) {
     let request = Request::builder()
         .method("POST")
-        .uri("/v1/inject")
+        .uri(format!("/v1/sessions/{session}/context-runs"))
+        .header(
+            "idempotency-key",
+            synveda_types::ContextRunId::new().to_string(),
+        )
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
-        .body(Body::from(json!({"session_id": session}).to_string()))
+        .body(Body::from("{}"))
         .expect("build inject request");
     call(app, request).await
 }
@@ -411,14 +422,27 @@ async fn world() -> Option<World> {
     let alice_token = issue("alice", tenant);
     let bob_token = issue("bob", tenant);
 
-    // The disclosures this suite answers about are made here, by the
-    // product, through the surface a real session uses.
-    let (status, _) = inject(&app, &alice_token, "alice-1").await;
-    assert_eq!(status, StatusCode::OK, "alice's session start");
-    let (status, _) = inject(&app, &bob_token, "bob-1").await;
-    assert_eq!(status, StatusCode::OK, "bob's session start");
-    let (status, _) = inject(&app, &alice_token, "alice-2").await;
-    assert_eq!(status, StatusCode::OK, "alice's second session");
+    // The disclosures this suite answers about are made here, by the product,
+    // through the surface a real session uses — three runs, because a
+    // composition names the run it was for since CPR-12.
+    let alice_run = session_seed::seed_run_for(&pool, tenant, "aud2-alice", "alice").await;
+    let bob_run = session_seed::seed_run_for(&pool, tenant, "aud2-bob", "bob").await;
+    let alice_second = session_seed::open_run(
+        &pool,
+        tenant,
+        alice_run.workspace_id,
+        "aud2-alice-2",
+        "alice",
+    )
+    .await;
+    for (who, token, run) in [
+        ("alice's session start", &alice_token, alice_run.session_id),
+        ("bob's session start", &bob_token, bob_run.session_id),
+        ("alice's second session", &alice_token, alice_second),
+    ] {
+        let (status, body) = inject(&app, token, run).await;
+        assert_eq!(status, StatusCode::CREATED, "{who}: {body}");
+    }
 
     let _ = bob;
     Some(World {
@@ -502,8 +526,9 @@ async fn who_could_see_this_record_is_one_call_answered_from_the_chain() {
     );
     assert_eq!(
         first["action"].as_str(),
-        Some("context.injected"),
-        "being *given* material is its own act, kept apart from asking for it"
+        Some("session.context.composed"),
+        "being *given* material is its own act, kept apart from asking for it — \
+         and since CPR-12 the act names the run it was for"
     );
     assert!(
         first["version_hash"].is_string() || first["object_hash"].is_string(),

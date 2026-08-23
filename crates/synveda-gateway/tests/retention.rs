@@ -1,7 +1,7 @@
 //! MEM-6 acceptance (ADR-0040): retention, disposal and staleness.
 //!
 //! The AC has two halves and both are here, over the real product path —
-//! `POST /v1/observe`, the extraction worker, `POST /v1/inject`, the sweep
+//! `POST /v1/sessions/{id}/events`, the extraction worker, a context run, the sweep
 //! the gateway spawns — never a hand-written record:
 //!
 //! * **a retention policy change re-evaluates existing records**: material
@@ -267,33 +267,60 @@ async fn post(app: &Router, uri: &str, bearer: &str, body: Value) -> (StatusCode
 }
 
 /// One observed statement, through the product's own write path.
-async fn observe(app: &Router, bearer: &str, session: &str, at: DateTime<Utc>, text: &str) {
+async fn observe(
+    app: &Router,
+    bearer: &str,
+    run: synveda_types::SessionId,
+    label: &str,
+    at: DateTime<Utc>,
+    text: &str,
+) {
     let (status, body) = post(
         app,
-        "/v1/observe",
+        &format!("/v1/sessions/{run}/events"),
         bearer,
         json!({
-            "session_id": session,
             "events": [{
-                "idempotency_key": format!("{session}:{}", at.timestamp_micros()),
-                // `tool_result` is what the deterministic extractor routes
-                // to `episode` (the class a real schedule shortens first).
-                "kind": "tool_result",
-                "payload": {"text": text},
+                // `tool.result` is what the deterministic extractor routes to
+                // `episode` (the class a real schedule shortens first).
+                "event_type": "tool.result",
+                "client_event_id": format!("{label}:{}", at.timestamp_micros()),
                 "occurred_at": at.to_rfc3339(),
+                "payload": {"text": text},
             }],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED, "observe: {body}");
-    assert_eq!(body["accepted"], json!(1), "observe: {body}");
+    assert_eq!(status, StatusCode::OK, "append: {body}");
+    assert_eq!(body["appended"], json!(1), "append: {body}");
 }
 
 /// The composed block a cold session start receives.
-async fn inject_text(app: &Router, bearer: &str, session: &str) -> String {
-    let (status, body) = post(app, "/v1/inject", bearer, json!({"session_id": session})).await;
-    assert_eq!(status, StatusCode::OK, "inject: {body}");
-    body["text"].as_str().expect("block text").to_owned()
+async fn inject_text(
+    app: &Router,
+    bearer: &str,
+    run: synveda_types::SessionId,
+    key: &str,
+) -> String {
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri(format!("/v1/sessions/{run}/context-runs"))
+        .header("authorization", format!("Bearer {bearer}"))
+        .header("idempotency-key", key)
+        .header("content-type", "application/json")
+        .body(Body::from("{}"))
+        .expect("build request");
+    let response = app.clone().oneshot(request).await.expect("send request");
+    let status = response.status();
+    let body = body_json(response).await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "context run: {status} {body}"
+    );
+    body["rendered"]
+        .as_str()
+        .expect("rendered block")
+        .to_owned()
 }
 
 async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
@@ -315,10 +342,10 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
     synveda_store::migrate(&pool)
         .await
         .expect("apply migrations");
-    sqlx::query_scalar!(r#"select pgmq.purge_queue('observe') as "purged!""#)
+    sqlx::query_scalar!(r#"select pgmq.purge_queue('session_events') as "purged!""#)
         .fetch_one(&pool)
         .await
-        .expect("purge observe queue");
+        .expect("purge the session-events queue");
     let id = TenantId::new();
     let slug = format!("mem6-{}", id.as_uuid().simple());
     tenants::create(&pool, id, &slug, "MEM-6 test tenant", TenantStatus::Active)
@@ -352,6 +379,9 @@ async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Scope {
     tx.commit().await.expect("commit hierarchy");
     platform
 }
+
+#[path = "session_seed.rs"]
+mod session_seed;
 
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
@@ -432,10 +462,18 @@ async fn assert_chain_verifies(pool: &PgPool, tenant: TenantId) {
 /// read your own chain — and nothing else, so the only thing a pack built
 /// on it changes is the configuration under test.
 const MEMBER_PACK: &str = r#"
-    permit (principal, action == Synveda::Action::"MemoryRead", resource)
-    when { principal in resource };
-    permit (principal, action == Synveda::Action::"MemoryWrite", resource)
-    when { principal has own_scope && resource == principal.own_scope };
+    permit (
+        principal,
+        action in [
+            Synveda::Action::"MemoryRead",
+            Synveda::Action::"MemoryWrite",
+            Synveda::Action::"SessionRead",
+            Synveda::Action::"SessionWrite"
+        ],
+        resource
+    ) when {
+        context.roles.containsAny(["member", "curator", "owner", "administrator"])
+    };
 "#;
 
 const PACK_NAME: &str = "mem6-pack";
@@ -509,7 +547,8 @@ async fn a_retention_policy_change_governs_the_very_next_inject_and_the_expiry_i
         return;
     };
     let _platform = seed_hierarchy(&pool, tenant).await;
-    let alice = seed_user(&pool, tenant, "alice").await;
+    let _alice = seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem6", "alice").await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
@@ -521,8 +560,24 @@ async fn a_retention_policy_change_governs_the_very_next_inject_and_the_expiry_i
     // time is the retention clock (ADR-0040 decision 3).
     let long_ago = Utc::now() - ChronoDuration::days(90);
     let yesterday = Utc::now() - ChronoDuration::days(1);
-    observe(&app, &token, "sess-old", long_ago, OLD_EPISODE).await;
-    observe(&app, &token, "sess-new", yesterday, RECENT_EPISODE).await;
+    observe(
+        &app,
+        &token,
+        run.session_id,
+        "sess-old",
+        long_ago,
+        OLD_EPISODE,
+    )
+    .await;
+    observe(
+        &app,
+        &token,
+        run.session_id,
+        "sess-new",
+        yesterday,
+        RECENT_EPISODE,
+    )
+    .await;
     drain(&deps, &config).await;
 
     let stored = current_records(&pool, tenant).await;
@@ -531,7 +586,7 @@ async fn a_retention_policy_change_governs_the_very_next_inject_and_the_expiry_i
     // Under the product default — the machinery on, no record horizon —
     // both compose. This is the pre-change state and it must be the
     // *product's* behaviour, not a test fixture's.
-    let before = inject_text(&app, &token, "cold-1").await;
+    let before = inject_text(&app, &token, run.session_id, "cold-1").await;
     assert!(
         before.contains("runbook"),
         "the old summary is there: {before}"
@@ -546,7 +601,7 @@ async fn a_retention_policy_change_governs_the_very_next_inject_and_the_expiry_i
     // runs, nothing restarts.
     apply_retention(&pool, &state, tenant, episodes_for(30)).await;
 
-    let after = inject_text(&app, &token, "cold-2").await;
+    let after = inject_text(&app, &token, run.session_id, "cold-2").await;
     assert!(
         !after.contains("runbook"),
         "the very next inject stops serving material past the new horizon: {after}"
@@ -586,7 +641,7 @@ async fn a_retention_policy_change_governs_the_very_next_inject_and_the_expiry_i
     assert_eq!(actor_kind, "system", "no human expired this");
     assert_eq!(outcome, "success");
     assert_eq!(payload["count"], json!(1));
-    assert_eq!(payload["scope_id"], json!(alice.scope_id));
+    assert_eq!(payload["scope_id"], json!(run.workspace_scope_id));
     let horizon = payload["horizons"]
         .as_array()
         .expect("horizons")
@@ -629,6 +684,7 @@ async fn pinned_material_is_exempt_from_every_horizon() {
     };
     let _platform = seed_hierarchy(&pool, tenant).await;
     let alice = seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem6", "alice").await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
@@ -648,7 +704,7 @@ async fn pinned_material_is_exempt_from_every_horizon() {
         pinned_id,
         tenant,
         &RecordState {
-            scope_id: alice.scope_id,
+            scope_id: run.workspace_scope_id,
             owner_id: alice.id,
             kind: RecordKind::Pinned,
             class: RecordClass::Episode,
@@ -671,7 +727,7 @@ async fn pinned_material_is_exempt_from_every_horizon() {
     // material at all.
     apply_retention(&pool, &state, tenant, episodes_for(30)).await;
 
-    let block = inject_text(&app, &token, "cold-1").await;
+    let block = inject_text(&app, &token, run.session_id, "cold-1").await;
     assert!(
         block.contains("incident review"),
         "pinned material is not subject to the read cut: {block}"
@@ -696,6 +752,7 @@ async fn the_destruction_horizon_takes_the_history_the_expiry_left() {
     };
     let _platform = seed_hierarchy(&pool, tenant).await;
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem6", "alice").await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
@@ -704,7 +761,15 @@ async fn the_destruction_horizon_takes_the_history_the_expiry_left() {
     let token = idp.user_token("alice");
 
     let long_ago = Utc::now() - ChronoDuration::days(90);
-    observe(&app, &token, "sess-old", long_ago, OLD_EPISODE).await;
+    observe(
+        &app,
+        &token,
+        run.session_id,
+        "sess-old",
+        long_ago,
+        OLD_EPISODE,
+    )
+    .await;
     drain(&deps, &config).await;
 
     apply_retention(&pool, &state, tenant, episodes_for(30)).await;
@@ -789,6 +854,7 @@ async fn the_observe_staging_plane_is_disposed_of_on_its_own_horizon() {
     };
     let _platform = seed_hierarchy(&pool, tenant).await;
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem6", "alice").await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
@@ -796,10 +862,18 @@ async fn the_observe_staging_plane_is_disposed_of_on_its_own_horizon() {
     let config = worker_config();
     let token = idp.user_token("alice");
 
-    observe(&app, &token, "sess", Utc::now(), RECENT_EPISODE).await;
+    observe(
+        &app,
+        &token,
+        run.session_id,
+        "sess",
+        Utc::now(),
+        RECENT_EPISODE,
+    )
+    .await;
     drain(&deps, &config).await;
     let staged: i64 = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from observe_events where tenant_id = $1"#,
+        r#"select count(*) as "count!" from session_events where tenant_id = $1"#,
         tenant.as_uuid(),
     )
     .fetch_one(&pool)
@@ -807,7 +881,7 @@ async fn the_observe_staging_plane_is_disposed_of_on_its_own_horizon() {
     .expect("count staging");
     assert_eq!(
         staged, 1,
-        "the payload is staged, as it has been since MEM-1"
+        "the payload is recorded, as it has been since MEM-1"
     );
 
     // Fresh material is not disposed of: the default horizon is 30 days.
@@ -815,18 +889,18 @@ async fn the_observe_staging_plane_is_disposed_of_on_its_own_horizon() {
 
     // Age the staging row past the strict pack's week.
     sqlx::query!(
-        "update observe_events set received_at = received_at - interval '40 days' \
+        "update session_events set received_at = received_at - interval '40 days' \
          where tenant_id = $1",
         tenant.as_uuid(),
     )
     .execute(&pool)
     .await
-    .expect("age the staging row");
+    .expect("age the recorded event");
 
     let pass = run_sweep(&state, tenant).await;
     assert_eq!(pass.staging_disposed, 1, "the payload was destroyed");
     let left: i64 = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from observe_events where tenant_id = $1"#,
+        r#"select count(*) as "count!" from session_events where tenant_id = $1"#,
         tenant.as_uuid(),
     )
     .fetch_one(&pool)
@@ -866,6 +940,7 @@ async fn a_pack_can_turn_the_feature_off() {
     };
     let _platform = seed_hierarchy(&pool, tenant).await;
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem6", "alice").await;
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
@@ -874,16 +949,24 @@ async fn a_pack_can_turn_the_feature_off() {
     let token = idp.user_token("alice");
 
     let long_ago = Utc::now() - ChronoDuration::days(90);
-    observe(&app, &token, "sess-old", long_ago, OLD_EPISODE).await;
+    observe(
+        &app,
+        &token,
+        run.session_id,
+        "sess-old",
+        long_ago,
+        OLD_EPISODE,
+    )
+    .await;
     drain(&deps, &config).await;
     sqlx::query!(
-        "update observe_events set received_at = received_at - interval '400 days' \
+        "update session_events set received_at = received_at - interval '400 days' \
          where tenant_id = $1",
         tenant.as_uuid(),
     )
     .execute(&pool)
     .await
-    .expect("age the staging row");
+    .expect("age the recorded event");
 
     // Horizons set, and the mode off: the numbers must be ignored rather
     // than merely absent, or "off" would be a different feature.
@@ -904,7 +987,7 @@ async fn a_pack_can_turn_the_feature_off() {
     )
     .await;
 
-    let block = inject_text(&app, &token, "cold-1").await;
+    let block = inject_text(&app, &token, run.session_id, "cold-1").await;
     assert!(
         block.contains("runbook"),
         "a 90-day-old episode under a 1-day horizon still composes when the \

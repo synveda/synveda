@@ -901,6 +901,69 @@ async fn another_tenant_s_session_id_is_a_404_like_any_other() {
     );
 }
 
+/// The three global routes are **gone**, not deprecated (CPR-12, ADR-0078).
+///
+/// Asserted rather than assumed, and asserted for the reason CPR-7 asserted
+/// the hierarchy 404s: a route that is deleted from a handler module but left
+/// mounted somewhere — a stale `.route(...)`, a fallback that swallows the
+/// path, a router someone re-added while merging — answers 200 to a caller
+/// that has not been updated, and the two planes are both live again with
+/// nobody told. The cheapest way to know is to ask.
+///
+/// **A 405 would fail this too, and should.** `405 Method Not Allowed` means
+/// the path is still mounted for some other verb, which is a route that
+/// exists. Only "there is nothing here" is the right answer.
+#[tokio::test]
+async fn the_three_global_routes_are_deleted_rather_than_deprecated() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+
+    // A body each route would once have accepted, so a 404 cannot be a
+    // rejected payload wearing the wrong status.
+    let bodies = [
+        (
+            "/v1/observe",
+            json!({"session_id": "s1", "events": [{
+                "idempotency_key": "k1",
+                "kind": "transcript_delta",
+                "payload": {"text": "hello"},
+                "occurred_at": "2026-08-23T10:00:00Z"
+            }]}),
+        ),
+        (
+            "/v1/inject",
+            json!({"session_id": "s1", "task": "why retries"}),
+        ),
+        (
+            "/v1/recall",
+            json!({"session_id": "s1", "query": "why retries"}),
+        ),
+    ];
+
+    for (path, body) in bodies {
+        let (status, error) = call(&app, "POST", path, Some(&token), None, Some(body)).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "{path} must be gone, not merely unhappy with the body: {error}"
+        );
+    }
+
+    // And they are not hiding behind another verb.
+    for path in ["/v1/observe", "/v1/inject", "/v1/recall"] {
+        let (status, error) = call(&app, "GET", path, Some(&token), None, None).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "{path} answers GET, so the path is still mounted: {error}"
+        );
+    }
+}
+
 // ── The rules that are about the rows ────────────────────────────────────────
 
 /// A session names a project it was told about, in the workspace it was told
@@ -1221,7 +1284,9 @@ async fn a_context_run_is_governed_persisted_and_watermarked() {
     // The per-scope decisions ride along, which is what makes "why was this
     // thin" answerable — the half of explainability that costs nothing now.
     assert!(
-        payload["scopes"].as_array().is_some_and(|s| !s.is_empty()),
+        payload["decisions"]
+            .as_array()
+            .is_some_and(|s| !s.is_empty()),
         "the chain names the scopes the walk decided: {payload}"
     );
     // A query is bounded like every other text input on this product.
@@ -1593,6 +1658,12 @@ async fn the_listing_narrows_by_client_by_who_and_by_day() {
     // so a window that ends at this instant excludes them and one that ends
     // tomorrow includes them.
     let now = chrono::Utc::now();
+    // `Z`, not `+00:00`: `to_rfc3339` renders the offset with a `+`, and a
+    // bare `+` in a query string decodes to a space — which the route refuses
+    // as "input contains invalid characters". A real client either encodes it
+    // or sends `Z`; this sends `Z`.
+    let instant =
+        |at: chrono::DateTime<chrono::Utc>| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let tomorrow = now + chrono::Duration::days(1);
     let yesterday = now - chrono::Duration::days(1);
     let (_, windowed) = call(
@@ -1600,8 +1671,8 @@ async fn the_listing_narrows_by_client_by_who_and_by_day() {
         "GET",
         &format!(
             "/v1/sessions?started_after={}&started_before={}",
-            yesterday.to_rfc3339(),
-            tomorrow.to_rfc3339()
+            instant(yesterday),
+            instant(tomorrow)
         ),
         Some(&token),
         None,
@@ -1613,7 +1684,7 @@ async fn the_listing_narrows_by_client_by_who_and_by_day() {
     let (_, before_them) = call(
         &app,
         "GET",
-        &format!("/v1/sessions?started_before={}", yesterday.to_rfc3339()),
+        &format!("/v1/sessions?started_before={}", instant(yesterday)),
         Some(&token),
         None,
         None,
@@ -1629,8 +1700,8 @@ async fn the_listing_narrows_by_client_by_who_and_by_day() {
         "GET",
         &format!(
             "/v1/sessions?started_after={}&started_before={}",
-            tomorrow.to_rfc3339(),
-            yesterday.to_rfc3339()
+            instant(tomorrow),
+            instant(yesterday)
         ),
         Some(&token),
         None,
@@ -1801,7 +1872,9 @@ async fn a_timeline_reports_both_clocks_and_marks_what_arrived_late() {
         Some(json!({"query": "the ledger"})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    // A fresh composition is a creation; only a replayed `Idempotency-Key`
+    // answers 200.
+    assert_eq!(status, StatusCode::CREATED);
     let (_, timeline) = call(
         &app,
         "GET",

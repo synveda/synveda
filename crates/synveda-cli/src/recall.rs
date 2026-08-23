@@ -1,192 +1,137 @@
-//! `synveda recall` — the other half of tiered injection (CTX-4,
-//! ADR-0041 decision 13).
+//! `synveda recall` — compose governed context from a terminal (CPR-12,
+//! ADR-0078 decision 5).
 //!
-//! An inject block's index tier ends its lines with `(recall <id>)`. This
-//! is what that instruction means: the command an agent or a human runs
-//! to turn a name into a body. It is the navigation path the acceptance
-//! criterion asks for, available in a live session with nothing to
-//! register — CTX-5's MCP tool joins the ADPT-1 plugin manifest later
-//! (ADR-0027's own reversal trigger) and calls this same route.
+//! # What this was, and what it is now
 //!
-//! HTTP-only, on FLOW-6's precedent: a recall is a governed read whose
-//! `MemoryRead` decisions the PDP takes per scope and whose
-//! `context.recalled` event the gateway chains under the caller's own
-//! identity. A CLI that read the records itself would leave no decision in
-//! the trail, so this module opens no database connection and the verb
-//! takes no `--database-url`.
+//! It was the other half of tiered injection (CTX-4, ADR-0041 decision 13):
+//! an inject block's index tier ended its lines with `(recall <id>)` and this
+//! turned a name into a body. It also carried CTX-5's bitemporal read —
+//! `--as-of` to ask what was known at a past instant.
+//!
+//! `/v1/recall` is deleted, and **both of those go with it**. The endpoint
+//! that replaced it composes a block for a question and takes neither handles
+//! nor an instant. That is a real capability loss and it is written here
+//! rather than smoothed over: Prompt 18 re-cuts recall over the new model and
+//! is where the handle tier and the bitemporal read come back.
+//!
+//! # Why a terminal command opens a session
+//!
+//! Every composition names the run it belongs to. So this opens an ephemeral
+//! `cli` run, composes into it, and leaves it closed — which means "who asked
+//! this deployment for context, and what did they get" is answerable about a
+//! person at a terminal exactly as it is about an agent. It costs one extra
+//! round trip and buys the property the whole programme is for.
+//!
+//! HTTP-only, on FLOW-6's precedent: a composition is a governed read whose
+//! decisions the PDP takes per scope and whose audit event the gateway chains
+//! under the caller's own identity. A CLI that read the records itself would
+//! leave no decision in the trail, so this module opens no database connection
+//! and the verb takes no `--database-url`.
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
-use synveda_types::{RecordClass, RecordId, RecordKind, ScopeId, Sensitivity};
 
 use crate::api::{Api, Origin};
 
-// ── The wire shapes (`crates/synveda-gateway/src/recall.rs`) ───────────
+// ── The wire shapes (`crates/synveda-gateway/src/sessions.rs`) ─────────
+
+/// As much of `GET /v1/me` as choosing a workspace needs.
+#[derive(Deserialize)]
+struct MeResponse {
+    workspaces: Vec<MeWorkspace>,
+}
 
 #[derive(Deserialize)]
-struct RecallResponse {
-    entries: Vec<RecallEntry>,
-    mode: String,
-    requested: usize,
-    as_of: DateTime<Utc>,
-    scopes_considered: usize,
-    scopes_decided: usize,
-    truncated: bool,
+struct MeWorkspace {
+    id: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct OpenedSession {
+    id: String,
+}
+
+#[derive(Deserialize)]
+struct ContextRunResponse {
+    rendered: String,
+    block_hash: String,
+    tokens: i32,
+    budget_tokens: i32,
+    entry_count: i32,
+    #[serde(default)]
     degraded: Vec<String>,
+    created_at: DateTime<Utc>,
 }
 
-#[derive(Deserialize)]
-struct RecallEntry {
-    record_id: RecordId,
-    scope_id: ScopeId,
-    channel: String,
-    kind: RecordKind,
-    class: RecordClass,
-    sensitivity: Sensitivity,
-    content: String,
-    valid_from: DateTime<Utc>,
-    valid_to: Option<DateTime<Utc>>,
-    object_hash: String,
-    staleness_permille: u16,
-}
-
-/// What one recall asks for: named records, or a question, at an instant.
+/// What one composition asks for.
 pub struct Ask<'a> {
-    /// The handles, when naming records.
-    pub ids: &'a [RecordId],
-    /// The question, when asking one. Exclusive with `ids` — clap
-    /// enforces it at the surface, the gateway enforces it again.
-    pub query: Option<&'a str>,
-    /// Transaction time (CTX-5, ADR-0042 decision 7).
-    pub as_of: Option<DateTime<Utc>>,
-    /// Valid time; defaults to `as_of` at the gateway.
-    pub valid_at: Option<DateTime<Utc>>,
-    /// Result cap for a question.
-    pub limit: Option<usize>,
+    /// The question. Required — there is no shape that omits it now.
+    pub query: &'a str,
+    /// The workspace to compose in, when the caller can see more than one.
+    pub workspace: Option<&'a str>,
+    /// Narrow the block's token budget. Narrowing only: the pack's budget is
+    /// the ceiling.
+    pub budget_tokens: Option<u32>,
 }
 
-impl Ask<'_> {
-    /// The wire body. Only what was asked for is sent, so the gateway's
-    /// defaults stay the gateway's — a CLI that filled them in would be a
-    /// second place the surface's contract lives.
-    fn body(&self) -> Result<serde_json::Value, String> {
-        let mut body = serde_json::Map::new();
-        match self.query {
-            Some(query) => {
-                body.insert("query".to_owned(), json!(query));
-            }
-            None => {
-                if self.ids.is_empty() {
-                    // A bare `--as-of` is the complete historical read:
-                    // everything you may see, as it stood then. It is the
-                    // one shape a query cannot give, because the search
-                    // indexes hold current truth (ADR-0042 decision 14).
-                    if self.as_of.is_none() {
-                        return Err("name a record id, ask a question with --query, \
-                                    or give an instant with --as-of"
-                            .to_owned());
-                    }
-                } else {
-                    body.insert("ids".to_owned(), json!(self.ids));
-                }
-            }
-        }
-        if let Some(at) = self.as_of {
-            body.insert("as_of".to_owned(), json!(at));
-        }
-        if let Some(at) = self.valid_at {
-            body.insert("valid_at".to_owned(), json!(at));
-        }
-        if let Some(limit) = self.limit {
-            body.insert("limit".to_owned(), json!(limit));
-        }
-        Ok(serde_json::Value::Object(body))
-    }
-}
-
-/// `synveda recall <id>... | --query <question>` — the bodies behind the
-/// handles, or the answer to a question (CTX-4/CTX-5).
+/// `synveda recall --query <question>` — compose a block and print it.
 pub async fn recall(
     profile: &str,
     ask: Ask<'_>,
     json_out: bool,
     quiet: bool,
 ) -> Result<(), String> {
-    let body = ask.body()?;
+    if ask.query.trim().is_empty() {
+        return Err("ask a question with --query".to_owned());
+    }
     let (api, origin) = Api::connect(profile).await?;
     if !quiet {
         announce(&api, &origin);
     }
+
+    let workspace = resolve_workspace(&api, ask.workspace).await?;
+    let session = open_run(&api, &workspace).await?;
+
+    let mut body = serde_json::Map::new();
+    body.insert("query".to_owned(), json!(ask.query));
+    if let Some(budget) = ask.budget_tokens {
+        body.insert("budget_tokens".to_owned(), json!(budget));
+    }
+    let path = format!("/v1/sessions/{session}/context-runs");
+    // A fresh key per invocation: two identical questions a minute apart are
+    // two compositions over a corpus that may have moved, not a retry.
+    let key = format!("cli-recall-{}", uuid_like()?);
+
     if json_out {
-        println!("{}", api.post("/v1/recall", Some(body)).await?);
+        let value: serde_json::Value = api
+            .post_idempotent_as(&path, Some(serde_json::Value::Object(body)), &key)
+            .await?;
+        println!("{value}");
         return Ok(());
     }
 
-    let response: RecallResponse = api.post_as("/v1/recall", Some(body)).await?;
-    for entry in &response.entries {
-        // The trust labels first, then the body — the order an agent
-        // should weigh them in, and the same labels the block carried.
-        println!(
-            "── {} [{}] {} {}{}",
-            entry.record_id,
-            entry.class,
-            entry.channel,
-            entry.kind,
-            match entry.sensitivity {
-                // Marked for the reason ADR-0038 decision 11 gives about
-                // the block: a reader cannot know what they are holding
-                // unless they are told, and that does not change because
-                // they asked for it by name.
-                tier if tier > Sensitivity::WORKING => format!(" [{tier}]"),
-                _ => String::new(),
-            },
-        );
-        println!(
-            "   scope {}  valid {}{}  freshness {}‰  {}",
-            entry.scope_id,
-            entry.valid_from.format("%Y-%m-%d"),
-            entry
-                .valid_to
-                .map_or_else(String::new, |end| format!("..{}", end.format("%Y-%m-%d"))),
-            entry.staleness_permille,
-            short(&entry.object_hash),
-        );
-        println!();
-        println!("{}", entry.content);
-        println!();
-    }
+    let response: ContextRunResponse = api
+        .post_idempotent_as(&path, Some(serde_json::Value::Object(body)), &key)
+        .await?;
 
-    // The gap is not an error and is not hidden. A handle is a name rather
-    // than a capability (ADR-0041 decision 5), so a block composed before
-    // a role changed can name records this caller may no longer read —
-    // and the honest thing is to say how many, without saying which, since
-    // the surface itself answers uniformly (decision 6).
-    let served = response.entries.len();
-    let at = response.as_of.format("%Y-%m-%d %H:%M:%S");
-    if served == 0 {
+    let at = response.created_at.format("%Y-%m-%d %H:%M:%S");
+    if response.entry_count == 0 || response.rendered.trim().is_empty() {
         println!("nothing available to you at {at}");
-    } else if response.mode == "ids" && served < response.requested {
-        println!(
-            "{served} of {} available to you at {at} — the rest are not, or no longer are",
-            response.requested,
-        );
-    } else if response.mode != "ids" {
-        println!(
-            "{served} of {} scopes you may read at {at}",
-            response.scopes_decided,
-        );
+        return Ok(());
     }
-    // A bounded answer must never read as a complete one (ADR-0042
-    // decision 5), so this is stated rather than left to be inferred from
-    // a count nobody was given.
-    if response.truncated {
-        println!(
-            "note: {} scopes could have contributed and {} were searched — \
-             this answer is incomplete",
-            response.scopes_considered, response.scopes_decided,
-        );
-    }
+    println!("{}", response.rendered.trim_end());
+    println!();
+    println!(
+        "{} record(s), {} of {} tokens, block {}",
+        response.entry_count,
+        response.tokens,
+        response.budget_tokens,
+        short(&response.block_hash),
+    );
+    // A degraded answer must never read as a complete one (ADR-0042
+    // decision 5), so this is stated rather than left to be inferred.
     if !response.degraded.is_empty() {
         println!(
             "note: degraded ({}) — ranking used the lexical leg only",
@@ -194,6 +139,63 @@ pub async fn recall(
         );
     }
     Ok(())
+}
+
+/// The workspace to compose in.
+///
+/// One is taken; more than one is a question rather than a guess, for the
+/// reason `synveda mcp` gives: composing in whichever workspace sorted first
+/// would quietly answer from the wrong team's memory.
+async fn resolve_workspace(api: &Api, named: Option<&str>) -> Result<String, String> {
+    if let Some(id) = named {
+        return Ok(id.to_owned());
+    }
+    let me: MeResponse = api.get_as("/v1/me").await?;
+    match me.workspaces.len() {
+        0 => Err("you have no workspace yet — create one in the console first".to_owned()),
+        1 => Ok(me.workspaces[0].id.clone()),
+        _ => {
+            let names: Vec<String> = me
+                .workspaces
+                .iter()
+                .map(|workspace| format!("{} ({})", workspace.name, workspace.id))
+                .collect();
+            Err(format!(
+                "you can see {} workspaces — name one with --workspace: {}",
+                me.workspaces.len(),
+                names.join(", "),
+            ))
+        }
+    }
+}
+
+/// Opens the ephemeral run this composition belongs to.
+async fn open_run(api: &Api, workspace: &str) -> Result<String, String> {
+    let external = uuid_like()?;
+    let opened: OpenedSession = api
+        .post_idempotent_as(
+            "/v1/sessions",
+            Some(json!({
+                "workspace_id": workspace,
+                "client_name": "cli",
+                "client_version": env!("CARGO_PKG_VERSION"),
+                "external_session_id": external,
+                "task_summary": "synveda recall",
+            })),
+            &format!("cli-recall-open-{external}"),
+        )
+        .await?;
+    Ok(opened.id)
+}
+
+/// A random identifier for one invocation.
+///
+/// Hex from the same CSPRNG `synveda login` uses for its CSRF state, rather
+/// than a `uuid` dependency this crate does not otherwise need.
+fn uuid_like() -> Result<String, String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|err| format!("read random bytes: {err}"))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 /// Which identity is reading — the `synveda proposal` discipline

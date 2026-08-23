@@ -9,7 +9,7 @@
       "events": [
         {
           "key": "roast-before",
-          "kind": "transcript_delta",
+          "event_type": "message.user",
           "text": "I prefer dark-roast coffee before the morning stand-up.",
           "marker": "dark-roast"
         }
@@ -21,7 +21,7 @@
       "events": [
         {
           "key": "roast-after",
-          "kind": "transcript_delta",
+          "event_type": "message.user",
           "text": "I prefer light-roast coffee before the morning stand-up.",
           "marker": "light-roast"
         }

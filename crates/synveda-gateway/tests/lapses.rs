@@ -318,15 +318,32 @@ async fn get(app: &Router, token: &str, uri: &str) -> (StatusCode, Value) {
     call(app, request).await
 }
 
-async fn inject(app: &Router, token: &str) -> Value {
-    let (status, body) = post(app, token, "/v1/inject", json!({"session_id": "authz-4"})).await;
-    assert_eq!(status, StatusCode::OK, "inject failed: {body}");
+#[path = "session_seed.rs"]
+mod session_seed;
+
+async fn inject(app: &Router, token: &str, run: synveda_types::SessionId) -> Value {
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/sessions/{run}/context-runs"))
+        .header("authorization", format!("Bearer {token}"))
+        .header(
+            "idempotency-key",
+            synveda_types::ContextRunId::new().to_string(),
+        )
+        .header("content-type", "application/json")
+        .body(Body::from("{}"))
+        .expect("build context-run request");
+    let (status, body) = call(app, request).await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "context run: {status} {body}"
+    );
     body
 }
 
 /// The caller's own composed block, as text.
-async fn block(app: &Router, token: &str) -> String {
-    inject(app, token).await["text"]
+async fn block(app: &Router, token: &str, run: synveda_types::SessionId) -> String {
+    inject(app, token, run).await["rendered"]
         .as_str()
         .expect("block text")
         .to_owned()
@@ -466,6 +483,7 @@ async fn a_lapse_grants_cross_team_read_and_its_expiry_restores_the_denial() {
     let priya_identity = seed_user(&pool, tenant, "priya").await;
     let grantee = priya_identity.scope_id;
     let priya = issue("priya", tenant);
+    let priya_run = session_seed::seed_run_for(&pool, tenant, "authz4-priya", "priya").await;
 
     // Two administrators at the department, because `regulated-strict`'s
     // `policy` cell asks for two *distinct* administrator approvers —
@@ -489,7 +507,9 @@ async fn a_lapse_grants_cross_team_read_and_its_expiry_restores_the_denial() {
 
     // ── Before ──────────────────────────────────────────────────────────
     assert!(
-        !block(&app, &priya).await.contains(RUNBOOK),
+        !block(&app, &priya, priya_run.session_id)
+            .await
+            .contains(RUNBOOK),
         "regulated-strict has no cross-team read: that is what a lapse is for"
     );
 
@@ -545,7 +565,7 @@ async fn a_lapse_grants_cross_team_read_and_its_expiry_restores_the_denial() {
     let lapse_id = granted["id"].as_str().expect("lapse id").to_owned();
 
     // ── While it stands ─────────────────────────────────────────────────
-    let during = block(&app, &priya).await;
+    let during = block(&app, &priya, priya_run.session_id).await;
     assert!(
         during.contains(RUNBOOK),
         "the lapse must reach the reader's own inject: {during}"
@@ -564,7 +584,7 @@ async fn a_lapse_grants_cross_team_read_and_its_expiry_restores_the_denial() {
 
     // ── Expiry: nothing is revoked, nothing runs, the window just closes ─
     tokio::time::sleep(Duration::from_secs(u64::from(WINDOW_SECS) + 1)).await;
-    let after = block(&app, &priya).await;
+    let after = block(&app, &priya, priya_run.session_id).await;
     assert!(
         !after.contains(RUNBOOK),
         "expiry must restore the denial with no act by anyone: {after}"
@@ -711,6 +731,7 @@ async fn a_lapse_discloses_only_what_the_target_published() {
     let priya_identity = seed_user(&pool, tenant, "priya").await;
     let grantee = priya_identity.scope_id;
     let priya = issue("priya", tenant);
+    let priya_run = session_seed::seed_run_for(&pool, tenant, "authz4-priya", "priya").await;
     for subject in ["nadia", "omar"] {
         seed_user(&pool, tenant, subject).await;
         bind(&pool, tenant, subject, org.eng.id, RoleKey::Administrator).await;
@@ -748,7 +769,7 @@ async fn a_lapse_discloses_only_what_the_target_published() {
     .await;
     assert_eq!(status, StatusCode::OK, "grant failed: {body}");
 
-    let composed = block(&app, &priya).await;
+    let composed = block(&app, &priya, priya_run.session_id).await;
     assert!(
         composed.contains(RUNBOOK),
         "the published record travels: {composed}"
@@ -790,6 +811,7 @@ async fn a_security_reviewer_revokes_what_they_could_never_grant() {
     let priya_identity = seed_user(&pool, tenant, "priya").await;
     let grantee = priya_identity.scope_id;
     let priya = issue("priya", tenant);
+    let priya_run = session_seed::seed_run_for(&pool, tenant, "authz4-priya", "priya").await;
     for subject in ["nadia", "omar"] {
         seed_user(&pool, tenant, subject).await;
         bind(&pool, tenant, subject, org.eng.id, RoleKey::Administrator).await;
@@ -847,7 +869,11 @@ async fn a_security_reviewer_revokes_what_they_could_never_grant() {
     )
     .await;
     let lapse_id = granted["id"].as_str().expect("lapse id").to_owned();
-    assert!(block(&app, &priya).await.contains(RUNBOOK));
+    assert!(
+        block(&app, &priya, priya_run.session_id)
+            .await
+            .contains(RUNBOOK)
+    );
 
     // A revocation needs its reason, exactly as the grant does.
     let (status, body) = post(
@@ -875,7 +901,9 @@ async fn a_security_reviewer_revokes_what_they_could_never_grant() {
 
     // The very next request, with no restart and nothing to wait out.
     assert!(
-        !block(&app, &priya).await.contains(RUNBOOK),
+        !block(&app, &priya, priya_run.session_id)
+            .await
+            .contains(RUNBOOK),
         "a revocation reaches the reader on their next session"
     );
 

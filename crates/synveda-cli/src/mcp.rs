@@ -69,6 +69,8 @@ pub mod install;
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use tokio::sync::Mutex;
+
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -81,7 +83,6 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use synveda_types::{ObserveKind, RecordId};
 
 use crate::api::{self, Api};
 
@@ -96,8 +97,8 @@ const REMEMBER: &str = "remember";
 /// when someone is reading a client's logs.
 const SERVER_NAME: &str = "synveda";
 
-/// The per-event payload cap the observe route enforces
-/// (`MAX_EVENT_PAYLOAD_BYTES`, ADR-0020). Checked here as well so an
+/// The per-event payload cap the append route enforces
+/// (`MAX_EVENT_PAYLOAD_BYTES`). Checked here as well so an
 /// oversized `remember` reads as a sentence rather than a 400 — the number
 /// is the gateway's, restated, and the gateway remains the one that decides.
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
@@ -133,12 +134,27 @@ pub struct Server {
     /// access token refreshes instead of failing. An MCP server runs for as
     /// long as its client does, which is longer than any bearer lives.
     profile: String,
-    /// One opaque session per server process (ADR-0020's `session_id` is
-    /// "an opaque harness session identifier; groups this batch's events").
-    /// A launch is the only session boundary this server can observe: it
-    /// has no transcript and no harness telling it when a conversation
-    /// started.
-    session_id: String,
+    /// The harness id for this launch. A launch is the only session boundary
+    /// this server can observe: it has no transcript and no harness telling it
+    /// when a conversation started.
+    ///
+    /// It is sent as `external_session_id` when the run is opened, which is
+    /// what makes opening idempotent — a server that reconnects finds the run
+    /// it already opened instead of minting a second one.
+    external_session_id: String,
+    /// The workspace this launch writes to, when it was told one. Without it
+    /// the server asks `/v1/me` and takes the answer only when there is
+    /// exactly one.
+    workspace: Option<String>,
+    /// The Synveda run this launch writes to and composes from, opened on
+    /// first use (CPR-12, ADR-0078 decision 5).
+    ///
+    /// Lazy rather than opened at startup, and that is not an optimisation: an
+    /// MCP server is launched by its client at login time, often before
+    /// anybody has signed in to Synveda and sometimes when the gateway is not
+    /// running. A constructor that had to reach the network would make the
+    /// whole server fail to start over a condition that fixes itself.
+    session: Mutex<Option<String>>,
     /// What this launch advertises — decision 6's whole mechanism, decided
     /// once. `tools/list` is per-process, which is what lets `--writes` be
     /// a launch argument and keeps ADR-0027 decision 1's property that this
@@ -151,10 +167,12 @@ pub struct Server {
 impl Server {
     /// Builds a server for `profile`, advertising the tools `writes` says
     /// this host needs.
-    pub fn new(profile: String, writes: Writes) -> Result<Self, String> {
+    pub fn new(profile: String, writes: Writes, workspace: Option<String>) -> Result<Self, String> {
         Ok(Self {
             profile,
-            session_id: format!("mcp-{}", random_token()?),
+            workspace,
+            external_session_id: format!("mcp-{}", random_token()?),
+            session: Mutex::new(None),
             tools: match writes {
                 Writes::Tool => vec![recall_tool(), remember_tool()],
                 Writes::Host => vec![recall_tool()],
@@ -176,11 +194,8 @@ impl Server {
 fn recall_tool() -> Tool {
     Tool::new(
         RECALL,
-        "Search or fetch governed organisational memory. Ask a question with `query` \
-         to search every scope your policy lets you read — which is wider than the \
-         scopes your session-start context block composes from — or pass `ids` to \
-         fetch the full body of records a block named as `(recall <id>)`. \
-         Use `as_of` to ask what was known at a past instant. \
+        "Search governed organisational memory. Ask a question with `query` to \
+         compose a context block from every scope your policy lets you read. \
          Results carry their channel (published means reviewed, derived means \
          unreviewed), provenance, and validity window, so you can weigh them. \
          What you may read is decided at call time under your own identity: \
@@ -190,37 +205,42 @@ fn recall_tool() -> Tool {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "The question to answer. Mutually exclusive with `ids`.",
+                    "description": "The question to answer.",
                 },
-                "ids": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description":
-                        "Record ids to fetch in full, as an inject block printed them. \
-                         Mutually exclusive with `query`.",
-                },
-                "as_of": {
-                    "type": "string",
-                    "description":
-                        "RFC 3339 instant. Serve bodies as the database held them then \
-                         (\"what did we know on 2026-03-03\"). Rewinds the corpus, never \
-                         your access.",
-                },
-                "valid_at": {
-                    "type": "string",
-                    "description":
-                        "RFC 3339 instant. Which assertions were true about the world then. \
-                         Defaults to `as_of`.",
-                },
-                "limit": {
+                "budget_tokens": {
                     "type": "number",
-                    "description": "How many records a query may return (1-32, default 32).",
+                    "description":
+                        "Narrow the block's token budget. You may narrow and never widen: \
+                         the policy pack's budget is the ceiling.",
                 },
             },
+            "required": ["query"],
             "additionalProperties": false,
         })),
     )
     .with_title("Recall governed memory")
+}
+
+/// The append body one `remember` call sends.
+///
+/// Split out so the one thing that must never drift — the event type — is
+/// assertable without a network call.
+fn remember_body(client_event_id: &str, payload: Value) -> Value {
+    json!({
+        "events": [{
+            // ADR-0057 decision 8, carried across the cutover as
+            // `memory.asserted` (ADR-0078 decision 1): this content was
+            // composed by a model and volunteered, not observed by a host, and
+            // once the two share a name nothing can separate them again.
+            "event_type": "memory.asserted",
+            // A fresh id per call rather than a content hash: a model stating
+            // the same fact twice is asserting it twice, not retrying, and
+            // only the sender can tell those apart.
+            "client_event_id": client_event_id,
+            "payload": payload,
+            "occurred_at": Utc::now(),
+        }],
+    })
 }
 
 /// `remember`, not `observe` (ADR-0057 decision 7).
@@ -242,10 +262,11 @@ fn remember_tool() -> Tool {
          decision and its reason, a preference, a procedure that worked. Do not narrate \
          the session: this is not a log, and material that is only useful right now \
          makes future recall worse. \
-         It writes to your own personal scope and nowhere else — never to a team, a \
-         department, or another person — and nothing reaches a shared scope without a \
-         human review. Secrets are scanned for and refused or quarantined before \
-         anything is stored, so do not pass credentials in the hope of storing them.",
+         It writes into the workspace this session is running in, so people who \
+         share that workspace may see it — do not put anything private here. \
+         Nothing reaches a reviewed channel without a human approving it. Secrets \
+         are scanned for and refused or quarantined before anything is stored, so \
+         do not pass credentials in the hope of storing them.",
         schema(json!({
             "type": "object",
             "properties": {
@@ -279,83 +300,182 @@ fn schema(value: Value) -> Arc<JsonObject> {
     }
 }
 
+// ── The run this launch writes to ──────────────────────────────────────
+
+/// As much of `GET /v1/me` as choosing a workspace needs.
+#[derive(Deserialize)]
+struct MeResponse {
+    workspaces: Vec<MeWorkspace>,
+}
+
+#[derive(Deserialize)]
+struct MeWorkspace {
+    id: String,
+    name: String,
+}
+
+/// The opened run, as `POST /v1/sessions` answers.
+#[derive(Deserialize)]
+struct OpenedSession {
+    id: String,
+}
+
+/// Resolves this launch's run, opening it on first use.
+///
+/// # Why this server has to pick a workspace
+///
+/// Every runtime write and every composition names the run it belongs to
+/// (ADR-0078), and a run happens in a workspace. An MCP server has no
+/// transcript, no project checkout and no harness telling it where it is — so
+/// it asks `/v1/me` and takes the answer when there is exactly one.
+///
+/// **More than one is a question, not a guess.** Writing a model's assertions
+/// into whichever workspace sorted first would put one team's memories in
+/// another team's scope, silently, forever. So the tool says which workspaces
+/// exist and asks to be launched with `--workspace`.
+async fn resolve_session(server: &Server, api: &Api) -> Result<String, String> {
+    let mut held = server.session.lock().await;
+    if let Some(id) = held.as_ref() {
+        return Ok(id.clone());
+    }
+
+    let workspace = match &server.workspace {
+        Some(id) => id.clone(),
+        None => {
+            let me: MeResponse = api
+                .get_as("/v1/me")
+                .await
+                .map_err(|error| format!("Could not read your workspaces: {error}"))?;
+            match me.workspaces.len() {
+                0 => {
+                    return Err(
+                        "You have no Synveda workspace yet. Open the console and create one, \
+                         then restart this client."
+                            .to_owned(),
+                    );
+                }
+                1 => me.workspaces[0].id.clone(),
+                _ => {
+                    let names: Vec<String> = me
+                        .workspaces
+                        .iter()
+                        .map(|workspace| format!("{} ({})", workspace.name, workspace.id))
+                        .collect();
+                    return Err(format!(
+                        "You can see {} workspaces and this server was not told which to use: {}. \
+                         Relaunch it with `--workspace <id>`.",
+                        me.workspaces.len(),
+                        names.join(", "),
+                    ));
+                }
+            }
+        }
+    };
+
+    let body = json!({
+        "workspace_id": workspace,
+        "client_name": "mcp",
+        "client_version": env!("CARGO_PKG_VERSION"),
+        // The harness id, so a reconnecting client finds the run it already
+        // opened rather than minting a second one for the same launch.
+        "external_session_id": server.external_session_id,
+        "agent_name": "mcp",
+    });
+    // The idempotency key is the launch id: the same launch opening twice is
+    // the same request, and that is exactly what a retry after a timeout is.
+    let opened: OpenedSession = api
+        .post_idempotent_as(
+            "/v1/sessions",
+            Some(body),
+            &format!("mcp-open-{}", server.external_session_id),
+        )
+        .await
+        .map_err(|error| format!("Could not open a Synveda session: {error}"))?;
+    *held = Some(opened.id.clone());
+    Ok(opened.id)
+}
+
 // ── recall ─────────────────────────────────────────────────────────────
 
-/// The recall wire shapes (`crates/synveda-gateway/src/recall.rs`), as much
-/// of them as the rendering below reads.
+/// The context-run wire shape (`crates/synveda-gateway/src/sessions.rs`), as
+/// much of it as the rendering below reads.
+///
+/// Shorter than the shape it replaced, and that is the point: a context run
+/// hands back a **rendered block**, watermark line included, so this server no
+/// longer re-implements the composition format. The one thing it still adds is
+/// what the block cannot say about itself — that a leg degraded.
 #[derive(Deserialize)]
-struct RecallResponse {
-    entries: Vec<RecallEntry>,
-    as_of: DateTime<Utc>,
-    valid_at: DateTime<Utc>,
-    scopes_considered: usize,
-    scopes_decided: usize,
-    truncated: bool,
+struct ContextRunResponse {
+    rendered: String,
+    entry_count: i32,
+    #[serde(default)]
     degraded: Vec<String>,
+    created_at: DateTime<Utc>,
 }
 
-#[derive(Deserialize)]
-struct RecallEntry {
-    record_id: RecordId,
-    scope_id: String,
-    channel: String,
-    class: String,
-    sensitivity: String,
-    content: String,
-    valid_from: DateTime<Utc>,
-    valid_to: Option<DateTime<Utc>>,
-    staleness_permille: u16,
+/// The answer as text: the composed block, plus what the block cannot say
+/// about how it was composed.
+fn render_recall(response: &ContextRunResponse) -> String {
+    if response.entry_count == 0 || response.rendered.trim().is_empty() {
+        return format!(
+            "No memory available to you at {}.",
+            instant(response.created_at)
+        );
+    }
+    // A degraded answer must never read as a complete one (ADR-0042
+    // decision 5), so this is stated rather than left to be inferred.
+    if response.degraded.is_empty() {
+        return response.rendered.clone();
+    }
+    format!(
+        "{}\n\nDegraded ({}): ranked on the lexical leg only.",
+        response.rendered.trim_end(),
+        response.degraded.join(", "),
+    )
 }
 
-/// What one `recall` call asked for, after the arguments have been read.
+/// What one `recall` call asked for.
+///
+/// **Narrower than CTX-5's shape**, and the narrowing is a real capability
+/// loss rather than a simplification. `/v1/recall` took `ids` (fetch the
+/// bodies behind an index tier's `(recall <id>)` handles), `as_of` and
+/// `valid_at` (the bitemporal read, ADR-0041/ADR-0042). The context-run
+/// endpoint that replaced it composes a block for a question and takes none of
+/// those, so this tool asks questions and cannot fetch by name or rewind.
+///
+/// Recorded in ADR-0078's consequences rather than papered over: Prompt 18
+/// re-cuts recall over the new model and is where the handle tier and the
+/// bitemporal read come back.
 #[derive(Default, Deserialize)]
 struct RecallArgs {
     query: Option<String>,
-    ids: Option<Vec<String>>,
-    as_of: Option<String>,
-    valid_at: Option<String>,
-    limit: Option<u32>,
+    budget_tokens: Option<u32>,
 }
 
 impl RecallArgs {
     /// The wire body, or the sentence to hand the model instead.
     ///
-    /// The xor is checked here as well as at the gateway, on CTX-5's
-    /// reasoning: an agent that gets it wrong reads a sentence rather than
-    /// a 400. Only what was asked for is sent, so the gateway's defaults
-    /// stay the gateway's.
+    /// Checked here as well as at the gateway, on CTX-5's reasoning: an agent
+    /// that gets it wrong reads a sentence rather than a 400. Only what was
+    /// asked for is sent, so the gateway's defaults stay the gateway's.
     fn body(self) -> Result<Value, String> {
-        let ids = self.ids.unwrap_or_default();
-        let query = self.query.filter(|text| !text.trim().is_empty());
+        let Some(query) = self.query.filter(|text| !text.trim().is_empty()) else {
+            return Err("Pass a `query` — the question you want memory for.".to_owned());
+        };
         let mut body = serde_json::Map::new();
-        match (&query, ids.is_empty()) {
-            (Some(_), false) => return Err("Pass either `query` or `ids`, not both.".to_owned()),
-            (None, true) => {
-                return Err(
-                    "Pass a `query` to search, or `ids` to fetch records by name.".to_owned(),
-                );
-            }
-            (Some(query), true) => {
-                body.insert("query".to_owned(), json!(query));
-            }
-            (None, false) => {
-                body.insert("ids".to_owned(), json!(ids));
-            }
-        }
-        if let Some(at) = self.as_of {
-            body.insert("as_of".to_owned(), json!(at));
-        }
-        if let Some(at) = self.valid_at {
-            body.insert("valid_at".to_owned(), json!(at));
-        }
-        if let Some(limit) = self.limit {
-            body.insert("limit".to_owned(), json!(limit));
+        body.insert("query".to_owned(), json!(query));
+        if let Some(budget) = self.budget_tokens {
+            body.insert("budget_tokens".to_owned(), json!(budget));
         }
         Ok(Value::Object(body))
     }
 }
 
-/// `recall` — search or fetch, under the caller's own identity.
+/// `recall` — compose context for this run, under the caller's own identity.
+///
+/// Since CPR-12 (ADR-0078 decision 5) this is a **context run**: it names the
+/// session it is composing for, so a model's question becomes a governed
+/// record of who asked for what rather than an unattributable search.
 async fn recall(server: &Server, args: RecallArgs) -> CallToolResult {
     let body = match args.body() {
         Ok(body) => body,
@@ -365,8 +485,22 @@ async fn recall(server: &Server, args: RecallArgs) -> CallToolResult {
         Ok(api) => api,
         Err(message) => return tool_error(message),
     };
+    let session = match resolve_session(server, &api).await {
+        Ok(session) => session,
+        Err(message) => return tool_error(message),
+    };
+    // A fresh key per call: two identical questions asked a minute apart are
+    // two compositions over a corpus that may have moved, not a retry.
+    let key = match random_token() {
+        Ok(key) => key,
+        Err(message) => return tool_error(message),
+    };
     match api
-        .post_as::<RecallResponse>("/v1/recall", Some(body))
+        .post_idempotent_as::<ContextRunResponse>(
+            &format!("/v1/sessions/{session}/context-runs"),
+            Some(body),
+            &key,
+        )
         .await
     {
         Ok(response) => CallToolResult::success(vec![ContentBlock::text(render_recall(&response))]),
@@ -374,92 +508,23 @@ async fn recall(server: &Server, args: RecallArgs) -> CallToolResult {
     }
 }
 
-/// The answer as text, in the shape an inject block already uses — trust
-/// markers first, then the body — so an agent that has read a block does
-/// not have to learn a second format (ADR-0042 decision 15).
-fn render_recall(response: &RecallResponse) -> String {
-    if response.entries.is_empty() {
-        return format!("No memory available to you at {}.", instant(response.as_of));
-    }
-    let entries: Vec<String> = response.entries.iter().map(render_entry).collect();
-    let mut notes = Vec::new();
-    // A bounded answer must never read as a complete one (ADR-0042
-    // decision 5), so this is stated rather than left to be inferred from
-    // a count nobody was given.
-    if response.truncated {
-        notes.push(format!(
-            "Incomplete: {} scopes could have contributed, {} were searched.",
-            response.scopes_considered, response.scopes_decided,
-        ));
-    }
-    if !response.degraded.is_empty() {
-        notes.push(format!(
-            "Degraded ({}): ranked on the lexical leg only.",
-            response.degraded.join(", "),
-        ));
-    }
-    // The watermark, so a recall is as citable as a block: the reader can
-    // say which versions of which records it was answering from.
-    notes.push(format!(
-        "Watermark: {} as of {} (valid {}).",
-        response
-            .entries
-            .iter()
-            .map(|entry| entry.record_id.to_string())
-            .collect::<Vec<_>>()
-            .join(" "),
-        instant(response.as_of),
-        instant(response.valid_at),
-    ));
-    format!("{}\n\n{}", entries.join("\n\n"), notes.join("\n"))
-}
-
-fn render_entry(entry: &RecallEntry) -> String {
-    let mut markers = vec![
-        entry.class.clone(),
-        if entry.channel == "published" {
-            "published".to_owned()
-        } else {
-            "unreviewed".to_owned()
-        },
-    ];
-    // A reader cannot know what they are holding unless they are told, and
-    // that does not change because they asked for it by name (ADR-0038
-    // decision 11).
-    if matches!(entry.sensitivity.as_str(), "confidential" | "restricted") {
-        markers.push(entry.sensitivity.clone());
-    }
-    let validity = match entry.valid_to {
-        None => format!("valid from {}", instant(entry.valid_from)),
-        Some(end) => format!("valid {}..{}", instant(entry.valid_from), instant(end)),
-    };
-    format!(
-        "[{}] {}\n  (recall {}) scope {} · {validity} · freshness {}‰",
-        markers.join("] ["),
-        entry.content,
-        entry.record_id,
-        entry.scope_id,
-        entry.staleness_permille,
-    )
-}
-
 // ── remember ───────────────────────────────────────────────────────────
 
-/// The observe wire shapes (`crates/synveda-gateway/src/observe.rs`), as
-/// much of them as the disposition below reads.
+/// The append wire shape (`crates/synveda-gateway/src/sessions.rs`), as much
+/// of it as the disposition below reads.
 #[derive(Deserialize)]
-struct ObserveResponse {
-    accepted: usize,
+struct AppendResponse {
+    appended: usize,
     duplicates: usize,
     quarantined: usize,
     denied: usize,
     #[serde(default)]
-    events: Vec<EventOutcome>,
+    events: Vec<AppendedEvent>,
 }
 
 #[derive(Deserialize)]
-struct EventOutcome {
-    status: String,
+struct AppendedEvent {
+    outcome: String,
     #[serde(default)]
     redactions: Option<Value>,
 }
@@ -499,25 +564,18 @@ async fn remember(server: &Server, args: RememberArgs) -> CallToolResult {
         Ok(key) => key,
         Err(message) => return tool_error(message),
     };
-    let body = json!({
-        "session_id": server.session_id,
-        "events": [{
-            "idempotency_key": key,
-            // Decision 8. A fresh key per call rather than a content hash:
-            // a model stating the same fact twice is asserting it twice,
-            // not retrying, and only the sender can tell those apart.
-            "kind": ObserveKind::Assertion,
-            "payload": payload,
-            "occurred_at": Utc::now(),
-        }],
-    });
-
     let api = match connect(server).await {
         Ok(api) => api,
         Err(message) => return tool_error(message),
     };
+    let session = match resolve_session(server, &api).await {
+        Ok(session) => session,
+        Err(message) => return tool_error(message),
+    };
+    let body = remember_body(&key, payload);
+
     match api
-        .post_as::<ObserveResponse>("/v1/observe", Some(body))
+        .post_as::<AppendResponse>(&format!("/v1/sessions/{session}/events"), Some(body))
         .await
     {
         Ok(response) => {
@@ -540,7 +598,7 @@ async fn remember(server: &Server, args: RememberArgs) -> CallToolResult {
 /// business: a denied write stored nothing, a quarantined one is waiting on
 /// a human, and a duplicate means the fact was already there. Saying
 /// "stored" for any of them would be a lie the model then reasons from.
-fn render_remember(response: &ObserveResponse) -> (String, bool) {
+fn render_remember(response: &AppendResponse) -> (String, bool) {
     let finding = response
         .events
         .first()
@@ -562,19 +620,19 @@ fn render_remember(response: &ObserveResponse) -> (String, bool) {
             true,
         );
     }
-    if response.duplicates > 0 && response.accepted == 0 {
+    if response.duplicates > 0 && response.appended == 0 {
         return (
             "Already remembered — this was recorded before.".to_owned(),
             false,
         );
     }
-    if response.accepted == 0 {
+    if response.appended == 0 {
         // The route acked but claimed nothing: say so rather than invent a
         // disposition the gateway did not report.
         let status = response
             .events
             .first()
-            .map_or("no outcome", |event| event.status.as_str());
+            .map_or("no outcome", |event| event.outcome.as_str());
         return (
             format!("The gateway accepted nothing and reported `{status}`."),
             true,
@@ -621,11 +679,11 @@ impl ServerHandler for Server {
             .with_protocol_version(ProtocolVersion::V_2026_07_28)
             .with_server_info(Implementation::new(SERVER_NAME, env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "Synveda is governed organisational memory. `recall` answers from every \
-                 scope this identity's policy permits, which is wider than what a \
-                 session-start context block composes from — reach for it when the answer \
-                 might already be known here rather than reasoning from scratch. Results \
-                 say whether they were reviewed and how fresh they are; weigh them on that."
+                "Synveda is governed organisational memory. `recall` composes a context \
+                 block from the scopes this identity's policy permits — reach for it when \
+                 the answer might already be known here rather than reasoning from \
+                 scratch. Results say whether they were reviewed and how fresh they are; \
+                 weigh them on that."
                     .to_owned(),
             )
     }
@@ -740,9 +798,13 @@ impl ServerHandler for Server {
 /// a live credential on a developer laptop is a new exposure, and the
 /// hosted story is ADPT-3's — versioned API, API keys for service
 /// identities — rather than something to improvise here.
-pub async fn serve(profile: String, writes: Writes) -> Result<(), String> {
+pub async fn serve(
+    profile: String,
+    writes: Writes,
+    workspace: Option<String>,
+) -> Result<(), String> {
     subscribe();
-    let server = Server::new(profile, writes)?;
+    let server = Server::new(profile, writes, workspace)?;
     let advertising = server
         .tools
         .iter()
@@ -757,7 +819,7 @@ pub async fn serve(profile: String, writes: Writes) -> Result<(), String> {
     tracing::info!(
         writes = ?writes,
         tools = %advertising,
-        session_id = %server.session_id,
+        external_session_id = %server.external_session_id,
         supported = %ProtocolVersion::V_2026_07_28,
         "mcp server starting",
     );
@@ -897,7 +959,7 @@ mod tests {
     use super::*;
 
     fn server(writes: Writes) -> Server {
-        Server::new("default".to_owned(), writes).expect("a server")
+        Server::new("default".to_owned(), writes, None).expect("a server")
     }
 
     fn advertised(writes: Writes) -> Vec<String> {
@@ -991,18 +1053,12 @@ mod tests {
     }
 
     #[test]
-    fn recall_refuses_both_and_neither_before_the_gateway_sees_them() {
-        let both = RecallArgs {
-            query: Some("what did we decide".to_owned()),
-            ids: Some(vec!["0198f000-0000-7000-8000-000000000000".to_owned()]),
-            ..RecallArgs::default()
-        };
-        assert!(both.body().unwrap_err().contains("not both"));
+    fn recall_refuses_a_call_with_no_question() {
         assert!(
             RecallArgs::default()
                 .body()
                 .unwrap_err()
-                .contains("`ids` to fetch")
+                .contains("Pass a `query`")
         );
     }
 
@@ -1023,42 +1079,37 @@ mod tests {
         assert_eq!(object["query"], json!("payments"));
 
         let body = RecallArgs {
-            ids: Some(vec!["0198f000-0000-7000-8000-000000000000".to_owned()]),
-            as_of: Some("2026-03-03T00:00:00Z".to_owned()),
-            limit: Some(4),
-            ..RecallArgs::default()
+            query: Some("payments".to_owned()),
+            budget_tokens: Some(512),
         }
         .body()
-        .expect("ids are enough");
-        assert_eq!(body["ids"], json!(["0198f000-0000-7000-8000-000000000000"]));
-        assert_eq!(body["as_of"], json!("2026-03-03T00:00:00Z"));
-        assert_eq!(body["limit"], json!(4));
-        assert!(body.get("query").is_none());
+        .expect("a narrowed budget is allowed");
+        assert_eq!(body["budget_tokens"], json!(512));
     }
 
-    /// A blank `query` is not a query. Without this the xor reads it as one
-    /// and the gateway refuses a request the model could have been told
-    /// about here.
+    /// A blank `query` is not a query. Without this the call reaches the
+    /// gateway and is refused there, where the model reads a 400 rather than
+    /// a sentence it can act on.
     #[test]
     fn a_blank_query_is_not_a_query() {
         let args = RecallArgs {
             query: Some("   ".to_owned()),
             ..RecallArgs::default()
         };
-        assert!(args.body().unwrap_err().contains("`ids` to fetch"));
+        assert!(args.body().unwrap_err().contains("Pass a `query`"));
     }
 
     /// The four dispositions MEM-2 can produce, and the three of them a
     /// model must not read as "stored".
     #[test]
     fn every_disposition_says_what_actually_happened() {
-        let outcome = |accepted, duplicates, quarantined, denied| ObserveResponse {
-            accepted,
+        let outcome = |appended, duplicates, quarantined, denied| AppendResponse {
+            appended,
             duplicates,
             quarantined,
             denied,
-            events: vec![EventOutcome {
-                status: "admitted".to_owned(),
+            events: vec![AppendedEvent {
+                outcome: "appended".to_owned(),
                 redactions: None,
             }],
         };
@@ -1092,13 +1143,13 @@ mod tests {
     /// is safe to show the model and useless to withhold.
     #[test]
     fn a_refusal_carries_the_scans_reason() {
-        let response = ObserveResponse {
-            accepted: 0,
+        let response = AppendResponse {
+            appended: 0,
             duplicates: 0,
             quarantined: 0,
             denied: 1,
-            events: vec![EventOutcome {
-                status: "denied".to_owned(),
+            events: vec![AppendedEvent {
+                outcome: "denied".to_owned(),
                 redactions: Some(
                     json!([{"rule": "aws-access-key", "category": "secret", "count": 1}]),
                 ),
@@ -1108,101 +1159,76 @@ mod tests {
         assert!(text.contains("aws-access-key"), "{text}");
     }
 
+    /// The composed block is passed through, because a context run already
+    /// renders in the format an agent reads. This server adds nothing to it,
+    /// which is the simplification the cutover bought: there is no second
+    /// implementation of the block format here to drift.
     #[test]
-    fn recall_renders_trust_markers_before_the_body() {
-        let response = RecallResponse {
-            entries: vec![RecallEntry {
-                record_id: "0198f000-0000-7000-8000-000000000000"
-                    .parse()
-                    .expect("a record id"),
-                scope_id: "0198f000-0000-7000-8000-000000000001".to_owned(),
-                channel: "derived".to_owned(),
-                class: "decision".to_owned(),
-                sensitivity: "confidential".to_owned(),
-                content: "we chose Postgres".to_owned(),
-                valid_from: "2026-03-03T00:00:00Z".parse().expect("an instant"),
-                valid_to: None,
-                staleness_permille: 120,
-            }],
-            as_of: "2026-08-05T00:00:00Z".parse().expect("an instant"),
-            valid_at: "2026-08-05T00:00:00Z".parse().expect("an instant"),
-            scopes_considered: 3,
-            scopes_decided: 3,
-            truncated: false,
+    fn recall_passes_the_composed_block_through() {
+        let response = ContextRunResponse {
+            rendered: "[decision] [unreviewed] we chose Postgres\n\nWatermark: …".to_owned(),
+            entry_count: 1,
             degraded: Vec::new(),
+            created_at: "2026-08-25T00:00:00Z".parse().expect("an instant"),
         };
         let rendered = render_recall(&response);
-        assert!(
-            rendered.starts_with("[decision] [unreviewed] [confidential] we chose Postgres"),
-            "{rendered}",
-        );
-        assert!(
-            rendered.contains("(recall 0198f000-0000-7000-8000-000000000000)"),
-            "{rendered}"
-        );
-        assert!(
-            rendered.contains("Watermark:"),
-            "a recall must be as citable as a block"
+        assert_eq!(
+            rendered, response.rendered,
+            "the block is passed through verbatim"
         );
     }
 
-    /// A bounded answer must never read as a complete one (ADR-0042
-    /// decision 5) — including when the boundary is the search's, not the
-    /// caller's.
+    /// A degraded answer must never read as a complete one (ADR-0042
+    /// decision 5), and an empty one is its own sentence rather than an error.
     #[test]
-    fn a_truncated_answer_says_it_is_incomplete() {
-        let response = RecallResponse {
-            entries: Vec::new(),
-            as_of: "2026-08-05T00:00:00Z".parse().expect("an instant"),
-            valid_at: "2026-08-05T00:00:00Z".parse().expect("an instant"),
-            scopes_considered: 40,
-            scopes_decided: 8,
-            truncated: true,
+    fn a_degraded_answer_says_so_and_an_empty_one_is_not_an_error() {
+        let empty = ContextRunResponse {
+            rendered: String::new(),
+            entry_count: 0,
             degraded: vec!["vector".to_owned()],
+            created_at: "2026-08-25T00:00:00Z".parse().expect("an instant"),
         };
-        // No entries at all is its own sentence, and it is not an error.
-        assert!(render_recall(&response).contains("No memory available to you"));
+        assert!(render_recall(&empty).contains("No memory available to you"));
 
-        let response = RecallResponse {
-            entries: vec![RecallEntry {
-                record_id: "0198f000-0000-7000-8000-000000000000"
-                    .parse()
-                    .expect("a record id"),
-                scope_id: "0198f000-0000-7000-8000-000000000001".to_owned(),
-                channel: "published".to_owned(),
-                class: "fact".to_owned(),
-                sensitivity: "internal".to_owned(),
-                content: "the deploy window is Thursday".to_owned(),
-                valid_from: "2026-03-03T00:00:00Z".parse().expect("an instant"),
-                valid_to: None,
-                staleness_permille: 0,
-            }],
-            ..response
+        let degraded = ContextRunResponse {
+            rendered: "the deploy window is Thursday".to_owned(),
+            entry_count: 1,
+            degraded: vec!["vector".to_owned()],
+            created_at: "2026-08-25T00:00:00Z".parse().expect("an instant"),
         };
-        let rendered = render_recall(&response);
+        let rendered = render_recall(&degraded);
         assert!(
-            rendered.contains("Incomplete: 40 scopes could have contributed"),
+            rendered.contains("the deploy window is Thursday"),
             "{rendered}"
         );
         assert!(rendered.contains("Degraded (vector)"), "{rendered}");
     }
 
     /// Decision 8, at the one point this module decides it: the write tool
-    /// writes assertions and nothing else, because a `remember` that
-    /// reported `decision` would be indistinguishable from a hook's
+    /// writes assertions and nothing else, because a `remember` that reported
+    /// an observation's event type would be indistinguishable from a hook's
     /// observation for the rest of the corpus's life.
     #[test]
     fn the_write_tool_writes_assertions() {
-        assert!(ObserveKind::Assertion.is_model_asserted());
-        assert_eq!(json!(ObserveKind::Assertion), json!("assertion"));
+        let body = remember_body("k1", json!({"text": "we ship on Fridays"}));
+        assert_eq!(
+            body["events"][0]["event_type"],
+            json!(synveda_types::session::SessionEventType::MemoryAsserted.as_str()),
+            "the remember tool must send the model-asserted type"
+        );
+        assert_eq!(body["events"][0]["client_event_id"], json!("k1"));
+        // And nothing else: a `remember` that also named an observation type
+        // would be indistinguishable from a hook's record for the rest of the
+        // corpus's life.
+        assert_eq!(body["events"].as_array().map(Vec::len), Some(1));
     }
 
-    /// Two servers must not share a session id, and the id must fit the
-    /// route's text-field cap.
+    /// Two launches must not share a harness id, and it must fit the route's
+    /// text-field cap.
     #[test]
-    fn each_launch_is_its_own_session() {
-        let first = server(Writes::Tool).session_id;
-        let second = server(Writes::Tool).session_id;
+    fn each_launch_is_its_own_run() {
+        let first = server(Writes::Tool).external_session_id;
+        let second = server(Writes::Tool).external_session_id;
         assert_ne!(first, second);
         assert!(first.starts_with("mcp-"));
         assert!(first.chars().count() <= 200, "{first}");
@@ -1219,11 +1245,15 @@ mod tests {
             .expect("properties");
         let mut names: Vec<&String> = properties.keys().collect();
         names.sort();
-        assert_eq!(names, ["as_of", "ids", "limit", "query", "valid_at"]);
+        // Narrower than CTX-5's schema, and the narrowing is a capability loss
+        // rather than a tidy-up: `ids`, `as_of` and `valid_at` described
+        // `/v1/recall`, which is deleted. Prompt 18 is where they come back.
+        assert_eq!(names, ["budget_tokens", "query"]);
         assert_eq!(tool.input_schema["additionalProperties"], json!(false));
-        assert!(
-            tool.input_schema.get("required").is_none(),
-            "every field is optional"
+        assert_eq!(
+            tool.input_schema["required"],
+            json!(["query"]),
+            "a composition needs a question"
         );
     }
 
@@ -1232,10 +1262,9 @@ mod tests {
         let tool = remember_tool();
         assert_eq!(tool.input_schema["required"], json!(["text"]));
         assert_eq!(tool.input_schema["additionalProperties"], json!(false));
-        // No scope parameter, and there must never be one: placement
-        // decides where a write lands (ADR-0020 decision 4), and a field
-        // here would be a second answer to a question the route does not
-        // ask.
+        // No scope parameter, and there must never be one: the run decides
+        // where a write lands (ADR-0078 decision 3), and a field here would be
+        // a second answer to a question the route does not ask.
         assert!(tool.input_schema["properties"].get("scope").is_none());
     }
 }

@@ -203,6 +203,9 @@ async fn seed_scopes(pool: &PgPool, tenant: TenantId) -> (Scope, Scope) {
 
 /// A person: their own principal scope under the tenant root, carrying
 /// the identity row (CPR-7, ADR-0074 decision 3).
+#[path = "session_seed.rs"]
+mod session_seed;
+
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
@@ -318,24 +321,48 @@ async fn list_channels(app: &Router, token: &str, scope: ScopeId) -> (StatusCode
     call(app, request).await
 }
 
-async fn inject(app: &Router, token: &str) -> (StatusCode, Value) {
+/// A composition for `run`, through the endpoint that replaced `/v1/inject`.
+async fn inject(app: &Router, token: &str, run: synveda_types::SessionId) -> (StatusCode, Value) {
     let request = Request::builder()
         .method("POST")
-        .uri("/v1/inject")
+        .uri(format!("/v1/sessions/{run}/context-runs"))
         .header("authorization", format!("Bearer {token}"))
+        .header(
+            "idempotency-key",
+            synveda_types::ContextRunId::new().to_string(),
+        )
         .header("content-type", "application/json")
-        .body(Body::from(json!({"session_id": "flow-2"}).to_string()))
-        .expect("build inject request");
-    call(app, request).await
+        .body(Body::from("{}"))
+        .expect("build context-run request");
+    let (status, body) = call(app, request).await;
+    // 201 on the first composition, 200 when a key replays one. Normalised so
+    // callers keep asserting the one status they care about.
+    (
+        if status == StatusCode::CREATED {
+            StatusCode::OK
+        } else {
+            status
+        },
+        body,
+    )
 }
 
+/// The record ids a block composed, read off its own watermark line.
+///
+/// `/v1/inject` served them as a field; a context run serves the rendered
+/// block, and the watermark is where the block names what it was composed
+/// from — which is the same list, from the surface that has to carry it
+/// anyway for a reader to cite the answer.
 fn record_ids(body: &Value) -> Vec<String> {
-    body["record_ids"]
-        .as_array()
-        .expect("record_ids array")
-        .iter()
-        .map(|id| id.as_str().expect("record id string").to_owned())
-        .collect()
+    let rendered = body["rendered"].as_str().unwrap_or_default();
+    let Some(marker) = rendered.split("records=").nth(1) else {
+        return Vec::new();
+    };
+    let ids = marker.split("-->").next().unwrap_or_default().trim();
+    if ids == "none" {
+        return Vec::new();
+    }
+    ids.split(',').map(str::trim).map(str::to_owned).collect()
 }
 
 async fn events(pool: &PgPool, tenant: TenantId, action: &str) -> Vec<StoredEvent> {
@@ -362,6 +389,7 @@ async fn bank_mode_flips_composition_over_real_channels() {
     };
     let (_platform, _) = seed_scopes(&pool, tenant).await;
     let alice = seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "flow2", "alice").await;
     // The material sits at alice's **own scope**, which is where the
     // pipeline puts every extracted memory (MEM-1, ADR-0020 decision 3)
     // and — since CPR-7 (ADR-0074 decision 3) — the one scope besides the
@@ -395,19 +423,19 @@ async fn bank_mode_flips_composition_over_real_channels() {
     let token = issue("alice", tenant);
 
     // Nothing is published yet: both records compose, both unreviewed.
-    let (status, before) = inject(&app, &token).await;
+    let (status, before) = inject(&app, &token, run.session_id).await;
     assert_eq!(status, StatusCode::OK);
     let ids = record_ids(&before);
     assert!(ids.contains(&procedure.to_string()) && ids.contains(&unreviewed.to_string()));
     assert_eq!(
-        before["text"]
+        before["rendered"]
             .as_str()
             .expect("text")
             .matches("[unreviewed]")
             .count(),
         2,
         "nothing is trusted before anyone publishes it: {}",
-        before["text"]
+        before["rendered"]
     );
 
     // The curator publishes one of them — the governed route, under the
@@ -432,9 +460,9 @@ async fn bank_mode_flips_composition_over_real_channels() {
 
     // The next inject composes it as reviewed material — no marker —
     // while the unpublished record still says it is unreviewed.
-    let (status, after) = inject(&app, &token).await;
+    let (status, after) = inject(&app, &token, run.session_id).await;
     assert_eq!(status, StatusCode::OK);
-    let text = after["text"].as_str().expect("text");
+    let text = after["rendered"].as_str().expect("text");
     assert!(
         text.contains(&format!("- [procedure] {PROCEDURE}\n")),
         "published material renders unmarked: {text}"
@@ -466,22 +494,22 @@ async fn bank_mode_flips_composition_over_real_channels() {
         .expect("set default pack");
 
     // The very next inject composes the published channel alone.
-    let (status, banked) = inject(&app, &token).await;
+    let (status, banked) = inject(&app, &token, run.session_id).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         record_ids(&banked),
         vec![procedure.to_string()],
         "only what a curator published survives bank mode"
     );
-    let text = banked["text"].as_str().expect("text");
+    let text = banked["rendered"].as_str().expect("text");
     assert!(
         !text.contains("[unreviewed]"),
         "and nothing in the block is unreviewed: {text}"
     );
 
     // The block cites the commit the curator made.
-    let injected = events(&pool, tenant, "context.injected").await;
-    let last = injected.last().expect("an inject event");
+    let injected = events(&pool, tenant, "session.context.composed").await;
+    let last = injected.last().expect("a context-run event");
     let channels = last.payload["channels"].as_array().expect("channels");
     assert!(
         channels

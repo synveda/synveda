@@ -301,15 +301,32 @@ async fn post(app: &Router, token: &str, uri: &str, body: Value) -> (StatusCode,
     call(app, request).await
 }
 
-async fn inject(app: &Router, token: &str) -> Value {
-    let (status, body) = post(app, token, "/v1/inject", json!({"session_id": "flow-5"})).await;
-    assert_eq!(status, StatusCode::OK, "inject failed: {body}");
+#[path = "session_seed.rs"]
+mod session_seed;
+
+async fn inject(app: &Router, token: &str, run: synveda_types::SessionId) -> Value {
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/sessions/{run}/context-runs"))
+        .header("authorization", format!("Bearer {token}"))
+        .header(
+            "idempotency-key",
+            synveda_types::ContextRunId::new().to_string(),
+        )
+        .header("content-type", "application/json")
+        .body(Body::from("{}"))
+        .expect("build context-run request");
+    let (status, body) = call(app, request).await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "context run failed: {status} {body}"
+    );
     body
 }
 
 /// Whether a caller's own context block carries the runbook.
-async fn reads_runbook(app: &Router, token: &str) -> bool {
-    inject(app, token).await["text"]
+async fn reads_runbook(app: &Router, token: &str, run: synveda_types::SessionId) -> bool {
+    inject(app, token, run).await["rendered"]
         .as_str()
         .expect("block text")
         .contains(RUNBOOK)
@@ -501,33 +518,62 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
         issue("sam@acme.test", tenant),
     );
     let app = router(state(&database_url()));
+    // A run per reader that composes: a composition names the session it was
+    // for since CPR-12, and these assertions are about what one reader
+    // receives. Dana has none — the two facts she used to observe by recall
+    // are now read at the channel (see below).
+    let pia_run = session_seed::seed_run_for(&pool, tenant, "flow5-pia", "pia@acme.test")
+        .await
+        .session_id;
+    let sam_run = session_seed::seed_run_for(&pool, tenant, "flow5-sam", "sam@acme.test")
+        .await
+        .session_id;
     let runbook = seed_record(&pool, tenant, org.platform.id, ravi.id, RUNBOOK).await;
 
     // Baseline: the runbook is the platform team's, and nobody outside it
     // reads it — not the sibling team, not the other department.
     assert!(
-        !reads_runbook(&app, &pia).await,
+        !reads_runbook(&app, &pia, pia_run).await,
         "the runbook must not reach payments before it climbs"
     );
     assert!(
-        !reads_runbook(&app, &sam).await,
+        !reads_runbook(&app, &sam, sam_run).await,
         "the runbook must not reach sales before it climbs"
     );
     // The reader-side baseline for the promotion proof below: Dana, who
     // curates Engineering, reads the runbook as platform's *derived*
     // material — her grant reaches the team because eng is on its chain —
     // and nothing more has happened to it yet.
-    let (status, baseline) = post(&app, &dana, "/v1/recall", json!({"ids": [runbook]})).await;
-    assert_eq!(status, StatusCode::OK, "the baseline recall: {baseline}");
-    assert_eq!(
-        baseline["entries"][0]["scope_id"].as_str(),
-        Some(org.platform.id.to_string().as_str()),
-        "before the climb the runbook composes from where it lives: {baseline}"
-    );
-    assert_eq!(
-        baseline["entries"][0]["channel"].as_str(),
-        Some("derived"),
-        "and as unreviewed material: {baseline}"
+    //
+    // **Asserted at the channel rather than at a reader**, and the reason is a
+    // capability this cut removed. `/v1/recall` widened a read to every scope
+    // the caller may reach — which is how dana, whose own chain never runs
+    // through the platform team, could observe the runbook where it lives. It
+    // is deleted (CPR-12, ADR-0078 decision 5), and a context run composes
+    // from the caller's own chain plus the *run's* scope chain — neither of
+    // which reaches a team dana merely holds a grant over. So the fact is
+    // asserted where it still lives: platform's derived channel holds the
+    // runbook and its published channel does not.
+    //
+    // Prompt 18 re-cuts recall over the new model; the reader-side version of
+    // this observation comes back with it.
+    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+        .await
+        .expect("tenant tx");
+    let before = synveda_vedaflow::read_memory_members(
+        &mut tx,
+        tenant,
+        &[org.eng.id],
+        synveda_types::Channel::Published,
+    )
+    .await
+    .expect("read engineering's published channel");
+    drop(tx);
+    assert!(
+        before
+            .first()
+            .is_none_or(|channel| !channel.members.iter().any(|(id, _)| *id == runbook)),
+        "before the climb the runbook is not Engineering's published material: {before:?}"
     );
 
     // ── Hop 1: platform → eng, under Engineering's curator ──────────────
@@ -616,36 +662,36 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
         "the org unit's channel is what moved: {published}"
     );
 
-    // The promotion, from the reader's side. Dana's own recall composed
-    // the runbook as platform's *derived* material before the climb; it
-    // now composes as Engineering's *published* material — the entry's
-    // address is the publishing scope, not the team the record lives at
-    // (ADR-0034 decision 6). That is the audience the first hop widens
-    // under the new model: everyone the org unit's reviewed channel
-    // stands for, not only those whose grant already reached the team.
-    let (status, recalled) = post(&app, &dana, "/v1/recall", json!({"ids": [runbook]})).await;
-    assert_eq!(
-        status,
-        StatusCode::OK,
-        "recalling the climbed runbook: {recalled}"
-    );
-    let entry = &recalled["entries"][0];
-    assert_eq!(
-        entry["scope_id"].as_str(),
-        Some(org.eng.id.to_string().as_str()),
-        "the entry composes from the publishing scope: {recalled}"
-    );
-    assert_eq!(
-        entry["channel"].as_str(),
-        Some("published"),
-        "climbed material composes as published, not derived: {recalled}"
+    // The promotion, at the channel. The record still lives at the platform
+    // team; what moved is **Engineering's** published channel, which is the
+    // address the entry composes from after the climb (ADR-0034 decision 6).
+    // That is the audience the first hop widens: everyone the org unit's
+    // reviewed channel stands for, not only those whose grant already reached
+    // the team.
+    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+        .await
+        .expect("tenant tx");
+    let climbed = synveda_vedaflow::read_memory_members(
+        &mut tx,
+        tenant,
+        &[org.eng.id],
+        synveda_types::Channel::Published,
+    )
+    .await
+    .expect("read engineering's published channel");
+    drop(tx);
+    assert!(
+        climbed
+            .first()
+            .is_some_and(|channel| channel.members.iter().any(|(id, _)| *id == runbook)),
+        "the climbed runbook is Engineering's published material: {climbed:?}"
     );
     // And an org-unit publication stops there: no org unit is on any
     // member's own chain (a principal scope hangs off the tenant root,
     // CPR-7), so a member of another branch still receives nothing in
     // their inject — only the root's publication reaches everyone.
     assert!(
-        !reads_runbook(&app, &sam).await,
+        !reads_runbook(&app, &sam, sam_run).await,
         "an org-unit publication must not reach another department's inject"
     );
 
@@ -686,7 +732,7 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     assert_eq!(status, StatusCode::OK, "rejecting hop 2: {rejected}");
     assert_eq!(rejected["state"].as_str(), Some("rejected"));
     assert!(
-        !reads_runbook(&app, &sam).await,
+        !reads_runbook(&app, &sam, sam_run).await,
         "a rejected climb must change nothing"
     );
 
@@ -755,11 +801,11 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     // branch that never held a grant over the runbook — now receives it
     // in his own inject, as published material (never `[unreviewed]`).
     assert!(
-        reads_runbook(&app, &sam).await,
+        reads_runbook(&app, &sam, sam_run).await,
         "after the second climb, another department must receive the runbook"
     );
-    let block = inject(&app, &sam).await;
-    let text = block["text"].as_str().expect("block text");
+    let block = inject(&app, &sam, sam_run).await;
+    let text = block["rendered"].as_str().expect("rendered block");
     assert!(
         !text.contains("[unreviewed]"),
         "climbed material composes as published, not derived: {text}"
@@ -771,7 +817,7 @@ async fn knowledge_climbs_two_levels_under_each_levels_approvers() {
     // And Pia, who never could read the platform team, receives it too —
     // the tenant's publication is what reaches her, nothing narrower.
     assert!(
-        reads_runbook(&app, &pia).await,
+        reads_runbook(&app, &pia, pia_run).await,
         "after the second climb, the sibling team receives the runbook"
     );
 

@@ -35,7 +35,7 @@ use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::quarantine::{QuarantinedEvent, ReviewDecision};
 use synveda_store::{quarantine, rls, scopes};
-use synveda_types::{Error, IdentityId, ObserveEventId, QuarantineState, Result, ScopeId};
+use synveda_types::{Error, QuarantineState, Result, ScopeId, SessionEventId, SessionId};
 
 use crate::app::AppState;
 use crate::audit;
@@ -86,11 +86,16 @@ async fn respond<T: IntoResponse>(
 /// (there is none anywhere to render, ADR-0021 decision 1).
 #[derive(Serialize)]
 struct QuarantineView {
-    event_id: ObserveEventId,
+    event_id: SessionEventId,
     scope_id: ScopeId,
-    owner_id: IdentityId,
-    session_id: String,
-    kind: String,
+    /// The run the event belongs to — a real aggregate since CPR-12, so a
+    /// reviewer can open the transcript this payload came from instead of
+    /// deciding about it in isolation.
+    session_id: SessionId,
+    /// The token subject that opened that run.
+    principal_id: String,
+    event_type: String,
+    client_event_id: String,
     payload: serde_json::Value,
     findings: serde_json::Value,
     state: QuarantineState,
@@ -108,9 +113,10 @@ impl From<QuarantinedEvent> for QuarantineView {
         QuarantineView {
             event_id: event.event_id,
             scope_id: event.scope_id,
-            owner_id: event.owner_id,
             session_id: event.session_id,
-            kind: event.kind,
+            principal_id: event.principal_id,
+            event_type: event.event_type,
+            client_event_id: event.client_event_id,
             payload: event.payload,
             findings: event.findings,
             state: event.state,
@@ -228,7 +234,7 @@ pub(crate) struct ReviewBody {
 #[tracing::instrument(name = "quarantine.release", skip_all)]
 pub(crate) async fn release(
     State(state): State<AppState>,
-    Path(event_id): Path<ObserveEventId>,
+    Path(event_id): Path<SessionEventId>,
     payload: std::result::Result<Json<ReviewBody>, JsonRejection>,
 ) -> Response {
     let result = review(&state, event_id, payload, ReviewDecision::Release).await;
@@ -239,7 +245,7 @@ pub(crate) async fn release(
 #[tracing::instrument(name = "quarantine.reject", skip_all)]
 pub(crate) async fn reject(
     State(state): State<AppState>,
-    Path(event_id): Path<ObserveEventId>,
+    Path(event_id): Path<SessionEventId>,
     payload: std::result::Result<Json<ReviewBody>, JsonRejection>,
 ) -> Response {
     let result = review(&state, event_id, payload, ReviewDecision::Reject).await;
@@ -252,7 +258,7 @@ pub(crate) async fn reject(
 /// and the chained semantic event — all atomic (ADR-0021 decision 7).
 async fn review(
     state: &AppState,
-    event_id: ObserveEventId,
+    event_id: SessionEventId,
     payload: std::result::Result<Json<ReviewBody>, JsonRejection>,
     decision: ReviewDecision,
 ) -> Result<Json<QuarantineView>> {
@@ -320,8 +326,8 @@ async fn review(
         json!({
             "authz": audit::decision_context(Action::QuarantineReview, &authorized),
             "event_id": reviewed.event_id,
-            "owner_id": reviewed.owner_id,
             "session_id": reviewed.session_id,
+            "principal_id": reviewed.principal_id,
             // Rule ids and counts — the finding summary is already
             // content-free (ADR-0021 decision 1).
             "findings": reviewed.findings,

@@ -34,7 +34,9 @@ mod recall;
 mod reset;
 mod scim;
 mod scope;
+mod session;
 mod skill;
+mod spool;
 #[cfg(test)]
 mod testing;
 mod whoami;
@@ -42,7 +44,6 @@ mod whoami;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
@@ -50,9 +51,8 @@ use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::Hs256Verifier;
 use synveda_types::{
     CompositionConfig, DedupConfig, DedupMode, IdentityId, IdentityKind, IndexTier, InjectChannels,
-    PackConfig, PromotionConfig, ProposalId, ProposalState, RecordId, RedactionConfig,
-    RedactionMode, RetentionConfig, ScanSeverity, ScopeId, SkillIndex, SkillScanConfig, TenantId,
-    TenantStatus,
+    PackConfig, PromotionConfig, ProposalId, ProposalState, RedactionConfig, RedactionMode,
+    RetentionConfig, ScanSeverity, ScopeId, SkillIndex, SkillScanConfig, TenantId, TenantStatus,
 };
 
 #[derive(Parser)]
@@ -213,6 +213,14 @@ enum Command {
         /// downstream can tell they were the same turn.
         #[arg(long, value_enum, default_value_t = mcp::Writes::Tool)]
         writes: mcp::Writes,
+        /// The workspace this server's run belongs to (CPR-12, ADR-0078).
+        ///
+        /// Every write and every composition names the run it belongs to, and
+        /// a run happens in a workspace. Omit it when you have one workspace
+        /// and the server will use it; with more than one it asks, rather
+        /// than writing a model's assertions into whichever sorted first.
+        #[arg(long)]
+        workspace: Option<String>,
         /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
         /// `default`.
         #[arg(long)]
@@ -342,59 +350,97 @@ enum Command {
     /// forbids.
     #[command(subcommand)]
     Skill(SkillCommand),
-    /// Fetch records in full by id (CTX-4, ADR-0041) — the other half of
-    /// tiered injection.
+    /// The durable observation spool (CPR-12, ADR-0078).
     ///
-    /// An inject block's index tier ends its lines with `(recall <id>)`;
-    /// this is that instruction. A gateway call under the bearer `synveda
-    /// login` stored, so the PDP decides per scope and the read is chained
-    /// under your own identity.
+    /// An agent client records what happened into a local spool before it
+    /// tries to deliver it, so an unreachable gateway, a killed hook, a
+    /// compaction or a reboot costs nothing. These are the commands for
+    /// looking at that spool and pushing it.
+    #[command(subcommand)]
+    Session(SessionCommand),
+    /// Compose governed context for a question (CPR-12, ADR-0078).
     ///
-    /// A handle is a name, not a capability: what you may read is decided
-    /// now, not when the block was composed, so an id you have since lost
-    /// access to simply does not come back.
+    /// Opens an ephemeral run, composes a block into it under the bearer
+    /// `synveda login` stored, and prints it. The PDP decides per scope and
+    /// the composition is chained under your own identity.
+    ///
+    /// This used to fetch records by id and to read the corpus at a past
+    /// instant. `/v1/recall` is deleted and both went with it; Prompt 18 is
+    /// where the handle tier and the bitemporal read come back.
     Recall {
-        /// The record ids, as the block printed them. Omit when asking a
-        /// question with --query.
-        #[arg(num_args = 0..)]
-        ids: Vec<RecordId>,
-        /// Ask a question instead of naming records: hybrid retrieval over
-        /// every scope your policy lets you read, which is wider than the
-        /// scopes an inject block composes from.
-        ///
-        /// Omit both this and the ids, with --as-of, to sweep everything
-        /// you may read as it stood at that instant — the complete
-        /// historical read, including material the live corpus no longer
-        /// holds.
-        #[arg(long, conflicts_with = "ids")]
-        query: Option<String>,
-        /// Serve bodies as the database held them at this instant —
-        /// "what did the agent know on March 3rd" (RFC 3339, e.g.
-        /// 2026-03-03T00:00:00Z).
-        ///
-        /// It rewinds the corpus, never your access: what you may read is
-        /// decided now, so this cannot return material you lost access to.
+        /// The question to answer.
         #[arg(long)]
-        as_of: Option<DateTime<Utc>>,
-        /// Valid time — which assertions were true *about the world* at
-        /// this instant. Defaults to --as-of, so one flag asks the
-        /// diagonal question.
+        query: String,
+        /// The workspace to compose in. Needed only when you can see more
+        /// than one.
         #[arg(long)]
-        valid_at: Option<DateTime<Utc>>,
-        /// How many records a --query may return.
+        workspace: Option<String>,
+        /// Narrow the block's token budget. You may narrow and never widen:
+        /// the policy pack's budget is the ceiling.
         #[arg(long)]
-        limit: Option<usize>,
+        budget_tokens: Option<u32>,
         /// Print the gateway's answer verbatim.
         #[arg(long)]
         json: bool,
-        /// Skip the "reading as ..." line — for a harness piping the
-        /// bodies straight into a session.
+        /// Skip the "reading as ..." line — for a harness piping the block
+        /// straight into a session.
         #[arg(long)]
         quiet: bool,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
         #[arg(long)]
         profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionCommand {
+    /// Deliver every unacknowledged event now.
+    ///
+    /// The hooks do this on their own schedule — `SessionStart` retries the
+    /// backlog, `Stop` delivers the turn, `SessionEnd` flushes within a
+    /// bounded deadline. This is the same delivery, on demand, for when a
+    /// gateway has been unreachable and you would rather not wait for the
+    /// next session to start.
+    Flush {
+        /// The spool directory. Defaults to $XDG_STATE_HOME/synveda/spool.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// Name each session as it goes.
+        #[arg(long)]
+        verbose: bool,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// The spool itself: what is held and what has been delivered.
+    #[command(subcommand)]
+    Spool(SpoolCommand),
+}
+
+#[derive(Subcommand)]
+enum SpoolCommand {
+    /// What is held, per session, and since when.
+    Status {
+        /// The spool directory. Defaults to $XDG_STATE_HOME/synveda/spool.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// Print the inventory as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete events this deployment has already answered for.
+    ///
+    /// Only acknowledged events are ever deleted, and `--acknowledged` is
+    /// required rather than assumed: the one irreversible thing that can be
+    /// done to an undelivered observation is delete it, so the command that
+    /// reclaims disk says out loud what it is allowed to take. There is no
+    /// flag that deletes undelivered events.
+    Purge {
+        /// Required. Delete only the events the gateway has acknowledged.
+        #[arg(long)]
+        acknowledged: bool,
+        /// The spool directory. Defaults to $XDG_STATE_HOME/synveda/spool.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
     },
 }
 
@@ -1745,9 +1791,11 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Mcp {
             command: None,
             writes,
+            workspace,
             profile,
-        } => mcp::serve(profile_name(profile), writes).await,
+        } => mcp::serve(profile_name(profile), writes, workspace).await,
         Command::Mcp {
+            workspace: _,
             command:
                 Some(McpCommand::Install {
                     client,
@@ -2505,12 +2553,21 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => pack::propose(&profile_name(profile), &name, scope, title.as_deref()).await,
         },
+        Command::Session(command) => match command {
+            SessionCommand::Flush {
+                dir,
+                verbose,
+                profile,
+            } => session::flush(&profile_name(profile), dir, verbose).await,
+            SessionCommand::Spool(command) => match command {
+                SpoolCommand::Status { dir, json } => session::status(dir, json),
+                SpoolCommand::Purge { acknowledged, dir } => session::purge(dir, acknowledged),
+            },
+        },
         Command::Recall {
-            ids,
             query,
-            as_of,
-            valid_at,
-            limit,
+            workspace,
+            budget_tokens,
             json,
             quiet,
             profile,
@@ -2518,11 +2575,9 @@ async fn run(cli: Cli) -> Result<(), String> {
             recall::recall(
                 &profile_name(profile),
                 recall::Ask {
-                    ids: &ids,
-                    query: query.as_deref(),
-                    as_of,
-                    valid_at,
-                    limit,
+                    query: &query,
+                    workspace: workspace.as_deref(),
+                    budget_tokens,
                 },
                 json,
                 quiet,

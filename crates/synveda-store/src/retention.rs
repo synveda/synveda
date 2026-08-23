@@ -109,7 +109,7 @@ pub async fn holds_closed_versions(
     .map_err(storage_error)
 }
 
-/// Whether the tenant holds any staged observe payload at all — the same
+/// Whether the tenant holds any session-event payload at all — the same
 /// cheap look for the disposal stage.
 #[tracing::instrument(
     name = "store.retention.holds_staging",
@@ -119,7 +119,7 @@ pub async fn holds_closed_versions(
 )]
 pub async fn holds_staging(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Result<bool> {
     sqlx::query_scalar!(
-        r#"select exists(select 1 from observe_events where tenant_id = $1) as "exists!""#,
+        r#"select exists(select 1 from session_events where tenant_id = $1) as "exists!""#,
         tenant_id.as_uuid(),
     )
     .fetch_one(executor)
@@ -360,22 +360,23 @@ async fn set_purge_flag(conn: &mut PgConnection, on: bool) -> Result<()> {
     })
 }
 
-/// Disposes of observe staging rows received at or before `cutoff`, with
-/// their quarantine markers — the disposal migrations 0012 and 0013 both
-/// deferred here (ADR-0040 decision 7).
+/// Disposes of session events received at or before `cutoff`, with their
+/// quarantine markers — the disposal migration 0044 deferred here and
+/// migration 0046 granted (ADR-0040 decision 7, ADR-0078 decision 4).
 ///
 /// Markers go first, because the FK points that way and because a marker
-/// without its event is meaningless (migration 0013's own words). Pending
-/// markers are disposed of like any other and counted separately.
+/// without its event is meaningless. Pending markers are disposed of like any
+/// other and counted separately.
 ///
-/// Disposal frees `(tenant_id, idempotency_key)`: MEM-1's admission gate
-/// covers exactly as long as this plane is kept, which is why the config's
-/// floor is a day.
+/// Disposal frees `(tenant_id, session_id, client_event_id)`: the append's
+/// idempotency gate covers exactly as long as this plane is kept, which is why
+/// the config's floor is a day.
 ///
 /// Runs behind the same named flag as the history purge (migration 0025):
-/// migration 0013's trigger refuses every delete from `observe_quarantine`
-/// unless the transaction has declared itself a retention disposal, so a
-/// handler that has not cannot retire a review by accident.
+/// migration 0046's triggers refuse every delete from `session_events` and
+/// `session_event_quarantine` unless the transaction has declared itself a
+/// retention disposal, so a handler that has not cannot retire a run's
+/// transcript by accident.
 #[tracing::instrument(
     name = "store.retention.dispose_staging",
     skip_all,
@@ -391,7 +392,7 @@ pub async fn dispose_staging(
     let due: Vec<Uuid> = sqlx::query_scalar!(
         r#"
         select id as "id!"
-        from observe_events
+        from session_events
         where tenant_id = $1 and received_at <= $2
         order by received_at, id
         limit $3
@@ -409,7 +410,7 @@ pub async fn dispose_staging(
     set_purge_flag(&mut *conn, true).await?;
     let markers = sqlx::query!(
         r#"
-        delete from observe_quarantine
+        delete from session_event_quarantine
         where tenant_id = $1 and event_id = any($2)
         returning state as "state!"
         "#,
@@ -421,7 +422,7 @@ pub async fn dispose_staging(
     .map_err(storage_error)?;
     let quarantined_pending = markers.iter().filter(|row| row.state == "pending").count() as u64;
     let events = sqlx::query!(
-        "delete from observe_events where tenant_id = $1 and id = any($2)",
+        "delete from session_events where tenant_id = $1 and id = any($2)",
         tenant_id.as_uuid(),
         &due,
     )

@@ -3816,6 +3816,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "synveda-audit",
  "synveda-crypto",

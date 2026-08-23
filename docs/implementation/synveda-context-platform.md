@@ -2337,4 +2337,156 @@ frontend changes, deletions, tests, and the resulting commit hash.
   until Prompt 19.
 - **Commit.** `feat(console): add session timeline` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by Prompt 12, on Prompt 1's rule.
+- **Commit hash.** `6150f34feab9cd0be1a748f9c51d9bdb2d41abd3`, written by
+  Prompt 12 on Prompt 1's rule.
+
+### Prompt 12 — Durable Claude session delivery (CPR-12)
+
+- **Divergence from §9.** §9's Prompt 12 reads *"Redaction and secret scanning
+  re-anchored on the session/candidate path"*. The prompt as it arrived is the
+  **adapter cutover and durable delivery**, which subsumes it: the scan seam
+  moved onto `session_events` as part of the move, so the §9 item is delivered
+  inside this one rather than skipped. What this prompt adds beyond §9's
+  forecast is the durable spool and the deletion of the three global routes —
+  work §9 had spread across its Prompt 8 (*"session events and the observe path
+  onto sessions"*), which CPR-11's record left open and unscheduled. **That gap
+  is now closed.** §9's Prompts 9, 10 and 11 — candidates, knowledge versions
+  and promotion — remain open and unstarted.
+
+- **Implemented.** The Claude Code integration moves wholly onto the session
+  API, and delivery becomes durable.
+
+  The spool is a versioned envelope per run under
+  `$XDG_CONFIG_HOME/synveda/spool/`, carrying spool version, client
+  installation id, Synveda session id and, per entry, client event id,
+  sequence, event type, occurred time, payload, payload hash, delivery
+  attempts, last attempt time and acknowledgement state. Every write is
+  temp-file → `fsync` → `rename`, so a kill mid-write leaves the old file or
+  the new one and never half of either. The previous format has **no reader**.
+
+  Hooks own delivery. `SessionStart` opens or resumes a run and retries the
+  unacknowledged backlog; `Stop` records the turn and starts a delivery within
+  a 2s budget; `PreCompact` records so a compaction does not swallow the turn;
+  `SessionEnd` performs a bounded synchronous flush within 3s. Whatever does
+  not go stays spooled and the next `SessionStart` retries it.
+
+  The CLI diagnoses and does not deliver on a schedule: `synveda session
+  flush`, `synveda session spool status`, `synveda session spool purge
+  --acknowledged`.
+
+  Context injection is `POST /v1/sessions/{id}/context-runs`.
+
+- **Schema/domain changes.** Migration **`0046_session_ingestion.sql`**,
+  43 → **44** migrations. The epoch stays at **2**: this chain has shipped
+  against nothing.
+
+  Added: `memory.asserted` to `session_events_type_check`;
+  `session_events.redactions` with an array CHECK; a
+  `session_events_tenant_id_unique` constraint so the quarantine table can
+  carry a composite foreign key; the PGMQ queue `session_events`;
+  `session_event_quarantine`, with composite foreign keys to `session_events`,
+  `sessions` and `scopes` so a quarantined row cannot outlive or drift from
+  what it is about; a one-shot review trigger; guarded-delete triggers behind
+  the `synveda.retention_purge` transaction-local flag; and
+  `session_context_runs.skills`.
+
+  Rebuilt: `audit_log_disclosure_idx`, to include `session.context.composed`.
+
+  Dropped: `observe_events`, `observe_quarantine`, the
+  `synveda_observe_quarantine_*` functions, and the `observe` PGMQ queue.
+
+  In types: `SessionEventType::MemoryAsserted` and `carries_memory()`, which
+  decides which of the thirteen types enqueue extraction work — seven do.
+  `ObserveKind` is deleted; `synveda-types/src/observe.rs` is now
+  `quarantine.rs` and keeps only `QuarantineState`.
+
+- **API and frontend changes.** Deleted: `POST /v1/observe`, `POST /v1/inject`,
+  `POST /v1/recall`. No route was added — the session plane already had the
+  seams, which is the point of ADR-0076 decision 7 having declared the context
+  run final. The OpenAPI document and `console/src/generated/api.ts` are
+  regenerated; the contract stays at **40 operations** because three
+  deletions were three routes never on it.
+
+  `synveda recall` and the `recall` MCP tool now compose a context run and say
+  in their own help what they lost: the by-id tier and the bitemporal read.
+
+- **Deleted.** `crates/synveda-gateway/src/{observe,inject,recall}.rs`;
+  `crates/synveda-store/src/observe.rs`;
+  `crates/synveda-store/tests/observe_queue.rs`;
+  `crates/synveda-gateway/tests/recall.rs`;
+  `adapters/claude-code/src/flush.mts`; `demos/ctx-5-recall.sh`; and roughly
+  270 lines of recall-only gathers from `authz.rs`.
+
+  Renamed rather than deleted, because their subject survived the move:
+  `tests/inject.rs` → `context_runs.rs`, `tests/observe.rs` →
+  `session_ingest_load.rs`, `tests/observe_redaction.rs` →
+  `session_redaction.rs`, `tests/tiered.rs` → `index_tier.rs`,
+  `tests/inject_latency.rs` → `context_run_latency.rs`.
+
+- **Tests.** Full Rust workspace **1,676 passed, 0 failed, 9 ignored**.
+  `synveda-eval` 159 passed. Adapter 87 passed. `cargo fmt --check` and
+  `clippy -D warnings` clean. `.sqlx` regenerated (42 written, 44 removed).
+
+  New: `crates/synveda-cli/src/spool.rs` — 13 unit tests over the format, the
+  canonical hash and the atomic write. `crates/synveda-gateway/tests/
+  session_seed.rs` — a shared fixture harness, included by `#[path]` rather
+  than published, because a test helper that becomes a module becomes an API.
+
+- **Three findings worth the record.**
+
+  1. **A 1.9× regression on a stated SLO, and a wrong first hypothesis.** The
+     append seam missed MEM-1's <20ms ack budget at 35.6ms after the move. The
+     first hypothesis was a per-session row lock — plausible, because the new
+     seam serialises per run where the old one did not. It was **wrong**:
+     spreading the load across many runs moved the median 0.3ms. The cause was
+     per-row inserts, one statement per event where the old path batched. Three
+     statements — pre-filter existing client event ids, one `unnest` insert
+     assigning contiguous sequences, read back — put it at 17–19ms. The wrong
+     hypothesis is recorded in the test's own comment, because the next person
+     to see this number will have the same idea.
+
+  2. **A pre-existing security hole in CPR-11's timeline.** CPR-11 shipped a
+     unit test asserting a timeline summary **is** the message text and an
+     integration test asserting a timeline carries **no** payload text. Both
+     were green, because they exercised different paths — and the one that was
+     passing on the real path was the wrong one. Messages now summarise as
+     `message.user (N characters)`. Two further CPR-11 tests could never have
+     passed: one asserted 200 where a fresh context run answers 201, and one
+     sent `+00:00` unencoded in a query string, where it decodes to a space and
+     is a 400.
+
+  3. **45 of the 67 shell scripts under `demos/` were dead**, and had been
+     since CPR-7 — three prompts ago. That
+     prompt deleted `synveda role bind`, `synveda hierarchy` and
+     `/v1/hierarchy/*` whole — correctly — and re-pointed the code, the tests,
+     the CLI and the docs. It did not re-point the demos, and **nothing said
+     so**: four prompts have recorded clean runs since, because no gate runs a
+     demo. 28 of CPR-12's own 32 observe/inject/recall demos are inside those
+     45, so re-pointing their call sites would produce scripts still dead one
+     command earlier. Filed as **CPR-13**, whose larger half is the gate.
+
+- **Left standing, deliberately, and each with a reason.**
+
+  - **Three eval suites fail by name rather than measure.** The extraction,
+    security and QA-index suites enumerated a corpus through `/v1/recall`'s
+    **sweep**. A context run cannot stand in: it ranks and budgets where a
+    sweep enumerates, so what it left out would be a property of the budget
+    rather than of extraction. The committed lens (`GET /v1/audit/events?
+    action=memory.extracted`) cannot stand in either — the chain carries
+    per-event *counts*, not the record text every per-class score reads. Their
+    seed legs are fully re-pointed onto the session plane and their sweep legs
+    return a named refusal, so `make eval-extraction-live` and
+    `make eval-security` fail with the reason rather than reporting a number
+    measured against a different question. `make ci`'s `eval-check` is
+    parse-only and is green. Prompt 18 re-cuts recall; Prompt 32 re-measures.
+  - **`RecallSweepRequest` and `RecallIdsRequest` are kept as tombstones** in
+    the eval client with no route behind them. Deleting them means deleting
+    three suites' worth of EVAL-2/4/5 structure for a surface that returns at
+    Prompt 18.
+  - **The demo corpus, minus five.** CPR-12 fixed the four demos that were
+    live and deleted `ctx-5-recall.sh`. See CPR-13.
+  - **`console/src/api.mts`'s seven hand-written surfaces**, until Prompt 19.
+
+- **Commit.** `feat(adapter): make Claude session delivery durable` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by Prompt 13, on Prompt 1's rule.

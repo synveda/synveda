@@ -309,21 +309,27 @@ done
     "$(kubectl get cluster -n "$NS" synveda-pg -o wide 2>&1 || true)"
 echo "    promoted $NEW (was $PRIMARY)"
 
-echo "==> the same inject, on the other side of the failover"
+echo "==> the same context run, on the other side of the failover"
+# The SAME run the client opened before the primary was deleted, read back
+# from the file it wrote. Opening a fresh one here would test that the
+# gateway can still create a session — a weaker claim than that a run which
+# existed before the failover still composes after it.
 kubectl exec -n "$NS" synveda-install-test -c client -- sh -ec '
   bearer=$(synveda auth token)
+  run=$(cat /work/session-id)
   for i in $(seq 1 120); do
     code=$(curl -sS -o /work/failover-body -w "%{http_code}" \
-      -X POST "$SYNVEDA_GATEWAY/v1/inject" \
+      -X POST "$SYNVEDA_GATEWAY/v1/sessions/$run/context-runs" \
       -H "Authorization: Bearer $bearer" -H "Content-Type: application/json" \
-      -d "{\"task\":\"when does the release train leave\",\"session_id\":\"ops2-failover\"}")
+      -H "Idempotency-Key: ops2-failover-$i" \
+      -d "{\"query\":\"when does the release train leave\"}")
     if [ "${code%${code#2}}" = "2" ] && grep -q "release train leaves" /work/failover-body; then
-      echo "    inject succeeded after the failover (attempt $i)"
+      echo "    the context run succeeded after the failover (attempt $i)"
       exit 0
     fi
     sleep 2
   done
-  echo "inject never recovered:"; cat /work/failover-body; exit 1
+  echo "the context run never recovered:"; cat /work/failover-body; exit 1
 ' || fail "the deployment did not survive losing its primary" \
   "$(kubectl get cluster -n "$NS" synveda-pg -o wide 2>&1 || true)"
 
@@ -333,8 +339,8 @@ echo "OPS-2 AC: a kind-cluster install of the enterprise profile"
 echo "  the chart installed, the job migrated under the admin identity,"
 echo "  and the gateway came up as a non-superuser role"
 echo "  a real authorization-code + PKCE login provisioned the org root"
-echo "  a governed write, observe → extraction → inject, audit verified"
-echo "  the primary was deleted and the same inject succeeded again"
+echo "  a governed write, append → extraction → context run, audit verified"
+echo "  the primary was deleted and the same run composed again"
 echo
 echo "  what this does not prove: no browser was involved. This is the"
 echo "  protocol path — discovery, JWKS, PKCE, iss and nonce — driven by"

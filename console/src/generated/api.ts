@@ -117,6 +117,11 @@ export type AppendResponse = {
      */
     appended: number;
     /**
+     * How many were refused outright by the redaction policy. Nothing of a
+     * denied event persists — not its payload, not a row, not a position.
+     */
+    denied: number;
+    /**
      * How many were already here.
      */
     duplicates: number;
@@ -124,6 +129,11 @@ export type AppendResponse = {
      * Per-event outcomes, in the order the batch listed them.
      */
     events: AppendedEventView[];
+    /**
+     * How many were stored but withheld from the extraction pipeline pending
+     * a reviewer's decision (MEM-2, ADR-0021 decision 5).
+     */
+    quarantined: number;
   };
 
 /**
@@ -131,15 +141,21 @@ export type AppendResponse = {
  */
 export type AppendedEventView = {
     /**
-     * The stored row — this deployment's version of it, never the caller's,
-     * because a retry must be told what is held rather than handed back what
-     * it just sent.
+     * The client's own id for the event, echoed on every outcome — including
+     * the ones that store nothing, which is what lets a spooling client mark
+     * exactly the entries this call resolved.
      */
-    event: SessionEventView;
+    client_event_id: string;
+    event?: unknown | null | SessionEventView;
     /**
-     * `appended` or `duplicate`.
+     * `appended`, `duplicate`, `quarantined` or `denied`.
      */
     outcome: string;
+    /**
+     * The scan's finding summary — rule ids, categories and counts, never
+     * matched text. Absent when the payload was clean.
+     */
+    redactions?: Record<string, unknown> | null;
   };
 
 /**
@@ -261,6 +277,12 @@ export type ContextRunView = {
      * The session it was composed for.
      */
     session_id: string;
+    /**
+     * The skills this block advertised (ADR-0054 decision 8): name, scope,
+     * commit and object address, so an adapter can materialise exactly what
+     * was named without asking twice.
+     */
+    skills: Record<string, unknown>;
     /**
      * Estimated tokens of `rendered`.
      */
@@ -771,7 +793,7 @@ export type NewEventBody = {
      * The payload shape this client declares. Defaults to the current one.
      */
     event_schema_version?: number;
-    event_type: "session.started" | "session.ended" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning";
+    event_type: "session.started" | "session.ended" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * When the client says it happened.
      */
@@ -1122,7 +1144,7 @@ export type SessionEventView = {
      * The payload shape the client declared.
      */
     event_schema_version: number;
-    event_type: "session.started" | "session.ended" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning";
+    event_type: "session.started" | "session.ended" | "message.user" | "message.assistant" | "tool.invoked" | "tool.result" | "file.read" | "file.changed" | "command.executed" | "skill.loaded" | "context.requested" | "adapter.warning" | "memory.asserted";
     /**
      * The event's id in this deployment.
      */

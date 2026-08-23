@@ -78,9 +78,14 @@ reach the credential seam and stop, and the recorded answer is the sign-in
 sentence. The test points `HOME` and `XDG_CONFIG_HOME` at an empty directory
 for exactly this reason — a developer with a live session records the same
 bytes as CI.
-The gateway-backed round trip — a real recall answering from a real corpus,
-watermarked — is `demos/ctx-5-recall.sh`, against a live stack.
+The gateway-backed round trip used to be `demos/ctx-5-recall.sh`, against a
+live stack. **That demo is deleted** (CPR-12, ADR-0078 decision 5): the tool
+answers from a context run now, and both of the claims that demo was built to
+make — the widening past the caller's own chain, and the as-of read — were
+properties of `/v1/recall`. Prompt 18 re-cuts recall and is where the
+gateway-backed round trip returns.
 
 **No `remember` that reaches the store.** Same reason. The write's admission,
 its redaction scan and its four dispositions are pinned by `mcp::tests` in
-`crates/synveda-cli/src/mcp.rs`, and the wire path by the observe suites.
+`crates/synveda-cli/src/mcp.rs`, and the wire path by the session-append
+suites.

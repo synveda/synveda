@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select payload::text as \"payload!\" from session_events\n           where tenant_id = $1 and client_event_id = 'q-pii'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payload!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "753d768a007324b9a8d562c5667c09a4d4c09974503046530df89918dbb60b3f"
+}

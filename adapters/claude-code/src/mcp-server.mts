@@ -44,7 +44,7 @@
  * # `--writes host` is not a default; it is the point
  *
  * ADR-0057 decision 6: this plugin's `Stop` hook already POSTs the turn to
- * `/v1/observe`. A `remember` tool advertised here would let the model
+ * session events. A `remember` tool advertised here would let the model
  * store a fact by tool call while the hook independently observes the
  * transcript containing it — two rows in the same home scope, different
  * payloads, different idempotency keys, so ADR-0020 decision 2's

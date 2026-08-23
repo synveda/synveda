@@ -30,7 +30,8 @@ use synveda_ingest::extraction::{
     AnyExtractor, ClaudeExtractor, DeterministicExtractor, ExtractionInput, Extractor,
     VllmExtractor,
 };
-use synveda_types::{IdentityId, ObserveEventId, ObserveKind, RecordClass, ScopeId, TenantId};
+use synveda_types::session::SessionEventType;
+use synveda_types::{RecordClass, ScopeId, SessionEventId, SessionId, TenantId};
 
 /// The macro-averaged precision floor for the deterministic path
 /// (ADR-0046 decision 13), raising ADR-0022's provisional 0.8 on the
@@ -80,7 +81,7 @@ struct Fixture {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FixtureInput {
-    kind: ObserveKind,
+    event_type: SessionEventType,
     session_id: String,
     occurred_at: DateTime<Utc>,
     payload: serde_json::Value,
@@ -124,12 +125,12 @@ fn fixtures() -> Vec<Fixture> {
 
 fn input(fixture: &FixtureInput) -> ExtractionInput {
     ExtractionInput {
-        event_id: ObserveEventId::new(),
+        event_id: SessionEventId::new(),
         tenant_id: TenantId::new(),
         scope_id: ScopeId::new(),
-        owner_id: IdentityId::new(),
-        session_id: fixture.session_id.clone(),
-        kind: fixture.kind,
+        session_id: SessionId::new(),
+        principal_id: fixture.session_id.clone(),
+        event_type: fixture.event_type,
         payload: fixture.payload.clone(),
         occurred_at: fixture.occurred_at,
         redactions: None,

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select (select count(*) from pgmq.q_session_events\n                where message ->> 'tenant_id' = $1)\n             + (select count(*) from pgmq.a_session_events\n                where message ->> 'tenant_id' = $1) as \"count!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "db07b4e42d92221b18d5559804c30e49e012d0ed3a24f99fc3edb2dd5c36d2e2"
+}

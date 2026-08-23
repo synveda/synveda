@@ -1,16 +1,27 @@
 //! The `/v1` client (EVAL-1, ADR-0028 decision 1).
 //!
-//! Four endpoints, an actor's own bearer, and no other way in. The wire
-//! structs are declared here rather than imported because this crate
-//! depends on no Synveda crate at all — the same price the TypeScript
-//! adapter pays, for the same reason: what an outside caller can see is
-//! exactly what an eval should measure.
+//! An actor's own bearer and no other way in. The wire structs are declared
+//! here rather than imported because this crate depends on no Synveda crate
+//! at all — the same price the TypeScript adapter pays, for the same reason:
+//! what an outside caller can see is exactly what an eval should measure.
 //!
-//! EVAL-2 added the last two (ADR-0046 decisions 1 and 4): the recall
-//! sweep, which is how a caller enumerates what it may read, and the
-//! audit search, which is how an auditor sees what the pipeline
-//! committed. They answer different questions and the extraction
-//! measurement needs both.
+//! **Re-anchored on the session plane by CPR-12** (ADR-0078 decisions 1 and
+//! 5). What was a global `/v1/observe` with a `session_id` field is now
+//! `POST /v1/sessions/{id}/events` against a run this harness opened, and
+//! what was `/v1/inject` is that run's `context-runs`. Every fixture label
+//! that used to *be* a session id is now looked up through
+//! [`Client::session_for`], which opens one run per label and reuses it.
+//!
+//! `/v1/recall` is deleted with no successor on this plane. Its **query**
+//! shape is served by a context run, narrower; its **sweep** and **ids**
+//! shapes have none — a composition is budget-bounded, so it can neither
+//! enumerate a corpus nor be handed a list of handles. Both refuse by name
+//! rather than degrade, and the three suites built on them fail loudly and
+//! say why. Prompt 18 re-cuts recall; Prompt 32 re-measures.
+//!
+//! The audit search is untouched (ADR-0046 decision 4): the sweep says what
+//! a *reader is served*, `GET /v1/audit/events` says what the *pipeline
+//! committed*, and only the second of those two lenses still has a route.
 
 use std::time::{Duration, Instant};
 
@@ -26,12 +37,35 @@ pub struct Client {
     http: reqwest::Client,
 }
 
-/// `POST /v1/inject` (CTX-3, ADR-0026).
+/// What the sweep shape answers with now, said once so every runner reports
+/// the same sentence.
+pub const UNAVAILABLE_SWEEP: &str = "the bitemporal corpus sweep is unavailable: `/v1/recall` is deleted (CPR-12, \
+     ADR-0078 decision 5) and a budgeted composition cannot stand in for an \
+     enumeration. Prompt 18 re-cuts recall; Prompt 32 re-measures.";
+
+/// The same, for the fetch-by-handle probe.
+pub const UNAVAILABLE_IDS: &str = "fetch-by-handle is unavailable: `/v1/recall` is deleted (CPR-12, ADR-0078 \
+     decision 5) and a context run takes no record ids. Prompt 18 re-cuts recall.";
+
+/// A random discriminator for an idempotency key.
+fn uuid_like() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    format!("{nanos:x}-{:x}", std::process::id())
+}
+
+/// `POST /v1/sessions/{id}/context-runs` (CTX-3, ADR-0026; re-anchored on the
+/// session plane by CPR-12, ADR-0078 decision 5).
+///
+/// `session_id` is no longer on the wire: the run is in the path, and its id is
+/// a real aggregate the harness opened rather than a label a fixture chose.
 #[derive(Debug, Serialize)]
 pub struct InjectRequest<'a> {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "query", skip_serializing_if = "Option::is_none")]
     pub task: Option<&'a str>,
-    pub session_id: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_tokens: Option<u32>,
 }
@@ -45,17 +79,31 @@ pub struct InjectRequest<'a> {
 /// are how a demotion is told from an absence, and the staleness scores,
 /// which are MEM-6's unvalidated heuristic (ADR-0040) measured for the
 /// first time.
+/// The composed block.
+///
+/// **Four fields the response no longer carries.** `/v1/inject` served
+/// `record_ids`, `tiers`, `index_entries`, `index_tokens` and
+/// `staleness_permille` as fields; a context run's body is deliberately
+/// minimal (ADR-0076 decision 7) and serves the rendered block. `record_ids`
+/// is recovered from the block's own watermark line, which is where a block
+/// names what it composed; the other four have no substitute here and are
+/// left empty, which grades every per-tier and staleness assertion as a miss
+/// rather than as a pass. EVAL-4's tier axis therefore needs Prompt 18 before
+/// it measures anything again.
 #[derive(Debug, Deserialize)]
 pub struct InjectResponse {
+    #[serde(rename = "rendered")]
     pub text: String,
     /// The watermark (ADR-0025 decision 7). It rides into the report so a
     /// measurement can be traced back to exactly the block that produced
     /// it, months later, from the audit chain.
     pub block_hash: String,
+    /// Parsed from the watermark rather than served as a field; see
+    /// [`InjectResponse::record_ids`].
+    #[serde(default, skip)]
     pub record_ids: Vec<String>,
     /// How much of each composed record the block carried, in block order:
-    /// `body` or `index` (CTX-4, ADR-0041 decision 9). Parallel to
-    /// `record_ids`, which is what makes a per-record tier readable.
+    /// `body` or `index` (CTX-4, ADR-0041 decision 9).
     #[serde(default)]
     pub tiers: Vec<String>,
     #[serde(default)]
@@ -68,6 +116,23 @@ pub struct InjectResponse {
     pub staleness_permille: Vec<u16>,
     pub tokens: u32,
     pub budget_tokens: u32,
+}
+
+impl InjectResponse {
+    /// Fills `record_ids` from the block's watermark line.
+    ///
+    /// Called once, on the way out of the client, so every caller reads the
+    /// same field it always read.
+    fn hydrate(&mut self) {
+        let Some(marker) = self.text.split("records=").nth(1) else {
+            return;
+        };
+        let ids = marker.split("-->").next().unwrap_or_default().trim();
+        if ids.is_empty() || ids == "none" {
+            return;
+        }
+        self.record_ids = ids.split(',').map(|id| id.trim().to_owned()).collect();
+    }
 }
 
 impl InjectResponse {
@@ -87,16 +152,18 @@ impl InjectResponse {
     }
 }
 
-/// `POST /v1/observe` (MEM-1, ADR-0020).
+/// `POST /v1/sessions/{id}/events` (MEM-1, ADR-0020; re-anchored by CPR-12,
+/// ADR-0078 decision 1).
 #[derive(Debug, Serialize)]
 pub struct ObserveRequest<'a> {
-    pub session_id: &'a str,
     pub events: Vec<ObserveEvent<'a>>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ObserveEvent<'a> {
+    #[serde(rename = "client_event_id")]
     pub idempotency_key: String,
+    #[serde(rename = "event_type")]
     pub kind: &'a str,
     pub payload: serde_json::Value,
     pub occurred_at: String,
@@ -104,30 +171,82 @@ pub struct ObserveEvent<'a> {
 
 #[derive(Debug, Deserialize)]
 pub struct ObserveResponse {
+    #[serde(rename = "appended")]
     pub accepted: usize,
     pub duplicates: usize,
     pub quarantined: usize,
     pub denied: usize,
     /// Per-event outcomes, which is what makes the extraction measurement
-    /// attributable: the buffered `event_id` acked here is the same id the
-    /// served record's `provenance` carries and the same id the
-    /// `memory.extracted` payload names, so one key joins the seed, the
-    /// sweep, and the chain.
+    /// attributable: the `event_id` acked here is the same id the served
+    /// record's `provenance` carries and the same id the `memory.extracted`
+    /// payload names, so one key joins the seed, the read, and the chain.
     #[serde(default)]
     pub events: Vec<ObserveEventOutcome>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ObserveEventOutcome {
+    #[serde(rename = "client_event_id")]
     pub idempotency_key: String,
-    /// Absent for a denied event: nothing was persisted for it.
-    pub event_id: Option<String>,
+    /// The stored row, absent for a denied event: nothing was persisted.
+    #[serde(default)]
+    pub event: Option<StoredEventRef>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StoredEventRef {
+    pub id: String,
+}
+
+impl ObserveEventOutcome {
+    /// The stored event's id, when one was stored.
+    pub fn event_id(&self) -> Option<&str> {
+        self.event.as_ref().map(|event| event.id.as_str())
+    }
+}
+
+/// `GET /v1/me`, as much of it as opening a run needs.
+#[derive(Debug, Deserialize)]
+pub struct MeResponse {
+    #[serde(default)]
+    pub workspaces: Vec<MeWorkspace>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MeWorkspace {
+    pub id: String,
+}
+
+/// `POST /v1/workspaces`.
+#[derive(Debug, Serialize)]
+pub struct NewWorkspaceRequest<'a> {
+    pub slug: &'a str,
+    pub display_name: &'a str,
+}
+
+/// `POST /v1/sessions` — the run a measurement is attributed to.
+#[derive(Debug, Serialize)]
+pub struct OpenSessionRequest<'a> {
+    pub workspace_id: &'a str,
+    pub client_name: &'a str,
+    pub external_session_id: &'a str,
+}
+
+/// A run, reduced to its address. The body carries more; the id is the
+/// whole of what a caller needs to post events or compose against it.
+#[derive(Debug, Deserialize)]
+pub struct SessionRef {
+    pub id: String,
 }
 
 /// `POST /v1/recall` in its **sweep** shape (CTX-5, ADR-0042 decision 14):
 /// no ids and no query, just an instant — "everything I may read, as it
 /// stood then". The one shape that enumerates a corpus rather than ranking
 /// one (ADR-0046 decision 1).
+///
+/// The route is deleted (CPR-12, ADR-0078 decision 5). The shape is kept
+/// because three suites are written against it and Prompt 18 re-cuts it;
+/// what it is sent to now is a named refusal.
 #[derive(Debug, Serialize)]
 pub struct RecallSweepRequest<'a> {
     pub as_of: &'a str,
@@ -149,7 +268,6 @@ pub struct RecallSweepRequest<'a> {
 #[derive(Debug, Serialize)]
 pub struct RecallQueryRequest<'a> {
     pub query: &'a str,
-    pub session_id: &'a str,
     pub limit: usize,
 }
 
@@ -166,6 +284,44 @@ pub struct RecallQueryRequest<'a> {
 pub struct RecallIdsRequest<'a> {
     pub ids: Vec<String>,
     pub session_id: &'a str,
+}
+
+impl RecallResponse {
+    /// A composed block, read as the shape recall used to answer with.
+    ///
+    /// Lossy on purpose and in one direction: a block carries rendered text
+    /// rather than per-record bodies, so `content` is the whole block on the
+    /// first entry and empty on the rest. Callers that ask "is this record
+    /// retrievable at all" are served correctly; callers that read
+    /// `entry.content` per record are not, and EVAL-4's content assertions
+    /// therefore need Prompt 18.
+    #[must_use]
+    pub fn from_block(block: &InjectResponse) -> Self {
+        let entries = block
+            .record_ids
+            .iter()
+            .enumerate()
+            .map(|(position, id)| RecallEntry {
+                record_id: id.clone(),
+                scope_id: String::new(),
+                class: String::new(),
+                content: if position == 0 {
+                    block.text.clone()
+                } else {
+                    String::new()
+                },
+                provenance: serde_json::Value::Null,
+            })
+            .collect::<Vec<_>>();
+        let considered = entries.len();
+        RecallResponse {
+            entries,
+            mode: "query".to_owned(),
+            truncated: false,
+            scopes_considered: considered,
+            scopes_decided: considered,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -336,44 +492,169 @@ impl Client {
         })
     }
 
+    /// What this caller can see, for choosing a workspace to run in.
+    pub async fn me(&self, bearer: &str) -> Result<MeResponse, String> {
+        self.get("/v1/me", bearer, &[]).await
+    }
+
+    /// The run a scenario's `session_id` label maps to.
+    ///
+    /// A label was enough when a session was an opaque correlation string; a
+    /// run is an aggregate now (CPR-10), so the harness opens one per label
+    /// and keys its calls on the real id. Idempotent, so a scenario re-run
+    /// lands on the run it opened last time.
+    pub async fn session_for(&self, bearer: &str, label: &str) -> Result<String, String> {
+        let me = self.me(bearer).await?;
+        let workspace = match me.workspaces.first() {
+            Some(workspace) => workspace.id.clone(),
+            None => {
+                self.create_workspace(
+                    bearer,
+                    &NewWorkspaceRequest {
+                        slug: "eval",
+                        display_name: "eval",
+                    },
+                )
+                .await?
+                .value
+                .id
+            }
+        };
+        Ok(self
+            .open_session(
+                bearer,
+                &OpenSessionRequest {
+                    workspace_id: &workspace,
+                    client_name: "synveda-eval",
+                    external_session_id: label,
+                },
+            )
+            .await?
+            .value
+            .id)
+    }
+
+    /// Creates a workspace, for a tenant that has none.
+    pub async fn create_workspace(
+        &self,
+        bearer: &str,
+        request: &NewWorkspaceRequest<'_>,
+    ) -> Result<Timed<SessionRef>, String> {
+        self.post_idempotent("/v1/workspaces", bearer, request, request.slug)
+            .await
+    }
+
+    /// Opens the run a measurement is attributed to.
+    ///
+    /// Idempotent on the harness's own external id, so a re-run of the same
+    /// scenario lands on the same run rather than minting a second one.
+    pub async fn open_session(
+        &self,
+        bearer: &str,
+        request: &OpenSessionRequest<'_>,
+    ) -> Result<Timed<SessionRef>, String> {
+        let key = format!("eval-open-{}", request.external_session_id);
+        self.post_idempotent("/v1/sessions", bearer, request, &key)
+            .await
+    }
+
+    /// Composes context for `session`.
     pub async fn inject(
         &self,
         bearer: &str,
+        session: &str,
         request: &InjectRequest<'_>,
     ) -> Result<Timed<InjectResponse>, String> {
-        self.post("/v1/inject", bearer, request).await
+        let key = format!("eval-ctx-{}", uuid_like());
+        let mut timed: Timed<InjectResponse> = self
+            .post_idempotent(
+                &format!("/v1/sessions/{session}/context-runs"),
+                bearer,
+                request,
+                &key,
+            )
+            .await?;
+        timed.value.hydrate();
+        Ok(timed)
     }
 
+    /// Appends observations to `session`.
     pub async fn observe(
         &self,
         bearer: &str,
+        session: &str,
         request: &ObserveRequest<'_>,
     ) -> Result<Timed<ObserveResponse>, String> {
-        self.post("/v1/observe", bearer, request).await
+        self.post(&format!("/v1/sessions/{session}/events"), bearer, request)
+            .await
     }
 
+    /// The bitemporal corpus sweep — **not available on this plane**.
+    ///
+    /// `/v1/recall` served "everything I may read, as it stood at instant T",
+    /// which is the one shape that *enumerates* a corpus rather than ranking
+    /// one (ADR-0046 decision 1). It is deleted (CPR-12, ADR-0078 decision 5)
+    /// and a context run cannot stand in: a composition is budget-bounded and
+    /// gradient-ordered, so what it leaves out is a property of the budget
+    /// rather than of the corpus.
+    ///
+    /// It fails loudly rather than degrading, because a measurement taken
+    /// against the wrong question is worse than a measurement not taken.
+    /// Prompt 18 re-cuts recall over the new model; Prompt 32 re-measures.
     pub async fn recall_sweep(
         &self,
-        bearer: &str,
-        request: &RecallSweepRequest<'_>,
+        _bearer: &str,
+        _request: &RecallSweepRequest<'_>,
     ) -> Result<Timed<RecallResponse>, String> {
-        self.post("/v1/recall", bearer, request).await
+        Err(UNAVAILABLE_SWEEP.to_owned())
     }
 
+    /// Ranked retrieval — served by a context run's query shape.
+    ///
+    /// Narrower than what it replaced: a composition ranks *and* budgets,
+    /// where recall ranked over a widened universe with no budget in the way.
+    /// A record that exists and is readable can therefore be absent here for
+    /// a reason recall never had, which is why this is only ever used to ask
+    /// whether something is retrievable at all.
     pub async fn recall_query(
         &self,
         bearer: &str,
+        session: &str,
         request: &RecallQueryRequest<'_>,
     ) -> Result<Timed<RecallResponse>, String> {
-        self.post("/v1/recall", bearer, request).await
+        let key = format!("eval-q-{}", uuid_like());
+        let timed: Timed<InjectResponse> = self
+            .post_idempotent(
+                &format!("/v1/sessions/{session}/context-runs"),
+                bearer,
+                &InjectRequest {
+                    task: Some(request.query),
+                    budget_tokens: None,
+                },
+                &key,
+            )
+            .await?;
+        let mut block = timed.value;
+        block.hydrate();
+        Ok(Timed {
+            value: RecallResponse::from_block(&block),
+            elapsed_ms: timed.elapsed_ms,
+            degraded: timed.degraded,
+        })
     }
 
+    /// Fetch-by-handle — **not available on this plane**.
+    ///
+    /// EVAL-5's sharpest probe: name ten inadmissible ids and measure that
+    /// nothing comes back. `/v1/recall`'s `ids` shape is deleted and a context
+    /// run takes no ids, so the probe cannot be posed at all. Prompt 18 is
+    /// where it returns.
     pub async fn recall_ids(
         &self,
-        bearer: &str,
-        request: &RecallIdsRequest<'_>,
+        _bearer: &str,
+        _request: &RecallIdsRequest<'_>,
     ) -> Result<Timed<RecallResponse>, String> {
-        self.post("/v1/recall", bearer, request).await
+        Err(UNAVAILABLE_IDS.to_owned())
     }
 
     pub async fn propose(
@@ -484,19 +765,48 @@ impl Client {
         bearer: &str,
         body: &B,
     ) -> Result<Timed<T>, String> {
+        self.send(path, bearer, Some(body), None).await
+    }
+
+    /// [`Client::post`] carrying an `Idempotency-Key`, which every creation on
+    /// the context-platform plane requires (ADR-0071).
+    async fn post_idempotent<B: Serialize, T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        bearer: &str,
+        body: &B,
+        key: &str,
+    ) -> Result<Timed<T>, String> {
+        self.send(path, bearer, Some(body), Some(key)).await
+    }
+
+    async fn send<B: Serialize, T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        bearer: &str,
+        body: Option<&B>,
+        key: Option<&str>,
+    ) -> Result<Timed<T>, String> {
         let started = Instant::now();
-        let response = self
-            .http
-            .post(format!("{}{path}", self.gateway_url))
-            .bearer_auth(bearer)
-            .header(
-                "x-synveda-client",
-                concat!("synveda-eval/", env!("CARGO_PKG_VERSION")),
-            )
-            .json(body)
+        let url = format!("{}{path}", self.gateway_url);
+        let mut request = match body {
+            Some(_) => self.http.post(&url),
+            None => self.http.get(&url),
+        };
+        request = request.bearer_auth(bearer).header(
+            "x-synveda-client",
+            concat!("synveda-eval/", env!("CARGO_PKG_VERSION")),
+        );
+        if let Some(key) = key {
+            request = request.header("idempotency-key", key);
+        }
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        let response = request
             .send()
             .await
-            .map_err(|err| format!("POST {path}: {err}"))?;
+            .map_err(|err| format!("{path}: {err}"))?;
         let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
 
         let status = response.status();
@@ -515,10 +825,10 @@ impl Client {
             .unwrap_or_default();
         let raw = response.text().await.unwrap_or_default();
         if !status.is_success() {
-            return Err(format!("POST {path} returned {status}: {}", detail(&raw)));
+            return Err(format!("{path} returned {status}: {}", detail(&raw)));
         }
         let value = serde_json::from_str(&raw)
-            .map_err(|err| format!("POST {path} returned an unreadable body: {err}"))?;
+            .map_err(|err| format!("{path} returned an unreadable body: {err}"))?;
         Ok(Timed {
             value,
             elapsed_ms,
@@ -546,16 +856,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_inject_request_omits_what_it_does_not_set() {
+    fn a_context_run_request_omits_what_it_does_not_set() {
         // A `null` task is not the same request as no task: the taskless
-        // branch is chosen by absence (ADR-0026 decision 3).
+        // branch is chosen by absence (ADR-0026 decision 3). The run is in
+        // the path now, so an empty request is the whole taskless body.
         let request = InjectRequest {
             task: None,
-            session_id: "s1",
             budget_tokens: None,
         };
-        let json = serde_json::to_string(&request).expect("serialises");
-        assert_eq!(json, r#"{"session_id":"s1"}"#);
+        assert_eq!(serde_json::to_string(&request).expect("serialises"), "{}");
+
+        // And the field is `query` on the wire (CPR-12, ADR-0078 decision 5):
+        // a body still saying `task` would be ignored rather than refused,
+        // which is exactly the silence a rename must not leave behind.
+        let asked = InjectRequest {
+            task: Some("why retries"),
+            budget_tokens: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&asked).expect("serialises"),
+            r#"{"query":"why retries"}"#
+        );
+    }
+
+    /// Where `record_ids` comes from now (CPR-12): a context run's body is
+    /// minimal by ADR-0076 decision 7 and does not carry them, so they are
+    /// read back off the block's own watermark — the line where a block
+    /// names what it composed.
+    #[test]
+    fn record_ids_are_recovered_from_the_watermark() {
+        let mut block = InjectResponse {
+            text: "…\n<!-- synveda block=b3 records=r1, r2 -->".to_owned(),
+            block_hash: "b3".to_owned(),
+            record_ids: Vec::new(),
+            tiers: Vec::new(),
+            index_entries: 0,
+            index_tokens: 0,
+            staleness_permille: Vec::new(),
+            tokens: 10,
+            budget_tokens: 100,
+        };
+        block.hydrate();
+        assert_eq!(block.record_ids, vec!["r1".to_owned(), "r2".to_owned()]);
+
+        // A block that composed nothing says so, and must not read as one
+        // record literally named "none".
+        let mut empty = InjectResponse {
+            text: "<!-- synveda block=b3 records=none -->".to_owned(),
+            record_ids: vec!["stale".to_owned()],
+            ..block
+        };
+        empty.hydrate();
+        assert_eq!(empty.record_ids, vec!["stale".to_owned()], "left untouched");
     }
 
     /// The join EVAL-4 grades on (ADR-0047 decision 2). Containment
@@ -564,12 +916,21 @@ mod tests {
     /// the whole suite turns on.
     #[test]
     fn a_records_tier_reads_by_position_and_absence_is_its_own_answer() {
-        let block: InjectResponse = serde_json::from_str(
-            r#"{"text":"…","block_hash":"b3","record_ids":["r1","r2"],
-                "tiers":["body","index"],"index_entries":1,"index_tokens":40,
-                "staleness_permille":[1000,820],"tokens":120,"budget_tokens":1500}"#,
-        )
-        .expect("parses");
+        // Built rather than parsed: `record_ids` and `tiers` are no longer
+        // on the wire, so a JSON fixture here would be testing a body no
+        // gateway sends. The positional join is what this asserts, and
+        // Prompt 18 is what has to make the fields real again.
+        let block = InjectResponse {
+            text: "…".to_owned(),
+            block_hash: "b3".to_owned(),
+            record_ids: vec!["r1".to_owned(), "r2".to_owned()],
+            tiers: vec!["body".to_owned(), "index".to_owned()],
+            index_entries: 1,
+            index_tokens: 40,
+            staleness_permille: vec![1000, 820],
+            tokens: 120,
+            budget_tokens: 1500,
+        };
         assert_eq!(block.tier_of("r1"), Some("body"));
         assert_eq!(block.tier_of("r2"), Some("index"));
         assert_eq!(block.tier_of("r3"), None, "not carried at all");
@@ -577,11 +938,10 @@ mod tests {
         // A gateway that sent fewer tiers than records must not default
         // one, or a truncated array would silently become a body and a
         // demotion would read as a whole record.
-        let ragged: InjectResponse = serde_json::from_str(
-            r#"{"text":"…","block_hash":"b3","record_ids":["r1","r2"],"tiers":["body"],
-                "tokens":10,"budget_tokens":100}"#,
-        )
-        .expect("parses");
+        let ragged = InjectResponse {
+            tiers: vec!["body".to_owned()],
+            ..block
+        };
         assert_eq!(ragged.tier_of("r1"), Some("body"));
         assert_eq!(ragged.tier_of("r2"), None);
     }

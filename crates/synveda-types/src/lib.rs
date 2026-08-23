@@ -31,12 +31,12 @@ mod identity;
 pub mod json;
 mod lapse;
 mod mover;
-mod observe;
 mod pack;
 mod policy;
 mod promotion;
 mod prompt;
 mod proposal;
+mod quarantine;
 mod record;
 mod redaction;
 // Canonical repository identity (CPR-4, ADR-0071 decision 4). Public as a
@@ -81,8 +81,8 @@ pub use error::{Error, Result};
 pub use graph::{Depth, Graph};
 pub use id::{
     ContextRunId, DirectoryGroupId, DirectoryUserId, GrantId, GraphEdgeId, GraphVertexId, GroupId,
-    IdentityId, InviteId, LapseId, ObserveEventId, ProjectId, ProposalId, RecordId, RepositoryId,
-    ScimCredentialId, ScopeId, SessionEventId, SessionId, TenantId, WorkspaceId,
+    IdentityId, InviteId, LapseId, ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId,
+    ScopeId, SessionEventId, SessionId, TenantId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use lapse::{
@@ -90,7 +90,6 @@ pub use lapse::{
     PRODUCT_MAX_DURATION_SECS, STRICT_MAX_DURATION_SECS,
 };
 pub use mover::{MoverConfig, PersonalMemory};
-pub use observe::{ObserveKind, QuarantineState};
 pub use pack::{
     CHUNK_CHARS, ContextPackChannel, ContextPackName, DocumentChunk, DocumentName, DocumentPath,
     MAX_DOCUMENT_CHARS, MAX_DOCUMENT_CHUNKS, MAX_DOCUMENT_NAME_CHARS, MAX_DOCUMENT_NAME_SEGMENTS,
@@ -107,6 +106,7 @@ pub use prompt::{
     MAX_TEMPLATE_CHARS, MAX_VARIABLES, PromptChannel, PromptName, PromptTemplate, PromptVariable,
 };
 pub use proposal::{ProposalEffect, ProposalState, ProposalView, Verdict};
+pub use quarantine::QuarantineState;
 pub use record::{RecordClass, RecordKind};
 pub use redaction::{RedactionConfig, RedactionMode};
 pub use retention::{

@@ -37,8 +37,7 @@ use synveda_ingest::worker::{self, WorkerConfig, WorkerDeps};
 use synveda_store::{identities, quarantine, rls, scopes, tenants};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Identity, IdentityId, IdentityKind, ObserveEventId, RecordId, ScopeId, Sensitivity, TenantId,
-    TenantStatus,
+    Identity, IdentityId, IdentityKind, RecordId, ScopeId, Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -221,10 +220,15 @@ async fn body_json(response: Response) -> Value {
     serde_json::from_slice(&bytes).expect("json body")
 }
 
-async fn post_observe(app: &Router, bearer: &str, body: Value) -> (StatusCode, Value) {
+async fn post_events(
+    app: &Router,
+    bearer: &str,
+    run: synveda_types::SessionId,
+    body: Value,
+) -> (StatusCode, Value) {
     let request = Request::builder()
         .method(Method::POST)
-        .uri("/v1/observe")
+        .uri(format!("/v1/sessions/{run}/events"))
         .header("authorization", format!("Bearer {bearer}"))
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
@@ -255,10 +259,10 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         .expect("apply migrations");
     // The shared queue may hold other suites' leftovers (nothing else
     // consumes); purge so drain loops and assertions see only this test.
-    sqlx::query_scalar!(r#"select pgmq.purge_queue('observe') as "purged!""#)
+    sqlx::query_scalar!(r#"select pgmq.purge_queue('session_events') as "purged!""#)
         .fetch_one(&pool)
         .await
-        .expect("purge observe queue");
+        .expect("purge the session-events queue");
     let id = TenantId::new();
     let slug = format!("mem3-{}", id.as_uuid().simple());
     tenants::create(&pool, id, &slug, "MEM-3 test tenant", TenantStatus::Active)
@@ -293,6 +297,9 @@ async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Scope {
     tx.commit().await.expect("commit hierarchy");
     platform
 }
+
+#[path = "session_seed.rs"]
+mod session_seed;
 
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
@@ -352,7 +359,7 @@ async fn stored_records(pool: &PgPool, tenant: TenantId) -> Vec<StoredRecord> {
 /// This tenant's queued signal count (body-filtered — the queue is shared).
 async fn queued(pool: &PgPool, tenant: TenantId) -> i64 {
     sqlx::query_scalar!(
-        r#"select count(*) as "count!" from pgmq.q_observe
+        r#"select count(*) as "count!" from pgmq.q_session_events
            where message ->> 'tenant_id' = $1"#,
         tenant.to_string(),
     )
@@ -361,16 +368,24 @@ async fn queued(pool: &PgPool, tenant: TenantId) -> i64 {
     .expect("count queue signals")
 }
 
-async fn staged_events(pool: &PgPool, tenant: TenantId) -> Vec<(ObserveEventId, DateTime<Utc>)> {
+async fn staged_events(
+    pool: &PgPool,
+    tenant: TenantId,
+) -> Vec<(synveda_types::SessionEventId, DateTime<Utc>)> {
     sqlx::query!(
-        "select id, occurred_at from observe_events where tenant_id = $1",
+        "select id, occurred_at from session_events where tenant_id = $1",
         tenant.as_uuid(),
     )
     .fetch_all(pool)
     .await
-    .expect("read staged events")
+    .expect("read recorded events")
     .into_iter()
-    .map(|row| (ObserveEventId::from_uuid(row.id), row.occurred_at))
+    .map(|row| {
+        (
+            synveda_types::SessionEventId::from_uuid(row.id),
+            row.occurred_at,
+        )
+    })
     .collect()
 }
 
@@ -401,10 +416,10 @@ async fn assert_chain_verifies(pool: &PgPool, tenant: TenantId) {
     );
 }
 
-fn event(key: &str, kind: &str, occurred_at: &str, payload: Value) -> Value {
+fn event(key: &str, event_type: &str, occurred_at: &str, payload: Value) -> Value {
     json!({
-        "idempotency_key": key,
-        "kind": kind,
+        "client_event_id": key,
+        "event_type": event_type,
         "payload": payload,
         "occurred_at": occurred_at,
     })
@@ -428,27 +443,28 @@ async fn observed_events_become_derived_records_with_provenance() {
     let idp = MockIdp::spawn().await;
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
-    let alice = seed_user(&pool, tenant, "alice").await;
+    let _alice = seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem3", "alice").await;
     let token = idp.user_token("alice");
 
     let occurred = "2026-07-21T09:00:00Z";
-    let (status, _) = post_observe(
+    let (status, _) = post_events(
         &app,
         &token,
+        run.session_id,
         json!({
-            "session_id": "sess-a",
             "events": [
-                event("a-1", "decision", occurred,
+                event("a-1", "message.assistant", occurred,
                       json!({"text": "Chose PGMQ over Kafka for the observe buffer."})),
-                event("a-2", "tool_result", occurred,
+                event("a-2", "tool.result", occurred,
                       json!({"output": "cargo test: 12 passed, 0 failed."})),
-                event("a-3", "transcript_delta", occurred,
+                event("a-3", "message.user", occurred,
                       json!({"text": "We always use small single-purpose commits."})),
             ],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
 
     let deps = worker_deps(
         &state,
@@ -468,14 +484,19 @@ async fn observed_events_become_derived_records_with_provenance() {
         assert_eq!(record.sensitivity, "internal");
         assert_eq!(record.valid_from, expected_valid_from);
         // The AC quadruple, on every record.
-        assert_eq!(record.provenance["session_id"], "sess-a");
+        // The run, by id: a session is an aggregate since CPR-10, so provenance
+        // names the row rather than a correlation string a client chose.
+        assert_eq!(
+            record.provenance["session_id"],
+            json!(run.session_id.to_string())
+        );
         assert_eq!(record.provenance["method"], "deterministic");
         assert_eq!(record.provenance["model_version"], "builtin@2");
         let confidence = record.provenance["confidence"]
             .as_f64()
             .expect("confidence is a number");
         assert!((0.0..=1.0).contains(&confidence));
-        let event_id: ObserveEventId = record.provenance["event_id"]
+        let event_id: synveda_types::SessionEventId = record.provenance["event_id"]
             .as_str()
             .expect("provenance names its event")
             .parse()
@@ -483,7 +504,7 @@ async fn observed_events_become_derived_records_with_provenance() {
         assert!(staged.iter().any(|(id, _)| *id == event_id));
         assert!(record.provenance["extracted_at"].as_str().is_some());
     }
-    // Records land at the owner's home scope.
+    // Records land at the scope the run was decided at (ADR-0078 decision 3).
     let scopes = sqlx::query_scalar!(
         "select scope_id from records where tenant_id = $1",
         tenant.as_uuid()
@@ -494,7 +515,7 @@ async fn observed_events_become_derived_records_with_provenance() {
     assert!(
         scopes
             .iter()
-            .all(|scope| *scope == alice.scope_id.as_uuid())
+            .all(|scope| *scope == run.workspace_scope_id.as_uuid())
     );
 
     let extracted = audit_rows(&pool, tenant, "memory.extracted").await;
@@ -511,9 +532,9 @@ async fn observed_events_become_derived_records_with_provenance() {
     // land in one transaction. The channel rides the group's existing
     // event rather than chaining a second one (decision 14).
     let channels = payload["channels"].as_array().expect("channels array");
-    assert_eq!(channels.len(), 1, "one commit per owner's home scope");
+    assert_eq!(channels.len(), 1, "one commit per run scope");
     assert_eq!(channels[0]["ref"], "memory/derived");
-    assert_eq!(channels[0]["scope_id"], json!(alice.scope_id));
+    assert_eq!(channels[0]["scope_id"], json!(run.workspace_scope_id));
     assert_eq!(channels[0]["records"], json!(3), "this batch's records");
     assert!(
         channels[0]["parent"].is_null(),
@@ -530,7 +551,7 @@ async fn observed_events_become_derived_records_with_provenance() {
     let derived = synveda_vedaflow::read_memory_members(
         &mut tx,
         tenant,
-        &[alice.scope_id],
+        &[run.workspace_scope_id],
         synveda_types::Channel::Derived,
     )
     .await
@@ -570,22 +591,23 @@ async fn released_quarantined_events_extract_identically() {
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem3", "alice").await;
     let token = idp.user_token("alice");
 
     // The documentation-only AWS example key: quarantined under the
     // zero-config strict pack (secrets → quarantine), redacted at
     // admission.
-    let (status, _) = post_observe(
+    let (status, _) = post_events(
         &app,
         &token,
+        run.session_id,
         json!({
-            "session_id": "sess-q",
-            "events": [event("q-1", "transcript_delta", "2026-07-21T10:00:00Z",
+            "events": [event("q-1", "message.user", "2026-07-21T10:00:00Z",
                 json!({"text": "The old deploy key AKIAIOSFODNN7EXAMPLE was rotated today."}))],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
     assert_eq!(queued(&pool, tenant).await, 0, "quarantine sends no signal");
     let (event_id, _) = staged_events(&pool, tenant).await[0];
 
@@ -642,23 +664,29 @@ async fn since_quarantined_owner_is_denied_at_commit() {
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
     let mallory = seed_user(&pool, tenant, "mallory").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem3", "mallory").await;
     let token = idp.user_token("mallory");
 
-    let (status, _) = post_observe(
+    let (status, _) = post_events(
         &app,
         &token,
+        run.session_id,
         json!({
-            "session_id": "sess-d",
-            "events": [event("d-1", "decision", "2026-07-21T11:00:00Z",
+            "events": [event("d-1", "message.assistant", "2026-07-21T11:00:00Z",
                 json!({"text": "A decision made moments before the quarantine."}))],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
 
-    // Quarantined between admission and extraction: departed, which is
-    // the one shape quarantine takes now (CPR-7, ADR-0074 decision 3) —
-    // sealed at the identity, refused by the base layer's forbid.
+    // Quarantined between admission and extraction: departed, which is the one
+    // shape quarantine takes now (CPR-7, ADR-0074 decision 3).
+    //
+    // Refused by the worker's own status check since CPR-12, not by the base
+    // layer's seal forbid: a memory lands at the run's scope now (ADR-0078
+    // decision 3), and a workspace is not sealed by one member leaving. The
+    // rule the seal expressed — nobody writes for a person the directory says
+    // is gone — is asserted at the writer instead.
     let mut tx = rls::begin_tenant_tx(&pool, tenant)
         .await
         .expect("tenant tx");
@@ -705,19 +733,20 @@ async fn exhausted_signals_dead_letter_with_an_audited_failure() {
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem3", "alice").await;
     let token = idp.user_token("alice");
 
-    let (status, _) = post_observe(
+    let (status, _) = post_events(
         &app,
         &token,
+        run.session_id,
         json!({
-            "session_id": "sess-p",
-            "events": [event("p-1", "transcript_delta", "2026-07-21T12:00:00Z",
+            "events": [event("p-1", "message.user", "2026-07-21T12:00:00Z",
                 json!({"text": "A poisoned message's content."}))],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
 
     let deps = worker_deps(
         &state,
@@ -765,24 +794,25 @@ async fn redelivered_signals_extract_exactly_once() {
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem3", "alice").await;
     let token = idp.user_token("alice");
 
-    let (status, _) = post_observe(
+    let (status, _) = post_events(
         &app,
         &token,
+        run.session_id,
         json!({
-            "session_id": "sess-r",
-            "events": [event("r-1", "decision", "2026-07-21T13:00:00Z",
+            "events": [event("r-1", "message.assistant", "2026-07-21T13:00:00Z",
                 json!({"text": "One decision, delivered more than once."}))],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
 
     // A competing consumer read the signal and died: vt 0 leaves it
     // immediately visible again with its read count advanced.
     let mut conn = pool.acquire().await.expect("acquire");
-    let seen = synveda_store::observe::read_signals(&mut conn, 0, 32)
+    let seen = synveda_store::sessions::read_signals(&mut conn, 0, 32)
         .await
         .expect("competing read");
     assert!(!seen.is_empty());
@@ -819,6 +849,7 @@ async fn an_extractor_can_never_mint_the_top_tier() {
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem3", "alice").await;
     let token = idp.user_token("alice");
 
     // A mock Claude endpoint that classifies its own output as the tier
@@ -849,17 +880,17 @@ async fn an_extractor_can_never_mint_the_top_tier() {
         axum::serve(listener, app).await.expect("mock claude serve");
     });
 
-    let (status, _) = post_observe(
+    let (status, _) = post_events(
         &app,
         &token,
+        run.session_id,
         json!({
-            "session_id": "sess-t",
-            "events": [event("t-1", "transcript_delta", "2026-07-21T14:00:00Z",
+            "events": [event("t-1", "message.user", "2026-07-21T14:00:00Z",
                 json!({"text": "Walk me through the vault ceremony."}))],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
 
     let deps = worker_deps(
         &state,
@@ -895,6 +926,7 @@ async fn extractor_output_secrets_never_persist() {
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem3", "alice").await;
     let token = idp.user_token("alice");
 
     // A mock Claude endpoint that "extracts" a memorised credential.
@@ -923,17 +955,17 @@ async fn extractor_output_secrets_never_persist() {
         axum::serve(listener, app).await.expect("mock claude serve");
     });
 
-    let (status, _) = post_observe(
+    let (status, _) = post_events(
         &app,
         &token,
+        run.session_id,
         json!({
-            "session_id": "sess-e",
-            "events": [event("e-1", "transcript_delta", "2026-07-21T14:00:00Z",
+            "events": [event("e-1", "message.user", "2026-07-21T14:00:00Z",
                 json!({"text": "Rotate the CI deploy credentials."}))],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
 
     let deps = worker_deps(
         &state,

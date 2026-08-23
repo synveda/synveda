@@ -11,8 +11,9 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use synveda_types::session::SessionEventType;
 use synveda_types::{
-    IdentityId, ObserveEventId, ObserveKind, RecordClass, Result, ScopeId, Sensitivity, TenantId,
+    RecordClass, Result, ScopeId, Sensitivity, SessionEventId, SessionId, TenantId,
 };
 
 mod claude;
@@ -24,23 +25,31 @@ pub use claude::ClaudeExtractor;
 pub use deterministic::DeterministicExtractor;
 pub use vllm::VllmExtractor;
 
-/// Everything one extraction sees: the staged event's redacted content
-/// plus the placement and provenance context (`synveda_store::observe::
-/// StagedEvent`, re-shaped as a serializable activity input).
+/// Everything one extraction sees: the event's redacted content plus the run's
+/// own provenance (`synveda_store::sessions::StagedEvent`, re-shaped as a
+/// serializable activity input).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtractionInput {
-    /// The staging row the signal named.
-    pub event_id: ObserveEventId,
+    /// The session event the signal named.
+    pub event_id: SessionEventId,
     /// The owning tenant.
     pub tenant_id: TenantId,
-    /// The home scope the event was admitted at.
+    /// The governed scope the run was **decided at** — where the memory lands
+    /// (CPR-12, ADR-0078 decision 3).
+    ///
+    /// This was the submitter's own home scope until the observe cutover,
+    /// because a correlation string could not say where a run happened. A
+    /// session can: its scope is derived from its workspace and project by the
+    /// schema and is unforgeable by a client. So a run against a shared
+    /// project now produces project memories rather than one person's private
+    /// pile of notes about shared work.
     pub scope_id: ScopeId,
-    /// The identity whose session produced the event.
-    pub owner_id: IdentityId,
-    /// The client's session identifier — the AC's source session.
-    pub session_id: String,
-    /// What the event reports; drives extraction routing.
-    pub kind: ObserveKind,
+    /// The run that produced the event.
+    pub session_id: SessionId,
+    /// The token subject that opened that run.
+    pub principal_id: String,
+    /// What happened; drives extraction routing.
+    pub event_type: SessionEventType,
     /// The redacted event body. `[REDACTED:*]` placeholders are opaque
     /// tokens (ADR-0021): extractors preserve them verbatim, never guess
     /// at what they hid.

@@ -37,6 +37,16 @@ export interface AdapterConfig {
   timeoutMs: number;
   budgetTokens?: number;
   compactBudgetTokens?: number;
+  /**
+   * The workspace runs in this project belong to (CPR-12, ADR-0078).
+   *
+   * Optional: with one workspace the adapter asks `/v1/me` and takes the
+   * answer. It is worth setting in a checked-out repository that belongs to a
+   * particular workspace — and it is safe to, unlike `gateway_url`, because
+   * naming a workspace inside a tenant the caller is already authenticated to
+   * cannot redirect a credential anywhere.
+   */
+  workspaceId?: string;
 }
 
 /** The project file's shape — every field unknown until proven. */
@@ -46,6 +56,7 @@ interface ProjectConfig {
   observe?: unknown;
   skills?: unknown;
   gateway_url?: unknown;
+  workspace_id?: unknown;
   timeout_ms?: unknown;
   budget_tokens?: unknown;
   compact_budget_tokens?: unknown;
@@ -67,6 +78,7 @@ export function loadConfig(cwd: string | undefined): AdapterConfig {
       DEFAULT_TIMEOUT_MS,
     budgetTokens: positive(project.budget_tokens),
     compactBudgetTokens: positive(project.compact_budget_tokens),
+    workspaceId: str(process.env.SYNVEDA_WORKSPACE) ?? str(project.workspace_id),
   };
 }
 

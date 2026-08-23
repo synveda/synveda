@@ -1,8 +1,8 @@
 # The Q&A corpus (EVAL-4, ADR-0047)
 
-A corpus planted through `/v1/observe`, climbed to a team, a department and
+A corpus planted through `POST /v1/sessions/{id}/events`, climbed to a team, a department and
 the org through **real proposals and real approvals**, and then questioned
-through the reader's own `POST /v1/inject` block. One reader, one corpus,
+through the reader's own `POST /v1/sessions/{id}/context-runs` block. One reader, one corpus,
 many questions.
 
 The lens is the block, which is the exact surface EVAL-2 rejected: ADR-0046
@@ -42,14 +42,14 @@ One file per **corpus**.
       "actor": "qa-reader",
       "session_id": "qa:acme:own",
       "tier": "user",
-      "events": [{ "key": "own-testing", "kind": "transcript_delta", "text": "…" }]
+      "events": [{ "key": "own-testing", "event_type": "message.user", "text": "…" }]
     },
     {
       "actor": "qa-team",
       "session_id": "qa:acme:team",
       "tier": "team",
       "promote_to": "payments",
-      "events": [{ "key": "team-retries", "kind": "decision", "text": "…" }]
+      "events": [{ "key": "team-retries", "event_type": "message.assistant", "text": "…" }]
     }
   ],
   "questions": [
@@ -76,7 +76,7 @@ One file per **corpus**.
   and the budget alone.
 - `needs` is `lexical` or `semantic` — see below.
 - `expect_records` names seed keys. Grading is by **record identity**, never
-  by string containment: observe's `event_id` → the sweep's
+  by string containment: the appended event's `event_id` → the sweep's
   `provenance.event_id` → `record_id` → its position in the block's
   `record_ids` and `tiers`. Containment could not tell a demotion from an
   absence, and those are the two answers this suite turns on.
@@ -101,7 +101,7 @@ gateway — `make ci` runs it on every pull request.
 6. **A taskless question cannot be `semantic`.** It takes no retrieval leg at
    all, so it reaches its answer on any stack.
 7. **A question that expects no records measures nothing.**
-8. Closed vocabularies for `tier`, `needs` and `kind`; no duplicate corpus
+8. Closed vocabularies for `tier`, `needs` and `event_type`; no duplicate corpus
    names, session ids, seed keys or question names.
 
 ## Writing a question that measures ranking

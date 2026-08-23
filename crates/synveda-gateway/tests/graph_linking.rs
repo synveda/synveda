@@ -1,6 +1,6 @@
 //! GRPH-2 acceptance (ADR-0044), the half that needs a database: the
 //! pipeline links records→entities→episodes over the real product path —
-//! `POST /v1/observe`, the extraction worker — and never a seeded row.
+//! `POST /v1/sessions/{id}/events`, the extraction worker — never a seeded row.
 //!
 //! The fixture-set precision measurement the AC names is
 //! `crates/synveda-ingest/tests/entity_resolution.rs`, where the resolver
@@ -46,8 +46,8 @@ use synveda_store::graph::{self, ProvenanceEdge};
 use synveda_store::{identities, quarantine, rls, scopes, tenants};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Depth, Graph, GraphVertexId, Identity, IdentityId, IdentityKind, ObserveEventId, RecordId,
-    ScopeId, TenantId, TenantStatus,
+    Depth, Graph, GraphVertexId, Identity, IdentityId, IdentityKind, RecordId, ScopeId, TenantId,
+    TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -227,10 +227,15 @@ async fn body_json(response: Response) -> Value {
     serde_json::from_slice(&bytes).expect("json body")
 }
 
-async fn post_observe(app: &Router, bearer: &str, body: Value) -> StatusCode {
+async fn post_events(
+    app: &Router,
+    bearer: &str,
+    run: synveda_types::SessionId,
+    body: Value,
+) -> StatusCode {
     let request = Request::builder()
         .method(Method::POST)
-        .uri("/v1/observe")
+        .uri(format!("/v1/sessions/{run}/events"))
         .header("authorization", format!("Bearer {bearer}"))
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
@@ -260,10 +265,10 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
     synveda_store::migrate(&pool)
         .await
         .expect("apply migrations");
-    sqlx::query_scalar!(r#"select pgmq.purge_queue('observe') as "purged!""#)
+    sqlx::query_scalar!(r#"select pgmq.purge_queue('session_events') as "purged!""#)
         .fetch_one(&pool)
         .await
-        .expect("purge observe queue");
+        .expect("purge the session-events queue");
     let id = TenantId::new();
     let slug = format!("grph2-{}", id.as_uuid().simple());
     tenants::create(&pool, id, &slug, "GRPH-2 test tenant", TenantStatus::Active)
@@ -297,6 +302,9 @@ async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Scope {
     platform
 }
 
+#[path = "session_seed.rs"]
+mod session_seed;
+
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
@@ -318,10 +326,10 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     identity
 }
 
-fn event(key: &str, kind: &str, occurred_at: &str, text: &str) -> Value {
+fn event(key: &str, event_type: &str, occurred_at: &str, text: &str) -> Value {
     json!({
-        "idempotency_key": key,
-        "kind": kind,
+        "client_event_id": key,
+        "event_type": event_type,
         "payload": { "text": text },
         "occurred_at": occurred_at,
     })
@@ -441,42 +449,46 @@ async fn two_sessions_naming_one_company_converge_on_one_vertex() {
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "grph2", "alice").await;
     let token = idp.user_token("alice");
     let deps = worker_deps(&state);
 
     // Session one, in June: the decision names the company one way.
-    let status = post_observe(
+    let status = post_events(
         &app,
         &token,
+        run.session_id,
         json!({
-            "session_id": "sess-june",
             "events": [event(
-                "g-1", "decision", "2026-06-02T09:00:00Z",
+                "g-1", "message.assistant", "2026-06-02T09:00:00Z",
                 "We decided ACME Corp will host the ledger service.",
             )],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
     drain(&deps, &worker_config()).await;
 
-    // Session two, in July: a different session, a different owner-facing
-    // wording, the same company. Drained separately so the second commit
-    // resolves against a vertex that already exists rather than against one
-    // it is creating — which is what "against existing nodes" means.
-    let status = post_observe(
+    // Session two, in July: a different **run** in the same workspace, a
+    // different owner-facing wording, the same company. Drained separately so
+    // the second commit resolves against a vertex that already exists rather
+    // than against one it is creating — which is what "against existing nodes"
+    // means.
+    let second =
+        session_seed::open_run(&pool, tenant, run.workspace_id, "grph2-july", "alice").await;
+    let status = post_events(
         &app,
         &token,
+        second,
         json!({
-            "session_id": "sess-july",
             "events": [event(
-                "g-2", "transcript_delta", "2026-07-14T09:00:00Z",
+                "g-2", "message.user", "2026-07-14T09:00:00Z",
                 "Acme Corporation renewed the platform contract.",
             )],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
     drain(&deps, &worker_config()).await;
 
     let records = record_ids(&pool, tenant).await;
@@ -525,18 +537,17 @@ async fn two_sessions_naming_one_company_converge_on_one_vertex() {
         }
     }
 
-    // Two sessions, two episode vertices.
+    // Two runs, two episode vertices — keyed by the run's id since CPR-10,
+    // where the key used to be a correlation string a client chose.
     let mut sessions: Vec<&str> = vertices
         .iter()
         .filter(|vertex| vertex.kind == "session")
         .map(|vertex| vertex.key.as_str())
         .collect();
     sessions.sort_unstable();
-    assert_eq!(
-        sessions,
-        vec!["sess-july", "sess-june"],
-        "sorted, not chronological"
-    );
+    let mut expected = vec![run.session_id.to_string(), second.to_string()];
+    expected.sort_unstable();
+    assert_eq!(sessions, expected, "sorted, not chronological");
 
     // Four claims: two mentions, two occurrences. Each names the record it
     // came from, each is open-ended, and the confidence tier reports what
@@ -675,23 +686,24 @@ async fn records_that_name_nothing_are_counted_as_orphans() {
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "grph2", "alice").await;
     let token = idp.user_token("alice");
 
-    let status = post_observe(
+    let status = post_events(
         &app,
         &token,
+        run.session_id,
         json!({
-            "session_id": "sess-orphan",
             "events": [
-                event("o-1", "transcript_delta", "2026-07-20T09:00:00Z",
+                event("o-1", "message.user", "2026-07-20T09:00:00Z",
                       "the nightly reconciliation finished without errors"),
-                event("o-2", "decision", "2026-07-20T09:05:00Z",
+                event("o-2", "message.assistant", "2026-07-20T09:05:00Z",
                       "We decided Grafana stays on the internal network."),
             ],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
     drain(&worker_deps(&state), &worker_config()).await;
 
     let records = record_ids(&pool, tenant).await;
@@ -755,34 +767,35 @@ async fn a_redacted_secret_never_becomes_a_vertex() {
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "grph2", "alice").await;
     let token = idp.user_token("alice");
 
-    let status = post_observe(
+    let status = post_events(
         &app,
         &token,
+        run.session_id,
         json!({
-            "session_id": "sess-secret",
             "events": [event(
-                "s-1", "transcript_delta", "2026-07-20T09:00:00Z",
+                "s-1", "message.user", "2026-07-20T09:00:00Z",
                 &format!("The old deploy key {SEEDED_AWS_KEY} was rotated by Ada Lovelace."),
             )],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
 
     // The strict pack quarantines a secret rather than queueing it; a
     // reviewer releases it and the redacted text rejoins the pipeline
     // (MEM-2, ADR-0021). Going through that door rather than around it is
     // the point: the linker sees exactly what a released event carries.
-    let event_id: ObserveEventId = sqlx::query_scalar!(
-        "select id from observe_events where tenant_id = $1",
+    let event_id: synveda_types::SessionEventId = sqlx::query_scalar!(
+        "select id from session_events where tenant_id = $1",
         tenant.as_uuid()
     )
     .fetch_one(&pool)
     .await
-    .map(ObserveEventId::from_uuid)
-    .expect("the staged event");
+    .map(synveda_types::SessionEventId::from_uuid)
+    .expect("the recorded event");
     let mut tx = rls::begin_tenant_tx(&pool, tenant)
         .await
         .expect("tenant tx");
@@ -847,10 +860,11 @@ async fn supersessions_are_projected_as_provenance_edges_and_never_mirrored() {
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "grph2", "alice").await;
     let token = idp.user_token("alice");
     let deps = worker_deps(&state);
 
-    for (key, session, occurred, text) in [
+    for (key, _label, occurred, text) in [
         (
             "p-1",
             "sess-before",
@@ -864,16 +878,16 @@ async fn supersessions_are_projected_as_provenance_edges_and_never_mirrored() {
             "We decided the reconciliation job runs against the ledger-live replica.",
         ),
     ] {
-        let status = post_observe(
+        let status = post_events(
             &app,
             &token,
+            run.session_id,
             json!({
-                "session_id": session,
-                "events": [event(key, "decision", occurred, text)],
+                "events": [event(key, "message.assistant", occurred, text)],
             }),
         )
         .await;
-        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(status, StatusCode::OK);
         drain(&deps, &worker_config()).await;
     }
 

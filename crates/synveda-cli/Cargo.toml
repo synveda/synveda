@@ -49,6 +49,11 @@ rmcp = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The durable spool's payload hash (CPR-12, ADR-0078 decision 6). SHA-256 and
+# not BLAKE3 because the *writer* is the Node adapter, whose `node:crypto` has
+# no BLAKE3 and which takes no dependencies; this side verifies what that side
+# wrote. The authoritative digest of an event is still the server's BLAKE3.
+sha2 = { workspace = true }
 sqlx = { workspace = true }
 # `net`/`io-util` for the loopback listener `synveda login` binds; there is
 # no daemon and no long-lived server, only one request from one browser.

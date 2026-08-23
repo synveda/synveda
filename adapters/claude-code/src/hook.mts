@@ -17,21 +17,24 @@
  */
 
 import { loadConfig } from "./config.mjs";
-import { flush } from "./flush.mjs";
+import { turn } from "./turn.mjs";
 import { log } from "./log.mjs";
 import { sessionStart } from "./session-start.mjs";
 import { syncSkills } from "./skills.mjs";
-import { prune } from "./spool.mjs";
 import type { HookInput, HookOutput } from "./types.mjs";
 
 /**
- * A hard ceiling on the whole hook, above the per-call deadline: if
- * anything hangs that the request deadline does not cover, the process
- * still leaves.
+ * A hard ceiling on the whole hook, above the per-call deadline: if anything
+ * hangs that the request deadline does not cover, the process still leaves.
+ *
+ * Above `SessionEnd`'s own flush budget, so the deadline that fires first is
+ * the flush's — a watchdog that beat it would kill the process between the
+ * append and the spool write, which is the one window where an acknowledgement
+ * can be lost.
  */
 const WATCHDOG_MS = 10_000;
 
-type Mode = "inject" | "flush" | "skills" | "none";
+type Mode = "start" | "turn" | "skills" | "none";
 
 process.on("uncaughtException", (error: unknown) => {
   log("hook.uncaught", { error: String(error) });
@@ -84,15 +87,12 @@ async function main(): Promise<void> {
       if (config.skills) await syncSkills();
       else log("skills.disabled", {});
     } else {
-      emit(mode === "inject" ? await sessionStart(input, config) : await flush(input, config));
+      emit(mode === "start" ? await sessionStart(input, config) : await turn(input, config));
     }
   } catch (error) {
     log("hook.failed", { hook: input.hook_event_name, error: String(error) });
   }
 
-  // Session state is worthless once the session is gone; the last hook
-  // of a session is the cheapest place to notice.
-  if (input.hook_event_name === "SessionEnd") prune();
 }
 
 /**
@@ -112,19 +112,24 @@ function resolveMode(argument: string | undefined, event: string | undefined): M
   }
   switch (event) {
     case "SessionStart":
-      return "inject";
+      return "start";
     case "Stop":
     case "PreCompact":
     case "SessionEnd":
-      return "flush";
+      return "turn";
     case undefined:
       break;
     default:
       // Registered for an event this adapter does not handle.
       return "none";
   }
-  if (argument === "session-start") return "inject";
-  if (argument === "observe" || argument === "flush") return "flush";
+  // The argument is the fallback when no payload named an event. Only the two
+  // names `hooks.json` actually registers are honoured: the pre-cut arguments
+  // (`observe`, `flush`) are gone with the plane they named, and a hook
+  // configuration still passing one does nothing rather than guessing
+  // (ADR-0078 decision 7).
+  if (argument === "session-start") return "start";
+  if (argument === "turn") return "turn";
   return "none";
 }
 

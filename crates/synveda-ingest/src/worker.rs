@@ -27,12 +27,12 @@ use sqlx::PgPool;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, ScopeNode};
 use synveda_store::dedup as store_dedup;
-use synveda_store::observe::{ObserveMessage, QueuedSignal, StagedEvent};
 use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{anchors, identities, observe, policy_assignments, rls};
+use synveda_store::sessions::{QueuedSignal, SignalMessage, StagedEvent};
+use synveda_store::{anchors, identities, policy_assignments, rls, sessions};
 use synveda_types::{
-    Channel, DedupConfig, Error, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind,
-    Result, ScopeId, Sensitivity, TenantId, permille,
+    Channel, DedupConfig, Error, IdentityId, IdentityKind, IdentityStatus, RecordClass, RecordId,
+    RecordKind, Result, ScopeId, Sensitivity, TenantId, permille,
 };
 use synveda_vedaflow::hash::ObjectHash;
 use synveda_vedaflow::{
@@ -155,7 +155,7 @@ pub async fn run_once(deps: &WorkerDeps, config: &WorkerConfig) -> Result<usize>
     let mut conn = deps.pool.acquire().await.map_err(|err| Error::Storage {
         message: format!("acquire worker connection: {err}"),
     })?;
-    let messages = observe::read_signals(&mut conn, config.vt_secs, config.batch).await?;
+    let messages = sessions::read_signals(&mut conn, config.vt_secs, config.batch).await?;
     let read = messages.len();
     if read == 0 {
         return Ok(0);
@@ -167,10 +167,10 @@ pub async fn run_once(deps: &WorkerDeps, config: &WorkerConfig) -> Result<usize>
     let mut signals: Vec<QueuedSignal> = Vec::with_capacity(read);
     for message in messages {
         match message {
-            ObserveMessage::Signal(signal) => signals.push(signal),
-            ObserveMessage::Malformed { msg_id } => {
+            SignalMessage::Signal(signal) => signals.push(signal),
+            SignalMessage::Malformed { msg_id } => {
                 tracing::warn!(msg.id = msg_id, "malformed observe signal; archiving");
-                observe::archive_signal(&mut conn, msg_id).await?;
+                sessions::archive_signal(&mut conn, msg_id).await?;
                 metrics::counter!(EXTRACTION_EVENTS_TOTAL, "outcome" => "skipped").increment(1);
             }
         }
@@ -260,13 +260,13 @@ async fn process_group(
                 loaded.push(Loaded::DeadLetter(signal));
                 continue;
             }
-            match observe::load_event(&mut tx, tenant_id, signal.event_id).await? {
+            match sessions::staged_event(&mut tx, tenant_id, signal.event_id).await? {
                 Some(event) => loaded.push(Loaded::Work(Box::new((signal, event)))),
                 None => {
                     tracing::warn!(
                         tenant.id = %tenant_id,
                         event.id = %signal.event_id,
-                        "signal names no staging row; archiving"
+                        "signal names no event row; archiving"
                     );
                     loaded.push(Loaded::Missing(signal.msg_id));
                 }
@@ -294,9 +294,9 @@ async fn process_group(
                     event_id: event.id,
                     tenant_id,
                     scope_id: event.scope_id,
-                    owner_id: event.owner_id,
                     session_id: event.session_id,
-                    kind: event.kind,
+                    principal_id: event.principal_id,
+                    event_type: event.event_type,
                     payload: event.payload,
                     occurred_at: event.occurred_at,
                     redactions: event.redactions,
@@ -475,11 +475,28 @@ async fn embed_event(deps: &WorkerDeps, item: Extracted) -> Result<Embedded> {
 /// decision 6), which is why the column is a name rather than a flag.
 const JUDGE_METHOD: &str = "deterministic";
 
-/// One owner's authorization verdict for this commit group.
-enum OwnerAuth {
-    /// The write may land at the owner's current home.
+/// What identifies one authorization on this plane (CPR-12, ADR-0078
+/// decision 3): the token subject that opened a run, and the governed scope
+/// the run was decided at.
+///
+/// It was an `IdentityId` alone until the observe cutover, because every write
+/// landed at its submitter's own home and the two were the same grouping. They
+/// are not any more: one person's runs in three projects are three
+/// authorizations at three scopes, and collapsing them to the person would let
+/// a permit in one project write a memory into another.
+type RunKey = (String, ScopeId);
+
+/// One run's authorization verdict for this commit group.
+enum RunAuth {
+    /// The write may land at the scope the run was decided at.
     Allowed {
-        home: ScopeId,
+        /// Where the memory lands — the *session's* scope, not the
+        /// submitter's home.
+        scope: ScopeId,
+        /// The identity behind the run's token subject. Records carry an
+        /// owner, so a subject with no identity row is denied rather than
+        /// guessed at.
+        owner_id: IdentityId,
         pack_name: String,
         pack_version: i64,
         roles: Vec<String>,
@@ -493,15 +510,24 @@ enum OwnerAuth {
     Denied { reason: String },
 }
 
-/// What one owner's records contribute to their home scope's derived
-/// channel (FLOW-2, ADR-0031 decision 13).
+/// The authorization key of one extraction input.
+fn run_key(input: &ExtractionInput) -> RunKey {
+    (input.principal_id.clone(), input.scope_id)
+}
+
+/// What one run's records contribute to its scope's derived channel (FLOW-2,
+/// ADR-0031 decision 13).
 ///
-/// Keyed by owner because home scope and owner are the same grouping: a
-/// record lands at its owner's personal node, so one scope in a group has
-/// exactly one owner — which is also why the owner is the commit's
-/// author. Blame and lineage (tech plan §2.5) run through this field.
+/// Keyed by [`RunKey`] rather than by owner: since the observe cutover a
+/// record lands at the scope its *run* was decided at, so one owner can
+/// contribute to several scopes in one group and each scope's commit needs its
+/// own author. Blame and lineage (tech plan §2.5) run through this field.
 struct DerivedBatch {
     scope: ScopeId,
+    /// The identity that authors this scope's commit. Carried on the batch
+    /// rather than derived from the key, because the key holds a token subject
+    /// and a commit is authored by an identity.
+    owner: IdentityId,
     pack_name: String,
     pack_version: i64,
     /// `(record id, content address)` per record inserted this group.
@@ -523,7 +549,7 @@ async fn commit_group(
     let mut tx = rls::begin_tenant_tx(&deps.pool, tenant_id).await?;
 
     for msg_id in missing {
-        observe::archive_signal(&mut tx, msg_id).await?;
+        sessions::archive_signal(&mut tx, msg_id).await?;
         metrics::counter!(EXTRACTION_EVENTS_TOTAL, "outcome" => "skipped").increment(1);
     }
 
@@ -531,7 +557,7 @@ async fn commit_group(
     // outcome failure; the staging row stays re-drivable provenance.
     let mut dead_lettered: Vec<serde_json::Value> = Vec::new();
     for signal in dead_letters {
-        if observe::archive_signal(&mut tx, signal.msg_id).await? {
+        if sessions::archive_signal(&mut tx, signal.msg_id).await? {
             dead_lettered.push(json!({
                 "event_id": signal.event_id,
                 "read_count": signal.read_ct,
@@ -540,26 +566,26 @@ async fn commit_group(
         }
     }
 
-    // Authorize each distinct owner once, at current facts (decision 4).
-    let mut auth_by_owner: HashMap<IdentityId, OwnerAuth> = HashMap::new();
+    // Authorize each distinct run once, at current facts (decision 4).
+    let mut auth_by_run: HashMap<RunKey, RunAuth> = HashMap::new();
     for item in &embedded {
-        if let std::collections::hash_map::Entry::Vacant(entry) =
-            auth_by_owner.entry(item.input.owner_id)
-        {
-            entry.insert(authorize_owner(deps, &mut tx, tenant_id, item.input.owner_id).await?);
+        let key = run_key(&item.input);
+        if let std::collections::hash_map::Entry::Vacant(entry) = auth_by_run.entry(key) {
+            let (subject, scope) = entry.key().clone();
+            entry.insert(authorize_run(deps, &mut tx, tenant_id, &subject, scope).await?);
         }
     }
 
     let now = Utc::now();
-    let missing_auth = OwnerAuth::Denied {
-        reason: "owner authorization missing".to_owned(),
+    let missing_auth = RunAuth::Denied {
+        reason: "run authorization missing".to_owned(),
     };
     let mut committed: Vec<serde_json::Value> = Vec::new();
-    let mut denied: HashMap<IdentityId, Vec<serde_json::Value>> = HashMap::new();
+    let mut denied: HashMap<RunKey, Vec<serde_json::Value>> = HashMap::new();
     let mut methods: Vec<(String, String)> = Vec::new();
     let mut rescan_findings = 0usize;
     let mut lags: Vec<f64> = Vec::new();
-    let mut batches: HashMap<IdentityId, DerivedBatch> = HashMap::new();
+    let mut batches: HashMap<RunKey, DerivedBatch> = HashMap::new();
     // What each home scope publishes, read once per scope: the governance
     // boundary the judge needs (ADR-0039 decision 9), and the same indexed
     // read composition makes.
@@ -581,15 +607,15 @@ async fn commit_group(
     for item in embedded {
         // The archive-lock: zero rows means a racing consumer already
         // committed this signal's work — skip without inserting.
-        if !observe::archive_signal(&mut tx, item.msg_id).await? {
+        if !sessions::archive_signal(&mut tx, item.msg_id).await? {
             metrics::counter!(EXTRACTION_EVENTS_TOTAL, "outcome" => "skipped").increment(1);
             continue;
         }
-        let auth = auth_by_owner
-            .get(&item.input.owner_id)
-            .unwrap_or(&missing_auth);
-        let OwnerAuth::Allowed {
-            home,
+        let key = run_key(&item.input);
+        let auth = auth_by_run.get(&key).unwrap_or(&missing_auth);
+        let RunAuth::Allowed {
+            scope: home,
+            owner_id,
             pack_name,
             pack_version,
             roles,
@@ -597,12 +623,13 @@ async fn commit_group(
         } = auth
         else {
             denied
-                .entry(item.input.owner_id)
+                .entry(key)
                 .or_default()
                 .push(json!(item.input.event_id));
             metrics::counter!(EXTRACTION_EVENTS_TOTAL, "outcome" => "denied").increment(1);
             continue;
         };
+        let owner_id = *owner_id;
         // The scope's published set, read once and reused for every
         // candidate: a contradiction against reviewed material is refused,
         // and a restatement of it merges into the reviewed copy rather than
@@ -619,15 +646,14 @@ async fn commit_group(
         }
         let published = published_at.get(home).cloned().unwrap_or_default();
 
-        let batch = batches
-            .entry(item.input.owner_id)
-            .or_insert_with(|| DerivedBatch {
-                scope: *home,
-                pack_name: pack_name.clone(),
-                pack_version: *pack_version,
-                members: Vec::new(),
-                events: 0,
-            });
+        let batch = batches.entry(key).or_insert_with(|| DerivedBatch {
+            scope: *home,
+            owner: owner_id,
+            pack_name: pack_name.clone(),
+            pack_version: *pack_version,
+            members: Vec::new(),
+            events: 0,
+        });
         batch.events += 1;
         let mut classes: Vec<&'static str> = Vec::new();
         let mut merged: Vec<serde_json::Value> = Vec::new();
@@ -656,7 +682,7 @@ async fn commit_group(
                 &JudgeInput {
                     tenant_id,
                     scope_id: *home,
-                    owner_id: item.input.owner_id,
+                    owner_id,
                     class: candidate.class,
                     content: &candidate.content,
                     vector: &candidate.vector,
@@ -701,7 +727,7 @@ async fn commit_group(
 
             let state = RecordState {
                 scope_id: *home,
-                owner_id: item.input.owner_id,
+                owner_id,
                 kind: RecordKind::Derived,
                 class: candidate.class,
                 content: candidate.content,
@@ -709,13 +735,13 @@ async fn commit_group(
                 provenance: json!({
                     "event_id": item.input.event_id,
                     "session_id": item.input.session_id,
-                    // The observed kind, carried so the model-asserted /
-                    // host-observed distinction survives to recall time
-                    // (ADR-0057 decision 8). Recall echoes `provenance`
-                    // verbatim, so writing it here is what makes it
-                    // provenance rather than telemetry that dies in the
-                    // staging buffer.
-                    "kind": item.input.kind,
+                    // The event type, carried so the model-asserted /
+                    // host-observed distinction survives to read time
+                    // (ADR-0057 decision 8, ADR-0078 decision 2). A composed
+                    // block echoes `provenance` verbatim, so writing it here
+                    // is what makes it provenance rather than telemetry that
+                    // dies in the ledger.
+                    "event_type": item.input.event_type,
                     "method": item.method,
                     "model_version": item.model_version,
                     "confidence": candidate.confidence,
@@ -753,7 +779,7 @@ async fn commit_group(
             // asserts nothing a reader can audit (ADR-0044 decision 12).
             linkable.push(LinkedRecord {
                 record_id,
-                session_id: item.input.session_id.clone(),
+                session_id: item.input.session_id.to_string(),
                 valid_from: state.valid_from,
                 mentions: candidate.entities,
             });
@@ -849,7 +875,8 @@ async fn commit_group(
         rescan_findings += item.rescan_findings;
         committed.push(json!({
             "event_id": item.input.event_id,
-            "owner": item.input.owner_id,
+            "owner": owner_id,
+            "session": item.input.session_id,
             "pack": format!("{pack_name}@{pack_version}"),
             "roles": roles,
             "records": classes.len(),
@@ -870,19 +897,21 @@ async fn commit_group(
     // left can only fail on a genuine invariant breach (decision 10).
     let linked = linking::link(&mut tx, tenant_id, &linkable).await?;
 
-    // The derived-channel commits: one per owner (equivalently, per home
-    // scope — a record lands at its owner's personal node), inside this
-    // same transaction and before the audit append, so the lock order
-    // ADR-0019 decision 1 fixes is preserved with the chain head last.
-    // Scopes are visited in id order so two workers touching the same two
-    // scopes cannot deadlock by approaching them from opposite ends.
-    let mut ordered: Vec<(&IdentityId, &DerivedBatch)> = batches
+    // The derived-channel commits: one per run key (a scope and the subject
+    // that ran there), inside this same transaction and before the audit
+    // append, so the lock order ADR-0019 decision 1 fixes is preserved with the
+    // chain head last. Scopes are visited in id order so two workers touching
+    // the same two scopes cannot deadlock by approaching them from opposite
+    // ends.
+    let mut ordered: Vec<(&RunKey, &DerivedBatch)> = batches
         .iter()
         .filter(|(_, batch)| !batch.members.is_empty())
         .collect();
-    ordered.sort_unstable_by_key(|(owner, batch)| (batch.scope, **owner));
+    ordered
+        .sort_unstable_by(|(a_key, a), (b_key, b)| (a.scope, &a_key.0).cmp(&(b.scope, &b_key.0)));
     let mut channels: Vec<serde_json::Value> = Vec::with_capacity(ordered.len());
-    for (owner, batch) in ordered {
+    for (_key, batch) in ordered {
+        let owner = batch.owner;
         let snapshot = PolicySnapshot::new(batch.pack_name.clone(), batch.pack_version);
         let message = format!(
             "extraction: {} record(s) from {} event(s)",
@@ -897,7 +926,7 @@ async fn commit_group(
                 channel: vedaflow::ChannelRef::memory(Channel::Derived),
                 members: &batch.members,
                 merge_parents: &[],
-                author: *owner,
+                author: owner,
                 message: &message,
                 committed_at: now,
                 policy_snapshot: &snapshot,
@@ -916,9 +945,10 @@ async fn commit_group(
     }
 
     // Denials chain standalone decision events (ADR-0019 decision 4).
-    for (owner_id, event_ids) in &denied {
-        let reason = match auth_by_owner.get(owner_id) {
-            Some(OwnerAuth::Denied { reason }) => reason.clone(),
+    for (key, event_ids) in &denied {
+        let (subject, scope) = key;
+        let reason = match auth_by_run.get(key) {
+            Some(RunAuth::Denied { reason }) => reason.clone(),
             _ => "unknown".to_owned(),
         };
         append_event(
@@ -930,7 +960,8 @@ async fn commit_group(
             json!({
                 "op": "extraction",
                 "action": Action::MemoryWrite.as_str(),
-                "owner": owner_id,
+                "principal": subject,
+                "scope": scope,
                 "event_ids": event_ids,
                 "reason": reason,
             }),
@@ -1142,43 +1173,72 @@ fn nominee(
     }
 }
 
-/// Re-decides `MemoryWrite` for one owner at its *current* home under
-/// its *current* quarantine state — the same reads the gateway's gather
-/// seam performs, with explicit context instead of task-locals.
-async fn authorize_owner(
+/// Re-decides `MemoryWrite` for one run at the **scope the run was decided
+/// at**, under current facts — the same reads the gateway's gather seam
+/// performs, with explicit context instead of task-locals.
+///
+/// The resource is the session's scope and not the submitter's home (CPR-12,
+/// ADR-0078 decision 3), which is the whole product consequence of the observe
+/// cutover: a run against a shared project writes project memories, and a run
+/// at somebody's own principal scope writes private ones that `base.cedar`'s
+/// personal-scope forbid keeps private.
+///
+/// The principal keeps its **own** chain in `principal_scopes` while `scopes`
+/// carries the resource's, because `standard` shares by `principal.ambit` and
+/// collapsing the two would make every run look like it happened where the
+/// person lives.
+async fn authorize_run(
     deps: &WorkerDeps,
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
-    owner_id: IdentityId,
-) -> Result<OwnerAuth> {
-    let Some(identity) = identities::by_id(&mut *tx, tenant_id, owner_id).await? else {
-        return Ok(OwnerAuth::Denied {
-            reason: "owner identity no longer exists".to_owned(),
+    subject: &str,
+    scope_id: ScopeId,
+) -> Result<RunAuth> {
+    // A record carries an owner, so a token subject with no identity row is
+    // denied rather than guessed at. A run can be opened by a subject that has
+    // no identity (a grant may precede one, ADR-0072), and that is exactly the
+    // case this refuses: the run is real and its memories have nobody to
+    // belong to.
+    let Some(identity) = identities::by_subject(&mut *tx, tenant_id, subject).await? else {
+        return Ok(RunAuth::Denied {
+            reason: "run's principal has no identity to own a record".to_owned(),
         });
     };
-    // A directory-created identity nobody has logged in as yet holds no
-    // authority for this seam to re-decide with (AUTH-4, ADR-0059
-    // decision 5). It is denied by the same door as a vanished owner —
-    // and an event of theirs can only be in flight at all if a seal
-    // landed between the observe and the drain.
-    let Some(subject) = identity.subject.clone() else {
-        return Ok(OwnerAuth::Denied {
-            reason: "owner identity has no bound subject".to_owned(),
+    // A departed person writes nothing, even from a run they opened before
+    // they left (AUTH-4, ADR-0059 decision 8).
+    //
+    // `base.cedar`'s seal forbid used to carry this on its own: the write
+    // landed at the person's own scope, and departure seals that scope. Since
+    // CPR-12 a memory lands at the **run's** scope (ADR-0078 decision 3), which
+    // is a workspace nobody sealed — so the rule the seal expressed has to be
+    // asserted here or an extraction worker draining a queue after somebody's
+    // last day would commit their material anyway. Checked before the decision
+    // rather than inside it, because it is a fact about the writer and not
+    // about what any pack permits.
+    if identity.status != IdentityStatus::Active {
+        return Ok(RunAuth::Denied {
+            reason: format!("run's principal is {} at extraction time", identity.status),
         });
-    };
+    }
+    let owner_id = identity.id;
+    let subject = subject.to_owned();
     // Quarantine is only ever "not provisioned" now (CPR-7, ADR-0074
     // decision 3): the identity row exists by construction here, so the
     // placement-derived flag is gone and nothing replaces it.
     let quarantined = false;
-    let chain: Vec<ScopeNode> = scope_chain(tx, tenant_id, identity.scope_id).await?;
+    // Two chains, and they are different facts. `principal_chain` is where the
+    // person lives; `chain` is where the run happened and what the decision is
+    // about.
+    let principal_chain: Vec<ScopeNode> = scope_chain(tx, tenant_id, identity.scope_id).await?;
+    let chain: Vec<ScopeNode> = scope_chain(tx, tenant_id, scope_id).await?;
     // The confinement scope (ADR-0018 decision 4): a service identity's
     // anchor is the scope above its own; unresolvable means quarantined,
     // never unconfined.
     let token_scope = if identity.kind == IdentityKind::Service {
-        let anchor = chain.get(1).map(|node| node.id);
+        let anchor = principal_chain.get(1).map(|node| node.id);
         if anchor.is_none() {
             // Fail closed on the Principal the same way the flag used to.
-            return Ok(OwnerAuth::Denied {
+            return Ok(RunAuth::Denied {
                 reason: "service identity lost its anchor scope".to_owned(),
             });
         }
@@ -1210,7 +1270,7 @@ async fn authorize_owner(
     let groups = anchors::groups_of(&mut *tx, tenant_id, &subject).await?;
     let context = AuthzContext {
         scopes: &chain,
-        principal_scopes: &chain,
+        principal_scopes: &principal_chain,
         anchors: anchor_set.as_slice(),
         groups: &groups,
         resources: &[],
@@ -1224,7 +1284,7 @@ async fn authorize_owner(
     let decision = deps.pdp.authorize(
         &principal,
         Action::MemoryWrite,
-        Resource::Scope(identity.scope_id),
+        Resource::Scope(scope_id),
         &context,
     )?;
     if decision.allowed {
@@ -1232,7 +1292,7 @@ async fn authorize_owner(
         // decision 5): the record's provenance says who may act on it, and
         // that is the set the decision actually weighed.
         let mut roles: Vec<String> =
-            synveda_policy::effective_role_keys_at(Resource::Scope(identity.scope_id), &context)
+            synveda_policy::effective_role_keys_at(Resource::Scope(scope_id), &context)
                 .into_iter()
                 .map(|key| key.as_str().to_owned())
                 .collect();
@@ -1243,10 +1303,11 @@ async fn authorize_owner(
         // MEM-2 and CTX-2 already do for redaction and composition.
         let dedup = deps
             .pdp
-            .effective(tenant_id, Resource::Scope(identity.scope_id), &context)
+            .effective(tenant_id, Resource::Scope(scope_id), &context)
             .dedup;
-        Ok(OwnerAuth::Allowed {
-            home: identity.scope_id,
+        Ok(RunAuth::Allowed {
+            scope: scope_id,
+            owner_id,
             pack_name: decision.pack_name,
             pack_version: decision.pack_version,
             roles,
@@ -1258,7 +1319,7 @@ async fn authorize_owner(
         } else {
             decision.determining.join(", ")
         };
-        Ok(OwnerAuth::Denied {
+        Ok(RunAuth::Denied {
             reason: format!(
                 "pack {}@{} denied ({determining})",
                 decision.pack_name, decision.pack_version

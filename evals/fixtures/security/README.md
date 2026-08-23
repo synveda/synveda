@@ -23,7 +23,7 @@ the wrong axis, and a derived answer cannot be mis-declared.
 
 ## The premise is governed, never seeded
 
-Material enters at its author's leaf through `/v1/observe`. Anything above
+Material enters at its author's leaf through `POST /v1/sessions/{id}/events`. Anything above
 the working tier gets there through a **classification proposal the author
 opens at their own home scope** and two distinct approvers sign, one of them
 holding `compliance` — the only mechanism in the product that mints a tier

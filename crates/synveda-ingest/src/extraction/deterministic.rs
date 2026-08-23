@@ -1,4 +1,4 @@
-//! The rule-based extractor: `ObserveKind` routing plus keyword
+//! The rule-based extractor: event-type routing plus keyword
 //! heuristics, truncation-as-summary. Honest about what it is — no
 //! network, no abstraction, fixed per-rule confidence — and exactly what
 //! keeps dev, demos, and the AC tests self-contained (ADR-0022
@@ -7,7 +7,8 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
-use synveda_types::{ObserveKind, RecordClass, Result};
+use synveda_types::session::SessionEventType;
+use synveda_types::{RecordClass, Result};
 
 use super::{CandidateRecord, ExtractionInput, ExtractionOutcome, Extractor};
 
@@ -30,7 +31,11 @@ static PREFERENCE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("static preference pattern compiles")
 });
 static DECISION: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(decided|decision|we chose|agreed to|going with|settled on)\b")
+    // `chose`/`chosen` bare, not only `we chose`: the pronoun was never the
+    // signal, and requiring it meant "Chose BLAKE3 over SHA-256" read as a
+    // fact. Found when the observe cutover removed `ObserveKind::Decision`
+    // and the keyword path had to carry cases the client used to classify.
+    Regex::new(r"(?i)\b(decided|decision|chose|chosen|we picked|agreed to|going with|settled on)\b")
         .expect("static decision pattern compiles")
 });
 static PROCEDURE: LazyLock<Regex> = LazyLock::new(|| {
@@ -193,7 +198,7 @@ impl Extractor for DeterministicExtractor {
         let candidates = if text.is_empty() {
             Vec::new()
         } else {
-            let (class, confidence) = classify(input.kind, &text);
+            let (class, confidence) = classify(input.event_type, &text);
             // Mentions come from the content that will actually be
             // persisted, not from the text before truncation: an edge
             // claiming this record names a thing must be true of the
@@ -216,23 +221,33 @@ impl Extractor for DeterministicExtractor {
     }
 }
 
-/// Kind routes first (the client told us what this is); transcript deltas
-/// fall through to keyword heuristics, default `fact`.
+/// The event type routes first (the client told us what this is); anything
+/// that is somebody's words falls through to keyword heuristics, default
+/// `fact`.
 ///
-/// `assertion` takes the keyword path with them, and deliberately. It is the
-/// one kind that says nothing about *class*: "a model composed this and
-/// chose to store it" (ADR-0057 decision 8) is a claim about who put the
-/// content on the wire, not about what the content is — a model asserts
-/// preferences, procedures and decisions as readily as bare facts. Routing
-/// it to a fixed class at `KIND_CONFIDENCE` would be asserting a
-/// classification the kind does not carry, so the text is read the same way
-/// a transcript delta's is, and the provenance claim rides on the record's
-/// `provenance.kind` instead (worker.rs).
-fn classify(kind: ObserveKind, text: &str) -> (RecordClass, f64) {
-    match kind {
-        ObserveKind::Decision => (RecordClass::Decision, KIND_CONFIDENCE),
-        ObserveKind::ToolResult => (RecordClass::Episode, KIND_CONFIDENCE),
-        ObserveKind::TranscriptDelta | ObserveKind::Assertion => {
+/// **Something that happened is an episode.** A tool call, a tool answer, a
+/// file change and a shell command are all records of an act, and their class
+/// is decided by their type at `KIND_CONFIDENCE` — nothing in the text can
+/// make a `command.executed` into a preference.
+///
+/// **`memory.asserted` takes the keyword path**, and deliberately. It is the
+/// one type that says nothing about *class*: "a model composed this and chose
+/// to store it" (ADR-0057 decision 8) is a claim about who put the content on
+/// the wire, not about what the content is — a model asserts preferences,
+/// procedures and decisions as readily as bare facts. Routing it to a fixed
+/// class at `KIND_CONFIDENCE` would assert a classification the type does not
+/// carry, so the text is read the same way a message's is and the provenance
+/// claim rides on the record's `provenance.event_type` instead (worker.rs).
+///
+/// Types that answer `false` to [`SessionEventType::carries_memory`] never
+/// reach here: no signal is enqueued for them.
+fn classify(event_type: SessionEventType, text: &str) -> (RecordClass, f64) {
+    match event_type {
+        SessionEventType::ToolInvoked
+        | SessionEventType::ToolResult
+        | SessionEventType::FileChanged
+        | SessionEventType::CommandExecuted => (RecordClass::Episode, KIND_CONFIDENCE),
+        _ => {
             if PREFERENCE.is_match(text) {
                 (RecordClass::Preference, KEYWORD_CONFIDENCE)
             } else if DECISION.is_match(text) {
@@ -409,27 +424,58 @@ mod tests {
         assert!(out.ends_with('…') && !out.contains("wor…"), "{out}");
     }
 
-    /// The kinds whose class the client effectively told us, and the class
-    /// each one means. `assertion` is absent by design — see below.
+    /// The types whose class the event itself decides, and the class each one
+    /// means. `memory.asserted` is absent by design — see below.
     #[test]
-    fn kind_routing_is_fixed_for_the_kinds_that_carry_a_class() {
+    fn type_routing_is_fixed_for_the_types_that_carry_a_class() {
+        for event_type in [
+            SessionEventType::ToolInvoked,
+            SessionEventType::ToolResult,
+            SessionEventType::FileChanged,
+            SessionEventType::CommandExecuted,
+        ] {
+            let (class, confidence) = classify(event_type, "anything at all");
+            assert_eq!(
+                class,
+                RecordClass::Episode,
+                "{} should route to episode whatever the text says",
+                event_type.as_str()
+            );
+            assert!((confidence - KIND_CONFIDENCE).abs() < f64::EPSILON);
+        }
+    }
+
+    /// The gate that keeps the extractor away from bookkeeping. A type that
+    /// answers `false` never gets a work signal, so a change that made one of
+    /// these `true` would start spending an LLM call on "session started".
+    #[test]
+    fn only_the_types_that_hold_content_carry_memory() {
+        let carrying: Vec<&str> = SessionEventType::ALL
+            .iter()
+            .filter(|event_type| event_type.carries_memory())
+            .map(SessionEventType::as_str)
+            .collect();
         assert_eq!(
-            classify(ObserveKind::Decision, "anything at all").0,
-            RecordClass::Decision
-        );
-        assert_eq!(
-            classify(ObserveKind::ToolResult, "anything at all").0,
-            RecordClass::Episode
+            carrying,
+            [
+                "message.user",
+                "message.assistant",
+                "tool.invoked",
+                "tool.result",
+                "file.changed",
+                "command.executed",
+                "memory.asserted",
+            ]
         );
     }
 
-    /// ADR-0057 decision 8: `assertion` is a provenance claim, not a class
-    /// claim. It must read the text exactly as a transcript delta does —
+    /// ADR-0057 decision 8: `memory.asserted` is a provenance claim, not a
+    /// class claim. It must read the text exactly as a plain message does —
     /// identical class *and* identical confidence — because a model asserts
-    /// preferences and procedures as readily as bare facts, and pinning it
-    /// to one class would assert a classification the kind never carried.
+    /// preferences and procedures as readily as bare facts, and pinning it to
+    /// one class would assert a classification the type never carried.
     #[test]
-    fn assertion_classifies_exactly_as_a_transcript_delta_does() {
+    fn an_assertion_classifies_exactly_as_a_message_does() {
         let texts = [
             "I prefer tabs over spaces",
             "we decided to ship on Friday",
@@ -440,9 +486,9 @@ mod tests {
         ];
         for text in texts {
             assert_eq!(
-                classify(ObserveKind::Assertion, text),
-                classify(ObserveKind::TranscriptDelta, text),
-                "assertion and transcript_delta disagreed on {text:?}"
+                classify(SessionEventType::MemoryAsserted, text),
+                classify(SessionEventType::MessageUser, text),
+                "memory.asserted and message.user disagreed on {text:?}"
             );
         }
     }
@@ -457,7 +503,7 @@ mod tests {
             "we decided to ship on Friday",
             "how to deploy: then run make release",
         ]
-        .map(|text| classify(ObserveKind::Assertion, text).0);
+        .map(|text| classify(SessionEventType::MemoryAsserted, text).0);
         assert_eq!(
             classes,
             [
@@ -467,7 +513,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            classify(ObserveKind::Assertion, "the sky is a colour").0,
+            classify(SessionEventType::MemoryAsserted, "the sky is a colour").0,
             RecordClass::Fact,
             "the default"
         );

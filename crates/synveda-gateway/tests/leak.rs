@@ -3,7 +3,7 @@
 //! leak-test suite.**
 //!
 //! Every claim here is made from a reader's side, through
-//! `POST /v1/inject`, because the criterion is about what a reader
+//! a context run, because the criterion is about what a reader
 //! *receives* — not about what a predicate contains. The material becomes
 //! `restricted` through the product's own path (a classification proposal
 //! two people approved, one of them compliance), which is what makes the
@@ -204,6 +204,9 @@ async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Org {
     seeded
 }
 
+#[path = "session_seed.rs"]
+mod session_seed;
+
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
@@ -310,14 +313,55 @@ async fn post(app: &Router, token: &str, uri: &str, body: Value) -> (StatusCode,
 }
 
 /// One reader's composed block for one task, as text.
-async fn block_for(app: &Router, token: &str, task: Option<&str>) -> String {
-    let mut body = json!({"session_id": "authz-5-leak"});
-    if let Some(task) = task {
-        body["task"] = json!(task);
+///
+/// A composition names the run it is for since CPR-12, so each reader in this
+/// suite composes into their own — which is also closer to the thing under
+/// test: what *this reader*, in *their* session, receives.
+async fn block_for(
+    app: &Router,
+    token: &str,
+    run: synveda_types::SessionId,
+    task: Option<&str>,
+) -> String {
+    let body = match task {
+        Some(task) => json!({"query": task}),
+        None => json!({}),
+    };
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/sessions/{run}/context-runs"))
+        .header("authorization", format!("Bearer {token}"))
+        .header(
+            "idempotency-key",
+            synveda_types::ContextRunId::new().to_string(),
+        )
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("build context-run request");
+    let (status, response) = call(app, request).await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "context run failed: {status} {response}"
+    );
+    response["rendered"]
+        .as_str()
+        .expect("rendered block")
+        .to_owned()
+}
+
+/// A run for each reader named, keyed by subject.
+async fn runs_for(
+    pool: &PgPool,
+    tenant: TenantId,
+    subjects: &[&str],
+) -> std::collections::BTreeMap<String, synveda_types::SessionId> {
+    let mut runs = std::collections::BTreeMap::new();
+    for subject in subjects {
+        let run =
+            session_seed::seed_run_for(pool, tenant, &format!("authz5-{subject}"), subject).await;
+        runs.insert((*subject).to_owned(), run.session_id);
     }
-    let (status, response) = post(app, token, "/v1/inject", body).await;
-    assert_eq!(status, StatusCode::OK, "inject failed: {response}");
-    response["text"].as_str().expect("block text").to_owned()
+    runs
 }
 
 async fn approve(app: &Router, token: &str, proposal: &str) {
@@ -548,6 +592,7 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
     let fay = issue("fay", tenant);
     let nadia = issue("nadia", tenant);
     let sam_token = issue("sam", tenant);
+    let runs = runs_for(&pool, tenant, &["priya", "fay", "nadia", "sam"]).await;
 
     let priya_identity = identities::by_subject(&pool, tenant, "priya")
         .await
@@ -561,14 +606,14 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
     // Every reader in the org, including the record's own author and a
     // steward of the department above it. The author's inclusion is the
     // sharp edge stated in decision 7: the tier means what it says.
-    for (who, token) in [
-        ("priya (payments)", &priya),
-        ("fay (another department)", &fay),
-        ("nadia (steward above platform)", &nadia),
-        ("sam (the record's own author)", &sam_token),
+    for (who, token, subject) in [
+        ("priya (payments)", &priya, "priya"),
+        ("fay (another department)", &fay, "fay"),
+        ("nadia (steward above platform)", &nadia, "nadia"),
+        ("sam (the record's own author)", &sam_token, "sam"),
     ] {
         for query in &queries {
-            let block = block_for(&app, token, query.as_deref()).await;
+            let block = block_for(&app, token, runs[subject], query.as_deref()).await;
             assert!(
                 !block.contains(RESTRICTED),
                 "{who} received restricted material for query {query:?}:\n{block}"
@@ -578,7 +623,7 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
 
     // The sweep is only meaningful if the *rest* of the corpus does travel:
     // a suite where nothing composes proves nothing.
-    let sams_block = block_for(&app, &sam_token, Some("tuesdays smoke suite")).await;
+    let sams_block = block_for(&app, &sam_token, runs["sam"], Some("tuesdays smoke suite")).await;
     assert!(
         sams_block.contains(INTERNAL),
         "the working tier still composes for its own team: {sams_block}"
@@ -622,7 +667,7 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
     );
 
     for query in &queries {
-        let block = block_for(&app, &priya, query.as_deref()).await;
+        let block = block_for(&app, &priya, runs["priya"], query.as_deref()).await;
         assert!(
             !block.contains(RESTRICTED),
             "a working-tier grant is not a door to the top tier ({query:?}):\n{block}"
@@ -703,7 +748,13 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
 
     // Now — and only now — the reader receives it, marked twice: the
     // section as lapsed, the line as restricted.
-    let under_grant = block_for(&app, &priya, Some("vault break-glass ceremony")).await;
+    let under_grant = block_for(
+        &app,
+        &priya,
+        runs["priya"],
+        Some("vault break-glass ceremony"),
+    )
+    .await;
     assert!(
         under_grant.contains(RESTRICTED),
         "the grant the floor priced is the one that discloses: {under_grant}"
@@ -720,7 +771,7 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
     // The grant reaches its grantee and nobody else — a different
     // department's reader is unaffected by any of it.
     for query in &queries {
-        let block = block_for(&app, &fay, query.as_deref()).await;
+        let block = block_for(&app, &fay, runs["fay"], query.as_deref()).await;
         assert!(
             !block.contains(RESTRICTED),
             "a grant to payments said nothing about sales ({query:?}):\n{block}"
@@ -730,7 +781,7 @@ async fn restricted_never_reaches_a_reader_without_a_compliance_signed_grant() {
     // ── Expiry: nobody acts, and the door closes ────────────────────────
     tokio::time::sleep(Duration::from_secs(u64::from(WINDOW_SECS) + 1)).await;
     for query in &queries {
-        let block = block_for(&app, &priya, query.as_deref()).await;
+        let block = block_for(&app, &priya, runs["priya"], query.as_deref()).await;
         assert!(
             !block.contains(RESTRICTED),
             "the window closed with nobody acting ({query:?}):\n{block}"
@@ -785,9 +836,10 @@ async fn confidential_material_takes_an_explicit_grant_and_a_binding_is_one() {
     .await;
 
     let priya = issue("priya", tenant);
+    let runs = runs_for(&pool, tenant, &["priya"]).await;
     let queries = query_variants(&[CONFIDENTIAL]);
     for query in &queries {
-        let block = block_for(&app, &priya, query.as_deref()).await;
+        let block = block_for(&app, &priya, runs["priya"], query.as_deref()).await;
         assert!(
             !block.contains(CONFIDENTIAL),
             "membership alone does not reach confidential ({query:?}):\n{block}"
@@ -797,7 +849,7 @@ async fn confidential_material_takes_an_explicit_grant_and_a_binding_is_one() {
     // A content-role grant at the scope the material sits on is the
     // explicit grant, and it is in force on the very next request.
     bind(&pool, tenant, "priya", org.root.id, RoleKey::Member).await;
-    let bound = block_for(&app, &priya, Some("incident bridge rota")).await;
+    let bound = block_for(&app, &priya, runs["priya"], Some("incident bridge rota")).await;
     assert!(
         bound.contains(CONFIDENTIAL),
         "the binding reaches confidential: {bound}"
@@ -809,19 +861,29 @@ async fn confidential_material_takes_an_explicit_grant_and_a_binding_is_one() {
 
     // The caller may narrow past what policy allows, never widen
     // (decision 12): asking for `internal` drops the tier it just gained.
-    let (status, narrowed) = post(
-        &app,
-        &priya,
-        "/v1/inject",
-        json!({
-            "session_id": "authz-5-leak",
-            "task": "incident bridge rota",
-            "max_sensitivity": "internal",
-        }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "narrowed inject failed: {narrowed}");
-    let text = narrowed["text"].as_str().expect("block text");
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/sessions/{}/context-runs", runs["priya"]))
+        .header("authorization", format!("Bearer {priya}"))
+        .header(
+            "idempotency-key",
+            synveda_types::ContextRunId::new().to_string(),
+        )
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({
+                "query": "incident bridge rota",
+                "max_sensitivity": "internal",
+            })
+            .to_string(),
+        ))
+        .expect("build context-run request");
+    let (status, narrowed) = call(&app, request).await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "narrowed context run failed: {status} {narrowed}"
+    );
+    let text = narrowed["rendered"].as_str().expect("rendered block");
     assert!(
         !text.contains(CONFIDENTIAL),
         "a caller asking for less gets less: {text}"

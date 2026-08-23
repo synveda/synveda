@@ -1,11 +1,15 @@
-//! The Synveda gateway: axum HTTP/gRPC serving the three primitives
-//! (`inject`, `recall`, `observe`) behind AuthN → tenant resolution → PDP →
-//! rate limits → audit (seed §7). The ONLY binary that speaks to the outside.
+//! The Synveda gateway: axum HTTP serving the runtime plane behind AuthN →
+//! tenant resolution → PDP → rate limits → audit (seed §7). The ONLY binary
+//! that speaks to the outside.
 //!
-//! Since MEM-1 the first primitive is live: `POST /v1/observe` admits
-//! batched session events into the RLS-staged buffer with PGMQ work
-//! signals for the pipeline (ADR-0020); `inject`/`recall` land with
-//! CTX-1..3. Also here: the FND-5 observability baseline (OTel tracing
+//! Since CPR-12 (ADR-0078) there is **one runtime write seam and one read
+//! seam**, and both name the run they belong to: `POST
+//! /v1/sessions/{id}/events` admits batched events — scanned for secrets,
+//! staged under RLS, signalled to the extraction pipeline — and `POST
+//! /v1/sessions/{id}/context-runs` composes context for one. The three global
+//! primitives they replaced (`/v1/observe`, `/v1/inject`, `/v1/recall`) are
+//! deleted, along with the opaque correlation string that was the only thing
+//! joining them. Also here: the FND-5 observability baseline (OTel tracing
 //! gateway→core→store, Prometheus `/metrics`, ops probes — ADR-0007) and
 //! the TEN-1 tenant plane (bearer-token → tenant resolution middleware
 //! guarding `/v1`, task-local context, `tenant.id` on every request
@@ -57,10 +61,8 @@ pub mod directory_admin;
 pub mod directory_sync;
 pub mod error;
 pub mod idempotency;
-mod inject;
 pub mod lapses;
 pub mod me;
-pub mod observe;
 pub mod openapi;
 pub mod packs;
 pub mod policy;
@@ -68,7 +70,6 @@ pub mod prompts;
 pub mod proposals;
 pub mod provision;
 pub mod quarantine;
-mod recall;
 mod request;
 pub mod scim;
 pub mod service_identities;

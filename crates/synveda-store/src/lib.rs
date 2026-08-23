@@ -56,7 +56,7 @@ pub mod idempotency;
 pub mod identities;
 pub mod keys;
 pub mod lapses;
-pub mod observe;
+
 pub mod packs;
 pub mod policy_assignments;
 pub mod policy_packs;

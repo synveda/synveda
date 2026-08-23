@@ -134,6 +134,47 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 /// The fixture: one tenant, `acme → eng → {platform, payments}`, and the
 /// people a *skill* publication needs — which is one more than a prompt's,
 /// because the invariant floor asks for a security reviewer on every one.
+/// A composition for the reader, through the endpoint that replaced
+/// `/v1/inject`.
+async fn compose(w: &World, body: Value) -> Value {
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/v1/sessions/{}/context-runs", w.bea_run))
+        .header("authorization", format!("Bearer {}", w.bea))
+        .header(
+            "idempotency-key",
+            synveda_types::ContextRunId::new().to_string(),
+        )
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("build context-run request");
+    let (status, value) = call(&w.app, request).await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "the composition must succeed: {status} {value}"
+    );
+    value
+}
+
+/// How many skills a block advertises, counted from its own skills section.
+///
+/// The section is rendered text rather than a response field since CPR-12, so
+/// this reads what a model would read.
+fn skills_named(block: &Value) -> usize {
+    let rendered = block["rendered"].as_str().unwrap_or_default();
+    let Some(section) = rendered.split("## Skills available").nth(1) else {
+        return 0;
+    };
+    section
+        .lines()
+        .take_while(|line| !line.starts_with("##") && !line.starts_with("<!--"))
+        .filter(|line| line.trim_start().starts_with("- "))
+        .count()
+}
+
+#[path = "session_seed.rs"]
+mod session_seed;
+
 struct World {
     pool: PgPool,
     tenant: TenantId,
@@ -162,6 +203,9 @@ struct World {
     sec: String,
     /// The consumer: placed at the platform team, holding no role at all.
     bea: String,
+    /// The reader's run: a composition names the session it was for since
+    /// CPR-12 (ADR-0078 decision 5).
+    bea_run: synveda_types::SessionId,
     /// Someone in the other team, for the gradient.
     dave: String,
 }
@@ -244,6 +288,9 @@ async fn world() -> Option<World> {
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
     let app = router(state(&url, pdp.clone()));
+    let bea_run = session_seed::seed_run_for(&pool, tenant, "skil-bea", "bea")
+        .await
+        .session_id;
     Some(World {
         pool,
         tenant,
@@ -258,6 +305,7 @@ async fn world() -> Option<World> {
         sam: issue("sam", tenant),
         sec: issue("sec", tenant),
         bea: issue("bea", tenant),
+        bea_run,
         dave: issue("dave", tenant),
     })
 }
@@ -819,15 +867,8 @@ async fn a_published_skill_composes_into_nothing() {
     author(&w, &w.alice, w.platform, V1_BODY).await;
     review_and_publish(&w, w.platform, "code-review", "code review skill").await;
 
-    let (status, block) = post(
-        &w.app,
-        "/v1/inject",
-        &w.bea,
-        json!({"task": "review this diff for defects", "session_id": "sess-skil1"}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{block}");
-    let text = block["text"].as_str().unwrap_or_default();
+    let block = compose(&w, json!({"query": "review this diff for defects"})).await;
+    let text = block["rendered"].as_str().unwrap_or_default();
     assert!(
         !text.contains(V1_BODY) && !text.contains("checked"),
         "a skill's content must not reach a block — the client's own \
@@ -864,16 +905,15 @@ async fn a_published_skill_composes_into_nothing() {
         block["channels"]
     );
 
-    // And a recall — whose universe is wider than inject's by design — finds
-    // nothing either, because there are no records to find.
-    let (status, recalled) = post(
-        &w.app,
-        "/v1/recall",
-        &w.bea,
-        json!({"query": "review a diff and report defects", "limit": 10}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{recalled}");
+    // The same question asked of the corpus finds nothing either, because
+    // there are no records to find.
+    //
+    // This used to be asked of `/v1/recall`, whose universe was **wider** than
+    // a composition's by design — which made it the stronger form of the
+    // claim. That route is deleted (CPR-12, ADR-0078 decision 5) and nothing
+    // widens a read today, so the claim is made at the only surface there is.
+    // Prompt 18 restores the wider one.
+    let recalled = compose(&w, json!({"query": "review a diff and report defects"})).await;
     assert!(
         !recalled.to_string().contains(V1_BODY),
         "a skill's body is in no corpus: {recalled}"
@@ -2621,15 +2661,8 @@ async fn a_reader_sees_their_own_teams_skills_and_the_orgs_and_never_another_tea
     );
 
     // ── The same three clauses in a composed block ─────────────────────
-    let (status, block) = post(
-        &w.app,
-        "/v1/inject",
-        &w.bea,
-        json!({"session_id": "sess-skil4"}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{block}");
-    let text = block["text"].as_str().unwrap_or_default();
+    let block = compose(&w, json!({})).await;
+    let text = block["rendered"].as_str().unwrap_or_default();
     assert!(
         text.contains("deploy-platform") && text.contains("house-style"),
         "the block names what this identity may install: {text}"
@@ -2669,8 +2702,12 @@ async fn a_reader_sees_their_own_teams_skills_and_the_orgs_and_never_another_tea
         );
         assert!(entry["scope_id"].as_str().is_some(), "{entry}");
     }
+    // The section costs something, measured from the block itself: the context
+    // run's body carries the citation and the block's total, and a separate
+    // `skill_tokens` field is not part of the shape ADR-0076 decision 7 fixed.
+    // What it costs *relative to nothing* is measured in the tier test below.
     assert!(
-        block["skill_tokens"].as_u64().unwrap_or(0) > 0,
+        block["tokens"].as_u64().unwrap_or(0) > 0,
         "the section's cost is the product's own number: {block}"
     );
 
@@ -2678,8 +2715,8 @@ async fn a_reader_sees_their_own_teams_skills_and_the_orgs_and_never_another_tea
     let injected = events(&w.pool, w.tenant)
         .await
         .into_iter()
-        .rfind(|event| event.action.as_str() == "context.injected")
-        .expect("an inject event");
+        .rfind(|event| event.action.as_str() == "session.context.composed")
+        .expect("a context-run event");
     let payload = injected.payload.to_string();
     assert!(
         payload.contains("deploy-platform") && payload.contains("house-style"),
@@ -2885,40 +2922,36 @@ async fn the_skill_index_tiers_token_cost_is_measured() {
     // A stored pack per arm, differing in exactly one field. Permissive on
     // purpose: the measurement is about width, not about who may read.
     install_composition(&w, "skil4-off", 1, SkillIndex::Off).await;
-    let (status, without) = post(&w.app, "/v1/inject", &w.bea, json!({})).await;
-    assert_eq!(status, StatusCode::OK, "{without}");
+    let without = compose(&w, json!({})).await;
 
     install_composition(&w, "skil4-names", 2, SkillIndex::Names).await;
-    let (status, with) = post(&w.app, "/v1/inject", &w.bea, json!({})).await;
-    assert_eq!(status, StatusCode::OK, "{with}");
+    let with = compose(&w, json!({})).await;
 
-    let named = with["skills"].as_array().map_or(0, Vec::len);
-    let cost = with["skill_tokens"].as_u64().unwrap_or_default();
+    // Measured from the rendered block and its token count rather than from
+    // response fields: `/v1/inject` reported `skills` and `skill_tokens`, and
+    // the context run that replaced it keeps a deliberately minimal body
+    // (ADR-0076 decision 7). The section's cost is the difference between the
+    // two arms, which is the number this measurement was ever about.
+    let named = skills_named(&with);
     let base = without["tokens"].as_u64().unwrap_or_default();
     let total = with["tokens"].as_u64().unwrap_or_default();
+    let cost = total.saturating_sub(base);
     // The number this feature owes ADR-0041's precedent, printed rather
     // than only asserted: the comparison between the two read-path tiers
     // is the point of taking it.
     eprintln!(
         "SKIL-4 measurement: off={base} tokens / {} skills named; \
-         names={total} tokens / {named} skills named; section={cost} tokens; \
-         block overhead {} tokens",
-        without["skills"].as_array().map_or(0, Vec::len),
-        total - cost,
+         names={total} tokens / {named} skills named; section={cost} tokens",
+        skills_named(&without),
     );
 
     assert_eq!(
-        without["skills"].as_array().map_or(0, Vec::len),
+        skills_named(&without),
         0,
         "`off` advertises nothing: {without}"
     );
-    assert_eq!(
-        without["skill_tokens"].as_u64().unwrap_or_default(),
-        0,
-        "and spends nothing: {without}"
-    );
     assert!(
-        !without["text"]
+        !without["rendered"]
             .as_str()
             .unwrap_or_default()
             .contains("house-style"),
@@ -2943,9 +2976,14 @@ async fn the_skill_index_tiers_token_cost_is_measured() {
     // and "the advertisement costs N" is only true for a reader who was
     // already being given something.
     assert_eq!(base, 0, "the `off` arm composes the empty block: {without}");
-    assert!(
-        total > cost,
-        "and a block that exists pays its preamble and watermark too: {with}"
+    // With `off` composing nothing at all, the section's measured cost *is*
+    // the whole block — preamble and watermark included. Stated rather than
+    // asserted away: "the advertisement costs N" is only true for a reader who
+    // was already being given something.
+    assert_eq!(
+        cost, total,
+        "the `off` arm composed nothing, so the section carries the block's \
+         fixed overhead behind it: {with}"
     );
 }
 

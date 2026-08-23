@@ -640,8 +640,20 @@ pub struct NewSessionEvent {
     pub client_event_id: String,
     /// When the client says it happened.
     pub occurred_at: DateTime<Utc>,
-    /// The content.
+    /// The content, **already redacted** by the scan seam (CPR-12,
+    /// ADR-0078 decision 1): raw finding text never reaches this module.
     pub payload: serde_json::Value,
+    /// The scan's finding summary — `[{rule, category, count}]`, never
+    /// matched text — stamped on the row as immutable provenance. `None`
+    /// when the payload was clean.
+    pub redactions: Option<serde_json::Value>,
+    /// Append the event but **withhold its work signal**, opening a pending
+    /// review row instead (ADR-0078 decision 4).
+    ///
+    /// The event is stored either way: idempotency stays single-point, and
+    /// `session_events` has no UPDATE grant, so quarantine can never be a
+    /// state on the row. A release enqueues the signal admission withheld.
+    pub quarantine: bool,
 }
 
 /// What appending one event did.
@@ -672,6 +684,10 @@ pub struct AppendedEvent {
     pub event: SessionEvent,
     /// Whether this call wrote it.
     pub outcome: AppendOutcome,
+    /// Whether **this** call staged it signal-less behind a pending review
+    /// row. Always `false` for a duplicate: the winning delivery's
+    /// disposition stands, whatever it was.
+    pub quarantined: bool,
 }
 
 struct EventRow {
@@ -686,6 +702,7 @@ struct EventRow {
     received_at: DateTime<Utc>,
     payload: serde_json::Value,
     payload_hash: String,
+    redactions: Option<serde_json::Value>,
 }
 
 impl TryFrom<EventRow> for SessionEvent {
@@ -706,6 +723,7 @@ impl TryFrom<EventRow> for SessionEvent {
             received_at: row.received_at,
             payload: row.payload,
             payload_hash: row.payload_hash,
+            redactions: row.redactions,
         })
     }
 }
@@ -806,7 +824,7 @@ pub async fn append_events(
     // this same row.
     let locked = sqlx::query!(
         r#"
-        select status
+        select status, scope_id
         from sessions
         where id = $1 and tenant_id = $2
         for update
@@ -820,6 +838,11 @@ pub async fn append_events(
     let Some(locked) = locked else {
         return Err(not_found(session_id));
     };
+    // The run's governed scope, read here rather than passed in: it is what a
+    // withheld event's review row is filtered by, and it is derived from the
+    // workspace and project by the schema itself (ADR-0076), so reading it is
+    // the only way to be sure of it.
+    let scope_id = locked.scope_id;
     let status: SessionStatus = locked.status.parse().map_err(|err| Error::Internal {
         message: format!("stored value outside vocabulary: {err}"),
     })?;
@@ -845,67 +868,244 @@ pub async fn append_events(
     .await
     .map_err(storage_error)?;
 
-    let mut next = head + 1;
-    let mut appended = Vec::with_capacity(events.len());
-    let mut written = 0usize;
-    let mut newest: Option<DateTime<Utc>> = None;
-    for event in events {
-        let hash = payload_hash(&event.payload);
-        let row = sqlx::query_as!(
+    // ── The append itself: three statements, not one per event ──────────
+    //
+    // A batch of two hundred used to be two hundred round trips, and on the
+    // dev-database link that is ~35ms of ack for a full batch — nearly twice
+    // seed §10's <20ms enqueue-only budget, which
+    // `session_ingest_load.rs::append_ack_sustains_1k_events_per_second`
+    // measures. `/v1/observe` was one `unnest` insert and this is what
+    // replaced it, so it is one too.
+    //
+    // Duplicates are found **before** the insert rather than by
+    // `ON CONFLICT DO NOTHING`, and that is not a style choice: positions are
+    // gapless per session, and a conflicting row inside a multi-row insert
+    // still consumes the sequence number it was assigned. Pre-filtering is
+    // what keeps the assigned range contiguous. The session's row lock is
+    // already held, so nothing can arrive between the two statements.
+    let submitted: Vec<&str> = events
+        .iter()
+        .map(|event| event.client_event_id.as_str())
+        .collect();
+    let owned: Vec<String> = submitted.iter().map(|id| (*id).to_owned()).collect();
+    let existing: std::collections::HashSet<String> = sqlx::query_scalar!(
+        r#"
+        select client_event_id
+        from session_events
+        where tenant_id = $1 and session_id = $2 and client_event_id = any($3::text[])
+        "#,
+        tenant_id.as_uuid(),
+        session_id.as_uuid(),
+        &owned,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage_error)?
+    .into_iter()
+    .collect();
+
+    let fresh: Vec<&NewSessionEvent> = events
+        .iter()
+        .filter(|event| !existing.contains(&event.client_event_id))
+        .collect();
+
+    let mut inserted: Vec<EventRow> = Vec::new();
+    if !fresh.is_empty() {
+        let ids: Vec<Uuid> = fresh
+            .iter()
+            .map(|_| SessionEventId::new().as_uuid())
+            .collect();
+        let types: Vec<String> = fresh
+            .iter()
+            .map(|event| event.event_type.as_str().to_owned())
+            .collect();
+        let versions: Vec<i32> = fresh
+            .iter()
+            .map(|event| event.event_schema_version)
+            .collect();
+        let client_ids: Vec<String> = fresh
+            .iter()
+            .map(|event| event.client_event_id.clone())
+            .collect();
+        let occurred: Vec<DateTime<Utc>> = fresh.iter().map(|event| event.occurred_at).collect();
+        let payloads: Vec<serde_json::Value> =
+            fresh.iter().map(|event| event.payload.clone()).collect();
+        let hashes: Vec<String> = fresh
+            .iter()
+            .map(|event| payload_hash(&event.payload))
+            .collect();
+        // Nullable elements cannot ride a typed vec; `redactions` goes over as
+        // a jsonb array whose elements are the per-event summary or json null
+        // (mapped back to a SQL null in the insert) — `/v1/observe`'s device,
+        // for its reason.
+        let redactions = serde_json::Value::Array(
+            fresh
+                .iter()
+                .map(|event| event.redactions.clone().unwrap_or(serde_json::Value::Null))
+                .collect(),
+        );
+        inserted = sqlx::query_as!(
             EventRow,
             r#"
             insert into session_events
                 (id, tenant_id, session_id, event_type, event_schema_version,
-                 client_event_id, sequence, occurred_at, payload, payload_hash)
-            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            on conflict (tenant_id, session_id, client_event_id) do nothing
+                 client_event_id, sequence, occurred_at, payload, payload_hash,
+                 redactions)
+            select u.id, $1, $2, u.event_type, u.version, u.client_event_id,
+                   $3 + u.ord, u.occurred_at, u.payload, u.payload_hash,
+                   nullif($11::jsonb -> (u.ord - 1)::int, 'null'::jsonb)
+            from unnest($4::uuid[], $5::text[], $6::int[], $7::text[],
+                        $8::timestamptz[], $9::jsonb[], $10::text[])
+                    with ordinality as u(id, event_type, version, client_event_id,
+                                         occurred_at, payload, payload_hash, ord)
             returning id, tenant_id, session_id, event_type, event_schema_version,
                       client_event_id, sequence, occurred_at, received_at,
-                      payload, payload_hash
+                      payload, payload_hash, redactions
             "#,
-            SessionEventId::new().as_uuid(),
             tenant_id.as_uuid(),
             session_id.as_uuid(),
-            event.event_type.as_str(),
-            event.event_schema_version,
-            event.client_event_id,
-            next,
-            event.occurred_at,
-            event.payload,
-            hash,
+            head,
+            &ids,
+            &types,
+            &versions,
+            &client_ids,
+            &occurred,
+            &payloads,
+            &hashes,
+            redactions,
         )
-        .fetch_optional(&mut *conn)
+        .fetch_all(&mut *conn)
         .await
         .map_err(storage_error)?;
+    }
 
-        match row {
-            Some(row) => {
-                next += 1;
-                written += 1;
-                newest = Some(newest.map_or(event.occurred_at, |at: DateTime<Utc>| {
-                    at.max(event.occurred_at)
-                }));
-                appended.push(AppendedEvent {
-                    event: row.try_into()?,
-                    outcome: AppendOutcome::Appended,
-                });
-            }
-            None => {
-                // Already here. The stored row is served rather than the
-                // caller's version of it: a retry must be told what this
-                // deployment holds, not handed back what it just sent.
-                let existing =
-                    event_by_client_id(&mut *conn, tenant_id, session_id, &event.client_event_id)
-                        .await?
-                        .ok_or_else(|| Error::Internal {
-                            message: "an event conflicted and then could not be read".to_owned(),
-                        })?;
-                appended.push(AppendedEvent {
-                    event: existing,
-                    outcome: AppendOutcome::Duplicate,
-                });
-            }
+    // The rows this deployment already held, served to the retry rather than
+    // its own copy handed back.
+    let mut held: std::collections::HashMap<String, SessionEvent> =
+        std::collections::HashMap::new();
+    if existing.len() < events.len() || !existing.is_empty() {
+        for row in sqlx::query_as!(
+            EventRow,
+            r#"
+            select id, tenant_id, session_id, event_type, event_schema_version,
+                   client_event_id, sequence, occurred_at, received_at, payload,
+                   payload_hash, redactions
+            from session_events
+            where tenant_id = $1 and session_id = $2
+              and client_event_id = any($3::text[])
+            "#,
+            tenant_id.as_uuid(),
+            session_id.as_uuid(),
+            &owned,
+        )
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(storage_error)?
+        {
+            let event: SessionEvent = row.try_into()?;
+            held.insert(event.client_event_id.clone(), event);
         }
+    }
+
+    let mut written = 0usize;
+    let mut newest: Option<DateTime<Utc>> = None;
+    let mut signals: Vec<serde_json::Value> = Vec::new();
+    let mut review_ids: Vec<Uuid> = Vec::new();
+    let mut review_findings: Vec<serde_json::Value> = Vec::new();
+    let fresh_ids: std::collections::HashSet<&str> = fresh
+        .iter()
+        .map(|event| event.client_event_id.as_str())
+        .collect();
+    for row in &inserted {
+        written += 1;
+        newest = Some(newest.map_or(row.occurred_at, |at: DateTime<Utc>| at.max(row.occurred_at)));
+    }
+    for event in events {
+        if !fresh_ids.contains(event.client_event_id.as_str()) {
+            continue;
+        }
+        let Some(stored) = held.get(&event.client_event_id) else {
+            continue;
+        };
+        if event.quarantine {
+            review_ids.push(stored.id.as_uuid());
+            // A quarantined event always has findings — that is what
+            // quarantined it — but the column is NOT NULL, so an empty array
+            // is the defensive shape, never a SQL null.
+            review_findings.push(
+                event
+                    .redactions
+                    .clone()
+                    .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
+            );
+        } else if event.event_type.carries_memory() {
+            // Only the types that hold content get a work signal (ADR-0078
+            // decision 2). A run starting, a skill loading and an adapter
+            // warning are part of the transcript and are not things to
+            // remember, and running an extractor over them is spend that can
+            // only produce noise.
+            signals.push(serde_json::json!({
+                "tenant_id": tenant_id,
+                "event_id": stored.id,
+            }));
+        }
+    }
+
+    // Answers in submission order, each naming the row this deployment holds.
+    let mut appended = Vec::with_capacity(events.len());
+    for event in events {
+        let stored = held
+            .get(&event.client_event_id)
+            .ok_or_else(|| Error::Internal {
+                message: format!(
+                    "an appended event could not be read back: {}",
+                    event.client_event_id
+                ),
+            })?
+            .clone();
+        let fresh_row = fresh_ids.contains(event.client_event_id.as_str());
+        appended.push(AppendedEvent {
+            event: stored,
+            outcome: if fresh_row {
+                AppendOutcome::Appended
+            } else {
+                AppendOutcome::Duplicate
+            },
+            quarantined: fresh_row && event.quarantine,
+        });
+    }
+
+    // One work signal per row actually inserted *and not quarantined*, on the
+    // caller's transaction: the pipeline can never see a delivery twice, a
+    // withheld event stays invisible to it until a reviewer releases it, and a
+    // rollback retracts rows, signals and review markers together.
+    if !signals.is_empty() {
+        sqlx::query_scalar!(
+            r#"select pgmq.send_batch($1, $2::jsonb[]) as "msg_id!""#,
+            SESSION_EVENTS_QUEUE,
+            &signals,
+        )
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(storage_error)?;
+    }
+    if !review_ids.is_empty() {
+        sqlx::query!(
+            r#"
+            insert into session_event_quarantine
+                (event_id, tenant_id, session_id, scope_id, findings)
+            select u.event_id, $1, $2, $3, u.findings
+            from unnest($4::uuid[], $5::jsonb[]) as u(event_id, findings)
+            "#,
+            tenant_id.as_uuid(),
+            session_id.as_uuid(),
+            scope_id,
+            &review_ids,
+            &review_findings,
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(storage_error)?;
     }
 
     if let Some(newest) = newest {
@@ -941,32 +1141,6 @@ pub async fn append_events(
     Ok(appended)
 }
 
-/// One event by the client's own id.
-async fn event_by_client_id(
-    executor: impl PgExecutor<'_>,
-    tenant_id: TenantId,
-    session_id: SessionId,
-    client_event_id: &str,
-) -> Result<Option<SessionEvent>> {
-    let row = sqlx::query_as!(
-        EventRow,
-        r#"
-        select id, tenant_id, session_id, event_type, event_schema_version,
-               client_event_id, sequence, occurred_at, received_at, payload,
-               payload_hash
-        from session_events
-        where tenant_id = $1 and session_id = $2 and client_event_id = $3
-        "#,
-        tenant_id.as_uuid(),
-        session_id.as_uuid(),
-        client_event_id,
-    )
-    .fetch_optional(executor)
-    .await
-    .map_err(storage_error)?;
-    row.map(TryInto::try_into).transpose()
-}
-
 /// One event of a session, by its own id.
 ///
 /// Keyed by the session as well as the event, so an event id from another run
@@ -990,7 +1164,7 @@ pub async fn event(
         r#"
         select id, tenant_id, session_id, event_type, event_schema_version,
                client_event_id, sequence, occurred_at, received_at, payload,
-               payload_hash
+               payload_hash, redactions
         from session_events
         where tenant_id = $1 and session_id = $2 and id = $3
         "#,
@@ -1028,7 +1202,7 @@ pub async fn events(
         r#"
         select id, tenant_id, session_id, event_type, event_schema_version,
                client_event_id, sequence, occurred_at, received_at, payload,
-               payload_hash
+               payload_hash, redactions
         from session_events
         where tenant_id = $1 and session_id = $2 and sequence > $3
         order by sequence
@@ -1043,6 +1217,218 @@ pub async fn events(
     .await
     .map_err(storage_error)?;
     rows.into_iter().map(TryInto::try_into).collect()
+}
+
+// ── The ingestion queue ──────────────────────────────────────────────────────
+//
+// CPR-12 (ADR-0078 decisions 1 and 2). This half of the module used to be
+// `crate::observe`, keyed to a staging table and an opaque correlation string.
+// It is the same mechanism — content-free signals, an archive-lock for
+// exactly-once, a visibility timeout for redelivery — over rows that know
+// which run produced them.
+
+/// The PGMQ queue carrying extraction work signals.
+///
+/// Renamed rather than reused when the observe plane was cut: a queue called
+/// `observe` whose messages name session events is a trap for whoever reads it
+/// next.
+pub const SESSION_EVENTS_QUEUE: &str = "session_events";
+
+/// One work signal read from the queue, invisible to other readers until its
+/// visibility timeout elapses or it is archived.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueuedSignal {
+    /// PGMQ message id — the archive handle.
+    pub msg_id: i64,
+    /// How many times the message has been read, this read included. The
+    /// consumer dead-letters past its threshold.
+    pub read_ct: i32,
+    /// The tenant whose transaction can see the event.
+    pub tenant_id: TenantId,
+    /// The event the signal names.
+    pub event_id: SessionEventId,
+}
+
+/// One message read from the queue: a well-formed work signal, or a body only
+/// a database-credentialed writer could have produced.
+///
+/// The consumer archives malformed messages defensively — they can never
+/// become processable and must not wedge the queue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignalMessage {
+    /// A well-formed `{tenant_id, event_id}` work signal.
+    Signal(QueuedSignal),
+    /// A message whose body did not parse; carries the archive handle.
+    Malformed {
+        /// PGMQ message id — the archive handle.
+        msg_id: i64,
+    },
+}
+
+/// Parses the well-formed signal body — the shape [`append_events`] and the
+/// quarantine release path serialise. Hand-rolled: this crate takes no
+/// serde-derive dependency for one two-field object.
+fn parse_signal_body(message: &serde_json::Value) -> Option<(TenantId, SessionEventId)> {
+    let field = |name: &str| {
+        message
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .and_then(|text| text.parse::<Uuid>().ok())
+    };
+    Some((
+        TenantId::from_uuid(field("tenant_id")?),
+        SessionEventId::from_uuid(field("event_id")?),
+    ))
+}
+
+/// Reads up to `qty` work signals with a `vt_secs` visibility timeout.
+///
+/// Runs on a plain pool connection: queue messages are content-free by design,
+/// so no tenant transaction is needed until the event itself is loaded.
+#[tracing::instrument(name = "store.sessions.read_signals", skip_all, err(Display))]
+pub async fn read_signals(
+    conn: &mut PgConnection,
+    vt_secs: i32,
+    qty: i32,
+) -> Result<Vec<SignalMessage>> {
+    let rows = sqlx::query!(
+        r#"
+        select msg_id as "msg_id!", read_ct as "read_ct!",
+               message as "message!"
+        from pgmq.read($1::text, $2::int, $3::int)
+        "#,
+        SESSION_EVENTS_QUEUE,
+        vt_secs,
+        qty,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| match parse_signal_body(&row.message) {
+            Some((tenant_id, event_id)) => SignalMessage::Signal(QueuedSignal {
+                msg_id: row.msg_id,
+                read_ct: row.read_ct,
+                tenant_id,
+                event_id,
+            }),
+            None => SignalMessage::Malformed { msg_id: row.msg_id },
+        })
+        .collect())
+}
+
+/// Archives one queue message, consuming it.
+///
+/// Returns `false` when the message was no longer in the queue — under
+/// redelivery races that means another consumer already committed this
+/// signal's work, and the caller must treat the signal as done. Callers commit
+/// records and archive in one transaction, so the delete's row lock serialises
+/// contenders and the loser sees `false`.
+#[tracing::instrument(
+    name = "store.sessions.archive_signal",
+    skip_all,
+    fields(msg.id = msg_id),
+    err(Display)
+)]
+pub async fn archive_signal(conn: &mut PgConnection, msg_id: i64) -> Result<bool> {
+    sqlx::query_scalar!(
+        r#"select pgmq.archive($1::text, $2::bigint) as "archived!""#,
+        SESSION_EVENTS_QUEUE,
+        msg_id,
+    )
+    .fetch_one(conn)
+    .await
+    .map_err(storage_error)
+}
+
+/// Enqueued signals not yet read or archived — the pipeline's backlog.
+#[tracing::instrument(name = "store.sessions.queue_depth", skip_all, err(Display))]
+pub async fn queue_depth(conn: &mut PgConnection) -> Result<i64> {
+    sqlx::query_scalar!(r#"select count(*) as "count!" from pgmq.q_session_events"#)
+        .fetch_one(conn)
+        .await
+        .map_err(storage_error)
+}
+
+/// One session event as the extraction pipeline loads it: the redacted content
+/// plus the run's own provenance.
+///
+/// The provenance is the point of the whole cutover (ADR-0078 decision 3).
+/// `/v1/observe` could offer the submitter's home scope and an opaque string;
+/// this offers the governed scope the run was **decided at**, derived by the
+/// schema from the workspace and project and unforgeable by a client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedEvent {
+    /// The event row's id.
+    pub id: SessionEventId,
+    /// The run it belongs to.
+    pub session_id: SessionId,
+    /// The governed scope the run was decided at — where the memory lands.
+    pub scope_id: ScopeId,
+    /// The token subject that opened the run.
+    pub principal_id: String,
+    /// What happened; drives extraction routing.
+    pub event_type: SessionEventType,
+    /// The redacted event body: `[REDACTED:*]` placeholders are opaque tokens
+    /// from here on.
+    pub payload: serde_json::Value,
+    /// Client-asserted event time — the record's valid-from.
+    pub occurred_at: DateTime<Utc>,
+    /// When admission committed; the pipeline-lag clock starts here.
+    pub received_at: DateTime<Utc>,
+    /// The admission scan's finding summary, carried into record provenance.
+    pub redactions: Option<serde_json::Value>,
+}
+
+/// Loads one event and its run's provenance, inside the caller's tenant
+/// transaction.
+///
+/// `None` when the row does not exist — a signal naming a missing row is
+/// archived with a warning, never retried.
+#[tracing::instrument(
+    name = "store.sessions.staged_event",
+    skip_all,
+    fields(tenant.id = %tenant_id, event.id = %event_id),
+    err(Display)
+)]
+pub async fn staged_event(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    event_id: SessionEventId,
+) -> Result<Option<StagedEvent>> {
+    let row = sqlx::query!(
+        r#"
+        select e.session_id, s.scope_id, s.principal_id, e.event_type,
+               e.payload, e.occurred_at, e.received_at, e.redactions
+        from session_events e
+        join sessions s on s.tenant_id = e.tenant_id and s.id = e.session_id
+        where e.tenant_id = $1 and e.id = $2
+        "#,
+        tenant_id.as_uuid(),
+        event_id.as_uuid(),
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    row.map(|row| {
+        Ok(StagedEvent {
+            id: event_id,
+            session_id: SessionId::from_uuid(row.session_id),
+            scope_id: ScopeId::from_uuid(row.scope_id),
+            principal_id: row.principal_id,
+            // The CHECK constraint keeps `event_type` inside the vocabulary; a
+            // parse failure means schema and code drifted — a bug.
+            event_type: row.event_type.parse().map_err(|err| Error::Internal {
+                message: format!("stored value outside vocabulary: {err}"),
+            })?,
+            payload: row.payload,
+            occurred_at: row.occurred_at,
+            received_at: row.received_at,
+            redactions: row.redactions,
+        })
+    })
+    .transpose()
 }
 
 // ── Context runs ─────────────────────────────────────────────────────────────
@@ -1070,6 +1456,8 @@ pub struct NewContextRun {
     pub budget_tokens: i32,
     /// How many records composed.
     pub entry_count: i32,
+    /// The skills the block advertised (ADR-0054 decision 8).
+    pub skills: serde_json::Value,
     /// Which legs degraded.
     pub degraded: Vec<String>,
 }
@@ -1086,6 +1474,7 @@ struct ContextRunRow {
     tokens: i32,
     budget_tokens: i32,
     entry_count: i32,
+    skills: serde_json::Value,
     degraded: Vec<String>,
     created_at: DateTime<Utc>,
 }
@@ -1104,6 +1493,7 @@ impl From<ContextRunRow> for ContextRun {
             tokens: row.tokens,
             budget_tokens: row.budget_tokens,
             entry_count: row.entry_count,
+            skills: row.skills,
             degraded: row.degraded,
             created_at: row.created_at,
         }
@@ -1130,11 +1520,11 @@ pub async fn record_context_run(
         r#"
         insert into session_context_runs
             (id, tenant_id, session_id, scope_id, principal_id, query, rendered,
-             block_hash, tokens, budget_tokens, entry_count, degraded)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             block_hash, tokens, budget_tokens, entry_count, skills, degraded)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         returning id, tenant_id, session_id, scope_id, principal_id, query,
                   rendered, block_hash, tokens, budget_tokens, entry_count,
-                  degraded, created_at
+                  skills, degraded, created_at
         "#,
         new.id.as_uuid(),
         tenant_id.as_uuid(),
@@ -1147,6 +1537,7 @@ pub async fn record_context_run(
         new.tokens,
         new.budget_tokens,
         new.entry_count,
+        new.skills,
         &new.degraded,
     )
     .fetch_one(&mut *conn)
@@ -1178,7 +1569,8 @@ pub async fn context_run(
         ContextRunRow,
         r#"
         select id, tenant_id, session_id, scope_id, principal_id, query, rendered,
-               block_hash, tokens, budget_tokens, entry_count, degraded, created_at
+               block_hash, tokens, budget_tokens, entry_count, skills, degraded,
+               created_at
         from session_context_runs
         where id = $1 and tenant_id = $2
         "#,
@@ -1214,7 +1606,7 @@ pub async fn context_runs(
         r#"
         select id, tenant_id, session_id, scope_id, principal_id, query,
                '' as "rendered!", block_hash, tokens, budget_tokens, entry_count,
-               degraded, created_at
+               skills, degraded, created_at
         from session_context_runs
         where tenant_id = $1 and session_id = $2
         order by created_at, id

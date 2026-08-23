@@ -269,10 +269,15 @@ async fn body_json(response: Response) -> Value {
     serde_json::from_slice(&bytes).expect("json body")
 }
 
-async fn post_observe(app: &Router, bearer: &str, body: Value) -> (StatusCode, Value) {
+async fn post_events(
+    app: &Router,
+    bearer: &str,
+    run: synveda_types::SessionId,
+    body: Value,
+) -> (StatusCode, Value) {
     let request = Request::builder()
         .method(Method::POST)
-        .uri("/v1/observe")
+        .uri(format!("/v1/sessions/{run}/events"))
         .header("authorization", format!("Bearer {bearer}"))
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
@@ -301,10 +306,10 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
     synveda_store::migrate(&pool)
         .await
         .expect("apply migrations");
-    sqlx::query_scalar!(r#"select pgmq.purge_queue('observe') as "purged!""#)
+    sqlx::query_scalar!(r#"select pgmq.purge_queue('session_events') as "purged!""#)
         .fetch_one(&pool)
         .await
-        .expect("purge observe queue");
+        .expect("purge the session-events queue");
     let id = TenantId::new();
     let slug = format!("mem4-{}", id.as_uuid().simple());
     tenants::create(&pool, id, &slug, "MEM-4 test tenant", TenantStatus::Active)
@@ -338,6 +343,9 @@ async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Scope {
     platform
 }
 
+#[path = "session_seed.rs"]
+mod session_seed;
+
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
@@ -362,7 +370,7 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
 /// This tenant's queued signal count (body-filtered — the queue is shared).
 async fn queued(pool: &PgPool, tenant: TenantId) -> i64 {
     sqlx::query_scalar!(
-        r#"select count(*) as "count!" from pgmq.q_observe
+        r#"select count(*) as "count!" from pgmq.q_session_events
            where message ->> 'tenant_id' = $1"#,
         tenant.to_string(),
     )
@@ -394,10 +402,10 @@ async fn records_with_embeddings(
     .collect()
 }
 
-fn event(key: &str, kind: &str, occurred_at: &str, payload: Value) -> Value {
+fn event(key: &str, event_type: &str, occurred_at: &str, payload: Value) -> Value {
     json!({
-        "idempotency_key": key,
-        "kind": kind,
+        "client_event_id": key,
+        "event_type": event_type,
         "payload": payload,
         "occurred_at": occurred_at,
     })
@@ -422,6 +430,7 @@ async fn chaos_killing_tei_mid_batch_loses_no_records_and_embeds_all() {
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem4", "alice").await;
     let token = idp.user_token("alice");
 
     // TEI serves exactly one embed call, then dies mid-batch.
@@ -432,23 +441,23 @@ async fn chaos_killing_tei_mid_batch_loses_no_records_and_embeds_all() {
     );
 
     let occurred = "2026-07-22T09:00:00Z";
-    let (status, _) = post_observe(
+    let (status, _) = post_events(
         &app,
         &token,
+        run.session_id,
         json!({
-            "session_id": "sess-chaos",
             "events": [
-                event("c-1", "decision", occurred,
+                event("c-1", "message.assistant", occurred,
                       json!({"text": "Chose embed-or-fail over async embedding."})),
-                event("c-2", "tool_result", occurred,
+                event("c-2", "tool.result", occurred,
                       json!({"output": "cargo test: 14 passed, 0 failed."})),
-                event("c-3", "transcript_delta", occurred,
+                event("c-3", "message.user", occurred,
                       json!({"text": "We always use transactional vectors."})),
             ],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
 
     // One pass while TEI dies under it.
     let read = worker::run_once(&deps, &chaos_config())
@@ -549,19 +558,20 @@ async fn deterministic_embedder_commits_hash_vectors() {
     let state = state(&db_url, &idp.issuer, tenant);
     let app = router(state.clone());
     seed_user(&pool, tenant, "alice").await;
+    let run = session_seed::seed_run_for(&pool, tenant, "mem4", "alice").await;
     let token = idp.user_token("alice");
 
-    let (status, _) = post_observe(
+    let (status, _) = post_events(
         &app,
         &token,
+        run.session_id,
         json!({
-            "session_id": "sess-det",
-            "events": [event("d-1", "decision", "2026-07-22T10:00:00Z",
+            "events": [event("d-1", "message.assistant", "2026-07-22T10:00:00Z",
                 json!({"text": "The deterministic embedder is the zero-config default."}))],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(status, StatusCode::OK);
 
     let deps = worker_deps(
         &state,

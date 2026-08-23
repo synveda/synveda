@@ -34,11 +34,17 @@ any agent harness plugs into.
 
 Every integration — Claude Code, an MCP client, a custom SDK — reduces to these:
 
+Everything an agent does belongs to a **run** — a governed record naming the
+workspace it happened in — and the two primitives hang off it:
+
 | | What it does | When |
 |---|---|---|
-| **`observe`** | "Here's what happened." Transcript deltas, tool results, decisions. | Continuously. Queued and processed async — never blocks the session. |
-| **`inject`** | "Give me a token-budgeted context block for this person, this session, this task." | At session start / pre-compact. Silent and fast. |
-| **`recall`** | An explicit, deeper search: hybrid retrieval plus graph traversal, plus "as of last March". | When the agent asks. |
+| **append an event** | "Here's what happened." Messages, tool results, file changes, commands. | Continuously. Spooled locally, delivered async — never blocks the session. |
+| **a context run** | "Give me a token-budgeted context block for this person, this run, this question." | At session start / pre-compact, or whenever the agent asks. | 
+
+`POST /v1/sessions/{id}/events` and `POST /v1/sessions/{id}/context-runs`. The
+run is in the path, so a memory lands where the *work* happened rather than
+wherever the writer's own account sits.
 
 ### Knowledge is treated like code
 
@@ -53,7 +59,7 @@ Each scope has three standing channels:
 - **`staged`** — proposals under review.
 - **`published`** — the trusted channel.
 
-Restricting `inject` to `published` only is a single policy switch — that switch
+Restricting a context run to `published` only is a single policy switch — that switch
 is "bank mode". A bad prompt shipped? Move the ref back one commit; every
 consuming agent heals on its next session start.
 
@@ -67,7 +73,7 @@ consuming agent heals on its next session start.
   time-boxed *lapse* ("let team X read team Y's procedures for 30 days —
   joint incident review"), with dual approval and automatic expiry. That mechanism is why one
   product can serve both a 10-person shop and a multi-region bank.
-- **Audit is an output, not a log file.** Every decision, injection, recall,
+- **Audit is an output, not a log file.** Every decision, composition,
   write and policy change lands in a hash-chained log that detects tampering
   even by an attacker holding database credentials.
 
@@ -96,7 +102,7 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | Phase | Scope | State |
 |---|---|---|
 | **0 — Foundation** | Workspace, dev environment, types, bitemporal schema, observability | ✅ 6/6 |
-| **1 — The spine** | SSO → provisioned own-scope → observe → extraction → inject → audit, live in Claude Code | ✅ 21/21 |
+| **1 — The spine** | SSO → provisioned own-scope → append → extraction → compose → audit, live in Claude Code | ✅ 21/21 |
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR, gateway scale | ⬜ 0/17 |
@@ -131,14 +137,17 @@ Published benchmark scores, and what they do and do not measure:
   granted at a scope and inherited by its subtree (`owner`, `member`,
   `viewer`, `reviewer`, `curator`, `administrator`), ABAC conditions,
   time-boxed lapses, and Postgres row-level security as a backstop.
-- **The write path** — `observe` → secret scan and redaction → extraction into
+- **The write path** — appending a session event → secret scan and redaction → extraction into
   classified records → embedding → graph-linking → commit to `derived`, with
   dedup and conflict detection, decay and TTL.
-- **The read path** — `inject` composes along the specificity gradient
+- **The read path** — a context run composes along the specificity gradient
   (the nearer scope beats the wider one, pinned beats derived, newer beats
   older) under a token budget, watermarked with the record IDs it used.
-  `recall` goes deeper: hybrid dense + sparse retrieval, graph traversal, as-of
-  queries.
+  `synveda recall` and the `recall` MCP tool ask the same question from a
+  terminal or an agent. (The deeper form — hybrid retrieval *widened past the
+  caller's own chain*, graph traversal and as-of queries — is out of service:
+  `/v1/recall` was deleted with the observe cutover, and Prompt 18 of the
+  context-platform programme re-cuts it over the governed scope model.)
 - **VedaFlow end to end** — objects, commits, refs, proposals, an approval matrix,
   auto-promotion rules, cross-scope promotion, rollback and pinning, and a CLI
   review flow that needs no console.
@@ -160,7 +169,7 @@ treat them as shape, not as an SLO.
 |---|---|
 | Policy decision (4-level chain, release build) | median **33µs**, p99 46µs |
 | Scope-chain resolve, warm | median **800ns** |
-| `inject` at 1,000 concurrent sessions | p50 **18.6ms**, p99 24ms (budget: 150ms) |
+| a context run at 1,000 concurrent sessions | p50 **18.6ms**, p99 24ms (budget: 150ms) |
 | Graph traversal | 1-hop 1.17ms, 2-hop 23.4ms (gate: 50ms) |
 | Extraction over a 50-fixture labelled corpus | macro precision **0.983**, recall 0.914 — the deterministic extractor; a live model reads 0.820/0.783 against the same corpus, which is mostly the corpus's exact-match predicate penalising paraphrase |
 | Clean machine → personalised Claude Code session | **1.5s** (budget: 120s) |
@@ -186,7 +195,7 @@ Being explicit, so nothing here misleads:
 - **No real Cursor frame either.** The generic MCP server ships as `synveda mcp`
   (ADPT-2), and its acceptance corpus was recorded from Claude Desktop and Zed.
   Cursor remains an install target rather than a measured one.
-- **No live Claude Code session has injected or observed.** The plugin now
+- **No live Claude Code session has composed or appended.** The plugin now
   installs into Claude Code and is proven to *load* there — `✔ enabled`, four
   hooks, one MCP server (OPS-8). What runs the hooks in ADPT-1's acceptance
   demo is still that demo's own driver, replaying recorded payloads. Until
@@ -230,19 +239,22 @@ make dev-down # stop; state persists in named volumes
 The first `dev-up` builds the Postgres image and downloads the BGE-M3 embedding
 model (~2.3 GB), so allow a few minutes.
 
-Then run any of the 58 demos in [`demos/`](demos/). Each one is self-contained —
-it brings up what it needs, seeds a scratch database, and prints what it proves.
-Good places to start:
+The 65 demos in [`demos/`](demos/) are each self-contained — one brings up what
+it needs, seeds a scratch database, and prints what it proves. Good places to
+start:
 
 ```sh
-sh demos/ctx-3-inject.sh          # the read path: compose a watermarked block,
-                                  # then kill the embedder mid-demo and watch it
-                                  # degrade gracefully instead of failing
-sh demos/flow-3-proposals.sh      # VedaFlow: propose, review, approve, publish
-sh demos/aud-2-audit-query.sh     # "who could see X on date D", answered from
-                                  # the chain with the database URL unset
-sh demos/adpt-1-claude-code.sh    # a clean machine to a personalised session
+sh demos/cpr-10-sessions.sh       # a run opened, appended to, composed for and
+                                  # closed through the public API, with a
+                                  # timeline over it and a chain that verifies
+sh demos/cpr-5-access.sh          # groups, grants and invitations
+sh demos/cpr-6-anchors.sh         # where a request stands, and what decides it
 ```
+
+> **Most of the other demos do not currently run.** 43 of the 65 scripts under
+> `demos/` call `synveda role bind` or `synveda hierarchy`, which the scope
+> cutover deleted three prompts ago — see `docs/backlog/CPR-13.md`. The three
+> above are among the 22 that are current.
 
 Other useful targets:
 

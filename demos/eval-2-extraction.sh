@@ -113,9 +113,19 @@ echo "    not have read the chain even if they wanted to (ADR-0045)."
 
 echo
 echo "==> [1/4] the suite: 50 labelled transcripts seeded through"
-echo "    /v1/observe, the chain waited on until the pipeline is done with"
-echo "    every one, then /v1/recall's sweep to enumerate what a reader is"
-echo "    actually served — and the per-class table scored off that"
+echo "    POST /v1/sessions/{id}/events, the chain waited on until the"
+echo "    pipeline is done with every one, then /v1/recall's sweep to"
+echo "    enumerate what a reader is actually served — and the per-class"
+echo "    table scored off that."
+echo
+echo "    THE SWEEP NO LONGER EXISTS. CPR-12 deleted /v1/recall (ADR-0078"
+echo "    decision 5) and a context run cannot stand in: it ranks and"
+echo "    budgets where a sweep enumerates, so what it left out would be a"
+echo "    property of the budget rather than of extraction. The seed leg is"
+echo "    re-pointed onto the session plane and the sweep leg refuses by"
+echo "    name, so this run fails with the reason rather than reporting a"
+echo "    number measured against a different question. Prompt 18 re-cuts"
+echo "    recall; Prompt 32 re-measures."
 eval_run
 echo
 echo "    the attribution column, which is the half a single lens cannot give:"

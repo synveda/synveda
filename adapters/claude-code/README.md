@@ -1,22 +1,24 @@
 # Claude Code adapter (ADPT-1)
 
 A Claude Code plugin that gives a session governed memory: it composes a
-context block at session start and observes the transcript as the
-session runs. Design and rationale: [ADR-0027](../../docs/adr/adr-0027-claude-code-adapter.md).
+context block at session start and records the transcript as the session runs.
+Design and rationale: [ADR-0027](../../docs/adr/adr-0027-claude-code-adapter.md),
+re-cut onto the session API by
+[ADR-0078](../../docs/adr/adr-0078-durable-session-delivery.md).
 
-The adapter decides nothing. It maps hook events to the two `/v1`
-primitives with the caller's own bearer, and inherits whatever the PDP
-allows that identity (seed §2.2).
+The adapter decides nothing. It maps hook events to the session plane with the
+caller's own bearer, and inherits whatever the PDP allows that identity
+(seed §2.2).
 
 ## The seams
 
 | Hook | Mode | What it does |
 | --- | --- | --- |
-| `SessionStart` | `session-start` | `POST /v1/inject`; returns the block as `additionalContext` |
+| `SessionStart` | `session-start` | Opens or resumes the run, retries the backlog, `POST /v1/sessions/{id}/context-runs`; returns the block as `additionalContext` |
 | `SessionStart` | `skills` | `synveda skill sync` into this plugin's own `skills/`; async, returns nothing |
-| `Stop` | `observe` | `POST /v1/observe` with the turn's transcript delta |
-| `PreCompact` | `flush` | Resends whatever a previous flush left behind |
-| `SessionEnd` | `flush` | The same retry, plus spool pruning |
+| `Stop` | `turn` | Records the turn into the spool, then delivers it |
+| `PreCompact` | `turn` | Records everything the transcript still holds, before compaction rewrites it |
+| `SessionEnd` | `turn` | Records the last turn, then a **bounded** synchronous flush, then closes the run |
 
 `SessionStart` is the only one of the four that can contribute context —
 `PreCompact`'s output becomes compaction instructions and its only
@@ -26,7 +28,8 @@ compaction is `SessionStart` firing again with `source: "compact"`
 
 Every hook exits 0, always. A dead gateway, an expired login, a
 malformed transcript, or an expired deadline yields a hook that
-contributes no context and returns success.
+contributes no context and returns success — **and records the events
+anyway**.
 
 ## Install
 
@@ -84,13 +87,15 @@ call `synveda auth token --json` for a currently-valid bearer, and the
 CLI refreshes it through the gateway when it expires. The adapter holds
 no OAuth code of its own (ADR-0027 decisions 4 to 6).
 
-Since CTX-4 the composed block may carry **index entries**: material the
-budget could not fit, named rather than dropped, each ending with a
-`(recall <id>)` handle and preceded by one line saying what that means.
-Nothing here had to change for it — the hook passes the block's text
-verbatim — and an agent navigates from a handle to the body by running
-`synveda recall <id>`, which is on `PATH` already because the same binary
-issues this plugin's bearer.
+The composed block is passed through verbatim; the hook renders nothing of
+its own.
+
+> **Fetch-by-handle is not available right now.** CTX-4's index tier ended its
+> lines with `(recall <id>)` and `synveda recall <id>` turned a handle into a
+> body. `/v1/recall` was deleted with the observe cutover and the context-run
+> endpoint that replaced it takes no ids, so a handle currently names something
+> nothing can fetch. Prompt 18 re-cuts recall over the new model. `synveda
+> recall --query` still answers questions.
 
 ### The MCP tool
 
@@ -111,9 +116,9 @@ hands it the client's own stdio, and — if the CLI is missing — says so
 instead of coming up with an empty tool list.
 
 It launches `synveda mcp --writes host`, hard-coded. This plugin's `Stop`
-hook already POSTs the turn to `/v1/observe`, so a `remember` tool here
+hook already records the turn as session events, so a `remember` tool here
 would let the model store a fact by tool call while the hook independently
-observes the transcript containing it: two rows, same scope, different
+records the transcript containing it: two rows, same run, different
 payloads, and nothing downstream able to tell they were one turn
 (ADR-0057 decision 6). There is no configuration of this plugin under
 which the other value is right, so there is no flag for it.
@@ -159,6 +164,10 @@ Environment (highest precedence):
 - `SYNVEDA_TOKEN` — bearer for `/v1`, bypassing the CLI
 - `SYNVEDA_PROFILE` — which credential profile to use, default `default`
 - `SYNVEDA_CLI` — path to the `synveda` binary, default from `PATH`
+- `SYNVEDA_WORKSPACE` — the workspace runs belong to. Optional: with one
+  workspace the adapter asks `/v1/me` and takes the answer; with more than one
+  it needs telling, because guessing would put one team's transcript in
+  another team's scope
 - `SYNVEDA_TIMEOUT_MS` — per-call deadline, default 3000
 
 Per project, optional, at `.synveda/config.json`:
@@ -170,6 +179,7 @@ Per project, optional, at `.synveda/config.json`:
   "observe": true,
   "skills": true,
   "gateway_url": "http://127.0.0.1:8120",
+  "workspace_id": "0198e4c1-0000-7000-8000-000000000001",
   "timeout_ms": 3000,
   "budget_tokens": 4000,
   "compact_budget_tokens": 1500
@@ -178,6 +188,10 @@ Per project, optional, at `.synveda/config.json`:
 
 A budget narrows and never widens: the effective budget is
 `min(pack budget, this)` (ADR-0026 decision 7).
+
+`workspace_id` is safe to set in a checked-out repository, unlike
+`gateway_url`: naming a workspace inside a tenant you are already
+authenticated to cannot redirect a credential anywhere.
 
 `gateway_url` here applies only when no `synveda login` credential is in
 play. A credential names the gateway it was issued for and that one
@@ -192,8 +206,12 @@ Nothing inside your project.
 - `$XDG_CONFIG_HOME/synveda/credentials.json` — written by `synveda
   login`, mode 0600, keyed by profile. `synveda auth logout` removes it;
   the tokens themselves stay valid at the issuer until they expire
-- `$XDG_STATE_HOME/synveda/sessions/` — per-session cursor and
-  transcript path (ADR-0027 decision 7)
+- `$XDG_STATE_HOME/synveda/spool/` — the durable spool: one file per
+  conversation, holding every recorded event and whether this deployment has
+  it (ADR-0078 decision 6). `synveda session spool status` reads it
+- `$XDG_CONFIG_HOME/synveda/installation-id` — a random id for this
+  installation, so two machines running this client can be told apart. Not a
+  hostname and not a username
 - `$XDG_STATE_HOME/synveda/adapter.log` — diagnostics, JSON lines.
   Never stdout: for `SessionStart`, stdout is context the model reads
 - `$XDG_STATE_HOME/synveda/disclosed/` — the one-shot per-project
@@ -208,11 +226,46 @@ Nothing inside your project.
 
 ## Delivery
 
-Observe is at-least-once over a durable cursor. The cursor — the uuid of
-the last transcript entry a gateway 2xx accepted — advances only on
-success, so a failed batch is resent by the next hook, where MEM-1's
-buffer reports the overlap as duplicates and re-enqueues nothing
-(ADR-0020 decision 2). No daemon, no local queue.
+**Record first, deliver second.** Every hook copies the transcript delta into
+a local spool and `fsync`s it *before* it tries to send anything. So an
+unreachable gateway, an expired login, a killed hook, a compaction or a reboot
+costs nothing: the events are on disk, and the next `SessionStart` — or
+`synveda session flush` — delivers them.
+
+Delivery is idempotent per event. Each event carries the transcript entry's own
+uuid as its `client_event_id`, so a redelivered batch that overlaps a previous
+one appends only what is new and comes back `duplicate` for the rest, at their
+original positions.
+
+Three commands make the spool something you can act on:
+
+```sh
+synveda session spool status                # what is held, and since when
+synveda session flush                       # deliver it now
+synveda session spool purge --acknowledged  # reclaim the disk
+```
+
+`purge` deletes only events this deployment has already answered for, and the
+flag is required rather than assumed. There is no flag that deletes
+undelivered ones.
+
+### The event-loss boundary
+
+If Claude Code terminates without running **any** lifecycle hook — `kill -9`, a
+harness crash, a machine losing power mid-turn — the events of the turn in
+flight are lost. They were never handed to a hook, so no code in this adapter
+ever saw them.
+
+This is not fixable from inside a hook contract, and the two ways to narrow it
+were both rejected with reasons that still hold: a background daemon watching
+the transcript file is a second thing to install, supervise and debug, and it
+would observe projects whose hooks are disabled (ADR-0027 decision 1); and
+recording from `PreToolUse`/`PostToolUse` would put this adapter in the path of
+every tool call, which is a latency budget it should not be spending.
+
+What the design does guarantee is that **everything a hook has been handed is
+durable before delivery is attempted**. The boundary is therefore "the turn in
+flight when the client died", not "everything since the gateway went down".
 
 ## Tests
 
@@ -220,13 +273,13 @@ buffer reports the overlap as duplicates and re-enqueues nothing
 pnpm --filter @synveda/claude-code-adapter test
 ```
 
-Unit tests cover the transcript parser, the event mapping, the spool,
-and the credential seam (against a stand-in CLI that refuses, hangs,
-prints garbage, or is not installed — all of which resolve to "no
-memory this time"); the handler suite runs both hook paths against a
-mock gateway, and several cases spawn the built entry point to prove
-exit 0 on every failure. Tests compile alongside the source into
-`dist/`.
+Unit tests cover the transcript parser, the event mapping, the durable spool,
+and the credential seam (against a stand-in CLI that refuses, hangs, prints
+garbage, or is not installed — all of which resolve to "no memory this time");
+the handler suite runs both hook paths against a mock gateway and asserts what
+the spool holds after each failure, not only that nothing crashed. Several
+cases spawn the built entry point to prove exit 0 on every failure. Tests
+compile alongside the source into `dist/`.
 
 ### The recorded-payload driver
 
@@ -234,13 +287,15 @@ exit 0 on every failure. Tests compile alongside the source into
 (shapes recorded from Claude Code 2.1.220, content synthetic), and
 `dist/driver.mjs` replays them through the built entry point as a child
 process — the same `node dist/hook.mjs <mode>` line `hooks/hooks.json`
-registers. Sixteen cases: dead gateway, 401, degraded header, oversized
-tool result, replayed batch, cursor resume after a failed flush, damaged
-transcript line, unreadable payload. Every one must exit 0.
+registers. Fifteen cases: dead gateway, degraded header, refused composition,
+a turn kept on disk when nothing could be delivered, the next start draining
+that backlog, a redelivered batch answered `duplicate`, a compaction that
+cannot eat a turn, a close owed over a backlog, a damaged transcript line, an
+unreadable payload, and a stale hook argument. Every one must exit 0.
 
 ```sh
-node dist/driver.mjs                                    # mock gateway
-node dist/driver.mjs --gateway URL --token BEARER       # live gateway
+node dist/driver.mjs                                                  # mock gateway
+node dist/driver.mjs --gateway URL --token BEARER --workspace ID      # live gateway
 ```
 
 The mock run is part of `npm test`. The live run is the last section of
@@ -262,4 +317,4 @@ demos/adpt-1-claude-code.sh
 A clean HOME, the prebuilt plugin, `synveda login` against live Rauthy,
 and a session that receives its watermarked block and contributes its
 turn back — timed against ADPT-1's two-minute budget, then joined in one
-verifying audit chain by session id.
+verifying audit chain by the run it all belongs to.

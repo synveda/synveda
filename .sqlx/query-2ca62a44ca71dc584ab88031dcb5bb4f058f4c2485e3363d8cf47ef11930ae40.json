@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update session_events set received_at = received_at - interval '400 days' where tenant_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2ca62a44ca71dc584ab88031dcb5bb4f058f4c2485e3363d8cf47ef11930ae40"
+}

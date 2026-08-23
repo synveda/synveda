@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select pgmq.purge_queue('session_events') as \"purged!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "purged!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7ff4c9dcc1e8230c784fd437c32e4748ba3e6ac074bdce00aa0b8dba9baf645f"
+}

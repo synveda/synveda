@@ -62,16 +62,25 @@ const ACTOR_COMPONENT: &str = "promotion";
 /// Which audit actions count as a recall (ADR-0033 decision 5, as CTX-5
 /// grew it — ADR-0042 decision 16).
 ///
-/// Two, since the day ADR-0033 wrote a trigger for: an explicit
-/// `context.recalled` is a **stronger** signal than composition, because
+/// Three, and each joined by being added here and nothing else — the
+/// projection, the rules and the evidence shape did not change, because every
+/// one of them keeps the same `entries[]` watermark shape on purpose. Every
+/// proposal records the set that was counted, so one opened before a given day
+/// cannot be misread as having counted an action added later.
+///
+/// `context.recalled` was a **stronger** signal than composition, because
 /// somebody asked for that material by name or by question rather than
-/// receiving it in a block they did not choose. It joined by being added
-/// here and nothing else — the projection, the rules and the evidence
-/// shape did not change, because CTX-5 kept recall's watermark the same
-/// shape as inject's on purpose. Every proposal records the set that was
-/// counted, so one opened before that day cannot be misread as having
-/// counted it.
-const SWEPT_ACTIONS: &[AuditAction] = &[AuditAction::ContextInjected, AuditAction::ContextRecalled];
+/// receiving it in a block they did not choose.
+///
+/// `session.context.composed` joined with the observe cutover (CPR-12,
+/// ADR-0078 decision 5): `/v1/inject` is deleted, so it is now the only way a
+/// block reaches anybody, and a sweep that did not count it would find every
+/// deployment on the new plane unused forever.
+const SWEPT_ACTIONS: &[AuditAction] = &[
+    AuditAction::ContextInjected,
+    AuditAction::ContextRecalled,
+    AuditAction::SessionContextComposed,
+];
 
 /// The engine's tuning knobs, parsed from `SYNVEDA_PROMOTION_*` by the
 /// gateway.
