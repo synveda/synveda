@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        update sessions\n           set status       = $3,\n               ended_at     = case when $3 in ('ended', 'abandoned', 'failed')\n                                   then now() else null end,\n               task_summary = coalesce($4, task_summary),\n               updated_at   = now()\n         where id = $1 and tenant_id = $2 and status = any($5)\n        returning id, tenant_id, workspace_id, project_id, scope_id, principal_id,\n                  client_name, client_version, client_installation_id,\n                  external_session_id, agent_name, model_name, repository_id,\n                  branch, task_summary, status, started_at, ended_at,\n                  last_observed_at, metadata, created_at, updated_at\n        ",
+  "query": "\n        select id, tenant_id, workspace_id, project_id, scope_id, principal_id,\n               client_name, client_version, client_installation_id,\n               external_session_id, agent_name, model_name, repository_id,\n               branch, task_summary, status, started_at, ended_at,\n               last_observed_at, end_reason, metadata, created_at, updated_at\n        from sessions\n        where tenant_id = $1\n          and principal_id = $2\n          and client_name = $3\n          and external_session_id = $4\n        ",
   "describe": {
     "columns": [
       {
@@ -100,16 +100,21 @@
       },
       {
         "ordinal": 19,
+        "name": "end_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
         "name": "metadata",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -117,10 +122,9 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
         "Text",
         "Text",
-        "TextArray"
+        "Text"
       ]
     },
     "nullable": [
@@ -143,10 +147,11 @@
       false,
       true,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "5768bd59200938a59bbb451faeb7c694088b1adae7964e04d7aeac4f7af96b68"
+  "hash": "a01728fa790693da161a427655fd90d40c7cf03cbb3f8eb05f80d6d7c633ebcb"
 }

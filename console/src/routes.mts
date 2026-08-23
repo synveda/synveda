@@ -40,6 +40,7 @@ export const BASE = "/console";
 export type RouteId =
   | "home"
   | "sessions"
+  | "session"
   | "knowledge"
   | "learnings"
   | "skills"
@@ -58,7 +59,15 @@ export type NavGroup = "primary" | "advanced" | "none";
 
 export interface RouteDef {
   id: RouteId;
-  /** The path under {@link BASE}; `""` is the index. */
+  /**
+   * The path under {@link BASE}; `""` is the index.
+   *
+   * A segment beginning with `:` is a **parameter** — `sessions/:session_id`
+   * matches one path element and names it. One level of pattern, written here
+   * rather than installed, for the reason the module note gives: a detail page
+   * needs a real, linkable, refreshable URL, and that is the whole of what a
+   * router owes this console (CPR-11).
+   */
   segment: string;
   label: string;
   group: NavGroup;
@@ -98,6 +107,13 @@ export const ROUTES: readonly RouteDef[] = [
     label: "Sessions",
     group: "primary",
     blurb: "Every run of an agent against this project.",
+  },
+  {
+    id: "session",
+    segment: "sessions/:session_id",
+    label: "Session",
+    group: "none",
+    blurb: "One run: what it was, how it ended, and everything that happened in it.",
   },
   {
     id: "knowledge",
@@ -199,10 +215,43 @@ export function routeOf(id: RouteId): RouteDef {
   return found;
 }
 
-/** The URL for a route, ready for an `href`. */
-export function hrefOf(id: RouteId): string {
+/**
+ * What a pathname resolved to: the route, and the values its parameters took.
+ *
+ * A record rather than a bare id since CPR-11, because a detail page is a
+ * route *and* an id, and threading the id separately would mean two sources
+ * for one fact — the address bar and a piece of component state that can
+ * disagree with it after a Back.
+ */
+export interface RouteMatch {
+  id: RouteId;
+  params: Record<string, string>;
+}
+
+/**
+ * The URL for a route, ready for an `href`.
+ *
+ * Throws on a parameter nothing filled, rather than emitting a literal
+ * `:session_id` into the DOM: a link that looks right and 404s on click is
+ * worse than a loud failure in the one place that builds it.
+ */
+export function hrefOf(id: RouteId, params: Record<string, string> = {}): string {
   const segment = routeOf(id).segment;
-  return segment.length === 0 ? `${BASE}/` : `${BASE}/${segment}`;
+  if (segment.length === 0) {
+    return `${BASE}/`;
+  }
+  const filled = segment
+    .split("/")
+    .map((part) => {
+      if (!part.startsWith(":")) return part;
+      const value = params[part.slice(1)];
+      if (value === undefined) {
+        throw new Error(`${id}: no value for route parameter ${part}`);
+      }
+      return encodeURIComponent(value);
+    })
+    .join("/");
+  return `${BASE}/${filled}`;
 }
 
 /**
@@ -212,16 +261,40 @@ export function hrefOf(id: RouteId): string {
  * the gateway's SPA fallback answers *every* path under the prefix with the
  * bundle (`console.rs`), so a typo arrives here rather than at a 404, and
  * silently landing on Home would tell somebody their link worked.
+ *
+ * Literal segments win over parameters, and the table's order decides nothing:
+ * a pattern only matches a path element that is not empty, and no two routes
+ * in {@link ROUTES} differ solely by a parameter.
  */
-export function matchRoute(pathname: string): RouteId | null {
+export function matchRoute(pathname: string): RouteMatch | null {
   if (!pathname.startsWith(BASE)) {
     return null;
   }
   // Everything between the prefix and any trailing slash, normalised, so
   // `/console`, `/console/` and `/console/people/` all behave.
   const rest = pathname.slice(BASE.length).replace(/^\/+/, "").replace(/\/+$/, "");
-  const found = ROUTES.find((route) => route.segment === rest);
-  return found ? found.id : null;
+  const parts = rest.length === 0 ? [] : rest.split("/");
+  for (const route of ROUTES) {
+    const pattern = route.segment.length === 0 ? [] : route.segment.split("/");
+    if (pattern.length !== parts.length) continue;
+    const params: Record<string, string> = {};
+    let matched = true;
+    for (const [index, part] of pattern.entries()) {
+      const actual = parts[index] as string;
+      if (part.startsWith(":")) {
+        if (actual.length === 0) {
+          matched = false;
+          break;
+        }
+        params[part.slice(1)] = decodeURIComponent(actual);
+      } else if (part !== actual) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return { id: route.id, params };
+  }
+  return null;
 }
 
 /** Whether a caller's forecast offers a route. See the forecast note above. */

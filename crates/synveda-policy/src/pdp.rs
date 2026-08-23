@@ -142,10 +142,23 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// rather than one, and each says why: `principal in resource` walks
 /// *up* from the caller's own scope and can never reach a `Session`,
 /// which hangs *below* one.
+/// `@20`: CPR-11 split the raw payload off the timeline (ADR-0077
+/// decision 3). One action — `SessionDiagnostics` — and nothing else
+/// moved. It is **strictly narrower than each pack's own
+/// `SessionRead`**, which is the property the split exists for: under
+/// `regulated-strict` and `standard` it is the membership floor plus a
+/// governance key (`reviewer`, `owner`, `administrator`) where reading a
+/// timeline also admits `viewer`, `curator` and `member`, and `standard`
+/// deliberately does **not** extend it by `principal.ambit` — sharing one
+/// step outward is a decision about a reading surface, and a neighbouring
+/// project's raw prompts are not a default under any pack. Under
+/// `open-collaboration`, which reads runs tenant-wide role-free, it takes
+/// any grant at all: somebody holding nothing can see that a run happened
+/// and cannot read what was said in it.
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 19),
-    (STANDARD, 19),
-    (OPEN_COLLABORATION, 19),
+    (REGULATED_STRICT, 20),
+    (STANDARD, 20),
+    (OPEN_COLLABORATION, 20),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the

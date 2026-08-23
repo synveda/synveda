@@ -52,6 +52,8 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -95,6 +97,16 @@ const MAX_LIST_LIMIT: i64 = 200;
 
 /// Most timeline entries one response carries, per source.
 const MAX_TIMELINE_ENTRIES: i64 = 500;
+
+/// How far an event's arrival may lag what it says about itself before the
+/// timeline calls it delayed (CPR-11, ADR-0077 decision 2).
+///
+/// A minute, because that is well above what a live hook costs — a delivery
+/// on the same turn is sub-second even through a queue — and well below what
+/// a spool replay produces, which is however long the network was down. A
+/// tighter bound would mark a slow batch as recovered; a looser one would
+/// hide a whole coffee break's worth of buffering.
+pub const DELAYED_AFTER_SECONDS: i64 = 60;
 
 /// Task cap for a context run. A task is a query, not a document — the same
 /// bound `/v1/inject` uses, and for its reason.
@@ -164,6 +176,10 @@ pub struct SessionView {
     /// When it closed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<DateTime<Utc>>,
+    /// Why it stopped, in the client's words — `status` says a run failed,
+    /// this says the hook timed out (CPR-11, ADR-0077 decision 4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_reason: Option<String>,
     /// The newest appended event's own instant.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_observed_at: Option<DateTime<Utc>>,
@@ -196,6 +212,7 @@ impl From<Session> for SessionView {
             status: session.status,
             started_at: session.started_at,
             ended_at: session.ended_at,
+            end_reason: session.end_reason,
             last_observed_at: session.last_observed_at,
             metadata: session.metadata,
             created_at: session.created_at,
@@ -204,17 +221,26 @@ impl From<Session> for SessionView {
     }
 }
 
-/// The session listing.
+/// The session listing, one page of it.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SessionList {
     /// The sessions this caller may read, newest first.
     pub sessions: Vec<SessionView>,
-    /// Whether there are more than this answer carries.
+    /// Where the next page resumes, or absent when this is the last one
+    /// (CPR-11, ADR-0077 decision 1).
     ///
-    /// Named rather than hidden. A recency-ordered feed can honestly serve
-    /// "the newest N"; what it must never do is serve them as though they were
-    /// all of them (ADR-0058 decision 5's rule, one plane over).
-    pub truncated: bool,
+    /// Opaque: pass it back as `cursor` and nothing else. It replaced CPR-10's
+    /// `truncated` boolean, which could say *that* an answer was cut short and
+    /// could not say where to continue — so a reader who wanted the run from
+    /// last Tuesday had no way to reach it.
+    ///
+    /// A page may be **empty and still carry one**: rows are filtered by the
+    /// PDP after they are scanned, so a page whose candidates this caller may
+    /// not read serves nothing and still says where to continue. That is the
+    /// honest shape — the alternative is a server that keeps scanning until it
+    /// fills a page, which is unbounded work driven by somebody else's rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 /// One immutable session event, as the API serves it.
@@ -358,6 +384,27 @@ pub struct TimelineEntry {
     /// The event's position, for an event.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sequence: Option<i64>,
+    /// When this deployment received it, for an event (CPR-11, ADR-0077
+    /// decision 2).
+    ///
+    /// The *other* clock. `at` is the client's statement about when the thing
+    /// happened; this is when the gateway was told. A live turn has them
+    /// within a second of each other; an adapter that spooled to disk while
+    /// the network was down delivers an hour of them at once, and only one of
+    /// the two instants is a clock this deployment controls.
+    ///
+    /// Absent for a context run: a composition happens *here*, so its two
+    /// instants would be the same number written twice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub received_at: Option<DateTime<Utc>>,
+    /// Whether the gap between the two exceeded a minute.
+    ///
+    /// Computed rather than left to each client, so "this did not arrive live"
+    /// means one thing across the console, the CLI and anything else that
+    /// reads a timeline. It is what a locally spooled batch, a replay after a
+    /// crash, and a machine with a wrong clock all look like from here — the
+    /// server cannot tell those three apart and does not pretend to.
+    pub delayed: bool,
     /// One line about what this entry is — a run's query, an event's family.
     pub summary: String,
 }
@@ -500,6 +547,14 @@ pub struct EndSessionBody {
     /// end. Replaces whatever was set at open.
     #[serde(default)]
     pub task_summary: Option<String>,
+    /// **Why** it stopped, in the client's words — `hook timed out`, `user
+    /// cancelled`, `context window exhausted` (CPR-11, ADR-0077 decision 4).
+    ///
+    /// Distinct from `task_summary`, which is what the run was *about*: the
+    /// status says a run failed, this says what failed. Free text, because the
+    /// vocabulary belongs to the harness.
+    #[serde(default)]
+    pub end_reason: Option<String>,
 }
 
 /// `POST /v1/sessions/{session_id}/context-runs`.
@@ -547,9 +602,62 @@ pub struct ListParams {
     /// `failed`.
     #[serde(default)]
     pub status: Option<String>,
+    /// Only runs opened by this agent client, matched exactly — `claude-code`,
+    /// `zed`, `mcp`. The label the client named itself with, never a prefix.
+    #[serde(default)]
+    pub client_name: Option<String>,
+    /// Only runs opened by this token subject.
+    #[serde(default)]
+    pub principal_id: Option<String>,
+    /// Only runs started at or after this instant (RFC 3339).
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "date-time")]
+    pub started_after: Option<DateTime<Utc>>,
+    /// Only runs started strictly before this instant (RFC 3339).
+    ///
+    /// Half-open with `started_after`, so two adjacent days cover every run
+    /// exactly once rather than sharing the one that started at midnight.
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "date-time")]
+    pub started_before: Option<DateTime<Utc>>,
+    /// The previous page's `next_cursor`. Opaque — pass it back unchanged.
+    #[serde(default)]
+    pub cursor: Option<String>,
     /// How many rows to serve: 1–200, default 50.
     #[serde(default)]
     pub limit: Option<i64>,
+}
+
+// ── The listing cursor ───────────────────────────────────────────────────────
+
+/// Encodes a keyset cursor for the wire (CPR-11, ADR-0077 decision 1).
+///
+/// `base64url(<rfc3339>|<uuid>)`. Opaque by intent rather than by encryption:
+/// what it carries is a row's own start instant and id, both of which the
+/// client was just served, so there is nothing in it to hide. The encoding
+/// exists so that a client cannot *construct* one by hand and come to depend
+/// on its shape — the day this becomes a sort key over something else, a
+/// hand-built cursor is a client that breaks.
+fn encode_cursor(cursor: &sessions::SessionCursor) -> String {
+    URL_SAFE_NO_PAD.encode(format!("{}|{}", cursor.started_at.to_rfc3339(), cursor.id))
+}
+
+/// The inverse. A malformed cursor is a 400 rather than a silent restart from
+/// the newest row: a client that sent one is looping, and answering page one
+/// forever is how that becomes an infinite scroll nobody notices.
+fn decode_cursor(raw: &str) -> Result<sessions::SessionCursor> {
+    let invalid = || Error::Invalid {
+        message: "`cursor` is not one this listing issued".to_owned(),
+    };
+    let bytes = URL_SAFE_NO_PAD.decode(raw).map_err(|_| invalid())?;
+    let decoded = String::from_utf8(bytes).map_err(|_| invalid())?;
+    let (at, id) = decoded.split_once('|').ok_or_else(invalid)?;
+    Ok(sessions::SessionCursor {
+        started_at: DateTime::parse_from_rfc3339(at)
+            .map_err(|_| invalid())?
+            .with_timezone(&Utc),
+        id: id.parse::<SessionId>().map_err(|_| invalid())?,
+    })
 }
 
 /// Query parameters for `GET /v1/sessions/{session_id}/timeline`.
@@ -703,23 +811,42 @@ fn session_image(session: &Session) -> serde_json::Value {
     })
 }
 
-/// The sessions this caller may read, decided **one row at a time against the
-/// row** (CPR-9's rule, applied from the start rather than retrofitted).
+/// One page of the listing: the rows this caller may read, decided **one at a
+/// time against the row** (CPR-9's rule, applied from the start rather than
+/// retrofitted), and where the next page resumes.
 ///
 /// [`crate::workspaces::decide_each`] does the deciding; this is the mapping
-/// from a session to what that function needs. The reason it is per row rather
-/// than per distinct scope — which would be cheaper, because every session in
-/// one project decides identically under the shipped packs — is that a
-/// *stored* pack may name a session by its own entity id, and a cache keyed on
-/// the scope would then answer a question it was never asked.
-async fn readable(
+/// from a session to what that function needs, plus the walk that turns a
+/// scanned candidate list into a page. The reason the decision is per row
+/// rather than per distinct scope — which would be cheaper, because every
+/// session in one project decides identically under the shipped packs — is
+/// that a *stored* pack may name a session by its own entity id, and a cache
+/// keyed on the scope would then answer a question it was never asked.
+///
+/// # Why the cursor follows the last candidate and not the last kept row
+///
+/// This is the whole of what makes pagination correct here, so it is written
+/// out. Rows are filtered by the PDP **after** they are scanned. If the cursor
+/// were the last row served, every denied row between two served ones would be
+/// scanned again on the next page — and a page whose candidates were *all*
+/// denied would serve nothing, carry no cursor, and end the listing while
+/// readable rows sat below it. So the cursor is the last candidate this page
+/// *considered*, whether or not it was served, and a page may be empty and
+/// still say where to continue.
+async fn page(
     state: &AppState,
     conn: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     input: &authz::DecisionInput,
-    sessions: Vec<Session>,
-) -> Result<(Vec<Session>, Option<Authorized>)> {
-    let rows: Vec<Decidable> = sessions
+    candidates: Vec<Session>,
+    limit: i64,
+    scan_truncated: bool,
+) -> Result<(
+    Vec<Session>,
+    Option<Authorized>,
+    Option<sessions::SessionCursor>,
+)> {
+    let rows: Vec<Decidable> = candidates
         .iter()
         .map(|session| Decidable {
             resource: Resource::Session(session.id),
@@ -733,17 +860,32 @@ async fn readable(
     let verdicts =
         crate::workspaces::decide_each(state, conn, tenant_id, input, Action::SessionRead, &rows)
             .await?;
+
+    let total = candidates.len();
     let mut authorized = None;
-    let kept = sessions
-        .into_iter()
-        .zip(verdicts)
-        .filter_map(|(session, verdict)| {
-            let allowed = verdict?;
+    let mut kept: Vec<Session> = Vec::new();
+    let mut consumed = 0usize;
+    // The last candidate this page looked at, kept whichever way its verdict
+    // went: the cursor is a position in the scan, not a position in the answer.
+    let mut last: Option<sessions::SessionCursor> = None;
+    for (session, verdict) in candidates.into_iter().zip(verdicts) {
+        consumed += 1;
+        last = Some(sessions::SessionCursor {
+            started_at: session.started_at,
+            id: session.id,
+        });
+        if let Some(allowed) = verdict {
             authorized.get_or_insert(allowed);
-            Some(session)
-        })
-        .collect();
-    Ok((kept, authorized))
+            kept.push(session);
+        }
+        if kept.len() as i64 == limit {
+            break;
+        }
+    }
+    // More below: either this page stopped short of the scan, or the scan
+    // itself stopped short of the table.
+    let more = consumed < total || scan_truncated;
+    Ok((kept, authorized, if more { last } else { None }))
 }
 
 /// Reads a session and decides `action` about it, in that order.
@@ -1017,6 +1159,14 @@ pub(crate) async fn list(
             .as_deref()
             .map(str::parse::<SessionStatus>)
             .transpose()?;
+        let after = params.cursor.as_deref().map(decode_cursor).transpose()?;
+        if let (Some(from), Some(to)) = (params.started_after, params.started_before)
+            && from >= to
+        {
+            return Err(Error::Invalid {
+                message: "`started_after` must be before `started_before`".to_owned(),
+            });
+        }
 
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         // The gate is decided at the scope the listing is anchored at: the one
@@ -1040,7 +1190,7 @@ pub(crate) async fn list(
             commit(tx).await?;
             return Ok(Json(SessionList {
                 sessions: Vec::new(),
-                truncated: false,
+                next_cursor: None,
             }));
         };
         // One gather serves both questions: the caller's principal, anchors
@@ -1057,7 +1207,7 @@ pub(crate) async fn list(
         let gate_resource = Resource::Scope(anchor.id);
         let at_gate = authz::decide(&state, &input, Action::SessionRead, gate_resource);
 
-        let (candidates, mut truncated) = sessions::list(
+        let (candidates, scan_truncated) = sessions::list(
             &mut *tx,
             tenant_id,
             &SessionFilter {
@@ -1065,20 +1215,40 @@ pub(crate) async fn list(
                 workspace_id: params.workspace_id,
                 project_id: params.project_id,
                 status,
+                client_name: params.client_name.clone(),
+                principal_id: params.principal_id.clone(),
+                started_after: params.started_after,
+                started_before: params.started_before,
+                after,
             },
         )
         .await?;
-        let (mut rows, at_row) = readable(&state, &mut tx, tenant_id, &input, candidates).await?;
-        if rows.len() as i64 > limit {
-            rows.truncate(limit as usize);
-            truncated = true;
-        }
+        let (rows, at_row, next_cursor) = page(
+            &state,
+            &mut tx,
+            tenant_id,
+            &input,
+            candidates,
+            limit,
+            scan_truncated,
+        )
+        .await?;
 
         // Two questions, not one (CPR-9): the gate answers "may this caller
         // read this plane as such", the per-row verdicts answer "which of
         // these". Refused only when both say no — a caller who holds nothing
         // at the anchor and nothing below it is told so, which is the contract
         // an outsider has always had.
+        //
+        // A consequence worth knowing (CPR-11): a *later* page can refuse
+        // where an earlier one served, when the caller is denied at the anchor
+        // and this page's candidates all belong to somebody else. The
+        // alternative — answer an empty page and a cursor — would hand a
+        // caller who holds nothing both the fact that rows exist and one row's
+        // key, which is precisely the class of leak CPR-9's audit was about.
+        // The refusal is honest and the disclosure is not, so this refuses.
+        // The console never meets it: it lists at the selected scope, where
+        // the gate is the scope the reader holds.
         let (authorized, resource) = match (at_gate, at_row) {
             (Ok(authorized), _) => (authorized, gate_resource),
             (Err(_), Some(authorized)) => (
@@ -1094,13 +1264,13 @@ pub(crate) async fn list(
             Action::SessionRead,
             &authorized,
             resource,
-            json!({"count": rows.len(), "truncated": truncated}),
+            json!({"count": rows.len(), "more": next_cursor.is_some()}),
         )
         .await?;
         commit(tx).await?;
         Ok(Json(SessionList {
             sessions: rows.into_iter().map(Into::into).collect(),
-            truncated,
+            next_cursor: next_cursor.as_ref().map(encode_cursor),
         }))
     }
     .await;
@@ -1142,6 +1312,96 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<SessionId>
     }
     .await;
     respond(&state, "session.get", result).await
+}
+
+/// `GET /v1/sessions/{session_id}/events/{event_id}` — the diagnostic
+/// expansion (CPR-11, ADR-0077 decision 3).
+///
+/// # Why this is not part of the timeline
+///
+/// A timeline says *that* a message was sent and summarises it in a line. This
+/// serves the **payload**: what the person and the agent actually said, byte
+/// for byte, the prompt, the tool arguments, the diff. Those are different
+/// disclosures, so they are different authorities — `SessionDiagnostics`
+/// rather than `SessionRead` — and a pack can let a project's members follow
+/// what their agents have been doing without handing every one of them a
+/// transcript of everybody's prompts.
+///
+/// One event per request, deliberately. A bulk "give me every payload" route
+/// would be the same disclosure with a better ergonomics story, and the shape
+/// this has is the shape a reader actually uses: they read a timeline, one
+/// entry looks wrong, they expand that entry.
+///
+/// The ownership check runs first, as everywhere on this plane: an event id
+/// from another session — or another tenant — is a 404 before any decision, so
+/// a refusal cannot be used to confirm that a run exists.
+#[utoipa::path(
+    get,
+    path = "/v1/sessions/{session_id}/events/{event_id}",
+    operation_id = "get_session_event",
+    tag = "sessions",
+    params(
+        ("session_id" = String, Path, description = "The session's id"),
+        ("event_id" = String, Path, description = "The event's id, from a timeline entry"),
+    ),
+    responses(
+        (status = 200, description = "The event, payload included", body = SessionEventView),
+        (status = 403, description = "The PDP denied `session.diagnostics`", body = ApiErrorBody),
+        (status = 404, description = "No such session or event in this tenant", body = ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn get_event(
+    State(state): State<AppState>,
+    Path((session_id, event_id)): Path<(SessionId, synveda_types::SessionEventId)>,
+) -> Response {
+    let result = async {
+        let tenant_id = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        // The session first, then the event, then the decision. The event read
+        // is keyed by both ids in SQL, so an event of another run is missing
+        // rather than foreign.
+        let session = sessions::get(&mut *tx, tenant_id, session_id)
+            .await?
+            .ok_or_else(|| session_not_found(session_id))?;
+        let event = sessions::event(&mut *tx, tenant_id, session_id, event_id)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("event {event_id} of session {session_id}"),
+            })?;
+        let (authorized, resource, _) = require(
+            &state,
+            &mut tx,
+            Action::SessionDiagnostics,
+            tenant_id,
+            Subject::Session(&session),
+        )
+        .await?;
+        // The chain records **which** event was expanded and never the payload
+        // it served: an audit log that copied every prompt somebody read would
+        // be a second, unbounded transcript store with weaker access rules than
+        // the first.
+        read_event(
+            &mut tx,
+            tenant_id,
+            "session.event.diagnostic",
+            Action::SessionDiagnostics,
+            &authorized,
+            resource,
+            json!({
+                "session_id": session_id,
+                "event_id": event_id,
+                "event_type": event.event_type.as_str(),
+                "sequence": event.sequence,
+                "payload_hash": event.payload_hash,
+            }),
+        )
+        .await?;
+        commit(tx).await?;
+        Ok(Json(SessionEventView::from(event)))
+    }
+    .await;
+    respond(&state, "session.event.get", result).await
 }
 
 // ── Events ───────────────────────────────────────────────────────────────────
@@ -1288,6 +1548,7 @@ pub(crate) async fn end(
             id,
             body.status,
             body.task_summary.as_deref(),
+            body.end_reason.as_deref(),
         )
         .await?;
         audit::record(
@@ -1304,6 +1565,7 @@ pub(crate) async fn end(
                 "to": after.status.as_str(),
                 "session": session_image(&after),
                 "ended_at": after.ended_at,
+                "end_reason": after.end_reason,
             }),
         )
         .await?;
@@ -1364,6 +1626,8 @@ pub(crate) async fn timeline(
                 at: event.occurred_at,
                 event_type: Some(event.event_type.as_str().to_owned()),
                 sequence: Some(event.sequence),
+                received_at: Some(event.received_at),
+                delayed: is_delayed(event.occurred_at, event.received_at),
                 summary: event_summary(&event),
             });
         }
@@ -1376,6 +1640,10 @@ pub(crate) async fn timeline(
                 at: run.created_at,
                 event_type: None,
                 sequence: None,
+                // A composition happens here, so there is no second clock to
+                // report and nothing that could have been late.
+                received_at: None,
+                delayed: false,
                 summary: match &run.query {
                     Some(query) => format!(
                         "context composed for {:?}: {} entries, {} tokens",
@@ -1412,6 +1680,17 @@ pub(crate) async fn timeline(
     }
     .await;
     respond(&state, "session.timeline", result).await
+}
+
+/// Whether an event reached this deployment far enough after it happened to
+/// call it delayed (CPR-11, ADR-0077 decision 2).
+///
+/// A signed comparison, so an event whose client clock runs *ahead* — a
+/// `received_at` earlier than the `occurred_at` it claims — is not delayed. It
+/// is something else, and reporting it as late would be a second wrong answer
+/// on top of the clock's.
+fn is_delayed(occurred_at: DateTime<Utc>, received_at: DateTime<Utc>) -> bool {
+    (received_at - occurred_at).num_seconds() >= DELAYED_AFTER_SECONDS
 }
 
 /// Merges the two sources into one reading order.
@@ -1897,6 +2176,8 @@ mod tests {
             at: at.parse().expect("an instant"),
             event_type: None,
             sequence,
+            received_at: None,
+            delayed: false,
             summary: String::new(),
         }
     }

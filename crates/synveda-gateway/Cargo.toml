@@ -54,6 +54,10 @@ utoipa = { workspace = true }
 # column says which table), so this plane handles one directly rather than
 # through a typed newtype.
 uuid = { workspace = true }
+# The session listing's keyset cursor is base64url of a row's own start
+# instant and id (CPR-11, ADR-0077 decision 1): opaque so that no client comes
+# to depend on its shape, not secret — it carries what was just served.
+base64 = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }

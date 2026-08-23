@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select s.id, s.tenant_id, s.workspace_id, s.project_id, s.scope_id,\n               s.principal_id, s.client_name, s.client_version,\n               s.client_installation_id, s.external_session_id, s.agent_name,\n               s.model_name, s.repository_id, s.branch, s.task_summary, s.status,\n               s.started_at, s.ended_at, s.last_observed_at, s.metadata,\n               s.created_at, s.updated_at\n        from sessions s\n        where s.tenant_id = $1\n          and ($2::uuid is null or exists (\n                  select 1 from scope_closure c\n                  where c.tenant_id = s.tenant_id\n                    and c.ancestor_id = $2::uuid\n                    and c.descendant_id = s.scope_id\n              ))\n          and ($3::uuid is null or s.workspace_id = $3::uuid)\n          and ($4::uuid is null or s.project_id = $4::uuid)\n          and ($5::text is null or s.status = $5::text)\n        order by s.started_at desc, s.id\n        limit $6\n        ",
+  "query": "\n        update sessions\n           set status       = $3,\n               ended_at     = case when $3 in ('ended', 'abandoned', 'failed')\n                                   then now() else null end,\n               task_summary = coalesce($4, task_summary),\n               end_reason   = coalesce($5, end_reason),\n               updated_at   = now()\n         where id = $1 and tenant_id = $2 and status = any($6)\n        returning id, tenant_id, workspace_id, project_id, scope_id, principal_id,\n                  client_name, client_version, client_installation_id,\n                  external_session_id, agent_name, model_name, repository_id,\n                  branch, task_summary, status, started_at, ended_at,\n                  last_observed_at, end_reason, metadata, created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -100,16 +100,21 @@
       },
       {
         "ordinal": 19,
+        "name": "end_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
         "name": "metadata",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -118,10 +123,10 @@
       "Left": [
         "Uuid",
         "Uuid",
-        "Uuid",
-        "Uuid",
         "Text",
-        "Int8"
+        "Text",
+        "Text",
+        "TextArray"
       ]
     },
     "nullable": [
@@ -144,10 +149,11 @@
       false,
       true,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "f4568402ed0c41b933aef88d28eb6916bc91ebbc2ea5d0fa5b8f6e5abc6dbefa"
+  "hash": "a525ee2225e01570d472ec2173add5e4a1917d940206e61adad324701d46941b"
 }

@@ -38,8 +38,11 @@
 //! into an audit payload. It meant a session an agent only *read* in did not
 //! exist — which ADPT-8 measured against a headless Claude Code run: three
 //! runs, three `inject.ok`, **zero** `observe.done`. The old string is
-//! untouched by this feature and is deleted with the observe re-cut (Prompt
-//! 11). Nothing here reads it and nothing there reads these.
+//! untouched by this feature and leaves with the observe re-cut, which is
+//! **open and unscheduled**: CPR-10 forecast it as Prompt 11 and Prompt 11
+//! turned out to be CPR-11, the session product experience (see §10 of
+//! `docs/implementation/synveda-context-platform.md`). Nothing here reads it
+//! and nothing there reads these.
 
 use std::fmt;
 use std::str::FromStr;
@@ -62,6 +65,12 @@ pub const MAX_LABEL_CHARS: usize = 200;
 
 /// Longest task summary.
 pub const MAX_TASK_SUMMARY_CHARS: usize = 2_000;
+
+/// Longest end reason (CPR-11, ADR-0077 decision 4).
+///
+/// Shorter than a task summary on purpose: a reason is a sentence about how a
+/// run stopped, and a field long enough for a stack trace would become one.
+pub const MAX_END_REASON_CHARS: usize = 500;
 
 /// Largest session `metadata` object, in bytes of its compact JSON encoding.
 pub const MAX_METADATA_BYTES: usize = 8_192;
@@ -414,6 +423,14 @@ pub struct Session {
     /// When it closed. `Some` exactly when [`SessionStatus::is_terminal`] — a
     /// database CHECK, not a convention.
     pub ended_at: Option<DateTime<Utc>>,
+    /// Why it stopped, in the client's words (CPR-11, ADR-0077 decision 4).
+    ///
+    /// Distinct from [`Session::task_summary`], which is what the run was
+    /// *about*: `status` says a run failed, this says the hook timed out. Only
+    /// ever set as part of a close — a database CHECK forbids one on an
+    /// `active` row — and free text, because the vocabulary belongs to the
+    /// harness.
+    pub end_reason: Option<String>,
     /// The `occurred_at` of the newest event appended to it, or `None` while
     /// nothing has been. What a listing sorts "recently active" by, and the
     /// one column an event append writes.
@@ -833,6 +850,7 @@ mod tests {
             status: SessionStatus::Ended,
             started_at: Utc::now(),
             ended_at: Some(Utc::now()),
+            end_reason: Some("hook timed out".to_owned()),
             last_observed_at: Some(Utc::now()),
             metadata: serde_json::json!({"cwd": "/work"}),
             created_at: Utc::now(),

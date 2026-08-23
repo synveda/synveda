@@ -1528,6 +1528,63 @@ CPR-10  The session ledger and runtime API (XL)
   at somebody else's `principal` scope; and all three tables are tenant-bound with forced RLS,
   with no UPDATE or DELETE on the two append-only ones and no DELETE on `sessions`.
 
+CPR-11  The session product experience (L)
+  Filed 2026-08-24 by Prompt 11 of the CPR programme. CPR-10 made a run a governed record —
+  three tables, seven routes, two Cedar actions, an audit chain — and a console page that
+  listed the newest runs and expanded one in place. What it did not make is a record somebody
+  with a question about a particular run can use, and the four gaps are holes rather than
+  polish. **A run older than one answer was unreachable**: the listing set `truncated: true`
+  when there was more and could not say where to continue, so a deployment whose agents open a
+  few hundred runs a week had no API path to last Tuesday's run at all — and nothing narrowed
+  by who ran a thing, which client, or when. **A timeline reported one clock**: `received_at`
+  has been stored since migration 0044 and served nowhere, while the adapters this product
+  ships spool to disk when the gateway is unreachable and flush later — so an hour of a
+  transcript arrives at once, an hour late, and a reader sees a perfectly plausible transcript
+  with no sign any of it was recovered. **There was no way to see what was actually said, and
+  no way to stop people seeing it**: a payload was echoed to the client that wrote it and read
+  by no route, and the moment one exists it is the largest disclosure on this plane. **And a
+  run said how it stopped and never why.**
+  What it adds: keyset pagination (`cursor` in, `next_cursor` out, `truncated` deleted rather
+  than kept beside it) with four more filters — `client_name`, `principal_id` and a half-open
+  `started_after`/`started_before` day range; `received_at` and a server-computed `delayed` on
+  every timeline event entry; a new route `GET /v1/sessions/{id}/events/{event_id}` behind a
+  **new Cedar action** `SessionDiagnostics`, strictly narrower than each pack's own
+  `SessionRead` (packs @19 → @20); `sessions.end_reason` (migration 0045) set at close and
+  carried into the chain; and the console's session product surface — a filter bar, Load more,
+  a route per run at `/console/sessions/{id}`, an ordered timeline showing both clocks and
+  marking what did not arrive live, a warning banner and per-entry warning marks, repository
+  and branch, and a policy-authorised payload expansion offered from the caller's forecast at
+  the run's own scope. Routing gains one level of `:param` pattern so a run has a real,
+  linkable, refreshable URL.
+  Five decisions in ADR-0077. **The cursor follows the last candidate a page considered, not
+  the last row it served**: rows are decided one at a time after they are scanned (CPR-9), so a
+  cursor on the last served row would end the listing whenever a whole page was denied while
+  readable rows sat below it — which is why a page may be empty and still carry a cursor, and
+  the schema says so. **A keyset, not an offset**: an offset skips and repeats whenever a run
+  is opened between two requests, which on this table is every request. **Lateness is one flag
+  and not three**: a spooled batch, a replay after a crash and a wrong clock produce the same
+  two instants, so the server reports the gap and refuses to name a cause. **A payload is its
+  own authority**, because a pack must be able to let a project's members follow what their
+  agents did without handing every one of them everybody's prompts — and the chain records
+  which event was expanded and never what was in it. **An end reason is not a task summary**:
+  one is what the run was about, the other is what broke.
+  AC: a listing pages through every run exactly once, newest first, and the walk terminates; a
+  cursor the listing did not issue is a 400 rather than a silent restart; `truncated` is gone
+  from the response rather than kept beside `next_cursor`; the four new filters narrow, the
+  client filter is exact rather than a prefix, and an inverted date window is a 400; every
+  timeline event entry carries both instants and a context run carries neither; an event
+  delivered two hours after it happened is `delayed` and a live one is not; an `adapter.warning`
+  is counted in `event_counts` and its own sentence reaches the entry; a caller granted `member`
+  at a project reads that run's timeline and is refused `session.diagnostics` by name on the
+  same run, while an administrator gets the bytes; a timeline carries no payload text at all;
+  the audit chain records that an event was expanded and contains none of its content; an event
+  id from another run — or an id nobody minted — is the same 404; a close records a reason, it
+  survives a re-read, it reaches the `session.ended` payload, and one over its bound is refused
+  rather than truncated; and the console renders an active run, a completed one, a failed one
+  with its reason, a delayed entry with both clocks and the gap, a delivery warning in a banner
+  and in place, a refusal with not one fact about the run in it, and another tenant's id exactly
+  as it renders a fictional one.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1621,7 +1678,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

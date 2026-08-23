@@ -96,7 +96,7 @@ test("every operation the document declares is callable, and none is invented", 
   // so this is really asserting the generator did not skip a row — the
   // failure that would make an operation typecheck and then throw.
   const ids = Object.keys(OPERATIONS);
-  assert.equal(ids.length, 39, "the contract's operation count moved; update the count here");
+  assert.equal(ids.length, 40, "the contract's operation count moved; update the count here");
   for (const id of ids) {
     const declared = OPERATIONS[id as keyof typeof OPERATIONS];
     assert.ok(declared.path.startsWith("/v1/"), `${id} is not a /v1 path`);

@@ -6342,6 +6342,7 @@ fn the_session_row_rules_hold_against_direct_sql() {
             fixture.session,
             SessionStatus::Ended,
             None,
+            None,
         )
         .await
         .expect("close it");
@@ -6482,11 +6483,32 @@ fn same_tenant_session_lifecycle_works_under_rls() {
         assert_eq!(listed.len(), 1);
         assert!(!truncated);
 
+        // CPR-11: a reason is part of a close, so an `active` row carrying one
+        // is a state nothing wrote — and that is a CHECK rather than a
+        // service's discipline, which is why this asserts it against **direct
+        // SQL** rather than through `transition`. A rule that lives in a
+        // function holds only for callers who went through that function.
+        let while_running = sqlx::query("update sessions set end_reason = $2 where id = $1")
+            .bind(fixture.session.as_uuid())
+            .bind("it has not ended")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            while_running.is_err(),
+            "an active run may not carry an end reason, got {while_running:?}"
+        );
+        // A failed statement poisons the transaction, so the rest of this test
+        // continues on a fresh one — the same shape every negative direct-SQL
+        // assertion in this file uses.
+        tx.rollback().await.expect("roll back the refused write");
+        let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
+
         sessions::transition(
             &mut tx,
             fixture.tenant,
             fixture.session,
             SessionStatus::Ending,
+            None,
             None,
         )
         .await
@@ -6513,12 +6535,20 @@ fn same_tenant_session_lifecycle_works_under_rls() {
             fixture.session,
             SessionStatus::Ended,
             Some("done"),
+            Some("the agent finished its task"),
         )
         .await
         .expect("close it");
         assert_eq!(closed.status, SessionStatus::Ended);
         assert!(closed.ended_at.is_some());
         assert_eq!(closed.task_summary.as_deref(), Some("done"));
+        // CPR-11: how it ended, beside what it was about. Two fields because
+        // they answer two questions, and a client that set both must get both
+        // back.
+        assert_eq!(
+            closed.end_reason.as_deref(),
+            Some("the agent finished its task")
+        );
 
         let refused = sessions::append_events(
             &mut tx,

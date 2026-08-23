@@ -403,6 +403,15 @@ export type CreatedInviteView = {
  * `POST /v1/sessions/{session_id}/end`.
  */
 export type EndSessionBody = {
+    /**
+     * **Why** it stopped, in the client's words — `hook timed out`, `user
+     * cancelled`, `context window exhausted` (CPR-11, ADR-0077 decision 4).
+     *
+     * Distinct from `task_summary`, which is what the run was *about*: the
+     * status says a run failed, this says what failed. Free text, because the
+     * vocabulary belongs to the harness.
+     */
+    end_reason?: string | null;
     status: "ending" | "ended" | "abandoned" | "failed";
     /**
      * What the run turned out to be about, when the client only knows at the
@@ -1145,21 +1154,29 @@ export type SessionEventView = {
   };
 
 /**
- * The session listing.
+ * The session listing, one page of it.
  */
 export type SessionList = {
+    /**
+     * Where the next page resumes, or absent when this is the last one
+     * (CPR-11, ADR-0077 decision 1).
+     *
+     * Opaque: pass it back as `cursor` and nothing else. It replaced CPR-10's
+     * `truncated` boolean, which could say *that* an answer was cut short and
+     * could not say where to continue — so a reader who wanted the run from
+     * last Tuesday had no way to reach it.
+     *
+     * A page may be **empty and still carry one**: rows are filtered by the
+     * PDP after they are scanned, so a page whose candidates this caller may
+     * not read serves nothing and still says where to continue. That is the
+     * honest shape — the alternative is a server that keeps scanning until it
+     * fills a page, which is unbounded work driven by somebody else's rows.
+     */
+    next_cursor?: string | null;
     /**
      * The sessions this caller may read, newest first.
      */
     sessions: SessionView[];
-    /**
-     * Whether there are more than this answer carries.
-     *
-     * Named rather than hidden. A recency-ordered feed can honestly serve
-     * "the newest N"; what it must never do is serve them as though they were
-     * all of them (ADR-0058 decision 5's rule, one plane over).
-     */
-    truncated: boolean;
   };
 
 /**
@@ -1195,6 +1212,11 @@ export type SessionView = {
      * When the row was created.
      */
     created_at: string;
+    /**
+     * Why it stopped, in the client's words — `status` says a run failed,
+     * this says the hook timed out (CPR-11, ADR-0077 decision 4).
+     */
+    end_reason?: string | null;
     /**
      * When it closed.
      */
@@ -1316,6 +1338,16 @@ export type TimelineEntry = {
      */
     at: string;
     /**
+     * Whether the gap between the two exceeded a minute.
+     *
+     * Computed rather than left to each client, so "this did not arrive live"
+     * means one thing across the console, the CLI and anything else that
+     * reads a timeline. It is what a locally spooled batch, a replay after a
+     * crash, and a machine with a wrong clock all look like from here — the
+     * server cannot tell those three apart and does not pretend to.
+     */
+    delayed: boolean;
+    /**
      * The event type, for an event.
      */
     event_type?: string | null;
@@ -1328,6 +1360,20 @@ export type TimelineEntry = {
      * `event` or `context_run` — which table this came from.
      */
     kind: string;
+    /**
+     * When this deployment received it, for an event (CPR-11, ADR-0077
+     * decision 2).
+     *
+     * The *other* clock. `at` is the client's statement about when the thing
+     * happened; this is when the gateway was told. A live turn has them
+     * within a second of each other; an adapter that spooled to disk while
+     * the network was down delivers an hour of them at once, and only one of
+     * the two instants is a clock this deployment controls.
+     *
+     * Absent for a context run: a composition happens *here*, so its two
+     * instants would be the same number written twice.
+     */
+    received_at?: string | null;
     /**
      * The event's position, for an event.
      */
@@ -1725,6 +1771,15 @@ export type Operations = {
     readonly response: AppendResponse;
   };
   /**
+   * `GET /v1/sessions/{session_id}/events/{event_id}` — the diagnostic
+   * expansion (CPR-11, ADR-0077 decision 3).
+   */
+  readonly get_session_event: {
+    readonly path: "/v1/sessions/{session_id}/events/{event_id}";
+    readonly method: "GET";
+    readonly response: SessionEventView;
+  };
+  /**
    * `GET /v1/sessions/{session_id}/timeline` — the projection.
    */
   readonly get_session_timeline: {
@@ -1861,6 +1916,7 @@ export const OPERATIONS = {
   create_context_run: { path: "/v1/sessions/{session_id}/context-runs", method: "POST", idempotent: true },
   end_session: { path: "/v1/sessions/{session_id}/end", method: "POST" },
   append_session_events: { path: "/v1/sessions/{session_id}/events", method: "POST" },
+  get_session_event: { path: "/v1/sessions/{session_id}/events/{event_id}", method: "GET" },
   get_session_timeline: { path: "/v1/sessions/{session_id}/timeline", method: "GET" },
   list_workspaces: { path: "/v1/workspaces", method: "GET" },
   create_workspace: { path: "/v1/workspaces", method: "POST", idempotent: true },

@@ -819,25 +819,28 @@ ol.commands li {
   max-width: 44rem;
 }
 
-/* Sessions (CPR-10). A run is a *row you open*, so the whole row is the
-   control — a small chevron would make the hit area a fifth of what a reader
-   aims at, and a run is the one thing on this page anybody clicks. It is a
-   real <button> rather than a clickable <div>, so the keyboard and a screen
-   reader get it for free. */
-ul.sessions button.row {
+/* Sessions (CPR-10, CPR-11). A run is a *row you open*, so the whole row is
+   the control — a small chevron would make the hit area a fifth of what a
+   reader aims at, and a run is the one thing on this page anybody clicks.
+   Since CPR-11 it is a real <a href> rather than a button: a run has its own
+   address, so middle-click, copy-link and open-in-new-tab all have to work. */
+ul.sessions a.row {
   display: block;
   width: 100%;
-  border: 0;
-  background: none;
   padding: 0;
-  font: inherit;
   color: inherit;
-  text-align: left;
-  cursor: pointer;
+  text-decoration: none;
 }
 
-ul.sessions button.row:hover strong {
+ul.sessions a.row:hover strong {
   text-decoration: underline;
+}
+
+/* A run that stopped without finishing is marked in the list as well as on
+   its own page, because the list is where somebody notices. */
+ul.sessions li.incomplete {
+  border-left: 2px solid var(--error-line);
+  padding-left: 0.5rem;
 }
 
 /* A running agent is the one state worth seeing across a list at a glance. */
@@ -880,4 +883,105 @@ ul.sessions button.row:hover strong {
    did: one is the product answering, the rest is the run. */
 .timeline li.context {
   color: var(--accent);
+}
+
+
+/* ── The session detail page (CPR-11, ADR-0077) ───────────────────────── */
+
+/* The filter row wraps rather than scrolls: six controls on a narrow screen
+   is two rows of three, and a horizontal scrollbar over form controls is a
+   filter nobody finds. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  align-items: flex-end;
+  margin: 0.6rem 0 1rem 0;
+}
+
+.filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.run-summary {
+  margin-bottom: 1.2rem;
+}
+
+/* The facts about a run, as a definition list: the pairing is the meaning,
+   and a table would be a grid of two columns pretending to be data. */
+dl.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0.6rem 0 0 0;
+}
+
+dl.facts dt {
+  color: var(--muted);
+}
+
+dl.facts dd {
+  margin: 0;
+}
+
+/* A warning banner is the error tone without the alert role: the run already
+   happened, and there is nothing here for the reader to fix in the page. */
+.banner.warn {
+  background: var(--error-bg);
+  border: 1px solid var(--error-line);
+}
+
+.timeline ol.entries {
+  font-size: 0.92rem;
+}
+
+.timeline li.entry {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+/* A warning is the one family a reader must not have to go looking for. */
+.timeline li.entry.warning {
+  border-left: 2px solid var(--error-line);
+  padding-left: 0.5rem;
+}
+
+/* And an entry that did not arrive live is marked in place, because a
+   transcript with one recovered hour in the middle reads perfectly plausibly
+   until somebody notices. */
+.timeline li.entry.late {
+  border-left: 2px dashed var(--muted);
+  padding-left: 0.5rem;
+}
+
+.late-note {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+/* A button that reads as a link: the expansion is an inline act, not a form
+   submission, and a full button would out-weigh the line it belongs to. */
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.diagnostic pre {
+  overflow-x: auto;
+  max-height: 22rem;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font-size: 0.85rem;
+}
+
+.diagnostic-closed {
+  font-size: 0.85rem;
 }

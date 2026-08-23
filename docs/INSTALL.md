@@ -392,10 +392,30 @@ section at all. That is a forecast and not a permission: every act is decided
 again at its own seam, and a page you reach anyway will show you the gateway's
 own refusal.
 
-Four items in that navigation — Sessions, Knowledge, New Learnings and Tools —
-have no data behind them yet. Each says so, and says which piece of work
-brings it. They are listed rather than hidden because they are what the
-product is.
+**Sessions** is where you see what your agents have actually been doing.
+Every run an agent opened against this deployment, newest first, narrowed by
+state, project, client, who ran it and a range of days, a page at a time.
+Open one and you get its whole timeline: the messages, tool calls, file
+changes, commands and skill loads in the order the server assigned them,
+beside the context blocks composed for that run. Each entry shows **both
+clocks** — when the client says a thing happened, and when this deployment was
+told — and an entry that did not arrive live is marked with how far behind it
+was, because the agent clients here spool to disk when the gateway is
+unreachable and flush later. An adapter warning gets a banner and a mark in
+place. A run that never finished says which way it stopped and, when the
+client said so, why.
+
+Raw event payloads are **not** shown by default: a timeline says a message was
+sent and summarises it, and the payload is what was actually said. Expanding
+one takes `session.diagnostics` at that run's scope — a separate authority
+from reading the timeline, so a team can follow what its agents did without
+handing everybody a transcript of everybody's prompts. Where you hold it, each
+entry gets a *Show raw payload* control; where you do not, the page says which
+role it takes.
+
+Three items in that navigation — Knowledge, New Learnings and Tools — have no
+data behind them yet. Each says so, and says which piece of work brings it.
+They are listed rather than hidden because they are what the product is.
 
 Signing in needs a **key plane**, because a console session seals its tokens
 under the deployment's encryption key (TEN-4). `init` mints one at

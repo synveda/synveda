@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Synveda",
-    "description": "Governed organisational memory and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface: `/v1/me`, the workspace, project and repository planes (CPR-4), the access plane — members, groups, grants and invitations (CPR-5), and the scope admin plane (CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants), and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, append events, end, timeline, and the context-run endpoint). The rest of the `/v1` surface — observe, inject, recall, proposals, channels, the registries and the older admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`. Appending session events is the one exception, and it is idempotent by a finer unit: each event carries the client's own `client_event_id`, unique within its session, so a redelivered batch appends what is new and reports `duplicate` for the rest.\n\n**Identity.** No request body on this surface accepts a tenant or an acting principal. Both are resolved from the bearer credential; a body naming either is refused rather than ignored.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
+    "description": "Governed organisational memory and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface: `/v1/me`, the workspace, project and repository planes (CPR-4), the access plane — members, groups, grants and invitations (CPR-5), and the scope admin plane (CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants), and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, append events, end, timeline, and the context-run endpoint), with CPR-11's paginated and filtered listing and its diagnostic expansion of one event. The rest of the `/v1` surface — observe, inject, recall, proposals, channels, the registries and the older admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`. Appending session events is the one exception, and it is idempotent by a finer unit: each event carries the client's own `client_event_id`, unique within its session, so a redelivered batch appends what is new and reports `duplicate` for the rest.\n\n**Identity.** No request body on this surface accepts a tenant or an acting principal. Both are resolved from the bearer credential; a body naming either is refused rather than ignored.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
     "license": {
       "name": "Proprietary"
     },
@@ -1603,6 +1603,53 @@
             }
           },
           {
+            "name": "client_name",
+            "in": "query",
+            "description": "Only runs opened by this agent client, matched exactly — `claude-code`,\n`zed`, `mcp`. The label the client named itself with, never a prefix.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "principal_id",
+            "in": "query",
+            "description": "Only runs opened by this token subject.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "started_after",
+            "in": "query",
+            "description": "Only runs started at or after this instant (RFC 3339).",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "started_before",
+            "in": "query",
+            "description": "Only runs started strictly before this instant (RFC 3339).\n\nHalf-open with `started_after`, so two adjacent days cover every run\nexactly once rather than sharing the one that started at midnight.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's `next_cursor`. Opaque — pass it back unchanged.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "description": "How many rows to serve: 1–200, default 50.",
@@ -2079,6 +2126,73 @@
           },
           "409": {
             "description": "The session is closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/events/{event_id}": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "`GET /v1/sessions/{session_id}/events/{event_id}` — the diagnostic\nexpansion (CPR-11, ADR-0077 decision 3).",
+        "description": "# Why this is not part of the timeline\n\nA timeline says *that* a message was sent and summarises it in a line. This\nserves the **payload**: what the person and the agent actually said, byte\nfor byte, the prompt, the tool arguments, the diff. Those are different\ndisclosures, so they are different authorities — `SessionDiagnostics`\nrather than `SessionRead` — and a pack can let a project's members follow\nwhat their agents have been doing without handing every one of them a\ntranscript of everybody's prompts.\n\nOne event per request, deliberately. A bulk \"give me every payload\" route\nwould be the same disclosure with a better ergonomics story, and the shape\nthis has is the shape a reader actually uses: they read a timeline, one\nentry looks wrong, they expand that entry.\n\nThe ownership check runs first, as everywhere on this plane: an event id\nfrom another session — or another tenant — is a 404 before any decision, so\na refusal cannot be used to confirm that a run exists.",
+        "operationId": "get_session_event",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "The session's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "path",
+            "description": "The event's id, from a timeline entry",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The event, payload included",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionEventView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `session.diagnostics`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session or event in this tenant",
             "content": {
               "application/json": {
                 "schema": {
@@ -3411,6 +3525,13 @@
           "status"
         ],
         "properties": {
+          "end_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "**Why** it stopped, in the client's words — `hook timed out`, `user\ncancelled`, `context window exhausted` (CPR-11, ADR-0077 decision 4).\n\nDistinct from `task_summary`, which is what the run was *about*: the\nstatus says a run failed, this says what failed. Free text, because the\nvocabulary belongs to the harness."
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -4593,22 +4714,24 @@
       },
       "SessionList": {
         "type": "object",
-        "description": "The session listing.",
+        "description": "The session listing, one page of it.",
         "required": [
-          "sessions",
-          "truncated"
+          "sessions"
         ],
         "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the next page resumes, or absent when this is the last one\n(CPR-11, ADR-0077 decision 1).\n\nOpaque: pass it back as `cursor` and nothing else. It replaced CPR-10's\n`truncated` boolean, which could say *that* an answer was cut short and\ncould not say where to continue — so a reader who wanted the run from\nlast Tuesday had no way to reach it.\n\nA page may be **empty and still carry one**: rows are filtered by the\nPDP after they are scanned, so a page whose candidates this caller may\nnot read serves nothing and still says where to continue. That is the\nhonest shape — the alternative is a server that keeps scanning until it\nfills a page, which is unbounded work driven by somebody else's rows."
+          },
           "sessions": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SessionView"
             },
             "description": "The sessions this caller may read, newest first."
-          },
-          "truncated": {
-            "type": "boolean",
-            "description": "Whether there are more than this answer carries.\n\nNamed rather than hidden. A recency-ordered feed can honestly serve\n\"the newest N\"; what it must never do is serve them as though they were\nall of them (ADR-0058 decision 5's rule, one plane over)."
           }
         }
       },
@@ -4664,6 +4787,13 @@
             "type": "string",
             "format": "date-time",
             "description": "When the row was created."
+          },
+          "end_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it stopped, in the client's words — `status` says a run failed,\nthis says the hook timed out (CPR-11, ADR-0077 decision 4)."
           },
           "ended_at": {
             "type": [
@@ -4826,6 +4956,7 @@
           "kind",
           "id",
           "at",
+          "delayed",
           "summary"
         ],
         "properties": {
@@ -4833,6 +4964,10 @@
             "type": "string",
             "format": "date-time",
             "description": "When it happened: an event's `occurred_at`, a run's `created_at`."
+          },
+          "delayed": {
+            "type": "boolean",
+            "description": "Whether the gap between the two exceeded a minute.\n\nComputed rather than left to each client, so \"this did not arrive live\"\nmeans one thing across the console, the CLI and anything else that\nreads a timeline. It is what a locally spooled batch, a replay after a\ncrash, and a machine with a wrong clock all look like from here — the\nserver cannot tell those three apart and does not pretend to."
           },
           "event_type": {
             "type": [
@@ -4848,6 +4983,14 @@
           "kind": {
             "type": "string",
             "description": "`event` or `context_run` — which table this came from."
+          },
+          "received_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this deployment received it, for an event (CPR-11, ADR-0077\ndecision 2).\n\nThe *other* clock. `at` is the client's statement about when the thing\nhappened; this is when the gateway was told. A live turn has them\nwithin a second of each other; an adapter that spooled to disk while\nthe network was down delivers an hour of them at once, and only one of\nthe two instants is a clock this deployment controls.\n\nAbsent for a context run: a composition happens *here*, so its two\ninstants would be the same number written twice."
           },
           "sequence": {
             "type": [

@@ -271,7 +271,15 @@ namespace Synveda {
     // thing for a `Session` as for a `Scope`, because a session is parented to
     // the scope it runs at. The one asymmetric rule — the membership floor —
     // is written as two clauses in each pack, and says so.
-    action SessionRead, SessionWrite
+    //
+    // `SessionDiagnostics` (CPR-11, ADR-0077 decision 3) is the third and it
+    // is deliberately not folded into `SessionRead`: a timeline says a message
+    // was sent and summarises it in a line, and a **payload** is what the
+    // agent and the person actually said, byte for byte. A pack must be able
+    // to let a project's members follow what their agents have been doing
+    // without handing every one of them everybody's prompts. It rides the same
+    // resource union for the same reason the other two do.
+    action SessionRead, SessionWrite, SessionDiagnostics
         appliesTo {
             principal: [Principal],
             resource: [Scope, Session],

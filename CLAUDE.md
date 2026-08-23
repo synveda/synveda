@@ -109,8 +109,9 @@ either.** To refresh both: `SYNVEDA_WRITE_OPENAPI=1 cargo test -p
 synveda-gateway --test openapi` then `node scripts/generate-api-types.mjs`.
 The document covers the context-platform plane — `/v1/me`,
 workspaces/projects/repositories, the access plane, and the six admin
-scope routes (32 operations) — and says so in its own description; the
-rest of `/v1` joins it at Prompt 19. Since CPR-8 the generator also emits
+scope routes, and the session plane (**40 operations** since CPR-11) — and
+says so in its own description; the rest of `/v1` joins it at Prompt 19.
+Since CPR-8 the generator also emits
 the **runtime** path/method table beside the type table and marks the eight
 operations whose document requires an `Idempotency-Key`, so the console's
 client requires the key at compile time and no hand-written copy of a path
@@ -185,8 +186,10 @@ reachable by somebody who is not holding a terminal — and **CPR-9 on
 first prompt asked to check its predecessors rather than build on them — and
 **CPR-10 on 2026-08-23**, making it **107 with 74 delivered**: the session
 ledger, the first of Stage B and the prompt that makes what an agent *does* a
-governed record. Prompts 11–33 of its programme are filed by the prompts that
-run them, so this number will keep moving.)
+governed record — and **CPR-11 on 2026-08-24**, making it **108 with 75
+delivered**: the session product experience, which turns that record into one
+somebody with a question can use. Prompts 12–33 of its programme are filed by
+the prompts that run them, so this number will keep moving.)
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and
@@ -227,7 +230,28 @@ context run and can never reorder a transcript.
 endpoint and calls the existing retrieval engine; Prompt 18 adds
 explainability behind it without changing it. The old `/v1/observe`,
 `/v1/inject` and `/v1/recall` are **untouched** and nothing bridges them in
-either direction: Prompt 11 re-cuts the observe path and deletes the string.
+either direction. CPR-10 forecast that Prompt 11 would re-cut the observe path
+and delete `observe_events.session_id`; **it did not** — Prompt 11 as it
+arrived is CPR-11, the session product experience — so the observe re-cut is
+**open and unscheduled**, recorded in §10 of the implementation document.
+
+Since CPR-11 that record is **usable** (ADR-0077). `GET /v1/sessions` is
+keyset-paginated — `cursor` in, `next_cursor` out, and `truncated` **deleted**
+rather than kept beside it — and the cursor follows the **last candidate a
+page considered**, not the last row it served, because rows are decided one at
+a time after they are scanned: a page may therefore be empty and still carry a
+cursor. Four more filters (`client_name`, `principal_id` and a half-open
+`started_after`/`started_before`). Every timeline event entry carries
+`received_at` beside the client's `occurred_at` and a server-computed
+`delayed`, which is **one flag and not three** — a spooled batch, a replay
+after a crash and a wrong clock produce the same two instants, so the server
+reports the gap and names no cause. A raw payload is its own authority:
+`GET /v1/sessions/{id}/events/{event_id}` under **`SessionDiagnostics`**,
+strictly narrower than each pack's own `SessionRead` (**packs @19 → @20**), and
+the chain records which event was expanded and never what was in it. A close
+carries an **`end_reason`** (migration `0045`), which is not `task_summary`.
+And a run has an **address**: `/console/sessions/{id}`, reached by one level of
+`:param` in the console's route table.
 
 Phase 3 was reordered on 2026-08-04 by demo-readiness (see the Sequencing
 note in SYNVEDA_FEATURES.md): the demo block leads — OPS-1, CNSL-1, ADPT-2,
@@ -286,10 +310,10 @@ onboarding** — workspace, project, repository, agent client, connection
 instructions, connection check. The personal/team question **seeds** a policy
 pack and a membership posture and records **no edition anywhere** (ADR-0068
 decision 1). No npm dependency was added: routing and the cache are written
-in-repo. Four primary pages have no plane yet (Sessions, Knowledge, New
-Learnings, Tools) and say so; seven surfaces still call hand-written paths in
-`console/src/api.mts` until Prompt 19 puts the rest of `/v1` on the
-contract.
+in-repo. Three primary pages have no plane yet (Knowledge, New Learnings,
+Tools) and say so — Sessions got one at CPR-10 and its product surface at
+CPR-11; seven surfaces still call hand-written paths in `console/src/api.mts`
+until Prompt 19 puts the rest of `/v1` on the contract.
 
 Phase demo goal: Entra/Okta live, spec-compliant governed skills into Claude
 Code + Cursor, LongMemEval scores published, Helm install.

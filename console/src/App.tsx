@@ -33,7 +33,7 @@ import {
   type Selection,
   type SelectionStore,
 } from "./selection.mjs";
-import { hrefOf, offersRoute, routeOf, type RouteId } from "./routes.mjs";
+import { hrefOf, offersRoute, routeOf, type RouteMatch } from "./routes.mjs";
 import type { MeView } from "./generated/api.js";
 
 import { Home } from "./Home.js";
@@ -41,6 +41,7 @@ import { Onboarding } from "./Onboarding.js";
 import { People } from "./People.js";
 import { Planned } from "./Planned.js";
 import { Reviews } from "./Reviews.js";
+import { Session } from "./Session.js";
 import { Sessions } from "./Sessions.js";
 import { Scopes } from "./Scopes.js";
 import { Settings } from "./Settings.js";
@@ -113,7 +114,7 @@ export function App() {
  * is no answer yet" is a hook that carries a null branch through every
  * line of it.
  */
-function SignedIn({ me, route }: { me: MeView; route: RouteId | null }) {
+function SignedIn({ me, route }: { me: MeView; route: RouteMatch | null }) {
   const [preference, setPreference] = useState<Selection>(() => readStored(selectionStore()));
   const selection = reconcile(preference, me);
 
@@ -153,14 +154,14 @@ function SignedIn({ me, route }: { me: MeView; route: RouteId | null }) {
   const needsOnboarding =
     me.onboarding.state === "needs_workspace" || me.onboarding.state === "needs_project";
   useEffect(() => {
-    if (needsOnboarding && route !== "welcome") {
+    if (needsOnboarding && route?.id !== "welcome") {
       navigate(hrefOf("welcome"), { replace: true });
     }
-  }, [needsOnboarding, route]);
+  }, [needsOnboarding, route?.id]);
 
   return (
     <AppProvider value={context}>
-      <Shell route={route} context={context}>
+      <Shell route={route?.id ?? null} context={context}>
         <Page route={route} me={me} />
       </Shell>
     </AppProvider>
@@ -173,7 +174,7 @@ function SignedIn({ me, route }: { me: MeView; route: RouteId | null }) {
  * A `switch` over a closed union, so a route added to `routes.mts` without
  * a page here is a compile error rather than a blank screen.
  */
-function Page({ route, me }: { route: RouteId | null; me: MeView }) {
+function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
   if (route === null) {
     return <NotFound />;
   }
@@ -181,10 +182,10 @@ function Page({ route, me }: { route: RouteId | null; me: MeView }) {
   // decides what to render, the page's own calls still meet the gateway's
   // decision, and a reader who gets past a stale forecast sees a refusal
   // from the act rather than a blank page.
-  if (!offersRoute(routeOf(route), me.capabilities.actions)) {
-    return <NotOffered route={route} />;
+  if (!offersRoute(routeOf(route.id), me.capabilities.actions)) {
+    return <NotOffered route={route.id} />;
   }
-  switch (route) {
+  switch (route.id) {
     case "home":
       return <Home />;
     case "welcome":
@@ -197,10 +198,14 @@ function Page({ route, me }: { route: RouteId | null; me: MeView }) {
       return <Skills />;
     case "sessions":
       return <Sessions />;
+    case "session":
+      // The id comes from the URL, so a refresh and a pasted link land on
+      // the same run. `matchRoute` cannot produce this route without it.
+      return <Session sessionId={route.params.session_id as string} />;
     case "knowledge":
     case "learnings":
     case "tools":
-      return <Planned route={route} />;
+      return <Planned route={route.id} />;
     case "reviews":
       return <Reviews />;
     case "scopes":

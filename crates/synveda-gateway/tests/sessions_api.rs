@@ -812,7 +812,10 @@ async fn a_project_member_sees_that_project_s_runs_and_no_others() {
         vec![mine["id"].as_str().expect("id")],
         "exactly the run in the project they hold: {listed}"
     );
-    assert_eq!(listed["truncated"], false);
+    assert!(
+        listed["next_cursor"].is_null(),
+        "one page held everything: {listed}"
+    );
 
     // And the per-object route agrees with the listing, both ways round —
     // the disagreement CPR-9 found on the workspace plane, asserted absent
@@ -1270,7 +1273,7 @@ async fn a_tenant_with_no_scopes_is_answered_rather_than_errored() {
     let (status, listed) = call(&app, "GET", "/v1/sessions", Some(&token), None, None).await;
     assert_eq!(status, StatusCode::OK, "{listed}");
     assert!(listed["sessions"].as_array().expect("sessions").is_empty());
-    assert_eq!(listed["truncated"], false);
+    assert!(listed["next_cursor"].is_null());
 }
 
 /// The listing's filters narrow, and the caller's `limit` is bounded.
@@ -1344,7 +1347,10 @@ async fn the_listing_filters_narrow_and_the_limit_is_bounded() {
     assert_eq!(count(&abandoned), 1);
     assert_eq!(abandoned["sessions"][0]["client_name"], "cursor");
 
-    // A `limit` under the number available truncates and **says so**.
+    // A `limit` under the number available fills one page and **says where
+    // the next one starts** — CPR-11 replaced CPR-10's `truncated`, which
+    // could say that an answer was cut short and could not say where to
+    // continue.
     let (_, limited) = call(
         &app,
         "GET",
@@ -1355,7 +1361,11 @@ async fn the_listing_filters_narrow_and_the_limit_is_bounded() {
     )
     .await;
     assert_eq!(count(&limited), 2);
-    assert_eq!(limited["truncated"], true);
+    assert!(limited["next_cursor"].is_string(), "{limited}");
+    assert!(
+        limited.get("truncated").is_none(),
+        "the boolean it replaced is gone rather than kept beside it: {limited}"
+    );
 
     // Out-of-range and unknown values are refused rather than clamped: a
     // silently clamped limit is a client bug nobody ever finds.
@@ -1419,4 +1429,672 @@ async fn a_run_at_somebody_s_own_scope_is_not_the_administrator_s_to_read() {
         "an administrator is offered nothing at somebody else's own scope: {probe}"
     );
     assert_eq!(node["actions"]["session.write"], false, "{probe}");
+}
+
+// ── CPR-11: the product surface over the ledger (ADR-0077) ───────────────────
+
+/// Every page of a listing is reachable, and the walk terminates.
+///
+/// This is the property CPR-10 could not offer: `truncated` said *that* an
+/// answer was cut short and never where to continue, so a run from last
+/// Tuesday was unreachable through the API. The assertion is deliberately the
+/// whole walk rather than one hop — a cursor that repeats a row, skips one, or
+/// never clears is a bug that only a full traversal shows.
+#[tokio::test]
+async fn a_listing_pages_through_every_run_exactly_once() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (ws, _) = seed_place(&app, &token, "paging").await;
+
+    let mut opened: Vec<String> = Vec::new();
+    for n in 0..5 {
+        let (status, session) = open_session(
+            &app,
+            &token,
+            &format!("page-{n}"),
+            json!({"workspace_id": ws, "client_name": "claude-code"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{session}");
+        opened.push(session["id"].as_str().expect("id").to_owned());
+    }
+
+    let mut seen: Vec<String> = Vec::new();
+    let mut cursor: Option<String> = None;
+    // Bounded: a walk that cannot terminate must fail this test rather than
+    // hang the suite.
+    for _ in 0..10 {
+        let path = match &cursor {
+            Some(cursor) => format!("/v1/sessions?limit=2&cursor={cursor}"),
+            None => "/v1/sessions?limit=2".to_owned(),
+        };
+        let (status, page) = call(&app, "GET", &path, Some(&token), None, None).await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        for session in page["sessions"].as_array().expect("sessions") {
+            seen.push(session["id"].as_str().expect("id").to_owned());
+        }
+        match page["next_cursor"].as_str() {
+            Some(next) => cursor = Some(next.to_owned()),
+            None => {
+                cursor = None;
+                break;
+            }
+        }
+    }
+    assert!(cursor.is_none(), "the walk ended rather than running out");
+
+    // Every run, once, newest first — which is the reverse of the order they
+    // were opened in.
+    let mut unique = seen.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), seen.len(), "a row was served twice: {seen:?}");
+    opened.reverse();
+    assert_eq!(seen, opened, "every run, newest first");
+
+    // A cursor this listing did not issue is refused rather than silently
+    // restarting from the newest row, which is how an infinite scroll becomes
+    // one nobody notices.
+    for bad in ["not-base64!!", "YWJj", ""] {
+        let (status, error) = call(
+            &app,
+            "GET",
+            &format!("/v1/sessions?cursor={bad}"),
+            Some(&token),
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "cursor={bad}: {error}");
+    }
+}
+
+/// The four filters this surface adds, and the half-open date range.
+#[tokio::test]
+async fn the_listing_narrows_by_client_by_who_and_by_day() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (ws, _) = seed_place(&app, &token, "narrowing").await;
+
+    // A second principal, so the `principal_id` filter has something to
+    // separate. They need a grant to open a run at all.
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin tx");
+    let root = synveda_store::scopes::ensure_tenant_root(&mut tx, tenant_id)
+        .await
+        .expect("the tenant root");
+    grant(&mut tx, tenant_id, root.id, MEMBER, RoleKey::Member).await;
+    tx.commit().await.expect("commit grant");
+    let member = issue(MEMBER, tenant_id);
+
+    for (key, token, client) in [
+        ("narrow-1", &token, "claude-code"),
+        ("narrow-2", &token, "zed"),
+        ("narrow-3", &member, "claude-code"),
+    ] {
+        let (status, session) = open_session(
+            &app,
+            token,
+            key,
+            json!({"workspace_id": ws, "client_name": client}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{session}");
+    }
+
+    let count = |listed: &Value| listed["sessions"].as_array().expect("sessions").len();
+
+    let (_, by_client) = call(
+        &app,
+        "GET",
+        "/v1/sessions?client_name=zed",
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(count(&by_client), 1);
+    assert_eq!(by_client["sessions"][0]["client_name"], "zed");
+
+    // An exact match, never a prefix: `zed` and `zed-nightly` are two clients.
+    let (_, prefix) = call(
+        &app,
+        "GET",
+        "/v1/sessions?client_name=ze",
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(count(&prefix), 0);
+
+    let (_, by_who) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions?principal_id={MEMBER}"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(count(&by_who), 1);
+    assert_eq!(by_who["sessions"][0]["principal_id"], MEMBER);
+
+    // The day these runs were opened is today, and the range is half-open —
+    // so a window that ends at this instant excludes them and one that ends
+    // tomorrow includes them.
+    let now = chrono::Utc::now();
+    let tomorrow = now + chrono::Duration::days(1);
+    let yesterday = now - chrono::Duration::days(1);
+    let (_, windowed) = call(
+        &app,
+        "GET",
+        &format!(
+            "/v1/sessions?started_after={}&started_before={}",
+            yesterday.to_rfc3339(),
+            tomorrow.to_rfc3339()
+        ),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(count(&windowed), 3);
+
+    let (_, before_them) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions?started_before={}", yesterday.to_rfc3339()),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(count(&before_them), 0);
+
+    // A window that ends before it starts is refused rather than answered
+    // with an empty list, which would read as "no runs" instead of "that is
+    // not a window".
+    let (status, error) = call(
+        &app,
+        "GET",
+        &format!(
+            "/v1/sessions?started_after={}&started_before={}",
+            tomorrow.to_rfc3339(),
+            yesterday.to_rfc3339()
+        ),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+}
+
+/// A run says **how** it ended, not only that it did — and the reason reaches
+/// the chain.
+#[tokio::test]
+async fn a_close_carries_a_reason_and_the_chain_records_it() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (ws, _) = seed_place(&app, &token, "reasons").await;
+    let (_, session) = open_session(
+        &app,
+        &token,
+        "reason-1",
+        json!({"workspace_id": ws, "client_name": "claude-code"}),
+    )
+    .await;
+    let id = session["id"].as_str().expect("id").to_owned();
+    assert!(
+        session["end_reason"].is_null(),
+        "an open run has no reason yet: {session}"
+    );
+
+    let (status, closed) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/end"),
+        Some(&token),
+        None,
+        Some(json!({"status": "failed", "end_reason": "the SessionEnd hook timed out"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(closed["status"], "failed");
+    assert_eq!(closed["end_reason"], "the SessionEnd hook timed out");
+
+    // It survives a re-read, and it is on the chain: "why did that run fail"
+    // is the question an auditor asks and the status alone cannot answer.
+    let (_, reread) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{id}"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(reread["end_reason"], "the SessionEnd hook timed out");
+    let chained = newest_payload(&state, tenant_id, "session.ended").await;
+    assert_eq!(chained["end_reason"], "the SessionEnd hook timed out");
+    assert_eq!(chained["to"], "failed");
+
+    // A reason over its bound is refused rather than truncated: a silently
+    // shortened explanation is worse than none.
+    let (_, another) = open_session(
+        &app,
+        &token,
+        "reason-2",
+        json!({"workspace_id": ws, "client_name": "claude-code"}),
+    )
+    .await;
+    let (status, error) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{}/end", another["id"].as_str().expect("id")),
+        Some(&token),
+        None,
+        Some(json!({"status": "failed", "end_reason": "x".repeat(501)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+}
+
+/// The timeline carries **both clocks**, and says which entries did not
+/// arrive live.
+///
+/// The reason this is on the server rather than left to each client: a spooled
+/// batch, a replay after a crash and a machine with a wrong clock all look
+/// identical from here, and one definition of "late" is what keeps the
+/// console, the CLI and anything else that reads a timeline agreeing about
+/// what they are looking at.
+#[tokio::test]
+async fn a_timeline_reports_both_clocks_and_marks_what_arrived_late() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (ws, _) = seed_place(&app, &token, "clocks").await;
+    let (_, session) = open_session(
+        &app,
+        &token,
+        "clocks-1",
+        json!({"workspace_id": ws, "client_name": "claude-code"}),
+    )
+    .await;
+    let id = session["id"].as_str().expect("id").to_owned();
+
+    // One event that happened just now, and one that happened two hours ago
+    // and is only being delivered now — which is exactly what an adapter
+    // flushing a spool sends.
+    let now = chrono::Utc::now();
+    let long_ago = now - chrono::Duration::hours(2);
+    let (status, appended) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/events"),
+        Some(&token),
+        None,
+        Some(json!({"events": [
+            at_event("live", "message.user", &now.to_rfc3339(), json!({"text": "fix the rounding"})),
+            at_event(
+                "spooled",
+                "message.assistant",
+                &long_ago.to_rfc3339(),
+                json!({"text": "here is the patch"}),
+            ),
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{appended}");
+
+    let (status, timeline) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{id}/timeline"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timeline}");
+    let entries = timeline["entries"].as_array().expect("entries");
+    assert_eq!(entries.len(), 2);
+    for entry in entries {
+        assert!(
+            entry["received_at"].is_string(),
+            "every event carries the second clock: {entry}"
+        );
+    }
+    // Ordered by `sequence`, not by instant — the merge's own property, and
+    // the reason the delivered-two-hours-ago event is second.
+    assert!(!entries[0]["delayed"].as_bool().expect("delayed"));
+    assert!(
+        entries[1]["delayed"].as_bool().expect("delayed"),
+        "an event two hours behind its own timestamp did not arrive live: {}",
+        entries[1]
+    );
+
+    // A context run has one clock and cannot be late: it is composed here.
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/context-runs"),
+        Some(&token),
+        Some("clocks-ctx"),
+        Some(json!({"query": "the ledger"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, timeline) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{id}/timeline"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    let run = timeline["entries"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .find(|entry| entry["kind"] == "context_run")
+        .expect("the context run");
+    assert!(run["received_at"].is_null(), "{run}");
+    assert_eq!(run["delayed"], false);
+}
+
+/// An adapter warning is an event like any other and is **counted** like one,
+/// so a reader can see that a client could not do something without reading
+/// every line of the run.
+#[tokio::test]
+async fn a_failed_delivery_is_a_warning_the_timeline_counts() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (ws, _) = seed_place(&app, &token, "warnings").await;
+    let (_, session) = open_session(
+        &app,
+        &token,
+        "warn-1",
+        json!({"workspace_id": ws, "client_name": "claude-code"}),
+    )
+    .await;
+    let id = session["id"].as_str().expect("id").to_owned();
+
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/events"),
+        Some(&token),
+        None,
+        Some(json!({"events": [
+            event("w-1", "adapter.warning", json!({
+                "message": "could not deliver 4 events; spooled to disk",
+            })),
+            event("m-1", "message.user", json!({"text": "carry on"})),
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, timeline) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{id}/timeline"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(timeline["event_counts"]["adapter.warning"], 1);
+    let warning = timeline["entries"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .find(|entry| entry["event_type"] == "adapter.warning")
+        .expect("the warning");
+    // The summary carries the client's own sentence: the console renders it
+    // and does not compose a second one.
+    assert!(
+        warning["summary"]
+            .as_str()
+            .expect("summary")
+            .contains("could not deliver 4 events"),
+        "{warning}"
+    );
+}
+
+/// A raw payload is a different disclosure from a timeline, so it is a
+/// different authority — and the split is asserted with **one caller** who
+/// holds one and not the other.
+#[tokio::test]
+async fn a_payload_takes_diagnostics_and_a_timeline_does_not() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (ws, pr) = seed_place(&app, &token, "diagnostics").await;
+    let (_, session) = open_session(
+        &app,
+        &token,
+        "diag-1",
+        json!({"workspace_id": ws, "project_id": pr, "client_name": "claude-code"}),
+    )
+    .await;
+    let id = session["id"].as_str().expect("id").to_owned();
+    let (status, appended) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{id}/events"),
+        Some(&token),
+        None,
+        Some(json!({"events": [
+            event("d-1", "message.user", json!({"text": "the API key is hunter2"})),
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{appended}");
+    let event_id = appended["events"][0]["event"]["id"]
+        .as_str()
+        .expect("event id")
+        .to_owned();
+
+    // The member holds `member` at the project and nothing above it. Under the
+    // shipped `regulated-strict` pack that reads a timeline and does **not**
+    // read a payload, which is the whole of what this action is for.
+    let (_, project) = call(
+        &app,
+        "GET",
+        &format!("/v1/projects/{pr}"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    let scope_id: synveda_types::ScopeId = project["scope_id"]
+        .as_str()
+        .expect("scope id")
+        .parse()
+        .expect("parse scope id");
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin tx");
+    grant(&mut tx, tenant_id, scope_id, MEMBER, RoleKey::Member).await;
+    tx.commit().await.expect("commit grant");
+    let member = issue(MEMBER, tenant_id);
+
+    let (status, timeline) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{id}/timeline"),
+        Some(&member),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the member reads the run: {timeline}"
+    );
+    // And the timeline it reads carries no payload at all — a summary is not
+    // the content, and this is the assertion that would fail if somebody put
+    // one on the entry "for convenience".
+    for entry in timeline["entries"].as_array().expect("entries") {
+        assert!(entry.get("payload").is_none(), "{entry}");
+        assert!(
+            !entry.to_string().contains("hunter2"),
+            "a timeline is not a transcript: {entry}"
+        );
+    }
+
+    let (status, refusal) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{id}/events/{event_id}"),
+        Some(&member),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refusal}");
+    assert_eq!(refusal["action"], "session.diagnostics");
+
+    // The administrator holds it, and gets the bytes.
+    let (status, expanded) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{id}/events/{event_id}"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{expanded}");
+    assert_eq!(expanded["payload"]["text"], "the API key is hunter2");
+    assert_eq!(expanded["client_event_id"], "d-1");
+
+    // The chain says which event was expanded and **never what was in it**:
+    // an audit log that copied every prompt somebody read would be a second
+    // transcript store with weaker access rules than the first.
+    let chain = sqlx::query_scalar::<_, Value>(
+        "select payload from audit_log where tenant_id = $1 order by seq",
+    )
+    .bind(tenant_id.as_uuid())
+    .fetch_all(&state.pool)
+    .await
+    .expect("read the chain");
+    let whole = serde_json::to_string(&chain).expect("serialise");
+    assert!(!whole.contains("hunter2"), "the chain carries no payload");
+    assert!(
+        whole.contains("session.event.diagnostic"),
+        "and it does record that somebody expanded one"
+    );
+}
+
+/// An event id from another run, another tenant, or nowhere at all is the
+/// same 404 — the ownership check before the decision, on the newest route.
+#[tokio::test]
+async fn an_event_of_another_run_is_missing_rather_than_refused() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (ws, _) = seed_place(&app, &token, "ownership").await;
+
+    let mut ids = Vec::new();
+    for n in 0..2 {
+        let (_, session) = open_session(
+            &app,
+            &token,
+            &format!("own-{n}"),
+            json!({"workspace_id": ws, "client_name": "claude-code"}),
+        )
+        .await;
+        let id = session["id"].as_str().expect("id").to_owned();
+        let (status, appended) = call(
+            &app,
+            "POST",
+            &format!("/v1/sessions/{id}/events"),
+            Some(&token),
+            None,
+            Some(json!({"events": [event(&format!("e-{n}"), "message.user", json!({}))]})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        ids.push((
+            id,
+            appended["events"][0]["event"]["id"]
+                .as_str()
+                .expect("event id")
+                .to_owned(),
+        ));
+    }
+
+    // The first run's event, asked for under the second run's id.
+    let (status, error) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{}/events/{}", ids[1].0, ids[0].1),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{error}");
+
+    // And an id nobody ever minted answers identically, so the route is not
+    // an existence oracle for another run's ledger.
+    let (fictional_status, fictional) = call(
+        &app,
+        "GET",
+        &format!(
+            "/v1/sessions/{}/events/{}",
+            ids[1].0,
+            synveda_types::SessionEventId::new()
+        ),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(fictional_status, status);
+    assert_eq!(fictional["kind"], error["kind"]);
+
+    // A caller who holds nothing is refused on this route like every other.
+    let (status, refusal) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{}/events/{}", ids[0].0, ids[0].1),
+        Some(&issue(OUTSIDER, tenant_id)),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refusal}");
 }

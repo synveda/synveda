@@ -68,6 +68,7 @@ const DECLARED_PATHS: &[&str] = &[
     "/v1/sessions/{session_id}/context-runs",
     "/v1/sessions/{session_id}/end",
     "/v1/sessions/{session_id}/events",
+    "/v1/sessions/{session_id}/events/{event_id}",
     "/v1/sessions/{session_id}/timeline",
     "/v1/workspaces",
     "/v1/workspaces/{workspace_id}",
@@ -315,8 +316,9 @@ fn the_document_is_generatable() {
     }
     assert_eq!(
         operation_ids.len(),
-        39,
-        "CPR-4's twelve, CPR-5's fourteen, CPR-7's six, CPR-10's seven: {operation_ids:?}"
+        40,
+        "CPR-4's twelve, CPR-5's fourteen, CPR-7's six, CPR-10's seven, \
+         CPR-11's one: {operation_ids:?}"
     );
 }
 

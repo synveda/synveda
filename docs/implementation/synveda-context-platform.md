@@ -2159,4 +2159,182 @@ frontend changes, deletions, tests, and the resulting commit hash.
   the 43 Phase-3 demos are still unchanged, for CPR-7's reason.
 - **Commit.** `feat(sessions): add session ledger and runtime API` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by Prompt 11, on Prompt 1's rule.
+- **Commit hash.** `16b83e4249fd47eb2866cd57ac3c2bb5b0e55183`.
+
+### Prompt 11 — The session product experience (CPR-11)
+
+- **Divergence from §9, and from Prompt 10's own forecast.** §9's Prompt 11
+  reads *"Candidate → knowledge promotion through VedaFlow"*; CPR-10's record,
+  CLAUDE.md and `synveda_types::session`'s module note all say Prompt 11
+  re-cuts the observe path and deletes `observe_events.session_id`. **The
+  prompt as it arrived is neither.** It is the session *product* experience:
+  the console surface over CPR-10's ledger, and the API work that surface
+  needs to exist. §9's preamble makes a prompt's own text authoritative, so
+  this is recorded rather than absorbed — and recorded more loudly than the
+  earlier divergences, because this one **leaves a forecast standing in three
+  files**. Two of the three are corrected here rather than left to read as an
+  oversight — CLAUDE.md and `synveda_types::session`'s module note now say the
+  observe re-cut is open and unscheduled. The **third is deliberately left
+  standing**: the same sentence is in `0044_sessions.sql`'s header, and a
+  migration's bytes are its checksum, so correcting a comment there would
+  trade one stale sentence for a `VersionMismatch` on every database that has
+  already run it. CPR-9 made the same call about three unreachable pre-epoch
+  statements, for the same reason, and Prompt 33's squash is where both get
+  cleaned up. CPR-10's entry above is also left exactly as written: a record of
+  what a prompt believed is worth more than a tidy one.
+  **The observe re-cut is unstarted.** `/v1/observe`, `/v1/inject` and
+  `/v1/recall` are untouched, `observe_events.session_id` is still a `text`
+  column, and nothing bridges the two models in either direction.
+- **Implemented.** CPR-10 made a run a governed record. This makes it a record
+  somebody with a question can use: keyset pagination and four more filters, a
+  timeline that reports both clocks, a payload behind its own authority, an end
+  reason, and the console pages over all of it — a filter bar, Load more, and a
+  route per run.
+- **Schema/domain changes.** Migration **`0045_session_end_reason.sql`**, one
+  nullable column, 42 → **43** migrations. The epoch stays at **2**: an
+  addition to a chain nothing has shipped against. `sessions.end_reason`, ≤ 500
+  characters, and a CHECK that forbids one on an `active` row — a reason is
+  part of a close, so a row carrying one while still running would be a state
+  nothing wrote. It is **not** `task_summary`: that is what the run was
+  *about*, set at open; overloading it would make the two indistinguishable the
+  first time a client set both.
+- **API and frontend changes.** 39 → **40** operations, 52 schemas, with
+  `docs/api/openapi.json` and `console/src/generated/api.ts` regenerated from
+  the handlers.
+  - `GET /v1/sessions` — `cursor` in, `next_cursor` out, **`truncated`
+    deleted**. Plus `client_name`, `principal_id`, `started_after`,
+    `started_before`.
+  - `GET /v1/sessions/{id}/timeline` — every event entry gains `received_at`
+    and a server-computed `delayed`.
+  - `GET /v1/sessions/{id}/events/{event_id}` — **new**, behind
+    `SessionDiagnostics`.
+  - `POST /v1/sessions/{id}/end` — takes `end_reason`; the view serves it and
+    the chain carries it.
+  - Console: `Session.tsx` (new), `Sessions.tsx` (re-cut), `sessions.mts`
+    (re-cut), one level of `:param` in `routes.mts`/`Router.tsx`/`App.tsx`, and
+    the styles for both pages.
+- **The cursor follows the last candidate a page considered, not the last row
+  it served.** This is the part worth reading twice. Rows on this plane are
+  decided one at a time against the row (CPR-9), **after** they are scanned. A
+  cursor on the last row *served* would re-scan every denied row between two
+  served ones — and, worse, a page whose candidates were **all** denied would
+  serve nothing, carry no cursor, and end the listing while readable rows sat
+  below it. So `page()` walks the scanned candidates, keeps up to `limit` of
+  them, and returns the key of the last one it looked at. The consequence is a
+  shape clients must handle and the schema states: **a page may be empty and
+  still carry a cursor.** The alternative — keep scanning until the page is
+  full — is unbounded work driven by rows the caller cannot read.
+- **A keyset, not an offset**, and the ordering moved with it: `started_at
+  desc, id desc` rather than `started_at desc, id asc`, so the resume
+  predicate is one row comparison the index can seek to rather than two
+  disjuncts. An offset would skip and repeat whenever a run was opened between
+  two requests, which on a table a fleet of agents writes to all night is every
+  request.
+- **Lateness is one flag and not three.** A locally spooled batch, a replay
+  after a crash and a machine whose clock is an hour out produce **the same two
+  instants**, and the server cannot tell them apart. So `delayed` reports that
+  the gap exceeded a minute and the console reports the gap itself —
+  "recovered or delayed — reached this deployment 1h 30m later" — and neither
+  names a cause. Skew the other way is deliberately not late: a `received_at`
+  earlier than the `occurred_at` it claims is something else, and calling it
+  late would be a second wrong answer on top of the clock's. The threshold
+  lives on the server so that "did not arrive live" means one thing across the
+  console, the CLI and anything else that reads a timeline.
+- **A payload is its own authority.** `SessionDiagnostics` — the fourteenth
+  Cedar action on this programme's planes — because a timeline says *that* a
+  message was sent and a payload is what was said, byte for byte. Permitted in
+  all three packs, **@19 → @20**, and **strictly narrower than each pack's own
+  `SessionRead`**: `regulated-strict` and `standard` take a governance key
+  (`reviewer`, `owner`, `administrator`) where a timeline also admits `viewer`,
+  `curator` and `member`, and `standard` deliberately does **not** extend it by
+  `principal.ambit` — sharing one step outward is a decision about a reading
+  surface, and a neighbouring project's raw prompts are not a default under any
+  pack. `open-collaboration` reads runs tenant-wide *role-free* and requires
+  any grant at all here, so the narrowing is real even there. It is **not** on
+  `base.cedar`'s governance carve-out, so personal-scope privacy reaches it
+  exactly as it reaches the other two, with no new rule.
+  The split is asserted with **one caller holding one half and not the other**
+  (`a_payload_takes_diagnostics_and_a_timeline_does_not`), which is the only
+  form of that assertion that means anything — and the same test walks the
+  timeline asserting no entry carries payload text, which is what fails the day
+  somebody adds one "for convenience".
+- **What the chain carries.** The diagnostic read chains one
+  `authz.decision` naming the event, its type, its sequence and its payload
+  **digest** — and never the payload. An audit log that copied every prompt
+  somebody read would be a second, unbounded transcript store with weaker
+  access rules than the first. Asserted by putting `hunter2` in an event,
+  expanding it, and sweeping the whole chain for the string.
+- **Console.** A run has an address. CPR-8's route table was flat literals;
+  this adds one level of `:param`, `matchRoute` returns `{ id, params }`, and
+  `hrefOf` throws on a placeholder nothing filled rather than emitting a
+  literal `:session_id` that 404s on click. The detail page reads the id out of
+  the address bar and from nowhere else, so Back, refresh and a pasted link all
+  land on the same run. The payload control is offered from the caller's
+  forecast **at that run's own scope** when `/v1/me` reported one — a caller
+  may hold the plane in one project and not another, and the tenant-wide figure
+  would render a control that 403s in half the places it appears. Nothing is
+  fetched until the control is clicked.
+- **Two things the console does that are easy to get wrong.** The accumulated
+  page list is computed **in render** from `seen + this page`, not pushed into
+  state from an effect — an effect that appends runs twice under StrictMode and
+  shows every row twice. And `appendPage` de-duplicates by id, because a reader
+  who clicks Load more twice before the first answer lands sends one cursor
+  twice and is served one page twice.
+- **Deleted.** `SessionList.truncated` — gone from the response, not kept
+  beside `next_cursor`, and a test asserts its absence rather than only
+  `next_cursor`'s presence. `synveda_store::sessions::list`'s ascending
+  tiebreak. CPR-10's expander-based session row (`ul.sessions button.row` and
+  the in-place `Timeline` inside `Sessions.tsx`), replaced by a link and a
+  route. `matchRoute`'s `RouteId | null` return.
+- **Tests.** New in `crates/synveda-gateway/tests/sessions_api.rs` (**7**,
+  21 total) — the whole pagination walk rather than one hop (a cursor that
+  repeats a row, skips one or never clears only shows in a full traversal),
+  the three bad cursors, the four filters with the exact-match and inverted-window
+  cases, the end reason through the API and into the chain and over its bound,
+  both clocks with a two-hour-late event beside a live one and a context run
+  that carries neither, the warning in `event_counts` and in its entry, the
+  payload split with one caller, and an event id from another run answering
+  exactly as a fictional one. New in `console/src/sessions.test.tsx` (**9**) —
+  the six scenarios the prompt names, plus the two empty-list sentences and the
+  Load more affordance, all through `renderToStaticMarkup` over a primed cache
+  so no request is ever made. 12 new derivations in `sessions.test.mts`, the
+  parameterised route in both directions in `routes.test.mts`, and the
+  operation count in `client.test.mts`.
+- **Run record, and it has one honest gap.** `make ci` **PASS** — every step,
+  including `cargo test --workspace` with no `DATABASE_URL` (the step CI
+  actually runs), `fmt`, `clippy -D warnings`, `deny`, `check-deps`,
+  `check-api-types`, `check-backlog` (108 features agree), `check-adr-status`,
+  `check-corpus-licences`, `check-chart-images`, `check-benchmarks`,
+  `check-ann-bench`, `chart-lint`, `eval-check`, `ts-build`,
+  `check-npm-licences` and `ts-test` (console **149/149**, adapter 74/74).
+  `crates/synveda-gateway/tests/sessions_api.rs` against a live Postgres:
+  **21/21**.
+  The DB-backed suite ran **571 passed, 1 failed**, and the one failure is
+  named here rather than smoothed over: **CNSL-2's explorer parity corpus**
+  (`console/fixtures/explorer`), which is a *recording* of what the capability
+  probe serves and now has one more action in it — `session.diagnostics`, from
+  `Action::PROBED_AT_SCOPE`. It is the same expected re-record CPR-10 hit for
+  `session.read`/`session.write`, and it is closed by one command:
+  `SYNVEDA_RECORD_FIXTURES=1 make db-test`, reading the diff before accepting
+  it — it should be exactly one line per recorded `actions` map.
+  **It is not closed in this commit, and the reason is environmental.** The
+  Docker daemon on the machine this ran on wedged partway through: every
+  `docker` call hung, and the Postgres container went with it — the port kept
+  accepting TCP and the backend stopped answering queries, which is why the
+  571/1 figure comes from running the suite directly against a freshly created,
+  fully migrated database rather than through `make db-test` (that target
+  shells out to `docker compose exec` for its scratch database). The fixture
+  was **not** hand-edited to the bytes it will have: a corpus written by hand
+  is exactly the drift the parity test exists to catch, and asserting a value
+  nobody observed would be worse than a red test somebody can see.
+- **No demo script.** CPR-9's precedent: a prompt whose acceptance criteria are
+  discharged by tests does not need one, and a new demo could not have been run
+  against a live stack here anyway. The 30 acceptance assertions live in
+  `sessions_api.rs` and `sessions.test.tsx`.
+- **Left standing, deliberately.** `demos/cpr-7-scopes.sh`'s missing closure
+  row (CPR-10 reported it and left it; still another feature's demo). The
+  observe path, whole. `console/src/api.mts`'s seven hand-written surfaces,
+  until Prompt 19.
+- **Commit.** `feat(console): add session timeline` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by Prompt 12, on Prompt 1's rule.

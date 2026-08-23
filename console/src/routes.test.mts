@@ -80,19 +80,50 @@ test("welcome is reachable but never in a menu", () => {
   // menu item for it would still be sitting there after it was finished.
   const welcome = routeOf("welcome");
   assert.equal(welcome.group, "none");
-  assert.equal(matchRoute("/console/welcome"), "welcome");
+  assert.deepEqual(matchRoute("/console/welcome"), { id: "welcome", params: {} });
   assert.ok(!primaryNav().includes(welcome));
   assert.ok(!advancedNav({}).includes(welcome));
 });
 
 test("paths round-trip, with and without their trailing slash", () => {
   for (const route of ROUTES) {
-    const href = hrefOf(route.id);
-    assert.equal(matchRoute(href), route.id, href);
-    assert.equal(matchRoute(`${href}/`), route.id, `${href}/`);
+    // A parameterised route needs a value for every placeholder; anything
+    // will do, because what is asserted is that the two functions agree.
+    const params = Object.fromEntries(
+      route.segment
+        .split("/")
+        .filter((part) => part.startsWith(":"))
+        .map((part) => [part.slice(1), "abc-123"]),
+    );
+    const href = hrefOf(route.id, params);
+    assert.deepEqual(matchRoute(href), { id: route.id, params }, href);
+    assert.deepEqual(matchRoute(`${href}/`), { id: route.id, params }, `${href}/`);
   }
-  assert.equal(matchRoute(BASE), "home");
-  assert.equal(matchRoute(`${BASE}/`), "home");
+  assert.deepEqual(matchRoute(BASE), { id: "home", params: {} });
+  assert.deepEqual(matchRoute(`${BASE}/`), { id: "home", params: {} });
+});
+
+test("a run has its own address, and the id in it is the id it renders", () => {
+  // The whole reason routing grew a parameter (CPR-11): a run somebody is
+  // investigating has to survive a refresh and paste into a ticket.
+  const href = hrefOf("session", { session_id: "018f-abc" });
+  assert.equal(href, "/console/sessions/018f-abc");
+  assert.deepEqual(matchRoute(href), { id: "session", params: { session_id: "018f-abc" } });
+
+  // A value with a slash in it is encoded on the way out and decoded on the
+  // way back, so a round trip is lossless rather than a second route.
+  const odd = hrefOf("session", { session_id: "a/b" });
+  assert.equal(odd, "/console/sessions/a%2Fb");
+  assert.deepEqual(matchRoute(odd), { id: "session", params: { session_id: "a/b" } });
+
+  // The literal listing still wins over the pattern, and the pattern does not
+  // swallow a deeper path.
+  assert.deepEqual(matchRoute("/console/sessions"), { id: "sessions", params: {} });
+  assert.equal(matchRoute("/console/sessions/a/b"), null);
+
+  // A link nothing filled is a loud failure rather than a `:session_id` in
+  // the DOM that 404s on click.
+  assert.throws(() => hrefOf("session"), /session_id/);
 });
 
 test("a path this console does not have matches nothing", () => {

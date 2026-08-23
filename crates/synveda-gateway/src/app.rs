@@ -246,6 +246,12 @@ pub fn router(state: AppState) -> Router {
             "/v1/sessions/{session_id}/events",
             post(crate::sessions::append_events),
         )
+        // The diagnostic expansion (CPR-11): one event, payload included,
+        // behind `session.diagnostics` rather than `session.read`.
+        .route(
+            "/v1/sessions/{session_id}/events/{event_id}",
+            get(crate::sessions::get_event),
+        )
         .route("/v1/sessions/{session_id}/end", post(crate::sessions::end))
         .route(
             "/v1/sessions/{session_id}/timeline",

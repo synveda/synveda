@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
-import { matchRoute, type RouteId } from "./routes.mjs";
+import { matchRoute, type RouteMatch } from "./routes.mjs";
 
 type Listener = () => void;
 
@@ -69,11 +69,15 @@ function serverPath(): string {
 }
 
 /**
- * The route the browser is on, or `null` for a path the console does not
- * have. See {@link matchRoute} for why `null` is rendered rather than
- * redirected.
+ * The route the browser is on and the parameters it carried, or `null` for a
+ * path the console does not have. See {@link matchRoute} for why `null` is
+ * rendered rather than redirected.
+ *
+ * The parameters come from the address bar and from nowhere else (CPR-11):
+ * a detail page reads the id it is showing out of its own URL, so Back,
+ * refresh and a pasted link all land on the same screen.
  */
-export function useRoute(): RouteId | null {
+export function useRoute(): RouteMatch | null {
   const path = useSyncExternalStore(subscribe, currentPath, serverPath);
   return matchRoute(path);
 }

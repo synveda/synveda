@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        insert into sessions\n            (id, tenant_id, workspace_id, project_id, workspace_scope_id,\n             project_scope_id, scope_id, principal_id, client_name, client_version,\n             client_installation_id, external_session_id, agent_name, model_name,\n             repository_id, branch, task_summary, metadata)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,\n                $15, $16, $17, $18)\n        returning id, tenant_id, workspace_id, project_id, scope_id, principal_id,\n                  client_name, client_version, client_installation_id,\n                  external_session_id, agent_name, model_name, repository_id,\n                  branch, task_summary, status, started_at, ended_at,\n                  last_observed_at, metadata, created_at, updated_at\n        ",
+  "query": "\n        select id, tenant_id, workspace_id, project_id, scope_id, principal_id,\n               client_name, client_version, client_installation_id,\n               external_session_id, agent_name, model_name, repository_id,\n               branch, task_summary, status, started_at, ended_at,\n               last_observed_at, end_reason, metadata, created_at, updated_at\n        from sessions\n        where id = $1 and tenant_id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -100,16 +100,21 @@
       },
       {
         "ordinal": 19,
+        "name": "end_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 20,
         "name": "metadata",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -117,23 +122,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        "Uuid",
-        "Uuid",
-        "Uuid",
-        "Uuid",
-        "Uuid",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Uuid",
-        "Text",
-        "Text",
-        "Jsonb"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -156,10 +145,11 @@
       false,
       true,
       true,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "c84a6350504926abb4e4f40b68956dff9e60e717fb987383ff374e122d50775a"
+  "hash": "192d20af046a8b86df1c33385a6437866680d6fcf8713927d409e9b29a0bc471"
 }

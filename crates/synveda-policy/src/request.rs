@@ -231,6 +231,23 @@ pub enum Action {
     /// additionally takes [`Action::MemoryRead`] at every scope that
     /// contributes, decided by the same composition walk `inject` runs.
     SessionWrite,
+    /// Read the **raw payload** of one session event (CPR-11, ADR-0077
+    /// decision 3).
+    ///
+    /// Separate from [`Action::SessionRead`] because the two disclose
+    /// different things. A timeline is a reading surface: it says a message
+    /// was sent, a tool ran, a file changed, and summarises each in a line.
+    /// A payload is what the agent and the person actually said, byte for
+    /// byte — the prompt, the tool arguments, the diff. A pack must be able to
+    /// let a project's members follow what their agents have been doing
+    /// without handing every one of them a full transcript of everybody's
+    /// prompts.
+    ///
+    /// It is strictly narrower than [`Action::SessionRead`] in the shipped
+    /// packs and must stay so in any other: an authority to read a payload
+    /// without the authority to know the event exists is not a thing this
+    /// product can express, because the route reads the timeline's own rows.
+    SessionDiagnostics,
     /// Read who holds what on the access plane: a scope's effective members,
     /// the tenant's groups, its grants and its outstanding invitations
     /// (CPR-5, ADR-0072 decision 7).
@@ -556,7 +573,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 43] = [
+    pub const ALL: [Action; 44] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -568,6 +585,7 @@ impl Action {
         Action::ProjectUpdate,
         Action::SessionRead,
         Action::SessionWrite,
+        Action::SessionDiagnostics,
         Action::MembershipRead,
         Action::MembershipGrant,
         Action::GroupManage,
@@ -617,7 +635,7 @@ impl Action {
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 34] = [
+    pub const PROBED_AT_SCOPE: [Action; 35] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -629,6 +647,7 @@ impl Action {
         Action::ProjectUpdate,
         Action::SessionRead,
         Action::SessionWrite,
+        Action::SessionDiagnostics,
         Action::MembershipRead,
         Action::MembershipGrant,
         Action::MemoryWrite,
@@ -713,6 +732,7 @@ impl Action {
             Action::ProjectUpdate => "project.update",
             Action::SessionRead => "session.read",
             Action::SessionWrite => "session.write",
+            Action::SessionDiagnostics => "session.diagnostics",
             Action::MembershipRead => "membership.read",
             Action::MembershipGrant => "membership.grant",
             Action::GroupManage => "group.manage",
@@ -762,6 +782,7 @@ impl Action {
             Action::ProjectUpdate => "ProjectUpdate",
             Action::SessionRead => "SessionRead",
             Action::SessionWrite => "SessionWrite",
+            Action::SessionDiagnostics => "SessionDiagnostics",
             Action::MembershipRead => "MembershipRead",
             Action::MembershipGrant => "MembershipGrant",
             Action::GroupManage => "GroupManage",

@@ -1,4 +1,4 @@
-// standard@19 — shares by default inside what you belong to (seed §6,
+// standard@20 — shares by default inside what you belong to (seed §6,
 // ADR-0014, ADR-0015, ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032,
 // ADR-0036, ADR-0037, ADR-0038, ADR-0072, ADR-0073).
 //
@@ -256,6 +256,46 @@ permit (
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["curator", "member", "owner", "administrator"])
+};
+
+
+// The diagnostic expansion (CPR-11, ADR-0077 decision 3).
+//
+// `SessionRead` serves a **timeline**: this event was a message, that one ran
+// a tool, here is a line about each. `SessionDiagnostics` serves the raw
+// payload — what the person and the agent actually said, byte for byte, the
+// prompt, the tool arguments, the diff. The two are not one authority, and
+// this pack's split is what that decision buys.
+//
+// It is strictly narrower than this pack's `SessionRead` and must stay so:
+// an authority to read a payload without the authority to know the event
+// exists is not expressible here, because the route reads the timeline's own
+// rows.
+// Note what is **not** here: this pack's `ambit` clause. Sharing one step
+// outward is a decision about the shape of a team's reading surface; a
+// neighbouring project's raw prompts are not a default under any pack.
+
+// The floor, in the same two clauses and for the same reason: your own runs'
+// payloads are yours, and `principal in resource` cannot reach a `Session`.
+permit (
+    principal,
+    action == Synveda::Action::"SessionDiagnostics",
+    resource
+) when { resource is Synveda::Scope && principal in resource };
+
+permit (
+    principal,
+    action == Synveda::Action::"SessionDiagnostics",
+    resource
+) when { resource is Synveda::Session && principal in resource.scope };
+
+permit (
+    principal,
+    action == Synveda::Action::"SessionDiagnostics",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["reviewer", "owner", "administrator"])
 };
 
 // The prompt registry (PRMT-1, ADR-0049 decision 4). Reading mirrors this

@@ -50,7 +50,8 @@ the workspace, project and repository planes (CPR-4), the access plane — \
 members, groups, grants and invitations (CPR-5), and the scope admin plane \
 (CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants), \
 and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, \
-append events, end, timeline, and the context-run endpoint). \
+append events, end, timeline, and the context-run endpoint), with CPR-11's \
+paginated and filtered listing and its diagnostic expansion of one event. \
 The rest of the `/v1` surface — observe, inject, recall, proposals, channels, \
 the registries and the older admin planes — predates the OpenAPI contract and \
 is brought onto it by a later prompt of the context-platform programme. Its \
@@ -103,6 +104,7 @@ revision, and its mutations are last-writer-wins under the PDP.",
         sessions::list,
         sessions::get,
         sessions::append_events,
+        sessions::get_event,
         sessions::end,
         sessions::timeline,
         sessions::create_context_run,

@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **107 features filed, 74 delivered**;
+Cursor frame has been replayed. **108 features filed, 75 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -132,8 +132,8 @@ Load-bearing facts about Phase 5:
   (INSTALL.md's SQL).
 - The OpenAPI contract covers the context-platform plane (`/v1/me`,
   workspaces, projects, repositories, the access plane and the six admin
-  scope routes — 32 operations); the rest of `/v1` joins it at
-  Prompt 19.
+  scope routes, and the session plane — **40 operations** since CPR-11); the
+  rest of `/v1` joins it at Prompt 19.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys
@@ -141,7 +141,22 @@ Load-bearing facts about Phase 5:
   Five states (the close is two-phase), events immutable and ordered by a
   server-assigned `sequence` and idempotent per event, a timeline projected
   over two tables and merged rather than sorted. `/v1/observe`, `/v1/inject`
-  and `/v1/recall` are untouched; Prompt 11 re-cuts them.
+  and `/v1/recall` are untouched. CPR-10 forecast that Prompt 11 would re-cut
+  them; it did not — Prompt 11 turned out to be CPR-11 — so the observe re-cut
+  is **open and unscheduled** (§10 of the implementation document).
+- CPR-11 (ADR-0077): **that record is usable**. `GET /v1/sessions` is
+  keyset-paginated (`cursor` in, `next_cursor` out, `truncated` **deleted**),
+  and the cursor follows the last candidate a page *considered* rather than
+  the last row it served — so a page may be empty and still carry one. Four
+  more filters (client, principal, and a half-open day range). Timeline event
+  entries carry `received_at` beside `occurred_at` and a server-computed
+  `delayed`, which is one flag and not three: a spool replay, a crash replay
+  and a wrong clock are indistinguishable from two instants, so the server
+  reports the gap and names no cause. A raw payload is its own authority —
+  `GET /v1/sessions/{id}/events/{event_id}` under `SessionDiagnostics`,
+  strictly narrower than each pack's own `SessionRead` (**packs @19 → @20**).
+  `sessions.end_reason` (migration `0045`) says *why* a run stopped. And a run
+  has an address: `/console/sessions/{id}`.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

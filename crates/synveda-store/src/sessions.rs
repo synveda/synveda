@@ -36,7 +36,7 @@
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, PgExecutor};
 use synveda_types::session::{
-    ContextRun, MAX_EVENT_PAYLOAD_BYTES, MAX_LABEL_CHARS, MAX_METADATA_BYTES,
+    ContextRun, MAX_END_REASON_CHARS, MAX_EVENT_PAYLOAD_BYTES, MAX_LABEL_CHARS, MAX_METADATA_BYTES,
     MAX_TASK_SUMMARY_CHARS, Session, SessionEvent, SessionEventType, SessionStatus,
     validate_client_event_id, validate_client_name, validate_json_object, validate_label,
 };
@@ -134,6 +134,7 @@ struct SessionRow {
     started_at: DateTime<Utc>,
     ended_at: Option<DateTime<Utc>>,
     last_observed_at: Option<DateTime<Utc>>,
+    end_reason: Option<String>,
     metadata: serde_json::Value,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -165,6 +166,7 @@ impl TryFrom<SessionRow> for Session {
             started_at: row.started_at,
             ended_at: row.ended_at,
             last_observed_at: row.last_observed_at,
+            end_reason: row.end_reason,
             metadata: row.metadata,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -304,7 +306,7 @@ pub async fn create(conn: &mut PgConnection, new: &NewSession) -> Result<Session
                   client_name, client_version, client_installation_id,
                   external_session_id, agent_name, model_name, repository_id,
                   branch, task_summary, status, started_at, ended_at,
-                  last_observed_at, metadata, created_at, updated_at
+                  last_observed_at, end_reason, metadata, created_at, updated_at
         "#,
         new.id.as_uuid(),
         new.tenant_id.as_uuid(),
@@ -357,7 +359,7 @@ pub async fn get(
                client_name, client_version, client_installation_id,
                external_session_id, agent_name, model_name, repository_id,
                branch, task_summary, status, started_at, ended_at,
-               last_observed_at, metadata, created_at, updated_at
+               last_observed_at, end_reason, metadata, created_at, updated_at
         from sessions
         where id = $1 and tenant_id = $2
         "#,
@@ -394,7 +396,7 @@ pub async fn by_external_ref(
                client_name, client_version, client_installation_id,
                external_session_id, agent_name, model_name, repository_id,
                branch, task_summary, status, started_at, ended_at,
-               last_observed_at, metadata, created_at, updated_at
+               last_observed_at, end_reason, metadata, created_at, updated_at
         from sessions
         where tenant_id = $1
           and principal_id = $2
@@ -412,8 +414,24 @@ pub async fn by_external_ref(
     row.map(TryInto::try_into).transpose()
 }
 
+/// Where a page of the listing resumes (CPR-11, ADR-0077 decision 1).
+///
+/// A **keyset**, not an offset: the listing's order is `(started_at desc, id
+/// desc)`, and this is the last key of the previous page, so the next one is
+/// "everything strictly after it in that order". An offset would re-count rows
+/// on every page and skip or repeat whenever a run was opened between two
+/// requests — which, on a table a fleet of agents writes to all night, is
+/// every request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionCursor {
+    /// The last row's `started_at`.
+    pub started_at: DateTime<Utc>,
+    /// Its id, which breaks ties within one instant.
+    pub id: SessionId,
+}
+
 /// What a listing filters by. Every field is optional; all of them narrow.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SessionFilter {
     /// Only sessions at or under this scope — the subtree, through
     /// `scope_closure`, so a workspace's scope lists its projects' sessions
@@ -425,6 +443,21 @@ pub struct SessionFilter {
     pub project_id: Option<ProjectId>,
     /// Only sessions in this state.
     pub status: Option<SessionStatus>,
+    /// Only sessions opened by this agent client, matched exactly — the label
+    /// the client named itself with, never a prefix.
+    pub client_name: Option<String>,
+    /// Only sessions opened by this token subject.
+    pub principal_id: Option<String>,
+    /// Only sessions started at or after this instant.
+    pub started_after: Option<DateTime<Utc>>,
+    /// Only sessions started strictly before this instant.
+    ///
+    /// Half-open on purpose: `[after, before)` composes, so two adjacent days
+    /// cover every run exactly once and a run started on the stroke of
+    /// midnight is in one of them rather than in both.
+    pub started_before: Option<DateTime<Utc>>,
+    /// Where to resume. `None` starts at the newest.
+    pub after: Option<SessionCursor>,
 }
 
 /// The candidate sessions a listing should decide about, newest first, with
@@ -453,8 +486,8 @@ pub async fn list(
                s.principal_id, s.client_name, s.client_version,
                s.client_installation_id, s.external_session_id, s.agent_name,
                s.model_name, s.repository_id, s.branch, s.task_summary, s.status,
-               s.started_at, s.ended_at, s.last_observed_at, s.metadata,
-               s.created_at, s.updated_at
+               s.started_at, s.ended_at, s.last_observed_at, s.end_reason,
+               s.metadata, s.created_at, s.updated_at
         from sessions s
         where s.tenant_id = $1
           and ($2::uuid is null or exists (
@@ -466,14 +499,28 @@ pub async fn list(
           and ($3::uuid is null or s.workspace_id = $3::uuid)
           and ($4::uuid is null or s.project_id = $4::uuid)
           and ($5::text is null or s.status = $5::text)
-        order by s.started_at desc, s.id
-        limit $6
+          and ($6::text is null or s.client_name = $6::text)
+          and ($7::text is null or s.principal_id = $7::text)
+          and ($8::timestamptz is null or s.started_at >= $8::timestamptz)
+          and ($9::timestamptz is null or s.started_at < $9::timestamptz)
+          -- The keyset (CPR-11). A row comparison rather than two disjuncts,
+          -- so the (tenant_id, scope_id, started_at desc) index can seek to it.
+          and ($10::timestamptz is null
+               or (s.started_at, s.id) < ($10::timestamptz, $11::uuid))
+        order by s.started_at desc, s.id desc
+        limit $12
         "#,
         tenant_id.as_uuid(),
         filter.scope_id.map(|id| id.as_uuid()) as Option<Uuid>,
         filter.workspace_id.map(|id| id.as_uuid()) as Option<Uuid>,
         filter.project_id.map(|id| id.as_uuid()) as Option<Uuid>,
         filter.status.map(|status| status.as_str()) as Option<&str>,
+        filter.client_name.as_deref() as Option<&str>,
+        filter.principal_id.as_deref() as Option<&str>,
+        filter.started_after as Option<DateTime<Utc>>,
+        filter.started_before as Option<DateTime<Utc>>,
+        filter.after.map(|cursor| cursor.started_at) as Option<DateTime<Utc>>,
+        filter.after.map(|cursor| cursor.id.as_uuid()) as Option<Uuid>,
         SCAN_LIMIT + 1,
     )
     .fetch_all(executor)
@@ -513,8 +560,10 @@ pub async fn transition(
     id: SessionId,
     status: SessionStatus,
     task_summary: Option<&str>,
+    end_reason: Option<&str>,
 ) -> Result<Session> {
     validate_label("task_summary", task_summary, MAX_TASK_SUMMARY_CHARS)?;
+    validate_label("end_reason", end_reason, MAX_END_REASON_CHARS)?;
     let from: Vec<String> = SessionStatus::ALL
         .iter()
         .filter(|current| current.may_become(status))
@@ -534,18 +583,20 @@ pub async fn transition(
                ended_at     = case when $3 in ('ended', 'abandoned', 'failed')
                                    then now() else null end,
                task_summary = coalesce($4, task_summary),
+               end_reason   = coalesce($5, end_reason),
                updated_at   = now()
-         where id = $1 and tenant_id = $2 and status = any($5)
+         where id = $1 and tenant_id = $2 and status = any($6)
         returning id, tenant_id, workspace_id, project_id, scope_id, principal_id,
                   client_name, client_version, client_installation_id,
                   external_session_id, agent_name, model_name, repository_id,
                   branch, task_summary, status, started_at, ended_at,
-                  last_observed_at, metadata, created_at, updated_at
+                  last_observed_at, end_reason, metadata, created_at, updated_at
         "#,
         id.as_uuid(),
         tenant_id.as_uuid(),
         status.as_str(),
         task_summary as Option<&str>,
+        end_reason as Option<&str>,
         &from,
     )
     .fetch_optional(&mut *conn)
@@ -909,6 +960,43 @@ async fn event_by_client_id(
         tenant_id.as_uuid(),
         session_id.as_uuid(),
         client_event_id,
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}
+
+/// One event of a session, by its own id.
+///
+/// Keyed by the session as well as the event, so an event id from another run
+/// answers `None` rather than that run's payload — the ownership rule the
+/// gateway's 404 depends on, held in the query rather than in a check the
+/// caller has to remember to write.
+#[tracing::instrument(
+    name = "store.sessions.event",
+    skip_all,
+    fields(tenant.id = %tenant_id, session.id = %session_id, event.id = %id),
+    err(Display)
+)]
+pub async fn event(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    id: SessionEventId,
+) -> Result<Option<SessionEvent>> {
+    let row = sqlx::query_as!(
+        EventRow,
+        r#"
+        select id, tenant_id, session_id, event_type, event_schema_version,
+               client_event_id, sequence, occurred_at, received_at, payload,
+               payload_hash
+        from session_events
+        where tenant_id = $1 and session_id = $2 and id = $3
+        "#,
+        tenant_id.as_uuid(),
+        session_id.as_uuid(),
+        id.as_uuid(),
     )
     .fetch_optional(executor)
     .await
