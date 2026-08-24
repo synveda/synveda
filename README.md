@@ -105,11 +105,11 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **1 — The spine** | SSO → provisioned own-scope → append → extraction → compose → audit, live in Claude Code | ✅ 21/21 |
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
-| **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR, gateway scale | ⬜ 0/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger, durable adapter delivery and its product surface | 🚧 12/33 |
+| **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR, gateway scale | 🚧 1/17 |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger, durable adapter delivery and its product surface | 🚧 13/33 |
 
 One further feature (AUTH-6, session and token hygiene) is unscheduled — **111
-in total, 76 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+in total, 78 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
@@ -157,8 +157,8 @@ Published benchmark scores, and what they do and do not measure:
   agentskills.io-compliant skills registry where publishing executable code
   requires a `reviewer` and two distinct approvers.
 - **A Claude Code integration** — installed hooks plus an MCP recall tool,
-  with deterministic session-plane replay in CI; the real-client gate remains
-  pending authentication as described below.
+  with deterministic session-plane replay in CI and an installed authenticated
+  Claude Code 2.1.241 lifecycle gate.
 - **A quality gate in CI** — extraction, retrieval, injection and security evals
   with committed baselines; the security gate is zero-tolerance on leaks.
 
@@ -198,14 +198,13 @@ Being explicit, so nothing here misleads:
 - **No real Cursor frame either.** The generic MCP server ships as `synveda mcp`
   (ADPT-2), and its acceptance corpus was recorded from Claude Desktop and Zed.
   Cursor remains an install target rather than a measured one.
-- **No live Claude Code session has yet composed or appended on the new session
-  plane.** CPR-14 now replays genuine Claude Code 2.1.220/2.1.241 frames through
-  the built hook, public session API, current Postgres, PDP, timeline and audit
-  chain, including outage and duplicate recovery. That is replay evidence, not
-  a live-client result. The separately runnable installed-client gate found
-  Claude Code 2.1.241 present but unauthenticated on 2026-08-23 and exited before
-  invoking a session. The plugin itself is proven to load — `✔ enabled`, four
-  hooks, one MCP server (OPS-8).
+- **Claude Code's remaining loss window begins before Synveda sees a turn.**
+  CPR-14 passed the separately runnable installed-client gate with authenticated
+  Claude Code 2.1.241 and plugin 0.2.0: one real context run, four ordered
+  user/tool/assistant events, normal SessionEnd, timeline and verifying audit
+  evidence. Deterministic replay covers outage and duplicate recovery in CI.
+  A host killed before any lifecycle hook writes the in-flight turn can still
+  lose that tail; nothing which reached the local spool is lost.
 - **Three console pages have no plane behind them.** CPR-8 made the console a
   product shell — routes, switchers, People, first-run onboarding, and the
   proposals inbox (CNSL-1) and scope explorer (CNSL-2) re-homed under

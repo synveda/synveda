@@ -112,6 +112,7 @@ export async function deliver(
       break;
     }
     recordAttempt(spool);
+    const appendStarted = Date.now();
     const result = await appendEvents(config, bearer, sessionId, {
       events: batch.map((entry) => ({
         event_type: entry.event_type,
@@ -119,6 +120,12 @@ export async function deliver(
         occurred_at: entry.occurred_at,
         payload: entry.payload,
       })),
+    });
+    log("deliver.batch", {
+      session: spool.external_session_id,
+      events: batch.length,
+      ok: result.ok,
+      elapsed_ms: Date.now() - appendStarted,
     });
     if (!result.ok) {
       complete = false;

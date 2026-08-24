@@ -137,9 +137,10 @@ to what came before.
 synveda plugin install
 ```
 
-Then start an **interactive** session — see the ADPT-8 note in the limits
-below before you script anything. Your session gets a watermarked block of
-memory at start, and your turns are observed back at the end.
+Then start an interactive or headless session. Your session gets a watermarked
+block of memory at start; each completed turn crosses the private local-spool
+boundary before the hook returns and is delivered at SessionEnd or the next
+SessionStart.
 
 **Anything else that speaks MCP:**
 
@@ -217,17 +218,17 @@ back to the same volumes.
 Written plainly because you will meet some of these, and finding out from a
 document beats finding out from behaviour.
 
-### Headless Claude Code sessions inject but never observe
+### A killed Claude Code process can lose its in-flight tail
 
-`claude -p` — CI, a script, an agent harness — receives its memory block and
-records **nothing** back. Exit code 0, no error, no warning. It looks exactly
-like a session that was observed.
+ADPT-8 is closed: CPR-14 passed an installed authenticated `claude -p` run on
+Claude Code 2.1.241. Stop and PreCompact now synchronously write only the local
+durable spool and make no gateway request; SessionEnd, the next SessionStart or
+an explicit flush delivers. The live run composed one context run, persisted
+four authentic user/tool/assistant events and ended normally.
 
-Only the session-start hook is synchronous; the observe hooks are async, so
-the process exits before they run. Your turns are not lost — they stay in the
-transcript and the spool holds no cursor — but nothing collects them.
-**Interactive sessions observe correctly.** Tracked as ADPT-8; use interactive
-sessions for anything you want recorded.
+The guarantee cannot begin before a hook runs. SIGKILL, a machine failure or a
+harness crash before the in-flight turn reaches Stop can lose that tail.
+Nothing which reached the spool is lost, including during a gateway outage.
 
 ### A tenant cannot be deleted
 

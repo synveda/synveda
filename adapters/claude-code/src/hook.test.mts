@@ -386,26 +386,30 @@ test("an ambiguous workspace opens no run rather than guessing", async () => {
 
 // ── Stop, PreCompact, SessionEnd ─────────────────────────────────────────
 
-test("a stop records the turn and delivers it", async () => {
+test("a stop crosses the durable boundary without waiting on the gateway", async () => {
   const mock = await gateway(ok);
-  const path = transcript([entry("u1", "the ask"), entry("a1", "the answer", "assistant")]);
+  const path = transcript([]);
   try {
     await sessionStart(
       { hook_event_name: "SessionStart", session_id: "f1", source: "startup", transcript_path: path },
       config(mock.url, { inject: false }),
+    );
+    writeFileSync(
+      path,
+      [entry("u1", "the ask"), entry("a1", "the answer", "assistant")]
+        .map((item) => JSON.stringify(item))
+        .join("\n"),
     );
     await turnHook(
       { hook_event_name: "Stop", session_id: "f1", transcript_path: path },
       config(mock.url),
     );
     const append = mock.requests.find((request) => request.path.endsWith("/events"));
-    assert.ok(append);
-    assert.equal((append.body.events as unknown[]).length, 2);
-    // An append takes no Idempotency-Key: its unit is the event.
-    assert.equal(append.idempotencyKey, undefined);
+    assert.equal(append, undefined, "Stop performs no network delivery inside the turn");
     const spool = loadSpool("f1");
     assert.ok(spool);
-    assert.equal(pending(spool).length, 0, "everything delivered is acknowledged");
+    assert.equal(pending(spool).length, 2, "the complete turn is durable for SessionEnd");
+    assert.equal(spool.entries[0]?.delivery_attempts, 0, "no request was attempted");
   } finally {
     await mock.close();
   }
@@ -428,7 +432,7 @@ test("a second stop with nothing new sends nothing", async () => {
  * **The property this whole feature exists for.** The gateway is down, the
  * events are recorded anyway, and the next start delivers them.
  */
-test("a failed delivery keeps the events and the next start sends them", async () => {
+test("a stopped turn stays pending and the next start sends it", async () => {
   const path = transcript([entry("u1", "the ask")]);
   // A run first, so the failure under test is the *delivery* failing rather
   // than there being nowhere to deliver to.
@@ -453,9 +457,14 @@ test("a failed delivery keeps the events and the next start sends them", async (
       config(failing.url),
     );
     const held = loadSpool("f3");
-    assert.ok(held, "the spool exists even though nothing was delivered");
+    assert.ok(held, "the spool exists before anything is delivered");
     assert.equal(pending(held).length, 1, "the event is held, not lost");
-    assert.equal(held.entries[0]?.delivery_attempts, 1, "the attempt is counted");
+    assert.equal(held.entries[0]?.delivery_attempts, 0, "Stop does not contact the failed gateway");
+    assert.equal(
+      failing.requests.some((request) => request.path.endsWith("/events")),
+      false,
+      "gateway availability is outside Stop's durable boundary",
+    );
   } finally {
     await failing.close();
   }

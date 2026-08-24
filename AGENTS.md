@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **111 features filed, 76 delivered**;
+Cursor frame has been replayed. **111 features filed, 78 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -162,13 +162,15 @@ Load-bearing facts about Phase 5:
   storage and queue; extraction consumes `session_events`; context enters
   through `POST /v1/sessions/{id}/context-runs`; and the Claude adapter writes
   a versioned, atomic local spool that retries per-event idempotently.
-- CPR-14 (ADR-0079) is implemented at **replay/live-gateway** level but not
-  delivered: genuine Claude Code 2.1.220/2.1.241 frames now run through the
-  built hook, public session API, PDP, current Postgres, timeline and audit in
-  CI, including outage and lost-ack recovery. The installed Claude Code
-  2.1.241 executable was unauthenticated on 2026-08-23, so no real client run
-  occurred and no live session has yet composed or appended through the
-  installed plugin on the new plane. `make claude-acceptance-live` is the gate.
+- CPR-14 (ADR-0079) is delivered at all three evidence tiers. Genuine Claude
+  Code 2.1.220/2.1.241 frames run through the built hook, public session API,
+  PDP, current Postgres, timeline and audit in CI, including outage and
+  lost-ack recovery. On 2026-08-24 the installed authenticated Claude Code
+  **2.1.241** client loaded plugin **0.2.0**, reported four hooks and one MCP
+  server enabled, composed one context run, appended four authentic ordered
+  events and ended the same run. Stop and PreCompact synchronously cross only
+  the atomic local-spool boundary; SessionEnd/next SessionStart deliver. This
+  also closes ADPT-8 without changing the host-killed-before-any-hook tail.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

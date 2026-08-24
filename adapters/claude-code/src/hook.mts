@@ -59,6 +59,7 @@ watchdog.unref();
 await main();
 
 async function main(): Promise<void> {
+  const hookStarted = Date.now();
   const input = await readInput();
   // Nothing parseable arrived at all. The mode argument alone would be
   // enough to go on, and that is exactly the trap: without a payload
@@ -97,7 +98,11 @@ async function main(): Promise<void> {
   } catch (error) {
     log("hook.failed", { hook: input.hook_event_name, error: String(error) });
   }
-
+  log("hook.done", {
+    hook: input.hook_event_name,
+    mode,
+    elapsed_ms: Date.now() - hookStarted,
+  });
 }
 
 /**

@@ -49,8 +49,8 @@ until CPR-7 a tenant's hierarchy root *had* to be `kind = 'org'`. Phase 5
 re-cuts that as 33 ordered prompts on `feat/context-platform-mvp`, with the
 decisions locked in ADR-0068 and the running record in
 docs/implementation/synveda-context-platform.md. **Prompts 1–12 are
-delivered**; 13 onward are open. CPR-14's replay/live-gateway implementation
-is complete, but its real-client criterion is pending and it is not delivered.
+delivered** and CPR-13's demo-corpus re-point is open. The external CPR-14
+acceptance gate is delivered at replay/live-gateway and real-client tiers.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -158,7 +158,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 76 of 111 features delivered — see docs/backlog/STATUS.md for
+features done. 78 of 111 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -199,9 +199,11 @@ making it **110 with 76 delivered** — the demo corpus re-point, which exists
 because CPR-12 went looking for the demos it had to change and found 43 of 65
 already dead. Prompts 13–33 of its programme are filed by the prompts that run
 them, so this number will keep moving. **CPR-14 was filed on 2026-08-23**, making
-it **111 with 76 delivered**: the live Claude Code session acceptance gate. Its
-replay/live-gateway implementation is complete, but the installed 2.1.241
-client was unauthenticated, so the real-client criterion remains open. **The
+it **111 with 76 delivered**: the live Claude Code session acceptance gate.
+On 2026-08-24 the authenticated installed **2.1.241** client completed that
+gate, delivering CPR-14 and simultaneously closing ADPT-8 at **111 with 78
+delivered**: Stop now crosses only the synchronous local-spool boundary and
+SessionEnd/next SessionStart deliver, proved by a real four-event run. **The
 headline above read 70 of 103
 against a trail that had said 108 since CPR-11 and a checker that had said 110
 since CPR-12 filed** — the same drift, a fourth time, and once again found by
@@ -307,11 +309,13 @@ original sequence before appending the new event exactly once. Fixture bytes
 are schema-validated, provenance-bound and hashed. `make
 claude-acceptance-live` is separate: it packages and installs through the
 supported marketplace path, asks Claude Code itself for the plugin/hook/MCP
-state and invokes real `claude -p`. On 2026-08-23 that executable was present
-at **2.1.241** and unauthenticated, so the gate exited 77 before a session ran.
-**No live Claude Code session has yet composed or appended through the
-installed plugin on the new session plane.** Replay success does not close
-CPR-14.
+state and invokes real `claude -p`. On 2026-08-24 the authenticated installed
+**2.1.241** client passed: plugin **0.2.0** was enabled with four hooks and one
+MCP server, SessionStart composed one context run, real user/Read/result/
+assistant activity persisted as four ordered events, and SessionEnd closed the
+same run. Stop is synchronous only through its 8ms atomic local-spool write;
+the 28ms append happened at SessionEnd. The remaining loss boundary is a host
+killed before any lifecycle hook receives the in-flight turn.
 
 **CPR-12 also found that 43 of the 65 scripts under `demos/` do not run**,
 and have not since CPR-7 deleted `synveda role bind` and

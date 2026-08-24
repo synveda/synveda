@@ -433,6 +433,20 @@ impl Harness {
         std::fs::write(&self.transcript, existing).expect("extend the transcript");
     }
 
+    /// Uses the adapter's supported per-project configuration seam. The
+    /// replay needs one SessionStart whose only job is backlog delivery; it
+    /// turns injection back on before the recovery start whose composition is
+    /// part of the acceptance evidence.
+    fn set_inject(&self, enabled: bool) {
+        let directory = self.project.join(".synveda");
+        std::fs::create_dir_all(&directory).expect("create project config directory");
+        std::fs::write(
+            directory.join("config.json"),
+            json!({"inject": enabled}).to_string(),
+        )
+        .expect("write project config");
+    }
+
     /// Runs the hook the way `hooks.json` registers it.
     async fn hook(&self, mode: &str, frame: &Value, gateway: &str) -> HookRun {
         let started = Instant::now();
@@ -557,6 +571,37 @@ impl Harness {
             .collect()
     }
 
+    /// Content-free diagnostics for the live gate: hook and adapter event
+    /// names only, never transcript fields or log values.
+    fn captured_hook_names(&self) -> Vec<String> {
+        let mut names = std::fs::read_dir(self.home.join("captures"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+            .filter_map(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .filter_map(|frame| {
+                let name = frame.get("hook_event_name")?.as_str()?;
+                Some(match name {
+                    "SessionStart" | "Stop" | "PreCompact" | "SessionEnd" => name.to_owned(),
+                    _ => "<unknown>".to_owned(),
+                })
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    fn adapter_log_event_names(&self) -> Vec<String> {
+        let path = self.home.join(".local/state/synveda/adapter.log");
+        std::fs::read_to_string(path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter_map(|row| row.get("event")?.as_str().map(safe_diagnostic_name))
+            .collect()
+    }
+
     fn cleanup(&self) {
         let _ = std::fs::remove_dir_all(&self.home);
     }
@@ -670,11 +715,34 @@ async fn a_claude_code_session_is_a_governed_record_from_start_to_end() {
         "a block is watermarked or it is not auditable: {block}"
     );
 
-    // ── 3. User and assistant activity reaches the gateway ───────────────────
+    // ── 3. Stop is durable locally; the next start delivers ─────────────────
     h.append_transcript("tool-turn.jsonl");
     let stop = h.frame("stop");
     let normal_stop = h.hook("turn", &stop, &live).await;
     assert_eq!(normal_stop.status, Some(0));
+
+    let stopped_spool = h.spool().expect("Stop wrote the durable spool");
+    let stopped_entries = stopped_spool["entries"].as_array().expect("spool entries");
+    assert_eq!(stopped_entries.len(), 4, "the whole tool turn is durable");
+    assert!(
+        stopped_entries.iter().all(|entry| {
+            entry["acknowledged"] != json!(true) && entry["delivery_attempts"] == json!(0)
+        }),
+        "Stop performs no delivery attempt: {stopped_spool}"
+    );
+    assert!(
+        h.events().await.is_empty(),
+        "the synchronous Stop boundary ends before the gateway"
+    );
+
+    // A supported project setting turns context injection off for this one
+    // start, leaving it as the eligible lifecycle retry the delivery design
+    // promises rather than manufacturing a call into an adapter function.
+    h.set_inject(false);
+    let delivery_start = h.frame("session-start-startup");
+    let delivered = h.hook("session-start", &delivery_start, &live).await;
+    assert_eq!(delivered.status, Some(0));
+    h.set_inject(true);
 
     let after_turn = h.events().await;
     let types: Vec<&str> = after_turn.iter().map(|(_, t, _)| t.as_str()).collect();
@@ -699,13 +767,17 @@ async fn a_claude_code_session_is_a_governed_record_from_start_to_end() {
 
     // ── 5. A gateway outage queues events locally ────────────────────────────
     //
-    // Same URL, no listener: what a restarting deployment looks like from a
-    // laptop. Before the outage, the second turn is written to the transcript
-    // exactly as the client would have written it.
-    h.gateway.stop().await;
+    // The second turn first reaches the spool exactly as the client writes it.
+    // Only then does the gateway go away, matching the recovery contract's
+    // boundary rather than racing the hook which establishes it.
     h.append_transcript("second-turn.jsonl");
     let outage = h.hook("turn", &stop, &live).await;
-    assert_eq!(outage.status, Some(0), "an outage never fails a session");
+    assert_eq!(
+        outage.status,
+        Some(0),
+        "the durable Stop never fails a session"
+    );
+    h.gateway.stop().await;
 
     let (spool_path, spooled) = h.spool_file().expect("the turn is on disk");
     #[cfg(unix)]
@@ -761,8 +833,8 @@ async fn a_claude_code_session_is_a_governed_record_from_start_to_end() {
         entries
             .iter()
             .filter(|entry| entry["acknowledged"] != json!(true))
-            .all(|entry| entry["delivery_attempts"].as_u64().is_some_and(|n| n >= 1)),
-        "the failed network attempt is persisted: {spooled}"
+            .all(|entry| entry["delivery_attempts"] == json!(0)),
+        "Stop does not contact the unavailable gateway: {spooled}"
     );
     assert_eq!(
         h.events().await.len(),
@@ -1241,17 +1313,17 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
         &claude,
         &[
             "-p",
+            // `--allowedTools` is variadic, so the positional prompt must
+            // precede it rather than be consumed as another tool name.
+            "Use the Read tool exactly once to read the relative file notes.txt. Do not answer before the tool result. Then answer in one short sentence.",
             "--session-id",
             h.external_session_id.as_str(),
             "--output-format",
             "json",
-            "--permission-mode",
-            "bypassPermissions",
-            "--dangerously-skip-permissions",
+            "--tools",
+            "Read",
             "--allowedTools",
             "Read",
-            "--include-hook-events",
-            "Use the Read tool to read notes.txt, then answer in one short sentence.",
         ],
         &h.project,
         &cli,
@@ -1260,10 +1332,8 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
     let client_elapsed = client_started.elapsed();
     assert!(
         client.status.success(),
-        "real Claude Code session failed (status={}, stdout_bytes={}, stderr_bytes={})",
-        client.status,
-        client.stdout.len(),
-        client.stderr.len(),
+        "real Claude Code session failed ({})",
+        safe_claude_diagnostic(&client),
     );
 
     let deadline = Instant::now() + Duration::from_secs(8);
@@ -1273,14 +1343,25 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
         {
             break row;
         }
-        assert!(
-            Instant::now() < deadline,
-            "SessionEnd did not leave an ended session"
-        );
+        if Instant::now() >= deadline {
+            let observed = h
+                .session_row()
+                .await
+                .map(|(_, status, end_reason, events)| (status, end_reason.is_some(), events));
+            panic!(
+                "SessionEnd did not leave an ended session (observed={observed:?}, captured_hooks={:?}, adapter_log_events={:?})",
+                h.captured_hook_names(),
+                h.adapter_log_event_names(),
+            );
+        }
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
     assert_eq!(status, "ended");
-    assert!(end_reason.is_some(), "the client supplied an end reason");
+    assert_eq!(
+        end_reason.as_deref(),
+        Some("other"),
+        "normal headless completion has Claude Code's stable exit reason"
+    );
     assert!(
         event_count >= 4,
         "user, tool call/result and assistant persisted"
@@ -1337,7 +1418,7 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
     .fetch_one(&h.pool)
     .await
     .expect("live context runs");
-    assert!(context_runs >= 1, "SessionStart did not compose");
+    assert_eq!(context_runs, 1, "SessionStart composed exactly once");
     let actions = h.chain_actions().await;
     for action in [
         "session.opened",
@@ -1391,6 +1472,36 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
         h.spool().is_none(),
         "a fully acknowledged, closed live spool is retired"
     );
+    let hook_durations = h.logged("hook.done");
+    let hook_ms = |hook: &str, mode: &str| {
+        hook_durations
+            .iter()
+            .find(|row| row["hook"] == hook && row["mode"] == mode)
+            .and_then(|row| row["elapsed_ms"].as_u64())
+            .unwrap_or_else(|| panic!("missing {hook}/{mode} duration in {hook_durations:?}"))
+    };
+    let session_start_ms = hook_ms("SessionStart", "start");
+    let stop_ms = hook_ms("Stop", "turn");
+    let session_end_ms = hook_ms("SessionEnd", "turn");
+    let append_ms = h
+        .logged("deliver.batch")
+        .into_iter()
+        .find(|row| row["ok"] == json!(true) && row["events"].as_u64().unwrap_or(0) > 0)
+        .and_then(|row| row["elapsed_ms"].as_u64())
+        .expect("successful live append duration");
+    let context_run_ms = h
+        .logged("context.ok")
+        .into_iter()
+        .find_map(|row| row["elapsed_ms"].as_u64())
+        .expect("successful live context-run duration");
+    assert!(
+        session_start_ms < 8_000,
+        "SessionStart: {session_start_ms}ms"
+    );
+    assert!(stop_ms < 5_000, "Stop: {stop_ms}ms");
+    assert!(session_end_ms < 8_000, "SessionEnd: {session_end_ms}ms");
+    assert!(append_ms < 5_000, "append request: {append_ms}ms");
+    assert!(context_run_ms < 5_000, "context run: {context_run_ms}ms");
     let captures = std::fs::read_dir(h.home.join("captures"))
         .expect("captured real hook frames")
         .filter_map(Result::ok)
@@ -1399,6 +1510,13 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
         captures >= 3,
         "SessionStart, activity and SessionEnd frames captured"
     );
+    let captured_hooks = h.captured_hook_names();
+    for hook in ["SessionStart", "Stop", "SessionEnd"] {
+        assert!(
+            captured_hooks.iter().any(|captured| captured == hook),
+            "Claude Code did not emit {hook}: {captured_hooks:?}"
+        );
+    }
 
     let report_dir = root.join("target/cpr14-live");
     std::fs::create_dir_all(&report_dir).expect("live report directory");
@@ -1417,17 +1535,27 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
                 "context_runs": context_runs,
                 "captured_hook_frames": captures,
                 "client_duration_ms": client_elapsed.as_millis(),
+                "session_start_ms": session_start_ms,
+                "stop_ms": stop_ms,
+                "session_end_ms": session_end_ms,
+                "append_ms": append_ms,
+                "context_run_ms": context_run_ms,
             }))
             .expect("live report")
         ),
     )
     .expect("persist non-sensitive live report");
     eprintln!(
-        "CPR-14 live: claude={} plugin=0.2.0 events={} context_runs={} duration_ms={}",
+        "CPR-14 live: claude={} plugin=0.2.0 events={} context_runs={} client_ms={} session_start_ms={} stop_ms={} session_end_ms={} append_ms={} context_run_ms={}",
         version.stdout.trim(),
         event_count,
         context_runs,
-        client_elapsed.as_millis()
+        client_elapsed.as_millis(),
+        session_start_ms,
+        stop_ms,
+        session_end_ms,
+        append_ms,
+        context_run_ms,
     );
     h.cleanup();
 }
@@ -1436,6 +1564,236 @@ struct CommandOutput {
     status: std::process::ExitStatus,
     stdout: String,
     stderr: String,
+}
+
+fn safe_diagnostic_name(name: &str) -> String {
+    if name.len() <= 96
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_.:-".contains(&byte))
+    {
+        name.to_owned()
+    } else {
+        "<redacted>".to_owned()
+    }
+}
+
+/// Reports enough of Claude's single-result envelope to classify a client
+/// failure without ever printing the result text, tool inputs, or hook frames.
+fn safe_claude_diagnostic(output: &CommandOutput) -> String {
+    let parsed = serde_json::from_str::<Value>(&output.stdout).ok();
+    let field = |name: &str| parsed.as_ref().and_then(|value| value.get(name)).cloned();
+    let safe_field = |name: &str| {
+        field(name).map_or(Value::Null, |value| match value {
+            Value::String(ref text)
+                if text.len() <= 64
+                    && text
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"_.:-".contains(&byte)) =>
+            {
+                value
+            }
+            Value::Bool(_) | Value::Number(_) | Value::Null => value,
+            _ => Value::String("<redacted>".to_owned()),
+        })
+    };
+    let mut top_level_fields: Vec<_> = parsed
+        .as_ref()
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|object| object.keys())
+        .map(|name| {
+            if name.len() <= 64
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"_.:-".contains(&byte))
+            {
+                name.to_owned()
+            } else {
+                "<redacted>".to_owned()
+            }
+        })
+        .collect();
+    top_level_fields.sort();
+    let permission_denials = parsed
+        .as_ref()
+        .and_then(|value| value.get("permission_denials"))
+        .and_then(Value::as_array);
+    let denial_tools: Vec<_> = permission_denials
+        .into_iter()
+        .flatten()
+        .filter_map(|denial| denial.get("tool_name").and_then(Value::as_str))
+        .map(|name| {
+            if name.len() <= 96
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"_.:-".contains(&byte))
+            {
+                name.to_owned()
+            } else {
+                "<redacted>".to_owned()
+            }
+        })
+        .collect();
+    let denial_count = permission_denials.map_or(0, Vec::len);
+    let error_count = parsed
+        .as_ref()
+        .and_then(|value| value.get("errors"))
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let hook_error_count = parsed
+        .as_ref()
+        .and_then(|value| value.get("hook_errors"))
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    // Classify values, not the whole JSON encoding. Every result envelope has
+    // a `permission_denials` field, so scanning field names labelled every
+    // unrelated failure as a permission problem.
+    let mut diagnostic_parts = vec![output.stderr.as_str()];
+    if let Some(result) = parsed
+        .as_ref()
+        .and_then(|value| value.get("result"))
+        .and_then(Value::as_str)
+    {
+        diagnostic_parts.push(result);
+    } else if parsed.is_none() {
+        diagnostic_parts.push(output.stdout.as_str());
+    }
+    let diagnostic_values = parsed
+        .as_ref()
+        .into_iter()
+        .flat_map(|value| [value.get("errors"), value.get("permission_denials")])
+        .flatten()
+        .map(Value::to_string)
+        .collect::<Vec<_>>();
+    diagnostic_parts.extend(diagnostic_values.iter().map(String::as_str));
+    let diagnostic_text = diagnostic_parts.join("\n").to_ascii_lowercase();
+    let category = if [
+        "authentication_failed",
+        "authentication_error",
+        "invalid authentication",
+        "oauth token",
+        "login expired",
+        "failed to authenticate",
+        "please run /login",
+        "claude_code_oauth_token",
+        "oauth token revoked",
+        "invalid authorization",
+    ]
+    .iter()
+    .any(|needle| diagnostic_text.contains(needle))
+    {
+        "authentication"
+    } else if [
+        "session limit",
+        "weekly limit",
+        "credit balance",
+        "rate_limit",
+        "rate limit",
+        "429",
+    ]
+    .iter()
+    .any(|needle| diagnostic_text.contains(needle))
+    {
+        "usage_limit"
+    } else if ["overloaded", "529", "internal server error"]
+        .iter()
+        .any(|needle| diagnostic_text.contains(needle))
+    {
+        "service"
+    } else if diagnostic_text.contains("api error") {
+        "api"
+    } else if [
+        "unable to connect",
+        "connection refused",
+        "network",
+        "tls certificate",
+    ]
+    .iter()
+    .any(|needle| diagnostic_text.contains(needle))
+    {
+        "network"
+    } else if denial_count > 0
+        || ["permission denied", "bypasspermissions", "root/sudo"]
+            .iter()
+            .any(|needle| diagnostic_text.contains(needle))
+    {
+        "permission"
+    } else if ["workspace", "trust"]
+        .iter()
+        .any(|needle| diagnostic_text.contains(needle))
+    {
+        "workspace_trust"
+    } else if ["hook", "plugin", "mcp server"]
+        .iter()
+        .any(|needle| diagnostic_text.contains(needle))
+    {
+        "integration"
+    } else if ["stdin", "positional argument", "output-format", "--print"]
+        .iter()
+        .any(|needle| diagnostic_text.contains(needle))
+    {
+        "invocation"
+    } else if ["current directory", "no such file", "not found"]
+        .iter()
+        .any(|needle| diagnostic_text.contains(needle))
+    {
+        "filesystem"
+    } else {
+        "unknown"
+    };
+    let stdout_hash = Sha256::digest(output.stdout.as_bytes());
+    let stderr_hash = Sha256::digest(output.stderr.as_bytes());
+    format!(
+        "status={}, category={}, stdout_bytes={}, stderr_bytes={}, stdout_sha256={stdout_hash:x}, stderr_sha256={stderr_hash:x}, fields={top_level_fields:?}, type={}, subtype={}, is_error={}, num_turns={}, stop_reason={}, terminal_reason={}, api_error_status={}, prevented_continuation={}, hook_errors={hook_error_count}, result_bytes={}, duration_ms={}, permission_denials={denial_count}, denial_tools={denial_tools:?}, errors={error_count}",
+        output.status,
+        category,
+        output.stdout.len(),
+        output.stderr.len(),
+        safe_field("type"),
+        safe_field("subtype"),
+        safe_field("is_error"),
+        safe_field("num_turns"),
+        safe_field("stop_reason"),
+        safe_field("terminal_reason"),
+        safe_field("api_error_status"),
+        safe_field("prevented_continuation"),
+        field("result")
+            .and_then(|value| value.as_str().map(str::len))
+            .unwrap_or(0),
+        safe_field("duration_ms"),
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_failure_diagnostics_classify_without_disclosing_result_text() {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    let secret = "private-model-result-must-not-be-logged";
+    let output = CommandOutput {
+        status: std::process::ExitStatus::from_raw(256),
+        stdout: json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": true,
+            "num_turns": 1,
+            "result": format!(
+                "CLAUDE_CODE_OAUTH_TOKEN has invalid authorization: {secret}"
+            ),
+            "permission_denials": [{"tool_name": "Read", "tool_input": {"path": secret}}],
+            "errors": []
+        })
+        .to_string(),
+        stderr: String::new(),
+    };
+
+    let diagnostic = safe_claude_diagnostic(&output);
+    assert!(diagnostic.contains("category=authentication"));
+    assert!(diagnostic.contains("permission_denials=1"));
+    assert!(diagnostic.contains("denial_tools=[\"Read\"]"));
+    assert!(!diagnostic.contains(secret));
+    assert!(!diagnostic.contains("invalid authorization:"));
 }
 
 async fn live_command(
@@ -1475,7 +1833,12 @@ async fn live_command(
         .env("SYNVEDA_WORKSPACE", &harness.workspace_id)
         .env("SYNVEDA_PROJECT", &harness.project_id)
         .env("SYNVEDA_CLI", cli)
-        .env("SYNVEDA_CAPTURE_DIR", harness.home.join("captures"));
+        .env("SYNVEDA_CAPTURE_DIR", harness.home.join("captures"))
+        // Claude Code's overall SessionEnd budget defaults to 1.5 seconds and
+        // plugin hook timeouts do not raise it. Use the acceptance gate's
+        // existing eight-second ceiling so the adapter's three-second bounded
+        // flush can finish rather than being killed by its host.
+        .env("CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS", "8000");
     let output = command.output().await.expect("run live command");
     CommandOutput {
         status: output.status,

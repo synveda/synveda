@@ -12,10 +12,12 @@ size: M
 
 ## Description
 
-A Claude Code session that is not a person at a terminal — `claude -p`, CI, a
-script, an agent harness — currently reads governed memory and writes none of
-it back. Injection is synchronous and lands; every write path is `async: true`,
-so the harness does not wait for it and the process exits first.
+Before CPR-14, a Claude Code session that was not a person at a terminal —
+`claude -p`, CI, a script, an agent harness — read governed memory and wrote
+none of it back. Injection was synchronous and landed; every write path was
+`async: true`, so the harness did not wait for it and the process exited first.
+CPR-14 closed that gap with a synchronous **local durability** boundary and
+deferred network delivery, then proved it through the installed real client.
 
 ## Why this exists
 
@@ -38,7 +40,7 @@ Interactive sessions the previous day, same machine, observed correctly:
 13:25:28  observe.done  hook=Stop        events=5  accepted=5
 ```
 
-## What the manifest says
+## What the old manifest said
 
 `hooks/hooks.json`, as shipped:
 
@@ -72,7 +74,8 @@ only things that would (`observe`, `flush`) are the async hooks that did not run
 
 ## Why this is a feature and not a one-line change
 
-The obvious fix — make `Stop` synchronous — taxes every interactive turn up to
+The obvious fix considered in 2026-08-13 — make the whole `Stop` operation
+synchronous — would tax every interactive turn up to
 5s to protect the headless case, which inverts the trade-off the current
 manifest deliberately makes. Three candidates, and choosing wants an ADR
 amendment rather than a commit message:
@@ -109,7 +112,32 @@ The first two compose, and probably should.
   session whose earlier turns had never been sent. A catch-up flush must lean on
   that property deliberately rather than incidentally.
 
-## Acceptance criteria
+## Resolution (2026-08-24)
+
+The installed authenticated Claude Code **2.1.241** gate resolved the open
+question: with `Stop` still async, a successful headless run emitted only its
+SessionStart hooks, exited, and left the Synveda session active with zero
+events. Claude Code kills async hooks which are still running when print mode
+tears down.
+
+The fix does not make a turn wait for observation delivery:
+
+- `Stop` and `PreCompact` are synchronous only through transcript conversion
+  and the spool's atomic temp-write → `fsync` → rename. They resolve no
+  credential and make no network request.
+- `SessionEnd` performs the bounded flush and close; the next SessionStart and
+  `synveda session flush` recover anything still pending.
+- The local-only Stop contract is asserted with a failed gateway: events are
+  durable, `delivery_attempts` remains zero, and no append request exists.
+
+The genuine rerun loaded plugin **0.2.0** through the supported marketplace
+path, reported four hooks and one MCP server enabled, composed one context run,
+persisted four authentic user/tool/assistant events and ended the same run. The
+chain, rather than `adapter.log`, contains the governed session actions. Stop's
+local boundary measured **8ms**; gateway append happened at SessionEnd and
+measured **28ms**. ADR-0027 amendment 3 records the revised seam.
+
+## Acceptance criteria — met
 
 - A **headless** `claude -p` session's turns reach the audit chain —
   `memory.observed` with `accepted > 0` for that `session_id` — without any
@@ -124,3 +152,8 @@ The first two compose, and probably should.
 - Whatever is chosen, the **tail case is stated**: which sessions are still
   never observed, and why that is acceptable. A design that quietly loses the
   last session of a project is the same silent gap in a smaller box.
+
+The remaining tail is a host killed before any lifecycle hook receives and
+writes the in-flight turn. Nothing that reached the spool is lost; the replay
+gate proves outage recovery, overlapping duplicate delivery and exactly-once
+server persistence.

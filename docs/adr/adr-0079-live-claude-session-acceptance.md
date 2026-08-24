@@ -25,6 +25,33 @@ identity, grant, record and session directly so the interesting part starts
 quickly. That would prove a path the product does not offer and, for governed
 assets, bypass the PDP this product exists to enforce.
 
+## Current evidence (2026-08-24)
+
+The live-client tier is complete. The installed authenticated **Claude Code
+2.1.241** executable loaded Synveda plugin **0.2.0**, reported it enabled with
+four hooks and one MCP server, and ran a deterministic headless Read turn in an
+isolated HOME and Claude/Synveda configuration. Its real SessionStart composed
+one context run; its real Stop crossed the local durable boundary; SessionEnd
+delivered four ordered user, tool-invocation, tool-result and assistant events
+and ended the same session with reason `other`. Timeline, raw-diagnostic
+authority, audit-chain, hash, ordering, acknowledgement and content-free
+evidence assertions all passed.
+
+The run took **5,526ms** in the client. Measured components were SessionStart
+**72ms**, Stop **8ms**, SessionEnd **53ms**, append **28ms** and context-run
+**15ms** on macOS 26.5.2 (25F84), Darwin 25.5.0 arm64. The deterministic replay
+continues to own outage/lost-ack recovery and ordinary CI. The host-killed-
+before-any-hook tail remains outside the guarantee.
+
+Isolation exposed one credential rule the runner now handles explicitly: an
+exported Claude credential can shadow a valid native login, while changing
+HOME or `CLAUDE_CONFIG_DIR` changes the macOS Keychain namespace used by this
+client version. The runner checks native authentication with credential
+overrides unset, hands only the native credential payload to the disposable
+configuration through a private 0600 temporary file, and deletes it on every
+exit path. Result diagnostics report only envelope fields, categories, counts,
+tool names, byte lengths and hashes; model result text is never printed.
+
 ## Decision
 
 ### 1. Evidence has three named tiers
@@ -130,4 +157,5 @@ audit actions, together with exact client/plugin/Synveda/platform versions.
   adapter configuration seam.
 - A replay can ship while live verification remains pending, but feature
   counts and support statements stay pending until the real executable
-  completes the gate. That is an explicit state, not a degraded pass.
+  completes the gate. CPR-14's 2026-08-24 run completed it; future client
+  versions must continue to pass the same separately named live target.

@@ -18,8 +18,8 @@ caller's own bearer, and inherits whatever the PDP allows that identity
 | --- | --- | --- |
 | `SessionStart` | `session-start` | Opens or resumes the run, retries the backlog, `POST /v1/sessions/{id}/context-runs`; returns the block as `additionalContext` |
 | `SessionStart` | `skills` | `synveda skill sync` into this plugin's own `skills/`; async, returns nothing |
-| `Stop` | `turn` | Records the turn into the spool, then delivers it |
-| `PreCompact` | `turn` | Records everything the transcript still holds, before compaction rewrites it |
+| `Stop` | `turn` | Synchronously records the turn into the spool, then returns before credential or network work |
+| `PreCompact` | `turn` | Synchronously records everything the transcript still holds, then returns before compaction rewrites it |
 | `SessionEnd` | `turn` | Records the last turn, then a **bounded** synchronous flush, then closes the run |
 
 `SessionStart` is the only one of the four that can contribute context —
@@ -232,11 +232,14 @@ Nothing inside your project.
 
 ## Delivery
 
-**Record first, deliver second.** Every hook copies the transcript delta into
-a local spool and `fsync`s it *before* it tries to send anything. So an
-unreachable gateway, an expired login, a killed hook, a compaction or a reboot
-costs nothing: the events are on disk, and the next `SessionStart` — or
-`synveda session flush` — delivers them.
+**Record first, deliver later.** Stop and PreCompact copy the transcript delta
+into a local spool, `fsync` it and return without resolving a credential or
+contacting the gateway. This synchronous local boundary survives successful
+headless teardown without putting gateway latency into an interactive turn.
+SessionEnd performs a bounded flush; the next `SessionStart` or `synveda
+session flush` delivers anything it could not acknowledge. An unreachable
+gateway, an expired login, a compaction or a reboot therefore costs no event
+which reached the spool.
 
 Delivery is idempotent per event. Each event carries the transcript entry's own
 uuid as its `client_event_id`, so a redelivered batch that overlaps a previous
@@ -336,6 +339,7 @@ make claude-acceptance-live  # installed marketplace + real authenticated client
 
 The first is always labelled replay. The second's runner exits 77 when the
 executable or authentication is unavailable (`make` surfaces that as recipe
-`Error 77`). On 2026-08-23 Claude Code 2.1.241 was installed
-but unauthenticated, so no real-client session ran and live verification remains
-pending; the replay does not stand in for it.
+`Error 77`). On 2026-08-24 installed authenticated Claude Code **2.1.241**
+passed with plugin **0.2.0**: four hooks and one MCP server enabled, one context
+run, four ordered user/tool/assistant events and a normal ended session. Replay
+remains distinct and does not stand in for future live-client versions.

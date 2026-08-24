@@ -260,12 +260,14 @@ const SCENARIOS: Scenario[] = [
     },
   },
   {
-    name: "a recorded stop records the turn and delivers it",
+    name: "a recorded stop durably records without waiting on delivery",
     respond: gatewayScript(() => undefined),
     async run(subject) {
-      const transcript = subject.transcript("turn.jsonl");
+      const transcript = subject.synthesise("growing.jsonl", []);
       const start = subject.recorded("session-start-startup", { transcript_path: transcript });
       exits(await subject.hook("session-start", start));
+      const captured = subject.transcript("turn.jsonl");
+      writeFileSync(transcript, readFileSync(captured));
       const payload = subject.recorded("stop", { transcript_path: transcript });
       exits(await subject.hook("turn", payload));
       const spool = subject.spool(String(payload.session_id));
@@ -275,8 +277,15 @@ const SCENARIOS: Scenario[] = [
         "the turn must be recorded as events, not merely posted",
       );
       expect(
-        (spool?.entries ?? []).every((entry) => entry.acknowledged),
-        "a reachable gateway must leave nothing pending",
+        (spool?.entries ?? []).every(
+          (entry) => !entry.acknowledged && entry.delivery_attempts === 0,
+        ),
+        "Stop must leave delivery to SessionEnd or the next SessionStart",
+      );
+      if (subject.live) return;
+      expect(
+        !subject.requests.some((request) => request.path.endsWith("/events")),
+        "Stop must not put gateway latency in the interactive turn",
       );
     },
   },
@@ -323,8 +332,13 @@ const SCENARIOS: Scenario[] = [
         "nothing may be marked delivered when the gateway was never reached",
       );
       expect(
-        (spool?.entries ?? []).some((entry) => entry.delivery_attempts >= 1),
-        "the attempt must be counted so `spool status` can report it",
+        (spool?.entries ?? []).every((entry) => entry.delivery_attempts === 0),
+        "the synchronous Stop boundary must not attempt network delivery",
+      );
+      if (subject.live) return;
+      expect(
+        !subject.requests.some((request) => request.path.endsWith("/events")),
+        "gateway availability must not affect Stop",
       );
     },
   },
@@ -376,7 +390,15 @@ const SCENARIOS: Scenario[] = [
         }
       });
 
-      exits(await subject.hook("turn", subject.recorded("stop", { transcript_path: transcript })));
+      exits(
+        await subject.hook(
+          "session-start",
+          subject.recorded("session-start-startup", {
+            session_id: stop.session_id,
+            transcript_path: transcript,
+          }),
+        ),
+      );
       const appends = subject.requests.filter((request) => request.path.endsWith("/events"));
       const last = appends.at(-1);
       const outcomes = ((last?.body.events ?? []) as unknown[]).length;

@@ -2638,4 +2638,144 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `test(adapter): verify live Claude session lifecycle` on
   `feat/context-platform-mvp`.
+- **Commit hash.** `02b986ba68c9a867abdd9aa5c2746740669fa6d2`, written by
+  the live-closure continuation below on Prompt 1's rule.
+
+### External acceptance objective — CPR-14 live-client closure
+
+- **Selected feature and state.** **CPR-14**, because CPR-13 remains reserved
+  for the demo-corpus re-point. The installed-client tier passed on
+  2026-08-24, so CPR-14 is delivered. The defect it exposed is exactly
+  ADPT-8's subject, and the fix meets all four of that feature's criteria; it
+  closes at the same time. The repository is therefore **111 features filed,
+  78 delivered**. Candidate extraction, Knowledge, New Learnings,
+  explainable context, skills, the MCP registry, OKF and graph work remain
+  unstarted.
+
+- **Implementation.** The live runner checks native Claude authentication with
+  `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and
+  `CLAUDE_CODE_OAUTH_TOKEN` unset, so an exported stale credential cannot
+  shadow a valid native login. On macOS it transfers only the default
+  `Claude Code-credentials` Keychain payload into the isolated Claude profile
+  through a private 0600 `mktemp` file, then removes it on success, failure or
+  signal. The Rust harness already removes isolated HOME, Synveda config and
+  raw captures from `Drop`, including assertion failures.
+
+  The authentic invocation now places the prompt before variadic
+  `--allowedTools`, uses the stable JSON output contract, advertises only Read
+  with `--tools Read --allowedTools Read`, and uses no permission bypass. Its
+  failure report is content-free: status, category, safe envelope field names,
+  enum/numeric fields, byte lengths, SHA-256s, denial counts and safe tool
+  names. A test proves a credential error containing private result text and a
+  private tool input is classified without either string appearing.
+
+  The lifecycle fix amends ADR-0027 and ADR-0078. Claude Code's successful
+  headless teardown kills unfinished async hooks. Stop and PreCompact are now
+  synchronous only through transcript conversion plus atomic local spool save;
+  they return before credential resolution or network I/O. SessionEnd owns the
+  bounded flush/close, with the next SessionStart and explicit CLI flush as
+  recovery. The live child sets
+  `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS=8000`: Claude Code's default overall
+  SessionEnd budget is 1.5s and a plugin hook's own timeout does not raise it,
+  while the adapter's existing flush remains bounded at 3s. Adapter logs add
+  content-free per-hook and per-append durations.
+
+- **Live evidence.** The real installed authenticated executable ran; no hook
+  function or manufactured invocation substitutes for it. Claude Code
+  **2.1.241** installed plugin **0.2.0** through `synveda plugin install`'s
+  marketplace path and reported `synveda@synveda` enabled, **four hooks** and
+  **one MCP server**. One deterministic real Read turn emitted SessionStart,
+  Stop and SessionEnd frames, opened exactly one project-scoped Synveda run,
+  composed exactly one context run, persisted four ordered
+  `message.user`/`tool.invoked`/`tool.result`/`message.assistant` events, flushed
+  the final tail and ended with reason `other`. The timeline, separately
+  authorised diagnostic payload, client ids, local SHA-256s, server BLAKE3
+  hashes, acknowledgement state, sequence order and verifying audit-chain
+  assertions passed. Summaries and audit/log evidence carry no message text.
+
+- **Replay and outage evidence.** The schema-validated authentic 2.1.220/
+  2.1.241 fixture corpus remains the ordinary-CI tier. Stop first leaves four
+  entries durable and unacknowledged with `delivery_attempts = 0` and no event
+  request; a supported next SessionStart drains them. A second two-event turn
+  reaches the spool before the gateway is stopped. The private 0700/0600 spool
+  remains intact and unacknowledged during the outage. After restore, the
+  harness commits the first pending event through the public append route but
+  deliberately loses the local acknowledgement; the next SessionStart sends
+  the two-event overlap and receives `duplicate` at original sequence **5**
+  plus `appended` at **6**. Six client ids produce six rows exactly once. CLI
+  spool tests prove acknowledged purge removes acknowledged entries while
+  retaining pending ones.
+
+- **Versions.** Live: Claude Code **2.1.241**, plugin **0.2.0**, Synveda
+  **0.2.0**, Node **v24.18.0**, pnpm **11.13.1**, rustc/cargo **1.96.0**.
+  Host: macOS **26.5.2 (25F84)**, Darwin **25.5.0**, arm64. Replay provenance
+  remains Claude Code **2.1.220** and **2.1.241**.
+
+- **Schema, API and contracts.** **No migration, epoch, Cedar action, audit
+  action, public HTTP route, OpenAPI or generated-client change.** The private
+  adapter contract changes are: Stop and PreCompact registrations no longer
+  carry `async: true`; both end at the atomic spool; SessionEnd/next start own
+  delivery; the live runner has isolated native-credential handoff and the
+  host SessionEnd budget; and the acceptance report/log carries content-free
+  hook, append and context durations.
+
+- **Defects discovered.** The variadic `--allowedTools` option consumed the
+  prompt when it followed the option; `--include-hook-events` is not valid with
+  JSON output; broad bypass flags were unnecessary; an exported invalid Claude
+  credential shadowed a valid native login; isolating either HOME or
+  `CLAUDE_CONFIG_DIR` changed the Keychain namespace in 2.1.241; the first
+  diagnostic classifier matched the ever-present field name
+  `permission_denials` and labelled unrelated failures as permission errors;
+  Claude's result envelope can say `subtype=success` and `is_error=true` with
+  zero permission denials; the host's SessionEnd budget is independent of the
+  plugin timeout; and the live run resolved ADPT-8's old ambiguity — async
+  Stop did not complete under successful `-p`, leaving the run active with
+  zero events. One model invocation returned a transient generic API error;
+  the unmodified retry passed. After the boundary moved, one replay assertion
+  still queried immediately after Stop; the corrected test uses the supported
+  next-SessionStart delivery path.
+
+- **Measurements.** Final live: client **5,526ms**, SessionStart **72ms**,
+  local-only Stop **8ms**, SessionEnd flush/close **53ms**, append **28ms**,
+  context run **15ms**. Final replay: SessionStart **76ms**, Stop child process
+  **31ms**, SessionEnd **55ms**, append **10ms**, context runs **15/13ms** and
+  bounded backlog recovery **72ms**. No ceiling moved. The live append was a
+  single cold sample, so the dedicated release gate was rerun: **10,000 events
+  in 9.91s (1,009/s), ack p50 13.09ms, p95 15.75ms, p99 17.05ms**, with a
+  165.88µs link baseline and 22.16ms local budget. It passed, so the 28ms live
+  observation is not a steady-state regression.
+
+- **Security.** Session bodies still cannot supply tenant, acting principal or
+  governed scope. The focused suite proves project-row decisions,
+  cross-project filtering, cross-tenant 404 equivalence and personal-scope
+  privacy. Timeline summaries carry types and lengths rather than message
+  text; raw diagnostics remain behind `SessionDiagnostics`; fixture and audit
+  sweeps find no credentials/private content; spool, capture and credential
+  handoff permissions are restrictive; logs/report carry ids, counts, hashes
+  and durations rather than bodies; and setup uses production JIT plus public
+  workspace/project/session paths with no direct governed-table mutation or
+  test-policy PDP bypass.
+
+- **Tests and exact results.** Adapter **96/96**; CLI spool **10/10**; console
+  **150/150**; focused session/ingestion/redaction/context/audit/timeline/
+  lifecycle gateway set **63 passed, 0 failed, 1 live ignored**; deterministic
+  replay **1 passed**; installed-client live **1 passed**; release append load
+  **1 passed** with the measurements above. `make ci` **PASS**: Rust workspace
+  plus doctests **1,680 passed, 0 failed, 10 ignored**, adapter **96/96**,
+  console **150/150**, and every checker. `make db-test` **PASS** on
+  `synveda_test_21449` with the same **1,680 passed, 0 failed, 10 ignored**;
+  the successful scratch database was dropped. The first replay after the
+  Stop-boundary change failed one stale immediate-delivery assertion and kept
+  `synveda_test_20275`; this was a harness failure, not lost product data.
+
+- **Limitations and remaining work.** The real proof is exact to Claude Code
+  2.1.241; future client versions run the same separate gate. A host killed
+  before any lifecycle hook writes the in-flight turn can still lose that
+  tail. Live Entra/Okta and real Cursor evidence remain absent. The three
+  intentionally blocked eval suites were not changed to measure another
+  question. CPR-13 remains untouched. The next bounded objective is
+  **CPR-13, the demo-corpus re-point and `make check-demos` gate**.
+
+- **Commit.** `fix(adapter): preserve headless Claude turns` on
+  `feat/context-platform-mvp`.
 - **Commit hash.** Written by the next prompt on Prompt 1's rule.

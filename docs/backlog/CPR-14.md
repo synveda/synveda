@@ -49,12 +49,24 @@ client event id.
 
 ## Current evidence
 
-Implementation and replay/live-gateway verification are complete. Live-client
-verification is pending: on 2026-08-23 the installed executable reported
-`2.1.241 (Claude Code)` and `claude auth status` reported `loggedIn: false` with
-no isolated credential available. The live runner exited 77 before packaging or
-invoking a session. No real Claude Code session has yet composed or appended
-through the installed plugin on the new session plane.
+Delivered 2026-08-24. Deterministic captured/mock and replay/live-gateway tiers
+pass, and the installed authenticated **Claude Code 2.1.241** executable passed
+the separately named live-client gate with Synveda plugin **0.2.0**. Claude
+Code itself reported the plugin enabled with four hooks and one MCP server. Its
+real SessionStart composed exactly one context run; real user, Read invocation,
+tool result and assistant activity produced four ordered session events; and
+real Stop plus SessionEnd flushed and ended the same run with reason `other`.
+The timeline, separately authorised diagnostic payload, verifying audit chain,
+spool hashes, server hashes, ordering and acknowledgement assertions passed
+without comparing model prose.
+
+The run isolated HOME and Claude/Synveda configuration while handing only the
+native macOS credential into the disposable profile through a private 0600
+temporary file. It recorded client **5,526ms**, SessionStart **72ms**, Stop
+**8ms**, SessionEnd **53ms**, append **28ms** and context-run **15ms** on macOS
+26.5.2 (25F84), Darwin 25.5.0 arm64. Replay remains the deterministic outage
+and idempotency proof in CI. A process killed before any lifecycle hook writes
+the in-flight turn can still lose that tail; the feature makes no broader claim.
 
 ## Acceptance criteria
 

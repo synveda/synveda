@@ -854,16 +854,16 @@ ADPT-7 Semantic Kernel memory connector (M) [Phase 4]
   two answer the same corpus for one identity.
 ADPT-8 Observation that survives a session that does not wait (M) [Phase 4]
   Filed 2026-08-13 by testing ADPT-1's plugin in a real Claude Code session on
-  v0.1.3. A headless run — `claude -p`, which is CI, a script, an agent harness —
-  **injects and never observes**. Every write hook is `async: true`, so the
-  harness does not wait, and the process exits first: three sessions produced
-  three `inject.ok` and zero `observe.done`, with no error and exit 0. The hook
-  is not broken — run by hand against the same transcript it accepted both turns
-  — and the turns are not destroyed, since the transcript stays on disk and the
-  spool holds no cursor. Nothing ever collects them, because flush is async too.
-  AC: a headless session's turns reach the chain without making an interactive
-  turn wait for them, demonstrated by a `claude -p` run whose `memory.observed`
-  the demo asserts.
+  v0.1.3. The measured defect was a headless `claude -p` which injected and
+  never observed because every write hook was async. Delivered 2026-08-24 by
+  CPR-14: Stop and PreCompact synchronously cross only the atomic local-spool
+  boundary and return before credentials or network, while SessionEnd, the next
+  SessionStart and explicit flush own delivery. An installed authenticated
+  Claude Code 2.1.241 run proved one context run, four ordered authentic
+  user/tool/assistant events, normal close and a verifying session audit chain;
+  Stop took 8ms and made no event request. AC: the real headless session's
+  activity reaches the chain without gateway latency entering an interactive
+  turn; the host-killed-before-any-hook tail remains stated.
 
 ──────────────────────────────────────────────
 EPIC OPS — Deployment & operations
@@ -1690,6 +1690,9 @@ CPR-14  Live Claude Code session acceptance gate (L)
   pending ones; exact Claude Code, plugin, Synveda and OS versions and SessionStart, Stop,
   SessionEnd, append, context-run and recovery durations are recorded; and ordinary CI runs the
   schema-validated authentic-frame replay under its own name without claiming a live client ran.
+  Delivered 2026-08-24 against installed authenticated Claude Code 2.1.241 and plugin 0.2.0:
+  the real client reported four hooks plus one MCP server enabled, composed one context run,
+  persisted four ordered user/tool/assistant events and ended the same governed session.
 
 ──────────────────────────────────────────────
 Sequencing (features → phases)

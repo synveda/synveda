@@ -224,13 +224,15 @@ plugin reads it per call. There is no other configuration.
 Nothing is lost, and you do not have to do anything about it.
 
 Every event the plugin records is written to a **local spool** first — one
-file per session under `~/.config/synveda/spool/` — and only then delivered.
+file per session under `$XDG_STATE_HOME/synveda/spool/` (or
+`~/.local/state/synveda/spool/`) — and only then delivered.
 A write is a temp file, an `fsync` and a rename, so a machine that dies
 mid-write leaves the previous state or the new one and never half of either.
 An event is deleted only once the gateway has acknowledged it.
 
-Delivery happens on the hooks: `Stop` records the turn and starts one,
-`SessionEnd` flushes what it can inside a bounded budget, and the **next**
+Delivery happens on the lifecycle hooks: `Stop` and `PreCompact` synchronously
+record to the local spool and return before credential or network work;
+`SessionEnd` flushes what it can inside a bounded budget; and the **next**
 `SessionStart` retries whatever is still unacknowledged. So a session worked
 on a plane, or against a gateway that was down for the afternoon, delivers
 itself the next time you start Claude Code with a network.

@@ -5,13 +5,15 @@
  *
  * | Hook | Records | Then |
  * |---|---|---|
- * | `Stop` | the turn | starts delivery |
- * | `PreCompact` | everything the transcript still holds | starts delivery |
+ * | `Stop` | the turn | returns once the local spool is durable |
+ * | `PreCompact` | everything the transcript still holds | returns once the local spool is durable |
  * | `SessionEnd` | the last turn | a **bounded** synchronous flush, then closes |
  *
- * `Stop` is the real write seam: it fires at the end of every turn. The
- * recording is durable before any delivery is attempted, which is the property
- * that makes an unreachable gateway cost nothing.
+ * `Stop` is the real write seam: it fires at the end of every turn. Its hook is
+ * synchronous because Claude Code kills async hooks when `-p` tears down, but
+ * only the local durable write sits in the turn. Network delivery remains the
+ * next SessionEnd, SessionStart or explicit flush command's work. PreCompact
+ * uses the same local-only boundary before Claude rewrites the transcript.
  *
  * `PreCompact` matters for one reason: it runs while compaction proceeds, so
  * the content must be in memory before the transcript is rewritten underneath
@@ -29,7 +31,7 @@ import { closeRun, deliver, recordDelta } from "./deliver.mjs";
 import { CLIENT_NAME } from "./client.mjs";
 import { installationId } from "./install-id.mjs";
 import { log } from "./log.mjs";
-import { loadSpool, newSpool, retireIfComplete, saveSpool } from "./spool.mjs";
+import { loadSpool, newSpool, pending, retireIfComplete, saveSpool } from "./spool.mjs";
 import { harnessSessionId } from "./session-start.mjs";
 import type { HookInput, HookOutput } from "./types.mjs";
 
@@ -43,8 +45,8 @@ import type { HookInput, HookOutput } from "./types.mjs";
  */
 const END_FLUSH_BUDGET_MS = 3000;
 
-/** How long `Stop`'s opportunistic delivery gets. */
-const TURN_DELIVERY_BUDGET_MS = 2000;
+/** How long a legacy payload without an event name gets for delivery. */
+const FALLBACK_DELIVERY_BUDGET_MS = 2000;
 
 export async function turn(input: HookInput, configured: AdapterConfig): Promise<HookOutput> {
   const hookStarted = Date.now();
@@ -64,6 +66,24 @@ export async function turn(input: HookInput, configured: AdapterConfig): Promise
     return {};
   }
 
+  // Claude Code 2.1.241 cancels async hooks during successful `-p` teardown.
+  // Registering Stop and PreCompact synchronously crosses the durability
+  // boundary, while returning here keeps an interactive turn and compaction
+  // independent of gateway latency.
+  if (input.hook_event_name === "Stop" || input.hook_event_name === "PreCompact") {
+    const held = pending(spool).length;
+    log("turn.done", {
+      session: externalId,
+      hook: input.hook_event_name,
+      recorded,
+      acknowledged: 0,
+      pending: held,
+      complete: held === 0,
+      elapsed_ms: Date.now() - hookStarted,
+    });
+    return {};
+  }
+
   const bearer = await resolveBearer();
   // Silent: the session-start hook already told the user to log in, and saying
   // it again on every turn would be noise rather than help. The events are
@@ -73,7 +93,7 @@ export async function turn(input: HookInput, configured: AdapterConfig): Promise
   spool.gateway_url = config.gatewayUrl;
 
   const ending = input.hook_event_name === "SessionEnd";
-  const budget = ending ? END_FLUSH_BUDGET_MS : TURN_DELIVERY_BUDGET_MS;
+  const budget = ending ? END_FLUSH_BUDGET_MS : FALLBACK_DELIVERY_BUDGET_MS;
   const result = await deliver(spool, config, bearer.token, Date.now() + budget);
 
   if (ending) {

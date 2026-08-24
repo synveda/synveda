@@ -1,9 +1,21 @@
 # ADR-0078: Durable session delivery and the observe/inject/recall cutover
 
-- **Status**: Accepted
+- **Status**: Accepted, amended 2026-08-24 by CPR-14
 - **Date**: 2026-08-25
 - **Feature(s)**: CPR-12
 - **Deciders**: Prompt 12 of the CPR programme
+
+## Amendment (2026-08-24): Stop and PreCompact end at the spool
+
+CPR-14 proved with the installed Claude Code 2.1.241 client that `async` write
+hooks are killed during successful headless teardown. Decision 7's phrase
+"delivery is attempted after the record is durable" left that network attempt
+inside Stop. It is replaced by a narrower and faster boundary: Stop and
+PreCompact synchronously record and atomically save, then return before
+credential resolution or network I/O. SessionEnd, the next SessionStart and
+the explicit CLI flush own delivery. This preserves decision 8's loss boundary
+while removing gateway latency from every interactive turn. ADR-0027 amendment
+3 records the client evidence and ADR-0079 records the acceptance result.
 
 ## Context
 
@@ -181,7 +193,8 @@ spool with extra steps.
 | Hook | What it does |
 |---|---|
 | `SessionStart` | Opens or resumes the Synveda session, **retries the backlog**, composes a context run, returns it as context. |
-| `Stop` | Records the turn's events into the spool and returns; delivery is attempted after the record is durable, never before. |
+| `Stop` | Records the turn's events, atomically saves the spool and returns **without credential resolution or network I/O**. |
+| `PreCompact` | Records everything the current transcript still holds, atomically saves the spool and returns before compaction can rewrite it. |
 | `SessionEnd` | A **bounded** synchronous flush — a fixed deadline and a fixed attempt count, because a hook that blocks a client's exit indefinitely is worse than one that leaves a backlog. |
 | next `SessionStart` | Retries whatever the last one could not acknowledge. |
 
