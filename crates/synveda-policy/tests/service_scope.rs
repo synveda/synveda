@@ -408,6 +408,7 @@ fn an_agent_reads_authored_assets_up_its_own_chain_and_nothing_else() {
             "context packs",
         ),
         (Action::SkillRead, Action::SkillWrite, "skills"),
+        (Action::ToolRead, Action::ToolWrite, "tool servers"),
     ] {
         // 1. Up the chain, role-free: the anchor, its department, the org,
         //    and the agent's own leaf. This is the zero-config resolution.

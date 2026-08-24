@@ -1,6 +1,6 @@
 //! Context-platform contract: the OpenAPI document is authoritative
 //! (ADR-0071 decision 7; CPR-17/ADR-0082; CPR-18/ADR-0083;
-//! CPR-23/ADR-0085).
+//! CPR-23/ADR-0085; CPR-25/ADR-0086).
 //!
 //! Three things have to be true for that sentence to mean anything, and this
 //! suite is each of them:
@@ -87,6 +87,7 @@ const DECLARED_PATHS: &[&str] = &[
     "/v1/projects/{project_id}/members/{principal_id}",
     "/v1/projects/{project_id}/repositories",
     "/v1/projects/{project_id}/repositories/{repository_id}",
+    "/v1/projects/{project_id}/tool-config",
     // CPR-10 (ADR-0076): the session ledger and runtime API.
     "/v1/sessions",
     "/v1/sessions/{session_id}",
@@ -112,6 +113,17 @@ const DECLARED_PATHS: &[&str] = &[
     "/v1/skills/{id}/versions/{version_id}/files/{path}",
     "/v1/skills/{id}/versions/{version_id}/tests",
     "/v1/skills/{id}/versions/{version_id}/usage",
+    // CPR-25 (ADR-0086): trusted MCP catalogue and exact project bindings.
+    "/v1/tool-bindings",
+    "/v1/tool-bindings/{id}",
+    "/v1/tool-servers",
+    "/v1/tool-servers/import-client-config",
+    "/v1/tool-servers/{id}",
+    "/v1/tool-servers/{id}/discoveries",
+    "/v1/tool-servers/{id}/versions",
+    "/v1/tool-servers/{id}/versions/{version_id}",
+    "/v1/tool-servers/{id}/versions/{version_id}/diff",
+    "/v1/tool-servers/{id}/versions/{version_id}/tests",
     "/v1/workspaces",
     "/v1/workspaces/{workspace_id}",
     "/v1/workspaces/{workspace_id}/invites",
@@ -363,8 +375,8 @@ fn the_document_is_generatable() {
     }
     assert_eq!(
         operation_ids.len(),
-        85,
-        "the 67-operation CPR-20 contract plus CPR-23's 18 Skill operations: \
+        101,
+        "the 67-operation CPR-20 contract plus CPR-23's 18 Skill and CPR-25's 16 Tool operations: \
          {operation_ids:?}"
     );
 }

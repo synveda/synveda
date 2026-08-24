@@ -80,6 +80,7 @@ pub mod sessions;
 pub mod skills;
 pub mod tenant_secrets;
 pub mod tenants;
+pub mod tool_registry;
 pub mod workspaces;
 
 use sqlx::migrate::Migrator;

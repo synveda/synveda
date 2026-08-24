@@ -409,6 +409,15 @@ pub enum Action {
     /// is sharpest: a skill is executable, so a pack must be able to say
     /// "curate conventions here" without saying "author code here".
     SkillWrite,
+    /// Inspect trusted MCP catalogue metadata or generate configuration for
+    /// an exact approved project binding (CPR-25, ADR-0086).
+    ///
+    /// Capability declarations remain untrusted metadata; this action grants
+    /// no permission to invoke a tool.
+    ToolRead,
+    /// Register, version, approve or bind trusted MCP metadata through a
+    /// typed VedaFlow change (CPR-25, ADR-0086).
+    ToolWrite,
     /// List/read quarantined observe events: the tenant's pending queue
     /// (the tenant resource) or a subtree's (a scope) — `/v1/quarantine`
     /// (MEM-2, ADR-0021 decision 6).
@@ -563,7 +572,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 46] = [
+    pub const ALL: [Action; 48] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -592,6 +601,8 @@ impl Action {
         Action::ContextPackWrite,
         Action::SkillRead,
         Action::SkillWrite,
+        Action::ToolRead,
+        Action::ToolWrite,
         Action::QuarantineRead,
         Action::QuarantineReview,
         Action::PolicyRead,
@@ -627,7 +638,7 @@ impl Action {
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 36] = [
+    pub const PROBED_AT_SCOPE: [Action; 38] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -649,6 +660,8 @@ impl Action {
         Action::PromptWrite,
         Action::ContextPackWrite,
         Action::SkillWrite,
+        Action::ToolRead,
+        Action::ToolWrite,
         Action::QuarantineRead,
         Action::QuarantineReview,
         Action::PolicyRead,
@@ -743,6 +756,8 @@ impl Action {
             Action::ContextPackWrite => "context_pack.write",
             Action::SkillRead => "skill.read",
             Action::SkillWrite => "skill.write",
+            Action::ToolRead => "tool.read",
+            Action::ToolWrite => "tool.write",
             Action::QuarantineRead => "quarantine.read",
             Action::QuarantineReview => "quarantine.review",
             Action::PolicyRead => "policy.read",
@@ -795,6 +810,8 @@ impl Action {
             Action::ContextPackWrite => "ContextPackWrite",
             Action::SkillRead => "SkillRead",
             Action::SkillWrite => "SkillWrite",
+            Action::ToolRead => "ToolRead",
+            Action::ToolWrite => "ToolWrite",
             Action::QuarantineRead => "QuarantineRead",
             Action::QuarantineReview => "QuarantineReview",
             Action::PolicyRead => "PolicyRead",

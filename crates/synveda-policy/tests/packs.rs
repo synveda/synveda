@@ -274,6 +274,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
     for (action, what) in [
         (Action::ContextPackRead, "context packs"),
         (Action::SkillRead, "skills"),
+        (Action::ToolRead, "tool servers"),
     ] {
         for target in ALL_SCOPES {
             let decision = memory(
@@ -302,6 +303,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         (Action::PromptWrite, "prompts"),
         (Action::ContextPackWrite, "context packs"),
         (Action::SkillWrite, "skills"),
+        (Action::ToolWrite, "tool servers"),
     ] {
         let authorable: Vec<&str> = ALL_SCOPES
             .into_iter()

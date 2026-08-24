@@ -82,4 +82,5 @@ pub mod sessions;
 pub mod skills;
 pub mod telemetry;
 pub mod tenant;
+pub mod tool_registry;
 pub mod workspaces;

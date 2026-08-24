@@ -71,6 +71,9 @@ mod skill_registry;
 mod skillquality;
 mod skillscan;
 mod tenant;
+// Trusted MCP server catalogue, immutable versions and exact project
+// bindings (CPR-25, ADR-0086).
+pub mod tool_registry;
 // The two product-level subtypes of a governed scope (CPR-4, ADR-0071).
 // Public as a module for `repository`'s reason and one of its own: `Project`
 // and `Workspace` are ordinary nouns, and the module path is what says these
@@ -95,13 +98,14 @@ pub use directory::{DirectoryGroup, DirectoryUser, ScimCredential};
 pub use error::{Error, Result};
 pub use graph::{Depth, Graph};
 pub use id::{
-    CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId, ContextCandidateId,
-    ContextFeedbackId, ContextRunId, ContextSelectionId, DirectoryGroupId, DirectoryUserId,
-    DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId, InviteId,
-    KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, LapseId,
-    ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId, ScopeId, SessionEventId,
-    SessionId, SkillBindingId, SkillId, SkillTestRunId, SkillUsageEventId, SkillVersionId,
-    TenantId, WorkspaceId,
+    CapabilitySnapshotId, CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId,
+    ContextCandidateId, ContextFeedbackId, ContextRunId, ContextSelectionId, DirectoryGroupId,
+    DirectoryUserId, DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId,
+    InviteId, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId,
+    LapseId, ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId, ScopeId,
+    SessionEventId, SessionId, SkillBindingId, SkillId, SkillTestRunId, SkillUsageEventId,
+    SkillVersionId, TenantId, ToolBindingId, ToolServerId, ToolServerVersionId, ToolTestRunId,
+    WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use lapse::{
@@ -150,3 +154,9 @@ pub use skillquality::{
 };
 pub use skillscan::{ScanSeverity, SkillScanConfig};
 pub use tenant::{Tenant, TenantStatus};
+pub use tool_registry::{
+    CapabilityCollection, MCP_PROTOCOL_VERSION, MCP_SPEC_COMMIT, NormalizedCapabilities,
+    ToolAuthenticationKind, ToolBindingState, ToolCommand, ToolMutationOutcome, ToolMutationResult,
+    ToolServerDescriptor, ToolServerSourceKind, ToolTestHarness, ToolTestOutcome, ToolTransport,
+    ToolVersionState, normalize_capabilities,
+};

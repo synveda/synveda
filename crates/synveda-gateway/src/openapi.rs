@@ -39,6 +39,7 @@ use crate::knowledge_api;
 use crate::me;
 use crate::sessions;
 use crate::skills;
+use crate::tool_registry;
 use crate::workspaces;
 
 /// The document root.
@@ -72,6 +73,12 @@ versions and exact file content, revisioned project/principal bindings, \
 version-specific host/model usage evidence, and controlled non-executing test \
 runs. Install, update, bind, disable and rollback are typed VedaFlow changes; \
 declared tools are metadata and never authorisation. \
+CPR-25 adds the trusted MCP catalogue: stable servers, immutable source and \
+capability snapshots pinned to MCP 2026-07-28, quarantined changed versions, \
+exact project bindings, secret-reference-only configuration and immutable \
+read-only connection-test evidence. Registration, version approval and every \
+binding transition are typed VedaFlow changes; capability descriptions grant \
+no invocation authority and the gateway is not an execution proxy. \
 Since CPR-12 the session plane is also the **only** runtime plane: \
 `POST /v1/sessions/{session_id}/events` is where observations are admitted and \
 `POST /v1/sessions/{session_id}/context-runs` is where context is composed. \
@@ -178,6 +185,22 @@ revision, and its mutations are last-writer-wins under the PDP.",
         skills::list_usage,
         skills::run_test,
         skills::list_tests,
+        tool_registry::register,
+        tool_registry::import_client_config,
+        tool_registry::stage_version,
+        tool_registry::discover,
+        tool_registry::list,
+        tool_registry::get,
+        tool_registry::list_versions,
+        tool_registry::get_version,
+        tool_registry::diff,
+        tool_registry::create_binding,
+        tool_registry::update_binding,
+        tool_registry::list_bindings,
+        tool_registry::get_binding,
+        tool_registry::generate_config,
+        tool_registry::run_test,
+        tool_registry::list_tests,
         access::list_workspace_members,
         access::list_invites,
         access::create_invite,
@@ -291,6 +314,26 @@ revision, and its mutations are last-writer-wins under the PDP.",
         skills::SkillUsageListView,
         skills::SkillTestRunView,
         skills::SkillTestRunListView,
+        tool_registry::ToolServerDescriptorBody,
+        tool_registry::RegisterToolServerBody,
+        tool_registry::ImportToolClientConfigBody,
+        tool_registry::StageToolVersionBody,
+        tool_registry::DiscoverToolServerBody,
+        tool_registry::CreateToolBindingBody,
+        tool_registry::UpdateToolBindingBody,
+        tool_registry::RunToolTestBody,
+        tool_registry::ToolMutationView,
+        tool_registry::ToolServerView,
+        tool_registry::ToolServerListView,
+        tool_registry::ToolServerVersionView,
+        tool_registry::ToolServerVersionListView,
+        tool_registry::ToolBindingView,
+        tool_registry::ToolBindingListView,
+        tool_registry::ToolVersionDiffView,
+        tool_registry::ToolClientConfigurationView,
+        tool_registry::ToolConfigurationBindingView,
+        tool_registry::ToolTestRunView,
+        tool_registry::ToolTestRunListView,
         access::MemberView,
         access::MemberList,
         access::GroupRefView,
@@ -318,6 +361,7 @@ revision, and its mutations are last-writer-wins under the PDP.",
         (name = "capture", description = "Session evidence extraction into reviewable Knowledge candidates"),
         (name = "context", description = "Explainable Knowledge planning, scoped query and explicit feedback"),
         (name = "skills", description = "Agent Skills-compatible immutable versions, governed bindings, usage and controlled tests"),
+        (name = "tools", description = "Trusted MCP server metadata, immutable quarantined versions, exact project bindings and read-only evidence"),
     ),
     modifiers(&BearerAuth),
 )]

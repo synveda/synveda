@@ -219,23 +219,24 @@ fn restricted_always_requires_compliance_and_dual_approval() {
     }
 }
 
-/// The floor's other rule: a skill is executable, so it never reaches a
-/// published channel without a security reviewer — at any sensitivity,
-/// under any pack.
+/// The floor's executable-boundary rule: neither a Skill nor a Tool version
+/// reaches application without a reviewer — at any sensitivity or pack.
 #[test]
-fn every_skill_needs_a_security_reviewer_under_every_pack() {
+fn every_executable_boundary_needs_a_security_reviewer_under_every_pack() {
     for pack in PACKS.iter().copied().chain(["someones-custom-pack"]) {
         let matrix = approvals::embedded(pack);
-        for sensitivity in Sensitivity::ALL {
-            for kind in SCOPE_KINDS {
-                let requirement = matrix.resolve(AssetKind::Skill, sensitivity, kind);
-                assert!(
-                    requirement
-                        .roles
-                        .contains(&RoleRequirement::new(RoleKey::Reviewer, 1)),
-                    "{pack}: a {sensitivity} skill at {kind:?} reached published \
-                     without a security reviewer"
-                );
+        for asset in [AssetKind::Skill, AssetKind::Tool] {
+            for sensitivity in Sensitivity::ALL {
+                for kind in SCOPE_KINDS {
+                    let requirement = matrix.resolve(asset, sensitivity, kind);
+                    assert!(
+                        requirement
+                            .roles
+                            .contains(&RoleRequirement::new(RoleKey::Reviewer, 1)),
+                        "{pack}: a {sensitivity} {asset} at {kind:?} reached application \
+                         without a security reviewer"
+                    );
+                }
             }
         }
     }

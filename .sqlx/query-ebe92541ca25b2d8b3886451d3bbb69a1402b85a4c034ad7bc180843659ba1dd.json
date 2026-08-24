@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tool_bindings\n              set version_id = $5, state = $6, revision = revision + 1,\n                  updated_at = now(), updated_by = $7\n            where tenant_id = $1 and id = $2 and project_id = $3 and revision = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ebe92541ca25b2d8b3886451d3bbb69a1402b85a4c034ad7bc180843659ba1dd"
+}

@@ -237,9 +237,11 @@ Being explicit, so nothing here misleads:
   product shell — routes, switchers, People, first-run onboarding, and the
   proposals inbox (CNSL-1) and scope explorer (CNSL-2) re-homed under
   **Advanced**. Sessions, Knowledge and New Learnings now have their product
-  planes; **Tools** is the remaining honest placeholder until the trusted MCP
-  registry package lands. Seven console surfaces also still call hand-written paths, because the
-  OpenAPI contract covers the context-platform plane only until Prompt 19.
+  planes. The trusted MCP catalogue backend now retains immutable discovery
+  evidence, quarantines changed schemas and pins approved project bindings,
+  but **Tools** remains an honest placeholder until CPR-26 builds its generated-
+  API product surface. Seven other console surfaces also still call hand-written
+  paths until the public-contract convergence package.
 - **No Python/TS SDKs** (ADPT-4) and **no importers** from claude-mem, Cognee or
   mem0 (ADPT-5).
 - **No per-tenant encryption keys, WORM export or SIEM streaming**

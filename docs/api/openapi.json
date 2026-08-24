@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Synveda",
-    "description": "Governed Knowledge and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface: `/v1/me`, the workspace, project and repository planes (CPR-4), the access plane — members, groups, grants and invitations (CPR-5), and the scope admin plane (CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants), and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, append events, end, timeline, and the context-run endpoint), with CPR-11's paginated and filtered listing and its diagnostic expansion of one event. CPR-17 adds stable Knowledge, immutable revision history, independently governed provenance and lifecycle mutations at `/v1/knowledge`; every write is an idempotent VedaFlow change and the collection is current-active by default with lexical and honestly degraded semantic search. CPR-18 adds `/v1/capture-batches` and `/v1/capture-candidates`: explicit or session-end extraction freezes exact event evidence and produces reviewable candidates only. Accept, edit, merge and replace enter the same Knowledge VedaFlow command layer; dismissal publishes nothing. CPR-20 makes context runs explainable over current immutable Knowledge, adds re-authorised trace and feedback operations, and provides ordinary and diagnostic session-scoped Knowledge query lenses without a global recall. CPR-23 adds the Agent Skills-compatible catalogue: stable Skills, immutable versions and exact file content, revisioned project/principal bindings, version-specific host/model usage evidence, and controlled non-executing test runs. Install, update, bind, disable and rollback are typed VedaFlow changes; declared tools are metadata and never authorisation. Since CPR-12 the session plane is also the **only** runtime plane: `POST /v1/sessions/{session_id}/events` is where observations are admitted and `POST /v1/sessions/{session_id}/context-runs` is where context is composed. The global `/v1/observe`, `/v1/inject` and `/v1/recall` routes that used to do both are deleted, not merely undocumented. The rest of the `/v1` surface — proposals, channels, the registries and the older admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`. Appending session events is the one exception, and it is idempotent by a finer unit: each event carries the client's own `client_event_id`, unique within its session, so a redelivered batch appends what is new and reports `duplicate` for the rest.\n\n**Identity.** No request body on this surface accepts a tenant or an acting principal. Both are resolved from the bearer credential; a body naming either is refused rather than ignored.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
+    "description": "Governed Knowledge and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface: `/v1/me`, the workspace, project and repository planes (CPR-4), the access plane — members, groups, grants and invitations (CPR-5), and the scope admin plane (CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants), and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, append events, end, timeline, and the context-run endpoint), with CPR-11's paginated and filtered listing and its diagnostic expansion of one event. CPR-17 adds stable Knowledge, immutable revision history, independently governed provenance and lifecycle mutations at `/v1/knowledge`; every write is an idempotent VedaFlow change and the collection is current-active by default with lexical and honestly degraded semantic search. CPR-18 adds `/v1/capture-batches` and `/v1/capture-candidates`: explicit or session-end extraction freezes exact event evidence and produces reviewable candidates only. Accept, edit, merge and replace enter the same Knowledge VedaFlow command layer; dismissal publishes nothing. CPR-20 makes context runs explainable over current immutable Knowledge, adds re-authorised trace and feedback operations, and provides ordinary and diagnostic session-scoped Knowledge query lenses without a global recall. CPR-23 adds the Agent Skills-compatible catalogue: stable Skills, immutable versions and exact file content, revisioned project/principal bindings, version-specific host/model usage evidence, and controlled non-executing test runs. Install, update, bind, disable and rollback are typed VedaFlow changes; declared tools are metadata and never authorisation. CPR-25 adds the trusted MCP catalogue: stable servers, immutable source and capability snapshots pinned to MCP 2026-07-28, quarantined changed versions, exact project bindings, secret-reference-only configuration and immutable read-only connection-test evidence. Registration, version approval and every binding transition are typed VedaFlow changes; capability descriptions grant no invocation authority and the gateway is not an execution proxy. Since CPR-12 the session plane is also the **only** runtime plane: `POST /v1/sessions/{session_id}/events` is where observations are admitted and `POST /v1/sessions/{session_id}/context-runs` is where context is composed. The global `/v1/observe`, `/v1/inject` and `/v1/recall` routes that used to do both are deleted, not merely undocumented. The rest of the `/v1` surface — proposals, channels, the registries and the older admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`. Appending session events is the one exception, and it is idempotent by a finer unit: each event carries the client's own `client_event_id`, unique within its session, so a redelivered batch appends what is new and reports `duplicate` for the rest.\n\n**Identity.** No request body on this surface accepts a tenant or an acting principal. Both are resolved from the bearer credential; a body naming either is refused rather than ignored.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
     "license": {
       "name": "Proprietary"
     },
@@ -3902,6 +3902,53 @@
         ]
       }
     },
+    "/v1/projects/{project_id}/tool-config": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`GET /v1/projects/{project_id}/tool-config` — secret-free exact bindings.",
+        "operationId": "generate_tool_client_config",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Secret-free generated configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolClientConfigurationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/sessions": {
       "get": {
         "tags": [
@@ -6037,6 +6084,1022 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SkillUsageListView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tool-bindings": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`GET /v1/tool-bindings` — list policy-visible project bindings.",
+        "operationId": "list_tool_bindings",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Restrict to one project.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "include_removed",
+            "in": "path",
+            "description": "Include logically removed bindings.",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "path",
+            "description": "Resume below this stable binding identifier.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "Maximum rows, 1..=200.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Visible project bindings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolBindingListView"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`POST /v1/tool-bindings` — propose an exact approved project binding.",
+        "operationId": "create_tool_binding",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required retry key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateToolBindingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Binding change opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolMutationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Binding conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tool-bindings/{id}": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`GET /v1/tool-bindings/{id}` — inspect one exact binding.",
+        "operationId": "get_tool_binding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact binding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolBindingView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`PATCH /v1/tool-bindings/{id}` — propose disable, repin or removal.",
+        "operationId": "update_tool_binding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required retry key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateToolBindingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Binding change opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolMutationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale binding revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tool-servers": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`GET /v1/tool-servers` — list policy-visible catalogue entries.",
+        "operationId": "list_tool_servers",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "path",
+            "description": "Resume after this stable catalogue identifier.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "Maximum rows, 1..=200.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Visible catalogue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolServerListView"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`POST /v1/tool-servers` — stage a stable server and first version.",
+        "operationId": "register_tool_server",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required retry key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterToolServerBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Tool change opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tool-servers/import-client-config": {
+      "post": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`POST /v1/tool-servers/import-client-config` — import one supported client entry.",
+        "operationId": "import_tool_client_config",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required retry key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportToolClientConfigBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Tool change opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or secret-bearing configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tool-servers/{id}": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`GET /v1/tool-servers/{id}` — inspect one stable entry.",
+        "operationId": "get_tool_server",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalogue entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolServerView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`PATCH /v1/tool-servers/{id}` — stage changed immutable metadata.",
+        "operationId": "update_tool_server",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required retry key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StageToolVersionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Quarantined version staged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolMutationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale current version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tool-servers/{id}/discoveries": {
+      "post": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`POST /v1/tool-servers/{id}/discoveries` — report stateless discovery.",
+        "operationId": "discover_tool_server",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required retry key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoverToolServerBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Unchanged discovery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolMutationView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Changed discovery quarantined",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolMutationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tool-servers/{id}/versions": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`GET /v1/tool-servers/{id}/versions` — immutable version history.",
+        "operationId": "list_tool_server_versions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "before_ordinal",
+            "in": "path",
+            "description": "Resume below this version ordinal.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "Maximum rows, 1..=200.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolServerVersionListView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tool-servers/{id}/versions/{version_id}": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`GET /v1/tool-servers/{id}/versions/{version_id}` — exact version.",
+        "operationId": "get_tool_server_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact immutable version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolServerVersionView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tool-servers/{id}/versions/{version_id}/diff": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`GET /v1/tool-servers/{id}/versions/{version_id}/diff` — compare versions.",
+        "operationId": "diff_tool_server_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "against",
+            "in": "path",
+            "description": "Baseline exact version.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Visible metadata/schema comparison",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolVersionDiffView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tool-servers/{id}/versions/{version_id}/tests": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`GET /v1/tool-servers/{id}/versions/{version_id}/tests` — list evidence.",
+        "operationId": "list_tool_server_tests",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "path",
+            "description": "Resume below this stable test-run identifier.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "Maximum rows, 1..=200.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable read-only test evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolTestRunListView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "`POST /v1/tool-servers/{id}/versions/{version_id}/tests` — record trusted\nread-only evidence. The gateway does not execute the server.",
+        "operationId": "run_tool_server_test",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required retry key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunToolTestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Immutable read-only test recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolTestRunView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Execution method or unsafe evidence refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
                 }
               }
             }
@@ -8366,6 +9429,42 @@
         },
         "additionalProperties": false
       },
+      "CreateToolBindingBody": {
+        "type": "object",
+        "description": "Bind one exact approved version to a project.",
+        "required": [
+          "project_id",
+          "server_id",
+          "version_id",
+          "state"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Target project."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable server."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled",
+              "removed"
+            ]
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact approved version. There is no follow-current mode."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateWorkspaceBody": {
         "type": "object",
         "description": "`POST /v1/workspaces`.",
@@ -8439,6 +9538,26 @@
           "reason": {
             "type": "string",
             "description": "Bounded human reason."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DiscoverToolServerBody": {
+        "type": "object",
+        "description": "Report a fresh discovery using the current descriptor.",
+        "required": [
+          "expected_current_version_id",
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "object",
+            "description": "Raw stateless discovery result."
+          },
+          "expected_current_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact current approved version precondition."
           }
         },
         "additionalProperties": false
@@ -8790,6 +9909,48 @@
             "description": "When it last changed."
           }
         }
+      },
+      "ImportToolClientConfigBody": {
+        "type": "object",
+        "description": "Import one supported client configuration entry.",
+        "required": [
+          "governing_scope_id",
+          "client",
+          "name",
+          "server",
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "object",
+            "description": "Raw stateless discovery result captured by the trusted adapter."
+          },
+          "client": {
+            "type": "string",
+            "description": "`claude_code`, `cursor` or `vscode` configuration grammar."
+          },
+          "governing_scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Governing scope."
+          },
+          "name": {
+            "type": "string",
+            "description": "Server key in the client configuration."
+          },
+          "secret_reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Opaque secret reference replacing any client credential material."
+          },
+          "server": {
+            "type": "object",
+            "description": "One client server object. Embedded env/header values are refused."
+          }
+        },
+        "additionalProperties": false
       },
       "InstallSkillBody": {
         "type": "object",
@@ -10426,6 +11587,36 @@
         },
         "additionalProperties": false
       },
+      "RegisterToolServerBody": {
+        "type": "object",
+        "description": "Register a server and its first immutable discovery snapshot.",
+        "required": [
+          "governing_scope_id",
+          "name",
+          "descriptor",
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "object",
+            "description": "Raw stateless MCP discovery result."
+          },
+          "descriptor": {
+            "$ref": "#/components/schemas/ToolServerDescriptorBody",
+            "description": "Immutable source/transport/authentication metadata."
+          },
+          "governing_scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Scope governing the catalogue entry."
+          },
+          "name": {
+            "type": "string",
+            "description": "Tenant-unique display name."
+          }
+        },
+        "additionalProperties": false
+      },
       "ReplaceCandidateBody": {
         "type": "object",
         "description": "Replace one visible current Knowledge item with this candidate.",
@@ -10589,6 +11780,58 @@
             "enum": [
               "validation_sandbox",
               "controlled_client"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "RunToolTestBody": {
+        "type": "object",
+        "description": "Trusted-adapter report for a read-only connection test.",
+        "required": [
+          "harness",
+          "harness_version",
+          "outcome",
+          "methods"
+        ],
+        "properties": {
+          "evidence": {
+            "type": "object",
+            "description": "Bounded credential-free report."
+          },
+          "harness": {
+            "type": "string",
+            "enum": [
+              "trusted_local_adapter",
+              "remote_http_adapter"
+            ]
+          },
+          "harness_version": {
+            "type": "string",
+            "description": "Exact adapter implementation/version."
+          },
+          "latency_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "End-to-end elapsed milliseconds.",
+            "minimum": 0
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Methods attempted. `tools/call` and every execution method are refused."
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "failed",
+              "error"
             ]
           }
         },
@@ -11646,6 +12889,31 @@
           }
         }
       },
+      "StageToolVersionBody": {
+        "type": "object",
+        "description": "Stage changed source, transport, auth or capability metadata.",
+        "required": [
+          "expected_current_version_id",
+          "descriptor",
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "object",
+            "description": "Complete raw discovery result."
+          },
+          "descriptor": {
+            "$ref": "#/components/schemas/ToolServerDescriptorBody",
+            "description": "Complete replacement descriptor."
+          },
+          "expected_current_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact current approved version precondition."
+          }
+        },
+        "additionalProperties": false
+      },
       "SupersedeKnowledgeBody": {
         "type": "object",
         "description": "`POST /v1/knowledge/{id}/supersede`.",
@@ -11871,6 +13139,667 @@
           }
         }
       },
+      "ToolBindingListView": {
+        "type": "object",
+        "description": "Binding collection.",
+        "required": [
+          "bindings"
+        ],
+        "properties": {
+          "bindings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolBindingView"
+            },
+            "description": "Policy-visible bindings."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Cursor after the last returned binding."
+          }
+        }
+      },
+      "ToolBindingView": {
+        "type": "object",
+        "description": "One exact-version project binding.",
+        "required": [
+          "id",
+          "project_id",
+          "scope_id",
+          "server_id",
+          "version_id",
+          "state",
+          "revision",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation instant."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable binding id."
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Target project."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Optimistic-concurrency revision.",
+            "minimum": 0
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Target project scope."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable server."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled",
+              "removed"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last transition instant."
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact immutable approved version."
+          }
+        }
+      },
+      "ToolClientConfigurationView": {
+        "type": "object",
+        "description": "Secret-free generated client configuration.",
+        "required": [
+          "project_id",
+          "configuration",
+          "bindings"
+        ],
+        "properties": {
+          "bindings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolConfigurationBindingView"
+            },
+            "description": "Binding/version pairs included."
+          },
+          "configuration": {
+            "type": "object",
+            "description": "Configuration contains exact approved bindings only."
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Target project."
+          }
+        }
+      },
+      "ToolConfigurationBindingView": {
+        "type": "object",
+        "description": "Evidence for one generated configuration entry.",
+        "required": [
+          "binding_id",
+          "version_id",
+          "digest"
+        ],
+        "properties": {
+          "binding_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Binding id."
+          },
+          "digest": {
+            "type": "string",
+            "description": "Immutable version digest."
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact version id."
+          }
+        }
+      },
+      "ToolMutationView": {
+        "type": "object",
+        "description": "Governed mutation response.",
+        "required": [
+          "change_id",
+          "outcome"
+        ],
+        "properties": {
+          "binding_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Binding when applicable."
+          },
+          "binding_revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Resulting binding revision.",
+            "minimum": 0
+          },
+          "change_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "VedaFlow change id."
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "pending_review",
+              "rejected"
+            ]
+          },
+          "server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Stable server when applicable."
+          },
+          "version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact immutable version when applicable."
+          }
+        }
+      },
+      "ToolServerDescriptorBody": {
+        "type": "object",
+        "description": "Credential-free immutable server descriptor.",
+        "required": [
+          "source_kind",
+          "source_reference",
+          "transport",
+          "authentication"
+        ],
+        "properties": {
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Literal argument vector; never a shell line."
+          },
+          "authentication": {
+            "type": "string",
+            "enum": [
+              "none",
+              "oauth",
+              "api_key",
+              "custom"
+            ]
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "One executable token for trusted-local stdio metadata."
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "HTTPS endpoint for Streamable HTTP."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Forward-compatible credential-free metadata."
+          },
+          "requested_permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Requested permissions are review metadata, not authorisation."
+          },
+          "secret_reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Opaque reference resolved outside the gateway. Never a secret value."
+          },
+          "source_kind": {
+            "type": "string",
+            "enum": [
+              "manifest",
+              "client_config",
+              "remote_http",
+              "trusted_local_adapter"
+            ]
+          },
+          "source_reference": {
+            "type": "string",
+            "description": "Human-inspectable credential-free source reference."
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "stdio",
+              "streamable_http"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ToolServerListView": {
+        "type": "object",
+        "description": "Cursor-paginated server catalogue.",
+        "required": [
+          "servers"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Cursor after the last candidate considered."
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolServerView"
+            },
+            "description": "Policy-visible entries."
+          }
+        }
+      },
+      "ToolServerVersionListView": {
+        "type": "object",
+        "description": "Version collection.",
+        "required": [
+          "versions"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cursor after the last returned version.",
+            "minimum": 0
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolServerVersionView"
+            },
+            "description": "Policy-visible versions."
+          }
+        }
+      },
+      "ToolServerVersionView": {
+        "type": "object",
+        "description": "One immutable MCP server version and discovery snapshot.",
+        "required": [
+          "id",
+          "server_id",
+          "change_id",
+          "ordinal",
+          "digest",
+          "protocol_version",
+          "state",
+          "descriptor",
+          "secret_reference_present",
+          "raw_capabilities",
+          "normalized_capabilities",
+          "capability_digest",
+          "declared_capabilities_are_authorization",
+          "discovered_at",
+          "created_at"
+        ],
+        "properties": {
+          "capability_digest": {
+            "type": "string",
+            "description": "Snapshot digest."
+          },
+          "change_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "VedaFlow proposal defining the trust state."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation instant."
+          },
+          "declared_capabilities_are_authorization": {
+            "type": "boolean",
+            "description": "Capability names and descriptions grant no authority."
+          },
+          "descriptor": {
+            "$ref": "#/components/schemas/ToolServerDescriptorBody",
+            "description": "Credential-free descriptor. Secret references are opaque identifiers."
+          },
+          "digest": {
+            "type": "string",
+            "description": "Stable digest."
+          },
+          "discovered_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Discovery instant."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Immutable version id."
+          },
+          "normalized_capabilities": {
+            "type": "object",
+            "description": "Canonical comparison snapshot."
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Monotonic version ordinal.",
+            "minimum": 0
+          },
+          "protocol_version": {
+            "type": "string",
+            "description": "Pinned official MCP protocol version."
+          },
+          "raw_capabilities": {
+            "type": "object",
+            "description": "Immutable raw discovery evidence."
+          },
+          "secret_reference_present": {
+            "type": "boolean",
+            "description": "Whether an opaque secret reference is configured."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable server id."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "quarantined",
+              "approved",
+              "rejected"
+            ]
+          }
+        }
+      },
+      "ToolServerView": {
+        "type": "object",
+        "description": "Stable catalogue entry.",
+        "required": [
+          "id",
+          "governing_scope_id",
+          "name",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation instant."
+          },
+          "current_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Current approved version, absent while first registration is quarantined."
+          },
+          "governing_scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Governing scope."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last approved-pointer transition."
+          }
+        }
+      },
+      "ToolTestRunListView": {
+        "type": "object",
+        "description": "Test-run collection.",
+        "required": [
+          "runs"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Cursor after the last returned report."
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolTestRunView"
+            },
+            "description": "Immutable test reports."
+          }
+        }
+      },
+      "ToolTestRunView": {
+        "type": "object",
+        "description": "One immutable read-only connection-test report.",
+        "required": [
+          "id",
+          "version_id",
+          "harness",
+          "harness_version",
+          "outcome",
+          "methods",
+          "evidence",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server receipt instant."
+          },
+          "evidence": {
+            "type": "object",
+            "description": "Credential-free evidence."
+          },
+          "harness": {
+            "type": "string",
+            "enum": [
+              "trusted_local_adapter",
+              "remote_http_adapter"
+            ]
+          },
+          "harness_version": {
+            "type": "string",
+            "description": "Exact reporter version."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Run id."
+          },
+          "latency_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Elapsed milliseconds.",
+            "minimum": 0
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Read-only methods attempted."
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "failed",
+              "error"
+            ]
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact version tested."
+          }
+        }
+      },
+      "ToolVersionDiffView": {
+        "type": "object",
+        "description": "Visible comparison between two immutable versions.",
+        "required": [
+          "from_version_id",
+          "to_version_id",
+          "descriptor_changed",
+          "tools_added",
+          "tools_removed",
+          "tools_changed",
+          "resources_added",
+          "resources_removed",
+          "resources_changed",
+          "prompts_added",
+          "prompts_removed",
+          "prompts_changed"
+        ],
+        "properties": {
+          "descriptor_changed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Descriptor fields whose canonical values differ."
+          },
+          "from_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Baseline version."
+          },
+          "prompts_added": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Added prompt names."
+          },
+          "prompts_changed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Prompt names whose schema/metadata changed."
+          },
+          "prompts_removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Removed prompt names."
+          },
+          "resources_added": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Added resource URIs."
+          },
+          "resources_changed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Resource URIs whose schema/metadata changed."
+          },
+          "resources_removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Removed resource URIs."
+          },
+          "to_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Candidate version."
+          },
+          "tools_added": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Added tool names."
+          },
+          "tools_changed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tool names whose description or input schema changed."
+          },
+          "tools_removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Removed tool names."
+          }
+        }
+      },
       "UpdateBody": {
         "type": "object",
         "description": "`PATCH /v1/workspaces/{workspace_id}` and\n`PATCH /v1/projects/{project_id}`.\n\n`description` has three cases and the wire says them apart: absent leaves\nit alone, `null` clears it, a string replaces it.",
@@ -12020,6 +13949,42 @@
               "confidential",
               "restricted"
             ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateToolBindingBody": {
+        "type": "object",
+        "description": "Change a binding using optimistic concurrency.",
+        "required": [
+          "expected_revision",
+          "version_id",
+          "state",
+          "reason"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Exact current binding revision.",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "description": "Bounded reason code (`disable`, `enable`, `repin`, `remove`)."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled",
+              "removed"
+            ]
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Complete resulting exact version."
           }
         },
         "additionalProperties": false
@@ -12181,6 +14146,10 @@
     {
       "name": "skills",
       "description": "Agent Skills-compatible immutable versions, governed bindings, usage and controlled tests"
+    },
+    {
+      "name": "tools",
+      "description": "Trusted MCP server metadata, immutable quarantined versions, exact project bindings and read-only evidence"
     }
   ]
 }

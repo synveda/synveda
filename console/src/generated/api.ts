@@ -1001,6 +1001,25 @@ export type CreateSkillBindingBody = {
   };
 
 /**
+ * Bind one exact approved version to a project.
+ */
+export type CreateToolBindingBody = {
+    /**
+     * Target project.
+     */
+    project_id: string;
+    /**
+     * Stable server.
+     */
+    server_id: string;
+    state: "enabled" | "disabled" | "removed";
+    /**
+     * Exact approved version. There is no follow-current mode.
+     */
+    version_id: string;
+  };
+
+/**
  * `POST /v1/workspaces`.
  */
 export type CreateWorkspaceBody = {
@@ -1058,6 +1077,20 @@ export type DeleteKnowledgeBody = {
      * Bounded human reason.
      */
     reason: string;
+  };
+
+/**
+ * Report a fresh discovery using the current descriptor.
+ */
+export type DiscoverToolServerBody = {
+    /**
+     * Raw stateless discovery result.
+     */
+    capabilities: Record<string, unknown>;
+    /**
+     * Exact current approved version precondition.
+     */
+    expected_current_version_id: string;
   };
 
 /**
@@ -1267,6 +1300,36 @@ export type GroupView = {
      * When it last changed.
      */
     updated_at: string;
+  };
+
+/**
+ * Import one supported client configuration entry.
+ */
+export type ImportToolClientConfigBody = {
+    /**
+     * Raw stateless discovery result captured by the trusted adapter.
+     */
+    capabilities: Record<string, unknown>;
+    /**
+     * `claude_code`, `cursor` or `vscode` configuration grammar.
+     */
+    client: string;
+    /**
+     * Governing scope.
+     */
+    governing_scope_id: string;
+    /**
+     * Server key in the client configuration.
+     */
+    name: string;
+    /**
+     * Opaque secret reference replacing any client credential material.
+     */
+    secret_reference?: string | null;
+    /**
+     * One client server object. Embedded env/header values are refused.
+     */
+    server: Record<string, unknown>;
   };
 
 /**
@@ -2236,6 +2299,28 @@ export type RecordSkillUsageBody = {
   };
 
 /**
+ * Register a server and its first immutable discovery snapshot.
+ */
+export type RegisterToolServerBody = {
+    /**
+     * Raw stateless MCP discovery result.
+     */
+    capabilities: Record<string, unknown>;
+    /**
+     * Immutable source/transport/authentication metadata.
+     */
+    descriptor: ToolServerDescriptorBody;
+    /**
+     * Scope governing the catalogue entry.
+     */
+    governing_scope_id: string;
+    /**
+     * Tenant-unique display name.
+     */
+    name: string;
+  };
+
+/**
  * Replace one visible current Knowledge item with this candidate.
  */
 export type ReplaceCandidateBody = {
@@ -2335,6 +2420,30 @@ export type RollbackSkillBindingBody = {
  */
 export type RunSkillTestBody = {
     harness: "validation_sandbox" | "controlled_client";
+  };
+
+/**
+ * Trusted-adapter report for a read-only connection test.
+ */
+export type RunToolTestBody = {
+    /**
+     * Bounded credential-free report.
+     */
+    evidence?: Record<string, unknown>;
+    harness: "trusted_local_adapter" | "remote_http_adapter";
+    /**
+     * Exact adapter implementation/version.
+     */
+    harness_version: string;
+    /**
+     * End-to-end elapsed milliseconds.
+     */
+    latency_ms?: number | null;
+    /**
+     * Methods attempted. `tools/call` and every execution method are refused.
+     */
+    methods: string[];
+    outcome: "passed" | "failed" | "error";
   };
 
 /**
@@ -2985,6 +3094,24 @@ export type SkillView = {
   };
 
 /**
+ * Stage changed source, transport, auth or capability metadata.
+ */
+export type StageToolVersionBody = {
+    /**
+     * Complete raw discovery result.
+     */
+    capabilities: Record<string, unknown>;
+    /**
+     * Complete replacement descriptor.
+     */
+    descriptor: ToolServerDescriptorBody;
+    /**
+     * Exact current approved version precondition.
+     */
+    expected_current_version_id: string;
+  };
+
+/**
  * `POST /v1/knowledge/{id}/supersede`.
  */
 export type SupersedeKnowledgeBody = {
@@ -3147,6 +3274,384 @@ export type TimelineView = {
   };
 
 /**
+ * Binding collection.
+ */
+export type ToolBindingListView = {
+    /**
+     * Policy-visible bindings.
+     */
+    bindings: ToolBindingView[];
+    /**
+     * Cursor after the last returned binding.
+     */
+    next_cursor?: string | null;
+  };
+
+/**
+ * One exact-version project binding.
+ */
+export type ToolBindingView = {
+    /**
+     * Creation instant.
+     */
+    created_at: string;
+    /**
+     * Stable binding id.
+     */
+    id: string;
+    /**
+     * Target project.
+     */
+    project_id: string;
+    /**
+     * Optimistic-concurrency revision.
+     */
+    revision: number;
+    /**
+     * Target project scope.
+     */
+    scope_id: string;
+    /**
+     * Stable server.
+     */
+    server_id: string;
+    state: "enabled" | "disabled" | "removed";
+    /**
+     * Last transition instant.
+     */
+    updated_at: string;
+    /**
+     * Exact immutable approved version.
+     */
+    version_id: string;
+  };
+
+/**
+ * Secret-free generated client configuration.
+ */
+export type ToolClientConfigurationView = {
+    /**
+     * Binding/version pairs included.
+     */
+    bindings: ToolConfigurationBindingView[];
+    /**
+     * Configuration contains exact approved bindings only.
+     */
+    configuration: Record<string, unknown>;
+    /**
+     * Target project.
+     */
+    project_id: string;
+  };
+
+/**
+ * Evidence for one generated configuration entry.
+ */
+export type ToolConfigurationBindingView = {
+    /**
+     * Binding id.
+     */
+    binding_id: string;
+    /**
+     * Immutable version digest.
+     */
+    digest: string;
+    /**
+     * Exact version id.
+     */
+    version_id: string;
+  };
+
+/**
+ * Governed mutation response.
+ */
+export type ToolMutationView = {
+    /**
+     * Binding when applicable.
+     */
+    binding_id?: string | null;
+    /**
+     * Resulting binding revision.
+     */
+    binding_revision?: number | null;
+    /**
+     * VedaFlow change id.
+     */
+    change_id: string;
+    outcome: "applied" | "pending_review" | "rejected";
+    /**
+     * Stable server when applicable.
+     */
+    server_id?: string | null;
+    /**
+     * Exact immutable version when applicable.
+     */
+    version_id?: string | null;
+  };
+
+/**
+ * Credential-free immutable server descriptor.
+ */
+export type ToolServerDescriptorBody = {
+    /**
+     * Literal argument vector; never a shell line.
+     */
+    args?: string[];
+    authentication: "none" | "oauth" | "api_key" | "custom";
+    /**
+     * One executable token for trusted-local stdio metadata.
+     */
+    command?: string | null;
+    /**
+     * HTTPS endpoint for Streamable HTTP.
+     */
+    endpoint?: string | null;
+    /**
+     * Forward-compatible credential-free metadata.
+     */
+    metadata?: Record<string, unknown>;
+    /**
+     * Requested permissions are review metadata, not authorisation.
+     */
+    requested_permissions?: string[];
+    /**
+     * Opaque reference resolved outside the gateway. Never a secret value.
+     */
+    secret_reference?: string | null;
+    source_kind: "manifest" | "client_config" | "remote_http" | "trusted_local_adapter";
+    /**
+     * Human-inspectable credential-free source reference.
+     */
+    source_reference: string;
+    transport: "stdio" | "streamable_http";
+  };
+
+/**
+ * Cursor-paginated server catalogue.
+ */
+export type ToolServerListView = {
+    /**
+     * Cursor after the last candidate considered.
+     */
+    next_cursor?: string | null;
+    /**
+     * Policy-visible entries.
+     */
+    servers: ToolServerView[];
+  };
+
+/**
+ * Version collection.
+ */
+export type ToolServerVersionListView = {
+    /**
+     * Cursor after the last returned version.
+     */
+    next_cursor?: number | null;
+    /**
+     * Policy-visible versions.
+     */
+    versions: ToolServerVersionView[];
+  };
+
+/**
+ * One immutable MCP server version and discovery snapshot.
+ */
+export type ToolServerVersionView = {
+    /**
+     * Snapshot digest.
+     */
+    capability_digest: string;
+    /**
+     * VedaFlow proposal defining the trust state.
+     */
+    change_id: string;
+    /**
+     * Creation instant.
+     */
+    created_at: string;
+    /**
+     * Capability names and descriptions grant no authority.
+     */
+    declared_capabilities_are_authorization: boolean;
+    /**
+     * Credential-free descriptor. Secret references are opaque identifiers.
+     */
+    descriptor: ToolServerDescriptorBody;
+    /**
+     * Stable digest.
+     */
+    digest: string;
+    /**
+     * Discovery instant.
+     */
+    discovered_at: string;
+    /**
+     * Immutable version id.
+     */
+    id: string;
+    /**
+     * Canonical comparison snapshot.
+     */
+    normalized_capabilities: Record<string, unknown>;
+    /**
+     * Monotonic version ordinal.
+     */
+    ordinal: number;
+    /**
+     * Pinned official MCP protocol version.
+     */
+    protocol_version: string;
+    /**
+     * Immutable raw discovery evidence.
+     */
+    raw_capabilities: Record<string, unknown>;
+    /**
+     * Whether an opaque secret reference is configured.
+     */
+    secret_reference_present: boolean;
+    /**
+     * Stable server id.
+     */
+    server_id: string;
+    state: "quarantined" | "approved" | "rejected";
+  };
+
+/**
+ * Stable catalogue entry.
+ */
+export type ToolServerView = {
+    /**
+     * Creation instant.
+     */
+    created_at: string;
+    /**
+     * Current approved version, absent while first registration is quarantined.
+     */
+    current_version_id?: string | null;
+    /**
+     * Governing scope.
+     */
+    governing_scope_id: string;
+    /**
+     * Stable id.
+     */
+    id: string;
+    /**
+     * Display name.
+     */
+    name: string;
+    /**
+     * Last approved-pointer transition.
+     */
+    updated_at: string;
+  };
+
+/**
+ * Test-run collection.
+ */
+export type ToolTestRunListView = {
+    /**
+     * Cursor after the last returned report.
+     */
+    next_cursor?: string | null;
+    /**
+     * Immutable test reports.
+     */
+    runs: ToolTestRunView[];
+  };
+
+/**
+ * One immutable read-only connection-test report.
+ */
+export type ToolTestRunView = {
+    /**
+     * Server receipt instant.
+     */
+    created_at: string;
+    /**
+     * Credential-free evidence.
+     */
+    evidence: Record<string, unknown>;
+    harness: "trusted_local_adapter" | "remote_http_adapter";
+    /**
+     * Exact reporter version.
+     */
+    harness_version: string;
+    /**
+     * Run id.
+     */
+    id: string;
+    /**
+     * Elapsed milliseconds.
+     */
+    latency_ms?: number | null;
+    /**
+     * Read-only methods attempted.
+     */
+    methods: string[];
+    outcome: "passed" | "failed" | "error";
+    /**
+     * Exact version tested.
+     */
+    version_id: string;
+  };
+
+/**
+ * Visible comparison between two immutable versions.
+ */
+export type ToolVersionDiffView = {
+    /**
+     * Descriptor fields whose canonical values differ.
+     */
+    descriptor_changed: string[];
+    /**
+     * Baseline version.
+     */
+    from_version_id: string;
+    /**
+     * Added prompt names.
+     */
+    prompts_added: string[];
+    /**
+     * Prompt names whose schema/metadata changed.
+     */
+    prompts_changed: string[];
+    /**
+     * Removed prompt names.
+     */
+    prompts_removed: string[];
+    /**
+     * Added resource URIs.
+     */
+    resources_added: string[];
+    /**
+     * Resource URIs whose schema/metadata changed.
+     */
+    resources_changed: string[];
+    /**
+     * Removed resource URIs.
+     */
+    resources_removed: string[];
+    /**
+     * Candidate version.
+     */
+    to_version_id: string;
+    /**
+     * Added tool names.
+     */
+    tools_added: string[];
+    /**
+     * Tool names whose description or input schema changed.
+     */
+    tools_changed: string[];
+    /**
+     * Removed tool names.
+     */
+    tools_removed: string[];
+  };
+
+/**
  * `PATCH /v1/workspaces/{workspace_id}` and
  * `PATCH /v1/projects/{project_id}`.
  *
@@ -3240,6 +3745,25 @@ export type UpdateSkillBody = {
      */
     provenance?: SkillProvenanceBody;
     sensitivity: "public" | "internal" | "confidential" | "restricted";
+  };
+
+/**
+ * Change a binding using optimistic concurrency.
+ */
+export type UpdateToolBindingBody = {
+    /**
+     * Exact current binding revision.
+     */
+    expected_revision: number;
+    /**
+     * Bounded reason code (`disable`, `enable`, `repin`, `remove`).
+     */
+    reason: string;
+    state: "enabled" | "disabled" | "removed";
+    /**
+     * Complete resulting exact version.
+     */
+    version_id: string;
   };
 
 /**
@@ -3732,6 +4256,14 @@ export type Operations = {
     readonly response: void;
   };
   /**
+   * `GET /v1/projects/{project_id}/tool-config` — secret-free exact bindings.
+   */
+  readonly generate_tool_client_config: {
+    readonly path: "/v1/projects/{project_id}/tool-config";
+    readonly method: "GET";
+    readonly response: ToolClientConfigurationView;
+  };
+  /**
    * `GET /v1/sessions` — the runs this caller may read, newest first.
    */
   readonly list_sessions: {
@@ -3988,6 +4520,141 @@ export type Operations = {
     readonly response: SkillUsageListView;
   };
   /**
+   * `GET /v1/tool-bindings` — list policy-visible project bindings.
+   */
+  readonly list_tool_bindings: {
+    readonly path: "/v1/tool-bindings";
+    readonly method: "GET";
+    readonly response: ToolBindingListView;
+  };
+  /**
+   * `POST /v1/tool-bindings` — propose an exact approved project binding.
+   */
+  readonly create_tool_binding: {
+    readonly path: "/v1/tool-bindings";
+    readonly method: "POST";
+    readonly body: CreateToolBindingBody;
+    readonly idempotent: true;
+    readonly response: ToolMutationView;
+  };
+  /**
+   * `GET /v1/tool-bindings/{id}` — inspect one exact binding.
+   */
+  readonly get_tool_binding: {
+    readonly path: "/v1/tool-bindings/{id}";
+    readonly method: "GET";
+    readonly response: ToolBindingView;
+  };
+  /**
+   * `PATCH /v1/tool-bindings/{id}` — propose disable, repin or removal.
+   */
+  readonly update_tool_binding: {
+    readonly path: "/v1/tool-bindings/{id}";
+    readonly method: "PATCH";
+    readonly body: UpdateToolBindingBody;
+    readonly idempotent: true;
+    readonly response: ToolMutationView;
+  };
+  /**
+   * `GET /v1/tool-servers` — list policy-visible catalogue entries.
+   */
+  readonly list_tool_servers: {
+    readonly path: "/v1/tool-servers";
+    readonly method: "GET";
+    readonly response: ToolServerListView;
+  };
+  /**
+   * `POST /v1/tool-servers` — stage a stable server and first version.
+   */
+  readonly register_tool_server: {
+    readonly path: "/v1/tool-servers";
+    readonly method: "POST";
+    readonly body: RegisterToolServerBody;
+    readonly idempotent: true;
+    readonly response: ToolMutationView;
+  };
+  /**
+   * `POST /v1/tool-servers/import-client-config` — import one supported client entry.
+   */
+  readonly import_tool_client_config: {
+    readonly path: "/v1/tool-servers/import-client-config";
+    readonly method: "POST";
+    readonly body: ImportToolClientConfigBody;
+    readonly idempotent: true;
+    readonly response: ToolMutationView;
+  };
+  /**
+   * `GET /v1/tool-servers/{id}` — inspect one stable entry.
+   */
+  readonly get_tool_server: {
+    readonly path: "/v1/tool-servers/{id}";
+    readonly method: "GET";
+    readonly response: ToolServerView;
+  };
+  /**
+   * `PATCH /v1/tool-servers/{id}` — stage changed immutable metadata.
+   */
+  readonly update_tool_server: {
+    readonly path: "/v1/tool-servers/{id}";
+    readonly method: "PATCH";
+    readonly body: StageToolVersionBody;
+    readonly idempotent: true;
+    readonly response: ToolMutationView;
+  };
+  /**
+   * `POST /v1/tool-servers/{id}/discoveries` — report stateless discovery.
+   */
+  readonly discover_tool_server: {
+    readonly path: "/v1/tool-servers/{id}/discoveries";
+    readonly method: "POST";
+    readonly body: DiscoverToolServerBody;
+    readonly idempotent: true;
+    readonly response: ToolMutationView;
+  };
+  /**
+   * `GET /v1/tool-servers/{id}/versions` — immutable version history.
+   */
+  readonly list_tool_server_versions: {
+    readonly path: "/v1/tool-servers/{id}/versions";
+    readonly method: "GET";
+    readonly response: ToolServerVersionListView;
+  };
+  /**
+   * `GET /v1/tool-servers/{id}/versions/{version_id}` — exact version.
+   */
+  readonly get_tool_server_version: {
+    readonly path: "/v1/tool-servers/{id}/versions/{version_id}";
+    readonly method: "GET";
+    readonly response: ToolServerVersionView;
+  };
+  /**
+   * `GET /v1/tool-servers/{id}/versions/{version_id}/diff` — compare versions.
+   */
+  readonly diff_tool_server_version: {
+    readonly path: "/v1/tool-servers/{id}/versions/{version_id}/diff";
+    readonly method: "GET";
+    readonly response: ToolVersionDiffView;
+  };
+  /**
+   * `GET /v1/tool-servers/{id}/versions/{version_id}/tests` — list evidence.
+   */
+  readonly list_tool_server_tests: {
+    readonly path: "/v1/tool-servers/{id}/versions/{version_id}/tests";
+    readonly method: "GET";
+    readonly response: ToolTestRunListView;
+  };
+  /**
+   * `POST /v1/tool-servers/{id}/versions/{version_id}/tests` — record trusted
+   * read-only evidence. The gateway does not execute the server.
+   */
+  readonly run_tool_server_test: {
+    readonly path: "/v1/tool-servers/{id}/versions/{version_id}/tests";
+    readonly method: "POST";
+    readonly body: RunToolTestBody;
+    readonly idempotent: true;
+    readonly response: ToolTestRunView;
+  };
+  /**
    * `GET /v1/workspaces` — the tenant's workspaces.
    */
   readonly list_workspaces: {
@@ -4134,6 +4801,7 @@ export const OPERATIONS = {
   list_repositories: { path: "/v1/projects/{project_id}/repositories", method: "GET" },
   attach_repository: { path: "/v1/projects/{project_id}/repositories", method: "POST", idempotent: true },
   detach_repository: { path: "/v1/projects/{project_id}/repositories/{repository_id}", method: "DELETE" },
+  generate_tool_client_config: { path: "/v1/projects/{project_id}/tool-config", method: "GET" },
   list_sessions: { path: "/v1/sessions", method: "GET" },
   open_session: { path: "/v1/sessions", method: "POST", idempotent: true },
   get_session: { path: "/v1/sessions/{session_id}", method: "GET" },
@@ -4163,6 +4831,21 @@ export const OPERATIONS = {
   list_skill_tests: { path: "/v1/skills/{id}/versions/{version_id}/tests", method: "GET" },
   run_skill_test: { path: "/v1/skills/{id}/versions/{version_id}/tests", method: "POST", idempotent: true },
   list_skill_usage: { path: "/v1/skills/{id}/versions/{version_id}/usage", method: "GET" },
+  list_tool_bindings: { path: "/v1/tool-bindings", method: "GET" },
+  create_tool_binding: { path: "/v1/tool-bindings", method: "POST", idempotent: true },
+  get_tool_binding: { path: "/v1/tool-bindings/{id}", method: "GET" },
+  update_tool_binding: { path: "/v1/tool-bindings/{id}", method: "PATCH", idempotent: true },
+  list_tool_servers: { path: "/v1/tool-servers", method: "GET" },
+  register_tool_server: { path: "/v1/tool-servers", method: "POST", idempotent: true },
+  import_tool_client_config: { path: "/v1/tool-servers/import-client-config", method: "POST", idempotent: true },
+  get_tool_server: { path: "/v1/tool-servers/{id}", method: "GET" },
+  update_tool_server: { path: "/v1/tool-servers/{id}", method: "PATCH", idempotent: true },
+  discover_tool_server: { path: "/v1/tool-servers/{id}/discoveries", method: "POST", idempotent: true },
+  list_tool_server_versions: { path: "/v1/tool-servers/{id}/versions", method: "GET" },
+  get_tool_server_version: { path: "/v1/tool-servers/{id}/versions/{version_id}", method: "GET" },
+  diff_tool_server_version: { path: "/v1/tool-servers/{id}/versions/{version_id}/diff", method: "GET" },
+  list_tool_server_tests: { path: "/v1/tool-servers/{id}/versions/{version_id}/tests", method: "GET" },
+  run_tool_server_test: { path: "/v1/tool-servers/{id}/versions/{version_id}/tests", method: "POST", idempotent: true },
   list_workspaces: { path: "/v1/workspaces", method: "GET" },
   create_workspace: { path: "/v1/workspaces", method: "POST", idempotent: true },
   get_workspace: { path: "/v1/workspaces/{workspace_id}", method: "GET" },

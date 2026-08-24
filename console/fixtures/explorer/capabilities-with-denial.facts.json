@@ -32,6 +32,8 @@
     "session.read",
     "session.write",
     "skill.write",
+    "tool.read",
+    "tool.write",
     "workspace.create",
     "workspace.read",
     "workspace.update",

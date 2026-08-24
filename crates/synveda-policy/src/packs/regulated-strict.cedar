@@ -545,6 +545,53 @@ permit (
         && context.roles.containsAny(["curator", "member", "owner", "administrator"])
 };
 
+// Trusted MCP catalogue metadata and governed binding intent (CPR-25). A
+// declaration grants no invocation authority.
+permit (
+    principal,
+    action == Synveda::Action::"ToolRead",
+    resource
+) when {
+    resource in principal.tenant
+        && principal in resource
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ToolRead",
+    resource
+) when {
+    resource in principal.tenant
+        && resource in principal.ambit
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ToolRead",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "curator", "member", "reviewer", "owner", "administrator"])
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ToolWrite",
+    resource
+) when {
+    principal has own_scope
+        && resource == principal.own_scope
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"ToolWrite",
+    resource
+) when {
+    resource in principal.tenant
+        && context.roles.containsAny(["curator", "member", "owner", "administrator"])
+};
+
 // The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform,
 // like the channel, quarantine and proposal planes and for the same reason
 // — what a tier *means* cannot loosen per pack, or `restricted` stops

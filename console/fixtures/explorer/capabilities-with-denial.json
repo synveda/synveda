@@ -48,6 +48,8 @@
       "session.read": true,
       "session.write": true,
       "skill.write": true,
+      "tool.read": true,
+      "tool.write": true,
       "workspace.create": true,
       "workspace.read": true,
       "workspace.update": true

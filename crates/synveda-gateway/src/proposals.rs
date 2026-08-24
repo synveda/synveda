@@ -1139,6 +1139,9 @@ async fn apply_inner(state: &AppState, id: ProposalId) -> Result<Json<serde_json
         (AssetKind::Skill, ProposalEffect::Apply) => {
             serde_json::to_value(crate::skills::apply_reviewed(state, id).await?)
         }
+        (AssetKind::Tool, ProposalEffect::Apply) => {
+            serde_json::to_value(crate::tool_registry::apply_reviewed(state, id).await?)
+        }
         _ => {
             return Err(Error::Invalid {
                 message: format!(
@@ -1841,6 +1844,9 @@ async fn member_views(
     if proposal.asset == AssetKind::Skill {
         return skill_change_member_views(tx, tenant_id, proposal, &proposed).await;
     }
+    if proposal.asset == AssetKind::Tool {
+        return tool_change_member_views(tx, tenant_id, proposal, &proposed).await;
+    }
     if proposal.asset == AssetKind::Prompt {
         return prompt_member_views(tx, tenant_id, proposal, &proposed).await;
     }
@@ -2016,6 +2022,78 @@ async fn skill_change_member_views(
         unchanged: payload_hash == change.payload_hash
             && manifest_hash == Some(change.payload_hash.as_str()),
         sensitivity: change.command.sensitivity(),
+        content: rendered.clone(),
+        effect: MemberEffect::Apply,
+        proposed: rendered,
+        baseline: None,
+    }])
+}
+
+/// [`member_views`] for an immutable typed Tool/apply command (CPR-25,
+/// ADR-0086). The command carries only credential-free descriptors, schemas,
+/// hashes and exact binding intent; secret material cannot enter this review.
+async fn tool_change_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let [member] = proposed else {
+        return Err(Error::Internal {
+            message: format!(
+                "Tool change {} has {} members rather than one command",
+                proposal.id,
+                proposed.len()
+            ),
+        });
+    };
+    if member.name != "command" {
+        return Err(Error::Internal {
+            message: format!(
+                "Tool change {} names member {:?}, expected command",
+                proposal.id, member.name
+            ),
+        });
+    }
+    let change = synveda_store::tool_registry::change(&mut *tx, tenant_id, proposal.id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!("Tool change {} has no typed effect", proposal.id),
+        })?;
+    let object = vedaflow::read_object(&mut *tx, tenant_id, member.object)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "Tool change {} names missing manifest object {}",
+                proposal.id,
+                member.object.to_hex()
+            ),
+        })?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&object.content).map_err(|err| Error::Internal {
+            message: format!("Tool change {} manifest is invalid: {err}", proposal.id),
+        })?;
+    let manifest_hash = manifest
+        .get("payload_hash")
+        .and_then(serde_json::Value::as_str);
+    let value = synveda_types::json::canonicalise(&serde_json::to_value(&change.command).map_err(
+        |err| Error::Internal {
+            message: format!("encode Tool change {} for review: {err}", proposal.id),
+        },
+    )?);
+    let rendered = serde_json::to_string_pretty(&value).map_err(|err| Error::Internal {
+        message: format!("render Tool change {}: {err}", proposal.id),
+    })?;
+    let payload_hash = blake3::hash(value.to_string().as_bytes())
+        .to_hex()
+        .to_string();
+    Ok(vec![MemberView {
+        member: member.name.clone(),
+        asset: AssetKind::Tool.as_str().to_owned(),
+        object_hash: member.object.to_hex(),
+        unchanged: payload_hash == change.payload_hash
+            && manifest_hash == Some(change.payload_hash.as_str()),
+        sensitivity: Sensitivity::Internal,
         content: rendered.clone(),
         effect: MemberEffect::Apply,
         proposed: rendered,

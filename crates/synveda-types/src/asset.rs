@@ -36,6 +36,9 @@ pub enum AssetKind {
     /// A skill definition and its bundled files (SKIL-1). Executable, and
     /// reviewed like code.
     Skill,
+    /// A trusted MCP server version or exact project binding (CPR-25,
+    /// ADR-0086). Declared capabilities are metadata, never authority.
+    Tool,
     /// A curated bundle pinned to a scope: docs, conventions, glossaries
     /// (PRMT-2).
     ContextPack,
@@ -47,11 +50,12 @@ pub enum AssetKind {
 impl AssetKind {
     /// All asset kinds. Kept in the same order as the `vedaflow_objects.kind`
     /// CHECK constraint (migration 0018).
-    pub const ALL: [AssetKind; 6] = [
+    pub const ALL: [AssetKind; 7] = [
         AssetKind::Memory,
         AssetKind::Knowledge,
         AssetKind::Prompt,
         AssetKind::Skill,
+        AssetKind::Tool,
         AssetKind::ContextPack,
         AssetKind::Policy,
     ];
@@ -85,6 +89,7 @@ impl AssetKind {
             AssetKind::Knowledge => "knowledge",
             AssetKind::Prompt => "prompt",
             AssetKind::Skill => "skill",
+            AssetKind::Tool => "tool",
             AssetKind::ContextPack => "context-pack",
             AssetKind::Policy => "policy",
         }

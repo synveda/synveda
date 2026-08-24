@@ -218,6 +218,10 @@ async fn visible_rows(
 const COVERED: &[&str] = &[
     "audit_chain_heads",
     "audit_log",
+    // CPR-25 (ADR-0086): trusted MCP catalogue metadata, immutable discovery
+    // snapshots, exact project bindings, typed VedaFlow changes and read-only
+    // test evidence are all tenant-confidential and owner-bypass-proof.
+    "capability_snapshots",
     // CPR-18 (ADR-0083): frozen session evidence, its reviewable proposals,
     // visible match hints and durable decisions all disclose transcript- or
     // Knowledge-derived state and therefore share the tenant boundary.
@@ -324,6 +328,11 @@ const COVERED: &[&str] = &[
     // for the same reason (decision 5).
     "tenant_keys",
     "tenant_secrets",
+    "tool_bindings",
+    "tool_changes",
+    "tool_server_versions",
+    "tool_servers",
+    "tool_test_runs",
     "vedaflow_commit_parents",
     "vedaflow_commits",
     "vedaflow_objects",

@@ -548,6 +548,20 @@ pub enum AuditAction {
     /// gateway's built-in harness validates and scans; it executes no bundle
     /// script.
     SkillTestRecorded,
+    /// A typed Tool/apply VedaFlow change staged trusted MCP catalogue or
+    /// exact-binding intent (CPR-25, ADR-0086). Carries hashes and ids, never
+    /// credentials or arbitrary descriptions.
+    ToolChangeOpened,
+    /// An approved Tool/apply effect advanced the current version or changed
+    /// an exact project binding.
+    ToolChangeApplied,
+    /// A Tool/apply effect reached a terminal precondition refusal.
+    ToolChangeRejected,
+    /// A trusted adapter reported one immutable read-only connection test.
+    ToolTestRecorded,
+    /// Secret-free client configuration was generated for a project from its
+    /// exact approved bindings.
+    ToolConfigurationGenerated,
     /// A grant reached the end of its window. Emitted by the sweep under
     /// `actor_kind=system`, and **bookkeeping only** — the grant stopped
     /// deciding anything at `expires_at` whether or not this was ever
@@ -568,7 +582,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 90] = [
+    pub const ALL: [AuditAction; 95] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -659,6 +673,11 @@ impl AuditAction {
         AuditAction::SkillScanRejected,
         AuditAction::SkillUsageRecorded,
         AuditAction::SkillTestRecorded,
+        AuditAction::ToolChangeOpened,
+        AuditAction::ToolChangeApplied,
+        AuditAction::ToolChangeRejected,
+        AuditAction::ToolTestRecorded,
+        AuditAction::ToolConfigurationGenerated,
     ];
 
     /// The stable dotted name stored in the `action` column. Renaming an
@@ -756,6 +775,11 @@ impl AuditAction {
             AuditAction::SkillScanRejected => "skill.scan.rejected",
             AuditAction::SkillUsageRecorded => "skill.usage.recorded",
             AuditAction::SkillTestRecorded => "skill.test.recorded",
+            AuditAction::ToolChangeOpened => "tool.change.opened",
+            AuditAction::ToolChangeApplied => "tool.change.applied",
+            AuditAction::ToolChangeRejected => "tool.change.rejected",
+            AuditAction::ToolTestRecorded => "tool.test.recorded",
+            AuditAction::ToolConfigurationGenerated => "tool.configuration.generated",
         }
     }
 }

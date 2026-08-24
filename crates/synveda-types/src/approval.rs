@@ -181,13 +181,14 @@ pub struct ApprovalMatrix {
 
 /// The invariant product floor (ADR-0032 decision 4).
 ///
-/// Two rules, prepended to every matrix — embedded pack, stored pack, or
+/// Three rules, prepended to every matrix — embedded pack, stored pack, or
 /// no configuration at all:
 ///
 /// - anything `restricted` needs an `administrator` and two distinct
 ///   approvers (tech plan §2.4; seed §4.2's own definition of the tier);
-/// - any `skill` needs a `reviewer` **and two distinct approvers**,
-///   because a skill is executable and reviewed like the code it is.
+/// - any `skill` or trusted-MCP `tool` version needs a `reviewer` **and two
+///   distinct approvers**, because executable instructions and capability
+///   declarations both cross a trust boundary.
 ///
 /// The two named roles are the grant-key re-vocabulary of `compliance` and
 /// `security-reviewer` (CPR-7, ADR-0074 decision 6): the floors are
@@ -216,6 +217,13 @@ static FLOOR: LazyLock<Vec<ApprovalRule>> = LazyLock::new(|| {
         },
         ApprovalRule {
             asset: Some(AssetKind::Skill),
+            min_sensitivity: Sensitivity::Public,
+            scope_kinds: None,
+            roles: vec![RoleRequirement::new(RoleKey::Reviewer, 1)],
+            distinct_approvers: 2,
+        },
+        ApprovalRule {
+            asset: Some(AssetKind::Tool),
             min_sensitivity: Sensitivity::Public,
             scope_kinds: None,
             roles: vec![RoleRequirement::new(RoleKey::Reviewer, 1)],
@@ -650,19 +658,21 @@ mod tests {
         assert!(requirement.is_empty(), "auto-approve is a real answer");
     }
 
-    /// A skill is executable, so the floor asks for a security reviewer
-    /// at every sensitivity — including `public`.
+    /// Skills and Tool versions cross executable trust boundaries, so the
+    /// floor asks for a reviewer at every sensitivity — including `public`.
     #[test]
-    fn every_skill_needs_a_security_reviewer() {
-        for sensitivity in Sensitivity::ALL {
-            let requirement =
-                ApprovalMatrix::empty().resolve(AssetKind::Skill, sensitivity, ScopeKind::Tenant);
-            assert!(
-                requirement
-                    .roles
-                    .contains(&RoleRequirement::new(RoleKey::Reviewer, 1)),
-                "{sensitivity} skill escaped security review"
-            );
+    fn every_executable_boundary_needs_a_security_reviewer() {
+        for asset in [AssetKind::Skill, AssetKind::Tool] {
+            for sensitivity in Sensitivity::ALL {
+                let requirement =
+                    ApprovalMatrix::empty().resolve(asset, sensitivity, ScopeKind::Tenant);
+                assert!(
+                    requirement
+                        .roles
+                        .contains(&RoleRequirement::new(RoleKey::Reviewer, 1)),
+                    "{sensitivity} {asset} escaped security review"
+                );
+            }
         }
     }
 

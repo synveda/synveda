@@ -38,11 +38,12 @@ programme convention established in Prompt 1.
 | Core personal/team PulseBoard loop across sessions, capture, governed Knowledge, privacy, supersession and inspector evidence | CPR-22 | **complete** | `8cdd1ee` | `c9e647d` | consolidated DB acceptance 1/1; capture 4/4; context 3/3; console 179/179 | PASS | PASS | isolated `demos/cpr-22-mvp-acceptance.sh` PASS: 3 sessions, 5 candidates, 4 changes, 3 current + 1 superseded Knowledge, 2 runs, 3 selections, zero records | none |
 | Re-point the executable demo corpus and gate CLI/OpenAPI drift | CPR-13 | **complete** | `c9e647d` | `9b8ad04` | checker fixtures 4/4; shell syntax PASS; generated inventory 73/73 | PASS | N/A — no persisted behaviour changed | MEM sessions 22/22 + load 1/1; CTX 1/1; FLOW 4/4; AUTHZ 2/2; ADPT authentic-frame 2/2 | none |
 | Immutable Agent Skills versions, project/principal bindings, evidence-labelled usage and controlled test runs | CPR-23 | **complete** | `9b8ad04` | `89b5f79` | gateway 1/1; RLS/immutability 1/1 + completeness 1/1; OpenAPI 5/5; policy packs 7/7; CLI 157/157; console 179/179 | PASS | PASS (`synveda_test_80706`) | official unversioned Agent Skills spec pinned to upstream `69ef37e`; isolated `demos/cpr-23-versioned-skills.sh` PASS | none |
-| Generated-API Skills Library, bindings, exact files/tests/usage and legacy Skill review-screen cutover | CPR-24 | **complete** | `89b5f79` | next checkpoint | helpers/components 10/10; shared review 5/5; console 186/186; CLI 151/151; production build PASS | PASS | N/A — console/client-only | no in-app browser exposed; real-component SSR and production bundle PASS | none |
+| Generated-API Skills Library, bindings, exact files/tests/usage and legacy Skill review-screen cutover | CPR-24 | **complete** | `89b5f79` | `07ce9f3` | helpers/components 10/10; shared review 5/5; console 186/186; CLI 151/151; production build PASS | PASS | N/A — console/client-only | no in-app browser exposed; real-component SSR and production bundle PASS | none |
+| Trusted MCP server catalogue, immutable versions/snapshots, exact project bindings, generated configuration and read-only tests | CPR-25 | **complete** | `07ce9f3` | next checkpoint | types 5/5; gateway unit 3/3 + public DB 1/1; policy PASS; RLS 1/1; OpenAPI 5/5; console 186/186 | PASS | PASS (`synveda_test_88082`) | official stable MCP 2026-07-28 pinned to `5f5440b`; isolated `demos/cpr-25-tool-registry.sh` PASS; deterministic report is not live-server evidence | none |
 
-**Exact next objective:** begin CPR-25, the trusted MCP server catalogue and
-project-binding backend, after recording CPR-24's commit hash under the
-next-checkpoint convention.
+**Exact next objective:** implement CPR-26, the generated-API Tools console over
+CPR-25's immutable catalogue, comparisons, exact project bindings, read-only
+tests and secret-free client configuration, without adding execution authority.
 
 ### Starting-point objective map
 
@@ -3717,4 +3718,77 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(console): add Skills Library (CPR-24)` on
   `feat/context-platform-mvp`.
 - **Commit hash.** Written by the CPR-25 checkpoint under the programme's
+  next-checkpoint convention.
+
+### Prompt 23 objective — trusted MCP server catalogue (CPR-25)
+
+- **Selected feature and specification.** **CPR-25** is delivered from
+  `07ce9f3`; it records CPR-24's commit as
+  `07ce9f3b32d67c4a50e83ff8fed38d6abdd7983f`. ADR-0086 is accepted. The
+  official stable MCP contract verified on 2026-08-24 is stateless
+  `2026-07-28`, pinned to the specification release commit
+  `5f5440bb26a62e2cf3440b92da5a667efa03b267`. Stdio and Streamable HTTP are
+  the accepted transports; retired HTTP+SSE, protocol sessions and invented
+  future revisions are refused.
+
+- **Immutable trust model.** Migration `0053_tool_registry.sql` creates stable
+  ToolServer identities, immutable ordinal ToolServerVersions, immutable raw
+  and deterministically normalised CapabilitySnapshots, revisioned exact-
+  version project ToolBindings, typed Tool changes and immutable ToolTestRuns.
+  A canonical digest covers source, transport, authentication, secret-reference
+  identity, requested permissions and tool/resource/prompt metadata. Any drift
+  creates a quarantined version; the same digest returns the existing evidence.
+  All six tables are tenant-bound with enabled/forced RLS and composite tenant
+  ownership. Database triggers make history immutable and prevent a current
+  pointer or binding from naming a version whose VedaFlow change was not
+  applied. Schema epoch **2** now has **51 migrations** and **655** checked
+  SQLx query descriptions.
+
+- **One governed mutation path.** Registration, supported-client import,
+  discovery drift, binding creation, disable/re-enable, exact repin and removal
+  use `AssetKind::Tool` VedaFlow Apply changes. Apply repeats target ownership,
+  `ToolWrite`, `ProposalOpen`, payload hash, current head, exact approval and
+  revision preconditions. Regulated policy leaves Tool changes pending for two
+  distinct reviewers plus the executable-boundary reviewer; applying another
+  server version never moves an existing project binding. `ToolRead` and
+  `ToolWrite` are carried through every pack, capability forecast and service-
+  token confinement rule. Five audit actions retain ids, digests, counts,
+  method names and outcomes rather than descriptions, schemas or credentials.
+
+- **Public discovery and configuration plane.** Sixteen generated operations
+  grow OpenAPI **85 → 101** and the TypeScript contract to **139 schemas**.
+  They import a bounded manifest/client entry, list and inspect exact versions,
+  compare normalised capabilities, govern exact bindings, generate a client
+  configuration containing reference placeholders only and record immutable
+  discovery/list test evidence. Collection routes are cursor-paginated and
+  decide every returned row. The gateway never launches an imported stdio
+  command, resolves a secret reference or accepts `tools/call`; descriptions,
+  annotations, requested permissions and declared schemas grant no authority.
+  The existing `synveda mcp` process remains a distinct public-API adapter.
+
+- **Threat and deletion result.** Client config import rejects credential-
+  shaped environment/header/token content without echo. Source/auth/schema
+  substitution is visible as quarantined digest drift. Foreign and fictional
+  identifiers produce the same absence, and the cross-tenant ambit regression
+  test prevents a scoped service permit escaping its tenant. No retired
+  transport, session compatibility shim, mutable-version replacement,
+  follow-current Tool binding, gateway code-execution seam, execution proxy,
+  plaintext secret field or duplicate MCP adapter was added. The capability
+  explorer fixtures were re-recorded only to add the two real Tool forecasts.
+
+- **Tests and exact results.** Tool domain validation **5/5**, gateway boundary
+  units **3/3**, public database lifecycle **1/1**, complete policy PASS
+  (packs **7/7**, approvals **6/6**, service confinement **4/4**), forced-RLS
+  completeness **1/1**, OpenAPI **5/5**, generated client drift and console
+  **186/186** pass. The isolated `demos/cpr-25-tool-registry.sh` reports one
+  stable server, two immutable versions/snapshots, one exact binding, four
+  governed changes and one non-executing test report. Full `make db-test`
+  **PASS** against disposable `synveda_test_88082`; complete `make ci` **PASS**
+  after its warnings-as-errors and generated-client golden findings were fixed
+  rather than suppressed. The deterministic discovery report is fixture
+  evidence, not a live external-server or proprietary-client claim.
+
+- **Commit.** `feat(tools): add trusted MCP server registry (CPR-25)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-26 checkpoint under the programme's
   next-checkpoint convention.

@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select binding.id, binding.project_id, project.scope_id, binding.server_id,\n                  binding.version_id, binding.state, binding.revision, binding.created_at,\n                  binding.created_by, binding.updated_at, binding.updated_by\n             from tool_bindings binding\n             join projects project on project.tenant_id = binding.tenant_id\n                                  and project.id = binding.project_id\n            where binding.tenant_id = $1\n              and ($2::uuid is null or binding.project_id = $2)\n              and ($3 or binding.state <> 'removed')\n              and ($4::uuid is null or binding.id < $4)\n            order by binding.id desc limit $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bool",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e460521fdfaea61950bcb6535f7e3a1df27fe424b489014d4b58cac68591b6f9"
+}

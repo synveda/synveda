@@ -1957,6 +1957,35 @@ CPR-24  Skills Library product experience (L)
   real-component acceptance, CLI regression, production build and `make ci`
   pass. No ADR: ADR-0075 and ADR-0085 already lock the consumed boundaries.
 
+CPR-25  Trusted MCP server catalogue and project bindings (XL)
+  Filed 2026-08-24 by the autonomous continuation. Add stable ToolServer
+  aggregates, immutable ToolServerVersions, raw and normalised
+  CapabilitySnapshots, revisioned exact-version project ToolBindings and
+  immutable read-only ToolTestRuns. Treat MCP as the external discovery/config
+  format around this governed product model, not as execution authority and
+  not as a second generic MCP adapter. Pin the stable official MCP 2026-07-28
+  specification and its stateless `server/discover`, per-request metadata,
+  stdio and Streamable HTTP model; never add HTTP+SSE or session-state
+  semantics. Import explicit manifests and one entry from supported client
+  configuration, register Streamable HTTP metadata, and admit stdio discovery
+  only as evidence reported by an authorised trusted local adapter. Preserve
+  raw metadata and deterministic normalisation; source, digest, transport,
+  authentication, requested-permission, tool, resource or prompt changes mint
+  a quarantined immutable version. Approval and every binding transition are
+  typed VedaFlow apply changes; project bindings always pin an exact approved
+  version, so a changed server never becomes active silently. Credentials are
+  secret references only. Generate client configuration without a secret value
+  and record only read-only discovery/list connectivity tests; universal tool
+  execution is outside this feature.
+  AC: immutable version/digest and diff evidence; unchanged discovery is
+  idempotent; quarantine then applied/pending/rejected approval; a new approved
+  version leaves an existing project binding unchanged; revisioned bind,
+  disable, repin and remove; exact tools/resources/prompts and schemas; current
+  2026-07-28 pin with no HTTP+SSE; generated secret-free config; read-only tests
+  reject any execution method; PDP/RLS tenant/project isolation; content-free
+  audit; generated OpenAPI; authentic stateless discovery fixtures; focused
+  tests, demo, `make ci` and `make db-test` pass. ADR-0086.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2050,7 +2079,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

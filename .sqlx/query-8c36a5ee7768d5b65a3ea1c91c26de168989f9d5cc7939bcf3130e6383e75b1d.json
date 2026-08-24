@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select action from audit_log\n           where tenant_id = $1 and action like 'tool.%'\n           order by seq",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "action",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8c36a5ee7768d5b65a3ea1c91c26de168989f9d5cc7939bcf3130e6383e75b1d"
+}

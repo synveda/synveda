@@ -317,6 +317,30 @@ is where clients collect them — Claude Desktop keeps them in
 `rmcp` is the protocol SDK, so including it shows the frames themselves — which
 is what you want when the handshake is the thing failing.
 
+### Trusting an external MCP server for a project
+
+The `synveda mcp` command above is Synveda's own thin client adapter. The
+trusted MCP catalogue is a different plane: it records which exact external
+server source, transport, authentication shape and tools/resources/prompts a
+project reviewed. The public `/v1/tool-servers` and `/v1/tool-bindings`
+operations import metadata, retain immutable raw and normalised discovery
+snapshots, compare versions and pin one approved version to a project.
+
+A changed schema, description, source, transport or authentication shape is a
+new quarantined version. Approving it does not move an existing project
+binding; repinning is a separate governed change. Authentication entries name
+an opaque secret reference only. Do not put a token, header value or environment
+credential in an imported manifest or client configuration: the API rejects
+it and generated configuration never resolves the reference.
+
+Local stdio commands are untrusted executable metadata. The gateway never runs
+an imported command. A trusted local adapter may perform MCP `server/discover`
+and the three list operations on the user's machine and report that bounded
+evidence; catalogue tests refuse `tools/call` and are not an execution proxy.
+The accepted external contract is the stateless MCP `2026-07-28` specification
+over stdio or Streamable HTTP. Retired HTTP+SSE/session-shaped servers are not
+translated.
+
 ## Choosing an embedder for semantic Knowledge search
 
 ```sh

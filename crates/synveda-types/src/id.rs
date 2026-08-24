@@ -281,6 +281,35 @@ define_id!(
 );
 
 define_id!(
+    /// Identifies one stable trusted MCP server catalogue entry (CPR-25,
+    /// ADR-0086).
+    ToolServerId
+);
+
+define_id!(
+    /// Identifies one immutable MCP server version (CPR-25, ADR-0086).
+    ToolServerVersionId
+);
+
+define_id!(
+    /// Identifies one immutable raw and normalised MCP capability snapshot
+    /// (CPR-25, ADR-0086).
+    CapabilitySnapshotId
+);
+
+define_id!(
+    /// Identifies one revisioned exact-version project tool binding (CPR-25,
+    /// ADR-0086).
+    ToolBindingId
+);
+
+define_id!(
+    /// Identifies one immutable read-only MCP connection test (CPR-25,
+    /// ADR-0086).
+    ToolTestRunId
+);
+
+define_id!(
     /// Identifies one context run — one act of composing context for a
     /// session (CPR-10, ADR-0076 decision 7).
     ContextRunId

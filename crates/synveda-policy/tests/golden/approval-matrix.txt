@@ -78,6 +78,26 @@ regulated-strict   skill restricted org_unit   reviewer×1 + administrator×1 + 
 regulated-strict   skill restricted workspace  reviewer×1 + administrator×1 + 2distinct
 regulated-strict   skill restricted project    reviewer×1 + administrator×1 + 2distinct
 regulated-strict   skill restricted principal  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool public tenant     reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool public org_unit   reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool public workspace  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool public project    reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool public principal  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool internal tenant     reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool internal org_unit   reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool internal workspace  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool internal project    reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool internal principal  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool confidential tenant     reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool confidential org_unit   reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool confidential workspace  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool confidential project    reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool confidential principal  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool restricted tenant     reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool restricted org_unit   reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool restricted workspace  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool restricted project    reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool restricted principal  reviewer×1 + administrator×1 + 2distinct
 regulated-strict   context-pack public tenant     curator×1 + administrator×1 + 2distinct
 regulated-strict   context-pack public org_unit   curator×1 + administrator×1 + 2distinct
 regulated-strict   context-pack public workspace  curator×1 + 1distinct
@@ -198,6 +218,26 @@ standard           skill restricted org_unit   reviewer×1 + administrator×1 + 
 standard           skill restricted workspace  reviewer×1 + administrator×1 + 2distinct
 standard           skill restricted project    reviewer×1 + administrator×1 + 2distinct
 standard           skill restricted principal  reviewer×1 + administrator×1 + 2distinct
+standard           tool public tenant     reviewer×1 + administrator×1 + 2distinct
+standard           tool public org_unit   reviewer×1 + administrator×1 + 2distinct
+standard           tool public workspace  reviewer×1 + administrator×1 + 2distinct
+standard           tool public project    reviewer×1 + administrator×1 + 2distinct
+standard           tool public principal  reviewer×1 + administrator×1 + 2distinct
+standard           tool internal tenant     reviewer×1 + administrator×1 + 2distinct
+standard           tool internal org_unit   reviewer×1 + administrator×1 + 2distinct
+standard           tool internal workspace  reviewer×1 + administrator×1 + 2distinct
+standard           tool internal project    reviewer×1 + administrator×1 + 2distinct
+standard           tool internal principal  reviewer×1 + administrator×1 + 2distinct
+standard           tool confidential tenant     reviewer×1 + administrator×1 + 2distinct
+standard           tool confidential org_unit   reviewer×1 + administrator×1 + 2distinct
+standard           tool confidential workspace  reviewer×1 + administrator×1 + 2distinct
+standard           tool confidential project    reviewer×1 + administrator×1 + 2distinct
+standard           tool confidential principal  reviewer×1 + administrator×1 + 2distinct
+standard           tool restricted tenant     reviewer×1 + administrator×1 + 2distinct
+standard           tool restricted org_unit   reviewer×1 + administrator×1 + 2distinct
+standard           tool restricted workspace  reviewer×1 + administrator×1 + 2distinct
+standard           tool restricted project    reviewer×1 + administrator×1 + 2distinct
+standard           tool restricted principal  reviewer×1 + administrator×1 + 2distinct
 standard           context-pack public tenant     curator×1 + 1distinct
 standard           context-pack public org_unit   curator×1 + 1distinct
 standard           context-pack public workspace  curator×1 + 1distinct
@@ -318,6 +358,26 @@ open-collaboration skill restricted org_unit   reviewer×1 + administrator×1 + 
 open-collaboration skill restricted workspace  reviewer×1 + administrator×1 + 2distinct
 open-collaboration skill restricted project    reviewer×1 + administrator×1 + 2distinct
 open-collaboration skill restricted principal  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool public tenant     reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool public org_unit   reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool public workspace  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool public project    reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool public principal  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool internal tenant     reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool internal org_unit   reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool internal workspace  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool internal project    reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool internal principal  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool confidential tenant     reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool confidential org_unit   reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool confidential workspace  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool confidential project    reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool confidential principal  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool restricted tenant     reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool restricted org_unit   reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool restricted workspace  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool restricted project    reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool restricted principal  reviewer×1 + administrator×1 + 2distinct
 open-collaboration context-pack public tenant     curator×1 + 1distinct
 open-collaboration context-pack public org_unit   curator×1 + 1distinct
 open-collaboration context-pack public workspace  curator×1 + 1distinct

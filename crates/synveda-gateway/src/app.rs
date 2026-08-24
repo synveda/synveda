@@ -41,6 +41,7 @@ use crate::quarantine;
 use crate::skills;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
+use crate::tool_registry;
 
 /// Shared state for all routes.
 #[derive(Clone)]
@@ -542,6 +543,53 @@ pub fn router(state: AppState) -> Router {
             post(skills::rollback_binding),
         )
         .route("/v1/skill-usage", post(skills::record_usage))
+        // Trusted MCP catalogue metadata and exact approved project bindings
+        // (CPR-25, ADR-0086). Discovery/test calls accept read-only reports
+        // from trusted adapters; no route invokes a tool or launches stdio.
+        .route(
+            "/v1/tool-servers/import-client-config",
+            post(tool_registry::import_client_config),
+        )
+        .route(
+            "/v1/tool-servers",
+            get(tool_registry::list).post(tool_registry::register),
+        )
+        .route(
+            "/v1/tool-servers/{id}",
+            get(tool_registry::get).patch(tool_registry::stage_version),
+        )
+        .route(
+            "/v1/tool-servers/{id}/discoveries",
+            post(tool_registry::discover),
+        )
+        .route(
+            "/v1/tool-servers/{id}/versions",
+            get(tool_registry::list_versions),
+        )
+        .route(
+            "/v1/tool-servers/{id}/versions/{version_id}",
+            get(tool_registry::get_version),
+        )
+        .route(
+            "/v1/tool-servers/{id}/versions/{version_id}/diff",
+            get(tool_registry::diff),
+        )
+        .route(
+            "/v1/tool-servers/{id}/versions/{version_id}/tests",
+            get(tool_registry::list_tests).post(tool_registry::run_test),
+        )
+        .route(
+            "/v1/tool-bindings",
+            get(tool_registry::list_bindings).post(tool_registry::create_binding),
+        )
+        .route(
+            "/v1/tool-bindings/{id}",
+            get(tool_registry::get_binding).patch(tool_registry::update_binding),
+        )
+        .route(
+            "/v1/projects/{project_id}/tool-config",
+            get(tool_registry::generate_config),
+        )
         // The lapse plane (AUTHZ-4, ADR-0037). `POST /v1/lapses` opens a
         // *proposal* and grants nothing; the grant is that proposal's
         // effect, beside `/publish` and taking the same shape.

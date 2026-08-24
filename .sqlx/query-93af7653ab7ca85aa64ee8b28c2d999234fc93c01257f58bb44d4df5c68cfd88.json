@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tool_changes\n              set resulting_server_id = $3, resulting_version_id = $4,\n                  resulting_binding_id = $5, resulting_binding_revision = $6,\n                  applied_at = now()\n            where tenant_id = $1 and proposal_id = $2 and applied_at is null",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "93af7653ab7ca85aa64ee8b28c2d999234fc93c01257f58bb44d4df5c68cfd88"
+}

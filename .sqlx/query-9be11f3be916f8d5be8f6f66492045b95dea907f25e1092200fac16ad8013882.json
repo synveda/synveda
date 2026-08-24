@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select exists(\n                           select 1 from tool_servers\n                            where tenant_id = $1 and id = $2\n                              and governing_scope_id = $3\n                              and current_version_id = $4\n                       ) as \"matches!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "matches!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9be11f3be916f8d5be8f6f66492045b95dea907f25e1092200fac16ad8013882"
+}

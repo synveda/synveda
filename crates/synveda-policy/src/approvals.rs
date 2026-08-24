@@ -7,8 +7,8 @@
 //! pack that governs the target scope, and a product pack means the same
 //! thing in every tenant (ADR-0014 decision 6).
 //!
-//! Every resolution merges [`ApprovalMatrix::floor`] first, so the two
-//! rules that make `restricted` and `skill` non-negotiable hold whatever
+//! Every resolution merges [`ApprovalMatrix::floor`] first, so the rules
+//! that make `restricted`, `skill` and `tool` non-negotiable hold whatever
 //! a pack — embedded or stored — says. The matrices here sit *above* the
 //! floor; none of them can lower it.
 //!
@@ -22,6 +22,7 @@
 //! | context pack → workspace/project/own | 1 × curator | 1 × curator | 1 × curator |
 //! | context pack → tenant root / org unit | curator + administrator, 2 distinct | 1 × curator | 1 × curator |
 //! | skill | administrator, 2 distinct (+ floor's reviewer) | 1 × administrator (+ floor) | 1 × administrator (+ floor) |
+//! | tool | administrator, 2 distinct (+ floor's reviewer) | 1 × administrator (+ floor) | 1 × administrator (+ floor) |
 //! | policy | 2 × administrator | 1 × administrator | 1 × administrator |
 //! | anything `restricted` | the floor: administrator, 2 distinct | same | same |
 //!
@@ -132,6 +133,12 @@ pub fn regulated_strict() -> ApprovalMatrix {
                 &[(RoleKey::Administrator, 1)],
                 2,
             ),
+            rule(
+                Some(AssetKind::Tool),
+                None,
+                &[(RoleKey::Administrator, 1)],
+                2,
+            ),
             // "Policy lapse under regulated-strict: 2 × steward at target
             // scope". Policy governs everything else, so it is the one
             // asset whose review needs two holders of the same role.
@@ -181,6 +188,12 @@ pub fn standard() -> ApprovalMatrix {
                 1,
             ),
             rule(
+                Some(AssetKind::Tool),
+                None,
+                &[(RoleKey::Administrator, 1)],
+                1,
+            ),
+            rule(
                 Some(AssetKind::Policy),
                 None,
                 &[(RoleKey::Administrator, 1)],
@@ -219,6 +232,12 @@ pub fn open_collaboration() -> ApprovalMatrix {
             ),
             rule(
                 Some(AssetKind::Skill),
+                None,
+                &[(RoleKey::Administrator, 1)],
+                1,
+            ),
+            rule(
+                Some(AssetKind::Tool),
                 None,
                 &[(RoleKey::Administrator, 1)],
                 1,

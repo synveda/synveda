@@ -69,13 +69,16 @@ CPR-22, the core personal/team MVP acceptance gate, is delivered: its isolated
 PulseBoard cross-session scenario, complete CI and full database suite pass.
 CPR-13, deliberately sequenced after the final MVP surfaces it documents, is
 delivered: 49 affected demos now teach the current platform and a recursive
-generated-help/OpenAPI drift gate covers all 74 shell scripts in `make ci`.
+generated-help/OpenAPI drift gate covers all 75 shell scripts in `make ci`.
 CPR-23, the immutable Skill catalogue and governed binding cutover, is
 delivered under ADR-0085; the old draft/channel distribution path is gone.
 CPR-24, the generated Skills Library and mutable-Skill review cutover, is
 delivered; exact versions, files, bindings, controlled tests and usage evidence
 now share one policy-aware product surface, while Advanced Reviews is
 artifact-neutral.
+CPR-25, the trusted MCP catalogue and exact-binding backend, is delivered under
+ADR-0086; immutable discovery evidence and quarantined drift use the stable
+stateless MCP 2026-07-28 contract, while the gateway executes no imported tool.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -137,13 +140,13 @@ either.** To refresh both: `SYNVEDA_WRITE_OPENAPI=1 cargo test -p
 synveda-gateway --test openapi` then `node scripts/generate-api-types.mjs`.
 The document covers the context-platform plane — `/v1/me`,
 workspaces/projects/repositories, access, admin scopes, sessions and the public
-Knowledge lifecycle/search, capture, explainable context and immutable Skill
-planes (**85 operations** since CPR-23) — and says
+Knowledge lifecycle/search, capture, explainable context, immutable Skill and
+trusted MCP catalogue planes (**101 operations** since CPR-25) — and says
 so in its own description; the remaining production planes join under the
 programme's public-contract convergence package.
 Since CPR-8 the generator also emits
-the **runtime** path/method table beside the type table and marks the eight
-operations whose document requires an `Idempotency-Key`, so the console's
+the **runtime** path/method table beside the type table and marks every
+operation whose document requires an `Idempotency-Key`, so the console's
 client requires the key at compile time and no hand-written copy of a path
 exists.
 
@@ -185,7 +188,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 90 of 121 features delivered — see docs/backlog/STATUS.md for
+features done. 91 of 122 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -291,6 +294,13 @@ over CPR-23's exact versions, bindings, controlled tests and usage evidence.
 It was delivered the same day, making it **121 with 90 delivered**: the
 generated Library owns the linkable product surface, and Advanced Reviews is
 again artifact-neutral.
+**CPR-25 was filed next**, making it **122 with 90 delivered**: it adds the
+trusted MCP server catalogue and exact-version project bindings under the
+stable stateless MCP 2026-07-28 contract.
+It was delivered on 2026-08-25, making it **122 with 91 delivered**: immutable
+raw/normalised discovery evidence, quarantined schema/source drift, typed
+VedaFlow approval and exact project bindings now share one PDP/RLS/audit path;
+the gateway neither launches imported stdio commands nor resolves secrets.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

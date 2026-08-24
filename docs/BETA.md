@@ -194,6 +194,15 @@ loader as the built-in table:
 Then `synveda mcp install --client my-editor`. If you would rather place the
 entry yourself, `--print` gives you it and writes nothing.
 
+That command installs **Synveda's** MCP adapter. Trusting some other MCP server
+for a project is separately governed: the catalogue records an immutable
+discovery digest and an exact approved project binding. A changed server is
+quarantined and does not replace the bound version. Credentials remain secret
+references, and the gateway never executes an imported stdio command or
+proxies a tool call. The catalogue backend is available through the generated
+public API; its Tools console arrives in CPR-26, so the current Tools page
+still says that it is not built rather than displaying a false empty list.
+
 ## 9. Removing it
 
 Fetched the same way as the installer — it is not placed on disk by the
