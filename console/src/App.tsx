@@ -38,6 +38,7 @@ import type { MeView } from "./generated/api.js";
 
 import { Home } from "./Home.js";
 import { Knowledge, KnowledgeItem } from "./Knowledge.js";
+import { Learnings } from "./Learnings.js";
 import { Onboarding } from "./Onboarding.js";
 import { People } from "./People.js";
 import { Planned } from "./Planned.js";
@@ -208,6 +209,7 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
     case "knowledge-item":
       return <KnowledgeItem knowledgeId={route.params.knowledge_id as string} />;
     case "learnings":
+      return <Learnings />;
     case "tools":
       return <Planned route={route.id} />;
     case "reviews":

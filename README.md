@@ -111,10 +111,10 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger, durable adapter delivery, governed versioned Knowledge and reviewable capture | 🚧 18/33 |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger, durable adapter delivery, governed versioned Knowledge and reviewable capture | 🚧 19/33 |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **115
-in total, 83 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **116
+in total, 84 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
@@ -148,7 +148,11 @@ Published benchmark scores, and what they do and do not measure:
   Explicit requests and terminal sessions freeze exact event snapshots into
   durable capture batches. Extraction creates reviewable candidates only;
   accept, edit, merge and replace enter those same VedaFlow commands, while
-  dismissal publishes nothing.
+  dismissal publishes nothing. The New Learnings console groups them by batch,
+  previews exact session evidence, compares policy-visible current Knowledge
+  and offers only private/project/workspace destinations the caller may publish
+  into; pending outcomes remain visibly outside active Knowledge in Advanced
+  Reviews.
 - **The read path** — the Knowledge Browser lists and searches current active
   revisions with cursor pagination, per-object PDP decisions and independently
   authorised provenance. Lexical search is immediate; configured TEI enables
@@ -215,13 +219,12 @@ Being explicit, so nothing here misleads:
   evidence. Deterministic replay covers outage and duplicate recovery in CI.
   A host killed before any lifecycle hook writes the in-flight turn can still
   lose that tail; nothing which reached the local spool is lost.
-- **Three console pages have no plane behind them.** CPR-8 made the console a
+- **One console page has no plane behind it.** CPR-8 made the console a
   product shell — routes, switchers, People, first-run onboarding, and the
   proposals inbox (CNSL-1) and scope explorer (CNSL-2) re-homed under
-  **Advanced** — and CPR-10 gave **Sessions** its plane, so Knowledge, New
-  Learnings and Tools are what remain, waiting on Prompts 11–15 of the
-  context-platform programme. Each page says so rather than rendering an empty
-  list. Seven console surfaces also still call hand-written paths, because the
+  **Advanced**. Sessions, Knowledge and New Learnings now have their product
+  planes; **Tools** is the remaining honest placeholder until the trusted MCP
+  registry package lands. Seven console surfaces also still call hand-written paths, because the
   OpenAPI contract covers the context-platform plane only until Prompt 19.
 - **No Python/TS SDKs** (ADPT-4) and **no importers** from claude-mem, Cognee or
   mem0 (ADPT-5).

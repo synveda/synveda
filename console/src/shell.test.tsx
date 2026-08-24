@@ -165,17 +165,12 @@ test("a page heading comes from the route table", () => {
   assert.ok(rendered.includes("Who may act here"));
 });
 
-test("a plane that is not built says so, and shows no empty list", () => {
+test("the remaining plane that is not built says so, and shows no empty list", () => {
   // The failure this prevents: an empty list is indistinguishable from a
   // plane that works and has nothing in it, which is precisely the wrong
   // thing to tell somebody whose agent has been running all week.
-  for (const route of ["learnings", "tools"] as const) {
-    const rendered = toText(renderToStaticMarkup(<Planned route={route} />));
-    assert.ok(rendered.includes("not built yet"), `${route}:\n\n${rendered}`);
-    assert.ok(rendered.includes("waiting on"), `${route} does not say what it is waiting on`);
-    assert.ok(
-      !/\b0 (sessions|items|rows)\b/.test(rendered),
-      `${route} fabricated an empty count:\n\n${rendered}`,
-    );
-  }
+  const rendered = toText(renderToStaticMarkup(<Planned route="tools" />));
+  assert.ok(rendered.includes("not built yet"), rendered);
+  assert.ok(rendered.includes("waiting on"), "Tools does not say what it is waiting on");
+  assert.ok(!/\b0 (sessions|items|rows)\b/.test(rendered), `Tools fabricated an empty count:\n\n${rendered}`);
 });

@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **115 features filed, 83 delivered**;
+Cursor frame has been replayed. **116 features filed, 84 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -199,8 +199,16 @@ Load-bearing facts about Phase 5:
   re-authorised, candidate decisions are retry-safe, and Knowledge erasure
   scrubs candidate plaintext. The PGMQ `session_events` queue and the old
   record/embed/dedup/link extraction writer are deleted. The generated
-  contract has 62 operations; New Learnings and Knowledge-backed context
-  retrieval are the next two product packages.
+  contract has 62 operations; Knowledge-backed context retrieval is the next
+  runtime package.
+- CPR-19 is delivered with no new ADR or backend: New Learnings groups capture
+  candidates by batch, previews exact session evidence, freshly reads visible
+  Knowledge comparisons and offers scope-safe accept/edit/merge/replace/
+  dismiss through generated commands. Only anchors forecasting
+  `knowledge.write` enter its private/project/workspace picker; exact PDP
+  decisions still happen at the gateway. Applied results link to Knowledge and
+  pending ones remain explicitly unpublished under Advanced Reviews. The
+  console suite is **165/165** and the planned placeholder is gone.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

@@ -471,12 +471,17 @@ handing everybody a transcript of everybody's prompts. Where you hold it, each
 entry gets a *Show raw payload* control; where you do not, the page says which
 role it takes.
 
-The public Knowledge Browser now searches current active revisions and exposes
+The public Knowledge Browser searches current active revisions and exposes
 immutable history and independently authorised provenance. Session extraction
-now produces reviewable capture candidates, but the lightweight **New
-Learnings** console over those public routes lands in the following package;
-until then that navigation entry remains an honest empty state rather than a
-second proposal inbox. Tools likewise names its later registry package.
+produces reviewable capture candidates; **New Learnings** groups them by batch
+and lets you filter by project, session and decision state, inspect their exact
+source-event summaries and current-Knowledge comparisons, and accept, edit,
+merge, replace, change scope or dismiss. Private, project and workspace choices
+are named distinctly and a scope you cannot publish into is not offered. An
+applied decision links to its Knowledge item; a stricter profile's pending
+change links to Advanced Reviews and remains explicitly unpublished. Raw source
+payloads still require `session.diagnostics` at the run. Tools is the one
+remaining honest placeholder and names its later registry package.
 
 Signing in needs a **key plane**, because a console session seals its tokens
 under the deployment's encryption key (TEN-4). `init` mints one at

@@ -1089,6 +1089,192 @@ button.danger {
   background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 
+.banner.warning {
+  border-color: var(--error-line);
+  background: color-mix(in srgb, var(--error-line) 8%, transparent);
+}
+
+/* ── New Learnings (CPR-19) ──────────────────────────────────────────── */
+
+.learnings-intro {
+  max-width: 48rem;
+}
+
+.learning-filters {
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.learning-filters input,
+.learning-filters select {
+  max-width: 17rem;
+}
+
+.learning-batches {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.learning-batch {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem;
+  margin: 0;
+}
+
+.learning-batch > header {
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.learning-batch > header h2,
+.learning-batch > header p {
+  margin-bottom: 0;
+}
+
+.batch-progress {
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+  font-size: 0.85rem;
+}
+
+.learning-candidates {
+  display: grid;
+  gap: 1rem;
+}
+
+.learning-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  min-width: 0;
+}
+
+.learning-card > header {
+  align-items: flex-start;
+  margin-bottom: 0.7rem;
+}
+
+.learning-card > header h3 {
+  color: var(--ink);
+  font-size: 1rem;
+  letter-spacing: 0;
+  margin: 0.15rem 0 0;
+  text-transform: none;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.learning-facts,
+.match-badges,
+.learning-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.8rem;
+}
+
+.learning-facts {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.8rem 0;
+}
+
+.learning-facts span + span::before {
+  content: "·";
+  margin-right: 0.8rem;
+}
+
+.match-badges {
+  margin: 0.8rem 0;
+}
+
+.match-badges .tag {
+  margin-left: 0;
+}
+
+.tag.match-conflict,
+.tag.match-possible_supersession {
+  border-color: var(--error-line);
+}
+
+.tag.match-duplicate {
+  border-color: var(--accent);
+}
+
+.source-preview,
+.existing-comparisons,
+.learning-actions {
+  border-top: 1px solid var(--line);
+  margin: 1rem 0 0;
+  padding-top: 0.2rem;
+}
+
+.source-events {
+  margin: 0.4rem 0 0;
+  padding-left: 1.4rem;
+}
+
+.source-events li {
+  margin: 0.7rem 0;
+}
+
+.source-events p {
+  margin: 0.15rem 0;
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.7rem;
+}
+
+.comparison-card {
+  border-left: 3px solid var(--line);
+  padding: 0.6rem 0.8rem;
+  min-width: 0;
+}
+
+.comparison-card h5,
+.comparison-card p {
+  margin: 0.3rem 0;
+}
+
+.learning-actions {
+  max-width: 46rem;
+}
+
+.learning-actions > button {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.scope-explanation {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0.7rem;
+}
+
+.candidate-action {
+  border-bottom: 1px solid var(--line);
+  padding: 0.65rem 0;
+}
+
+.candidate-action summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.learning-pagination {
+  margin-top: 1rem;
+}
+
 @media (max-width: 55rem) {
   .knowledge-toolbar {
     justify-content: flex-start;
@@ -1097,5 +1283,14 @@ button.danger {
 
   .knowledge-columns {
     grid-template-columns: 1fr;
+  }
+
+  .learning-batch > header {
+    display: block;
+  }
+
+  .batch-progress {
+    margin-top: 0.6rem;
+    text-align: left;
   }
 }

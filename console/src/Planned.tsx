@@ -1,9 +1,10 @@
 /**
  * The planes this epoch has not built yet (CPR-8, ADR-0075 decision 7).
  *
- * New Learnings and Tools are in the primary navigation because they are
- * what the product *is* — before their packages land, this page says so
- * without pretending an absent API is an empty collection.
+ * Tools is in the primary navigation because it is part of the product's
+ * stable shape — before its package lands, this page says so without
+ * pretending an absent API is an empty collection. New Learnings left this
+ * page at CPR-19, just as Sessions did at CPR-10.
  *
  * **Sessions left this page at CPR-10** (ADR-0076), which is what the page is
  * for: an entry here is a debt with a name, and it is paid by deleting the
@@ -25,16 +26,9 @@
  */
 
 import { PageHeading } from "./Shell.js";
-import type { RouteId } from "./routes.mjs";
 
 /** What each planned plane will hold, and what delivers it. */
 const PLANNED: Record<string, { what: string; owed: string }> = {
-  learnings: {
-    what:
-      "What your sessions extracted and nobody has stood behind yet — the candidates, on " +
-      "their own side of the trust boundary, where you accept, edit or drop them.",
-    owed: "the candidate plane, separated from published knowledge",
-  },
   tools: {
     what:
       "The tool registry: which tools your agents may call here, at which version, under " +
@@ -43,7 +37,7 @@ const PLANNED: Record<string, { what: string; owed: string }> = {
   },
 };
 
-export function Planned({ route }: { route: RouteId }) {
+export function Planned({ route }: { route: "tools" }) {
   const plane = PLANNED[route];
   return (
     <>

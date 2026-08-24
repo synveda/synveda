@@ -98,6 +98,10 @@ export function Home() {
         <h2>Next</h2>
         <ul className="next">
           <li>
+            <Link href={hrefOf("learnings")}>Review New Learnings</Link> — decide what your
+            sessions proposed before it can become active Knowledge.
+          </li>
+          <li>
             <Link href={hrefOf("welcome")}>Connect an agent client</Link> — the commands for
             Claude Code, Cursor, Claude Desktop or any MCP client.
           </li>

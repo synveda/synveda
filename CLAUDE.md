@@ -57,6 +57,9 @@ CPR-17, the generated public Knowledge API/search/browser hard cut, is
 delivered and also closes CNSL-4 by subsumption.
 CPR-18, the session capture-batch and reviewable-candidate cutover, is
 delivered; the old record extraction writer and its PGMQ queue are gone.
+CPR-19, the New Learnings lightweight review workflow, is delivered over that
+generated candidate contract; its scope-safe actions all enter VedaFlow and
+the placeholder is gone.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -165,7 +168,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 83 of 115 features delivered — see docs/backlog/STATUS.md for
+features done. 84 of 116 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -232,6 +235,11 @@ delivered**: exact session-event snapshots now become restart-safe reviewable
 capture batches and candidates; publication enters CPR-16's VedaFlow Knowledge
 command seam, while the old record extraction writer and PGMQ queue are
 deleted.
+**CPR-19 was filed and delivered the same day**, making it **116 with 84
+delivered**: New Learnings now groups those candidates with exact source
+evidence and fresh Knowledge comparisons, offers only policy-forecast
+private/project/workspace destinations, and sends every decision through the
+generated VedaFlow-backed capture commands rather than a second review model.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and
@@ -406,8 +414,8 @@ onboarding** — workspace, project, repository, agent client, connection
 instructions, connection check. The personal/team question **seeds** a policy
 pack and a membership posture and records **no edition anywhere** (ADR-0068
 decision 1). No npm dependency was added: routing and the cache are written
-in-repo. Two primary pages have no plane yet (New Learnings and Tools) and say
-so — Sessions got one at CPR-10/11 and Knowledge at CPR-17; seven surfaces
+in-repo. One primary page has no plane yet (Tools) and says so — Sessions got
+one at CPR-10/11, Knowledge at CPR-17 and New Learnings at CPR-19; seven surfaces
 still call hand-written paths in `console/src/api.mts`
 until Prompt 19 puts the rest of `/v1` on the contract.
 

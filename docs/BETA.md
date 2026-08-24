@@ -106,6 +106,15 @@ an ephemeral public session and asks for one budgeted context composition; it
 is not a global Knowledge enumeration or a direct database query. Both paths
 go through the PDP under the caller's identity.
 
+Open `/console/learnings` after a session ends to review what extraction
+proposed. Each candidate remains outside active Knowledge until you decide it.
+The page groups the run's batch, previews its exact source events and visible
+existing-Knowledge comparisons, and offers Accept, Edit and accept, Merge,
+Replace, Change scope and Dismiss. Private, project and workspace destinations
+are offered only where `/v1/me` forecasts `knowledge.write`; the gateway still
+decides the act. A pending VedaFlow outcome links to Advanced Reviews rather
+than pretending it was published.
+
 ## 6. Meet the thing the product is actually for
 
 Open **http://127.0.0.1:8120/console/** and sign in with the same operator.

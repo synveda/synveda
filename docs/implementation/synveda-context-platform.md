@@ -31,12 +31,14 @@ programme convention established in Prompt 1.
 | Versioned Knowledge aggregate, immutable revisions, normalised provenance and current projection | CPR-15 | **complete** | `6eb3e3b` | `874aa51` | types 5/5; store DB 5/5; RLS completeness PASS | PASS | PASS | isolated `demos/cpr-15-knowledge-aggregate.sh` PASS | none |
 | Governed create/edit/verify/supersede/merge/archive/restore/forget and durable erasure | CPR-16 | **complete** | `874aa51` | `f2a7c5c` | gateway lifecycle 3/3; policy approvals 6/6, packs 7/7, PDP 11/11; RLS completeness PASS | PASS | PASS | isolated `demos/cpr-16-knowledge-lifecycle.sh` PASS: 19 governed changes, zero old records | none |
 | Public Knowledge API, lexical/semantic search, generated-client browser and raw-record product cutover | CPR-17 | **complete** | `f2a7c5c` | `2d845b0` | gateway public API 1/1; OpenAPI 5/5; console 151/151; RLS 84/84 | PASS | PASS | isolated `demos/cpr-17-knowledge-browser.sh` PASS: one Knowledge item, zero old records | none |
-| Session-based capture batches, reviewable candidates and governed acceptance actions | CPR-18 | **complete** | `2d845b0` | next checkpoint | gateway 3/3; Claude lifecycle 2/2; ingest 64/64; OpenAPI 5/5; console 151/151; RLS 84/84 | PASS | PASS | isolated `demos/cpr-18-session-capture.sh` PASS: 8 candidates, 8 governed changes, zero old records/queue | none |
+| Session-based capture batches, reviewable candidates and governed acceptance actions | CPR-18 | **complete** | `2d845b0` | `e778a60` | gateway 3/3; Claude lifecycle 2/2; ingest 64/64; OpenAPI 5/5; console 151/151; RLS 84/84 | PASS | PASS | isolated `demos/cpr-18-session-capture.sh` PASS: 8 candidates, 8 governed changes, zero old records/queue | none |
+| New Learnings lightweight candidate review and scope-safe governed decisions | CPR-19 | **complete** | `e778a60` | next checkpoint | console pure 8/8; component acceptance 6/6; complete console 165/165; production build PASS | PASS | N/A — console-only | real-component server-rendered acceptance covers evidence, comparisons, all actions, denial and applied/pending outcomes | none |
 
-**Exact next objective:** file and implement CPR-19, the New Learnings console
-over CPR-18's generated candidate/batch contract: source preview, scope-safe
-accept/edit/merge/replace/dismiss, pending-review outcomes and removal of the
-duplicate candidate product surfaces while retaining Advanced > Reviews.
+**Exact next objective:** file and implement CPR-20, the explainable context
+planner and Knowledge-backed retrieval cutover: persisted visible candidates,
+selections and feedback; trace-retention modes; a project- or session-scoped
+recall application API plus separately authorised evaluation/query lenses;
+and deletion of the temporary record composer and recall tombstones.
 CPR-13 remains reserved for the demo-corpus re-point and follows the
 MVP surfaces it must demonstrate; rewriting those demos before Knowledge,
 capture and scoped recall exist would knowingly rewrite them twice.
@@ -3231,3 +3233,79 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(capture): extract reviewable session learnings (CPR-18)`
   on `feat/context-platform-mvp`.
 - **Commit hash.** Written by the CPR-19 checkpoint on Prompt 1's rule.
+
+### Prompt 17 objective — New Learnings lightweight review workflow (CPR-19)
+
+- **Selected feature and state.** **CPR-19** is delivered from `e778a60`.
+  It is the ordinary personal/team presentation of CPR-18's durable candidate
+  boundary, not another inbox or proposal service. The preceding CPR-18
+  feature commit is `e778a6041bc6b56621c9aeb313ca2757da2b9471`.
+
+- **Decision.** No new ADR was needed. ADR-0075 fixes the product shell and
+  generated-client rule; ADR-0081 fixes the one governed Knowledge mutation
+  seam; ADR-0082 fixes fresh per-object Knowledge reads; and ADR-0083 fixes
+  candidate-only capture plus the public decision contract. The console uses
+  capability forecasts only to decide which controls to offer. Every read and
+  mutation still reaches the gateway, where ownership and the PDP decide.
+
+- **Product surface.** `/console/learnings` now lists cursor-paginated capture
+  batches and candidates, filters both by project and exact session, filters
+  candidates by decision state, groups cards under their durable batch and
+  reports honest loaded progress. Each card distinguishes proposed content,
+  type, confidence and sensitivity; private, project and workspace placement;
+  duplicate, conflict and possible-supersession matches; decision status; and
+  the resulting Knowledge or review destination.
+
+- **Evidence and comparison.** Exact candidate source event ids are joined to
+  the public session timeline for a conversation preview. Raw payload remains
+  an on-demand, separately authorised read and is offered only when the exact
+  run's forecast includes `session.diagnostics`. Every match comparison is
+  fetched afresh through generated `get_knowledge`; a revoked grant therefore
+  becomes the gateway's refusal instead of a title or body cached in frontend
+  state.
+
+- **Governed decisions.** Accept, edit-and-accept, merge, replace,
+  change-scope-and-accept and dismiss use only the 62-operation generated
+  public client. Retryable decisions carry idempotency keys; merge and replace
+  carry the exact existing revision precondition supplied by extraction;
+  changed placement sends explicit optional-field nulls. Replace invokes the
+  governed supersession command and retains history. Dismiss publishes
+  nothing. Applied outcomes link to Knowledge, while pending outcomes link to
+  Advanced Reviews and explicitly remain inactive until publication.
+
+- **Scope safety and removed residue.** Destination choices are limited to
+  the relevant principal, project and workspace anchors whose forecast offers
+  `knowledge.write`; the gateway repeats the authoritative decision. The
+  stale New Learnings placeholder and its “not built” assertion are deleted.
+  Advanced Reviews remains the sole comprehensive VedaFlow review surface;
+  no capture-specific proposal, quarantine or review model was added.
+
+- **Schema, API and security boundaries.** This package changes no migration,
+  SQLx metadata, route, OpenAPI schema, Cedar action or audit vocabulary.
+  CPR-18 remains the database/PDP/RLS/audit authority for every candidate
+  read and decision. The generated contract remains **62 operations**, schema
+  epoch **2** remains at **48 migrations**, and no frontend path can publish
+  Knowledge directly.
+
+- **Tests and exact results.** Eight pure cases pin collection filters,
+  policy-filtered placements, all generated wire operations, explicit nulls,
+  revision preconditions, grouping/progress and outcome wording. Six rendered
+  component acceptance cases cover evidence and comparisons, every action,
+  denied destinations, read-only sessions, applied and pending-review results
+  and dismissal. The production TypeScript/Vite build and complete console
+  suite **165/165** pass. `make ci` **PASS**, including Rust tests, clippy
+  `-D warnings`, dependency/licence/backlog/ADR/generated-API gates, Helm,
+  deterministic evaluation parsing, console **165/165** and Claude adapter
+  **96/96**. `make db-test` is N/A because no database-backed behaviour
+  changed; CPR-18's passing database evidence is not relabelled as a rerun.
+
+- **Limitations and next work.** No external client or model claim is part of
+  this console package. CPR-20 now owns the Knowledge-backed explainable
+  context planner, scoped recall/query surfaces and deletion of the temporary
+  record composer. CPR-13 remains reserved until that final runtime read
+  surface exists. Live Entra/Okta and authentic Cursor evidence remain
+  unrelated external gaps.
+
+- **Commit.** `feat(console): add New Learnings workflow (CPR-19)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-20 checkpoint on Prompt 1's rule.

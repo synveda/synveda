@@ -1798,6 +1798,36 @@ CPR-18  Session-based capture batches and reviewable candidates (XL)
   tables/queue assumptions are deleted; audit evidence is content-free; and
   focused tests, a runnable demo, `make ci` and `make db-test` pass. ADR-0083.
 
+CPR-19  New Learnings lightweight review workflow (L)
+  Filed 2026-08-24 by the autonomous continuation. Replace the New Learnings
+  placeholder with the ordinary personal/team review surface over CPR-18's
+  generated capture contract. Group candidates by their durable batch, filter
+  by project, session and decision state, show batch progress, exact source
+  conversation evidence, proposed type and placement, policy-visible duplicate,
+  conflict and supersession hints, fresh existing-Knowledge comparisons and the
+  resulting Knowledge address. Offer accept, edit-and-accept, merge, replace,
+  scope change and dismiss; replace is governed supersession and no candidate
+  action publishes outside CPR-16's VedaFlow command seam. Private principal,
+  project and workspace placement are named distinctly, and the scope picker
+  contains only anchors whose `/v1/me` forecast offers `knowledge.write`; every
+  request still meets the gateway's exact PDP decision. A pending outcome points
+  to Advanced Reviews and remains explicitly outside active Knowledge. Keep that
+  comprehensive review engine and delete the planned/duplicate candidate product
+  surface rather than creating a second proposal inbox.
+  AC: the page uses only generated capture, session and Knowledge operations;
+  project/session/state filters and both collection cursors are handled; batches
+  show honest loaded/review progress; exact source events resolve to timeline
+  previews and raw payload is offered only under `session.diagnostics`; every
+  match is re-read through the public Knowledge API before comparison; all six
+  actions are present and their generated idempotent wire bodies carry exact
+  revision preconditions where required; unavailable publication scopes cannot
+  be selected; personal/project/workspace wording is explicit; applied,
+  pending-review, rejected and dismissed outcomes cannot be confused; Advanced
+  Reviews remains the sole comprehensive proposal surface; the placeholder is
+  deleted; and focused helper/rendering tests plus the production build and
+  `make ci` pass. No ADR: ADR-0075, ADR-0081, ADR-0082 and ADR-0083 already lock
+  the shell, command, read and candidate boundaries this package consumes.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1891,7 +1921,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who
