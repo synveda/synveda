@@ -35,13 +35,12 @@ programme convention established in Prompt 1.
 | New Learnings lightweight candidate review and scope-safe governed decisions | CPR-19 | **complete** | `e778a60` | `e90dac9` | console pure 8/8; component acceptance 6/6; complete console 165/165; production build PASS | PASS | N/A — console-only | real-component server-rendered acceptance covers evidence, comparisons, all actions, denial and applied/pending outcomes | none |
 | Explainable Knowledge context planning, trace retention, feedback and scoped query/evaluation lenses | CPR-20 | **complete** | `e90dac9` | `8ed8aa6` | context 3/3; audit 13/13; packs 10/10; sessions 22/22; OpenAPI 5/5; console 165/165; RLS guards PASS | PASS | PASS | isolated `demos/cpr-20-context-planning.sh` PASS: 55 Knowledge, 47 plans, 75 selections, 2 feedback, zero records | none |
 | Linkable Context Inspector, retention-aware evidence and exact revision outcome feedback | CPR-21 | **complete** | `8ed8aa6` | `8cdd1ee` | console helpers 7/7; component 6/6; complete console 179/179; context 3/3; sessions 22/22; production build PASS | PASS | PASS | in-app browser unavailable; real-component SSR covers full/redacted/hashes-only/disabled/refusal and the production bundle builds | none |
-| Core personal/team PulseBoard loop across sessions, capture, governed Knowledge, privacy, supersession and inspector evidence | CPR-22 | **complete** | `8cdd1ee` | next checkpoint | consolidated DB acceptance 1/1; capture 4/4; context 3/3; console 179/179 | PASS | PASS | isolated `demos/cpr-22-mvp-acceptance.sh` PASS: 3 sessions, 5 candidates, 4 changes, 3 current + 1 superseded Knowledge, 2 runs, 3 selections, zero records | none |
+| Core personal/team PulseBoard loop across sessions, capture, governed Knowledge, privacy, supersession and inspector evidence | CPR-22 | **complete** | `8cdd1ee` | `c9e647d` | consolidated DB acceptance 1/1; capture 4/4; context 3/3; console 179/179 | PASS | PASS | isolated `demos/cpr-22-mvp-acceptance.sh` PASS: 3 sessions, 5 candidates, 4 changes, 3 current + 1 superseded Knowledge, 2 runs, 3 selections, zero records | none |
+| Re-point the executable demo corpus and gate CLI/OpenAPI drift | CPR-13 | **complete** | `c9e647d` | next checkpoint | checker fixtures 4/4; shell syntax PASS; generated inventory 73/73 | PASS | N/A — no persisted behaviour changed | MEM sessions 22/22 + load 1/1; CTX 1/1; FLOW 4/4; AUTHZ 2/2; ADPT authentic-frame 2/2 | none |
 
-**Exact next objective:** commit and push CPR-22, then execute the already-filed
-CPR-13 demo-corpus re-point over the final MVP surfaces and add the drift gate.
-CPR-13 remains reserved for the demo-corpus re-point and follows the
-MVP surfaces it must demonstrate; rewriting those demos before Knowledge,
-capture and scoped recall exist would knowingly rewrite them twice.
+**Exact next objective:** finish the CPR-13 package gate, commit and push it,
+then allocate CPR-23 to Prompt 21's immutable versioned, project-bindable Agent
+Skills backend by extending the existing registry and VedaFlow seams.
 
 ### Starting-point objective map
 
@@ -3532,4 +3531,69 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `test(mvp): verify cross-session team knowledge loop (CPR-22)`
   on `feat/context-platform-mvp`.
 - **Commit hash.** Written by the CPR-13 checkpoint under the programme's
+  next-checkpoint convention.
+
+### Demo-corpus convergence objective — current platform re-point (CPR-13)
+
+- **Selected feature and state.** The already-reserved **CPR-13** is delivered
+  from `c9e647d`, after CPR-22 supplied the final Knowledge/capture/context
+  surfaces the demos must teach. It records CPR-22's commit as
+  `c9e647d6332457735e8c2b05b43690f9e7b2dc2d`.
+
+- **Authoritative inventory and deletion.** The generated-contract scan found
+  **49 affected scripts**, six more than CPR-12's route-name estimate because
+  the acceptance criterion also rejects real server paths missing from the
+  generated contract. Those scripts contained **18,528 lines** of copied
+  hierarchy, role-binding, record, global runtime, IdP and hand-written route
+  setup. They are now short, feature-specific current-model narratives over a
+  shared isolated epoch-2 Postgres harness: 18,528 affected-script lines became
+  504 plus a 52-line helper, a net reduction of **17,972 lines**. No
+  compatibility command, old route, record-to-Knowledge translation or direct
+  database seeding was added.
+
+- **Preserved teaching map.** MEM now demonstrates idempotent ordered session
+  events, redaction, capture candidates, current Knowledge indexing/matches and
+  governed erasure. CTX demonstrates current-revision planning, budgets,
+  session-scoped delivery and trace retention. FLOW demonstrates the one
+  VedaFlow Knowledge change ledger, auto-apply, pending review and immutable
+  correction. AUTH/AUTHZ/TEN demonstrate principal scopes, groups, grants,
+  anchors and per-row decisions. ADPT uses public clients and authentic Claude
+  frames. The audit, console, evaluation, graph, operations, prompt and skill
+  scripts point at their corresponding current focused suites. Historical
+  filenames remain feature-evidence addresses, not aliases or runtime support.
+
+- **Drift gate.** `scripts/check-demos.mjs` recursively scans all **73** shell
+  scripts without executing them. It removes unquoted comments, joins continued
+  lines, skips heredoc fixtures and explanatory output, distinguishes Rauthy's
+  external `/auth/v1` contract, recognises both literal `synveda` and common
+  built-binary aliases, and checks command positions against recursive Clap
+  help plus production paths against generated OpenAPI. Cargo first refreshes
+  the binary, so a stale executable cannot bless removed source. Four tests
+  deliberately inject dead command/path and alias cases and pin the safe
+  exclusions. `make check-demos` runs both test and corpus passes and is a
+  prerequisite of `make ci`.
+
+- **Representative live-database evidence.** `demos/mem-1-observe.sh` passes
+  sessions **22/22** and the 10,000-event load gate at **1,006 events/s** (ack
+  p50 29.36ms, p95 34.65ms, p99 36.12ms); `ctx-3-inject.sh` passes the current
+  Knowledge planner **1/1**; `flow-3-proposals.sh` passes lifecycle/VedaFlow
+  **4/4**; `authz-2-policy-packs.sh` passes current-scope decisions **2/2**;
+  and `adpt-1-claude-code.sh` builds the real hook and passes **2/2** using
+  authentic captured Claude Code 2.1.241 frames. Its separately named live
+  proprietary-client test remains ignored in this run; CPR-14's genuine live
+  2.1.241 evidence is not relabelled replay.
+
+- **Schema and architecture.** This documentation/test package adds no ADR,
+  migration, route, DTO, Cedar action, audit action, metric or runtime path.
+  Schema epoch **2** remains **49 migrations** and OpenAPI remains **67
+  operations**. `make db-test` is therefore not required; the five isolated
+  Postgres demos are package evidence, not a claim that persistence changed.
+  Complete `make ci` **PASS**, including the new four-case checker test and
+  73/73 generated inventory gate, Rust fmt/clippy/tests/build/licences,
+  dependency/ADR/backlog/API/benchmark/chart/evaluation checks, console
+  **179/179** and Claude adapter **96/96**.
+
+- **Commit.** `test(demos): re-point demo corpus and gate drift (CPR-13)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-23 checkpoint under the programme's
   next-checkpoint convention.

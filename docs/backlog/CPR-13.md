@@ -89,3 +89,61 @@ delete them is that they are the only artefact in this repository that
 explains *why* a subsystem is shaped the way it is to somebody who has not
 read its ADR — and the reason to gate them is that nobody noticed for three
 prompts.
+
+## Delivery — 2026-08-24
+
+Delivered after CPR-22, once Knowledge, capture and the scoped context/query
+surfaces existed. The final generated-contract scan found **49 affected scripts
+out of 72 then present**, not the earlier 43: that earlier number looked only
+for the routes CPR-12 deleted, while the acceptance criterion also catches
+scripts that call a real server route which never joined the generated OpenAPI
+contract. One shared harness was added during the rewrite, bringing the final
+checked corpus to **73 shell scripts** including the nested Helm client fixture.
+
+The 49 scripts no longer copy 18,528 lines of retired hierarchy, role-binding,
+record, global observe/inject/recall or hand-written HTTP setup. Each is now a
+short feature-specific narrative which creates an isolated epoch-2 database
+and runs the current focused acceptance seam:
+
+- MEM and CTX point to ordered session events, capture candidates, current
+  immutable Knowledge and explainable session context runs;
+- FLOW points to the same VedaFlow Knowledge command/change ledger used by the
+  product, including auto-apply and pending review;
+- AUTH/AUTHZ/TEN point to principal scopes, groups, grants, anchors and per-row
+  Cedar decisions;
+- ADPT points to the built public-API clients and authentic Claude frame
+  harness; skills, prompts, audit, graph, console, evaluation and operations
+  retain their teaching purpose through their current focused suites. The
+  18,528 original affected-script lines are now 504 lines plus a 52-line
+  shared harness: a net reduction of **17,972 lines**.
+
+`scripts/check-demos.mjs` recursively reads shell scripts without executing
+them, ignores comments, explanatory output, heredoc fixture bodies and the
+external IdP's `/auth/v1` contract, recognises literal `synveda` and the common
+built-binary aliases, then compares command positions with recursively
+generated Clap help and production paths with `docs/api/openapi.json`. It first
+builds the CLI so a stale local binary cannot make the gate lie. Its four tests
+deliberately reintroduce a dead command and dead path, pin the fixture/comment
+exclusions, pin the external-provider boundary and prove a `$BIN` alias cannot
+hide a dead subcommand. `make check-demos` runs both the tests and the full
+scan, and `make ci` runs `check-demos`.
+
+Representative isolated live-Postgres results:
+
+- `sh demos/mem-1-observe.sh`: sessions **22/22**, 10,000-event load **1/1**,
+  **1,006 events/s**, ack p50 **29.36ms**, p95 **34.65ms**, p99 **36.12ms**;
+- `sh demos/ctx-3-inject.sh`: current Knowledge planner **1/1**;
+- `sh demos/flow-3-proposals.sh`: governed Knowledge lifecycle **4/4**;
+- `sh demos/authz-2-policy-packs.sh`: current-scope pack API **2/2**;
+- `sh demos/adpt-1-claude-code.sh`: built hook plus authentic captured Claude
+  Code 2.1.241 frames **2/2**, with the separately named proprietary-client
+  case honestly ignored here because CPR-14 already holds its genuine live
+  evidence.
+
+This package changes no schema, route, DTO, Cedar action, audit action or
+application behaviour. Schema epoch 2 remains at 49 migrations and the
+generated contract remains 67 operations. No ADR is needed for a repository
+drift gate and documentation rewrite. Complete `make ci` passes, including the
+new checker, all 73 demo scripts, console **179/179** and Claude adapter
+**96/96**. `make db-test` is not applicable because persisted behaviour did not
+change; the required representative demos already use isolated live Postgres.

@@ -1659,6 +1659,14 @@ CPR-13  The demo corpus re-point (L)
   `/v1` path absent from `docs/api/openapi.json`; the gate catches a deliberately reintroduced
   dead command; and a representative demo from each of MEM, CTX, FLOW, AUTHZ and ADPT runs
   green against a live stack.
+  Delivered 2026-08-24 after the core MVP surfaces existed: 49 affected scripts were rewritten
+  as concise current-model narratives over isolated epoch-2 Postgres and focused acceptance
+  seams: 18,528 affected-script lines became 504 plus a 52-line shared harness, a net reduction
+  of 17,972. `make check-demos` recursively checks all 73 shell
+  scripts against freshly built recursive Clap help and the generated OpenAPI paths; four
+  parser/gate tests include deliberately dead command, path and binary-alias fixtures. The MEM,
+  CTX, FLOW, AUTHZ and authentic-frame ADPT representatives all pass. No product contract,
+  schema, PDP or audit vocabulary changes.
 
 CPR-14  Live Claude Code session acceptance gate (L)
   Filed 2026-08-23 by the post-CPR-12 acceptance handover. CPR-12 made the session plane the

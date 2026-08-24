@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **119 features filed, 87 delivered**;
+Cursor frame has been replayed. **119 features filed, 88 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -232,6 +232,12 @@ Load-bearing facts about Phase 5:
   chain, zero record writes and all three deleted global runtime routes still
   404. It is deterministic application acceptance; CPR-14 remains the genuine
   live Claude Code evidence.
+- CPR-13 is delivered after that MVP checkpoint: 49 affected demo scripts are
+  concise current-scope/session/capture/Knowledge/context narratives, 17,972
+  lines smaller after copied retired setup was deleted. `make check-demos`
+  recursively validates all 73 shell scripts against freshly built Clap help
+  and generated OpenAPI paths, including binary aliases; MEM, CTX, FLOW,
+  AUTHZ and the authentic-frame ADPT live-Postgres representatives pass.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

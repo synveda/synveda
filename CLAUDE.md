@@ -48,8 +48,8 @@ audience. Everything above Phase 5 was built for an organisation — and
 until CPR-7 a tenant's hierarchy root *had* to be `kind = 'org'`. Phase 5
 re-cuts that as 33 ordered prompts on `feat/context-platform-mvp`, with the
 decisions locked in ADR-0068 and the running record in
-docs/implementation/synveda-context-platform.md. **Prompts 1–12 are
-delivered** and CPR-13's demo-corpus re-point is open. The external CPR-14
+docs/implementation/synveda-context-platform.md. **Prompts 1–13 are
+delivered**. The external CPR-14
 acceptance gate is delivered at replay/live-gateway and real-client tiers.
 CPR-15, the versioned Knowledge persistence aggregate, is delivered.
 CPR-16, the governed Knowledge mutation lifecycle, is delivered.
@@ -67,6 +67,9 @@ CPR-21, the generated Context Inspector and outcome-feedback product surface,
 is delivered with no new ADR, schema, policy/audit action or API operation.
 CPR-22, the core personal/team MVP acceptance gate, is delivered: its isolated
 PulseBoard cross-session scenario, complete CI and full database suite pass.
+CPR-13, deliberately sequenced after the final MVP surfaces it documents, is
+delivered: 49 affected demos now teach the current platform and a recursive
+generated-help/OpenAPI drift gate covers all 73 shell scripts in `make ci`.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -176,7 +179,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 87 of 119 features delivered — see docs/backlog/STATUS.md for
+features done. 88 of 119 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -263,6 +266,13 @@ delivered**: the isolated PulseBoard acceptance proves the session → candidate
 → VedaFlow Knowledge → clean teammate context → explicit supersession →
 inspector loop with Alice's private preference absent; complete CI and the full
 fresh-scratch database suite pass.
+**CPR-13 was delivered after that checkpoint**, making it **119 with 88
+delivered**: 49 affected scripts and their shared harness are 17,972 lines
+smaller after stale copied setup was deleted,
+all 73 shell demos are checked against fresh recursive CLI help and generated
+OpenAPI, and the required MEM, CTX, FLOW, AUTHZ and ADPT representatives pass
+against isolated current Postgres (the ADPT run uses authentic captured frames;
+CPR-14 remains the distinct genuine-client evidence).
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and
