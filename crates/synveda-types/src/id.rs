@@ -258,6 +258,24 @@ define_id!(
 );
 
 define_id!(
+    /// Identifies one visible candidate considered by a context run
+    /// (CPR-20, ADR-0084).
+    ContextCandidateId
+);
+
+define_id!(
+    /// Identifies one immutable Knowledge-revision selection in a context run
+    /// (CPR-20, ADR-0084).
+    ContextSelectionId
+);
+
+define_id!(
+    /// Identifies one feedback assertion about an exact context selection
+    /// (CPR-20, ADR-0084).
+    ContextFeedbackId
+);
+
+define_id!(
     /// Identifies one immutable snapshot of session evidence selected for
     /// candidate extraction (CPR-18, ADR-0083).
     CaptureBatchId

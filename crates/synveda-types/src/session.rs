@@ -51,8 +51,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ContextRunId, Error, ProjectId, RepositoryId, Result, ScopeId, SessionEventId, SessionId,
-    TenantId, WorkspaceId,
+    ContextCompletionStatus, ContextRunId, Error, ProjectId, RepositoryId, Result, ScopeId,
+    SessionEventId, SessionId, TenantId, TraceRetentionMode, WorkspaceId,
 };
 
 /// Longest agent-client name, in characters. Bounded because it is stored,
@@ -571,6 +571,10 @@ pub struct ContextRun {
     pub tenant_id: TenantId,
     /// The session it was composed for.
     pub session_id: SessionId,
+    /// Workspace derived from the session.
+    pub workspace_id: WorkspaceId,
+    /// Project derived from the session, when the run is workspace-wide.
+    pub project_id: Option<ProjectId>,
     /// The governed scope it was anchored at — the session's.
     pub scope_id: ScopeId,
     /// The token subject that asked.
@@ -578,6 +582,8 @@ pub struct ContextRun {
     /// The task the caller named, when it named one. `None` is the
     /// session-start shape: everything pinned, nothing ranked.
     pub query: Option<String>,
+    /// Content-free BLAKE3 digest of the query, when present.
+    pub query_hash: Option<String>,
     /// The rendered block, watermark line included. Empty when nothing
     /// composed — which is a result, not an error.
     pub rendered: String,
@@ -588,8 +594,14 @@ pub struct ContextRun {
     pub tokens: i32,
     /// The budget it was composed under.
     pub budget_tokens: i32,
+    /// Caller-requested budget before the governed ceiling narrowed it.
+    pub requested_budget_tokens: Option<i32>,
     /// How many records composed.
     pub entry_count: i32,
+    /// Visible candidates retained for this run.
+    pub candidate_count: i32,
+    /// Knowledge revisions selected for this run.
+    pub selection_count: i32,
     /// The skills this block advertised, as it advertised them (ADR-0054
     /// decision 8): name, scope, commit and object address, so an adapter can
     /// materialise exactly what was named without asking twice.
@@ -601,6 +613,22 @@ pub struct ContextRun {
     /// Which legs degraded, if any — `embedder`, `retrieval`. Empty is the
     /// ordinary answer.
     pub degraded: Vec<String>,
+    /// Valid-time instant at which current Knowledge was planned.
+    pub as_of: DateTime<Utc>,
+    /// Planner implementation version.
+    pub retrieval_version: String,
+    /// Configured semantic model, absent for lexical-only planning.
+    pub embedding_model: Option<String>,
+    /// Knowledge index schema/version.
+    pub index_version: String,
+    /// Graph implementation version, absent until graph expansion runs.
+    pub graph_version: Option<String>,
+    /// Governed trace-retention mode.
+    pub trace_retention: TraceRetentionMode,
+    /// Whether planning completed or failed.
+    pub completion_status: ContextCompletionStatus,
+    /// At least one candidate was filtered by policy. No count is retained.
+    pub policy_exclusion: bool,
     /// When it was composed.
     pub created_at: DateTime<Utc>,
 }

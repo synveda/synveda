@@ -45,6 +45,10 @@ pub struct ListCursor {
 /// Filters shared by plain listing and both query legs.
 #[derive(Debug, Clone)]
 pub struct Filters {
+    /// Exact governed scopes admissible to a session planner. Empty means no
+    /// additional exact-scope restriction; the ordinary public listing uses
+    /// the independently shaped workspace/project/subtree filters below.
+    pub scope_ids: Vec<ScopeId>,
     /// Workspace whose governed subtree contains the item.
     pub workspace_id: Option<WorkspaceId>,
     /// Exact project association.
@@ -84,6 +88,10 @@ impl Filters {
 
     fn scope_uuid(&self) -> Option<Uuid> {
         self.scope_id.map(|id| id.as_uuid())
+    }
+
+    fn scope_uuids(&self) -> Vec<Uuid> {
+        self.scope_ids.iter().map(ScopeId::as_uuid).collect()
     }
 
     fn knowledge_type_name(&self) -> Option<&str> {
@@ -200,6 +208,7 @@ pub async fn list_candidates(
           ))
           and current.valid_from <= $14
           and (current.valid_to is null or $14 < current.valid_to)
+          and (cardinality($18::uuid[]) = 0 or current.scope_id = any($18))
           and ($15::timestamptz is null
                or current.updated_at < $15
                or (current.updated_at = $15 and current.id < $16))
@@ -223,6 +232,7 @@ pub async fn list_candidates(
         cursor_at,
         cursor_id,
         limit.max(1),
+        &filters.scope_uuids(),
     )
     .fetch_all(&mut *conn)
     .await
@@ -306,6 +316,7 @@ pub async fn lexical_candidates(
           ))
           and current.valid_from <= $15
           and (current.valid_to is null or $15 < current.valid_to)
+          and (cardinality($17::uuid[]) = 0 or current.scope_id = any($17))
         order by 3 desc, current.updated_at desc, current.id desc
         limit $16
         "#,
@@ -324,6 +335,71 @@ pub async fn lexical_candidates(
         filters.updated_before,
         filters.stale,
         filters.at,
+        limit.max(1),
+        &filters.scope_uuids(),
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| Candidate {
+            item_id: KnowledgeItemId::from_uuid(row.item_id),
+            updated_at: row.updated_at,
+            score: row.score,
+        })
+        .collect())
+}
+
+/// Bounded trace-only candidates for a non-current lifecycle.
+///
+/// Supersession normally closes valid time, so the ordinary current query is
+/// intentionally unable to return that row. The context planner still needs
+/// to explain that a visible lexical match was rejected as stale or
+/// superseded. This query bypasses only the valid-time projection; callers
+/// must use it solely for non-selectable trace candidates and must still run
+/// the exact Knowledge PDP decision before retaining an address.
+#[tracing::instrument(
+    name = "store.knowledge_search.lifecycle_trace_candidates",
+    skip_all,
+    fields(tenant.id = %tenant_id, lifecycle = %lifecycle, limit),
+    err(Display)
+)]
+pub async fn lifecycle_trace_candidates(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    scope_ids: &[ScopeId],
+    lifecycle: KnowledgeLifecycleState,
+    query: Option<&str>,
+    limit: i64,
+) -> Result<Vec<Candidate>> {
+    let scope_ids: Vec<uuid::Uuid> = scope_ids.iter().map(|id| id.as_uuid()).collect();
+    let rows = sqlx::query!(
+        r#"
+        select current.id as "item_id!",
+               current.updated_at as "updated_at!",
+               case when $2::text is null then 0.0::float8
+                    else ts_rank_cd(
+                        revision.search_document,
+                        websearch_to_tsquery('simple'::regconfig, $2)
+                    )::float8
+               end as "score!"
+        from knowledge_current current
+        join knowledge_revisions revision
+          on revision.tenant_id = current.tenant_id
+         and revision.id = current.current_revision_id
+        where current.tenant_id = $1
+          and current.lifecycle_state = $3
+          and (cardinality($4::uuid[]) = 0 or current.scope_id = any($4))
+          and ($2::text is null or revision.search_document @@
+               websearch_to_tsquery('simple'::regconfig, $2))
+        order by 3 desc, current.updated_at desc, current.id desc
+        limit $5
+        "#,
+        tenant_id.as_uuid(),
+        query,
+        lifecycle.as_str(),
+        &scope_ids,
         limit.max(1),
     )
     .fetch_all(&mut *conn)
@@ -400,6 +476,7 @@ macro_rules! semantic_query {
                 filters.stale,
                 filters.at,
                 limit.max(1),
+                &filters.scope_uuids(),
             )
             .fetch_all(&mut *conn)
             .await
@@ -566,6 +643,7 @@ mod tests {
     #[test]
     fn filter_names_are_the_closed_domain_vocabulary() {
         let filters = Filters {
+            scope_ids: Vec::new(),
             workspace_id: None,
             project_id: None,
             scope_id: None,

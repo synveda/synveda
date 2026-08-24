@@ -274,12 +274,13 @@ derived during a shared run is not a shared draft.
 ### Everything else — Claude Desktop, Cursor, Zed
 
 `synveda mcp` serves governed context to any MCP client over stdio: `recall`
-opens a session context run, and `remember` appends an assertion event to a
-session for later capture in your own personal scope.
-(`recall` used to fetch by handle and read the corpus at a past instant. It
-composes a context run now, and both went with `/v1/recall`; Prompt 18 of the
-context-platform programme is where they return.) You do not have to write the
-config by hand —
+uses the ordinary Knowledge query on the caller's public session, and
+`remember` appends an assertion event to that session for later capture in
+your own personal scope. Recall returns exact immutable revision and source
+addresses; it neither consumes a context token budget nor opens the separately
+authorised diagnostics enumeration lens. The deleted tenant-global
+`/v1/recall` route has not returned. You do not have to write the config by
+hand —
 
 ```sh
 synveda mcp install --client claude-desktop   # or: --client cursor
@@ -338,8 +339,9 @@ semantic demonstration.
 Vectors are keyed by immutable revision and model, so changing models does not
 reinterpret old vectors. The indexer creates rows for the configured model as
 it converges. The old `record_embeddings` table is not a Knowledge search
-index; it survives only inside the controlled context-composition seam that
-the context-planning package removes.
+index. No application reader uses it after CPR-20; it remains inert in the
+pre-squash migration chain until the final schema-baseline package deletes the
+replaced record tables.
 Supported index dimensions remain 16 and 1024 (ADR-0024 decision 5), so adding
 a third model shape requires an explicit schema decision.
 

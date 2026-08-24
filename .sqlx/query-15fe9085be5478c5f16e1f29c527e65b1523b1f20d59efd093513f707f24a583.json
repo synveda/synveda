@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select seq, occurred_at, actor_kind, actor_subject, action, payload\n           from audit_log\n           where tenant_id = $1\n             and action in ('context.injected', 'context.recalled',\n                            'session.context.composed')\n             and payload @> $2::jsonb\n             and seq > $3\n             and occurred_at >= $4\n             and occurred_at < $5\n           order by seq\n           limit $6",
+  "query": "select seq, occurred_at, actor_kind, actor_subject, action, payload\n           from audit_log\n           where tenant_id = $1\n             and action = 'session.context.composed'\n             and actor_subject = $2\n             and occurred_at <= $3\n           order by seq desc\n           limit $4",
   "describe": {
     "columns": [
       {
@@ -37,9 +37,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Jsonb",
-        "Int8",
-        "Timestamptz",
+        "Text",
         "Timestamptz",
         "Int8"
       ]
@@ -53,5 +51,5 @@
       false
     ]
   },
-  "hash": "6777af3d6cccf1a090b20dd2920bb6cc3668954611c404a84b644899880aaba5"
+  "hash": "15fe9085be5478c5f16e1f29c527e65b1523b1f20d59efd093513f707f24a583"
 }

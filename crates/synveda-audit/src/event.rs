@@ -188,6 +188,17 @@ pub enum AuditAction {
     /// [`AuditAction::ContextInjected`]'s reason: the chain records what an
     /// agent was given, and the run row holds what that was.
     SessionContextComposed,
+    /// A bounded policy-visible Knowledge pool was retrieved for a context
+    /// run. Carries revision ids or hashes according to retention, score
+    /// component names and an aggregate policy-filtering flag, never content.
+    ContextCandidatesRetrieved,
+    /// Exact immutable Knowledge revisions were selected under the context
+    /// budget. Distinct from delivery: a selection is a planner decision and
+    /// `SessionContextComposed` proves the resulting block crossed the API.
+    ContextSelectionsMade,
+    /// Explicit feedback was attached to one context selection and immutable
+    /// revision. Retrieval or delivery alone never emits this action.
+    ContextFeedbackRecorded,
     /// An exact eligible session-event snapshot was frozen for extraction.
     /// Carries ids, digest and count, never transcript content.
     CaptureBatchCreated,
@@ -587,7 +598,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 85] = [
+    pub const ALL: [AuditAction; 88] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -613,6 +624,9 @@ impl AuditAction {
         AuditAction::SessionEnded,
         AuditAction::SessionEventsAppended,
         AuditAction::SessionContextComposed,
+        AuditAction::ContextCandidatesRetrieved,
+        AuditAction::ContextSelectionsMade,
+        AuditAction::ContextFeedbackRecorded,
         AuditAction::CaptureBatchCreated,
         AuditAction::CaptureBatchCompleted,
         AuditAction::CaptureCandidateDecided,
@@ -703,6 +717,9 @@ impl AuditAction {
             AuditAction::SessionEnded => "session.ended",
             AuditAction::SessionEventsAppended => "session.events.appended",
             AuditAction::SessionContextComposed => "session.context.composed",
+            AuditAction::ContextCandidatesRetrieved => "context.candidates.retrieved",
+            AuditAction::ContextSelectionsMade => "context.selections.made",
+            AuditAction::ContextFeedbackRecorded => "context.feedback.recorded",
             AuditAction::CaptureBatchCreated => "capture.batch.created",
             AuditAction::CaptureBatchCompleted => "capture.batch.completed",
             AuditAction::CaptureCandidateDecided => "capture.candidate.decided",

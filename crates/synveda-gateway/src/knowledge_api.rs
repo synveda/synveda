@@ -25,6 +25,7 @@ use synveda_ingest::FindingCategory;
 use synveda_ingest::embedding::Embedder as _;
 use synveda_policy::{Action, Resource, ResourceEntity};
 use synveda_store::anchors::AnchorSelection;
+use synveda_store::context as context_store;
 use synveda_store::knowledge::{self as store, KnowledgeSnapshot};
 use synveda_store::knowledge_search::{self as search, Candidate, Filters, ListCursor};
 use synveda_store::{rls, scopes};
@@ -35,8 +36,8 @@ use synveda_types::knowledge::{
     KnowledgeSourceType, KnowledgeType, normalise_knowledge_tags,
 };
 use synveda_types::{
-    Error, KnowledgeItemId, KnowledgeRevisionId, ProjectId, ProposalId, Result, ScopeId,
-    Sensitivity, SessionEventId, TenantId, WorkspaceId,
+    ContextSelectionId, Error, KnowledgeItemId, KnowledgeRevisionId, ProjectId, ProposalId, Result,
+    ScopeId, Sensitivity, SessionEventId, SessionId, TenantId, WorkspaceId,
 };
 use utoipa::ToSchema;
 
@@ -151,7 +152,7 @@ pub struct KnowledgeRevisionView {
 }
 
 impl KnowledgeRevisionView {
-    fn from_revision(revision: KnowledgeRevision, at: DateTime<Utc>) -> Self {
+    pub(crate) fn from_revision(revision: KnowledgeRevision, at: DateTime<Utc>) -> Self {
         let content = revision.content;
         Self {
             id: revision.id,
@@ -261,7 +262,11 @@ pub struct KnowledgeItemView {
 }
 
 impl KnowledgeItemView {
-    fn from_snapshot(snapshot: KnowledgeSnapshot, at: DateTime<Utc>, score: Option<f64>) -> Self {
+    pub(crate) fn from_snapshot(
+        snapshot: KnowledgeSnapshot,
+        at: DateTime<Utc>,
+        score: Option<f64>,
+    ) -> Self {
         let KnowledgeSnapshot { item, revision, .. } = snapshot;
         Self {
             id: item.id,
@@ -363,12 +368,18 @@ pub struct KnowledgeSourcesView {
     pub sources: Vec<KnowledgeSourceView>,
 }
 
-/// One future context-use entry. CPR-18 is the first producer.
+/// One policy-visible context use of an exact immutable revision.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct KnowledgeUsageView {
     /// Context run that selected the exact revision.
     #[schema(value_type = String, format = "uuid")]
     pub context_run_id: synveda_types::ContextRunId,
+    /// Session whose access was independently decided.
+    #[schema(value_type = String, format = "uuid")]
+    pub session_id: SessionId,
+    /// Exact selection, suitable for explicit feedback.
+    #[schema(value_type = String, format = "uuid")]
+    pub context_selection_id: ContextSelectionId,
     /// Exact revision used.
     #[schema(value_type = String, format = "uuid")]
     pub revision_id: KnowledgeRevisionId,
@@ -378,8 +389,7 @@ pub struct KnowledgeUsageView {
     pub reason_codes: Vec<String>,
 }
 
-/// Cursor envelope for usage history. It is truthfully empty until CPR-18's
-/// `ContextSelection` aggregate produces entries.
+/// Cursor envelope for policy-visible usage history.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct KnowledgeUsageListView {
     /// Recorded context uses.
@@ -787,6 +797,7 @@ fn parse_filters(params: &ListKnowledgeParams, at: DateTime<Utc>) -> Result<Filt
         None => None,
     };
     Ok(Filters {
+        scope_ids: Vec::new(),
         workspace_id: params.workspace_id,
         project_id: params.project_id,
         scope_id: params.scope_id,
@@ -914,6 +925,38 @@ fn decode_history_cursor(raw: &str, item_id: KnowledgeItemId) -> Result<i64> {
         .ok_or_else(invalid)?
         .parse::<i64>()
         .map_err(|_| invalid())
+}
+
+fn encode_usage_cursor(
+    item_id: KnowledgeItemId,
+    selected_at: DateTime<Utc>,
+    selection_id: ContextSelectionId,
+) -> String {
+    URL_SAFE_NO_PAD.encode(format!(
+        "ku1|{item_id}|{}|{selection_id}",
+        selected_at.to_rfc3339()
+    ))
+}
+
+fn decode_usage_cursor(
+    raw: &str,
+    item_id: KnowledgeItemId,
+) -> Result<(DateTime<Utc>, ContextSelectionId)> {
+    let invalid = || Error::Invalid {
+        message: "`cursor` is not one this Knowledge usage listing issued".to_owned(),
+    };
+    let bytes = URL_SAFE_NO_PAD.decode(raw).map_err(|_| invalid())?;
+    let decoded = String::from_utf8(bytes).map_err(|_| invalid())?;
+    let parts: Vec<&str> = decoded.split('|').collect();
+    match parts.as_slice() {
+        ["ku1", item, selected_at, selection_id] if *item == item_id.to_string() => Ok((
+            DateTime::parse_from_rfc3339(selected_at)
+                .map_err(|_| invalid())?
+                .with_timezone(&Utc),
+            selection_id.parse().map_err(|_| invalid())?,
+        )),
+        _ => Err(invalid()),
+    }
 }
 
 pub(crate) fn content(
@@ -1851,16 +1894,82 @@ pub(crate) async fn usage(
     Query(params): Query<UsageParams>,
 ) -> Response {
     let result = async {
-        list_limit(params.limit)?;
-        if params.cursor.is_some() {
-            return Err(Error::Invalid {
-                message: "usage has no next page; omit `cursor`".to_owned(),
-            });
-        }
+        let limit = list_limit(params.limit)?;
+        let cursor = params
+            .cursor
+            .as_deref()
+            .map(|raw| decode_usage_cursor(raw, id))
+            .transpose()?;
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let snapshot = snapshot(&mut tx, tenant_id, id).await?;
         let allowed = authorize_snapshot(&state, &mut tx, tenant_id, &snapshot).await?;
+        let scan_limit = (limit * 10).min(500);
+        let mut candidates =
+            context_store::usage_candidates(&mut tx, tenant_id, id, cursor, scan_limit + 1).await?;
+        let mut more = candidates.len() as i64 > scan_limit;
+        candidates.truncate(scan_limit as usize);
+        let mut usages = Vec::new();
+        let mut consumed = 0usize;
+        let total = candidates.len();
+        let mut last = None;
+        for candidate in candidates {
+            consumed += 1;
+            last = Some((candidate.selected_at, candidate.selection_id));
+            match crate::sessions::load(
+                &state,
+                &mut tx,
+                tenant_id,
+                candidate.session_id,
+                Action::SessionRead,
+            )
+            .await
+            {
+                Ok(_) => {}
+                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => continue,
+                Err(error) => return Err(error),
+            }
+            let Some(revision) =
+                store::revision(&mut *tx, tenant_id, id, candidate.knowledge_revision_id).await?
+            else {
+                continue;
+            };
+            match crate::context_api::authorize_revision(
+                &state,
+                &mut tx,
+                tenant_id,
+                &snapshot,
+                revision.content.sensitivity,
+            )
+            .await
+            {
+                Ok(_) => usages.push(KnowledgeUsageView {
+                    context_run_id: candidate.context_run_id,
+                    session_id: candidate.session_id,
+                    context_selection_id: candidate.selection_id,
+                    revision_id: candidate.knowledge_revision_id,
+                    selected_at: candidate.selected_at,
+                    reason_codes: candidate
+                        .reason_codes
+                        .into_iter()
+                        .map(|reason| reason.as_str().to_owned())
+                        .collect(),
+                }),
+                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => continue,
+                Err(error) => return Err(error),
+            }
+            if usages.len() as i64 == limit {
+                break;
+            }
+        }
+        more |= consumed < total;
+        let next_cursor = if more {
+            last.map(|(selected_at, selection_id)| {
+                encode_usage_cursor(id, selected_at, selection_id)
+            })
+        } else {
+            None
+        };
         read_event(
             &mut tx,
             tenant_id,
@@ -1870,15 +1979,21 @@ pub(crate) async fn usage(
             json!({
                 "knowledge_item_id": id,
                 "revision_id": snapshot.revision.id,
-                "served": 0,
-                "producer": "context_selection_pending_cpr18",
+                "served": usages.len(),
+                "more": next_cursor.is_some(),
+                "context_runs": usages.iter().map(|usage| json!({
+                    "context_run_id": usage.context_run_id,
+                    "session_id": usage.session_id,
+                    "context_selection_id": usage.context_selection_id,
+                    "knowledge_revision_id": usage.revision_id,
+                })).collect::<Vec<_>>(),
             }),
         )
         .await?;
         commit(tx).await?;
         Ok(Json(KnowledgeUsageListView {
-            usages: Vec::new(),
-            next_cursor: None,
+            usages,
+            next_cursor,
         }))
     }
     .await;

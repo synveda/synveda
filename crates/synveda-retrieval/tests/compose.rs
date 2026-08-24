@@ -1382,13 +1382,10 @@ fn material_that_does_not_fit_is_named_rather_than_dropped() {
         !block.text.contains(runbook.trim_end()),
         "the body itself never composed"
     );
-    // The legend stopped naming a command with the observe cutover:
-    // `/v1/recall` is deleted and nothing fetches a body by id today
-    // (CPR-12, ADR-0078 decision 5), so it says what a handle *is* rather than
-    // what to run on it. Prompt 18 is where a handle becomes fetchable again.
+    // The legend names the budget reason without advertising a deleted route.
     assert!(
-        block.text.contains("recall handle"),
-        "and the block says what a handle is:\n{}",
+        block.text.contains("abbreviated to fit the token budget"),
+        "and the block says why the entry was abbreviated:\n{}",
         block.text
     );
     // An index entry is a disclosure, so it is watermarked like any other
@@ -1407,10 +1404,7 @@ fn material_that_does_not_fit_is_named_rather_than_dropped() {
     assert_eq!(
         block.index_tokens,
         block.entries[1].tokens
-            + estimated_tokens(
-                "Summarised entries end with a recall handle naming the record \
-                 they came from.\n",
-            ),
+            + estimated_tokens("Summarised entries were abbreviated to fit the token budget.\n"),
         "the index tier's cost is its lines plus the legend it had to place"
     );
 }

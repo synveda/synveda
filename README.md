@@ -157,11 +157,13 @@ Published benchmark scores, and what they do and do not measure:
   revisions with cursor pagination, per-object PDP decisions and independently
   authorised provenance. Lexical search is immediate; configured TEI enables
   semantic fusion, while the deterministic test embedder is honestly reported
-  as lexical-only. Session context composition still uses the one internal
-  controlled projection scheduled for the context-planning package. The deleted global
-  `/v1/recall` route has not been restored; the existing CLI/MCP `recall`
-  command composes only through a public session context run and is not an
-  enumeration/query surface.
+  as lexical-only. Session context runs now persist an explainable plan over
+  exact immutable Knowledge revisions: candidates, selections, reason/score
+  components, token exclusions, versions and explicit degradation. Trace reads
+  re-authorise every retained item and source and obey full, redacted,
+  hashes-only or disabled retention. The deleted global `/v1/recall` route has
+  not returned; CLI/MCP recall uses the ordinary session-scoped Knowledge query,
+  while corpus enumeration is a separately authorised diagnostics operation.
 - **VedaFlow end to end** — objects, commits, refs, proposals, an approval matrix,
   auto-promotion rules, cross-scope promotion, rollback and pinning, and a CLI
   review flow that needs no console.

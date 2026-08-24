@@ -448,6 +448,7 @@ async fn visible_matches(
 ) -> Result<Vec<CaptureMatch>> {
     let personal = proposed.proposed_owner_principal_id.is_some();
     let filters = Filters {
+        scope_ids: Vec::new(),
         workspace_id: (!personal).then_some(batch.workspace_id),
         project_id: proposed.proposed_project_id,
         scope_id: Some(proposed.proposed_scope_id),

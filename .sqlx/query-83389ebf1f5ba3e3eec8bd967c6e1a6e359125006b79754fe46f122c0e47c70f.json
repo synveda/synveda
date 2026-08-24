@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, context_run_id, rank, knowledge_item_id,\n               knowledge_revision_id, content_hash, token_count,\n               reason_codes as \"reason_codes!: Vec<String>\", created_at\n        from context_selections\n        where tenant_id = $1 and context_run_id = $2 and id = $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "context_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "rank",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "knowledge_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "knowledge_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "token_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "reason_codes!: Vec<String>",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "83389ebf1f5ba3e3eec8bd967c6e1a6e359125006b79754fe46f122c0e47c70f"
+}

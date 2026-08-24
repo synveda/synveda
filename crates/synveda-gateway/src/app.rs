@@ -293,13 +293,27 @@ pub fn router(state: AppState) -> Router {
             "/v1/sessions/{session_id}/timeline",
             get(crate::sessions::timeline),
         )
-        // The context endpoint (ADR-0076 decision 7), and since CPR-12 the
-        // **only** one: `/v1/inject` is deleted and this is what composes.
-        // What Prompt 18 adds is explainability behind this same request and
-        // response.
+        // Explainable Knowledge-backed context planning (CPR-20, ADR-0084).
+        // The session POST remains the only delivery seam; inspection,
+        // feedback and deep/evaluation query lenses stay session/project
+        // scoped and re-authorise every exact Knowledge revision.
         .route(
             "/v1/sessions/{session_id}/context-runs",
-            post(crate::sessions::create_context_run),
+            post(crate::context_api::create_context_run),
+        )
+        .route(
+            "/v1/sessions/{session_id}/knowledge-query",
+            post(crate::context_api::knowledge_query),
+        )
+        .route(
+            "/v1/sessions/{session_id}/knowledge-evaluation",
+            post(crate::context_api::knowledge_evaluation),
+        )
+        .route("/v1/context-runs", get(crate::context_api::list))
+        .route("/v1/context-runs/{id}", get(crate::context_api::get))
+        .route(
+            "/v1/context-runs/{id}/feedback",
+            post(crate::context_api::feedback),
         )
         // Extraction freezes immutable session evidence and stops at
         // reviewable candidates (CPR-18, ADR-0083). Accepted decisions enter

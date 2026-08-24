@@ -60,6 +60,9 @@ delivered; the old record extraction writer and its PGMQ queue are gone.
 CPR-19, the New Learnings lightweight review workflow, is delivered over that
 generated candidate contract; its scope-safe actions all enter VedaFlow and
 the placeholder is gone.
+CPR-20, the explainable Knowledge context planner and scoped-query cutover, is
+delivered; current immutable Knowledge, re-authorised traces and exact feedback
+replace the final runtime record reader under accepted ADR-0084.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -121,7 +124,8 @@ either.** To refresh both: `SYNVEDA_WRITE_OPENAPI=1 cargo test -p
 synveda-gateway --test openapi` then `node scripts/generate-api-types.mjs`.
 The document covers the context-platform plane — `/v1/me`,
 workspaces/projects/repositories, access, admin scopes, sessions and the public
-Knowledge lifecycle/search and capture planes (**62 operations** since CPR-18) — and says
+Knowledge lifecycle/search, capture and explainable context planes (**67
+operations** since CPR-20) — and says
 so in its own description; the remaining production planes join under the
 programme's public-contract convergence package.
 Since CPR-8 the generator also emits
@@ -168,7 +172,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 84 of 116 features delivered — see docs/backlog/STATUS.md for
+features done. 85 of 117 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -240,6 +244,11 @@ delivered**: New Learnings now groups those candidates with exact source
 evidence and fresh Knowledge comparisons, offers only policy-forecast
 private/project/workspace destinations, and sends every decision through the
 generated VedaFlow-backed capture commands rather than a second review model.
+**CPR-20 was filed and delivered the same day**, making it **117 with 85
+delivered**: its Knowledge-only explainable planner removes the final runtime
+record reader, persists re-authorised trace/feedback evidence under four
+retention modes and adds separately authorised session-scoped ordinary and
+evaluation query lenses without restoring global recall.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and
@@ -276,14 +285,12 @@ this route takes no `Idempotency-Key` while opening a run and composing
 context both do. A **timeline is a projection** over two tables and never a
 third, merged rather than sorted so a skewed client clock can misplace a
 context run and can never reorder a transcript.
-`POST /v1/sessions/{id}/context-runs` is the **final shape** of the context
-endpoint and calls the existing retrieval engine; Prompt 18 adds
-explainability behind it without changing it. The old `/v1/observe`,
-`/v1/inject` and `/v1/recall` are **untouched** and nothing bridges them in
-either direction. CPR-10 forecast that Prompt 11 would re-cut the observe path
-and delete `observe_events.session_id`; **it did not** — Prompt 11 as it
-arrived is CPR-11, the session product experience — so the observe re-cut is
-**open and unscheduled**, recorded in §10 of the implementation document.
+`POST /v1/sessions/{id}/context-runs` is the **final public shape** of the
+context endpoint. CPR-10 initially called the old retrieval engine and left
+`/v1/observe`, `/v1/inject` and `/v1/recall` untouched; CPR-11 did not perform
+the forecast cutover. CPR-12 subsequently deleted that parallel runtime, and
+CPR-20 replaced the final internal record reader with the explainable current-
+Knowledge planner without changing this endpoint's address.
 
 Since CPR-11 that record is **usable** (ADR-0077). `GET /v1/sessions` is
 keyset-paginated — `cursor` in, `next_cursor` out, and `truncated` **deleted**
@@ -325,12 +332,13 @@ predecessor's format. Hooks own delivery; the CLI diagnoses
 because the thing that verifies it is Node. **The event-loss boundary is
 documented rather than closed**: a host killed before any lifecycle hook
 runs loses the turn since the last `Stop`; nothing that reached the spool
-is ever lost. `synveda recall` and the `recall` MCP tool compose a context
-run now and say what they lost — the by-id tier and the bitemporal read,
-both waiting on Prompt 18. **Three eval suites fail by name rather than
-measure**: extraction, security and QA-index enumerated a corpus through
-`/v1/recall`'s sweep, and a context run ranks and budgets where a sweep
-enumerates. `make ci`'s `eval-check` is parse-only and green.
+is ever lost. Since CPR-20, `synveda recall` and the `recall` MCP tool call the
+ordinary session-scoped Knowledge query rather than composing a context run;
+the separately authorised evaluation lens supplies exact query, enumeration
+and revision-id reads. The extraction, security and QA-index suites therefore
+have the correct replacement seam, but Prompt 30 owns reproducible reseeding,
+remeasurement and baseline changes; `make ci`'s `eval-check` remains parse-only
+and green until then.
 
 CPR-14 makes the missing join executable without blurring its evidence tiers
 (ADR-0079). `make claude-acceptance` replays genuine, versioned Claude Code

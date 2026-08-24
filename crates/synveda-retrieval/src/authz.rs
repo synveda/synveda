@@ -25,7 +25,7 @@ use synveda_policy::{
 use synveda_types::anchor::ScopeAnchor;
 use synveda_types::{
     CompositionConfig, GroupId, Lapse, LapseId, PolicyAssignment, Result, ScopeId, ScopeTier,
-    Sensitivity,
+    Sensitivity, TraceRetentionMode,
 };
 
 use crate::compose::ComposeScope;
@@ -418,6 +418,9 @@ pub struct CompositionPlan {
     /// "per-scope configurable" resolves at the caller's placement
     /// (ADR-0025 decision 3).
     pub budget_tokens: u32,
+    /// Governed amount of explainability retained for the whole run, from
+    /// the same home-scope pack as the budget (CPR-20, ADR-0084).
+    pub trace_retention: TraceRetentionMode,
     /// Every chain scope's `MemoryRead` outcome, chain order (allowed
     /// and denied alike): what the walk decided, kept so the inject
     /// audit event aggregates decisions without re-deriving them
@@ -489,17 +492,18 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
         // Named per tier inside the sweep (ADR-0038 decision 2).
         sensitivity: None,
     };
-    let budget_tokens = match inputs.chain.first() {
+    let home_composition = match inputs.chain.first() {
         Some(home) => {
             // The pack resolution is tier-blind — an effective pack is a
             // property of the resource (ADR-0014 decision 3) — so any tier
             // reads the same config.
             pdp.effective(tenant_id, Resource::Scope(home.id), &context_at(0))
                 .composition
-                .budget_tokens
         }
-        None => CompositionConfig::DEFAULT.budget_tokens,
+        None => CompositionConfig::DEFAULT,
     };
+    let budget_tokens = home_composition.budget_tokens;
+    let trace_retention = home_composition.trace_retention;
     let mut scopes = Vec::with_capacity(inputs.chain.len());
     let mut decisions = Vec::with_capacity(inputs.chain.len());
     for (position, node) in inputs.chain.iter().enumerate() {
@@ -624,6 +628,7 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
     Ok(CompositionPlan {
         scopes,
         budget_tokens,
+        trace_retention,
         decisions,
     })
 }

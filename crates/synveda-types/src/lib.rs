@@ -21,6 +21,8 @@ mod channel;
 // Session-derived, reviewable Knowledge proposals (CPR-18, ADR-0083).
 pub mod capture;
 mod composition;
+// Explainable Knowledge-backed context planning (CPR-20, ADR-0084).
+pub mod context;
 mod dedup;
 mod directory;
 mod error;
@@ -83,16 +85,21 @@ pub use channel::Channel;
 pub use composition::{
     CompositionConfig, DEFAULT_INDEX_ENTRY_CHARS, EntryTier, IndexTier, InjectChannels, SkillIndex,
 };
+pub use context::{
+    ContextCandidate, ContextCompletionStatus, ContextFeedback, ContextFeedbackType,
+    ContextReasonCode, ContextSelection, TraceRetentionMode,
+};
 pub use dedup::{DedupConfig, DedupMode, MAX_DEDUP_NEIGHBOURS, permille};
 pub use directory::{DirectoryGroup, DirectoryUser, ScimCredential};
 pub use error::{Error, Result};
 pub use graph::{Depth, Graph};
 pub use id::{
-    CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId, ContextRunId, DirectoryGroupId,
-    DirectoryUserId, DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId,
-    InviteId, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId,
-    LapseId, ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId, ScopeId,
-    SessionEventId, SessionId, TenantId, WorkspaceId,
+    CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId, ContextCandidateId,
+    ContextFeedbackId, ContextRunId, ContextSelectionId, DirectoryGroupId, DirectoryUserId,
+    DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId, InviteId,
+    KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, LapseId,
+    ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId, ScopeId, SessionEventId,
+    SessionId, TenantId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use lapse::{

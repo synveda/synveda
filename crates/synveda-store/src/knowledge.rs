@@ -965,6 +965,44 @@ pub async fn revisions(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// Reads one exact immutable revision of one stable item.
+///
+/// This is a storage primitive, not an authority check. Context inspection
+/// uses the retained address and then decides `KnowledgeRead` at this exact
+/// revision's sensitivity before exposing any field (CPR-20, ADR-0084).
+#[tracing::instrument(
+    name = "store.knowledge.revision",
+    skip_all,
+    fields(tenant.id = %tenant_id, knowledge.item.id = %item_id, knowledge.revision.id = %revision_id),
+    err(Display)
+)]
+pub async fn revision(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    item_id: KnowledgeItemId,
+    revision_id: KnowledgeRevisionId,
+) -> Result<Option<KnowledgeRevision>> {
+    let row = sqlx::query_as!(
+        RevisionRow,
+        r#"
+        select id, tenant_id, knowledge_item_id, revision_number, title,
+               body_markdown, summary, tags as "tags!: Vec<String>",
+               sensitivity, confidence_permille, valid_from, valid_to,
+               stale_after, verification_metadata, content_hash, metadata,
+               created_by, transaction_time
+        from knowledge_revisions
+        where tenant_id = $1 and knowledge_item_id = $2 and id = $3
+        "#,
+        tenant_id.as_uuid(),
+        item_id.as_uuid(),
+        revision_id.as_uuid(),
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}
+
 /// Lists a revision's sources whose own governed scopes the caller was
 /// already authorised to inspect.
 ///

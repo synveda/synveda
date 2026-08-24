@@ -1,28 +1,22 @@
-//! `synveda recall` — compose governed context from a terminal (CPR-12,
-//! ADR-0078 decision 5).
+//! `synveda recall` — query current governed Knowledge from a terminal
+//! (CPR-20, ADR-0084).
 //!
 //! # What this was, and what it is now
 //!
-//! It was the other half of tiered injection (CTX-4, ADR-0041 decision 13):
-//! an inject block's index tier ended its lines with `(recall <id>)` and this
-//! turned a name into a body. It also carried CTX-5's bitemporal read —
-//! `--as-of` to ask what was known at a past instant.
-//!
-//! `/v1/recall` is deleted, and **both of those go with it**. The endpoint
-//! that replaced it composes a block for a question and takes neither handles
-//! nor an instant. That is a real capability loss and it is written here
-//! rather than smoothed over: Prompt 18 re-cuts recall over the new model and
-//! is where the handle tier and the bitemporal read come back.
+//! The deleted global `/v1/recall` read the retired record model. Its supported
+//! successor is the session-scoped Knowledge query: current active immutable
+//! revisions, independently authorised provenance and honest lexical/semantic
+//! degradation. Context delivery remains a separately budgeted context run;
+//! a deep query never pretends to be an injected block.
 //!
 //! # Why a terminal command opens a session
 //!
-//! Every composition names the run it belongs to. So this opens an ephemeral
-//! `cli` run, composes into it, and leaves it closed — which means "who asked
-//! this deployment for context, and what did they get" is answerable about a
-//! person at a terminal exactly as it is about an agent. It costs one extra
-//! round trip and buys the property the whole programme is for.
+//! Every query names the run it belongs to. So this opens an ephemeral `cli`
+//! run and queries through it — which means "who asked this deployment for
+//! Knowledge, and what did they get" is answerable about a person at a
+//! terminal exactly as it is about an agent.
 //!
-//! HTTP-only, on FLOW-6's precedent: a composition is a governed read whose
+//! HTTP-only, on FLOW-6's precedent: a query is a governed read whose
 //! decisions the PDP takes per scope and whose audit event the gateway chains
 //! under the caller's own identity. A CLI that read the records itself would
 //! leave no decision in the trail, so this module opens no database connection
@@ -34,7 +28,7 @@ use serde_json::json;
 
 use crate::api::{Api, Origin};
 
-// ── The wire shapes (`crates/synveda-gateway/src/sessions.rs`) ─────────
+// ── The public query wire shapes (`context_api.rs`) ─────────────────────
 
 /// As much of `GET /v1/me` as choosing a workspace needs.
 #[derive(Deserialize)]
@@ -54,15 +48,43 @@ struct OpenedSession {
 }
 
 #[derive(Deserialize)]
-struct ContextRunResponse {
-    rendered: String,
-    block_hash: String,
-    tokens: i32,
-    budget_tokens: i32,
-    entry_count: i32,
+pub(crate) struct KnowledgeQueryResponse {
+    items: Vec<KnowledgeQueryItem>,
+    as_of: DateTime<Utc>,
+    retrieval_mode: String,
     #[serde(default)]
-    degraded: Vec<String>,
-    created_at: DateTime<Utc>,
+    degradation: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct KnowledgeQueryItem {
+    knowledge: KnowledgeItem,
+    #[serde(default)]
+    sources: Vec<KnowledgeSource>,
+}
+
+#[derive(Deserialize)]
+struct KnowledgeItem {
+    id: String,
+    scope_id: String,
+    knowledge_type: String,
+    current_revision: KnowledgeRevision,
+}
+
+#[derive(Deserialize)]
+struct KnowledgeRevision {
+    id: String,
+    title: String,
+    body_markdown: String,
+    content_hash: String,
+}
+
+#[derive(Deserialize)]
+struct KnowledgeSource {
+    source_type: String,
+    session_event_id: Option<String>,
+    locator: Option<String>,
+    source_revision: Option<String>,
 }
 
 /// What one composition asks for.
@@ -71,12 +93,11 @@ pub struct Ask<'a> {
     pub query: &'a str,
     /// The workspace to compose in, when the caller can see more than one.
     pub workspace: Option<&'a str>,
-    /// Narrow the block's token budget. Narrowing only: the pack's budget is
-    /// the ceiling.
-    pub budget_tokens: Option<u32>,
+    /// Bound the number of current Knowledge results (1–100).
+    pub limit: Option<u32>,
 }
 
-/// `synveda recall --query <question>` — compose a block and print it.
+/// `synveda recall --query <question>` — query current Knowledge and print it.
 pub async fn recall(
     profile: &str,
     ask: Ask<'_>,
@@ -96,49 +117,77 @@ pub async fn recall(
 
     let mut body = serde_json::Map::new();
     body.insert("query".to_owned(), json!(ask.query));
-    if let Some(budget) = ask.budget_tokens {
-        body.insert("budget_tokens".to_owned(), json!(budget));
+    if let Some(limit) = ask.limit {
+        body.insert("limit".to_owned(), json!(limit));
     }
-    let path = format!("/v1/sessions/{session}/context-runs");
-    // A fresh key per invocation: two identical questions a minute apart are
-    // two compositions over a corpus that may have moved, not a retry.
-    let key = format!("cli-recall-{}", uuid_like()?);
+    let path = format!("/v1/sessions/{session}/knowledge-query");
 
     if json_out {
         let value: serde_json::Value = api
-            .post_idempotent_as(&path, Some(serde_json::Value::Object(body)), &key)
+            .post_as(&path, Some(serde_json::Value::Object(body)))
             .await?;
         println!("{value}");
         return Ok(());
     }
 
-    let response: ContextRunResponse = api
-        .post_idempotent_as(&path, Some(serde_json::Value::Object(body)), &key)
+    let response: KnowledgeQueryResponse = api
+        .post_as(&path, Some(serde_json::Value::Object(body)))
         .await?;
-
-    let at = response.created_at.format("%Y-%m-%d %H:%M:%S");
-    if response.entry_count == 0 || response.rendered.trim().is_empty() {
-        println!("nothing available to you at {at}");
-        return Ok(());
-    }
-    println!("{}", response.rendered.trim_end());
-    println!();
-    println!(
-        "{} record(s), {} of {} tokens, block {}",
-        response.entry_count,
-        response.tokens,
-        response.budget_tokens,
-        short(&response.block_hash),
-    );
-    // A degraded answer must never read as a complete one (ADR-0042
-    // decision 5), so this is stated rather than left to be inferred.
-    if !response.degraded.is_empty() {
-        println!(
-            "note: degraded ({}) — ranking used the lexical leg only",
-            response.degraded.join(", "),
-        );
-    }
+    println!("{}", render_knowledge_query(&response));
     Ok(())
+}
+
+/// Render a query result for both the terminal and generic MCP adapter.
+pub(crate) fn render_knowledge_query(response: &KnowledgeQueryResponse) -> String {
+    let at = response.as_of.format("%Y-%m-%d %H:%M:%S");
+    if response.items.is_empty() {
+        return format!("No current Knowledge available to you at {at}.");
+    }
+    let mut lines = vec![format!("# Synveda Knowledge (as of {at})")];
+    for item in &response.items {
+        let revision = &item.knowledge.current_revision;
+        lines.push(format!("\n## {}", revision.title));
+        lines.push(revision.body_markdown.trim().to_owned());
+        let sources = if item.sources.is_empty() {
+            "source evidence withheld or unavailable".to_owned()
+        } else {
+            item.sources
+                .iter()
+                .map(|source| {
+                    let address = source
+                        .session_event_id
+                        .as_deref()
+                        .or(source.locator.as_deref())
+                        .unwrap_or("unaddressed");
+                    match source.source_revision.as_deref() {
+                        Some(version) => format!("{}:{address}@{version}", source.source_type),
+                        None => format!("{}:{address}", source.source_type),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        lines.push(format!(
+            "_Knowledge {} revision {}; type={}; scope={}; content={}; source={}_",
+            item.knowledge.id,
+            revision.id,
+            item.knowledge.knowledge_type,
+            item.knowledge.scope_id,
+            short(&revision.content_hash),
+            sources,
+        ));
+    }
+    lines.push(format!(
+        "\n{} item(s); retrieval={}",
+        response.items.len(),
+        response.retrieval_mode,
+    ));
+    if let Some(degradation) = &response.degradation {
+        lines.push(format!(
+            "Degraded ({degradation}): semantic ranking was unavailable."
+        ));
+    }
+    lines.join("\n")
 }
 
 /// The workspace to compose in.
@@ -209,4 +258,78 @@ fn announce(api: &Api, origin: &Origin) {
 
 fn short(hash: &str) -> String {
     hash.chars().take(12).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn response(items: Vec<KnowledgeQueryItem>) -> KnowledgeQueryResponse {
+        KnowledgeQueryResponse {
+            items,
+            as_of: "2026-08-25T00:00:00Z".parse().expect("an instant"),
+            retrieval_mode: "lexical".to_owned(),
+            degradation: None,
+        }
+    }
+
+    #[test]
+    fn recall_renders_exact_revision_and_provenance() {
+        let rendered = render_knowledge_query(&response(vec![KnowledgeQueryItem {
+            knowledge: KnowledgeItem {
+                id: "item-1".to_owned(),
+                scope_id: "scope-1".to_owned(),
+                knowledge_type: "decision".to_owned(),
+                current_revision: KnowledgeRevision {
+                    id: "revision-2".to_owned(),
+                    title: "Database".to_owned(),
+                    body_markdown: "Use Postgres.".to_owned(),
+                    content_hash: "0123456789abcdef".to_owned(),
+                },
+            },
+            sources: vec![KnowledgeSource {
+                source_type: "repository".to_owned(),
+                session_event_id: None,
+                locator: Some("docs/architecture.md".to_owned()),
+                source_revision: Some("abc123".to_owned()),
+            }],
+        }]));
+        assert!(rendered.contains("Use Postgres."), "{rendered}");
+        assert!(
+            rendered.contains("item-1 revision revision-2"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("repository:docs/architecture.md@abc123"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn recall_states_empty_and_degraded_results_honestly() {
+        let empty = render_knowledge_query(&response(Vec::new()));
+        assert!(empty.contains("No current Knowledge"), "{empty}");
+
+        let mut degraded = response(vec![KnowledgeQueryItem {
+            knowledge: KnowledgeItem {
+                id: "item-1".to_owned(),
+                scope_id: "scope-1".to_owned(),
+                knowledge_type: "fact".to_owned(),
+                current_revision: KnowledgeRevision {
+                    id: "revision-1".to_owned(),
+                    title: "Window".to_owned(),
+                    body_markdown: "Thursday.".to_owned(),
+                    content_hash: "fedcba9876543210".to_owned(),
+                },
+            },
+            sources: Vec::new(),
+        }]);
+        degraded.degradation = Some("semantic_index_not_ready".to_owned());
+        let rendered = render_knowledge_query(&degraded);
+        assert!(rendered.contains("Thursday."), "{rendered}");
+        assert!(
+            rendered.contains("Degraded (semantic_index_not_ready)"),
+            "{rendered}"
+        );
+    }
 }

@@ -11,9 +11,9 @@
 //!
 //! Grading joins by **session identity**, which is the only join this
 //! corpus offers. Each haystack session is seeded under a session id this
-//! harness owns, and the block's `record_ids` are handed back to
-//! `POST /v1/recall` in its ids shape to read each record's
-//! `provenance.session_id`. EVAL-4 does the same join through a sweep, and
+//! harness owns, and the block's current Knowledge ids are handed back to
+//! the session-scoped diagnostic lens in its ids shape to read each source
+//! session. EVAL-4 does the same join through an enumeration, and
 //! a sweep cannot be used here for the reason ADR-0046 decision 3 gives
 //! and ADR-0061 decision 8 restates: an instance is ~40 sessions against a
 //! 32-record cap, and a full page and a truncated one are
@@ -55,7 +55,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::client::{
-    Client, InjectRequest, ObserveEvent, ObserveRequest, RecallIdsRequest, RecallQueryRequest,
+    Client, InjectRequest, KnowledgeIdsRequest, KnowledgeQueryRequest, ObserveEvent, ObserveRequest,
 };
 use crate::extraction::{AUDITOR_ACTOR, read_committed};
 use crate::longmemeval::{Instance, Session, parse_date};
@@ -75,16 +75,15 @@ const SESSION_PREFIX: &str = "lme";
 /// What a haystack session is observed as.
 const KIND: &str = "transcript_delta";
 
-/// The surface's cap on an ids-shaped recall (`MAX_RECALL_IDS`). Chunked
-/// at it rather than asked past it: the rule ADR-0046 decision 3 and
+/// A conservative chunk below the Knowledge evaluation lens's public
+/// 100-id bound. Chunked rather than asked past it: ADR-0046 decision 3 and
 /// ADR-0048 trigger (f) both state is that a corpus outgrowing this splits
 /// across more actors, and a *join* over ids the caller already holds is
 /// the one shape where paging is exact rather than ambiguous.
-const MAX_RECALL_IDS: usize = 32;
+const MAX_KNOWLEDGE_IDS: usize = 32;
 
-/// What a readiness query may carry. `POST /v1/recall` caps a query at
-/// `MAX_QUERY_CHARS` (4,000) and refuses anything longer with a 400
-/// (`crates/synveda-gateway/src/recall.rs`), and a real haystack session
+/// What a readiness query may carry. The session Knowledge query caps text at
+/// 4,000 characters and refuses anything longer with a 400, and a real haystack session
 /// runs well past that — the first run against the fetched corpus died on
 /// the first instance, forty-seven sessions in. Held below the cap rather
 /// than at it: the surface's bound is the surface's to change, and a
@@ -799,12 +798,12 @@ async fn wait_for_index(
                 .await?;
             let found = suite
                 .client
-                .recall_query(
+                .knowledge_query(
                     bearer,
                     &index_run,
-                    &RecallQueryRequest {
+                    &KnowledgeQueryRequest {
                         query: &render(&session),
-                        limit: MAX_RECALL_IDS,
+                        limit: MAX_KNOWLEDGE_IDS,
                     },
                 )
                 .await?;
@@ -848,11 +847,11 @@ async fn bound_sessions(
 ) -> Result<BTreeSet<String>, String> {
     let mut bound = BTreeSet::new();
     let mut attributed = 0usize;
-    for chunk in record_ids.chunks(MAX_RECALL_IDS) {
+    for chunk in record_ids.chunks(MAX_KNOWLEDGE_IDS) {
         let answered = client
-            .recall_ids(
+            .knowledge_ids(
                 bearer,
-                &RecallIdsRequest {
+                &KnowledgeIdsRequest {
                     ids: chunk.to_vec(),
                     session_id: &format!("eval:{SESSION_PREFIX}:join:{}", instance.question_id),
                 },

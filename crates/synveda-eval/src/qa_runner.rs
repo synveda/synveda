@@ -25,8 +25,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
 use crate::client::{
-    Client, InjectRequest, ObserveEvent, ObserveRequest, ProposalRequest, RecallQueryRequest,
-    RecallSweepRequest,
+    Client, InjectRequest, KnowledgeQueryRequest, KnowledgeSweepRequest, ObserveEvent,
+    ObserveRequest, ProposalRequest,
 };
 use crate::extraction::{AUDITOR_ACTOR, read_committed};
 use crate::qa::{Corpus, Question, TIERS};
@@ -298,9 +298,9 @@ async fn locate(
     for author in authors {
         let bearer = &environment.actor(author)?.token;
         let swept = client
-            .recall_sweep(
+            .knowledge_sweep(
                 bearer,
-                &RecallSweepRequest {
+                &KnowledgeSweepRequest {
                     as_of: &as_of,
                     session_id: &format!("eval:qa:locate:{}", corpus.corpus),
                     limit: SWEEP_LIMIT,
@@ -502,8 +502,8 @@ async fn promote(
 /// being graded (the EVAL-2 rule about waiting on the chain rather than
 /// on the sweep, one layer out).
 ///
-/// It asks through `POST /v1/recall`'s query form rather than through a
-/// block. Recall ranks with no composition budget and no scope gradient,
+/// It asks through the session-scoped Knowledge query rather than through a
+/// block. The query ranks with no composition budget,
 /// so "indexed" cannot be confused with "did not fit" — where an inject
 /// probe becomes unsatisfiable the moment a pack narrows the budget below
 /// what the far end of the chain needs, and the wait then burns its whole
@@ -514,7 +514,7 @@ async fn promote(
 /// as the reader. A promotion publishes a channel that *names* a record
 /// at its current address (ADR-0034 decision 3); the record itself stays
 /// on its author's leaf. So a reader composes promoted material through
-/// the published channel but a query-shaped recall, which searches the
+/// the published channel but a Knowledge query, which searches the
 /// scopes the caller may read, does not reach it. The author always can,
 /// and the sparse index is one per tenant (ADR-0024 decision 3) — so
 /// readiness established for the author is readiness full stop.
@@ -552,10 +552,10 @@ async fn wait_for_index(
                 .session_for(author, &format!("eval:qa:index:{}", corpus.corpus))
                 .await?;
             let found = client
-                .recall_query(
+                .knowledge_query(
                     author,
                     &index_run,
-                    &RecallQueryRequest {
+                    &KnowledgeQueryRequest {
                         query: &slot.text,
                         limit: SWEEP_LIMIT,
                     },
@@ -597,9 +597,9 @@ async fn wait_for_index(
 async fn served_total(client: &Client, reader: &str, corpus: &Corpus) -> Result<usize, String> {
     let as_of = (chrono::Utc::now() + chrono::Duration::seconds(60)).to_rfc3339();
     let swept = client
-        .recall_sweep(
+        .knowledge_sweep(
             reader,
-            &RecallSweepRequest {
+            &KnowledgeSweepRequest {
                 as_of: &as_of,
                 session_id: &format!("eval:qa:served:{}", corpus.corpus),
                 limit: SWEEP_LIMIT,

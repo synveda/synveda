@@ -57,6 +57,7 @@ pub mod capabilities;
 pub mod capture;
 pub mod channels;
 pub mod console;
+pub mod context_api;
 pub mod curators;
 pub mod directory_admin;
 pub mod directory_sync;

@@ -15,8 +15,9 @@
 //! No gateway is needed and none is used: every case here is decided by
 //! the server alone — the handshake of both eras, what each launch mode
 //! advertises, the refusals, and the sentence a caller gets when no
-//! credential resolves. The gateway-backed round trip is
-//! `demos/ctx-5-recall.sh`'s, against a live stack.
+//! credential resolves. CPR-20's gateway-backed seam is exercised by
+//! `demos/cpr-20-context-planning.sh`; this corpus remains the deterministic
+//! protocol boundary.
 //!
 //! # What is real here, and what is not
 //!

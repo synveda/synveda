@@ -358,15 +358,11 @@ enum Command {
     /// looking at that spool and pushing it.
     #[command(subcommand)]
     Session(SessionCommand),
-    /// Compose governed context for a question (CPR-12, ADR-0078).
+    /// Query current governed Knowledge for a question (CPR-20, ADR-0084).
     ///
-    /// Opens an ephemeral run, composes a block into it under the bearer
-    /// `synveda login` stored, and prints it. The PDP decides per scope and
-    /// the composition is chained under your own identity.
-    ///
-    /// This used to fetch records by id and to read the corpus at a past
-    /// instant. `/v1/recall` is deleted and both went with it; Prompt 18 is
-    /// where the handle tier and the bitemporal read come back.
+    /// Opens an ephemeral run and performs the public session-scoped Knowledge
+    /// query under the bearer `synveda login` stored. The PDP decides each
+    /// exact Knowledge revision and provenance descriptor.
     Recall {
         /// The question to answer.
         #[arg(long)]
@@ -375,10 +371,9 @@ enum Command {
         /// than one.
         #[arg(long)]
         workspace: Option<String>,
-        /// Narrow the block's token budget. You may narrow and never widen:
-        /// the policy pack's budget is the ceiling.
+        /// Maximum current Knowledge results to return (1–100).
         #[arg(long)]
-        budget_tokens: Option<u32>,
+        limit: Option<u32>,
         /// Print the gateway's answer verbatim.
         #[arg(long)]
         json: bool,
@@ -2002,6 +1997,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                         // fleet being told which skills it may install.
                         skill_index: composition_skill_index
                             .unwrap_or(CompositionConfig::DEFAULT.skill_index),
+                        trace_retention: CompositionConfig::DEFAULT.trace_retention,
                     });
             let scan = scan_block_at.map(|block_at| SkillScanConfig { block_at });
             // Validated here as well as at install: a rule that asks for
@@ -2567,7 +2563,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Recall {
             query,
             workspace,
-            budget_tokens,
+            limit,
             json,
             quiet,
             profile,
@@ -2577,7 +2573,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 recall::Ask {
                     query: &query,
                     workspace: workspace.as_deref(),
-                    budget_tokens,
+                    limit,
                 },
                 json,
                 quiet,

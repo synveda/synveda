@@ -16,10 +16,10 @@
 //!   rather than merely rejected here (ADR-0045 decision 2). A
 //!   subtree-bound auditor is denied, and the denial names what it would
 //!   take.
-//! - **No content.** Every response carries record ids, object addresses,
-//!   channels, tiers and staleness. Resolving any of them to a body is
-//!   `MemoryRead` through `POST /v1/recall` — a different call and a
-//!   different decision (ADR-0045 decision 6).
+//! - **No content.** Every disclosure response carries only stable Knowledge
+//!   item ids, immutable revision ids, content hashes and planner reason codes.
+//!   Resolving one to content requires an independent `KnowledgeRead` decision
+//!   through the current Knowledge API (ADR-0045 decision 6; ADR-0084).
 //! - **The answer states its own completeness.** Every response carries
 //!   the chain head it was taken against and the seq range it covered, so
 //!   a finding can be re-derived by someone who does not trust the auditor
@@ -43,7 +43,7 @@ use synveda_audit::{
 };
 use synveda_policy::{Action, Resource};
 use synveda_store::rls;
-use synveda_types::{Error, RecordId, Result};
+use synveda_types::{Error, KnowledgeItemId, Result};
 
 use crate::app::AppState;
 use crate::audit;
@@ -253,28 +253,16 @@ struct DisclosureView {
     actor_kind: String,
     /// Who was served.
     actor_subject: String,
-    /// `context.injected` (given it) or `context.recalled` (asked for it)
-    /// — different acts, kept apart rather than merged into "saw".
+    /// The delivery act that put this revision in a session context.
     action: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     session_id: Option<String>,
-    record_id: String,
-    /// The VedaFlow object address of exactly the version served. Absent
-    /// on entries written before FLOW-2 — absence is reported, never
-    /// defaulted.
+    knowledge_item_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    object_hash: Option<String>,
-    /// The CTX-2 version hash, on entries old enough to predate the
-    /// object address. A content address and a version hash are different
-    /// claims, so neither is ever reported as the other.
+    knowledge_revision_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    version_hash: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    channel: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tier: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    staleness_permille: Option<i64>,
+    content_hash: Option<String>,
+    reason_codes: Vec<String>,
 }
 
 impl From<Disclosure> for DisclosureView {
@@ -286,20 +274,18 @@ impl From<Disclosure> for DisclosureView {
             actor_subject: disclosure.actor_subject,
             action: disclosure.action,
             session_id: disclosure.session_id,
-            record_id: disclosure.entry.record_id,
-            object_hash: disclosure.entry.object_hash,
-            version_hash: disclosure.entry.version_hash,
-            channel: disclosure.entry.channel,
-            tier: disclosure.entry.tier,
-            staleness_permille: disclosure.entry.staleness_permille,
+            knowledge_item_id: disclosure.entry.knowledge_item_id,
+            knowledge_revision_id: disclosure.entry.knowledge_revision_id,
+            content_hash: disclosure.entry.content_hash,
+            reason_codes: disclosure.entry.reason_codes,
         }
     }
 }
 
 #[derive(Deserialize)]
 pub(crate) struct DisclosuresParams {
-    /// The record asked about.
-    record: RecordId,
+    /// The stable Knowledge item asked about.
+    knowledge_item: KnowledgeItemId,
     /// The window's inclusive start. With `until` absent this is a day:
     /// "on date D" is the question, so the default window is 24 hours.
     from: DateTime<Utc>,
@@ -311,7 +297,7 @@ pub(crate) struct DisclosuresParams {
 
 #[derive(Serialize)]
 struct DisclosuresResponse {
-    /// Who the chain records the record being **served** to in the window,
+    /// Who the chain records the Knowledge item being **served** to in the window,
     /// with what they got. This is evidence.
     disclosed: Vec<DisclosureView>,
     /// The events that opened and closed authority over the window — role
@@ -332,7 +318,7 @@ struct DisclosuresResponse {
 
 /// The sentence that keeps `disclosed` from being read as `authority` and
 /// neither from being read as "everyone who could have seen it".
-const DISCLOSURE_NOTE: &str = "`disclosed` is who the chain records being served this record in \
+const DISCLOSURE_NOTE: &str = "`disclosed` is who the chain records being served this Knowledge item in \
      the window. `authority` is what governed its scope over the same \
      window. They are not merged: deciding who *could* have seen it from \
      reconstructed inputs would be a replay of authority rather than the \
@@ -363,7 +349,7 @@ pub(crate) async fn disclosures(
         let page = synveda_audit::disclosures(
             &mut tx,
             tenant_id,
-            params.record,
+            params.knowledge_item,
             params.from,
             until,
             params.after.unwrap_or(0),
@@ -395,7 +381,7 @@ pub(crate) async fn disclosures(
             "disclosures",
             &authorized,
             json!({
-                "record_id": params.record.to_string(),
+                "knowledge_item_id": params.knowledge_item.to_string(),
                 "from": params.from,
                 "until": until,
                 "disclosed": page.items.len(),
@@ -417,20 +403,15 @@ pub(crate) async fn disclosures(
     respond(&state, "disclosures", result).await
 }
 
-/// One record a subject was last served, with what they got.
+/// One Knowledge item a subject was last served, with what they got.
 #[derive(Serialize)]
 struct KnownView {
-    record_id: String,
+    knowledge_item_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    object_hash: Option<String>,
+    knowledge_revision_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    version_hash: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    channel: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tier: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    staleness_permille: Option<i64>,
+    content_hash: Option<String>,
+    reason_codes: Vec<String>,
     /// The chain position of the last delivery — the evidence.
     seq: i64,
     /// When it was last delivered.
@@ -455,7 +436,7 @@ pub(crate) struct KnowledgeParams {
 struct KnowledgeResponse {
     subject: String,
     at: DateTime<Utc>,
-    /// One row per record, carrying the version *last* delivered at or
+    /// One row per item, carrying the revision *last* delivered at or
     /// before `at`.
     known: Vec<KnownView>,
     /// What this answer is, stated in it: what A was served, not what A
@@ -467,8 +448,8 @@ struct KnowledgeResponse {
 
 const KNOWLEDGE_NOTE: &str = "What the chain records this subject being served at or before the \
      instant — not what they were permitted to ask for. Each entry names \
-     a version by its address, so it resolves to exact bytes for a caller \
-     who also holds MemoryRead (ADR-0045 decisions 5 and 6).";
+     an immutable Knowledge revision and content hash; content remains behind \
+     an independent KnowledgeRead decision (ADR-0084).";
 
 /// `GET /v1/audit/knowledge` — "what did agent A know at time T" (ADR-0045
 /// decision 5).
@@ -500,7 +481,7 @@ pub(crate) async fn knowledge(
             json!({
                 "subject": params.subject,
                 "at": at,
-                "records": known.len(),
+                "knowledge_items": known.len(),
                 "disclosures": page.items.len(),
             }),
         )
@@ -513,12 +494,10 @@ pub(crate) async fn knowledge(
             known: known
                 .into_iter()
                 .map(|item| KnownView {
-                    record_id: item.entry.record_id,
-                    object_hash: item.entry.object_hash,
-                    version_hash: item.entry.version_hash,
-                    channel: item.entry.channel,
-                    tier: item.entry.tier,
-                    staleness_permille: item.entry.staleness_permille,
+                    knowledge_item_id: item.entry.knowledge_item_id,
+                    knowledge_revision_id: item.entry.knowledge_revision_id,
+                    content_hash: item.entry.content_hash,
+                    reason_codes: item.entry.reason_codes,
                     seq: item.seq,
                     occurred_at: item.occurred_at,
                     action: item.action,

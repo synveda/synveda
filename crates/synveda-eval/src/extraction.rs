@@ -1,36 +1,29 @@
 //! Seed → wait → sweep → attribute → score, one fixture group at a time
 //! (EVAL-2, ADR-0046).
 //!
-//! Nothing here reads a record the product would not serve. Transcripts go
-//! in through `POST /v1/sessions/{id}/events` and the records they became
-//! come back through `/v1/recall`'s sweep, so every number is a number a
-//! caller could have measured for themselves — MEM-1's buffer, MEM-2's
-//! redaction, MEM-3's extraction, MEM-4's embedding, MEM-5's dedup and
-//! CTX's admission all included, because they are all between the two calls.
+//! Nothing here reads Knowledge the product would not serve. Transcripts go
+//! in through `POST /v1/sessions/{id}/events`; accepted Knowledge comes back
+//! through the separately authorised, session-scoped Knowledge evaluation
+//! lens. Every item is still decided exactly by the PDP.
 //!
 //! **Two lenses, two questions** (decision 4). The sweep says what a
 //! *reader is served*; `GET /v1/audit/events?action=memory.extracted` says
 //! what the *pipeline committed*. `admit` applies tiers, horizons and
 //! MEM-5's valid-window predicate, so those are not the same set, and the
 //! difference between them is reported as its own number rather than
-//! absorbed into recall. The gated axes come from the sweep, because that
+//! absorbed into the served lens. The gated axes come from the sweep, because that
 //! is the product claim.
 //!
-//! **This suite does not run as of CPR-12** (ADR-0078 decision 5).
-//! `/v1/recall` is deleted and its sweep has no successor: the served lens
-//! enumerates a corpus, and a context run ranks and truncates one, so what
-//! it left out would be a property of the budget rather than of extraction.
-//! The committed lens alone cannot stand in either — the chain carries
-//! per-event *counts*, not the record text every per-class score reads. The
-//! seed leg is fully re-pointed onto the session plane and the sweep leg
-//! fails by name, so `make eval-extraction-live` fails with the reason
-//! rather than reporting a number measured against a different question.
-//! Prompt 18 re-cuts recall; Prompt 32 re-measures.
+//! CPR-20 restores that enumeration without restoring tenant-global recall:
+//! the evaluation route derives its project and authority from a real session,
+//! follows opaque cursors and is deliberately separate from the budgeted
+//! context-run surface. Prompt 30 owns the corpus re-measurement and baseline
+//! update after capture acceptance is wired into the evaluation setup.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
-use crate::client::{Client, ObserveEvent, ObserveRequest, RecallSweepRequest};
+use crate::client::{Client, KnowledgeSweepRequest, ObserveEvent, ObserveRequest};
 use crate::fixtures::{CLASSES, Fixture, Group};
 use crate::report::{ClassCounts, ExtractionOutcome};
 use crate::scenario::Environment;
@@ -153,9 +146,9 @@ pub async fn run_group(
     let as_of = (chrono::Utc::now() + chrono::Duration::seconds(60)).to_rfc3339();
     let session = format!("eval:extraction:{}", group.group);
     let swept = client
-        .recall_sweep(
+        .knowledge_sweep(
             bearer,
-            &RecallSweepRequest {
+            &KnowledgeSweepRequest {
                 as_of: &as_of,
                 session_id: &session,
                 limit: SWEEP_LIMIT,

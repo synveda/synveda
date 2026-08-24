@@ -20,19 +20,25 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
 use synveda_store::{
-    access, idempotency, identities, policy_assignments, policy_packs, projects, quarantine,
-    repositories, rls, scopes, sessions, tenants, workspaces,
+    access, context, idempotency, identities, knowledge, policy_assignments, policy_packs,
+    projects, quarantine, repositories, rls, scopes, sessions, tenants, workspaces,
 };
 // The generic scope vocabulary, reached through its module because the old
 // hierarchy still owns the root name until Prompt 6 (CPR-3, ADR-0070).
 use synveda_types::access::{GrantSource, GrantSubject, GroupSource, RoleKey};
+use synveda_types::knowledge::{
+    KnowledgeLifecycleState, KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeSourceType,
+    KnowledgeType,
+};
 use synveda_types::repository;
 use synveda_types::scope;
 use synveda_types::session::{SessionEventType, SessionStatus};
 use synveda_types::{
-    ContextRunId, Error, GrantId, GroupId, IdentityId, IdentityKind, InviteId, PackConfig,
+    ContextCandidateId, ContextCompletionStatus, ContextFeedbackId, ContextFeedbackType,
+    ContextReasonCode, ContextRunId, ContextSelectionId, Error, GrantId, GroupId, IdentityId,
+    IdentityKind, InviteId, KnowledgeItemId, KnowledgeRevisionId, KnowledgeSourceId, PackConfig,
     ProjectId, RecordClass, RecordId, RecordKind, RepositoryId, ScopeId, Sensitivity, SessionId,
-    TenantId, TenantStatus, WorkspaceId,
+    TenantId, TenantStatus, TraceRetentionMode, WorkspaceId,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -221,9 +227,14 @@ const COVERED: &[&str] = &[
     "capture_candidate_events",
     "capture_candidate_matches",
     "capture_candidates",
+    // CPR-20 (ADR-0084): policy-visible planner evidence and explicit
+    // feedback are tenant-bound, even when retention keeps hashes only.
+    "context_candidates",
+    "context_feedback",
     "context_pack_chunks",
     "context_pack_documents",
     "context_packs",
+    "context_selections",
     "directory_sync_state",
     // CPR-16 (ADR-0081): the reusable operation ledger is tenant-bound just
     // like the effect it executes; a guessed job id must not reveal whether
@@ -6184,6 +6195,7 @@ struct SessionFixture {
     workspace: WorkspaceId,
     scope: ScopeId,
     session: SessionId,
+    run: ContextRunId,
 }
 
 /// Admits a tenant with a workspace, one session in it, two events and one
@@ -6263,32 +6275,157 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
     )
     .await
     .expect("append events");
-    sessions::record_context_run(
+    let run = sessions::record_context_run(
         &mut tx,
         tenant,
         &sessions::NewContextRun {
             id: ContextRunId::new(),
             skills: serde_json::json!([]),
             session_id: session.id,
+            workspace_id: workspace.id,
+            project_id: None,
             scope_id: workspace.scope_id,
             principal_id: "rls-agent".to_owned(),
             query: Some("what do we know".to_owned()),
+            query_hash: Some(blake3::hash(b"what do we know").to_hex().to_string()),
             rendered: "composed material".to_owned(),
-            block_hash: "abc123".to_owned(),
+            block_hash: blake3::hash(b"composed material").to_hex().to_string(),
             tokens: 4,
             budget_tokens: 1500,
+            requested_budget_tokens: None,
             entry_count: 0,
+            candidate_count: 0,
+            selection_count: 0,
             degraded: Vec::new(),
+            as_of: chrono::Utc::now(),
+            retrieval_version: "rls-test-v1".to_owned(),
+            embedding_model: None,
+            index_version: "rls-test-index-v1".to_owned(),
+            graph_version: None,
+            trace_retention: TraceRetentionMode::Full,
+            completion_status: ContextCompletionStatus::Completed,
+            policy_exclusion: false,
         },
     )
     .await
     .expect("record context run");
+
+    let item_id = KnowledgeItemId::new();
+    let revision_id = KnowledgeRevisionId::new();
+    let source = knowledge::create_source(
+        &mut tx,
+        &knowledge::NewKnowledgeSource {
+            id: KnowledgeSourceId::new(),
+            tenant_id: tenant,
+            scope_id: workspace.scope_id,
+            source_type: KnowledgeSourceType::Manual,
+            session_event_id: None,
+            locator: None,
+            source_revision: None,
+            content_hash: None,
+            metadata: serde_json::json!({"fixture": "CPR-20"}),
+            created_by: Some("rls-agent".to_owned()),
+        },
+    )
+    .await
+    .expect("create provenance fixture");
+    let content = KnowledgeRevisionContent {
+        title: "RLS context fixture".to_owned(),
+        body_markdown: "tenant-private planner evidence".to_owned(),
+        summary: "planner evidence".to_owned(),
+        tags: vec!["rls".to_owned()],
+        sensitivity: Sensitivity::Internal,
+        confidence_permille: 900,
+        valid_from: chrono::Utc::now(),
+        valid_to: None,
+        stale_after: None,
+        verification_metadata: serde_json::json!({}),
+        metadata: serde_json::json!({"fixture": "CPR-20"}),
+    };
+    let snapshot = knowledge::create_item(
+        &mut tx,
+        &knowledge::NewKnowledgeItem {
+            id: item_id,
+            tenant_id: tenant,
+            scope_id: workspace.scope_id,
+            project_id: None,
+            owner_principal_id: None,
+            knowledge_type: KnowledgeType::Fact,
+            origin: KnowledgeOrigin::Authored,
+            created_by: Some("rls-agent".to_owned()),
+        },
+        &knowledge::NewKnowledgeRevision {
+            id: revision_id,
+            content,
+            created_by: Some("rls-agent".to_owned()),
+        },
+        &[source.id],
+    )
+    .await
+    .expect("create Knowledge fixture");
+    let content_hash = snapshot.revision.content_hash;
+    context::insert_candidate(
+        &mut tx,
+        tenant,
+        &context::NewContextCandidate {
+            id: ContextCandidateId::new(),
+            context_run_id: run.id,
+            ordinal: 0,
+            knowledge_item_id: Some(item_id),
+            knowledge_revision_id: Some(revision_id),
+            content_hash: content_hash.clone(),
+            scope_id: Some(workspace.scope_id),
+            lifecycle_state: Some(KnowledgeLifecycleState::Active),
+            keyword_score_micros: 500_000,
+            semantic_score_micros: 0,
+            freshness_score_micros: 100_000,
+            pin_score_micros: 0,
+            current_state_score_micros: 100_000,
+            final_score_micros: 700_000,
+            reason_codes: vec![ContextReasonCode::KeywordMatch],
+            exclusion_reason: None,
+        },
+    )
+    .await
+    .expect("record candidate fixture");
+    let selection = context::insert_selection(
+        &mut tx,
+        tenant,
+        &context::NewContextSelection {
+            id: ContextSelectionId::new(),
+            context_run_id: run.id,
+            rank: 1,
+            knowledge_item_id: Some(item_id),
+            knowledge_revision_id: Some(revision_id),
+            content_hash,
+            token_count: 8,
+            reason_codes: vec![ContextReasonCode::KeywordMatch],
+        },
+    )
+    .await
+    .expect("record selection fixture");
+    context::insert_feedback(
+        &mut tx,
+        tenant,
+        &context::NewContextFeedback {
+            id: ContextFeedbackId::new(),
+            context_run_id: run.id,
+            context_selection_id: selection.id,
+            knowledge_revision_id: revision_id,
+            feedback_type: ContextFeedbackType::Helpful,
+            principal_id: "rls-agent".to_owned(),
+            idempotency_key: "rls-feedback".to_owned(),
+        },
+    )
+    .await
+    .expect("record feedback fixture");
     tx.commit().await.expect("commit session fixture");
     SessionFixture {
         tenant,
         workspace: workspace.id,
         scope: workspace.scope_id,
         session: session.id,
+        run: run.id,
     }
 }
 
@@ -6322,6 +6459,35 @@ async fn visible_session_rows(
     (sessions, events, runs)
 }
 
+/// Rows of `tenant` visible through the three CPR-20 trace tables.
+async fn visible_context_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64, i64) {
+    let candidates = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from context_candidates where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count context_candidates");
+    let selections = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from context_selections where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count context_selections");
+    let feedback = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from context_feedback where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count context_feedback");
+    (candidates, selections, feedback)
+}
+
 /// The wrong (or absent) tenant GUC sees zero rows in all three tables; the
 /// right one sees exactly its own.
 #[test]
@@ -6340,6 +6506,15 @@ fn wrong_tenant_guc_sees_no_session_rows() {
         assert_eq!(
             visible_session_rows(&mut tx, adversary.tenant).await,
             (1, 2, 1)
+        );
+        assert_eq!(
+            visible_context_rows(&mut tx, victim.tenant).await,
+            (0, 0, 0),
+            "planner trace rows leaked across tenants under the wrong GUC"
+        );
+        assert_eq!(
+            visible_context_rows(&mut tx, adversary.tenant).await,
+            (1, 1, 1)
         );
         // Not a count: the *content*. An event payload is a transcript and a
         // context run holds composed material, so a leak here is the leak this
@@ -6361,6 +6536,11 @@ fn wrong_tenant_guc_sees_no_session_rows() {
             visible_session_rows(&mut tx, victim.tenant).await,
             (0, 0, 0),
             "session-ledger rows visible without any tenant GUC"
+        );
+        assert_eq!(
+            visible_context_rows(&mut tx, victim.tenant).await,
+            (0, 0, 0),
+            "planner trace rows visible without any tenant GUC"
         );
     });
 }
@@ -6414,15 +6594,51 @@ fn the_app_role_cannot_rewrite_or_delete_a_transcript() {
     db.rt.block_on(async {
         let fixture = seed_session(&db.pool).await;
 
-        for statement in [
-            "update session_events set payload = '{}'::jsonb where session_id = $1",
-            "delete from session_events where session_id = $1",
-            "update session_context_runs set rendered = '' where session_id = $1",
-            "delete from session_context_runs where session_id = $1",
+        for (statement, id) in [
+            (
+                "update session_events set payload = '{}'::jsonb where session_id = $1",
+                fixture.session.as_uuid(),
+            ),
+            (
+                "delete from session_events where session_id = $1",
+                fixture.session.as_uuid(),
+            ),
+            (
+                "update session_context_runs set rendered = '' where id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
+                "delete from session_context_runs where id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
+                "update context_candidates set final_score_micros = 0 where context_run_id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
+                "delete from context_candidates where context_run_id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
+                "update context_selections set token_count = 0 where context_run_id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
+                "delete from context_selections where context_run_id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
+                "update context_feedback set feedback_type = 'unhelpful' where context_run_id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
+                "delete from context_feedback where context_run_id = $1",
+                fixture.run.as_uuid(),
+            ),
         ] {
             let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
             let err = sqlx::query(statement)
-                .bind(fixture.session.as_uuid())
+                .bind(id)
                 .execute(&mut *tx)
                 .await
                 .expect_err(&format!("{statement} must be refused"));
@@ -6460,6 +6676,42 @@ fn the_app_role_cannot_rewrite_or_delete_a_transcript() {
                 == Some("42501"),
             "sessions: expected insufficient_privilege, got {err:?}"
         );
+    });
+}
+
+/// CPR-20 trace immutability also binds the migration owner. Missing app-role
+/// grants are not enough: break-glass SQL must be unable to rewrite the
+/// historical explanation without an explicit future retention design.
+#[test]
+fn the_database_owner_cannot_rewrite_context_trace_history() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let fixture = seed_session(&db.pool).await;
+        for statement in [
+            "update session_context_runs set rendered = '' where id = $1",
+            "delete from session_context_runs where id = $1",
+            "update context_candidates set final_score_micros = 0 where context_run_id = $1",
+            "delete from context_candidates where context_run_id = $1",
+            "update context_selections set token_count = 0 where context_run_id = $1",
+            "delete from context_selections where context_run_id = $1",
+            "update context_feedback set feedback_type = 'unhelpful' where context_run_id = $1",
+            "delete from context_feedback where context_run_id = $1",
+        ] {
+            let mut tx = db.pool.begin().await.expect("begin owner trace probe");
+            let err = sqlx::query(statement)
+                .bind(fixture.run.as_uuid())
+                .execute(&mut *tx)
+                .await
+                .expect_err(&format!("{statement} must trip immutable trigger"));
+            assert_eq!(
+                err.as_database_error()
+                    .and_then(sqlx::error::DatabaseError::code)
+                    .as_deref(),
+                Some("P0001"),
+                "{statement}: owner bypassed immutable trace trigger: {err:?}"
+            );
+            tx.rollback().await.expect("roll back owner trace probe");
+        }
     });
 }
 

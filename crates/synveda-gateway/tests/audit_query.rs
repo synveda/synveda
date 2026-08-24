@@ -1,12 +1,11 @@
 //! AUD-2 acceptance criteria (ADR-0045): "both questions answerable via
 //! one API call each (uses bitemporal + refs)."
 //!
-//! Both questions over the real product surfaces, and — this is the point
-//! — **never a seeded audit row**. Disclosures exist here because people
-//! were actually served material: alice and bob each call
-//! `POST /v1/inject` and the chain records what they got, exactly as it
-//! would in a live session. The audit surface then answers from those
-//! events and nothing else.
+//! Both questions use the real product surfaces and — this is the point —
+//! **never a seeded audit row**. Disclosures exist here because people were
+//! actually served Knowledge: alice and bob each create a session context run
+//! and the chain records the exact immutable revisions delivered. The audit
+//! surface then answers from those events and nothing else.
 //!
 //! The suite runs under the **real embedded packs** — `regulated-strict`
 //! is the zero-config default and nothing here installs a permissive one.
@@ -31,16 +30,18 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
-use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder, Embedder as _};
+use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::records::{self, RecordEmbedding, RecordState};
-use synveda_store::{access, identities, rls, scopes, tenants};
+use synveda_store::{access, identities, knowledge as stored, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::knowledge::{
+    KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeSourceType, KnowledgeType,
+};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    GrantId, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, ScopeId,
-    Sensitivity, TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, KnowledgeItemId, KnowledgeRevisionId,
+    KnowledgeSourceId, ScopeId, Sensitivity, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -52,13 +53,13 @@ const RUNBOOK: &str = "Platform incident runbook: freeze the reconciliation job,
      ledger tail against the acquirer statement, then page the on-call and the controller \
      together.";
 
-/// alice's own note — a second record, so "what did alice know" has more
+/// alice's own note — a second Knowledge item, so "what did alice know" has more
 /// than one row and the fold has something to fold.
 const NOTE: &str = "Alice prefers rebase-and-merge for her feature branches.";
 
 /// Material only the payments team holds. Never disclosed to anyone in
 /// this suite, which is what makes it the honest half of the
-/// existence-oracle test: a record that exists and was never served must
+/// existence-oracle test: an item that exists and was never served must
 /// answer exactly like one that does not exist at all.
 const PAYMENTS_ONLY: &str = "Payments settlement cutover checklist, revision four.";
 
@@ -197,43 +198,71 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     identity
 }
 
-async fn seed_record(
+async fn seed_knowledge(
     pool: &PgPool,
     tenant: TenantId,
     scope: ScopeId,
-    owner: IdentityId,
+    owner_principal_id: Option<&str>,
+    knowledge_type: KnowledgeType,
     content: &str,
-) -> RecordId {
-    let embedder = DeterministicEmbedder::new();
-    let vector = embedder
-        .embed(std::slice::from_ref(&content.to_owned()))
+) -> (KnowledgeItemId, KnowledgeRevisionId) {
+    let mut tx = rls::begin_tenant_tx(pool, tenant)
         .await
-        .expect("deterministic embed")
-        .remove(0);
-    let id = RecordId::new();
-    records::insert(
-        pool,
-        id,
-        tenant,
-        &RecordState {
+        .expect("begin Knowledge fixture");
+    let source = stored::create_source(
+        &mut tx,
+        &stored::NewKnowledgeSource {
+            id: KnowledgeSourceId::new(),
+            tenant_id: tenant,
             scope_id: scope,
-            owner_id: owner,
-            kind: RecordKind::Derived,
-            class: RecordClass::Procedure,
-            content: content.to_owned(),
-            sensitivity: Sensitivity::Internal,
-            provenance: json!({"source": "aud-2 test fixture"}),
-            valid_from: Utc::now(),
-            valid_to: None,
-        },
-        &RecordEmbedding {
-            model: embedder.model().to_owned(),
-            vector,
+            source_type: KnowledgeSourceType::Manual,
+            session_event_id: None,
+            locator: None,
+            source_revision: None,
+            content_hash: None,
+            metadata: json!({"fixture": "AUD-2/CPR-20"}),
+            created_by: Some("audit-fixture".to_owned()),
         },
     )
     .await
-    .expect("insert record");
-    id
+    .expect("create Knowledge source");
+    let item_id = KnowledgeItemId::new();
+    let revision_id = KnowledgeRevisionId::new();
+    stored::create_item(
+        &mut tx,
+        &stored::NewKnowledgeItem {
+            id: item_id,
+            tenant_id: tenant,
+            scope_id: scope,
+            project_id: None,
+            owner_principal_id: owner_principal_id.map(str::to_owned),
+            knowledge_type,
+            origin: KnowledgeOrigin::Authored,
+            created_by: Some("audit-fixture".to_owned()),
+        },
+        &stored::NewKnowledgeRevision {
+            id: revision_id,
+            content: KnowledgeRevisionContent {
+                title: content.lines().next().unwrap_or("Knowledge").to_owned(),
+                body_markdown: content.to_owned(),
+                summary: content.to_owned(),
+                tags: vec!["audit-fixture".to_owned()],
+                sensitivity: Sensitivity::Internal,
+                confidence_permille: 900,
+                valid_from: Utc::now(),
+                valid_to: None,
+                stale_after: None,
+                verification_metadata: json!({}),
+                metadata: json!({"fixture": "AUD-2/CPR-20"}),
+            },
+            created_by: Some("audit-fixture".to_owned()),
+        },
+        &[source.id],
+    )
+    .await
+    .expect("insert Knowledge");
+    tx.commit().await.expect("commit Knowledge fixture");
+    (item_id, revision_id)
 }
 
 /// A direct grant write — the bootstrap path, silent in the chain.
@@ -342,14 +371,14 @@ fn stamp(at: DateTime<Utc>) -> String {
 
 /// The world every test starts in: a runbook the whole tenant shares and
 /// alice's own note, both served to alice; the runbook also served to
-/// bob; a payments record nobody is ever served; and two auditors — dana
+/// bob; a payments item nobody is ever served; and two auditors — dana
 /// tenant-wide, erin at platform only.
 ///
 /// The shared material lives at the tenant root because that is where a
 /// session actually receives it (CPR-7): a member's own chain is their
 /// principal scope and the root, and an org unit composes for nobody
 /// without a grant — so the runbook sits at the root and the
-/// payments-only record sits where no ungranted reader reaches it.
+/// payments-only item sits where no ungranted reader reaches it.
 struct World {
     pool: PgPool,
     tenant: TenantId,
@@ -357,9 +386,10 @@ struct World {
     alice: String,
     dana: String,
     erin: String,
-    runbook: RecordId,
-    note: RecordId,
-    payments_only: RecordId,
+    runbook: KnowledgeItemId,
+    runbook_revision: KnowledgeRevisionId,
+    note: KnowledgeItemId,
+    payments_only: KnowledgeItemId,
     /// An instant before any inject ran — the "what did alice know
     /// *then*" end of the bitemporal pair.
     before: DateTime<Utc>,
@@ -370,7 +400,7 @@ async fn world() -> Option<World> {
     let (platform, payments) = seed_scopes(&pool, tenant).await;
     let alice = seed_user(&pool, tenant, "alice").await;
     let bob = seed_user(&pool, tenant, "bob").await;
-    let carol = seed_user(&pool, tenant, "carol").await;
+    let _carol = seed_user(&pool, tenant, "carol").await;
     seed_user(&pool, tenant, "dana").await;
     seed_user(&pool, tenant, "erin").await;
     seed_user(&pool, tenant, "olive").await;
@@ -391,9 +421,33 @@ async fn world() -> Option<World> {
     grant(&pool, tenant, "alice", platform.id, RoleKey::Member).await;
     grant(&pool, tenant, "bob", platform.id, RoleKey::Member).await;
 
-    let runbook = seed_record(&pool, tenant, root.id, alice.id, RUNBOOK).await;
-    let note = seed_record(&pool, tenant, alice.scope_id, alice.id, NOTE).await;
-    let payments_only = seed_record(&pool, tenant, payments.id, carol.id, PAYMENTS_ONLY).await;
+    let (runbook, runbook_revision) = seed_knowledge(
+        &pool,
+        tenant,
+        root.id,
+        None,
+        KnowledgeType::Procedure,
+        RUNBOOK,
+    )
+    .await;
+    let (note, _) = seed_knowledge(
+        &pool,
+        tenant,
+        alice.scope_id,
+        Some("alice"),
+        KnowledgeType::Preference,
+        NOTE,
+    )
+    .await;
+    let (payments_only, _) = seed_knowledge(
+        &pool,
+        tenant,
+        payments.id,
+        None,
+        KnowledgeType::Procedure,
+        PAYMENTS_ONLY,
+    )
+    .await;
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
     let index = Arc::new(SearchIndex::open(index_root()).expect("open sidecar"));
@@ -453,6 +507,7 @@ async fn world() -> Option<World> {
         dana: issue("dana", tenant),
         erin: issue("erin", tenant),
         runbook,
+        runbook_revision,
         note,
         payments_only,
         before,
@@ -481,20 +536,20 @@ fn subjects(disclosed: &Value) -> Vec<String> {
 
 /// **"Who could see X on date D" — one API call.**
 ///
-/// alice and bob were each served the platform runbook by `inject`; carol
+/// alice and bob were each served the platform runbook by a context run; carol
 /// never was. One `GET /v1/audit/disclosures` names exactly those two, with
 /// what each of them actually got, and the answer is stamped with the chain
 /// it was taken against so it can be re-derived (ADR-0045 decisions 4
 /// and 9).
 #[tokio::test]
-async fn who_could_see_this_record_is_one_call_answered_from_the_chain() {
+async fn who_could_see_this_knowledge_is_one_call_answered_from_the_chain() {
     let Some(w) = world().await else { return };
     let (from, until) = day_window();
 
     let (status, body) = get(
         &w.app,
         &format!(
-            "/v1/audit/disclosures?record={}&from={from}&until={until}",
+            "/v1/audit/disclosures?knowledge_item={}&from={from}&until={until}",
             w.runbook
         ),
         &w.dana,
@@ -521,7 +576,7 @@ async fn who_could_see_this_record_is_one_call_answered_from_the_chain() {
     // got something (ADR-0041 decision 9).
     let first = &body["disclosed"][0];
     assert_eq!(
-        first["record_id"].as_str(),
+        first["knowledge_item_id"].as_str(),
         Some(w.runbook.to_string()).as_deref()
     );
     assert_eq!(
@@ -530,10 +585,12 @@ async fn who_could_see_this_record_is_one_call_answered_from_the_chain() {
         "being *given* material is its own act, kept apart from asking for it — \
          and since CPR-12 the act names the run it was for"
     );
-    assert!(
-        first["version_hash"].is_string() || first["object_hash"].is_string(),
-        "a disclosure names the version served: {first}"
+    assert_eq!(
+        first["knowledge_revision_id"].as_str(),
+        Some(w.runbook_revision.to_string()).as_deref(),
+        "a disclosure names the exact immutable revision served: {first}"
     );
+    assert!(first["content_hash"].is_string(), "and its content hash");
     assert!(first["seq"].is_i64(), "and the chain row that proves it");
 
     // The completeness stamp (decision 9).
@@ -561,7 +618,7 @@ async fn disclosure_and_authority_arrive_as_two_lists_with_the_reason_in_the_res
     let (status, body) = get(
         &w.app,
         &format!(
-            "/v1/audit/disclosures?record={}&from={from}&until={until}",
+            "/v1/audit/disclosures?knowledge_item={}&from={from}&until={until}",
             w.runbook
         ),
         &w.dana,
@@ -606,7 +663,7 @@ async fn disclosure_and_authority_arrive_as_two_lists_with_the_reason_in_the_res
 /// refs.**
 ///
 /// One `GET /v1/audit/knowledge` returns what alice was *served*, folded
-/// to one row per record with the version last delivered. The AC's
+/// to one row per Knowledge item with the revision last delivered. The AC's
 /// "uses bitemporal + refs" is asserted rather than asserted-about: every
 /// id in the answer resolves in the bitemporal pair at the instant asked
 /// at, and each row names the version by hash.
@@ -626,7 +683,12 @@ async fn what_did_this_agent_know_is_one_call_and_its_ids_resolve_bitemporally()
     let known = body["known"].as_array().expect("known array");
     let ids: Vec<String> = known
         .iter()
-        .map(|row| row["record_id"].as_str().expect("record_id").to_owned())
+        .map(|row| {
+            row["knowledge_item_id"]
+                .as_str()
+                .expect("knowledge_item_id")
+                .to_owned()
+        })
         .collect();
     assert!(
         ids.contains(&w.runbook.to_string()),
@@ -641,20 +703,20 @@ async fn what_did_this_agent_know_is_one_call_and_its_ids_resolve_bitemporally()
         "and never payments material"
     );
 
-    // One row per record, not one per delivery: alice injected twice, so
+    // One row per item, not one per delivery: alice composed twice, so
     // the runbook was served twice and folds to a single row that says so.
     assert_eq!(
         ids.len(),
         known
             .iter()
-            .map(|row| row["record_id"].as_str().expect("id"))
+            .map(|row| row["knowledge_item_id"].as_str().expect("id"))
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
-        "the fold is one row per record: {body}"
+        "the fold is one row per Knowledge item: {body}"
     );
     let runbook_row = known
         .iter()
-        .find(|row| row["record_id"].as_str() == Some(&w.runbook.to_string()))
+        .find(|row| row["knowledge_item_id"].as_str() == Some(&w.runbook.to_string()))
         .expect("the runbook row");
     assert_eq!(
         runbook_row["occasions"].as_u64(),
@@ -663,10 +725,12 @@ async fn what_did_this_agent_know_is_one_call_and_its_ids_resolve_bitemporally()
     );
 
     // **refs**: the row names the version it delivered.
-    assert!(
-        runbook_row["version_hash"].is_string() || runbook_row["object_hash"].is_string(),
-        "the answer names a version, which is what makes it checkable: {runbook_row}"
+    assert_eq!(
+        runbook_row["knowledge_revision_id"].as_str(),
+        Some(w.runbook_revision.to_string()).as_deref(),
+        "the answer names the exact revision, which makes it checkable: {runbook_row}"
     );
+    assert!(runbook_row["content_hash"].is_string());
 
     // **bitemporal**: every id the answer names resolves to the version
     // that was current at the instant asked at. The audit answer and the
@@ -675,12 +739,19 @@ async fn what_did_this_agent_know_is_one_call_and_its_ids_resolve_bitemporally()
         .await
         .expect("tenant tx");
     for id in &ids {
-        let record_id = RecordId::from_uuid(id.parse().expect("uuid"));
-        let version = records::as_of(&mut *tx, record_id, at)
+        let item_id: KnowledgeItemId = id.parse().expect("Knowledge item id");
+        let revision_id: KnowledgeRevisionId = known
+            .iter()
+            .find(|row| row["knowledge_item_id"].as_str() == Some(id.as_str()))
+            .and_then(|row| row["knowledge_revision_id"].as_str())
+            .expect("disclosure carries a revision")
+            .parse()
+            .expect("Knowledge revision id");
+        let version = stored::revision(&mut *tx, w.tenant, item_id, revision_id)
             .await
-            .expect("as-of read");
+            .expect("exact revision read");
         let version = version.unwrap_or_else(|| {
-            panic!("{id} was disclosed at {at} and must resolve in the bitemporal pair")
+            panic!("{item_id}/{revision_id} was disclosed at {at} and must remain immutable")
         });
         assert_eq!(
             version.tenant_id, w.tenant,
@@ -745,7 +816,7 @@ async fn a_subtree_bound_auditor_is_refused_rather_than_served_a_subset() {
     for path in [
         "/v1/audit/events".to_owned(),
         format!(
-            "/v1/audit/disclosures?record={}&from={from}&until={until}",
+            "/v1/audit/disclosures?knowledge_item={}&from={from}&until={until}",
             w.runbook
         ),
         "/v1/audit/knowledge?subject=alice".to_owned(),
@@ -793,17 +864,17 @@ async fn the_subject_of_an_audit_answer_cannot_read_the_audit_plane() {
 ///
 /// Swept over every route's full response body: an auditor holds
 /// `AuditRead` and no `MemoryRead`, and the surface has no content path to
-/// forget to gate. Record bodies are what an auditor would otherwise
+/// forget to gate. Knowledge bodies are what an auditor would otherwise
 /// acquire here, and this is the last route by which they could.
 #[tokio::test]
-async fn no_record_content_reaches_any_audit_answer() {
+async fn no_knowledge_content_reaches_any_audit_answer() {
     let Some(w) = world().await else { return };
     let (from, until) = day_window();
 
     for path in [
         "/v1/audit/events?limit=500".to_owned(),
         format!(
-            "/v1/audit/disclosures?record={}&from={from}&until={until}",
+            "/v1/audit/disclosures?knowledge_item={}&from={from}&until={until}",
             w.runbook
         ),
         "/v1/audit/knowledge?subject=alice".to_owned(),
@@ -815,7 +886,7 @@ async fn no_record_content_reaches_any_audit_answer() {
         for content in [RUNBOOK, NOTE, PAYMENTS_ONLY] {
             assert!(
                 !rendered.contains(content),
-                "record content reached {path} — an auditor reads no content (seed §5)"
+                "Knowledge content reached {path} — an auditor reads no content (seed §5)"
             );
         }
         // The distinctive middles too, in case a renderer ever truncates.
@@ -826,7 +897,7 @@ async fn no_record_content_reaches_any_audit_answer() {
         ] {
             assert!(
                 !rendered.contains(fragment),
-                "a fragment of record content reached {path}: {fragment}"
+                "a fragment of Knowledge content reached {path}: {fragment}"
             );
         }
     }
@@ -834,7 +905,7 @@ async fn no_record_content_reaches_any_audit_answer() {
 
 /// **The surface is not an existence oracle** (ADR-0045 compliance notes).
 ///
-/// A record that does not exist and one that exists but was never served
+/// A Knowledge item that does not exist and one that exists but was never served
 /// answer identically — same status, same shape, same empty list. An
 /// auditor who could tell them apart would have a membership oracle over
 /// the corpus, which is exactly what `recall`'s uniform refusal exists to
@@ -843,13 +914,15 @@ async fn no_record_content_reaches_any_audit_answer() {
 async fn a_disclosure_answer_is_not_an_existence_oracle() {
     let Some(w) = world().await else { return };
     let (from, until) = day_window();
-    let nonexistent = RecordId::new();
+    let nonexistent = KnowledgeItemId::new();
 
     let mut answers = Vec::new();
-    for record in [nonexistent, w.payments_only] {
+    for knowledge_item in [nonexistent, w.payments_only] {
         let (status, body) = get(
             &w.app,
-            &format!("/v1/audit/disclosures?record={record}&from={from}&until={until}"),
+            &format!(
+                "/v1/audit/disclosures?knowledge_item={knowledge_item}&from={from}&until={until}"
+            ),
             &w.dana,
         )
         .await;
@@ -863,7 +936,7 @@ async fn a_disclosure_answer_is_not_an_existence_oracle() {
 
     assert_eq!(
         answers[0]["disclosed"], answers[1]["disclosed"],
-        "a record that never existed and one that was never served are \
+        "a Knowledge item that never existed and one that was never served are \
          indistinguishable in the answer"
     );
     assert_eq!(
@@ -888,7 +961,7 @@ async fn a_truncated_page_reports_itself_and_its_cursor_walks_the_whole_answer()
     let (_, whole) = get(
         &w.app,
         &format!(
-            "/v1/audit/disclosures?record={}&from={from}&until={until}",
+            "/v1/audit/disclosures?knowledge_item={}&from={from}&until={until}",
             w.runbook
         ),
         &w.dana,
@@ -903,7 +976,7 @@ async fn a_truncated_page_reports_itself_and_its_cursor_walks_the_whole_answer()
         let (status, page) = get(
             &w.app,
             &format!(
-                "/v1/audit/disclosures?record={}&from={from}&until={until}&limit=1&after={after}",
+                "/v1/audit/disclosures?knowledge_item={}&from={from}&until={until}&limit=1&after={after}",
                 w.runbook
             ),
             &w.dana,
@@ -1036,19 +1109,19 @@ async fn the_search_filters_by_actor_action_and_outcome_including_denials() {
     }
     assert!(
         !by_actor["events"].as_array().expect("events").is_empty(),
-        "bob injected, so bob is on the chain"
+        "bob composed context, so bob is on the chain"
     );
 
     // By action: every row is the action asked for.
-    let (status, injects) = get(
+    let (status, compositions) = get(
         &w.app,
-        "/v1/audit/events?action=context.injected&limit=200",
+        "/v1/audit/events?action=session.context.composed&limit=200",
         &w.dana,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    for event in injects["events"].as_array().expect("events") {
-        assert_eq!(event["action"].as_str(), Some("context.injected"));
+    for event in compositions["events"].as_array().expect("events") {
+        assert_eq!(event["action"].as_str(), Some("session.context.composed"));
     }
 }
 
@@ -1062,7 +1135,7 @@ async fn a_typo_is_refused_rather_than_answered_with_nothing() {
     let Some(w) = world().await else { return };
 
     for path in [
-        "/v1/audit/events?action=context.injcted",
+        "/v1/audit/events?action=session.context.compozed",
         "/v1/audit/events?outcome=denied",
         "/v1/audit/events?limit=1001",
         "/v1/audit/events?limit=0",

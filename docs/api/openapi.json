@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Synveda",
-    "description": "Governed Knowledge and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface: `/v1/me`, the workspace, project and repository planes (CPR-4), the access plane — members, groups, grants and invitations (CPR-5), and the scope admin plane (CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants), and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, append events, end, timeline, and the context-run endpoint), with CPR-11's paginated and filtered listing and its diagnostic expansion of one event. CPR-17 adds stable Knowledge, immutable revision history, independently governed provenance and lifecycle mutations at `/v1/knowledge`; every write is an idempotent VedaFlow change and the collection is current-active by default with lexical and honestly degraded semantic search. CPR-18 adds `/v1/capture-batches` and `/v1/capture-candidates`: explicit or session-end extraction freezes exact event evidence and produces reviewable candidates only. Accept, edit, merge and replace enter the same Knowledge VedaFlow command layer; dismissal publishes nothing. Since CPR-12 the session plane is also the **only** runtime plane: `POST /v1/sessions/{session_id}/events` is where observations are admitted and `POST /v1/sessions/{session_id}/context-runs` is where context is composed. The global `/v1/observe`, `/v1/inject` and `/v1/recall` routes that used to do both are deleted, not merely undocumented. The rest of the `/v1` surface — proposals, channels, the registries and the older admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`. Appending session events is the one exception, and it is idempotent by a finer unit: each event carries the client's own `client_event_id`, unique within its session, so a redelivered batch appends what is new and reports `duplicate` for the rest.\n\n**Identity.** No request body on this surface accepts a tenant or an acting principal. Both are resolved from the bearer credential; a body naming either is refused rather than ignored.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
+    "description": "Governed Knowledge and context for AI agents.\n\n**Coverage.** This document describes the context-platform surface: `/v1/me`, the workspace, project and repository planes (CPR-4), the access plane — members, groups, grants and invitations (CPR-5), and the scope admin plane (CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants), and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, append events, end, timeline, and the context-run endpoint), with CPR-11's paginated and filtered listing and its diagnostic expansion of one event. CPR-17 adds stable Knowledge, immutable revision history, independently governed provenance and lifecycle mutations at `/v1/knowledge`; every write is an idempotent VedaFlow change and the collection is current-active by default with lexical and honestly degraded semantic search. CPR-18 adds `/v1/capture-batches` and `/v1/capture-candidates`: explicit or session-end extraction freezes exact event evidence and produces reviewable candidates only. Accept, edit, merge and replace enter the same Knowledge VedaFlow command layer; dismissal publishes nothing. CPR-20 makes context runs explainable over current immutable Knowledge, adds re-authorised trace and feedback operations, and provides ordinary and diagnostic session-scoped Knowledge query lenses without a global recall. Since CPR-12 the session plane is also the **only** runtime plane: `POST /v1/sessions/{session_id}/events` is where observations are admitted and `POST /v1/sessions/{session_id}/context-runs` is where context is composed. The global `/v1/observe`, `/v1/inject` and `/v1/recall` routes that used to do both are deleted, not merely undocumented. The rest of the `/v1` surface — proposals, channels, the registries and the older admin planes — predates the OpenAPI contract and is brought onto it by a later prompt of the context-platform programme. Its absence here is a statement about this document, not about the gateway.\n\n**Tenancy.** Every path below sits behind bearer authentication and tenant resolution. A response is always scoped to the caller's tenant, which is why no response body echoes a tenant id.\n\n**Idempotency.** Every creation takes a required `Idempotency-Key` header. Reusing a key with the same request replays the original resource with `200`; a fresh key creates and answers `201`; reusing a key with a *different* request is `409`. Appending session events is the one exception, and it is idempotent by a finer unit: each event carries the client's own `client_event_id`, unique within its session, so a redelivered batch appends what is new and reports `duplicate` for the rest.\n\n**Identity.** No request body on this surface accepts a tenant or an acting principal. Both are resolved from the bearer credential; a body naming either is refused rather than ignored.\n\n**Preconditions.** Every update on the workspace plane — workspaces, projects, repositories — takes a required `expected_revision`; a mismatch is `409` and writes nothing. The scope admin plane does not: a scope carries no revision, and its mutations are last-writer-wins under the PDP.",
     "license": {
       "name": "Proprietary"
     },
@@ -1622,6 +1622,265 @@
           },
           "409": {
             "description": "Stale revision or changed retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/context-runs": {
+      "get": {
+        "tags": [
+          "context"
+        ],
+        "summary": "`GET /v1/context-runs` — cursor-paginated, per-session-authorised plans.",
+        "operationId": "list_context_runs",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Exact session.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Exact project.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "principal_id",
+            "in": "query",
+            "description": "Exact requesting principal.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque keyset cursor.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Served-row bound, 1–200.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Visible context runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextRunListView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied session reading",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/context-runs/{id}": {
+      "get": {
+        "tags": [
+          "context"
+        ],
+        "summary": "`GET /v1/context-runs/{id}` — re-authorised planner detail.",
+        "operationId": "get_context_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Context run id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Visible retained planner detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextRunDetailView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied session reading",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such context run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/context-runs/{id}/feedback": {
+      "post": {
+        "tags": [
+          "context"
+        ],
+        "summary": "`POST /v1/context-runs/{id}/feedback` — one explicit outcome assertion.",
+        "operationId": "create_context_feedback",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Context run id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextFeedbackBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Idempotent replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextFeedbackView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Feedback recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextFeedbackView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or missing key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied session writing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such visible run or selection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -4048,10 +4307,9 @@
     "/v1/sessions/{session_id}/context-runs": {
       "post": {
         "tags": [
-          "sessions"
+          "context"
         ],
-        "summary": "`POST /v1/sessions/{session_id}/context-runs` — compose context for a run.",
-        "description": "**The final shape of this endpoint** (ADR-0076 decision 7). What it does\ntoday is decide `SessionWrite` at the session, call the existing retrieval\nengine over the session's scope chain and the caller's own, persist the\nidentity and the rendered block, and chain the watermark. Prompt 18 adds\nthe explainability — which scopes were considered, which were denied, why\neach entry made the cut — behind this same request and this same envelope.",
+        "summary": "`POST /v1/sessions/{session_id}/context-runs` — plan and deliver context.",
         "operationId": "create_context_run",
         "parameters": [
           {
@@ -4066,7 +4324,7 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Required. A unique value per request, reused verbatim on retry.",
+            "description": "Required. Reuse verbatim on retry.",
             "required": true,
             "schema": {
               "type": "string"
@@ -4077,7 +4335,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ContextRunBody"
+                "$ref": "#/components/schemas/CreateContextRunBody"
               }
             }
           },
@@ -4085,7 +4343,7 @@
         },
         "responses": {
           "200": {
-            "description": "This key already composed this run",
+            "description": "Idempotent replay",
             "content": {
               "application/json": {
                 "schema": {
@@ -4095,7 +4353,7 @@
             }
           },
           "201": {
-            "description": "Composed",
+            "description": "Knowledge-backed context planned and delivered",
             "content": {
               "application/json": {
                 "schema": {
@@ -4105,7 +4363,7 @@
             }
           },
           "400": {
-            "description": "Malformed body, or no `Idempotency-Key`",
+            "description": "Invalid body or idempotency key",
             "content": {
               "application/json": {
                 "schema": {
@@ -4115,7 +4373,7 @@
             }
           },
           "403": {
-            "description": "The PDP denied `session.write`",
+            "description": "The PDP denied session writing",
             "content": {
               "application/json": {
                 "schema": {
@@ -4125,7 +4383,7 @@
             }
           },
           "404": {
-            "description": "No such session in this tenant",
+            "description": "No such session",
             "content": {
               "application/json": {
                 "schema": {
@@ -4135,7 +4393,7 @@
             }
           },
           "409": {
-            "description": "The key was reused for a different request",
+            "description": "Idempotency conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -4377,6 +4635,160 @@
           },
           "404": {
             "description": "No such session or event in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/knowledge-evaluation": {
+      "post": {
+        "tags": [
+          "context"
+        ],
+        "summary": "`POST /v1/sessions/{session_id}/knowledge-evaluation` — diagnostics lens.",
+        "operationId": "evaluate_session_knowledge",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Owning session",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeEvaluationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Diagnostic query, id fetch or enumeration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextKnowledgeQueryView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid mutually exclusive lens",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied session diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/knowledge-query": {
+      "post": {
+        "tags": [
+          "context"
+        ],
+        "summary": "`POST /v1/sessions/{session_id}/knowledge-query` — ordinary deep recall.",
+        "operationId": "query_session_knowledge",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Owning session",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeQueryBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Current visible Knowledge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextKnowledgeQueryView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query or limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied session or Knowledge reading",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session",
             "content": {
               "application/json": {
                 "schema": {
@@ -5885,35 +6297,294 @@
           }
         }
       },
-      "ContextRunBody": {
+      "ContextCandidateView": {
         "type": "object",
-        "description": "`POST /v1/sessions/{session_id}/context-runs`.\n\nThe **final shape** of this endpoint (ADR-0076 decision 7). What it does\ntoday is call the existing retrieval engine and persist the identity and\nthe rendered block; Prompt 18 adds the explainability — which scopes were\nconsidered, which were denied, why each entry made the cut — behind the\nsame request and the same response envelope.",
+        "description": "One retained, freshly re-authorised planner candidate.",
+        "required": [
+          "id",
+          "ordinal",
+          "content_hash",
+          "reason_codes"
+        ],
         "properties": {
-          "budget_tokens": {
+          "content_hash": {
+            "type": "string",
+            "description": "Canonical content hash."
+          },
+          "exclusion_reason": {
             "type": [
-              "integer",
+              "string",
               "null"
             ],
+            "description": "Why this visible candidate was not selected."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Trace-row id."
+          },
+          "knowledge_item_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Stable Knowledge item, absent in hashes-only mode."
+          },
+          "knowledge_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact immutable revision, absent in hashes-only mode."
+          },
+          "lifecycle_state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Lifecycle observed at planning time."
+          },
+          "ordinal": {
+            "type": "integer",
             "format": "int32",
-            "description": "Narrow the block's token budget. The caller may narrow and never\nwiden: the pack's budget is the ceiling.",
-            "minimum": 0
+            "description": "Consideration position."
           },
-          "max_sensitivity": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Ceiling on the sensitivity tier that may compose."
+          "reason_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Why it was considered."
           },
-          "query": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "What the agent is about to do. Ranks the material; omitting it is the\nsession-start shape — everything pinned, nothing ranked."
+          "revision": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/KnowledgeRevisionView",
+                "description": "Exact immutable content, full mode only and freshly authorised."
+              }
+            ]
+          },
+          "scores": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ContextScoreView",
+                "description": "Full-mode score detail."
+              }
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeSourceView"
+            },
+            "description": "Independently visible provenance, full mode only."
+          }
+        }
+      },
+      "ContextFeedbackBody": {
+        "type": "object",
+        "description": "Explicit feedback about one exact selected revision.",
+        "required": [
+          "context_selection_id",
+          "knowledge_revision_id",
+          "feedback_type"
+        ],
+        "properties": {
+          "context_selection_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact retained selection."
+          },
+          "feedback_type": {
+            "type": "string",
+            "description": "One of the five explicit feedback values."
+          },
+          "knowledge_revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact immutable revision selected."
           }
         },
         "additionalProperties": false
+      },
+      "ContextFeedbackView": {
+        "type": "object",
+        "description": "One explicit feedback assertion.",
+        "required": [
+          "id",
+          "context_selection_id",
+          "knowledge_revision_id",
+          "feedback_type",
+          "principal_id",
+          "created_at"
+        ],
+        "properties": {
+          "context_selection_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact selection."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Assertion time."
+          },
+          "feedback_type": {
+            "type": "string",
+            "description": "Feedback vocabulary."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Feedback id."
+          },
+          "knowledge_revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact immutable revision."
+          },
+          "principal_id": {
+            "type": "string",
+            "description": "Authenticated subject that supplied it."
+          }
+        }
+      },
+      "ContextKnowledgeQueryView": {
+        "type": "object",
+        "description": "Scoped Knowledge query/evaluation result.",
+        "required": [
+          "items",
+          "as_of",
+          "retrieval_mode"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Valid-time instant applied to the current-head projection."
+          },
+          "degradation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Honest semantic degradation, when applicable."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextKnowledgeView"
+            },
+            "description": "Policy-visible current Knowledge."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Evaluation sweep continuation. Ordinary queries never return one."
+          },
+          "retrieval_mode": {
+            "type": "string",
+            "description": "`lexical`, `hybrid`, `listing` or `ids`."
+          }
+        }
+      },
+      "ContextKnowledgeView": {
+        "type": "object",
+        "description": "One current Knowledge query result with independently visible evidence.",
+        "required": [
+          "knowledge",
+          "sources"
+        ],
+        "properties": {
+          "knowledge": {
+            "$ref": "#/components/schemas/KnowledgeItemView",
+            "description": "Current stable item and immutable revision."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeSourceView"
+            },
+            "description": "Independently visible provenance."
+          }
+        }
+      },
+      "ContextRunDetailView": {
+        "type": "object",
+        "description": "Freshly re-authorised detail for one context run.",
+        "required": [
+          "run",
+          "candidates",
+          "selections",
+          "feedback"
+        ],
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextCandidateView"
+            },
+            "description": "Retained visible candidates. Empty in disabled mode."
+          },
+          "feedback": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextFeedbackView"
+            },
+            "description": "Explicit feedback whose revision remains visible."
+          },
+          "policy_exclusion_message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Aggregate revocation/policy notice with no denied count."
+          },
+          "run": {
+            "$ref": "#/components/schemas/ContextRunView",
+            "description": "Core immutable run/delivery record."
+          },
+          "selections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextSelectionView"
+            },
+            "description": "Retained visible selections. Empty in disabled mode."
+          }
+        }
+      },
+      "ContextRunListView": {
+        "type": "object",
+        "description": "Cursor page of context runs.",
+        "required": [
+          "runs"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Resume position after the last candidate considered."
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextRunView"
+            },
+            "description": "Freshly session-authorised rows."
+          }
+        }
       },
       "ContextRunView": {
         "type": "object",
@@ -5921,17 +6592,29 @@
         "required": [
           "id",
           "session_id",
+          "workspace_id",
           "scope_id",
-          "rendered",
           "block_hash",
           "tokens",
           "budget_tokens",
           "entry_count",
+          "candidate_count",
+          "selection_count",
           "skills",
           "degraded",
+          "as_of",
+          "retrieval_version",
+          "index_version",
+          "trace_retention_mode",
+          "completion_status",
           "created_at"
         ],
         "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Valid-time instant used for current Knowledge."
+          },
           "block_hash": {
             "type": "string",
             "description": "BLAKE3 over the composed entries, hex."
@@ -5940,6 +6623,15 @@
             "type": "integer",
             "format": "int32",
             "description": "The budget it composed under."
+          },
+          "candidate_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Visible candidates retained for the run."
+          },
+          "completion_status": {
+            "type": "string",
+            "description": "`pending`, `completed` or `failed`."
           },
           "created_at": {
             "type": "string",
@@ -5953,15 +6645,48 @@
             },
             "description": "Which retrieval legs degraded — `embedder`, `retrieval`. Empty is the\nordinary answer."
           },
+          "embedding_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Semantic model used, when configured."
+          },
           "entry_count": {
             "type": "integer",
             "format": "int32",
             "description": "How many records composed."
           },
+          "graph_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Graph implementation version, when graph expansion ran."
+          },
           "id": {
             "type": "string",
             "format": "uuid",
             "description": "The run's id."
+          },
+          "index_version": {
+            "type": "string",
+            "description": "Knowledge index implementation version."
+          },
+          "policy_exclusion_message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Aggregate policy-filtering notice without a denied count."
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Project derived from the session, when present."
           },
           "query": {
             "type": [
@@ -5970,14 +6695,41 @@
             ],
             "description": "The task, when one was named."
           },
+          "query_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Content-free query digest."
+          },
           "rendered": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The rendered block, watermark line included. Empty when nothing\ncomposed — a result, not an error."
+          },
+          "requested_budget_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Caller-requested budget before the governed ceiling."
+          },
+          "retrieval_version": {
+            "type": "string",
+            "description": "Planner implementation version."
           },
           "scope_id": {
             "type": "string",
             "format": "uuid",
             "description": "The scope it was anchored at."
+          },
+          "selection_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Immutable Knowledge revisions selected."
           },
           "session_id": {
             "type": "string",
@@ -5992,8 +6744,164 @@
             "type": "integer",
             "format": "int32",
             "description": "Estimated tokens of `rendered`."
+          },
+          "trace_retention_mode": {
+            "type": "string",
+            "description": "`full`, `redacted`, `hashes_only` or `disabled`."
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Workspace derived from the session."
           }
         }
+      },
+      "ContextScoreView": {
+        "type": "object",
+        "description": "Integer score components retained for an authorised candidate.",
+        "required": [
+          "keyword_micros",
+          "semantic_micros",
+          "freshness_micros",
+          "pin_micros",
+          "current_state_micros",
+          "final_micros"
+        ],
+        "properties": {
+          "current_state_micros": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Current-state contribution, per million."
+          },
+          "final_micros": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Final deterministic score, per million."
+          },
+          "freshness_micros": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Freshness contribution, per million."
+          },
+          "keyword_micros": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Lexical contribution, per million."
+          },
+          "pin_micros": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Explicit-pin contribution, per million."
+          },
+          "semantic_micros": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Semantic contribution, per million."
+          }
+        }
+      },
+      "ContextSelectionView": {
+        "type": "object",
+        "description": "One retained selected revision.",
+        "required": [
+          "id",
+          "rank",
+          "content_hash",
+          "token_count",
+          "reason_codes"
+        ],
+        "properties": {
+          "content_hash": {
+            "type": "string",
+            "description": "Canonical content hash."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Selection id."
+          },
+          "knowledge_item_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Stable Knowledge item, absent in hashes-only mode."
+          },
+          "knowledge_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact immutable revision, absent in hashes-only mode."
+          },
+          "rank": {
+            "type": "integer",
+            "format": "int32",
+            "description": "One-based delivery rank."
+          },
+          "reason_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Why it was selected."
+          },
+          "revision": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/KnowledgeRevisionView",
+                "description": "Exact immutable content, full mode only and freshly authorised."
+              }
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeSourceView"
+            },
+            "description": "Independently visible provenance, full mode only."
+          },
+          "token_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Estimated tokens charged."
+          }
+        }
+      },
+      "CreateContextRunBody": {
+        "type": "object",
+        "description": "`POST /v1/sessions/{session_id}/context-runs`.",
+        "properties": {
+          "budget_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Requested budget; the governed pack remains the ceiling.",
+            "minimum": 0
+          },
+          "max_sensitivity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional sensitivity narrowing."
+          },
+          "query": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Task/query; omission is the session-start recency shape."
+          }
+        },
+        "additionalProperties": false
       },
       "CreateGroupBody": {
         "type": "object",
@@ -6791,6 +7699,50 @@
         },
         "additionalProperties": false
       },
+      "KnowledgeEvaluationBody": {
+        "type": "object",
+        "description": "Separately authorised evaluation query/enumeration/id lens.",
+        "properties": {
+          "as_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Valid-time instant for the current-head projection. Defaults to now."
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Opaque continuation for an enumeration sweep."
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exact stable ids. Omit with `query` for an enumeration sweep."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Candidate/page bound, 1–100."
+          },
+          "query": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Query text. Omit with `ids` for an enumeration sweep."
+          }
+        },
+        "additionalProperties": false
+      },
       "KnowledgeHistoryView": {
         "type": "object",
         "description": "Immutable revision history page.",
@@ -7013,6 +7965,28 @@
             "description": "Resulting immutable revision when applied."
           }
         }
+      },
+      "KnowledgeQueryBody": {
+        "type": "object",
+        "description": "Ordinary session-scoped deep query.",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Result bound, 1–100."
+          },
+          "query": {
+            "type": "string",
+            "description": "Query text."
+          }
+        },
+        "additionalProperties": false
       },
       "KnowledgeRelationView": {
         "type": "object",
@@ -7345,7 +8319,7 @@
       },
       "KnowledgeUsageListView": {
         "type": "object",
-        "description": "Cursor envelope for usage history. It is truthfully empty until CPR-18's\n`ContextSelection` aggregate produces entries.",
+        "description": "Cursor envelope for policy-visible usage history.",
         "required": [
           "usages"
         ],
@@ -7368,9 +8342,11 @@
       },
       "KnowledgeUsageView": {
         "type": "object",
-        "description": "One future context-use entry. CPR-18 is the first producer.",
+        "description": "One policy-visible context use of an exact immutable revision.",
         "required": [
           "context_run_id",
+          "session_id",
+          "context_selection_id",
           "revision_id",
           "selected_at",
           "reason_codes"
@@ -7380,6 +8356,11 @@
             "type": "string",
             "format": "uuid",
             "description": "Context run that selected the exact revision."
+          },
+          "context_selection_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact selection, suitable for explicit feedback."
           },
           "reason_codes": {
             "type": "array",
@@ -7397,6 +8378,11 @@
             "type": "string",
             "format": "date-time",
             "description": "Selection time."
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Session whose access was independently decided."
           }
         }
       },
@@ -8982,6 +9968,10 @@
     {
       "name": "capture",
       "description": "Session evidence extraction into reviewable Knowledge candidates"
+    },
+    {
+      "name": "context",
+      "description": "Explainable Knowledge planning, scoped query and explicit feedback"
     }
   ]
 }

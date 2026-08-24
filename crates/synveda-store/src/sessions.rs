@@ -41,8 +41,8 @@ use synveda_types::session::{
     validate_client_event_id, validate_client_name, validate_json_object, validate_label,
 };
 use synveda_types::{
-    ContextRunId, Error, ProjectId, RepositoryId, Result, ScopeId, SessionEventId, SessionId,
-    TenantId, WorkspaceId,
+    ContextCompletionStatus, ContextRunId, Error, ProjectId, RepositoryId, Result, ScopeId,
+    SessionEventId, SessionId, TenantId, TraceRetentionMode, WorkspaceId,
 };
 use uuid::Uuid;
 
@@ -1207,12 +1207,18 @@ pub struct NewContextRun {
     pub id: ContextRunId,
     /// The session it was composed for.
     pub session_id: SessionId,
+    /// Workspace derived from the session.
+    pub workspace_id: WorkspaceId,
+    /// Project derived from the session, when present.
+    pub project_id: Option<ProjectId>,
     /// The scope it was anchored at — the session's.
     pub scope_id: ScopeId,
     /// The token subject that asked.
     pub principal_id: String,
     /// The task, when one was named.
     pub query: Option<String>,
+    /// BLAKE3 digest of the query, when present.
+    pub query_hash: Option<String>,
     /// The composed block.
     pub rendered: String,
     /// The block's identity.
@@ -1221,49 +1227,101 @@ pub struct NewContextRun {
     pub tokens: i32,
     /// The budget it composed under.
     pub budget_tokens: i32,
+    /// Caller-requested budget before the governed ceiling.
+    pub requested_budget_tokens: Option<i32>,
     /// How many records composed.
     pub entry_count: i32,
+    /// Visible candidates retained.
+    pub candidate_count: i32,
+    /// Knowledge selections retained.
+    pub selection_count: i32,
     /// The skills the block advertised (ADR-0054 decision 8).
     pub skills: serde_json::Value,
     /// Which legs degraded.
     pub degraded: Vec<String>,
+    /// Valid-time instant used by retrieval.
+    pub as_of: DateTime<Utc>,
+    /// Planner implementation version.
+    pub retrieval_version: String,
+    /// Semantic model, absent for lexical-only planning.
+    pub embedding_model: Option<String>,
+    /// Knowledge index implementation version.
+    pub index_version: String,
+    /// Graph implementation version, absent until graph expansion runs.
+    pub graph_version: Option<String>,
+    /// Governed trace-retention mode.
+    pub trace_retention: TraceRetentionMode,
+    /// Planning completion state.
+    pub completion_status: ContextCompletionStatus,
+    /// Whether policy filtered at least one candidate, without a count.
+    pub policy_exclusion: bool,
 }
 
 struct ContextRunRow {
     id: Uuid,
     tenant_id: Uuid,
     session_id: Uuid,
+    workspace_id: Uuid,
+    project_id: Option<Uuid>,
     scope_id: Uuid,
     principal_id: String,
     query: Option<String>,
+    query_hash: Option<String>,
     rendered: String,
     block_hash: String,
     tokens: i32,
     budget_tokens: i32,
+    requested_budget_tokens: Option<i32>,
     entry_count: i32,
+    candidate_count: i32,
+    selection_count: i32,
     skills: serde_json::Value,
     degraded: Vec<String>,
+    as_of: DateTime<Utc>,
+    retrieval_version: String,
+    embedding_model: Option<String>,
+    index_version: String,
+    graph_version: Option<String>,
+    trace_retention_mode: String,
+    completion_status: String,
+    policy_exclusion: bool,
     created_at: DateTime<Utc>,
 }
 
-impl From<ContextRunRow> for ContextRun {
-    fn from(row: ContextRunRow) -> Self {
-        ContextRun {
+impl TryFrom<ContextRunRow> for ContextRun {
+    type Error = Error;
+
+    fn try_from(row: ContextRunRow) -> Result<Self> {
+        Ok(ContextRun {
             id: ContextRunId::from_uuid(row.id),
             tenant_id: TenantId::from_uuid(row.tenant_id),
             session_id: SessionId::from_uuid(row.session_id),
+            workspace_id: WorkspaceId::from_uuid(row.workspace_id),
+            project_id: row.project_id.map(ProjectId::from_uuid),
             scope_id: ScopeId::from_uuid(row.scope_id),
             principal_id: row.principal_id,
             query: row.query,
+            query_hash: row.query_hash,
             rendered: row.rendered,
             block_hash: row.block_hash,
             tokens: row.tokens,
             budget_tokens: row.budget_tokens,
+            requested_budget_tokens: row.requested_budget_tokens,
             entry_count: row.entry_count,
+            candidate_count: row.candidate_count,
+            selection_count: row.selection_count,
             skills: row.skills,
             degraded: row.degraded,
+            as_of: row.as_of,
+            retrieval_version: row.retrieval_version,
+            embedding_model: row.embedding_model,
+            index_version: row.index_version,
+            graph_version: row.graph_version,
+            trace_retention: row.trace_retention_mode.parse()?,
+            completion_status: row.completion_status.parse()?,
+            policy_exclusion: row.policy_exclusion,
             created_at: row.created_at,
-        }
+        })
     }
 }
 
@@ -1286,26 +1344,54 @@ pub async fn record_context_run(
         ContextRunRow,
         r#"
         insert into session_context_runs
-            (id, tenant_id, session_id, scope_id, principal_id, query, rendered,
-             block_hash, tokens, budget_tokens, entry_count, skills, degraded)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-        returning id, tenant_id, session_id, scope_id, principal_id, query,
-                  rendered, block_hash, tokens, budget_tokens, entry_count,
-                  skills, degraded, created_at
+            (id, tenant_id, session_id, workspace_id, project_id, scope_id,
+             principal_id, query, query_hash, rendered, block_hash, tokens,
+             budget_tokens, requested_budget_tokens, entry_count,
+             candidate_count, selection_count, skills, degraded, as_of,
+             retrieval_version, embedding_model, index_version, graph_version,
+             trace_retention_mode, completion_status, policy_exclusion)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
+                $25, $26, $27)
+        returning id, tenant_id, session_id, workspace_id as "workspace_id!",
+                  project_id, scope_id,
+                  principal_id, query, query_hash, rendered, block_hash, tokens,
+                  budget_tokens, requested_budget_tokens, entry_count,
+                  candidate_count, selection_count, skills, degraded,
+                  as_of as "as_of!",
+                  retrieval_version as "retrieval_version!", embedding_model,
+                  index_version as "index_version!", graph_version,
+                  trace_retention_mode as "trace_retention_mode!",
+                  completion_status as "completion_status!",
+                  policy_exclusion, created_at
         "#,
         new.id.as_uuid(),
         tenant_id.as_uuid(),
         new.session_id.as_uuid(),
+        new.workspace_id.as_uuid(),
+        new.project_id.map(|id| id.as_uuid()),
         new.scope_id.as_uuid(),
         new.principal_id,
         new.query.as_deref() as Option<&str>,
+        new.query_hash.as_deref() as Option<&str>,
         new.rendered,
         new.block_hash,
         new.tokens,
         new.budget_tokens,
+        new.requested_budget_tokens,
         new.entry_count,
+        new.candidate_count,
+        new.selection_count,
         new.skills,
         &new.degraded,
+        new.as_of,
+        new.retrieval_version,
+        new.embedding_model.as_deref() as Option<&str>,
+        new.index_version,
+        new.graph_version.as_deref() as Option<&str>,
+        new.trace_retention.as_str(),
+        new.completion_status.as_str(),
+        new.policy_exclusion,
     )
     .fetch_one(&mut *conn)
     .await
@@ -1317,7 +1403,7 @@ pub async fn record_context_run(
         "operation" => "create",
     )
     .increment(1);
-    Ok(row.into())
+    row.try_into()
 }
 
 /// Fetches one context run.
@@ -1335,11 +1421,18 @@ pub async fn context_run(
     let row = sqlx::query_as!(
         ContextRunRow,
         r#"
-        select id, tenant_id, session_id, scope_id, principal_id, query, rendered,
-               block_hash, tokens, budget_tokens, entry_count, skills, degraded,
+        select id, tenant_id, session_id, workspace_id as "workspace_id!",
+               project_id, scope_id,
+               principal_id, query, query_hash, rendered, block_hash, tokens,
+               budget_tokens, requested_budget_tokens, entry_count,
+               candidate_count, selection_count, skills, degraded,
+               as_of as "as_of!", retrieval_version as "retrieval_version!",
+               embedding_model, index_version as "index_version!", graph_version,
+               trace_retention_mode as "trace_retention_mode!",
+               completion_status as "completion_status!", policy_exclusion,
                created_at
         from session_context_runs
-        where id = $1 and tenant_id = $2
+        where id = $1 and tenant_id = $2 and workspace_id is not null
         "#,
         id.as_uuid(),
         tenant_id.as_uuid(),
@@ -1347,7 +1440,7 @@ pub async fn context_run(
     .fetch_optional(executor)
     .await
     .map_err(storage_error)?;
-    Ok(row.map(Into::into))
+    row.map(TryInto::try_into).transpose()
 }
 
 /// A session's context runs, oldest first.
@@ -1371,11 +1464,18 @@ pub async fn context_runs(
     let rows = sqlx::query_as!(
         ContextRunRow,
         r#"
-        select id, tenant_id, session_id, scope_id, principal_id, query,
-               '' as "rendered!", block_hash, tokens, budget_tokens, entry_count,
-               skills, degraded, created_at
+        select id, tenant_id, session_id, workspace_id as "workspace_id!",
+               project_id, scope_id,
+               principal_id, query, query_hash, '' as "rendered!", block_hash,
+               tokens, budget_tokens, requested_budget_tokens, entry_count,
+               candidate_count, selection_count, skills, degraded,
+               as_of as "as_of!", retrieval_version as "retrieval_version!",
+               embedding_model, index_version as "index_version!", graph_version,
+               trace_retention_mode as "trace_retention_mode!",
+               completion_status as "completion_status!", policy_exclusion,
+               created_at
         from session_context_runs
-        where tenant_id = $1 and session_id = $2
+        where tenant_id = $1 and session_id = $2 and workspace_id is not null
         order by created_at, id
         limit $3
         "#,
@@ -1386,7 +1486,84 @@ pub async fn context_runs(
     .fetch_all(executor)
     .await
     .map_err(storage_error)?;
-    Ok(rows.into_iter().map(Into::into).collect())
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// Keyset for the cross-session context-run listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContextRunCursor {
+    /// Last considered creation time.
+    pub created_at: DateTime<Utc>,
+    /// Stable tie-breaker.
+    pub id: ContextRunId,
+}
+
+/// Candidate filters for the public context-run listing.
+#[derive(Debug, Clone, Default)]
+pub struct ContextRunFilter {
+    /// Exact owning session.
+    pub session_id: Option<SessionId>,
+    /// Exact project association.
+    pub project_id: Option<ProjectId>,
+    /// Exact requesting principal.
+    pub principal_id: Option<String>,
+}
+
+/// Scans context-run candidates newest-first. This is deliberately not an
+/// authorised listing: the gateway decides `SessionRead` for each row and
+/// advances its cursor over denied candidates too.
+#[tracing::instrument(
+    name = "store.sessions.context_run_candidates",
+    skip_all,
+    fields(tenant.id = %tenant_id, limit),
+    err(Display)
+)]
+pub async fn context_run_candidates(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    filters: &ContextRunFilter,
+    cursor: Option<ContextRunCursor>,
+    limit: i64,
+) -> Result<Vec<ContextRun>> {
+    let cursor_at = cursor.map(|value| value.created_at);
+    let cursor_id = cursor.map(|value| value.id.as_uuid());
+    let rows = sqlx::query_as!(
+        ContextRunRow,
+        r#"
+        select id, tenant_id, session_id, workspace_id as "workspace_id!",
+               project_id, scope_id,
+               principal_id, query, query_hash, rendered, block_hash, tokens,
+               budget_tokens, requested_budget_tokens, entry_count,
+               candidate_count, selection_count, skills, degraded,
+               as_of as "as_of!", retrieval_version as "retrieval_version!",
+               embedding_model, index_version as "index_version!", graph_version,
+               trace_retention_mode as "trace_retention_mode!",
+               completion_status as "completion_status!", policy_exclusion,
+               created_at
+        from session_context_runs
+        where tenant_id = $1
+          and workspace_id is not null
+          and ($2::uuid is null or session_id = $2)
+          and ($3::uuid is null or project_id = $3)
+          and ($4::text is null or principal_id = $4)
+          and ($5::timestamptz is null
+               or created_at < $5
+               or (created_at = $5 and id < $6))
+        order by created_at desc, id desc
+        limit $7
+        "#,
+        tenant_id.as_uuid(),
+        filters.session_id.map(|id| id.as_uuid()),
+        filters.project_id.map(|id| id.as_uuid()),
+        filters.principal_id.as_deref() as Option<&str>,
+        cursor_at,
+        cursor_id,
+        limit.max(1),
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
 }
 
 #[cfg(test)]

@@ -455,35 +455,185 @@ export type ChainResponse = {
   };
 
 /**
- * `POST /v1/sessions/{session_id}/context-runs`.
- *
- * The **final shape** of this endpoint (ADR-0076 decision 7). What it does
- * today is call the existing retrieval engine and persist the identity and
- * the rendered block; Prompt 18 adds the explainability — which scopes were
- * considered, which were denied, why each entry made the cut — behind the
- * same request and the same response envelope.
+ * One retained, freshly re-authorised planner candidate.
  */
-export type ContextRunBody = {
+export type ContextCandidateView = {
     /**
-     * Narrow the block's token budget. The caller may narrow and never
-     * widen: the pack's budget is the ceiling.
+     * Canonical content hash.
      */
-    budget_tokens?: number | null;
+    content_hash: string;
     /**
-     * Ceiling on the sensitivity tier that may compose.
+     * Why this visible candidate was not selected.
      */
-    max_sensitivity?: string | null;
+    exclusion_reason?: string | null;
     /**
-     * What the agent is about to do. Ranks the material; omitting it is the
-     * session-start shape — everything pinned, nothing ranked.
+     * Trace-row id.
      */
-    query?: string | null;
+    id: string;
+    /**
+     * Stable Knowledge item, absent in hashes-only mode.
+     */
+    knowledge_item_id?: string | null;
+    /**
+     * Exact immutable revision, absent in hashes-only mode.
+     */
+    knowledge_revision_id?: string | null;
+    /**
+     * Lifecycle observed at planning time.
+     */
+    lifecycle_state?: string | null;
+    /**
+     * Consideration position.
+     */
+    ordinal: number;
+    /**
+     * Why it was considered.
+     */
+    reason_codes: string[];
+    revision?: unknown | null | KnowledgeRevisionView;
+    scores?: unknown | null | ContextScoreView;
+    /**
+     * Independently visible provenance, full mode only.
+     */
+    sources?: KnowledgeSourceView[];
+  };
+
+/**
+ * Explicit feedback about one exact selected revision.
+ */
+export type ContextFeedbackBody = {
+    /**
+     * Exact retained selection.
+     */
+    context_selection_id: string;
+    /**
+     * One of the five explicit feedback values.
+     */
+    feedback_type: string;
+    /**
+     * Exact immutable revision selected.
+     */
+    knowledge_revision_id: string;
+  };
+
+/**
+ * One explicit feedback assertion.
+ */
+export type ContextFeedbackView = {
+    /**
+     * Exact selection.
+     */
+    context_selection_id: string;
+    /**
+     * Assertion time.
+     */
+    created_at: string;
+    /**
+     * Feedback vocabulary.
+     */
+    feedback_type: string;
+    /**
+     * Feedback id.
+     */
+    id: string;
+    /**
+     * Exact immutable revision.
+     */
+    knowledge_revision_id: string;
+    /**
+     * Authenticated subject that supplied it.
+     */
+    principal_id: string;
+  };
+
+/**
+ * Scoped Knowledge query/evaluation result.
+ */
+export type ContextKnowledgeQueryView = {
+    /**
+     * Valid-time instant applied to the current-head projection.
+     */
+    as_of: string;
+    /**
+     * Honest semantic degradation, when applicable.
+     */
+    degradation?: string | null;
+    /**
+     * Policy-visible current Knowledge.
+     */
+    items: ContextKnowledgeView[];
+    /**
+     * Evaluation sweep continuation. Ordinary queries never return one.
+     */
+    next_cursor?: string | null;
+    /**
+     * `lexical`, `hybrid`, `listing` or `ids`.
+     */
+    retrieval_mode: string;
+  };
+
+/**
+ * One current Knowledge query result with independently visible evidence.
+ */
+export type ContextKnowledgeView = {
+    /**
+     * Current stable item and immutable revision.
+     */
+    knowledge: KnowledgeItemView;
+    /**
+     * Independently visible provenance.
+     */
+    sources: KnowledgeSourceView[];
+  };
+
+/**
+ * Freshly re-authorised detail for one context run.
+ */
+export type ContextRunDetailView = {
+    /**
+     * Retained visible candidates. Empty in disabled mode.
+     */
+    candidates: ContextCandidateView[];
+    /**
+     * Explicit feedback whose revision remains visible.
+     */
+    feedback: ContextFeedbackView[];
+    /**
+     * Aggregate revocation/policy notice with no denied count.
+     */
+    policy_exclusion_message?: string | null;
+    /**
+     * Core immutable run/delivery record.
+     */
+    run: ContextRunView;
+    /**
+     * Retained visible selections. Empty in disabled mode.
+     */
+    selections: ContextSelectionView[];
+  };
+
+/**
+ * Cursor page of context runs.
+ */
+export type ContextRunListView = {
+    /**
+     * Resume position after the last candidate considered.
+     */
+    next_cursor?: string | null;
+    /**
+     * Freshly session-authorised rows.
+     */
+    runs: ContextRunView[];
   };
 
 /**
  * A context run, as the API serves it.
  */
 export type ContextRunView = {
+    /**
+     * Valid-time instant used for current Knowledge.
+     */
+    as_of: string;
     /**
      * BLAKE3 over the composed entries, hex.
      */
@@ -492,6 +642,14 @@ export type ContextRunView = {
      * The budget it composed under.
      */
     budget_tokens: number;
+    /**
+     * Visible candidates retained for the run.
+     */
+    candidate_count: number;
+    /**
+     * `pending`, `completed` or `failed`.
+     */
+    completion_status: string;
     /**
      * When it was composed.
      */
@@ -502,26 +660,62 @@ export type ContextRunView = {
      */
     degraded: string[];
     /**
+     * Semantic model used, when configured.
+     */
+    embedding_model?: string | null;
+    /**
      * How many records composed.
      */
     entry_count: number;
+    /**
+     * Graph implementation version, when graph expansion ran.
+     */
+    graph_version?: string | null;
     /**
      * The run's id.
      */
     id: string;
     /**
+     * Knowledge index implementation version.
+     */
+    index_version: string;
+    /**
+     * Aggregate policy-filtering notice without a denied count.
+     */
+    policy_exclusion_message?: string | null;
+    /**
+     * Project derived from the session, when present.
+     */
+    project_id?: string | null;
+    /**
      * The task, when one was named.
      */
     query?: string | null;
     /**
+     * Content-free query digest.
+     */
+    query_hash?: string | null;
+    /**
      * The rendered block, watermark line included. Empty when nothing
      * composed — a result, not an error.
      */
-    rendered: string;
+    rendered?: string | null;
+    /**
+     * Caller-requested budget before the governed ceiling.
+     */
+    requested_budget_tokens?: number | null;
+    /**
+     * Planner implementation version.
+     */
+    retrieval_version: string;
     /**
      * The scope it was anchored at.
      */
     scope_id: string;
+    /**
+     * Immutable Knowledge revisions selected.
+     */
+    selection_count: number;
     /**
      * The session it was composed for.
      */
@@ -536,6 +730,101 @@ export type ContextRunView = {
      * Estimated tokens of `rendered`.
      */
     tokens: number;
+    /**
+     * `full`, `redacted`, `hashes_only` or `disabled`.
+     */
+    trace_retention_mode: string;
+    /**
+     * Workspace derived from the session.
+     */
+    workspace_id: string;
+  };
+
+/**
+ * Integer score components retained for an authorised candidate.
+ */
+export type ContextScoreView = {
+    /**
+     * Current-state contribution, per million.
+     */
+    current_state_micros: number;
+    /**
+     * Final deterministic score, per million.
+     */
+    final_micros: number;
+    /**
+     * Freshness contribution, per million.
+     */
+    freshness_micros: number;
+    /**
+     * Lexical contribution, per million.
+     */
+    keyword_micros: number;
+    /**
+     * Explicit-pin contribution, per million.
+     */
+    pin_micros: number;
+    /**
+     * Semantic contribution, per million.
+     */
+    semantic_micros: number;
+  };
+
+/**
+ * One retained selected revision.
+ */
+export type ContextSelectionView = {
+    /**
+     * Canonical content hash.
+     */
+    content_hash: string;
+    /**
+     * Selection id.
+     */
+    id: string;
+    /**
+     * Stable Knowledge item, absent in hashes-only mode.
+     */
+    knowledge_item_id?: string | null;
+    /**
+     * Exact immutable revision, absent in hashes-only mode.
+     */
+    knowledge_revision_id?: string | null;
+    /**
+     * One-based delivery rank.
+     */
+    rank: number;
+    /**
+     * Why it was selected.
+     */
+    reason_codes: string[];
+    revision?: unknown | null | KnowledgeRevisionView;
+    /**
+     * Independently visible provenance, full mode only.
+     */
+    sources?: KnowledgeSourceView[];
+    /**
+     * Estimated tokens charged.
+     */
+    token_count: number;
+  };
+
+/**
+ * `POST /v1/sessions/{session_id}/context-runs`.
+ */
+export type CreateContextRunBody = {
+    /**
+     * Requested budget; the governed pack remains the ceiling.
+     */
+    budget_tokens?: number | null;
+    /**
+     * Optional sensitivity narrowing.
+     */
+    max_sensitivity?: string | null;
+    /**
+     * Task/query; omission is the session-start recency shape.
+     */
+    query?: string | null;
   };
 
 /**
@@ -1025,6 +1314,32 @@ export type KnowledgeContentBody = {
   };
 
 /**
+ * Separately authorised evaluation query/enumeration/id lens.
+ */
+export type KnowledgeEvaluationBody = {
+    /**
+     * Valid-time instant for the current-head projection. Defaults to now.
+     */
+    as_of?: string | null;
+    /**
+     * Opaque continuation for an enumeration sweep.
+     */
+    cursor?: string | null;
+    /**
+     * Exact stable ids. Omit with `query` for an enumeration sweep.
+     */
+    ids?: string[];
+    /**
+     * Candidate/page bound, 1–100.
+     */
+    limit?: number | null;
+    /**
+     * Query text. Omit with `ids` for an enumeration sweep.
+     */
+    query?: string | null;
+  };
+
+/**
  * Immutable revision history page.
  */
 export type KnowledgeHistoryView = {
@@ -1135,6 +1450,20 @@ export type KnowledgeMutationView = {
      * Resulting immutable revision when applied.
      */
     revision_id?: string | null;
+  };
+
+/**
+ * Ordinary session-scoped deep query.
+ */
+export type KnowledgeQueryBody = {
+    /**
+     * Result bound, 1–100.
+     */
+    limit?: number | null;
+    /**
+     * Query text.
+     */
+    query: string;
   };
 
 /**
@@ -1324,8 +1653,7 @@ export type KnowledgeSourcesView = {
   };
 
 /**
- * Cursor envelope for usage history. It is truthfully empty until CPR-18's
- * `ContextSelection` aggregate produces entries.
+ * Cursor envelope for policy-visible usage history.
  */
 export type KnowledgeUsageListView = {
     /**
@@ -1339,13 +1667,17 @@ export type KnowledgeUsageListView = {
   };
 
 /**
- * One future context-use entry. CPR-18 is the first producer.
+ * One policy-visible context use of an exact immutable revision.
  */
 export type KnowledgeUsageView = {
     /**
      * Context run that selected the exact revision.
      */
     context_run_id: string;
+    /**
+     * Exact selection, suitable for explicit feedback.
+     */
+    context_selection_id: string;
     /**
      * Visible reason codes.
      */
@@ -1358,6 +1690,10 @@ export type KnowledgeUsageView = {
      * Selection time.
      */
     selected_at: string;
+    /**
+     * Session whose access was independently decided.
+     */
+    session_id: string;
   };
 
 /**
@@ -2565,6 +2901,32 @@ export type Operations = {
     readonly response: CaptureDecisionView;
   };
   /**
+   * `GET /v1/context-runs` — cursor-paginated, per-session-authorised plans.
+   */
+  readonly list_context_runs: {
+    readonly path: "/v1/context-runs";
+    readonly method: "GET";
+    readonly response: ContextRunListView;
+  };
+  /**
+   * `GET /v1/context-runs/{id}` — re-authorised planner detail.
+   */
+  readonly get_context_run: {
+    readonly path: "/v1/context-runs/{id}";
+    readonly method: "GET";
+    readonly response: ContextRunDetailView;
+  };
+  /**
+   * `POST /v1/context-runs/{id}/feedback` — one explicit outcome assertion.
+   */
+  readonly create_context_feedback: {
+    readonly path: "/v1/context-runs/{id}/feedback";
+    readonly method: "POST";
+    readonly body: ContextFeedbackBody;
+    readonly idempotent: true;
+    readonly response: ContextFeedbackView;
+  };
+  /**
    * `POST /v1/invites/{invite_token}/accept` — redeem one.
    */
   readonly accept_invite: {
@@ -2807,12 +3169,12 @@ export type Operations = {
     readonly response: CaptureBatchView;
   };
   /**
-   * `POST /v1/sessions/{session_id}/context-runs` — compose context for a run.
+   * `POST /v1/sessions/{session_id}/context-runs` — plan and deliver context.
    */
   readonly create_context_run: {
     readonly path: "/v1/sessions/{session_id}/context-runs";
     readonly method: "POST";
-    readonly body: ContextRunBody;
+    readonly body: CreateContextRunBody;
     readonly idempotent: true;
     readonly response: ContextRunView;
   };
@@ -2842,6 +3204,24 @@ export type Operations = {
     readonly path: "/v1/sessions/{session_id}/events/{event_id}";
     readonly method: "GET";
     readonly response: SessionEventView;
+  };
+  /**
+   * `POST /v1/sessions/{session_id}/knowledge-evaluation` — diagnostics lens.
+   */
+  readonly evaluate_session_knowledge: {
+    readonly path: "/v1/sessions/{session_id}/knowledge-evaluation";
+    readonly method: "POST";
+    readonly body: KnowledgeEvaluationBody;
+    readonly response: ContextKnowledgeQueryView;
+  };
+  /**
+   * `POST /v1/sessions/{session_id}/knowledge-query` — ordinary deep recall.
+   */
+  readonly query_session_knowledge: {
+    readonly path: "/v1/sessions/{session_id}/knowledge-query";
+    readonly method: "POST";
+    readonly body: KnowledgeQueryBody;
+    readonly response: ContextKnowledgeQueryView;
   };
   /**
    * `GET /v1/sessions/{session_id}/timeline` — the projection.
@@ -2972,6 +3352,9 @@ export const OPERATIONS = {
   dismiss_capture_candidate: { path: "/v1/capture-candidates/{id}/dismiss", method: "POST", idempotent: true },
   merge_capture_candidate: { path: "/v1/capture-candidates/{id}/merge", method: "POST", idempotent: true },
   replace_capture_candidate: { path: "/v1/capture-candidates/{id}/replace", method: "POST", idempotent: true },
+  list_context_runs: { path: "/v1/context-runs", method: "GET" },
+  get_context_run: { path: "/v1/context-runs/{id}", method: "GET" },
+  create_context_feedback: { path: "/v1/context-runs/{id}/feedback", method: "POST", idempotent: true },
   accept_invite: { path: "/v1/invites/{invite_token}/accept", method: "POST" },
   list_knowledge: { path: "/v1/knowledge", method: "GET" },
   create_knowledge: { path: "/v1/knowledge", method: "POST", idempotent: true },
@@ -3003,6 +3386,8 @@ export const OPERATIONS = {
   end_session: { path: "/v1/sessions/{session_id}/end", method: "POST" },
   append_session_events: { path: "/v1/sessions/{session_id}/events", method: "POST" },
   get_session_event: { path: "/v1/sessions/{session_id}/events/{event_id}", method: "GET" },
+  evaluate_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-evaluation", method: "POST" },
+  query_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-query", method: "POST" },
   get_session_timeline: { path: "/v1/sessions/{session_id}/timeline", method: "GET" },
   list_workspaces: { path: "/v1/workspaces", method: "GET" },
   create_workspace: { path: "/v1/workspaces", method: "POST", idempotent: true },

@@ -1,0 +1,190 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, session_id, workspace_id as \"workspace_id!\",\n               project_id, scope_id,\n               principal_id, query, query_hash, rendered, block_hash, tokens,\n               budget_tokens, requested_budget_tokens, entry_count,\n               candidate_count, selection_count, skills, degraded,\n               as_of as \"as_of!\", retrieval_version as \"retrieval_version!\",\n               embedding_model, index_version as \"index_version!\", graph_version,\n               trace_retention_mode as \"trace_retention_mode!\",\n               completion_status as \"completion_status!\", policy_exclusion,\n               created_at\n        from session_context_runs\n        where tenant_id = $1\n          and workspace_id is not null\n          and ($2::uuid is null or session_id = $2)\n          and ($3::uuid is null or project_id = $3)\n          and ($4::text is null or principal_id = $4)\n          and ($5::timestamptz is null\n               or created_at < $5\n               or (created_at = $5 and id < $6))\n        order by created_at desc, id desc\n        limit $7\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "workspace_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "query",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "query_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "rendered",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "block_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "tokens",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "budget_tokens",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "requested_budget_tokens",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "entry_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "candidate_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "selection_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "skills",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 18,
+        "name": "degraded",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 19,
+        "name": "as_of!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "retrieval_version!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "embedding_model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
+        "name": "index_version!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "graph_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 24,
+        "name": "trace_retention_mode!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 25,
+        "name": "completion_status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 26,
+        "name": "policy_exclusion",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 27,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "cee7cf7ee442f4dd3bc205135bc72530b99cc2c370541435604c307b5971e29c"
+}

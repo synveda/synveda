@@ -59,24 +59,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_ingest::ScanOutcome;
-use synveda_ingest::embedding::Embedder as _;
-use synveda_policy::{Action, Resource, ResourceEntity, ScopeNode};
-use synveda_retrieval::{
-    CandidateScope, ComposeRequest, MemoryReadInputs, QueryVector, SearchFilter, SearchRequest,
-    compose, composition_plan, hybrid_search,
-};
+use synveda_policy::{Action, Resource, ResourceEntity};
 use synveda_store::anchors::AnchorSelection;
-use synveda_store::sessions::{
-    self, AppendOutcome, NewContextRun, NewSession, NewSessionEvent, SessionFilter,
-};
+use synveda_store::sessions::{self, AppendOutcome, NewSession, NewSessionEvent, SessionFilter};
 use synveda_store::{capture, rls, scopes};
 use synveda_types::session::{
     CURRENT_EVENT_SCHEMA_VERSION, ContextRun, Session, SessionEvent, SessionEventType,
     SessionStatus,
 };
 use synveda_types::{
-    ContextRunId, Error, PolicyAssignment, ProjectId, RedactionMode, RepositoryId, Result, ScopeId,
-    SessionId, TenantId, WorkspaceId,
+    ContextRunId, Error, ProjectId, RedactionMode, RepositoryId, Result, ScopeId, SessionId,
+    TenantId, WorkspaceId,
 };
 use utoipa::ToSchema;
 
@@ -108,13 +101,6 @@ const MAX_TIMELINE_ENTRIES: i64 = 500;
 /// tighter bound would mark a slow batch as recovered; a looser one would
 /// hide a whole coffee break's worth of buffering.
 pub const DELAYED_AFTER_SECONDS: i64 = 60;
-
-/// Task cap for a context run. A task is a query, not a document — the same
-/// bound `/v1/inject` uses, and for its reason.
-const MAX_QUERY_CHARS: usize = 4096;
-
-/// Candidate depth handed to the ranking legs, matching `/v1/inject`'s.
-const RELEVANCE_LIMIT: usize = 200;
 
 // ── Views ────────────────────────────────────────────────────────────────────
 
@@ -340,23 +326,41 @@ pub struct ContextRunView {
     /// The session it was composed for.
     #[schema(value_type = String, format = "uuid")]
     pub session_id: SessionId,
+    /// Workspace derived from the session.
+    #[schema(value_type = String, format = "uuid")]
+    pub workspace_id: WorkspaceId,
+    /// Project derived from the session, when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub project_id: Option<ProjectId>,
     /// The scope it was anchored at.
     #[schema(value_type = String, format = "uuid")]
     pub scope_id: ScopeId,
     /// The task, when one was named.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<String>,
+    /// Content-free query digest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_hash: Option<String>,
     /// The rendered block, watermark line included. Empty when nothing
     /// composed — a result, not an error.
-    pub rendered: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rendered: Option<String>,
     /// BLAKE3 over the composed entries, hex.
     pub block_hash: String,
     /// Estimated tokens of `rendered`.
     pub tokens: i32,
     /// The budget it composed under.
     pub budget_tokens: i32,
+    /// Caller-requested budget before the governed ceiling.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_budget_tokens: Option<i32>,
     /// How many records composed.
     pub entry_count: i32,
+    /// Visible candidates retained for the run.
+    pub candidate_count: i32,
+    /// Immutable Knowledge revisions selected.
+    pub selection_count: i32,
     /// The skills this block advertised (ADR-0054 decision 8): name, scope,
     /// commit and object address, so an adapter can materialise exactly what
     /// was named without asking twice.
@@ -365,6 +369,25 @@ pub struct ContextRunView {
     /// Which retrieval legs degraded — `embedder`, `retrieval`. Empty is the
     /// ordinary answer.
     pub degraded: Vec<String>,
+    /// Valid-time instant used for current Knowledge.
+    pub as_of: DateTime<Utc>,
+    /// Planner implementation version.
+    pub retrieval_version: String,
+    /// Semantic model used, when configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<String>,
+    /// Knowledge index implementation version.
+    pub index_version: String,
+    /// Graph implementation version, when graph expansion ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_version: Option<String>,
+    /// `full`, `redacted`, `hashes_only` or `disabled`.
+    pub trace_retention_mode: String,
+    /// `pending`, `completed` or `failed`.
+    pub completion_status: String,
+    /// Aggregate policy-filtering notice without a denied count.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_exclusion_message: Option<String>,
     /// When it was composed.
     pub created_at: DateTime<Utc>,
 }
@@ -374,17 +397,63 @@ impl From<ContextRun> for ContextRunView {
         ContextRunView {
             id: run.id,
             session_id: run.session_id,
+            workspace_id: run.workspace_id,
+            project_id: run.project_id,
             scope_id: run.scope_id,
             query: run.query,
-            rendered: run.rendered,
+            query_hash: run.query_hash,
+            rendered: Some(run.rendered),
             block_hash: run.block_hash,
             tokens: run.tokens,
             budget_tokens: run.budget_tokens,
+            requested_budget_tokens: run.requested_budget_tokens,
             entry_count: run.entry_count,
+            candidate_count: run.candidate_count,
+            selection_count: run.selection_count,
             skills: run.skills,
             degraded: run.degraded,
+            as_of: run.as_of,
+            retrieval_version: run.retrieval_version,
+            embedding_model: run.embedding_model,
+            index_version: run.index_version,
+            graph_version: run.graph_version,
+            trace_retention_mode: run.trace_retention.as_str().to_owned(),
+            completion_status: run.completion_status.as_str().to_owned(),
+            policy_exclusion_message: run
+                .policy_exclusion
+                .then(|| "Some candidates were excluded by policy.".to_owned()),
             created_at: run.created_at,
         }
+    }
+}
+
+impl ContextRunView {
+    /// Applies trace-read disclosure. Creation/replay may return the delivered
+    /// block; inspection follows the retained trace mode.
+    pub(crate) fn for_trace(run: ContextRun) -> Self {
+        let mode = run.trace_retention;
+        let mut view = Self::from(run);
+        if !matches!(mode, synveda_types::TraceRetentionMode::Full) {
+            view.query = None;
+            view.rendered = None;
+        }
+        view
+    }
+
+    /// A listing identifies runs but never bulk-discloses their delivery
+    /// payload, content-derived hash, token size, entry counts or advertised
+    /// skills. Those fields can reveal that a now-denied Knowledge selection
+    /// existed before the detail surface has re-authorised exact revisions.
+    pub(crate) fn for_listing(run: ContextRun) -> Self {
+        let mut view = Self::for_trace(run);
+        view.rendered = None;
+        view.block_hash = blake3::hash(b"").to_hex().to_string();
+        view.tokens = 0;
+        view.entry_count = 0;
+        view.candidate_count = 0;
+        view.selection_count = 0;
+        view.skills = serde_json::json!([]);
+        view
     }
 }
 
@@ -583,30 +652,6 @@ pub struct EndSessionBody {
     pub end_reason: Option<String>,
 }
 
-/// `POST /v1/sessions/{session_id}/context-runs`.
-///
-/// The **final shape** of this endpoint (ADR-0076 decision 7). What it does
-/// today is call the existing retrieval engine and persist the identity and
-/// the rendered block; Prompt 18 adds the explainability — which scopes were
-/// considered, which were denied, why each entry made the cut — behind the
-/// same request and the same response envelope.
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ContextRunBody {
-    /// What the agent is about to do. Ranks the material; omitting it is the
-    /// session-start shape — everything pinned, nothing ranked.
-    #[serde(default)]
-    pub query: Option<String>,
-    /// Narrow the block's token budget. The caller may narrow and never
-    /// widen: the pack's budget is the ceiling.
-    #[serde(default)]
-    pub budget_tokens: Option<u32>,
-    /// Ceiling on the sensitivity tier that may compose.
-    #[serde(default)]
-    #[schema(value_type = Option<String>)]
-    pub max_sensitivity: Option<synveda_types::Sensitivity>,
-}
-
 /// Query parameters for `GET /v1/sessions`.
 #[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -729,7 +774,7 @@ async fn respond<T: IntoResponse>(
 }
 
 /// The uniform 404 for a session that is missing *or* another tenant's.
-fn session_not_found(id: SessionId) -> Error {
+pub(crate) fn session_not_found(id: SessionId) -> Error {
     Error::NotFound {
         entity: format!("session {id}"),
     }
@@ -938,7 +983,7 @@ pub(crate) async fn load(
 /// pack for the session's scope**, which is the same resolution the
 /// `SessionWrite` decision just performed, and re-gathering it would be a
 /// second walk that could disagree with the first.
-async fn load_with_input(
+pub(crate) async fn load_with_input(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
@@ -1989,477 +2034,6 @@ fn truncate(text: &str, max: usize) -> String {
         out.push('…');
     }
     out
-}
-
-// ── Context runs ─────────────────────────────────────────────────────────────
-
-/// The query, as the chain records it: a digest, never the words.
-fn task_hash(task: &str) -> String {
-    blake3::hash(task.as_bytes()).to_hex().to_string()
-}
-
-/// The composed run, with the degradation ladder on the header as well as in
-/// the body (ADR-0026 decision 4).
-///
-/// The header is part of a **successful** response, not an error: a client
-/// that degraded still got context, and the one that ships with this product
-/// reads exactly this header to decide whether to say so. `/v1/inject` set it
-/// and this is what replaced that route.
-fn context_run_response(status: StatusCode, run: ContextRun) -> Response {
-    let header = run
-        .degraded
-        .join(",")
-        .parse::<axum::http::HeaderValue>()
-        .ok()
-        .filter(|_| !run.degraded.is_empty());
-    let mut rendered = (status, Json(ContextRunView::from(run))).into_response();
-    if let Some(value) = header {
-        rendered.headers_mut().insert("x-synveda-degraded", value);
-    }
-    rendered
-}
-
-/// `POST /v1/sessions/{session_id}/context-runs` — compose context for a run.
-///
-/// **The final shape of this endpoint** (ADR-0076 decision 7). What it does
-/// today is decide `SessionWrite` at the session, call the existing retrieval
-/// engine over the session's scope chain and the caller's own, persist the
-/// identity and the rendered block, and chain the watermark. Prompt 18 adds
-/// the explainability — which scopes were considered, which were denied, why
-/// each entry made the cut — behind this same request and this same envelope.
-#[utoipa::path(
-    post,
-    path = "/v1/sessions/{session_id}/context-runs",
-    operation_id = "create_context_run",
-    tag = "sessions",
-    params(
-        ("session_id" = String, Path, description = "The session's id"),
-        ("Idempotency-Key" = String, Header,
-         description = "Required. A unique value per request, reused verbatim on retry."),
-    ),
-    request_body = ContextRunBody,
-    responses(
-        (status = 201, description = "Composed", body = ContextRunView),
-        (status = 200, description = "This key already composed this run", body = ContextRunView),
-        (status = 400, description = "Malformed body, or no `Idempotency-Key`", body = ApiErrorBody),
-        (status = 403, description = "The PDP denied `session.write`", body = ApiErrorBody),
-        (status = 404, description = "No such session in this tenant", body = ApiErrorBody),
-        (status = 409, description = "The key was reused for a different request", body = ApiErrorBody),
-    ),
-    security(("bearer" = [])),
-)]
-pub(crate) async fn create_context_run(
-    State(state): State<AppState>,
-    Path(id): Path<SessionId>,
-    headers: HeaderMap,
-    payload: std::result::Result<Json<ContextRunBody>, JsonRejection>,
-) -> Response {
-    let result = async {
-        let body = body(payload)?;
-        let tenant_id = tenant_id()?;
-        let subject = subject()?;
-        if let Some(query) = &body.query {
-            let chars = query.chars().count();
-            if chars == 0 || chars > MAX_QUERY_CHARS {
-                return Err(Error::Invalid {
-                    message: format!("`query` is 1..={MAX_QUERY_CHARS} characters"),
-                });
-            }
-        }
-        if body.budget_tokens == Some(0) {
-            return Err(Error::Invalid {
-                message: "`budget_tokens` is at least 1".to_owned(),
-            });
-        }
-        let claim = Claim::from_headers(
-            &headers,
-            "session.context_run",
-            &subject,
-            &json!({
-                "route": "POST /v1/sessions/{session_id}/context-runs",
-                "session_id": id,
-                "query": body.query,
-                "budget_tokens": body.budget_tokens,
-                "max_sensitivity": body.max_sensitivity,
-            }),
-        )?;
-
-        let replayed = match crate::idempotency::dispatch(&state.pool, tenant_id, &claim).await? {
-            Dispatch::Replay(run_id) => Some(run_id),
-            Dispatch::Create => {
-                match compose_for_session(&state, tenant_id, &subject, id, &body, &claim).await {
-                    Ok(run) => return Ok(context_run_response(StatusCode::CREATED, run)),
-                    Err(conflict @ Error::Conflict { .. }) => Some(
-                        crate::idempotency::resolve_conflict(
-                            &state.pool,
-                            tenant_id,
-                            &claim,
-                            conflict,
-                        )
-                        .await?,
-                    ),
-                    Err(other) => return Err(other),
-                }
-            }
-        };
-        let run_id = ContextRunId::from_uuid(replayed.expect("replay id"));
-        let run = replay_context_run(&state, tenant_id, id, run_id, &claim).await?;
-        Ok(context_run_response(StatusCode::OK, run))
-    }
-    .await;
-    respond(&state, "session.context_run", result).await
-}
-
-/// The composition itself.
-///
-/// Two tenant transactions bracket the embed call, because no transaction
-/// spans a network call (the MEM-3 rule `/v1/inject` follows): the first
-/// decides and gathers the plan, the second searches, composes, persists and
-/// chains.
-async fn compose_for_session(
-    state: &AppState,
-    tenant_id: TenantId,
-    principal_id: &str,
-    session_id: SessionId,
-    body: &ContextRunBody,
-    claim: &Claim,
-) -> Result<ContextRun> {
-    // Transaction 1: the decision and the plan. Read-only, and dropped before
-    // the embed call.
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let session = sessions::get(&mut *tx, tenant_id, session_id)
-        .await?
-        .ok_or_else(|| session_not_found(session_id))?;
-    let (authorized, _, input) = require(
-        state,
-        &mut tx,
-        Action::SessionWrite,
-        tenant_id,
-        Subject::Session(&session),
-    )
-    .await?;
-
-    // The composition universe: the caller's own chain, plus the **session's**
-    // scope chain as widened candidates.
-    //
-    // Two sources, and both are needed. The caller's own chain is what
-    // `/v1/inject` composes from, and it is where somebody's private material
-    // lives. The session's chain is the project, its workspace and the org
-    // above them — the material the run is actually about, which is not on the
-    // caller's own chain at all. Handing the session's chain in as `chain`
-    // instead would have silently made the caller's own notes unreachable from
-    // every project session.
-    //
-    // `candidates` is the mechanism CTX-5 built for exactly this (ADR-0042
-    // decision 2): scopes that could contribute to *this* request, each
-    // decided under its own chain and pack. Nothing here widens what a pack
-    // permits — every candidate is still decided, per tier, by the same walk.
-    let principal_ids: Vec<ScopeId> = input.principal_scopes.iter().map(|node| node.id).collect();
-    let mut assignments: Vec<PolicyAssignment> = input.assignments.clone();
-    for assignment in
-        synveda_store::policy_assignments::for_scopes(&mut *tx, tenant_id, &principal_ids).await?
-    {
-        if !assignments
-            .iter()
-            .any(|held| held.scope_id == assignment.scope_id)
-        {
-            assignments.push(assignment);
-        }
-    }
-    let session_chain: Vec<ScopeNode> = input.chain.to_vec();
-    let own_chain: Vec<ScopeNode> = input.principal_scopes.to_vec();
-    // The scopes a standing lapse reaches, each with its own chain and
-    // assignments — read in the same transaction, because the effective pack
-    // is a property of the resource (AUTHZ-4, ADR-0037 decision 10). Empty for
-    // every caller holding no lapse, which is almost all of them.
-    //
-    // CPR-10 left these out on the reasoning that omitting them can only
-    // narrow, and that a second relaxation path was Prompt 26's to build once.
-    // That reasoning held while `/v1/inject` still existed and still carried
-    // them. CPR-12 deleted it, so this is now the **only** governed read path
-    // — and a lapse nothing honours is not a narrowing, it is a shipped
-    // feature that silently stopped working. Gathered the same way inject
-    // gathered them, through the same seam, so there is still one path.
-    let lapsed_chains = authz::gather_lapsed(state, &mut tx, &input).await?;
-    drop(tx);
-    let lapsed: Vec<synveda_retrieval::LapsedScope<'_>> = lapsed_chains
-        .iter()
-        .map(|resolved| synveda_retrieval::LapsedScope {
-            lapse: &resolved.lapse,
-            chain: &resolved.chain,
-            assignments: &resolved.assignments,
-        })
-        .collect();
-
-    let candidates: Vec<CandidateScope<'_>> = session_chain
-        .iter()
-        .enumerate()
-        // A scope already on the caller's own chain is skipped: the nearer
-        // source wins, which is the same rule `MemoryReadInputs::candidates`
-        // documents for recall.
-        .filter(|(_, node)| !own_chain.iter().any(|own| own.id == node.id))
-        .map(|(index, node)| CandidateScope {
-            scope_id: node.id,
-            chain: &session_chain[index..],
-            assignments: &assignments,
-        })
-        .collect();
-
-    let plan = composition_plan(
-        &state.pdp,
-        &MemoryReadInputs {
-            principal: &input.principal,
-            chain: &own_chain,
-            anchors: input.anchors.as_slice(),
-            groups: &input.groups,
-            assignments: &assignments,
-            default_pack: input.default_pack.as_deref(),
-            lapses: &input.lapses,
-            lapsed: &lapsed,
-            candidates: &candidates,
-        },
-    )?;
-
-    let budget_tokens = match body.budget_tokens {
-        Some(requested) => plan.budget_tokens.min(requested),
-        None => plan.budget_tokens,
-    };
-    let as_of = Utc::now();
-    let mut degraded: Vec<String> = Vec::new();
-
-    // The embed call: outside any transaction, and a failure drops the dense
-    // leg rather than the request — `/v1/inject`'s posture, for its reason.
-    let query = body
-        .query
-        .as_ref()
-        .filter(|_| !plan.scopes.is_empty())
-        .cloned();
-    let vector = match &query {
-        Some(task) => {
-            match tokio::time::timeout(
-                state.inject_embed_timeout,
-                state.embedder.embed(std::slice::from_ref(task)),
-            )
-            .await
-            {
-                Ok(Ok(mut vectors)) if !vectors.is_empty() => Some(QueryVector {
-                    model: state.embedder.model().to_owned(),
-                    vector: vectors.remove(0),
-                }),
-                _ => {
-                    tracing::warn!("query embed unavailable; degrading to sparse-only");
-                    degraded.push("embedder".to_owned());
-                    None
-                }
-            }
-        }
-        None => None,
-    };
-
-    // Transaction 2: search, compose, persist, chain.
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let relevance = match &query {
-        Some(task) => {
-            let request = SearchRequest {
-                query: task.clone(),
-                vector,
-                filter: SearchFilter {
-                    tiers: plan
-                        .scopes
-                        .iter()
-                        .flat_map(|scope| {
-                            synveda_types::ScopeTier::expand(scope.scope_id, &scope.sensitivities)
-                        })
-                        .collect(),
-                },
-                limit: RELEVANCE_LIMIT,
-                per_leg: RELEVANCE_LIMIT,
-                at: as_of,
-            };
-            match hybrid_search(&mut tx, &state.search_index, tenant_id, &request).await {
-                Ok(results) => Some(
-                    results
-                        .into_iter()
-                        .map(|retrieved| retrieved.record.id)
-                        .collect(),
-                ),
-                Err(error) => {
-                    tracing::warn!(error = %error, "hybrid search failed; composing unranked");
-                    degraded.push("retrieval".to_owned());
-                    None
-                }
-            }
-        }
-        None => None,
-    };
-
-    let mut request = ComposeRequest::new(plan.scopes, budget_tokens, as_of);
-    if let Some(ceiling) = body.max_sensitivity {
-        request = request.narrowed_to(ceiling);
-    }
-    request.relevance = relevance;
-    let block = compose(&mut tx, tenant_id, &request).await?;
-
-    let run = sessions::record_context_run(
-        &mut tx,
-        tenant_id,
-        &NewContextRun {
-            id: ContextRunId::new(),
-            session_id,
-            scope_id: session.scope_id,
-            principal_id: principal_id.to_owned(),
-            query: body.query.clone(),
-            rendered: block.text.clone(),
-            block_hash: block.block_hash.clone(),
-            tokens: i32::try_from(block.tokens).unwrap_or(i32::MAX),
-            budget_tokens: i32::try_from(block.budget_tokens).unwrap_or(i32::MAX),
-            entry_count: i32::try_from(block.entries.len()).unwrap_or(i32::MAX),
-            // Shaped here rather than by deriving `Serialize` on the
-            // retrieval type: this is a wire contract, and a derive would
-            // make every field of an internal struct part of it (the
-            // `WorkspaceView` rule).
-            skills: json!(
-                block
-                    .skills
-                    .iter()
-                    .map(|skill| json!({
-                        "name": skill.name,
-                        "scope_id": skill.scope_id,
-                        "position": skill.position,
-                        "commit": skill.commit,
-                        "object_hash": skill.object_hash,
-                        "sensitivity": skill.sensitivity,
-                    }))
-                    .collect::<Vec<_>>()
-            ),
-            degraded: degraded.clone(),
-        },
-    )
-    .await?;
-    claim.remember(&mut tx, tenant_id, run.id.as_uuid()).await?;
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::SessionContextComposed,
-        Resource::Session(session_id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::SessionWrite, &authorized),
-            "session_id": session_id,
-            "context_run_id": run.id,
-            // Correlation without content (ADR-0021's discipline): the query
-            // rides as a hash or not at all. The run row holds the text —
-            // that row is governed content behind the PDP; the chain is not.
-            "task_hash": body.query.as_deref().map(task_hash),
-            // The watermark, never the block: the chain records *what an agent
-            // was given*, and the run row holds the text.
-            "block_hash": run.block_hash,
-            "entry_count": run.entry_count,
-            // The full per-entry watermark (ADR-0025 decision 7, as ADR-0031
-            // decision 11 upgraded it): the VedaFlow object address of exactly
-            // the version that composed, plus the channel it composed from —
-            // the trust label an auditor reads before the content.
-            //
-            // This is the disclosure record. `/v1/inject` carried it and this
-            // endpoint is what replaced that route (CPR-12, ADR-0078
-            // decision 5), so it carries it too — without this the audit
-            // plane's "what was that agent given" question has no answer at
-            // all, because there is no other composition surface left.
-            "entries": block.entries.iter().map(|entry| json!({
-                "record_id": entry.record_id,
-                "object_hash": entry.object_hash,
-                "channel": entry.channel,
-                // "Was that agent given the payments runbook, or only told it
-                // exists" is a question an auditor asks about a corpus that has
-                // since moved, so the chain answers it rather than a
-                // re-derivation (ADR-0041 decision 9).
-                "tier": entry.tier,
-                // Integer per mille, never a float: audit canonicalisation
-                // refuses one (ADR-0019 decision 2).
-                "staleness_permille": entry.staleness_permille,
-            })).collect::<Vec<_>>(),
-            // Where each scope's published channel pointed when the block was
-            // composed: tech plan §2.5's "responses cite commit hashes", paid
-            // for out of the audit event rather than the token budget.
-            "channels": block.channels.iter().map(|channel| json!({
-                "scope_id": channel.scope_id,
-                "ref": channel.channel,
-                "commit": channel.commit,
-                // Whether a pin chose that commit (FLOW-7, ADR-0036
-                // decision 10).
-                "pinned": channel.pinned,
-            })).collect::<Vec<_>>(),
-            // What the agent was told it could install, and never the
-            // description (ADR-0054 decision 8): a name, where it came from
-            // and the bytes it names. The prose lives in the block; the chain
-            // records the claim.
-            "skills": block.skills.iter().map(|skill| json!({
-                "name": skill.name.as_str(),
-                "scope_id": skill.scope_id,
-                "commit": skill.commit,
-                "object_hash": skill.object_hash,
-                "sensitivity": skill.sensitivity.as_str(),
-            })).collect::<Vec<_>>(),
-            "skill_tokens": block.skill_tokens,
-            "skills_omitted": block.skills_omitted,
-            "tokens": run.tokens,
-            "budget_tokens": run.budget_tokens,
-            "degraded": run.degraded,
-            // The aggregated per-scope `MemoryRead` decisions (ADR-0019
-            // decision 4): one event, every scope's verdict. Each carries the
-            // **tiers** the walk permitted rather than a bare allow (AUTHZ-5,
-            // ADR-0038 decision 13): "who could see this scope's restricted
-            // material on date D" is the question a regulator asks, and this
-            // is what answers it.
-            "decisions": plan
-                .decisions
-                .iter()
-                .map(|decision| json!({
-                    "scope_id": decision.scope_id,
-                    "allowed": decision.allowed,
-                    "sensitivities": decision.sensitivities
-                        .iter()
-                        .map(|tier| tier.as_str())
-                        .collect::<Vec<_>>(),
-                    "pack": format!("{}@{}", decision.pack_name, decision.pack_version),
-                    "lapse_id": decision.lapse,
-                }))
-                .collect::<Vec<_>>(),
-            "idempotency_key": claim.key,
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-    Ok(run)
-}
-
-/// The replay path: the same decision, then the run the key produced.
-async fn replay_context_run(
-    state: &AppState,
-    tenant_id: TenantId,
-    session_id: SessionId,
-    run_id: ContextRunId,
-    claim: &Claim,
-) -> Result<ContextRun> {
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let (_, authorized, resource) =
-        load(state, &mut tx, tenant_id, session_id, Action::SessionWrite).await?;
-    let run = sessions::context_run(&mut *tx, tenant_id, run_id)
-        .await?
-        .filter(|run| run.session_id == session_id)
-        .ok_or_else(|| crate::idempotency::vanished(claim, run_id.as_uuid()))?;
-    read_event(
-        &mut tx,
-        tenant_id,
-        "session.context_run.replay",
-        Action::SessionWrite,
-        &authorized,
-        resource,
-        json!({"session_id": session_id, "context_run_id": run_id, "idempotency_key": claim.key}),
-    )
-    .await?;
-    commit(tx).await?;
-    Ok(run)
 }
 
 #[cfg(test)]

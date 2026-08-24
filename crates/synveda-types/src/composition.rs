@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::Error;
+use crate::{Error, TraceRetentionMode};
 
 /// Which channels compose into an inject block under a pack (CTX-2,
 /// ADR-0025 decision 2). Since FLOW-2 the channels are real: a record
@@ -288,6 +288,11 @@ pub struct CompositionConfig {
     /// resolving to the product config rather than failing to load.
     #[serde(default)]
     pub skill_index: SkillIndex,
+    /// How much planner detail is retained for context inspection
+    /// (CPR-20, ADR-0084). This never grants a read; it only removes detail
+    /// from an already-authorised trace.
+    #[serde(default, skip_serializing_if = "TraceRetentionMode::is_full")]
+    pub trace_retention: TraceRetentionMode,
 }
 
 impl CompositionConfig {
@@ -299,6 +304,7 @@ impl CompositionConfig {
         index_tier: IndexTier::Demote,
         index_entry_chars: DEFAULT_INDEX_ENTRY_CHARS,
         skill_index: SkillIndex::Names,
+        trace_retention: TraceRetentionMode::Full,
     };
 }
 

@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **116 features filed, 84 delivered**;
+Cursor frame has been replayed. **117 features filed, 85 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -132,8 +132,8 @@ Load-bearing facts about Phase 5:
   (INSTALL.md's SQL).
 - The generated OpenAPI contract covers the context-platform plane (`/v1/me`,
   workspaces, projects, repositories, access, admin scopes, sessions and the
-  public Knowledge lifecycle/search and capture surfaces — **62 operations**
-  since CPR-18). The console's Knowledge Browser consumes generated operations only;
+  public Knowledge lifecycle/search, capture and explainable context surfaces —
+  **67 operations** since CPR-20). The console consumes generated operations only;
   the remaining production planes join under the programme's public-contract
   convergence package.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
@@ -189,8 +189,8 @@ Load-bearing facts about Phase 5:
   source and relation endpoint is decided independently; all writes use
   CPR-16's VedaFlow command seam. The proposal classification route/CLI/eval
   call, public record proposal fields, record channel publication/aliases and
-  raw-record browser fixtures are deleted. The temporary record-backed context
-  composer remains internal until the explainable context-planning package.
+  raw-record browser fixtures are deleted. CPR-20 subsequently deleted the
+  temporary record-backed context composer.
 - CPR-18 (ADR-0083) is delivered: terminal or explicit session capture freezes
   an exact event snapshot into a restart-safe batch. Extraction creates only
   reviewable candidates with same-session evidence and independently decided
@@ -199,8 +199,8 @@ Load-bearing facts about Phase 5:
   re-authorised, candidate decisions are retry-safe, and Knowledge erasure
   scrubs candidate plaintext. The PGMQ `session_events` queue and the old
   record/embed/dedup/link extraction writer are deleted. The generated
-  contract has 62 operations; Knowledge-backed context retrieval is the next
-  runtime package.
+  contract grew to 62 operations; CPR-20 subsequently replaced the remaining
+  record-backed context reader.
 - CPR-19 is delivered with no new ADR or backend: New Learnings groups capture
   candidates by batch, previews exact session evidence, freshly reads visible
   Knowledge comparisons and offers scope-safe accept/edit/merge/replace/
@@ -209,6 +209,16 @@ Load-bearing facts about Phase 5:
   decisions still happen at the gateway. Applied results link to Knowledge and
   pending ones remain explicitly unpublished under Advanced Reviews. The
   console suite is **165/165** and the planned placeholder is gone.
+- CPR-20 (ADR-0084) is delivered: context runs now plan over current immutable
+  Knowledge revisions and retain independently authorised candidates,
+  selections, score/reason detail and revision-specific feedback under four
+  trace-retention modes. Five generated operations add run list/detail,
+  feedback and distinct session-scoped ordinary/diagnostics Knowledge query
+  lenses (67 operations total). The runtime record composer and recall
+  tombstones are deleted; no global recall route or translation layer returns.
+  Context packs and skill advertisements remain separately governed authored
+  inputs, and their aggregate historical block is masked when exact authored
+  authority cannot be reconstructed.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

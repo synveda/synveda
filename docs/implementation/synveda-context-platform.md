@@ -32,13 +32,13 @@ programme convention established in Prompt 1.
 | Governed create/edit/verify/supersede/merge/archive/restore/forget and durable erasure | CPR-16 | **complete** | `874aa51` | `f2a7c5c` | gateway lifecycle 3/3; policy approvals 6/6, packs 7/7, PDP 11/11; RLS completeness PASS | PASS | PASS | isolated `demos/cpr-16-knowledge-lifecycle.sh` PASS: 19 governed changes, zero old records | none |
 | Public Knowledge API, lexical/semantic search, generated-client browser and raw-record product cutover | CPR-17 | **complete** | `f2a7c5c` | `2d845b0` | gateway public API 1/1; OpenAPI 5/5; console 151/151; RLS 84/84 | PASS | PASS | isolated `demos/cpr-17-knowledge-browser.sh` PASS: one Knowledge item, zero old records | none |
 | Session-based capture batches, reviewable candidates and governed acceptance actions | CPR-18 | **complete** | `2d845b0` | `e778a60` | gateway 3/3; Claude lifecycle 2/2; ingest 64/64; OpenAPI 5/5; console 151/151; RLS 84/84 | PASS | PASS | isolated `demos/cpr-18-session-capture.sh` PASS: 8 candidates, 8 governed changes, zero old records/queue | none |
-| New Learnings lightweight candidate review and scope-safe governed decisions | CPR-19 | **complete** | `e778a60` | next checkpoint | console pure 8/8; component acceptance 6/6; complete console 165/165; production build PASS | PASS | N/A — console-only | real-component server-rendered acceptance covers evidence, comparisons, all actions, denial and applied/pending outcomes | none |
+| New Learnings lightweight candidate review and scope-safe governed decisions | CPR-19 | **complete** | `e778a60` | `e90dac9` | console pure 8/8; component acceptance 6/6; complete console 165/165; production build PASS | PASS | N/A — console-only | real-component server-rendered acceptance covers evidence, comparisons, all actions, denial and applied/pending outcomes | none |
+| Explainable Knowledge context planning, trace retention, feedback and scoped query/evaluation lenses | CPR-20 | **complete** | `e90dac9` | next checkpoint | context 3/3; audit 13/13; packs 10/10; sessions 22/22; OpenAPI 5/5; console 165/165; RLS guards PASS | PASS | PASS | isolated `demos/cpr-20-context-planning.sh` PASS: 55 Knowledge, 47 plans, 75 selections, 2 feedback, zero records | none |
 
-**Exact next objective:** file and implement CPR-20, the explainable context
-planner and Knowledge-backed retrieval cutover: persisted visible candidates,
-selections and feedback; trace-retention modes; a project- or session-scoped
-recall application API plus separately authorised evaluation/query lenses;
-and deletion of the temporary record composer and recall tombstones.
+**Exact next objective:** file and implement CPR-21, the Context Inspector and
+revision-specific outcome-feedback console over CPR-20's generated run
+list/detail/feedback operations, including the session-timeline link and
+retention-mode presentation rules.
 CPR-13 remains reserved for the demo-corpus re-point and follows the
 MVP surfaces it must demonstrate; rewriting those demos before Knowledge,
 capture and scoped recall exist would knowingly rewrite them twice.
@@ -3308,4 +3308,102 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `feat(console): add New Learnings workflow (CPR-19)` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by the CPR-20 checkpoint on Prompt 1's rule.
+- **Commit hash.** `e90dac9c9f36e747c380b377f524dd383b7603ce`.
+
+### Prompt 18 objective — explainable Knowledge context planning and scoped query (CPR-20)
+
+- **Selected feature and state.** **CPR-20** is delivered from `e90dac9`.
+  It removes the final production read of the replaced record model. The
+  preceding CPR-19 feature commit is
+  `e90dac9c9f36e747c380b377f524dd383b7603ce`.
+
+- **Decision.** Accepted ADR-0084 makes one distinction load-bearing: a
+  context run is budgeted delivery, while ordinary deep query and privileged
+  corpus evaluation are separate session-scoped reads. All three share the
+  same current Knowledge and exact PDP seam; none restores tenant-global
+  `/v1/recall`, direct-store adapter access or a record translation layer.
+  A trace is governed content in its own right, so a denied candidate is never
+  persisted and every retained address is re-authorised before disclosure.
+
+- **Schema and hard-cut boundary.** Migration `0051_context_planning` extends
+  `session_context_runs` with the derived project, as-of instant, requested and
+  actual budgets, retrieval/embedding/index/graph versions, completion and
+  degradation states, query/render hashes, retention mode and policy-exclusion
+  marker. `context_candidates`, `context_selections` and `context_feedback`
+  retain bounded visible evidence and exact immutable revision outcomes. All
+  are tenant-bound, forced-RLS and append-only to the application role, with
+  tenant-qualified keys binding session, run, item and revision. The migration
+  contains no `INSERT`, `UPDATE` or old-row translator: an opaque pre-cut run
+  has no planner marker and every application query filters it out; a CHECK
+  requires native rows to carry the complete planner shape. Schema epoch **2**
+  now has **49 migrations**.
+
+- **Planner and explanations.** Query composition uses bounded lexical and
+  configured semantic retrieval over `knowledge_current`; queryless starts use
+  bounded recency plus current conventions/preferences. Every exact candidate
+  and source receives a fresh decision before persistence or rendering.
+  Selected rows retain revision id, rank, token cost, eleven reason codes and
+  separate integer keyword, semantic, freshness, pin, graph, current-state and
+  final contributions. Stale and superseded revisions are visible exclusions
+  only when authorised and are never selected as current. Graph absence is an
+  explicit degradation/version fact until the bounded graph package.
+
+- **Trace retention and side channels.** `full`, `redacted`, `hashes_only` and
+  `disabled` have distinct storage and response assertions. Denied Knowledge
+  creates no id, title, edge, reason or count; a run may report only one
+  aggregate policy-exclusion message. The core delivery row retains exact bytes
+  for lost-ack replay, but list reads mask them and detail reads apply retention
+  plus fresh session/item/source decisions. Context packs and skill
+  advertisements still compose through their own PDP actions and share the
+  budget. Because this old core row cannot identify exact authored versions,
+  any trace read after an authored input contributed masks the whole rendered
+  block, its hash/tokens and skill list rather than treating a historical block
+  as authority.
+
+- **Public API and clients.** The generated OpenAPI contract grows **62 → 67
+  operations**. The existing `POST /v1/sessions/{id}/context-runs` keeps its
+  address and delivery semantics; new operations are cursor-paginated
+  `GET /v1/context-runs`, re-authorised `GET /v1/context-runs/{id}`, idempotent
+  exact-selection `POST /v1/context-runs/{id}/feedback`, ordinary
+  `POST /v1/sessions/{id}/knowledge-query` and diagnostics-only
+  `POST /v1/sessions/{id}/knowledge-evaluation`. The evaluation cursor advances
+  over the last candidate considered, including denied rows, without disclosing
+  their number. CLI and generic MCP recall use the ordinary public query;
+  extraction/security/QA clients have the true enumeration/id lens needed for
+  later remeasurement rather than abusing a context budget.
+
+- **Audit and observability.** Retrieval, selection and feedback have separate
+  spans and metrics. Three new hash-chain actions bring the vocabulary to
+  **88**; their payloads contain ids, hashes, counts, versions and decisions,
+  never query, rendered text, Knowledge content, source locator or event
+  payload. Audit's “what did this agent know” fold now resolves exact immutable
+  Knowledge selections and bitemporal revisions instead of old record entries.
+  Knowledge usage uses the same re-authorised selection evidence.
+
+- **Deleted production and test residue.** The record-backed composer and
+  hydration/authorisation path, gateway `index_tier.rs` suite, record-shaped
+  audit projection and temporary `RecallSweepRequest`/`RecallIdsRequest`
+  refusal tombstones are deleted. No application query reads `records` or
+  `record_embeddings`; no old row is dual-written or translated. Authored
+  context-pack summaries no longer print dead record recall handles.
+
+- **Tests and exact results.** Focused database-backed results: context runs
+  **3/3**, audit query **13/13**, context packs **10/10**, sessions **22/22**,
+  skills **24/24**, OpenAPI **5/5**, RLS trace immutability/completeness **2/2**;
+  console **165/165**, CLI recall **2/2** and MCP **14/14** also pass.
+  `make ci` **PASS** and the full fresh-scratch `make db-test` **PASS**,
+  including the 1k-event load gate. The isolated runnable
+  `demos/cpr-20-context-planning.sh` **PASS** reports **55 Knowledge items, 47
+  plans, 75 immutable selections, 2 feedback rows and zero old records**.
+
+- **Limitations and next work.** No live external client or model claim is made.
+  The original extraction/security/QA benchmark questions now have a real
+  evaluation lens, but Prompt 30 owns reproducible reseeding, measurement and
+  baseline changes; this package does not relabel old refusal results. Bounded
+  graph expansion, unreviewed-channel configuration and exact immutable skill
+  binding identities remain their filed packages. CPR-21 now owns the Context
+  Inspector presentation over these public traces.
+
+- **Commit.** `feat(context): add explainable context planning (CPR-20)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-21 checkpoint on Prompt 1's rule.

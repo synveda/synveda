@@ -1828,6 +1828,32 @@ CPR-19  New Learnings lightweight review workflow (L)
   `make ci` pass. No ADR: ADR-0075, ADR-0081, ADR-0082 and ADR-0083 already lock
   the shell, command, read and candidate boundaries this package consumes.
 
+CPR-20  Explainable Knowledge context planning and scoped query (XL)
+  Filed 2026-08-24 by the autonomous continuation. Replace the final
+  record-backed runtime reader with a durable, explainable planner over current
+  immutable Knowledge revisions. Persist the visible bounded candidates,
+  selections, exact revision addresses, reason and integer score components,
+  requested/actual budget, retrieval/index versions, degradation, rendering
+  hash, completion and governed trace-retention mode. Denied Knowledge leaves
+  no object-shaped trace and every retained reference is re-authorised on read.
+  Keep separately governed context packs and skill advertisements as authored
+  inputs; never translate Knowledge through records or admit an unreviewed
+  capture candidate without an explicit future governed channel rule.
+  Add generated run list/detail and exact-revision feedback operations, a
+  session-scoped ordinary Knowledge query, and a separately authorised
+  SessionDiagnostics evaluation lens for query, enumeration and exact-id
+  benchmarks. Neither surface restores tenant-global `/v1/recall` or direct
+  store access. AC: only current active Knowledge selects; stale, superseded,
+  duplicate and token-budget exclusions are explicit when visible; full,
+  redacted, hashes-only and disabled traces disclose exactly their configured
+  shape; policy-denied candidates leak no id/title/edge/reason/count; feedback
+  binds one run, selection and immutable revision; Knowledge usage derives
+  from re-authorised selections; retrieval, selection, delivery and feedback
+  are distinct traced/metered/content-free audited events; context packs and
+  skills survive the cutover; old runtime record composition and recall
+  tombstones are deleted; focused tests, demo, `make ci` and `make db-test`
+  pass. ADR-0084.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1921,7 +1947,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

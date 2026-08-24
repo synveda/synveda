@@ -50,6 +50,7 @@ where embedding.tenant_id = $1
   ))
   and current.valid_from <= $16
   and (current.valid_to is null or $16 < current.valid_to)
+  and (cardinality($18::uuid[]) = 0 or current.scope_id = any($18))
 order by embedding.embedding::vector(1024) <=> $3::real[]::vector(1024),
          current.updated_at desc,
          current.id desc

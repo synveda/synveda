@@ -1222,7 +1222,7 @@ async fn an_append_chains_one_event_however_many_it_carried() {
 }
 
 /// The context run is decided, persisted and chained — and its rendered block
-/// stays out of the audit payload, exactly as `/v1/inject`'s does.
+/// stays out of the audit payload.
 #[tokio::test]
 async fn a_context_run_is_governed_persisted_and_watermarked() {
     let _guard = serial().await;
@@ -1259,7 +1259,11 @@ async fn a_context_run_is_governed_persisted_and_watermarked() {
     // an error — the posture `/v1/inject` has always had.
     assert_eq!(run["entry_count"], 0);
     assert!(run["budget_tokens"].as_i64().is_some_and(|b| b <= 500));
-    assert!(run["degraded"].as_array().expect("degraded").is_empty());
+    assert_eq!(
+        run["degraded"],
+        json!(["embedder"]),
+        "the deterministic test embedder is honestly reported as non-semantic"
+    );
 
     // A replay serves the same run with 200 and composes nothing again.
     let (status, replay) = call(
@@ -1281,14 +1285,9 @@ async fn a_context_run_is_governed_persisted_and_watermarked() {
         payload.get("rendered").is_none(),
         "the chain carries the watermark, never the block: {payload}"
     );
-    // The per-scope decisions ride along, which is what makes "why was this
-    // thin" answerable — the half of explainability that costs nothing now.
-    assert!(
-        payload["decisions"]
-            .as_array()
-            .is_some_and(|s| !s.is_empty()),
-        "the chain names the scopes the walk decided: {payload}"
-    );
+    assert_eq!(payload["authz"]["action"], json!("session.write"));
+    assert_eq!(payload["knowledge"], json!([]));
+    assert!(payload["retrieval_version"].is_string());
     // A query is bounded like every other text input on this product.
     let (status, error) = call(
         &app,

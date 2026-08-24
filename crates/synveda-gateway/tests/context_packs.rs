@@ -16,8 +16,8 @@
 //! - **"next session" is satisfied as "next call"**, because the pack
 //!   channel is read live on the composition path;
 //! - **pack content composes as pinned material, ranked**, and what does
-//!   not fit is named in the index tier with a recall handle rather than
-//!   dropped;
+//!   not fit is named in the index tier by bundle, document and section
+//!   rather than silently dropped or given a dead legacy handle;
 //! - **`ContextPackRead` admits pack chunks and `MemoryRead` never does**,
 //!   tested under a stored pack that grants one and denies the other, which
 //!   is the only shape in which the claim can be false;
@@ -435,7 +435,7 @@ async fn pack_watermarks(w: &World) -> Vec<Value> {
         .rev()
         .find(|event| event.action == "session.context.composed")
         .expect("a context-run event");
-    last.payload["channels"]
+    last.payload["authored_channels"]
         .as_array()
         .map(|channels| {
             channels
@@ -656,6 +656,22 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
         composed.contains("three days"),
         "the reviewed runbook composes into a session that never authored it: {composed}"
     );
+    let run_id = after["id"].as_str().expect("context run id");
+    let (trace_status, trace) = get(&w.app, &format!("/v1/context-runs/{run_id}"), &w.bea).await;
+    assert_eq!(trace_status, StatusCode::OK, "read context trace: {trace}");
+    assert_eq!(
+        trace["run"]["rendered"],
+        Value::Null,
+        "an authored delivery is not copied back through a trace read: {trace}"
+    );
+    assert!(
+        trace["policy_exclusion_message"].is_string(),
+        "the masked authored portion is reported without an object or count: {trace}"
+    );
+    assert!(
+        !trace.to_string().contains("three days"),
+        "a trace lacking exact authored-object re-authorisation leaks no pack text: {trace}"
+    );
     let watermarks = pack_watermarks(&w).await;
     assert!(
         watermarks
@@ -840,7 +856,7 @@ async fn re_authoring_unchanged_bytes_embeds_nothing() {
 /// hand-pinned records costing tens of tokens. A large glossary against a
 /// 1,500-token budget is not that case, and this is the resolution that
 /// keeps both halves: the block that cannot hold the runbook **says the
-/// runbook exists, names it, and hands back a recall handle**.
+/// runbook exists and names its stable authored location**.
 #[tokio::test]
 async fn a_pack_too_large_for_the_budget_is_named_rather_than_dropped() {
     let Some(w) = world().await else { return };
@@ -877,11 +893,7 @@ async fn a_pack_too_large_for_the_budget_is_named_rather_than_dropped() {
     );
     // The index tier, counted from the block itself: the context run's body is
     // deliberately minimal (ADR-0076 decision 7) and does not carry a count,
-    // but a handle is a visible thing in the rendered text.
-    assert!(
-        composed.matches("(recall ").count() > 0,
-        "and what did not fit was named: {composed}"
-    );
+    // but the authored location and explicit budget marker are visible.
     // Decision 10's line: the pack, the document, the section, the title —
     // a better description than any truncation of the prose.
     assert!(
@@ -893,36 +905,13 @@ async fn a_pack_too_large_for_the_budget_is_named_rather_than_dropped() {
         "and the section it came from: {composed}"
     );
     assert!(
-        composed.contains("(recall "),
-        "and hands back a recall handle: {composed}"
+        composed.contains("summary only: token budget"),
+        "and says why only the authored location was supplied: {composed}"
     );
-
-    // The handle names a real record — which is what "named rather than
-    // dropped" means at this end.
-    //
-    // **What it does not do yet is resolve.** `/v1/recall` fetched a body by
-    // id and is deleted (CPR-12, ADR-0078 decision 5); the context run that
-    // replaced it composes for a question and takes no ids. So the assertion
-    // this test used to make — that the handle hands back the chunk the block
-    // could not hold — has no surface to make it against. Prompt 18 re-cuts
-    // recall over the new model and is where it comes back; asserting it
-    // against a route that does not exist would be worse than saying so.
-    let handle = composed
-        .split("(recall ")
-        .nth(1)
-        .and_then(|rest| rest.split(')').next())
-        .expect("a recall handle")
-        .to_owned();
-    let id: synveda_types::RecordId = handle.parse().expect("a handle is a record id");
-    let stored: i64 = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from records where tenant_id = $1 and id = $2"#,
-        w.tenant.as_uuid(),
-        id.as_uuid(),
-    )
-    .fetch_one(&w.pool)
-    .await
-    .expect("look the handle up");
-    assert_eq!(stored, 1, "the handle names a record that exists: {handle}");
+    assert!(
+        !composed.contains("(recall "),
+        "no dead legacy record handle may escape: {composed}"
+    );
 }
 
 /// **`ContextPackRead` admits pack chunks and `MemoryRead` never does**
@@ -1218,7 +1207,7 @@ async fn every_act_is_on_the_chain_and_no_payload_carries_document_text() {
         .rev()
         .find(|event| event.action == "session.context.composed")
         .expect("a context-run event");
-    let channels = injected.payload["channels"]
+    let channels = injected.payload["authored_channels"]
         .as_array()
         .cloned()
         .unwrap_or_default();
@@ -1228,7 +1217,7 @@ async fn every_act_is_on_the_chain_and_no_payload_carries_document_text() {
             .any(|channel| channel["ref"] == json!("context-pack/published")),
         "the served block's watermark cites the pack channel it composed \
          against: {:?}",
-        injected.payload["channels"]
+        injected.payload["authored_channels"]
     );
 
     // The sweep. No payload on the whole chain carries document text —

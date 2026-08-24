@@ -1492,6 +1492,7 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
         &mut search_tx,
         tenant.id,
         &knowledge_search::Filters {
+            scope_ids: Vec::new(),
             workspace_id: None,
             project_id: None,
             scope_id: Some(workspace.id),

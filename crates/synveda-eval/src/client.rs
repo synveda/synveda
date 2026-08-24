@@ -12,12 +12,10 @@
 //! that used to *be* a session id is now looked up through
 //! [`Client::session_for`], which opens one run per label and reuses it.
 //!
-//! `/v1/recall` is deleted with no successor on this plane. Its **query**
-//! shape is served by a context run, narrower; its **sweep** and **ids**
-//! shapes have none — a composition is budget-bounded, so it can neither
-//! enumerate a corpus nor be handed a list of handles. Both refuse by name
-//! rather than degrade, and the three suites built on them fail loudly and
-//! say why. Prompt 18 re-cuts recall; Prompt 32 re-measures.
+//! CPR-20 re-cuts deep query onto the ordinary session-scoped Knowledge lens
+//! and corpus enumeration/id probes onto its stricter `SessionDiagnostics`
+//! lens. Neither abuses a budgeted context run and neither restores a global
+//! recall route. Prompt 30 re-measures the suites against accepted Knowledge.
 //!
 //! The audit search is untouched (ADR-0046 decision 4): the sweep says what
 //! a *reader is served*, `GET /v1/audit/events` says what the *pipeline
@@ -36,16 +34,6 @@ pub struct Client {
     gateway_url: String,
     http: reqwest::Client,
 }
-
-/// What the sweep shape answers with now, said once so every runner reports
-/// the same sentence.
-pub const UNAVAILABLE_SWEEP: &str = "the bitemporal corpus sweep is unavailable: `/v1/recall` is deleted (CPR-12, \
-     ADR-0078 decision 5) and a budgeted composition cannot stand in for an \
-     enumeration. Prompt 18 re-cuts recall; Prompt 32 re-measures.";
-
-/// The same, for the fetch-by-handle probe.
-pub const UNAVAILABLE_IDS: &str = "fetch-by-handle is unavailable: `/v1/recall` is deleted (CPR-12, ADR-0078 \
-     decision 5) and a context run takes no record ids. Prompt 18 re-cuts recall.";
 
 /// A random discriminator for an idempotency key.
 fn uuid_like() -> String {
@@ -124,14 +112,26 @@ impl InjectResponse {
     /// Called once, on the way out of the client, so every caller reads the
     /// same field it always read.
     fn hydrate(&mut self) {
-        let Some(marker) = self.text.split("records=").nth(1) else {
+        if let Some(marker) = self.text.split("records=").nth(1) {
+            let ids = marker.split("-->").next().unwrap_or_default().trim();
+            if !ids.is_empty() && ids != "none" {
+                self.record_ids = ids.split(',').map(|id| id.trim().to_owned()).collect();
+                return;
+            }
+        }
+        let Some((_, marker)) = self.text.rsplit_once("[Synveda Knowledge: ") else {
             return;
         };
-        let ids = marker.split("-->").next().unwrap_or_default().trim();
-        if ids.is_empty() || ids == "none" {
+        let ids = marker.split(']').next().unwrap_or_default().trim();
+        if ids.is_empty() {
             return;
         }
-        self.record_ids = ids.split(',').map(|id| id.trim().to_owned()).collect();
+        self.record_ids = ids
+            .split(',')
+            .filter_map(|address| address.trim().split('@').next())
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+            .collect();
     }
 }
 
@@ -239,16 +239,11 @@ pub struct SessionRef {
     pub id: String,
 }
 
-/// `POST /v1/recall` in its **sweep** shape (CTX-5, ADR-0042 decision 14):
-/// no ids and no query, just an instant — "everything I may read, as it
-/// stood then". The one shape that enumerates a corpus rather than ranking
-/// one (ADR-0046 decision 1).
-///
-/// The route is deleted (CPR-12, ADR-0078 decision 5). The shape is kept
-/// because three suites are written against it and Prompt 18 re-cuts it;
-/// what it is sent to now is a named refusal.
-#[derive(Debug, Serialize)]
-pub struct RecallSweepRequest<'a> {
+/// Diagnostic, cursor-paginated enumeration over one session's Knowledge
+/// universe. `session_id` remains the eval label; the client resolves it to a
+/// real run before calling the public application API.
+#[derive(Debug)]
+pub struct KnowledgeSweepRequest<'a> {
     pub as_of: &'a str,
     pub session_id: &'a str,
     /// Asked for explicitly rather than left to the surface's default, so
@@ -257,69 +252,94 @@ pub struct RecallSweepRequest<'a> {
     pub limit: usize,
 }
 
-/// `POST /v1/recall` in its **query** shape (CTX-5, ADR-0042 decision 1):
-/// ranked retrieval over the widened universe, with no composition budget
-/// and no scope gradient in the way.
-///
-/// EVAL-4 uses it for one thing only — asking whether a record is
-/// retrievable at all, which is a different question from whether it fits
-/// in a block, and the only honest way to wait for the sparse sidecar
-/// without waiting for the measurement (ADR-0047 decision 5).
+/// Ordinary deep query over current Knowledge, separate from composition.
 #[derive(Debug, Serialize)]
-pub struct RecallQueryRequest<'a> {
+pub struct KnowledgeQueryRequest<'a> {
     pub query: &'a str,
     pub limit: usize,
 }
 
-/// `POST /v1/recall` in its **ids** shape (CTX-4, ADR-0041): the handles an
-/// index line rendered, re-decided by the current plan on the way in.
-///
-/// EVAL-5's sharpest probe (ADR-0048 decision 1). It removes retrieval
-/// from the question entirely — no ranking, no index, no phrasing — and
-/// asks the product to refuse a record by name. Refusals are uniform and
-/// silent (ADR-0041), so a request naming ten inadmissible ids answers
-/// with nothing rather than with an error, and "nothing" is exactly the
-/// measurement.
-#[derive(Debug, Serialize)]
-pub struct RecallIdsRequest<'a> {
+/// Diagnostic fetch-by-id probe. Every returned item is still decided exactly.
+#[derive(Debug)]
+pub struct KnowledgeIdsRequest<'a> {
     pub ids: Vec<String>,
     pub session_id: &'a str,
 }
 
-impl RecallResponse {
-    /// A composed block, read as the shape recall used to answer with.
-    ///
-    /// Lossy on purpose and in one direction: a block carries rendered text
-    /// rather than per-record bodies, so `content` is the whole block on the
-    /// first entry and empty on the rest. Callers that ask "is this record
-    /// retrievable at all" are served correctly; callers that read
-    /// `entry.content` per record are not, and EVAL-4's content assertions
-    /// therefore need Prompt 18.
-    #[must_use]
-    pub fn from_block(block: &InjectResponse) -> Self {
-        let entries = block
-            .record_ids
-            .iter()
-            .enumerate()
-            .map(|(position, id)| RecallEntry {
-                record_id: id.clone(),
-                scope_id: String::new(),
-                class: String::new(),
-                content: if position == 0 {
-                    block.text.clone()
-                } else {
-                    String::new()
-                },
-                provenance: serde_json::Value::Null,
+#[derive(Debug, Deserialize)]
+struct KnowledgeQueryResponse {
+    items: Vec<KnowledgeQueryEntry>,
+    #[serde(rename = "retrieval_mode")]
+    _retrieval_mode: String,
+    next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeQueryEntry {
+    knowledge: KnowledgeWireItem,
+    #[serde(default)]
+    sources: Vec<KnowledgeWireSource>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeWireItem {
+    id: String,
+    scope_id: String,
+    knowledge_type: String,
+    current_revision: KnowledgeWireRevision,
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeWireRevision {
+    body_markdown: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeWireSource {
+    session_event_id: Option<String>,
+    #[serde(default)]
+    metadata: serde_json::Value,
+}
+
+impl KnowledgeQueryResponse {
+    fn into_eval(self, mode: &str) -> RecallResponse {
+        let entries = self
+            .items
+            .into_iter()
+            .map(|entry| {
+                let mut provenance = entry
+                    .sources
+                    .first()
+                    .map(|source| source.metadata.clone())
+                    .filter(serde_json::Value::is_object)
+                    .unwrap_or_else(|| serde_json::json!({}));
+                if let (Some(object), Some(event_id)) = (
+                    provenance.as_object_mut(),
+                    entry
+                        .sources
+                        .first()
+                        .and_then(|source| source.session_event_id.clone()),
+                ) {
+                    object.insert("event_id".to_owned(), serde_json::Value::String(event_id));
+                }
+                RecallEntry {
+                    record_id: entry.knowledge.id,
+                    scope_id: entry.knowledge.scope_id,
+                    class: entry.knowledge.knowledge_type,
+                    content: entry.knowledge.current_revision.body_markdown,
+                    provenance,
+                }
             })
-            .collect::<Vec<_>>();
-        let considered = entries.len();
+            .collect();
         RecallResponse {
             entries,
-            mode: "query".to_owned(),
-            truncated: false,
-            scopes_considered: considered,
-            scopes_decided: considered,
+            mode: mode.to_owned(),
+            truncated: self.next_cursor.is_some(),
+            // The new lens decides exact items, not aggregate scopes. The
+            // old report columns remain zero until Prompt 30 replaces them
+            // with Knowledge/PDP evidence rather than fabricating a count.
+            scopes_considered: 0,
+            scopes_decided: 0,
         }
     }
 }
@@ -572,72 +592,141 @@ impl Client {
             .await
     }
 
-    /// The bitemporal corpus sweep — **not available on this plane**.
-    ///
-    /// `/v1/recall` served "everything I may read, as it stood at instant T",
-    /// which is the one shape that *enumerates* a corpus rather than ranking
-    /// one (ADR-0046 decision 1). It is deleted (CPR-12, ADR-0078 decision 5)
-    /// and a context run cannot stand in: a composition is budget-bounded and
-    /// gradient-ordered, so what it leaves out is a property of the budget
-    /// rather than of the corpus.
-    ///
-    /// It fails loudly rather than degrading, because a measurement taken
-    /// against the wrong question is worse than a measurement not taken.
-    /// Prompt 18 re-cuts recall over the new model; Prompt 32 re-measures.
-    pub async fn recall_sweep(
+    /// Enumerates the current visible Knowledge corpus through the diagnostic
+    /// lens, following every opaque cursor until `limit` or exhaustion.
+    pub async fn knowledge_sweep(
         &self,
-        _bearer: &str,
-        _request: &RecallSweepRequest<'_>,
+        bearer: &str,
+        request: &KnowledgeSweepRequest<'_>,
     ) -> Result<Timed<RecallResponse>, String> {
-        Err(UNAVAILABLE_SWEEP.to_owned())
+        if request.limit == 0 {
+            return Err("a Knowledge sweep limit must be at least one".to_owned());
+        }
+        let session = self.session_for(bearer, request.session_id).await?;
+        let mut cursor: Option<String> = None;
+        let mut entries = Vec::new();
+        let mut elapsed_ms = 0.0;
+        let mut degraded = Vec::new();
+        let mut truncated = false;
+        loop {
+            let remaining = request.limit.saturating_sub(entries.len());
+            if remaining == 0 {
+                truncated = cursor.is_some();
+                break;
+            }
+            let page_limit = remaining.min(100);
+            let timed: Timed<KnowledgeQueryResponse> = self
+                .post(
+                    &format!("/v1/sessions/{session}/knowledge-evaluation"),
+                    bearer,
+                    &serde_json::json!({
+                        "as_of": request.as_of,
+                        "cursor": cursor.as_deref(),
+                        "limit": page_limit,
+                    }),
+                )
+                .await?;
+            elapsed_ms += timed.elapsed_ms;
+            for warning in timed.degraded {
+                if !degraded.contains(&warning) {
+                    degraded.push(warning);
+                }
+            }
+            let next = timed.value.next_cursor.clone();
+            let mut page = timed.value.into_eval("sweep");
+            entries.append(&mut page.entries);
+            let Some(next) = next else { break };
+            if cursor.as_deref() == Some(next.as_str()) {
+                return Err("Knowledge evaluation repeated its cursor".to_owned());
+            }
+            cursor = Some(next);
+        }
+        Ok(Timed {
+            value: RecallResponse {
+                entries,
+                mode: "sweep".to_owned(),
+                truncated,
+                scopes_considered: 0,
+                scopes_decided: 0,
+            },
+            elapsed_ms,
+            degraded,
+        })
     }
 
-    /// Ranked retrieval — served by a context run's query shape.
-    ///
-    /// Narrower than what it replaced: a composition ranks *and* budgets,
-    /// where recall ranked over a widened universe with no budget in the way.
-    /// A record that exists and is readable can therefore be absent here for
-    /// a reason recall never had, which is why this is only ever used to ask
-    /// whether something is retrievable at all.
-    pub async fn recall_query(
+    /// Ranked, non-budgeted current Knowledge query under ordinary
+    /// `SessionRead` authority.
+    pub async fn knowledge_query(
         &self,
         bearer: &str,
         session: &str,
-        request: &RecallQueryRequest<'_>,
+        request: &KnowledgeQueryRequest<'_>,
     ) -> Result<Timed<RecallResponse>, String> {
-        let key = format!("eval-q-{}", uuid_like());
-        let timed: Timed<InjectResponse> = self
-            .post_idempotent(
-                &format!("/v1/sessions/{session}/context-runs"),
+        let timed: Timed<KnowledgeQueryResponse> = self
+            .post(
+                &format!("/v1/sessions/{session}/knowledge-query"),
                 bearer,
-                &InjectRequest {
-                    task: Some(request.query),
-                    budget_tokens: None,
-                },
-                &key,
+                request,
             )
             .await?;
-        let mut block = timed.value;
-        block.hydrate();
         Ok(Timed {
-            value: RecallResponse::from_block(&block),
+            value: timed.value.into_eval("query"),
             elapsed_ms: timed.elapsed_ms,
             degraded: timed.degraded,
         })
     }
 
-    /// Fetch-by-handle — **not available on this plane**.
-    ///
-    /// EVAL-5's sharpest probe: name ten inadmissible ids and measure that
-    /// nothing comes back. `/v1/recall`'s `ids` shape is deleted and a context
-    /// run takes no ids, so the probe cannot be posed at all. Prompt 18 is
-    /// where it returns.
-    pub async fn recall_ids(
+    /// Fetches exact ids through the diagnostic lens, chunking at the public
+    /// API bound. Denied ids return no object-shaped result.
+    pub async fn knowledge_ids(
         &self,
-        _bearer: &str,
-        _request: &RecallIdsRequest<'_>,
+        bearer: &str,
+        request: &KnowledgeIdsRequest<'_>,
     ) -> Result<Timed<RecallResponse>, String> {
-        Err(UNAVAILABLE_IDS.to_owned())
+        if request.ids.is_empty() {
+            return Ok(Timed {
+                value: RecallResponse {
+                    entries: Vec::new(),
+                    mode: "ids".to_owned(),
+                    truncated: false,
+                    scopes_considered: 0,
+                    scopes_decided: 0,
+                },
+                elapsed_ms: 0.0,
+                degraded: Vec::new(),
+            });
+        }
+        let session = self.session_for(bearer, request.session_id).await?;
+        let mut entries = Vec::new();
+        let mut elapsed_ms = 0.0;
+        let mut degraded = Vec::new();
+        for ids in request.ids.chunks(100) {
+            let timed: Timed<KnowledgeQueryResponse> = self
+                .post(
+                    &format!("/v1/sessions/{session}/knowledge-evaluation"),
+                    bearer,
+                    &serde_json::json!({"ids": ids, "limit": ids.len()}),
+                )
+                .await?;
+            elapsed_ms += timed.elapsed_ms;
+            for warning in timed.degraded {
+                if !degraded.contains(&warning) {
+                    degraded.push(warning);
+                }
+            }
+            entries.extend(timed.value.into_eval("ids").entries);
+        }
+        Ok(Timed {
+            value: RecallResponse {
+                entries,
+                mode: "ids".to_owned(),
+                truncated: false,
+                scopes_considered: 0,
+                scopes_decided: 0,
+            },
+            elapsed_ms,
+            degraded,
+        })
     }
 
     pub async fn propose(

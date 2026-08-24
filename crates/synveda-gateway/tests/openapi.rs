@@ -64,6 +64,10 @@ const DECLARED_PATHS: &[&str] = &[
     "/v1/capture-candidates/{id}/dismiss",
     "/v1/capture-candidates/{id}/merge",
     "/v1/capture-candidates/{id}/replace",
+    // CPR-20 (ADR-0084): explainable context traces and explicit feedback.
+    "/v1/context-runs",
+    "/v1/context-runs/{id}",
+    "/v1/context-runs/{id}/feedback",
     "/v1/invites/{invite_token}/accept",
     // CPR-17 (ADR-0082): the public Knowledge plane.
     "/v1/knowledge",
@@ -90,6 +94,8 @@ const DECLARED_PATHS: &[&str] = &[
     "/v1/sessions/{session_id}/end",
     "/v1/sessions/{session_id}/events",
     "/v1/sessions/{session_id}/events/{event_id}",
+    "/v1/sessions/{session_id}/knowledge-evaluation",
+    "/v1/sessions/{session_id}/knowledge-query",
     "/v1/sessions/{session_id}/timeline",
     "/v1/workspaces",
     "/v1/workspaces/{workspace_id}",
@@ -340,8 +346,8 @@ fn the_document_is_generatable() {
     }
     assert_eq!(
         operation_ids.len(),
-        62,
-        "the 53-operation CPR-17 contract plus CPR-18's 9 capture operations: \
+        67,
+        "the 62-operation CPR-18 contract plus CPR-20's 5 new operations: \
          {operation_ids:?}"
     );
 }

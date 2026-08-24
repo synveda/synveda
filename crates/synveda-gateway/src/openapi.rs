@@ -34,6 +34,7 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 
 use crate::access;
 use crate::capture;
+use crate::context_api;
 use crate::knowledge_api;
 use crate::me;
 use crate::sessions;
@@ -62,6 +63,9 @@ CPR-18 adds `/v1/capture-batches` and `/v1/capture-candidates`: explicit or \
 session-end extraction freezes exact event evidence and produces reviewable \
 candidates only. Accept, edit, merge and replace enter the same Knowledge \
 VedaFlow command layer; dismissal publishes nothing. \
+CPR-20 makes context runs explainable over current immutable Knowledge, adds \
+re-authorised trace and feedback operations, and provides ordinary and \
+diagnostic session-scoped Knowledge query lenses without a global recall. \
 Since CPR-12 the session plane is also the **only** runtime plane: \
 `POST /v1/sessions/{session_id}/events` is where observations are admitted and \
 `POST /v1/sessions/{session_id}/context-runs` is where context is composed. \
@@ -135,7 +139,12 @@ revision, and its mutations are last-writer-wins under the PDP.",
         sessions::get_event,
         sessions::end,
         sessions::timeline,
-        sessions::create_context_run,
+        context_api::create_context_run,
+        context_api::list,
+        context_api::get,
+        context_api::feedback,
+        context_api::knowledge_query,
+        context_api::knowledge_evaluation,
         capture::create_batch,
         capture::list_batches,
         capture::get_batch,
@@ -210,7 +219,18 @@ revision, and its mutations are last-writer-wins under the PDP.",
         sessions::NewEventBody,
         sessions::AppendEventsBody,
         sessions::EndSessionBody,
-        sessions::ContextRunBody,
+        context_api::ContextScoreView,
+        context_api::ContextCandidateView,
+        context_api::ContextSelectionView,
+        context_api::ContextFeedbackView,
+        context_api::ContextRunDetailView,
+        context_api::ContextRunListView,
+        context_api::ContextKnowledgeView,
+        context_api::ContextKnowledgeQueryView,
+        context_api::CreateContextRunBody,
+        context_api::KnowledgeQueryBody,
+        context_api::KnowledgeEvaluationBody,
+        context_api::ContextFeedbackBody,
         capture::CaptureBatchView,
         capture::CaptureBatchListView,
         capture::CaptureMatchView,
@@ -247,6 +267,7 @@ revision, and its mutations are last-writer-wins under the PDP.",
         (name = "sessions", description = "Agent runs, their immutable event ledger, and the context composed for them"),
         (name = "knowledge", description = "Stable governed Knowledge, immutable revisions, provenance and lifecycle"),
         (name = "capture", description = "Session evidence extraction into reviewable Knowledge candidates"),
+        (name = "context", description = "Explainable Knowledge planning, scoped query and explicit feedback"),
     ),
     modifiers(&BearerAuth),
 )]
