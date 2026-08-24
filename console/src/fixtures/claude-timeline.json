@@ -66,14 +66,14 @@
       "id": "ID",
       "at": "INSTANT",
       "delayed": false,
-      "summary": "context composed: 0 entries, 0 tokens"
+      "summary": "Synveda supplied 0 knowledge items"
     },
     {
       "kind": "context_run",
       "id": "ID",
       "at": "INSTANT",
       "delayed": false,
-      "summary": "context composed: 0 entries, 0 tokens"
+      "summary": "Synveda supplied 0 knowledge items"
     }
   ],
   "event_counts": {

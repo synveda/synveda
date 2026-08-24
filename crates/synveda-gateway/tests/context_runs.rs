@@ -597,6 +597,32 @@ async fn planner_selects_only_current_knowledge_and_feedback_names_one_revision(
         .expect("active exact revision selected");
     let selection_id = selected["id"].as_str().expect("selection id");
 
+    let (timeline_status, timeline) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/sessions/{}/timeline", world.alice_session),
+        &world.alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(timeline_status, StatusCode::OK, "{timeline}");
+    let timeline_run = timeline["entries"]
+        .as_array()
+        .expect("timeline entries")
+        .iter()
+        .find(|entry| entry["kind"] == "context_run" && entry["id"] == run_id)
+        .expect("this context run on its session timeline");
+    let noun = if selections.len() == 1 {
+        "knowledge item"
+    } else {
+        "knowledge items"
+    };
+    assert_eq!(
+        timeline_run["summary"],
+        format!("Synveda supplied {} {noun}", selections.len())
+    );
+
     let feedback_body = json!({
         "context_selection_id": selection_id,
         "knowledge_revision_id": corpus.active_revision,
@@ -760,6 +786,31 @@ async fn denied_private_knowledge_leaks_no_address_content_count_or_block_finger
         blake3::hash(b"").to_hex().to_string()
     );
     assert!(bob_detail["policy_exclusion_message"].is_string());
+
+    let (timeline_status, timeline) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/sessions/{}/timeline", world.alice_session),
+        &world.bob_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(timeline_status, StatusCode::OK, "{timeline}");
+    let timeline_run = timeline["entries"]
+        .as_array()
+        .expect("timeline entries")
+        .iter()
+        .find(|entry| entry["kind"] == "context_run" && entry["id"] == run_id)
+        .expect("shared session run is timeline-visible");
+    assert_eq!(
+        timeline_run["summary"],
+        "Synveda supplied 0 knowledge items. Some context detail is unavailable under current policy."
+    );
+    let timeline_disclosure = timeline_run.to_string();
+    assert!(!timeline_disclosure.contains(&corpus.private_id));
+    assert!(!timeline_disclosure.contains(&corpus.private_revision));
+    assert!(!timeline_disclosure.contains("test-fast-secret"));
 
     let (list_status, listing) = call(
         &world.app,

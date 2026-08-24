@@ -1873,10 +1873,12 @@ pub(crate) async fn timeline(
                 summary: event_summary(&event),
             });
         }
-        let run_entries: Vec<TimelineEntry> = runs
-            .into_iter()
-            .take(MAX_TIMELINE_ENTRIES as usize)
-            .map(|run| TimelineEntry {
+        let mut run_entries: Vec<TimelineEntry> = Vec::new();
+        for run in runs.into_iter().take(MAX_TIMELINE_ENTRIES as usize) {
+            let (visible_selections, policy_exclusion) =
+                crate::context_api::timeline_selection_visibility(&state, &mut tx, tenant_id, &run)
+                    .await?;
+            run_entries.push(TimelineEntry {
                 kind: "context_run".to_owned(),
                 id: run.id.to_string(),
                 at: run.created_at,
@@ -1886,20 +1888,9 @@ pub(crate) async fn timeline(
                 // report and nothing that could have been late.
                 received_at: None,
                 delayed: false,
-                summary: match &run.query {
-                    Some(query) => format!(
-                        "context composed for {:?}: {} entries, {} tokens",
-                        truncate(query, 60),
-                        run.entry_count,
-                        run.tokens
-                    ),
-                    None => format!(
-                        "context composed: {} entries, {} tokens",
-                        run.entry_count, run.tokens
-                    ),
-                },
-            })
-            .collect();
+                summary: context_run_summary(visible_selections, policy_exclusion),
+            });
+        }
         let entries = merge_timeline(event_entries, run_entries);
 
         read_event(
@@ -1966,6 +1957,25 @@ fn merge_timeline(events: Vec<TimelineEntry>, runs: Vec<TimelineEntry>) -> Vec<T
     }
     merged.extend(runs);
     merged
+}
+
+/// A server-owned, content-free timeline line for one context delivery.
+///
+/// The task belongs on the inspector under its trace-retention mode, not in
+/// the broader session timeline. The count has already been re-authorised by
+/// `context_api::timeline_selection_visibility`; the optional sentence is the
+/// only thing a denied selection contributes.
+fn context_run_summary(visible_selections: usize, policy_exclusion: bool) -> String {
+    let noun = if visible_selections == 1 {
+        "knowledge item"
+    } else {
+        "knowledge items"
+    };
+    let mut summary = format!("Synveda supplied {visible_selections} {noun}");
+    if policy_exclusion {
+        summary.push_str(". Some context detail is unavailable under current policy.");
+    }
+    summary
 }
 
 /// One line about an event, from the fields its family actually carries.
@@ -2149,6 +2159,26 @@ mod tests {
             )
             .len(),
             1
+        );
+    }
+
+    #[test]
+    fn a_context_summary_is_plural_and_discloses_only_an_aggregate_policy_gap() {
+        assert_eq!(
+            context_run_summary(0, false),
+            "Synveda supplied 0 knowledge items"
+        );
+        assert_eq!(
+            context_run_summary(1, false),
+            "Synveda supplied 1 knowledge item"
+        );
+        assert_eq!(
+            context_run_summary(2, false),
+            "Synveda supplied 2 knowledge items"
+        );
+        assert_eq!(
+            context_run_summary(1, true),
+            "Synveda supplied 1 knowledge item. Some context detail is unavailable under current policy."
         );
     }
 

@@ -371,7 +371,7 @@ test("the database-backed Claude replay timeline renders without transcript cont
     "tool.invoked",
     "tool.result",
     "message.assistant (111 characters)",
-    "context composed: 0 entries, 0 tokens",
+    "Synveda supplied 0 knowledge items",
   ]) {
     assert.ok(rendered.includes(summary), "missing gateway-produced summary: " + summary);
   }
@@ -381,6 +381,15 @@ test("the database-backed Claude replay timeline renders without transcript cont
   );
   assert.doesNotMatch(rendered, /Read notes\.txt|full jitter|Write that budget down/);
   assert.match(rendered, /Show raw payload/);
+  const markup = renderToStaticMarkup(
+    <AppProvider value={appContext(me(), reconcile({ workspaceId: "w-1", projectId: "p-1" }, me()), () => {})}>
+      <Session sessionId="s-1" />
+    </AppProvider>,
+  );
+  assert.ok(
+    markup.includes('href="/console/context-runs/ID"'),
+    "a context delivery opens the exact inspector rather than an unlinked timeline label",
+  );
 });
 
 test("a run in a project this caller may not read renders the refusal and nothing about the run", async () => {

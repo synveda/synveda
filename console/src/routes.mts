@@ -41,6 +41,7 @@ export type RouteId =
   | "home"
   | "sessions"
   | "session"
+  | "context-run"
   | "knowledge"
   | "knowledge-item"
   | "learnings"
@@ -115,6 +116,13 @@ export const ROUTES: readonly RouteDef[] = [
     label: "Session",
     group: "none",
     blurb: "One run: what it was, how it ended, and everything that happened in it.",
+  },
+  {
+    id: "context-run",
+    segment: "context-runs/:context_run_id",
+    label: "Context Inspector",
+    group: "none",
+    blurb: "What Synveda supplied, why it was selected, and the evidence behind it.",
   },
   {
     id: "knowledge",

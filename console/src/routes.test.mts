@@ -126,6 +126,17 @@ test("a run has its own address, and the id in it is the id it renders", () => {
   assert.throws(() => hrefOf("session"), /session_id/);
 });
 
+test("a context run has one linkable inspector address", () => {
+  const href = hrefOf("context-run", { context_run_id: "018f-context" });
+  assert.equal(href, "/console/context-runs/018f-context");
+  assert.deepEqual(matchRoute(href), {
+    id: "context-run",
+    params: { context_run_id: "018f-context" },
+  });
+  assert.equal(routeOf("context-run").group, "none");
+  assert.throws(() => hrefOf("context-run"), /context_run_id/);
+});
+
 test("a Knowledge item has a stable address", () => {
   const href = hrefOf("knowledge-item", { knowledge_id: "018f-knowledge" });
   assert.equal(href, "/console/knowledge/018f-knowledge");

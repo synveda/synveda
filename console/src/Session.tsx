@@ -267,7 +267,13 @@ function Entry({
         {isWarning(entry) ? <span className="tag warn">warning</span> : null}
         {isContextRun(entry) ? <span className="tag done">context</span> : null}
       </div>
-      <div>{entry.summary}</div>
+      <div>
+        {isContextRun(entry) ? (
+          <Link href={hrefOf("context-run", { context_run_id: entry.id })}>{entry.summary}</Link>
+        ) : (
+          entry.summary
+        )}
+      </div>
       {note ? <div className="late-note">{note}</div> : null}
       {diagnostics && !isContextRun(entry) ? (
         <Payload eventId={entry.id} sessionId={sessionId} />

@@ -38,6 +38,7 @@ import type { MeView } from "./generated/api.js";
 
 import { Home } from "./Home.js";
 import { Knowledge, KnowledgeItem } from "./Knowledge.js";
+import { ContextInspector } from "./Context.js";
 import { Learnings } from "./Learnings.js";
 import { Onboarding } from "./Onboarding.js";
 import { People } from "./People.js";
@@ -204,6 +205,8 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
       // The id comes from the URL, so a refresh and a pasted link land on
       // the same run. `matchRoute` cannot produce this route without it.
       return <Session sessionId={route.params.session_id as string} />;
+    case "context-run":
+      return <ContextInspector contextRunId={route.params.context_run_id as string} />;
     case "knowledge":
       return <Knowledge />;
     case "knowledge-item":

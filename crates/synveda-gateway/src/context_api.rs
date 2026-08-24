@@ -1854,6 +1854,56 @@ async fn selection_view(
     Ok((Some(base(revision, sources)), source_policy_exclusion))
 }
 
+/// The Knowledge-selection facts a session timeline may summarise.
+///
+/// A timeline is authorised as a session read, but that is not authority to
+/// disclose a Knowledge selection that the same caller can no longer read.
+/// Full and redacted traces retain exact revision addresses, so count them
+/// only after the same fresh revision decision used by the inspector. A
+/// hashes-only trace deliberately retained no address to disclose; its
+/// content-free selection rows are the retained trace. Disabled mode retained
+/// no selection trace at all.
+///
+/// The boolean is deliberately aggregate. It lets the timeline say that some
+/// detail is unavailable without exposing a denied revision's id, title,
+/// reason or count (ADR-0084 decision 3).
+pub(crate) async fn timeline_selection_visibility(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    run: &ContextRun,
+) -> Result<(usize, bool)> {
+    let mut policy_exclusion = run.policy_exclusion;
+    if run.trace_retention == TraceRetentionMode::Disabled {
+        return Ok((0, policy_exclusion));
+    }
+
+    let retained = store::selections_for_run(&mut *tx, tenant_id, run.id).await?;
+    if run.trace_retention == TraceRetentionMode::HashesOnly {
+        return Ok((retained.len(), policy_exclusion));
+    }
+
+    let mut visible = 0usize;
+    for selection in retained {
+        let (Some(item_id), Some(revision_id)) =
+            (selection.knowledge_item_id, selection.knowledge_revision_id)
+        else {
+            return Err(Error::Internal {
+                message: "an addressed context selection lost its Knowledge address".to_owned(),
+            });
+        };
+        if load_visible_revision(state, tx, tenant_id, item_id, revision_id, false)
+            .await?
+            .is_some()
+        {
+            visible += 1;
+        } else {
+            policy_exclusion = true;
+        }
+    }
+    Ok((visible, policy_exclusion))
+}
+
 async fn detail_view(
     state: &AppState,
     tx: &mut sqlx::PgConnection,

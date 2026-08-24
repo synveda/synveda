@@ -1854,6 +1854,32 @@ CPR-20  Explainable Knowledge context planning and scoped query (XL)
   tombstones are deleted; focused tests, demo, `make ci` and `make db-test`
   pass. ADR-0084.
 
+CPR-21  Context Inspector and outcome feedback (L)
+  Filed 2026-08-24 by the autonomous continuation. Build the linkable Context
+  Inspector over CPR-20's generated, freshly re-authorised run detail. Show the
+  retained task, exact immutable selected revisions and provenance, planning
+  lifecycle state, reasons, integer score components, rank, token cost and total
+  budget, visible exclusions, implementation/index versions, degradation and
+  rendered hash without widening any trace-retention mode. Offer the five
+  explicit feedback types against one exact selection and revision through the
+  generated idempotent command; retrieval alone is never helpfulness. Link each
+  session timeline context entry to the inspector and summarise it as “Synveda
+  supplied N knowledge items” without repeating the task on the broader session
+  surface.
+  AC: `/console/context-runs/{id}` is refreshable and uses only generated
+  operations; selected current Knowledge, visible source evidence, reasons,
+  scores, rank and tokens are legible; stale/superseded and token-budget
+  exclusions are not confused with current selection or policy denial;
+  full/redacted/hashes-only/disabled modes state what was retained and never
+  invent withheld ids/content; policy denial exposes only the aggregate server
+  message; feedback carries exact run/selection/revision identity and one
+  idempotency key, then refreshes the detail; the session timeline links the
+  exact run with the required summary; existing project-isolation and denied-
+  Knowledge gateway cases remain green; no schema, policy, audit or OpenAPI
+  operation is added; and helper/rendering, focused gateway, build, `make ci`
+  and `make db-test` gates pass. No ADR: ADR-0075, ADR-0077 and ADR-0084 already
+  lock every consumed boundary.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1947,7 +1973,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

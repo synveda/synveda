@@ -1275,6 +1275,96 @@ button.danger {
   margin-top: 1rem;
 }
 
+/* ── Context Inspector (CPR-21, ADR-0084) ────────────────────────────── */
+
+.context-inspector {
+  max-width: 72rem;
+}
+
+.context-run-heading,
+.context-selection > header,
+.context-exclusions header {
+  align-items: flex-start;
+  margin-bottom: 0.8rem;
+}
+
+.context-run-heading h2,
+.context-selection h4,
+.context-exclusions h4 {
+  color: var(--ink);
+  font-size: 1rem;
+  letter-spacing: 0;
+  margin: 0.15rem 0 0;
+  text-transform: none;
+}
+
+.context-rendered,
+.context-content {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--line) 12%, transparent);
+  font: 0.88rem/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+.context-selections,
+.context-exclusions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+}
+
+.context-selection,
+.context-exclusions > li {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  min-width: 0;
+}
+
+.context-reasons,
+.context-feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.context-reasons .tag {
+  margin-left: 0;
+}
+
+dl.context-scores {
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+dl.context-scores > div {
+  border-left: 2px solid var(--line);
+  padding-left: 0.6rem;
+}
+
+dl.context-scores dd {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+.context-sources,
+.context-feedback {
+  border-top: 1px solid var(--line);
+  margin: 1rem 0 0;
+  padding-top: 0.2rem;
+}
+
+.context-feedback-history {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
 @media (max-width: 55rem) {
   .knowledge-toolbar {
     justify-content: flex-start;

@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **117 features filed, 85 delivered**;
+Cursor frame has been replayed. **118 features filed, 86 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -219,6 +219,12 @@ Load-bearing facts about Phase 5:
   Context packs and skill advertisements remain separately governed authored
   inputs, and their aggregate historical block is masked when exact authored
   authority cannot be reconstructed.
+- CPR-21 is delivered: `/console/context-runs/{id}` is the generated-API
+  Context Inspector over CPR-20's re-authorised trace and exact-revision
+  feedback. Session context entries link it and carry only a freshly visible
+  `Synveda supplied N knowledge items` summary; full/redacted/hashes-only/
+  disabled remain honest, and no schema, Cedar/audit action or parallel
+  telemetry model was added.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

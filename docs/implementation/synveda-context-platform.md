@@ -33,12 +33,12 @@ programme convention established in Prompt 1.
 | Public Knowledge API, lexical/semantic search, generated-client browser and raw-record product cutover | CPR-17 | **complete** | `f2a7c5c` | `2d845b0` | gateway public API 1/1; OpenAPI 5/5; console 151/151; RLS 84/84 | PASS | PASS | isolated `demos/cpr-17-knowledge-browser.sh` PASS: one Knowledge item, zero old records | none |
 | Session-based capture batches, reviewable candidates and governed acceptance actions | CPR-18 | **complete** | `2d845b0` | `e778a60` | gateway 3/3; Claude lifecycle 2/2; ingest 64/64; OpenAPI 5/5; console 151/151; RLS 84/84 | PASS | PASS | isolated `demos/cpr-18-session-capture.sh` PASS: 8 candidates, 8 governed changes, zero old records/queue | none |
 | New Learnings lightweight candidate review and scope-safe governed decisions | CPR-19 | **complete** | `e778a60` | `e90dac9` | console pure 8/8; component acceptance 6/6; complete console 165/165; production build PASS | PASS | N/A — console-only | real-component server-rendered acceptance covers evidence, comparisons, all actions, denial and applied/pending outcomes | none |
-| Explainable Knowledge context planning, trace retention, feedback and scoped query/evaluation lenses | CPR-20 | **complete** | `e90dac9` | next checkpoint | context 3/3; audit 13/13; packs 10/10; sessions 22/22; OpenAPI 5/5; console 165/165; RLS guards PASS | PASS | PASS | isolated `demos/cpr-20-context-planning.sh` PASS: 55 Knowledge, 47 plans, 75 selections, 2 feedback, zero records | none |
+| Explainable Knowledge context planning, trace retention, feedback and scoped query/evaluation lenses | CPR-20 | **complete** | `e90dac9` | `8ed8aa6` | context 3/3; audit 13/13; packs 10/10; sessions 22/22; OpenAPI 5/5; console 165/165; RLS guards PASS | PASS | PASS | isolated `demos/cpr-20-context-planning.sh` PASS: 55 Knowledge, 47 plans, 75 selections, 2 feedback, zero records | none |
+| Linkable Context Inspector, retention-aware evidence and exact revision outcome feedback | CPR-21 | **complete** | `8ed8aa6` | next checkpoint | console helpers 7/7; component 6/6; complete console 179/179; context 3/3; sessions 22/22; production build PASS | PASS | PASS | in-app browser unavailable; real-component SSR covers full/redacted/hashes-only/disabled/refusal and the production bundle builds | none |
 
-**Exact next objective:** file and implement CPR-21, the Context Inspector and
-revision-specific outcome-feedback console over CPR-20's generated run
-list/detail/feedback operations, including the session-timeline link and
-retention-mode presentation rules.
+**Exact next objective:** file and implement CPR-22, the core individual/small-
+team MVP acceptance gate over sessions, capture, governed Knowledge, clean-
+session/team reuse, private isolation, supersession and the Context Inspector.
 CPR-13 remains reserved for the demo-corpus re-point and follows the
 MVP surfaces it must demonstrate; rewriting those demos before Knowledge,
 capture and scoped recall exist would knowingly rewrite them twice.
@@ -3407,3 +3407,53 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(context): add explainable context planning (CPR-20)` on
   `feat/context-platform-mvp`.
 - **Commit hash.** Written by the CPR-21 checkpoint on Prompt 1's rule.
+
+### Prompt 19 objective — Context Inspector and explicit outcome feedback (CPR-21)
+
+- **Selected feature and state.** **CPR-21** is delivered from `8ed8aa6`. It
+  implements the external Prompt 19 objective without a new ADR, schema,
+  Cedar action, audit action or OpenAPI operation. ADR-0075 continues to own
+  the generated-client console shell, ADR-0077 the session timeline and
+  ADR-0084 the re-authorised trace/feedback contract.
+
+- **Inspector product surface.** `/console/context-runs/{id}` is a stable,
+  refreshable route backed only by generated `get_context_run` and
+  `create_context_feedback` operations. Full traces render the retained task,
+  delivered block, exact Knowledge revision, current/stale/superseded state,
+  rank, token charge, reason codes, keyword/embedding/freshness/pin/current-
+  state/final scores and independently visible provenance. Requested and
+  governed budgets, actual token use, retrieval/embedding/index/graph
+  versions, degradation and rendered hash remain explicit. Graph is labelled
+  `not run` rather than assigned an invented contribution before the bounded-
+  graph package.
+
+- **Retention and feedback.** Full, redacted, hashes-only and disabled modes
+  state what was retained instead of treating absent content as empty.
+  Hashes-only rows expose no Knowledge link or feedback control; disabled
+  says selection detail was not retained and makes no claim that delivery
+  selected nothing. The five feedback acts are user-initiated only and send
+  one exact selection plus immutable revision under the run's generated
+  idempotent operation. Selection alone creates no helpfulness assertion.
+
+- **Timeline disclosure repair.** A context timeline entry now says `Synveda
+  supplied N knowledge items`, links the exact run to the inspector and no
+  longer repeats the task, rendered-entry total or token total on the broader
+  `SessionRead` surface. The count is not copied from the historical run row:
+  full/redacted selection addresses are freshly decided as Knowledge reads,
+  denied rows add no count, and at most the aggregate current-policy notice is
+  appended. A project reader of another principal's private selection sees
+  zero visible items and no private id, revision, content or reason.
+
+- **Tests and exact results.** Pure inspector/wire rules **7/7**, real-
+  component acceptance **6/6**, complete console **179/179**, context API
+  **3/3**, sessions API **22/22**, production Vite build **PASS**. `make ci`
+  **PASS** and full fresh-scratch `make db-test` **PASS**, including the 1k-
+  event load gate. The in-app browser runtime exposed no connected browser,
+  so no interactive visual claim is made; the same production component is
+  rendered in every retention/refusal acceptance case and the real bundle
+  builds successfully.
+
+- **Commit.** `feat(console): add context inspector and feedback (CPR-21)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-22 checkpoint under the programme's
+  next-checkpoint convention.
