@@ -169,7 +169,7 @@ test("a plane that is not built says so, and shows no empty list", () => {
   // The failure this prevents: an empty list is indistinguishable from a
   // plane that works and has nothing in it, which is precisely the wrong
   // thing to tell somebody whose agent has been running all week.
-  for (const route of ["sessions", "knowledge", "learnings", "tools"] as const) {
+  for (const route of ["learnings", "tools"] as const) {
     const rendered = toText(renderToStaticMarkup(<Planned route={route} />));
     assert.ok(rendered.includes("not built yet"), `${route}:\n\n${rendered}`);
     assert.ok(rendered.includes("waiting on"), `${route} does not say what it is waiting on`);

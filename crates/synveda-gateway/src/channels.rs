@@ -1,19 +1,15 @@
 //! The VedaFlow channel API (FLOW-2, ADR-0031 decision 12):
 //! `/v1/channels/{scope_id}` behind tenant resolution, uniform-404
-//! ownership, and the PDP (`ChannelRead` to see a scope's channels,
-//! `ChannelPublish` to move records onto its published one).
+//! ownership, and the PDP (`ChannelRead` to see a scope's authored-artifact
+//! channels, `ChannelPublish` to move an immutable artifact version onto one).
 //!
-//! Publishing is the act that crosses the trust boundary: after it,
-//! `inject` composes those records as reviewed material rather than as
-//! unreviewed derived output. It is therefore a curator's action by name
+//! Publishing is the act that crosses the trust boundary. It is therefore a curator's action by name
 //! (seed §5), same-scope (climbing is FLOW-5's, with the higher scope's
 //! approvers), and additive — retraction is a rewind, and rewinds are
 //! FLOW-7's by name.
 //!
-//! What lands is bound to *bytes*, not ids: each record's content address
-//! is computed from the version being published and stored in the
-//! channel's tree, so a later edit demotes the record to unreviewed
-//! rather than riding a published id (ADR-0031 decision 5).
+//! What lands is bound to *bytes*, not a mutable name: each artifact's
+//! content address is stored in the channel tree (ADR-0031 decision 5).
 //!
 //! Since FLOW-7 (ADR-0036) the same plane holds the two acts that move a
 //! channel the other way: `ChannelRollback` rewinds it to a state it has
@@ -25,9 +21,7 @@
 //!
 //! Since FLOW-3 (ADR-0032 decision 8) this route resolves the **same**
 //! approval matrix a proposal does, with the acting principal counting as
-//! the only approver. A curator publishing internal memory under
-//! `regulated-strict` still works — the matrix asks for one curator and
-//! one curator acted — and a `restricted` record refuses and names the
+//! the only approver. A multi-person requirement refuses and names the
 //! proposal route. That is what keeps one matrix rather than two paths:
 //! the direct route did not become a hole to close, it became the
 //! degenerate case where one approval is enough.
@@ -41,12 +35,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::records::RecordState;
-use synveda_store::{records, rls, scopes};
+use synveda_store::{rls, scopes};
 use synveda_types::{
-    AssetKind, CastApproval, Channel, Error, IdentityId, RecordId, Result, ScopeId, Sensitivity,
+    AssetKind, CastApproval, Channel, Error, IdentityId, Result, ScopeId, Sensitivity,
 };
-use synveda_vedaflow::{self as vedaflow, ChannelRef, MemoryAsset, PolicySnapshot, Signer};
+use synveda_vedaflow::{self as vedaflow, ChannelRef, PolicySnapshot, Signer};
 
 use crate::app::AppState;
 use crate::approvals;
@@ -56,10 +49,10 @@ use crate::error::ApiError;
 use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::CHANNEL_OPERATIONS_TOTAL;
 
-/// Records per publish. Well below `MAX_CHANNEL_MEMBERS` on purpose: a
-/// publish is a reviewed act, and a thousand records in one call is a
+/// Members per publish. Well below `MAX_CHANNEL_MEMBERS` on purpose: a
+/// publish is a reviewed act, and a thousand members in one call is a
 /// migration wearing a curator's hat.
-const MAX_PUBLISH_RECORDS: usize = 200;
+const MAX_PUBLISH_MEMBERS: usize = 200;
 
 /// The commit-message cap; mirrors `vedaflow_commits`' CHECK.
 const MAX_MESSAGE_CHARS: usize = 4096;
@@ -97,11 +90,11 @@ async fn respond<T: IntoResponse>(
 /// One standing channel as the API renders it.
 #[derive(Serialize)]
 struct ChannelView {
-    /// The ref name, e.g. `memory/published`.
+    /// The ref name, e.g. `skill/published`.
     name: String,
     asset: String,
     channel: Channel,
-    /// Where the channel points — what an inject block cites.
+    /// Where the channel points — what an authorised reader cites.
     commit: String,
     /// Entries in that commit's tree: the membership for `published` and
     /// `staged`, the last commit's additions for `derived` (which is a
@@ -164,7 +157,16 @@ pub(crate) async fn list(State(state): State<AppState>, Path(scope_id): Path<Sco
             Some(&node),
         )
         .await?;
-        let statuses = vedaflow::channels::status(&mut tx, tenant_id, scope_id).await?;
+        let statuses: Vec<_> = vedaflow::channels::status(&mut tx, tenant_id, scope_id)
+            .await?
+            .into_iter()
+            .filter(|status| {
+                matches!(
+                    status.channel.asset,
+                    AssetKind::Prompt | AssetKind::ContextPack | AssetKind::Skill
+                )
+            })
+            .collect();
         // An allowed admin-plane read chains its decision (ADR-0019
         // decision 4).
         audit::record(
@@ -203,20 +205,12 @@ pub(crate) async fn list(State(state): State<AppState>, Path(scope_id): Path<Sco
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PublishBody {
-    /// The records to admit. Must be current records of **this** scope:
-    /// the direct route stays same-scope (ADR-0034 decision 13). A climb
-    /// from a child scope goes through `POST /v1/proposals` with a
-    /// `source_scope_id`, because it needs a recorded proposer, a
-    /// disclosure decision, and a review that other people can read —
-    /// none of which a single call has.
-    #[serde(default)]
-    record_ids: Vec<RecordId>,
     /// The prompts to admit, by name (PRMT-1, ADR-0049 decision 7). Must be
-    /// drafts of **this** scope, for the reason `record_ids` must be its
-    /// records: the direct route stays same-scope.
+    /// drafts of **this** scope: the direct route stays same-scope.
     ///
-    /// Exactly one of the two lists may be present. Under the default pack
+    /// Exactly one member list may be present. Under the default pack
     /// a prompt publication refuses here on its own arithmetic — the matrix
     /// asks for a steward *and* a curator, two distinct people — and names
     /// the proposal route; under `standard` a single curator may publish,
@@ -227,7 +221,7 @@ pub(crate) struct PublishBody {
     prompt_names: Vec<synveda_types::PromptName>,
     /// The context-pack documents to admit, by path (PRMT-2, ADR-0050
     /// decision 1). Must be documents of **this** scope, for the reason
-    /// the other two lists must be its material: the direct route stays
+    /// the other lists must be its material: the direct route stays
     /// same-scope.
     ///
     /// Exactly one of the three lists may be present. Under the default
@@ -235,20 +229,18 @@ pub(crate) struct PublishBody {
     /// arithmetic — since ADR-0050 decision 15 the matrix asks for a
     /// curator *and* a steward, two distinct people — and names the
     /// proposal route; at a team or a leaf one curator still publishes
-    /// directly, which is the `SHARED`/`LOCAL` split memory has had since
-    /// FLOW-3, given to packs because their blast radius is wider than a
-    /// single record's.
+    /// directly, which is the governed `SHARED`/`LOCAL` split.
     #[serde(default)]
     document_paths: Vec<synveda_types::DocumentPath>,
     /// The skills to admit, by name (SKIL-1, ADR-0051 decision 1). Must be
-    /// drafts of **this** scope, for the reason the other three lists must
+    /// drafts of **this** scope, for the reason the other lists must
     /// be its material: the direct route stays same-scope.
     ///
     /// A skill names the *bundle*, never a file: a client loads a skill
     /// whole, so publishing three of its four files would publish a version
     /// nobody can run. Every file the draft holds becomes a member.
     ///
-    /// Exactly one of the four lists may be present. Under **every** pack a
+    /// Exactly one list may be present. Under **every** pack a
     /// skill publication refuses here on its own arithmetic — the invariant
     /// floor asks for a security reviewer and, since ADR-0051 decision 18,
     /// two distinct approvers — and names the proposal route. That
@@ -274,14 +266,12 @@ struct PublishResponse {
     parent: Option<String>,
     /// The published set's size after this call.
     members: usize,
-    /// Records this call admitted that the channel did not already hold
+    /// Members this call admitted that the channel did not already hold
     /// at that address. Zero means everything named was already
     /// published, unchanged — the act still commits and still audits.
     added: usize,
-    /// Each record's content address, in request order: what the tree now
-    /// names, and what composition recomputes to decide the record is
-    /// still the version that was reviewed.
-    published: Vec<PublishedRecord>,
+    /// Each member's content address, in request order.
+    published: Vec<PublishedMember>,
     /// What the approval matrix asked for here, and which of the acting
     /// principal's roles supplied it (FLOW-3, ADR-0032 decision 8).
     /// A publication that needed nothing renders an empty requirement,
@@ -298,18 +288,13 @@ struct PublishResponse {
 }
 
 #[derive(Serialize)]
-struct PublishedRecord {
-    /// The tree entry name — a record id, or a prompt's path (PRMT-1,
-    /// ADR-0049 decision 3).
+struct PublishedMember {
+    /// The tree entry name or authored path.
     member: String,
-    /// The record id, for a memory publication.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    record_id: Option<RecordId>,
     object_hash: String,
 }
 
-/// `POST /v1/channels/{scope_id}/publish` — admit records onto the
-/// scope's `memory/published` channel.
+/// `POST /v1/channels/{scope_id}/publish` — admit authored artifact versions.
 #[tracing::instrument(name = "channels.publish", skip_all)]
 pub(crate) async fn publish(
     State(state): State<AppState>,
@@ -371,33 +356,9 @@ async fn publish_inner(
         AssetKind::Prompt
     } else if !body.skill_names.is_empty() {
         AssetKind::Skill
-    } else if body.document_paths.is_empty() {
-        AssetKind::Memory
     } else {
         AssetKind::ContextPack
     };
-    let mut requested = body.record_ids.clone();
-    requested.sort_unstable();
-    requested.dedup();
-    let versions = records::current_at_scope(&mut *tx, tenant_id, scope_id, &requested).await?;
-    if versions.len() != requested.len() {
-        let found: Vec<RecordId> = versions.iter().map(|version| version.id).collect();
-        let missing: Vec<String> = requested
-            .iter()
-            .filter(|id| !found.contains(id))
-            .map(ToString::to_string)
-            .collect();
-        // Named rather than silently dropped: publishing a subset of what
-        // a curator asked for is the one outcome a review surface must
-        // never produce quietly.
-        return Err(Error::Invalid {
-            message: format!(
-                "not current records of this scope: {} — promote from a child scope \
-                 with POST /v1/proposals and a source_scope_id (FLOW-5)",
-                missing.join(", ")
-            ),
-        });
-    }
     let mut paths = body.document_paths.clone();
     paths.sort();
     paths.dedup();
@@ -487,20 +448,16 @@ async fn publish_inner(
     // then satisfied by the acting principal alone or refused with the
     // proposal route named (ADR-0032 decision 8). Same resolution
     // function a proposal uses; there is one matrix, not two.
-    let sensitivity = versions
+    let sensitivity = drafts
         .iter()
-        .map(|version| version.state.sensitivity)
-        .chain(drafts.iter().map(|draft| draft.sensitivity))
+        .map(|draft| draft.sensitivity)
         .chain(documents.iter().map(|document| document.sensitivity))
         .chain(skill_drafts.iter().map(|(skill, _)| skill.sensitivity))
         .max()
         .unwrap_or(Sensitivity::Public);
     // The second decision (ADR-0031 decision 12): may this principal *read*
     // what it is about to declare reviewed. Publication is same-scope, so it
-    // is the same scope — but it is the one that keeps a team's curator out
-    // of a teammate's personal channel, because the privacy floor
-    // (ADR-0015 decision 4) denies `MemoryRead` there. Nobody publishes
-    // material they cannot read.
+    // is the same scope. Nobody publishes material they cannot read.
     //
     // At the working tier, deliberately (AUTHZ-5, ADR-0038 decision 10):
     // this guard asks *whose* material it is, not how sensitive it is.
@@ -512,10 +469,16 @@ async fn publish_inner(
     // anyone, which would leave the invariant floor's own cell unreachable
     // and a restricted lapse with nothing to disclose.
     decide_asset_read(state, &input, asset_kind, scope_id)?;
-    let entries: Vec<String> = versions
+    let entries: Vec<String> = drafts
         .iter()
-        .map(|version| version.id.as_uuid().to_string())
-        .chain(drafts.iter().map(|draft| draft.template.name.to_string()))
+        .map(|draft| draft.template.name.to_string())
+        .chain(documents.iter().map(|document| {
+            synveda_types::DocumentPath::new(
+                document.pack_name.clone(),
+                document.document_name.clone(),
+            )
+            .to_string()
+        }))
         .chain(skill_drafts.iter().map(|(skill, _)| skill.name.to_string()))
         .collect();
     let requirement = approvals::resolve(
@@ -543,18 +506,8 @@ async fn publish_inner(
     // re-publishing unchanged content stores nothing new — and a prompt's
     // object was already written at authoring time, so that write dedups.
     let mut members: Vec<(String, vedaflow::hash::ObjectHash)> =
-        Vec::with_capacity(versions.len() + drafts.len() + documents.len());
-    let mut published: Vec<PublishedRecord> = Vec::with_capacity(members.capacity());
-    for version in &versions {
-        let asset = memory_asset(version.id, &version.state);
-        let object = vedaflow::put_memory(&mut tx, tenant_id, &asset).await?;
-        members.push((asset.entry_name(), object.hash));
-        published.push(PublishedRecord {
-            member: asset.entry_name(),
-            record_id: Some(version.id),
-            object_hash: object.hash.to_hex(),
-        });
-    }
+        Vec::with_capacity(drafts.len() + documents.len() + skill_drafts.len());
+    let mut published: Vec<PublishedMember> = Vec::with_capacity(members.capacity());
     for draft in &drafts {
         let asset = vedaflow::PromptAsset {
             scope_id,
@@ -563,9 +516,8 @@ async fn publish_inner(
         };
         let object = vedaflow::put_prompt(&mut tx, tenant_id, &asset).await?;
         members.push((asset.entry_name(), object.hash));
-        published.push(PublishedRecord {
+        published.push(PublishedMember {
             member: asset.entry_name(),
-            record_id: None,
             object_hash: object.hash.to_hex(),
         });
     }
@@ -581,9 +533,8 @@ async fn publish_inner(
             document.document_name.clone(),
         );
         members.push((path.to_string(), address));
-        published.push(PublishedRecord {
+        published.push(PublishedMember {
             member: path.to_string(),
-            record_id: None,
             object_hash: address.to_hex(),
         });
     }
@@ -595,9 +546,8 @@ async fn publish_inner(
             let address = vedaflow::hash::ObjectHash::from_bytes(file.object_hash);
             let path = synveda_types::SkillPath::new(skill.name.clone(), file.path.clone());
             members.push((path.to_string(), address));
-            published.push(PublishedRecord {
+            published.push(PublishedMember {
                 member: path.to_string(),
-                record_id: None,
                 object_hash: address.to_hex(),
             });
         }
@@ -638,10 +588,9 @@ async fn publish_inner(
             "message": body.message,
             // Names and addresses, never content — the text stays in its own
             // table, and the address is what an auditor rechecks.
-            "records": published.iter().map(|record| json!({
-                "member": record.member,
-                "record_id": record.record_id,
-                "object_hash": record.object_hash,
+            "published": published.iter().map(|member| json!({
+                "member": member.member,
+                "object_hash": member.object_hash,
             })).collect::<Vec<_>>(),
             "commit": committed.commit.to_hex(),
             "parent": committed.parent.map(|parent| parent.to_hex()),
@@ -696,24 +645,25 @@ const MAX_HISTORY: u32 = 200;
 /// Its default, when the caller does not ask.
 const DEFAULT_HISTORY: u32 = 20;
 
-/// Which channel a FLOW-7 call is about. Both halves default, so the
-/// common case — a scope's published memories — names neither.
+/// Which authored-artifact channel a FLOW-7 call is about. The asset is
+/// required; `published` remains the channel default.
 ///
 /// The routes are asset-kind generic on purpose: PRMT-1's prompts and
 /// SKIL-1's skill bundles land on channels of the same shape, and a
-/// rewind of one is this same act. What they do not have yet is a read
-/// action, so they are refused by name rather than governed by memory's
-/// (ADR-0036 decision 3).
+/// rewind of one is this same act. Every admitted family has its own read
+/// action; all other asset kinds are refused by name.
 ///
 /// Spelled out on each request type rather than flattened into them: a
 /// flattened struct deserialises differently from a query string than
 /// from a body, and two fields are cheaper than that surprise.
-fn channel_of(asset: Option<AssetKind>, channel: Option<Channel>) -> Result<ChannelRef> {
-    let asset = asset.unwrap_or(AssetKind::Memory);
-    if !asset.has_channels() {
+fn channel_of(asset: AssetKind, channel: Option<Channel>) -> Result<ChannelRef> {
+    if !matches!(
+        asset,
+        AssetKind::Prompt | AssetKind::ContextPack | AssetKind::Skill
+    ) {
         return Err(Error::Invalid {
             message: format!(
-                "{} has no VedaFlow channel; its governed state is not a ref",
+                "{} is not a public authored-artifact channel",
                 asset.as_str()
             ),
         });
@@ -752,7 +702,6 @@ fn decide_asset_read(
 ) -> Result<crate::authz::Authorized> {
     let resource = Resource::Scope(scope_id);
     match asset {
-        AssetKind::Memory => authz::decide_read(state, input, resource, Sensitivity::WORKING),
         AssetKind::Prompt => {
             authz::decide_prompt_read(state, input, resource, Sensitivity::WORKING)
         }
@@ -827,7 +776,7 @@ pub(crate) async fn history(
 
 #[derive(Deserialize)]
 pub(crate) struct HistoryQuery {
-    asset: Option<AssetKind>,
+    asset: AssetKind,
     channel: Option<Channel>,
     limit: Option<u32>,
 }
@@ -847,7 +796,7 @@ async fn history_inner(
         scope_id,
     )?;
     // Reading a channel's history is reading the channel: same action, and
-    // the entries carry no record content — ids, addresses, and the
+    // the entries carry no artifact content — names, addresses, and the
     // curators' own commit messages.
     let authorized = authz::require(
         &state.clone(),
@@ -910,8 +859,9 @@ async fn history_inner(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RollbackBody {
-    asset: Option<AssetKind>,
+    asset: AssetKind,
     channel: Option<Channel>,
     /// The commit being abandoned — what the caller read before deciding.
     /// Required rather than inferred: a rewind is a decision about *which*
@@ -922,7 +872,7 @@ pub(crate) struct RollbackBody {
     /// The state to install: one of the entries `GET /history` lists.
     to_commit: String,
     /// Why. An auditor reads this, and so does whoever asks next week why
-    /// a record stopped being published.
+    /// an artifact stopped being published.
     message: String,
 }
 
@@ -932,17 +882,15 @@ struct RollbackResponse {
     channel: String,
     /// The commit abandoned.
     from: String,
-    /// The commit installed — what the next inject at this scope cites.
+    /// The commit installed — what the next authorised reader sees.
     to: String,
     /// The membership after the rewind.
     members: usize,
-    /// The record ids that stopped being published material. These compose
-    /// as unreviewed derived output again where the pack admits it, and
-    /// not at all under bank mode.
+    /// Member names that stopped being published.
     removed: Vec<String>,
-    /// Records whose published version went back to an earlier one, with
+    /// Members whose published version went back to an earlier one, with
     /// the address now bound.
-    restored: Vec<PublishedRecord>,
+    restored: Vec<PublishedMember>,
 }
 
 /// `POST /v1/channels/{scope_id}/rollback` — rewind the channel to a state
@@ -1048,12 +996,7 @@ async fn rollback_inner(
         restored: rolled_back
             .restored
             .into_iter()
-            .map(|member| PublishedRecord {
-                // A memory channel names entries by record id; a prompt
-                // channel names them by path (PRMT-1, ADR-0049 decision 3),
-                // so the id is the parse that may fail and the name is the
-                // one field every kind carries.
-                record_id: member.name.parse().ok().map(RecordId::from_uuid),
+            .map(|member| PublishedMember {
                 member: member.name,
                 object_hash: member.object.to_hex(),
             })
@@ -1062,8 +1005,9 @@ async fn rollback_inner(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PinBody {
-    asset: Option<AssetKind>,
+    asset: AssetKind,
     channel: Option<Channel>,
     /// The commit to hold readers at: one of the entries `GET /history`
     /// lists, the head included.
@@ -1074,8 +1018,9 @@ pub(crate) struct PinBody {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct UnpinBody {
-    asset: Option<AssetKind>,
+    asset: AssetKind,
     channel: Option<Channel>,
     /// Why the hold is being released.
     reason: String,
@@ -1301,38 +1246,35 @@ fn validate(body: &PublishBody) -> Result<()> {
     let invalid = |message: String| Err(Error::Invalid { message });
     // One asset kind per publication, for the reason a proposal carries one
     // (ADR-0049 decision 6): the approval matrix resolves from it.
-    let named = usize::from(!body.record_ids.is_empty())
-        + usize::from(!body.prompt_names.is_empty())
+    let named = usize::from(!body.prompt_names.is_empty())
         + usize::from(!body.document_paths.is_empty())
         + usize::from(!body.skill_names.is_empty());
     match named {
         0 => {
             return invalid(
-                "name at least one member: record_ids for memories, prompt_names for \
-                 prompts, document_paths for context pack documents, skill_names for \
-                 skills"
+                "name at least one member: prompt_names for prompts, document_paths for \
+                 context pack documents, or skill_names for skills"
                     .to_owned(),
             );
         }
         1 => {}
         _ => {
             return invalid(
-                "a publication carries one asset kind: name record_ids, prompt_names, \
-                 document_paths or skill_names, never more than one"
+                "a publication carries one asset kind: name prompt_names, document_paths \
+                 or skill_names, never more than one"
                     .to_owned(),
             );
         }
     }
     if body
-        .record_ids
+        .prompt_names
         .len()
-        .max(body.prompt_names.len())
         .max(body.document_paths.len())
         .max(body.skill_names.len())
-        > MAX_PUBLISH_RECORDS
+        > MAX_PUBLISH_MEMBERS
     {
         return invalid(format!(
-            "a publication may name at most {MAX_PUBLISH_RECORDS} members"
+            "a publication may name at most {MAX_PUBLISH_MEMBERS} members"
         ));
     }
     let chars = body.message.chars().count();
@@ -1342,22 +1284,4 @@ fn validate(body: &PublishBody) -> Result<()> {
         ));
     }
     Ok(())
-}
-
-/// The VedaFlow view of a stored record version (ADR-0031 decision 6).
-/// The same field copy the pipeline and the composition engine make, for
-/// the reason recorded there: `synveda-store` and `synveda-vedaflow` are
-/// siblings, so neither can host a conversion between their types.
-fn memory_asset(id: RecordId, state: &RecordState) -> MemoryAsset {
-    MemoryAsset {
-        id,
-        scope_id: state.scope_id,
-        owner_id: state.owner_id,
-        kind: state.kind,
-        class: state.class,
-        content: state.content.clone(),
-        sensitivity: state.sensitivity,
-        valid_from: state.valid_from,
-        valid_to: state.valid_to,
-    }
 }

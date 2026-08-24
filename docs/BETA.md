@@ -4,9 +4,16 @@ Both halves are in one file on purpose. A demo is driven by whoever built it;
 a beta is driven by somebody who did not, so the limits stop being things we
 remember to mention and become something you can read before you hit them.
 
-**What this is.** Governed organisational memory for AI agents. Your sessions
-write memory, policy decides who may read it back, and every act is on an
-audit chain you can verify yourself.
+**What this is.** Governed Knowledge and context for AI agents. Sessions append
+events, policy decides which immutable Knowledge revisions may be read, and
+every governed act is on an audit chain you can verify yourself.
+
+> **Phase 5 branch note (2026-08-24):** install, login and session delivery
+> remain current, but the organisation-seeding walkthrough in sections 4–7 is
+> part of CPR-13's explicitly open demo-corpus debt and must not be represented
+> as runnable. The supported product noun is Knowledge, browsed at
+> `/console/knowledge`; the later one-command personal/team walkthrough is
+> rebuilt entirely through public APIs.
 
 **What you need.** Docker. That is the whole list.
 
@@ -37,12 +44,12 @@ and Dan, in convention-shaped groups across `eng/platform`, `eng/payments` and
 explained in step 4.
 
 **On `--embedder tei`:** it pulls a 2.3GB embedding model once and gives you
-real semantic search. Without it you get `--embedder deterministic`, a hash —
-retrieval still works and is exact on the keyword leg, but "find me things
-*like* this" is not meaningful. **Choose now**: the model is recorded on every
-record written and nothing in the product re-embeds a corpus, so changing your
-mind later means starting over. If you only want to see the shape of the
-thing, drop the flag and save the download.
+real semantic Knowledge search. Without it you get `--embedder deterministic`,
+a hash whose geometry is deliberately never queried or labelled semantic;
+Knowledge search stays lexical and says why. Immutable revisions are indexed
+asynchronously for the configured real model, so a model change converges a
+new model-labelled sidecar rather than reinterpreting old vectors. If you only
+want to see the product shape, drop the flag and save the download.
 
 ## 3. Log in
 
@@ -91,8 +98,11 @@ synveda scope tree
 synveda recall --query "how do we roll out payments"
 ```
 
-The recall is going through the policy engine. You are seeing what *you* are
-allowed to see, decided per scope, not a database query with a filter on it.
+Open `/console/knowledge` for the authoritative current content, immutable
+revision history and provenance browser. The terminal `recall` command opens
+an ephemeral public session and asks for one budgeted context composition; it
+is not a global Knowledge enumeration or a direct database query. Both paths
+go through the PDP under the caller's identity.
 
 ## 6. Meet the thing the product is actually for
 
@@ -207,7 +217,8 @@ Two things it deliberately does **not** do:
   all-or-nothing and is not a GDPR erasure certificate.
 
 One thing to know before you keep data: `~/.synveda/data/kms.key` goes with a
-default uninstall. Your records stay readable — they are not sealed under it —
+default uninstall. Ordinary Knowledge content stays readable — it is not
+sealed under that deployment key —
 but console sessions, tenant secrets and any `synveda tenant export` archive
 can never be opened again without that file. Copy it first if you might come
 back to the same volumes.
@@ -288,7 +299,8 @@ implement. It prints why, and the one command that fixes it:
 synveda reset --database --force
 ```
 
-That destroys the database — every tenant, record and audit event in it — and
+That destroys the database — every tenant, session, Knowledge item and audit
+event in it — and
 builds an empty one at the current epoch. It keeps your `kms.key`, the compose
 profile, your stored logins and every other database on the server. Nothing
 about it is recoverable, so if there is anything in there you want, take it

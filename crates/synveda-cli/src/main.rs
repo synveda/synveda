@@ -789,10 +789,10 @@ enum ChannelCommand {
     History {
         /// The scope UUID.
         scope: ScopeId,
-        /// Which channel, as its ref name. Defaults to
-        /// `memory/published`.
+        /// Which authored-artifact channel, as its ref name (for example
+        /// `skill/published`).
         #[arg(long)]
-        channel: Option<String>,
+        channel: String,
         /// How many states, 1..=200.
         #[arg(long)]
         limit: Option<u32>,
@@ -817,11 +817,11 @@ enum ChannelCommand {
         #[arg(long)]
         to: String,
         /// Why. An auditor reads this, and so does whoever asks next week
-        /// why a record stopped being published.
+        /// why an artifact stopped being published.
         #[arg(long)]
         message: String,
         #[arg(long)]
-        channel: Option<String>,
+        channel: String,
         #[arg(long)]
         json: bool,
         #[arg(long)]
@@ -842,7 +842,7 @@ enum ChannelCommand {
         #[arg(long)]
         reason: String,
         #[arg(long)]
-        channel: Option<String>,
+        channel: String,
         #[arg(long)]
         json: bool,
         #[arg(long)]
@@ -857,7 +857,7 @@ enum ChannelCommand {
         #[arg(long)]
         reason: String,
         #[arg(long)]
-        channel: Option<String>,
+        channel: String,
         #[arg(long)]
         json: bool,
         #[arg(long)]
@@ -960,15 +960,6 @@ enum ProposalCommand {
     /// Run an approved Knowledge proposal's typed effect. The gateway
     /// repeats PDP and revision checks before applying it (CPR-16).
     Apply {
-        /// The proposal UUID.
-        id: ProposalId,
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Run an approved *classification* proposal's effect: move its
-    /// records to the tier the review approved (AUTHZ-5). Retained only
-    /// through CPR-16's controlled old-record read interval.
-    Classify {
         /// The proposal UUID.
         id: ProposalId,
         #[arg(long)]
@@ -2343,9 +2334,6 @@ async fn run(cli: Cli) -> Result<(), String> {
             ProposalCommand::Apply { id, profile } => {
                 proposal::apply(&profile_name(profile), id).await
             }
-            ProposalCommand::Classify { id, profile } => {
-                proposal::classify(&profile_name(profile), id).await
-            }
             ProposalCommand::OverrideQuality {
                 id,
                 reason,
@@ -2778,4 +2766,38 @@ async fn connect() -> Result<sqlx::PgPool, String> {
                  `synveda init` installs)"
             )
         })
+}
+
+#[cfg(test)]
+mod hard_cut_tests {
+    use super::*;
+
+    #[test]
+    fn removed_record_classification_command_is_not_an_alias() {
+        let error = Cli::try_parse_from([
+            "synveda",
+            "proposal",
+            "classify",
+            "0198f000-0000-7000-8000-000000000001",
+        ])
+        .err()
+        .expect("the removed command must fail parsing");
+        assert!(
+            error.to_string().contains("unrecognized subcommand"),
+            "unexpected clap refusal: {error}"
+        );
+    }
+
+    #[test]
+    fn channel_history_requires_an_authored_artifact_ref() {
+        let error = Cli::try_parse_from([
+            "synveda",
+            "channel",
+            "history",
+            "0198f000-0000-7000-8000-000000000001",
+        ])
+        .err()
+        .expect("the removed memory default must not parse");
+        assert!(error.to_string().contains("--channel"), "{error}");
+    }
 }

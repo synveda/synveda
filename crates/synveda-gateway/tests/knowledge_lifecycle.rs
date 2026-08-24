@@ -8,7 +8,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode};
+use axum::http::{HeaderMap, Method, Request, StatusCode};
 use chrono::Utc;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
@@ -17,8 +17,10 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::{knowledge, telemetry};
 use synveda_identity::{Claims, Hs256Verifier, TenantContext, with_tenant};
+use synveda_ingest::embedding::Embedder as _;
 use synveda_store::{
-    access, identities, knowledge as stored, policy_assignments, rls, scopes, tenants,
+    access, identities, knowledge as stored, knowledge_search, policy_assignments, rls, scopes,
+    tenants,
 };
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::knowledge::{
@@ -273,6 +275,58 @@ fn content(title: &str, body: &str, metadata: Value) -> KnowledgeRevisionContent
         verification_metadata: json!({}),
         metadata,
     }
+}
+
+async fn api(
+    app: &axum::Router,
+    method: Method,
+    uri: &str,
+    token: &str,
+    idempotency_key: Option<&str>,
+    payload: Option<&Value>,
+) -> (StatusCode, HeaderMap, Value) {
+    let mut request = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("authorization", format!("Bearer {token}"));
+    if let Some(key) = idempotency_key {
+        request = request.header("idempotency-key", key);
+    }
+    let body = if let Some(payload) = payload {
+        request = request.header("content-type", "application/json");
+        Body::from(serde_json::to_vec(payload).expect("encode API request"))
+    } else {
+        Body::empty()
+    };
+    let response = app
+        .clone()
+        .oneshot(request.body(body).expect("build API request"))
+        .await
+        .expect("Knowledge API route responds");
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read API response");
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).expect("decode API response")
+    };
+    (status, headers, value)
+}
+
+fn api_content(title: &str, body: &str) -> Value {
+    json!({
+        "title": title,
+        "body_markdown": body,
+        "summary": body,
+        "tags": ["PulseBoard", "Delivery"],
+        "sensitivity": "internal",
+        "confidence_permille": 940,
+        "verification_metadata": {},
+        "metadata": {"fixture": "CPR-17"}
+    })
 }
 
 fn source(scope_id: ScopeId) -> KnowledgeSourceDraft {
@@ -1056,4 +1110,485 @@ async fn review_is_live_and_forget_leaves_only_content_free_evidence() {
         !audit_text.contains(sentinel),
         "ordinary audit evidence must retain hashes and IDs, not erased content"
     );
+}
+
+/// CPR-17's public acceptance seam. This deliberately enters mutations only
+/// through HTTP and proves that listing/search, immutable detail, provenance,
+/// erasure and the revision-vector sidecar all stay on the Knowledge model.
+#[tokio::test]
+async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
+    let _guard = serial().await;
+    let Some((state, tenant)) = admitted_tenant().await else {
+        return;
+    };
+    use_standard(&state.pool, tenant.id).await;
+    let workspace = seed_workspace(&state.pool, tenant.id).await;
+    let alice = seed_user(&state.pool, tenant.id, "alice-api@pulseboard.test").await;
+    let _bob = seed_user(&state.pool, tenant.id, "bob-api@pulseboard.test").await;
+    for subject in ["alice-api@pulseboard.test", "bob-api@pulseboard.test"] {
+        grant(
+            &state.pool,
+            tenant.id,
+            workspace.id,
+            subject,
+            RoleKey::Member,
+        )
+        .await;
+    }
+
+    let app = router(state.clone());
+    let verifier = Hs256Verifier::new(SECRET);
+    let alice_token = verifier.issue(
+        "alice-api@pulseboard.test",
+        tenant.id,
+        Duration::from_secs(300),
+    );
+    let bob_token = verifier.issue(
+        "bob-api@pulseboard.test",
+        tenant.id,
+        Duration::from_secs(300),
+    );
+    let removed_route = api(
+        &app,
+        Method::POST,
+        &format!("/v1/proposals/{}/classify", ProposalId::new()),
+        &alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(removed_route.0, StatusCode::NOT_FOUND);
+    let removed_payload = json!({
+        "scope_id": workspace.id,
+        "record_ids": [KnowledgeItemId::new()],
+        "title": "removed raw-record proposal"
+    });
+    let refused_record_proposal = api(
+        &app,
+        Method::POST,
+        "/v1/proposals",
+        &alice_token,
+        None,
+        Some(&removed_payload),
+    )
+    .await;
+    assert_eq!(refused_record_proposal.0, StatusCode::BAD_REQUEST);
+    let refused_effect_alias = api(
+        &app,
+        Method::POST,
+        "/v1/proposals",
+        &alice_token,
+        None,
+        Some(&json!({
+            "scope_id": workspace.id,
+            "prompt_names": ["removed-effect"],
+            "title": "removed effect field",
+            "effect": "classify"
+        })),
+    )
+    .await;
+    assert_eq!(refused_effect_alias.0, StatusCode::BAD_REQUEST);
+    let refused_record_channel = api(
+        &app,
+        Method::POST,
+        &format!("/v1/channels/{}/publish", workspace.id),
+        &alice_token,
+        None,
+        Some(&json!({
+            "record_ids": [KnowledgeItemId::new()],
+            "message": "removed direct record publication"
+        })),
+    )
+    .await;
+    assert_eq!(refused_record_channel.0, StatusCode::BAD_REQUEST);
+    let refused_memory_history = api(
+        &app,
+        Method::GET,
+        &format!(
+            "/v1/channels/{}/history?asset=memory&channel=published",
+            workspace.id
+        ),
+        &alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(refused_memory_history.0, StatusCode::BAD_REQUEST);
+
+    let shared_body = json!({
+        "scope_id": workspace.id,
+        "knowledge_type": "convention",
+        "origin": "authored",
+        "content": api_content(
+            "Webhook delivery identity",
+            "Webhook deliveries are deduplicated by provider event ID."
+        ),
+        "sources": [
+            {"scope_id": workspace.id, "source_type": "manual", "metadata": {"kind": "team-note"}},
+            {"scope_id": alice.scope_id, "source_type": "manual", "metadata": {"kind": "private-draft"}}
+        ]
+    });
+    let (created_status, _, created) = api(
+        &app,
+        Method::POST,
+        "/v1/knowledge",
+        &alice_token,
+        Some("cpr17-create-shared"),
+        Some(&shared_body),
+    )
+    .await;
+    assert_eq!(created_status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["outcome"], "applied");
+    let shared_id: KnowledgeItemId = created["knowledge_item_id"]
+        .as_str()
+        .expect("created item id")
+        .parse()
+        .expect("parse item id");
+    let first_revision: KnowledgeRevisionId = created["revision_id"]
+        .as_str()
+        .expect("created revision id")
+        .parse()
+        .expect("parse revision id");
+
+    let (replay_status, _, replay) = api(
+        &app,
+        Method::POST,
+        "/v1/knowledge",
+        &alice_token,
+        Some("cpr17-create-shared"),
+        Some(&shared_body),
+    )
+    .await;
+    assert_eq!(replay_status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["change_id"], created["change_id"]);
+    assert_eq!(replay["knowledge_item_id"], created["knowledge_item_id"]);
+
+    let (detail_status, detail_headers, detail) = api(
+        &app,
+        Method::GET,
+        &format!("/v1/knowledge/{shared_id}"),
+        &bob_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(detail_status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["current_revision"]["id"], first_revision.to_string());
+    assert_eq!(
+        detail_headers
+            .get("etag")
+            .expect("revision ETag")
+            .to_str()
+            .expect("ETag text"),
+        format!("\"{first_revision}\"")
+    );
+
+    let (_, _, sources) = api(
+        &app,
+        Method::GET,
+        &format!("/v1/knowledge/{shared_id}/sources"),
+        &bob_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        sources["sources"].as_array().expect("source array").len(),
+        1,
+        "Bob may read the shared descriptor but not Alice's personal source: {sources}"
+    );
+    assert_eq!(sources["sources"][0]["scope_id"], workspace.id.to_string());
+
+    let edit_body = json!({
+        "expected_revision_id": first_revision,
+        "content": api_content(
+            "Webhook delivery identity",
+            "Provider event ID is the webhook delivery idempotency key."
+        )
+    });
+    let (edit_status, _, edited) = api(
+        &app,
+        Method::PATCH,
+        &format!("/v1/knowledge/{shared_id}"),
+        &alice_token,
+        Some("cpr17-edit-shared"),
+        Some(&edit_body),
+    )
+    .await;
+    assert_eq!(edit_status, StatusCode::CREATED, "{edited}");
+    let second_revision: KnowledgeRevisionId = edited["revision_id"]
+        .as_str()
+        .expect("edited revision id")
+        .parse()
+        .expect("parse edited revision");
+
+    let (history_status, _, history) = api(
+        &app,
+        Method::GET,
+        &format!("/v1/knowledge/{shared_id}/history?limit=1"),
+        &bob_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(history_status, StatusCode::OK, "{history}");
+    assert_eq!(history["revisions"][0]["id"], second_revision.to_string());
+    let history_cursor = history["next_cursor"]
+        .as_str()
+        .expect("second history page");
+    let (_, _, older) = api(
+        &app,
+        Method::GET,
+        &format!("/v1/knowledge/{shared_id}/history?limit=1&cursor={history_cursor}"),
+        &bob_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(older["revisions"][0]["id"], first_revision.to_string());
+
+    let (search_status, _, search) = api(
+        &app,
+        Method::GET,
+        "/v1/knowledge?query=provider%20event%20id&tag=pulseboard&source=manual&limit=1",
+        &bob_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(search_status, StatusCode::OK, "{search}");
+    assert_eq!(search["retrieval_mode"], "lexical");
+    assert_eq!(
+        search["degradation"],
+        "deterministic_embedder_is_not_semantic"
+    );
+    assert_eq!(search["items"][0]["id"], shared_id.to_string());
+
+    let private_body = json!({
+        "scope_id": alice.scope_id,
+        "owner_principal_id": "alice-api@pulseboard.test",
+        "knowledge_type": "preference",
+        "content": api_content("Quick test", "My local quick-test command is just test-fast.")
+    });
+    let (private_status, _, private_created) = api(
+        &app,
+        Method::POST,
+        "/v1/knowledge",
+        &alice_token,
+        Some("cpr17-create-private"),
+        Some(&private_body),
+    )
+    .await;
+    assert_eq!(private_status, StatusCode::CREATED, "{private_created}");
+    let private_id: KnowledgeItemId = private_created["knowledge_item_id"]
+        .as_str()
+        .expect("private item")
+        .parse()
+        .expect("parse private item");
+    let private_revision: KnowledgeRevisionId = private_created["revision_id"]
+        .as_str()
+        .expect("private revision")
+        .parse()
+        .expect("parse private revision");
+    let (_, _, hidden) = api(
+        &app,
+        Method::GET,
+        "/v1/knowledge?query=quick-test",
+        &bob_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        hidden["items"],
+        json!([]),
+        "private Knowledge leaked: {hidden}"
+    );
+
+    let delete_without_mode = api(
+        &app,
+        Method::DELETE,
+        &format!("/v1/knowledge/{shared_id}"),
+        &alice_token,
+        Some("cpr17-delete-without-mode"),
+        None,
+    )
+    .await;
+    assert_eq!(delete_without_mode.0, StatusCode::BAD_REQUEST);
+    let archive_body = json!({
+        "mode": "archive",
+        "expected_revision_id": second_revision,
+        "reason": "acceptance archive"
+    });
+    let (archive_status, _, archived) = api(
+        &app,
+        Method::DELETE,
+        &format!("/v1/knowledge/{shared_id}"),
+        &alice_token,
+        Some("cpr17-archive-shared"),
+        Some(&archive_body),
+    )
+    .await;
+    assert_eq!(archive_status, StatusCode::CREATED, "{archived}");
+    let (_, _, active_search) = api(
+        &app,
+        Method::GET,
+        "/v1/knowledge?query=provider%20event%20id",
+        &bob_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(active_search["items"], json!([]));
+    let (_, _, archived_search) = api(
+        &app,
+        Method::GET,
+        "/v1/knowledge?query=provider%20event%20id&lifecycle_state=archived",
+        &bob_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(archived_search["items"][0]["id"], shared_id.to_string());
+    let restore_body = json!({
+        "expected_revision_id": second_revision,
+        "reason": "acceptance restore"
+    });
+    let (restore_status, _, restored) = api(
+        &app,
+        Method::POST,
+        &format!("/v1/knowledge/{shared_id}/restore"),
+        &alice_token,
+        Some("cpr17-restore-shared"),
+        Some(&restore_body),
+    )
+    .await;
+    assert_eq!(restore_status, StatusCode::CREATED, "{restored}");
+
+    let embed = synveda_gateway::knowledge_index::sweep_tenant(
+        &state.pool,
+        state.embedder.as_ref(),
+        tenant.id,
+        64,
+    )
+    .await
+    .expect("index immutable Knowledge revisions");
+    assert!(
+        embed.inserted >= 3,
+        "every new revision gets a sidecar: {embed:?}"
+    );
+    let query_vector = state
+        .embedder
+        .embed(&["webhook provider event id".to_owned()])
+        .await
+        .expect("embed semantic test query")
+        .pop()
+        .expect("one query vector");
+    let mut search_tx = rls::begin_tenant_tx(&state.pool, tenant.id)
+        .await
+        .expect("begin semantic read");
+    let semantic = knowledge_search::semantic_candidates(
+        &mut search_tx,
+        tenant.id,
+        &knowledge_search::Filters {
+            workspace_id: None,
+            project_id: None,
+            scope_id: Some(workspace.id),
+            owner_principal_id: None,
+            knowledge_type: None,
+            origin: None,
+            lifecycle: None,
+            tag: None,
+            source_type: None,
+            updated_from: None,
+            updated_before: None,
+            stale: None,
+            at: Utc::now(),
+        },
+        state.embedder.model(),
+        &query_vector,
+        10,
+    )
+    .await
+    .expect("run Knowledge semantic candidate query");
+    search_tx.commit().await.expect("commit semantic read");
+    assert!(
+        semantic
+            .iter()
+            .any(|candidate| candidate.item_id == shared_id)
+    );
+
+    let forget_body = json!({
+        "mode": "forget",
+        "expected_revision_id": private_revision,
+        "reason": "acceptance erasure"
+    });
+    let (forget_status, _, forgotten) = api(
+        &app,
+        Method::DELETE,
+        &format!("/v1/knowledge/{private_id}"),
+        &alice_token,
+        Some("cpr17-forget-private"),
+        Some(&forget_body),
+    )
+    .await;
+    assert_eq!(forget_status, StatusCode::CREATED, "{forgotten}");
+    let (gone_status, _, _) = api(
+        &app,
+        Method::GET,
+        &format!("/v1/knowledge/{private_id}"),
+        &alice_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(gone_status, StatusCode::NOT_FOUND);
+
+    let foreign_id = TenantId::new();
+    let foreign = tenants::create(
+        &state.pool,
+        foreign_id,
+        &format!("cpr17-foreign-{}", foreign_id.as_uuid().simple()),
+        "CPR-17 foreign API tenant",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create foreign tenant");
+    use_standard(&state.pool, foreign.id).await;
+    seed_user(&state.pool, foreign.id, "foreign-api@pulseboard.test").await;
+    let foreign_token = verifier.issue(
+        "foreign-api@pulseboard.test",
+        foreign.id,
+        Duration::from_secs(300),
+    );
+    let (foreign_status, _, foreign_body) = api(
+        &app,
+        Method::GET,
+        &format!("/v1/knowledge/{shared_id}"),
+        &foreign_token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(foreign_status, StatusCode::NOT_FOUND, "{foreign_body}");
+    let mut foreign_tx = rls::begin_tenant_tx(&state.pool, foreign.id)
+        .await
+        .expect("begin foreign embedding probe");
+    sqlx::raw_sql("set local role synveda_app")
+        .execute(&mut *foreign_tx)
+        .await
+        .expect("demote foreign probe");
+    let leaked_embeddings = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from knowledge_revision_embeddings
+           where tenant_id = $1"#,
+        tenant.id.as_uuid(),
+    )
+    .fetch_one(&mut *foreign_tx)
+    .await
+    .expect("probe foreign embeddings");
+    assert_eq!(leaked_embeddings, 0, "forced RLS hides revision vectors");
+    foreign_tx
+        .rollback()
+        .await
+        .expect("roll back foreign probe");
 }

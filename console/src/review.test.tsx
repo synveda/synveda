@@ -42,8 +42,6 @@ const FIXTURES = new URL("../fixtures/", import.meta.url);
  * the CLI's; the test below refuses to let the three diverge.
  */
 const CASES = [
-  "memory-update",
-  "memory-drifted",
   "skill-clean",
   "skill-below-bar",
   "skill-checklist-stale",

@@ -1,9 +1,9 @@
 //! The VedaFlow proposal API (FLOW-3, ADR-0032): `/v1/proposals` behind
 //! tenant resolution, uniform-404 ownership, and the PDP.
 //!
-//! A proposal is the governed request to run one reviewed effect. Most move
-//! content onto a scope's published channel; Knowledge proposals apply a
-//! typed aggregate command instead (CPR-16, ADR-0081). In both cases its
+//! A proposal is the governed request to run one reviewed effect. Authored
+//! artifacts move onto a scope's published channel; Knowledge proposals
+//! apply a typed aggregate command instead (CPR-16, ADR-0081). In both cases its
 //! content is a commit — a tree naming every member at the exact object
 //! address reviewed — and its workflow is one row. Approvals are append-only,
 //! each naming the commit it approved and the effective roles its caster held
@@ -21,23 +21,17 @@
 //!
 //! # Climbing (FLOW-5, ADR-0034)
 //!
-//! A proposal's target may be a strict **ancestor** of its source, which
-//! is how tribal knowledge reaches the department and then the org. It is
-//! not a second kind of proposal: same table, same matrix resolved at the
-//! target and only there, same lifecycle, same audit actions. Two things
-//! are added and nothing else. Opening a climb takes a second Cedar
-//! decision — `MemoryRead` at the *source*, the proposer's warrant for
-//! showing the material to the target's reviewers — and a climb's members
-//! must be material the source scope holds, meaning records that live
-//! there or records its published channel names at their current address.
-//! The second sense is what lets a department propose onward what a team
-//! climbed into it, with nothing stored to make the hop possible.
+//! An authored-artifact proposal's target may be a strict **ancestor** of
+//! its source. It is not a second kind of proposal: same table, matrix,
+//! lifecycle and audit actions. Opening a climb takes a second Cedar
+//! decision using that artifact family's read action at the source, which
+//! is the proposer's warrant for showing the material to target reviewers.
 //!
 //! # Publishing is a separate act
 //!
 //! The deciding approval does not publish. `POST /v1/proposals/{id}/publish`
-//! takes `ChannelPublish` and `MemoryRead` at the target exactly as the
-//! direct route does, and additionally requires the proposal open, the
+//! takes `ChannelPublish` and the artifact family's read action at the
+//! target, and additionally requires the proposal open, the
 //! requirement satisfied, and the bytes unchanged since the review.
 //! Auto-publishing would have to run under system authority precisely
 //! when a `compliance` reviewer casts the deciding vote — a role that
@@ -68,17 +62,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::records::RecordState;
-use synveda_store::{records, rls, scopes};
+use synveda_store::{rls, scopes};
 use synveda_types::scope::Scope;
 use synveda_types::{
     ApprovalRequirement, AssetKind, CastApproval, Channel, Checklist, ChecklistItem,
     ChecklistVerdict, DocumentPath, Error, IdentityId, PromotionEvidence, PromptName,
-    ProposalEffect, ProposalId, ProposalState, ProposalView, QualityShortfall, RecordId, Result,
-    ScopeId, Sensitivity, SkillFile, SkillFilePath, SkillName, SkillPath, SkillQualityConfig,
+    ProposalEffect, ProposalId, ProposalState, ProposalView, QualityShortfall, Result, ScopeId,
+    Sensitivity, SkillFile, SkillFilePath, SkillName, SkillPath, SkillQualityConfig,
     SkillScanConfig, TenantId, Verdict,
 };
-use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
+use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
 
 use crate::app::AppState;
 use crate::approvals::{self, RequirementView};
@@ -209,7 +202,7 @@ struct ApprovalView {
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 enum MemberEffect {
-    /// The channel names no version of this record; publication admits it.
+    /// The channel names no version of this member; publication admits it.
     Add,
     /// The channel names it at a different address; publication replaces
     /// that version with this one.
@@ -225,14 +218,14 @@ enum MemberEffect {
 /// the old side of the diff, present only for [`MemberEffect::Update`].
 ///
 /// This is the one content-visibility widening in FLOW-6 (ADR-0035
-/// decision 8): a reviewer holding no `MemoryRead` sees what a
-/// publication would overwrite. Bounded by the proposal's own member set,
+/// decision 8): a reviewer sees what a publication would overwrite.
+/// Bounded by the proposal's own member set,
 /// the target's own channel, and the target scope the reviewer already
 /// holds `ProposalRead` on — and admitted because a review of a change
 /// that hides one side of the change is not a review.
 #[derive(Serialize)]
 struct BaselineView {
-    /// The address the target's tree names for this record today.
+    /// The address the target's tree names for this member today.
     object_hash: String,
     /// That object's canonical bytes as text (ADR-0030 decision 4's
     /// human-readable form, which FLOW-1 chose for exactly this).
@@ -241,17 +234,12 @@ struct BaselineView {
 
 /// One member of a proposal — the id and the address that was proposed,
 /// plus what a reviewer needs to review it: the bytes under review, the
-/// bytes they would replace, and the record's current content.
+/// bytes they would replace, and the artifact's current content.
 #[derive(Serialize)]
 struct MemberView {
-    /// The tree entry name: a record id for a memory, a path for a prompt
-    /// (PRMT-1, ADR-0049 decision 3). The one field both asset kinds carry,
-    /// and the one a review surface displays.
+    /// The tree entry name: a path for an authored asset or `command` for a
+    /// typed aggregate effect. The one field every artifact family carries.
     member: String,
-    /// The record id, for a memory proposal. Absent for an authored asset,
-    /// whose members are named rather than identified.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    record_id: Option<RecordId>,
     /// What kind of asset this proposal carries — one word, so a reviewer's
     /// first line says what they are looking at.
     asset: String,
@@ -261,20 +249,15 @@ struct MemberView {
     /// content moved after the proposal opened, and publishing will
     /// refuse (ADR-0032 decision 6).
     unchanged: bool,
-    /// A memory's class. Absent for a prompt, which has none — `asset`
-    /// says what it is instead.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    class: Option<String>,
     sensitivity: Sensitivity,
-    /// The member's text **as it stands now**: a record's content, or a
-    /// prompt draft's template. Beside `unchanged` this is what makes drift
+    /// The member's text **as it stands now**. Beside `unchanged` this is what makes drift
     /// legible; it is not what the approvals bind.
     content: String,
     /// What publication would do to the target's channel for this member.
     effect: MemberEffect,
     /// The canonical bytes at the proposed address — what the approvals
     /// bind, read from the object store rather than re-derived from the
-    /// record, because an edited record is no longer what anyone approved
+    /// source row, because an edited artifact is no longer what anyone approved
     /// (ADR-0035 decision 6). Empty only if the object is missing, which
     /// the append-only store makes impossible.
     proposed: String,
@@ -433,12 +416,10 @@ pub(crate) async fn list(
 /// who cannot read the source scope reviews what the proposal shows them.
 /// Since FLOW-5 that is a real difference — a climb's members live below
 /// the target — and `ProposalRead` at the target is deliberately the only
-/// gate (ADR-0034 decision 1). Requiring the reviewer to hold
-/// `MemoryRead` at the *source* instead would break the product twice
-/// over: `compliance` holds no content read in any pack, so the invariant
-/// floor's own role could never review a `restricted` climb, and nobody
-/// but the owner reads a personal scope, so a user's own memory could
-/// never climb to their team. The read that guards a climb is the
+/// gate (ADR-0034 decision 1). Requiring the reviewer to hold the artifact
+/// read action at the *source* instead would break the product: `compliance`
+/// holds no content read in any pack, so the invariant floor's own role
+/// could never review a `restricted` climb. The read that guards a climb is the
 /// proposer's, taken once at open time and recorded under their name.
 #[tracing::instrument(name = "proposals.get", skip_all)]
 pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId>) -> Response {
@@ -590,6 +571,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
 // ── Open ───────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct OpenBody {
     /// The scope whose published channel would move. Requirements resolve
     /// here, and only here — "each level's approvers" is true because
@@ -602,19 +584,10 @@ pub(crate) struct OpenBody {
     /// composition walks down (ADR-0034 decision 2).
     #[serde(default)]
     source_scope_id: Option<ScopeId>,
-    /// The records to propose. Must be material the source scope holds —
-    /// records living there, or records its published channel names at
-    /// their current address (ADR-0034 decision 3).
-    #[serde(default)]
-    record_ids: Vec<RecordId>,
     /// The prompts to propose, by name (PRMT-1, ADR-0049 decision 6).
     ///
-    /// Exactly one of `record_ids` and `prompt_names` may be present: a
-    /// proposal has one asset kind, because the approval matrix resolves
-    /// from it and `regulated-strict` prices a prompt at two distinct
-    /// people where it prices a team's memory at one. A mixed set would
-    /// have to be priced at the maximum, which is a rule nobody wrote and
-    /// a review nobody asked for.
+    /// Exactly one authored-artifact member list may be present: a proposal
+    /// has one asset kind because the approval matrix resolves from it.
     ///
     /// The same two senses of "the source holds it" apply: the draft lives
     /// there, or the source's published channel names it at that address —
@@ -646,18 +619,6 @@ pub(crate) struct OpenBody {
     skill_names: Vec<SkillName>,
     /// What this proposes, in one line. A reviewer reads it in a list.
     title: String,
-    /// What running this proposal would *do*. Absent means `published` —
-    /// the effect a proposal had before AUTHZ-4 and the one it has almost
-    /// always. `lapse` is refused here: a lapse's terms are a different
-    /// body and have their own route (ADR-0037).
-    #[serde(default)]
-    effect: Option<ProposalEffect>,
-    /// The tier a `classify` proposal would install (AUTHZ-5, ADR-0038
-    /// decision 9). Required for that effect and refused for any other:
-    /// a publication does not move a tier, and a body that named one would
-    /// be describing something the effect will not do.
-    #[serde(default)]
-    sensitivity: Option<Sensitivity>,
 }
 
 #[derive(Serialize)]
@@ -683,10 +644,7 @@ async fn open_inner(
 ) -> Result<Json<OpenResponse>> {
     let body = body(payload)?;
     validate_open(&body)?;
-    let effect = body.effect.unwrap_or(ProposalEffect::Published);
-    // Present exactly for the effect that installs one, absent for every
-    // other: `validate_open` refuses the two mismatches by name.
-    let proposed_tier = body.sensitivity.unwrap_or(Sensitivity::WORKING);
+    let effect = ProposalEffect::Published;
     let tenant_id = tenant_id()?;
     let source_scope_id = body.source_scope_id.unwrap_or(body.scope_id);
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
@@ -752,21 +710,14 @@ async fn open_inner(
         AssetKind::Prompt
     } else if !body.document_paths.is_empty() {
         AssetKind::ContextPack
-    } else if !body.skill_names.is_empty() {
-        AssetKind::Skill
     } else {
-        AssetKind::Memory
+        AssetKind::Skill
     };
     // The members, as the asset kind's own reader sees them: the two senses
     // of "the source holds it" (ADR-0034 decision 3) are the same two for
     // both kinds — it lives there, or the source's published channel names
     // it at its current address — read from different tables.
     let members_now: Vec<Proposed> = match asset {
-        AssetKind::Memory => held_versions(&mut tx, tenant_id, source_scope_id, &body.record_ids)
-            .await?
-            .into_iter()
-            .map(Proposed::Memory)
-            .collect(),
         AssetKind::ContextPack => {
             held_documents(&mut tx, tenant_id, source_scope_id, &body.document_paths)
                 .await?
@@ -779,23 +730,22 @@ async fn open_inner(
             .into_iter()
             .map(Proposed::Skill)
             .collect(),
-        _ => held_prompts(&mut tx, tenant_id, source_scope_id, &body.prompt_names)
+        AssetKind::Prompt => held_prompts(&mut tx, tenant_id, source_scope_id, &body.prompt_names)
             .await?
             .into_iter()
             .map(Proposed::Prompt)
             .collect(),
+        other => {
+            return Err(Error::Invalid {
+                message: format!(
+                    "{} is not accepted by the authored-artifact proposal route",
+                    other.as_str()
+                ),
+            });
+        }
     };
     let held = max_sensitivity(&members_now);
-    // A classification's requirement resolves at the **maximum of the
-    // current and proposed tiers** (ADR-0038 decision 9). Taking only the
-    // proposed side would price a declassification at the tier it is
-    // leaving *for* — so removing `restricted` would cost what `internal`
-    // costs, and the one direction that actually removes a control would be
-    // the cheap one.
-    let sensitivity = match effect {
-        ProposalEffect::Classify => held.max(proposed_tier),
-        _ => held,
-    };
+    let sensitivity = held;
     // The disclosure decision (ADR-0034 decision 1): may this principal
     // read what it is about to show the target's reviewers. It is the
     // whole warrant for the climb — the privacy floor then makes "nobody
@@ -810,33 +760,18 @@ async fn open_inner(
     //
     // Taken with the *asset kind's* own read action (PRMT-1, ADR-0049
     // decision 4): a prompt proposal's disclosure is a `PromptRead`, and
-    // deciding it as a memory read would ask a question about a different
-    // corpus — in a pack that shares prompts more widely than memory, or
-    // less, the two answers differ.
+    // deciding it as another artifact family's read would ask a question
+    // about a different corpus.
     let disclosed = decide_asset_read(state, &input, asset, source_scope_id)?;
+    let disclosed_action = asset_read_action(asset)?;
     // Objects first: each member's address, computed from the version
     // being proposed. This is what binds the review to bytes — approvals
     // name this commit, and publishing recomputes these addresses from the
-    // records as they stand then (ADR-0032 decision 6).
+    // source rows as they stand then (ADR-0032 decision 6).
     let mut members: Vec<(String, vedaflow::hash::ObjectHash)> =
         Vec::with_capacity(members_now.len());
     for proposed in &members_now {
         let (entry, hash) = match proposed {
-            Proposed::Memory(version) => {
-                let mut asset = memory_asset(version.id, &version.state);
-                if effect == ProposalEffect::Classify {
-                    // The proposed version differs from the live record in
-                    // exactly one field, and it lives in the object store
-                    // rather than in the row: writing the row first would put
-                    // the change live before anyone reviewed it (ADR-0038
-                    // decision 9). The tier is inside the memory object's
-                    // address, so the approvals bind it the way they bind
-                    // bytes, with no recheck.
-                    asset.sensitivity = proposed_tier;
-                }
-                let object = vedaflow::put_memory(&mut tx, tenant_id, &asset).await?;
-                (asset.entry_name(), object.hash)
-            }
             // A prompt's object is already stored — the draft row's foreign
             // key required it at authoring time — so this write dedups and
             // stores nothing. It runs anyway, because a member reached
@@ -956,15 +891,11 @@ async fn open_inner(
             "target_scope_id": body.scope_id,
             "climb": (source_scope_id != body.scope_id).then(|| json!({
                 "levels": target_position,
-                "source_read": audit::decision_context(Action::MemoryRead, &disclosed),
+                "source_read": audit::decision_context(disclosed_action, &disclosed),
             })),
-            // Names and addresses, never content. `record_id` is kept for
-            // a memory proposal because AUD-2's disclosure query reads it;
-            // an authored asset is named rather than identified, and the
-            // `member` key is the one both kinds carry.
-            "records": members.iter().map(|(name, hash)| json!({
+            // Names and addresses, never content.
+            "members": members.iter().map(|(name, hash)| json!({
                 "member": name,
-                "record_id": (asset == AssetKind::Memory).then(|| name.clone()),
                 "object_hash": hash.to_hex(),
             })).collect::<Vec<_>>(),
             "approvals": approvals::audit_context(&requirement, &outstanding),
@@ -1802,8 +1733,7 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
     // and the tier was priced by the matrix these approvals satisfied. With
     // the asset kind's own read action since PRMT-1 (ADR-0049 decision 4) —
     // which is what keeps a steward, who reads no content in any pack, from
-    // running a prompt publication's effect exactly as it keeps them from
-    // running a memory one's.
+    // running a prompt publication's effect.
     decide_asset_read(state, &input, proposal.asset, node.id)?;
     require_open(&proposal)?;
     require_effect(&proposal, ProposalEffect::Published, "publish")?;
@@ -1824,7 +1754,7 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
     }
 
     // Approvals bind bytes. Recompute every member's address from the
-    // record as it stands *now* and require it to equal what the approved
+    // artifact as it stands *now* and require it to equal what the approved
     // commit named — otherwise the content moved after the review, and
     // publishing it would launder unreviewed text through a completed
     // approval (ADR-0032 decision 6). Then re-ask whether the source still
@@ -1887,144 +1817,12 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
         )
         .await;
     }
-    let ids = member_ids(&proposed)?;
-    let versions = records::current_many(&mut *tx, tenant_id, &ids).await?;
-    let published = published_at(&mut tx, tenant_id, proposal.source_scope_id).await?;
-    // Every refusal here is a `Conflict`, never an `Invalid`: the request
-    // is well formed and was well formed when it was approved — what moved
-    // is the world, between the review and its effect.
-    let moved = |what: &str, record: RecordId| Error::Conflict {
+    Err(Error::Invalid {
         message: format!(
-            "record {record} {what} after this proposal was approved; withdraw it and \
-             open a new one so the change is reviewed"
+            "proposal {id} carries removed asset kind {}; raw records cannot be published",
+            proposal.asset.as_str()
         ),
-    };
-    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> = Vec::with_capacity(ids.len());
-    for member in &proposed {
-        let record: RecordId = member.name.parse().map_err(|err| Error::Internal {
-            message: format!(
-                "proposal member {:?} is not a record id: {err}",
-                member.name
-            ),
-        })?;
-        let Some(version) = versions.iter().find(|version| version.id == record) else {
-            return Err(moved("no longer exists", record));
-        };
-        let asset = memory_asset(version.id, &version.state);
-        let address = asset.address();
-        if address != member.object {
-            return Err(moved("changed", record));
-        }
-        // And the source must still hold it. A record rewound off the
-        // source's channel (FLOW-7) or moved out of the scope between
-        // approval and publication is refused rather than carried up on a
-        // review of material the source no longer stands behind
-        // (ADR-0034 decision 7).
-        if version.state.scope_id != proposal.source_scope_id
-            && published.get(&record) != Some(&address)
-        {
-            return Err(Error::Conflict {
-                message: format!(
-                    "scope {} no longer holds record {record}; the climb was approved \
-                     against material its source has since given up",
-                    proposal.source_scope_id
-                ),
-            });
-        }
-        // Content-addressed: the object is already stored from the open,
-        // so this re-write dedups and stores nothing.
-        vedaflow::put_memory(&mut tx, tenant_id, &asset).await?;
-        members.push((asset.entry_name(), address));
-    }
-
-    let channel = vedaflow::ChannelRef::memory(Channel::Published);
-    let snapshot = PolicySnapshot::new(
-        authorized.decision.pack_name.clone(),
-        authorized.decision.pack_version,
-    );
-    let committed = vedaflow::publish(
-        &mut tx,
-        tenant_id,
-        &vedaflow::ChannelWrite {
-            scope: proposal.target_scope_id,
-            channel,
-            members: &members,
-            // The publication is a merge: head first (the mainline), then
-            // the proposal it is the effect of. Lineage becomes a fact
-            // about the commit graph rather than a join between tables.
-            merge_parents: &[proposal.commit],
-            author: publisher,
-            message: &proposal.title,
-            committed_at: Utc::now(),
-            policy_snapshot: &snapshot,
-        },
-        &Signer::Unsigned,
-    )
-    .await?;
-    close(
-        &mut tx,
-        tenant_id,
-        id,
-        ProposalState::Published,
-        publisher,
-        None,
-    )
-    .await?;
-    vedaflow::proposals::act("published", proposal.asset);
-
-    // The same action a direct publish emits, with the proposal named:
-    // it is the same governed act with the same consequence, and a second
-    // action asserting it would be a fact an auditor has to reconcile
-    // (ADR-0019 decision 4; ADR-0032 decision 18).
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::ChannelPublished,
-        Resource::Scope(proposal.target_scope_id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::ChannelPublish, &authorized),
-            "channel": channel.name(),
-            "asset": channel.asset.as_str(),
-            "message": proposal.title,
-            "proposal_id": id,
-            "proposal_commit": proposal.commit.to_hex(),
-            "sensitivity": proposal.sensitivity.as_str(),
-            // What climbed, and from where. The scope pair on the
-            // publication event is what lets an auditor read a climb off
-            // the chain without joining the proposal row (ADR-0034
-            // decision 9).
-            "source_scope_id": proposal.source_scope_id,
-            "target_scope_id": proposal.target_scope_id,
-            "records": members.iter().map(|(name, hash)| json!({
-                "record_id": name,
-                "object_hash": hash.to_hex(),
-            })).collect::<Vec<_>>(),
-            "commit": committed.commit.to_hex(),
-            "parent": committed.parent.map(|parent| parent.to_hex()),
-            "members": committed.entries,
-            "added": committed.added,
-            "approvals": approvals::audit_context(&requirement, &outstanding),
-            "approved_by": cast.iter().map(|approval| json!({
-                "identity_id": approval.identity,
-                "subject": approval.subject,
-                "roles": approval.roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    Ok(Json(PublishResponse {
-        proposal_id: id,
-        scope_id: proposal.target_scope_id,
-        channel: channel.name(),
-        commit: committed.commit.to_hex(),
-        parent: committed.parent.map(|parent| parent.to_hex()),
-        proposal_commit: proposal.commit.to_hex(),
-        members: committed.entries,
-        added: committed.added,
-    }))
+    })
 }
 
 /// The publish effect for a context-pack proposal (PRMT-2, ADR-0050
@@ -2037,8 +1835,8 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
 /// `Conflict`, because the request was well formed when it was approved and
 /// what moved is the world.
 ///
-/// It writes `context-pack/published` rather than `memory/published`, and it
-/// chains the same `vedaflow.channel.published` event with `asset` reading
+/// It writes `context-pack/published` and chains the
+/// `vedaflow.channel.published` event with `asset` reading
 /// `context-pack` — the same governed act with the same consequence
 /// (ADR-0019 decision 4).
 ///
@@ -2687,198 +2485,10 @@ async fn publish_prompts(
     }))
 }
 
-// ── Classify: the other effect ─────────────────────────────────────────
-
-#[derive(Serialize)]
-struct ClassifyResponse {
-    proposal_id: ProposalId,
-    scope_id: ScopeId,
-    /// The tier every named record now carries.
-    sensitivity: Sensitivity,
-    /// The records that moved, with the tier each left.
-    records: Vec<ClassifiedRecord>,
-    proposal_commit: String,
-    state: &'static str,
-}
-
-#[derive(Serialize)]
-struct ClassifiedRecord {
-    record_id: RecordId,
-    /// What the record carried before this effect ran — the half of the
-    /// change an auditor needs to price it (ADR-0038 decision 9).
-    was: Sensitivity,
-}
-
-/// `POST /v1/proposals/{id}/classify` — run an approved classification
-/// proposal's effect (AUTHZ-5, ADR-0038 decision 9).
-#[tracing::instrument(name = "proposals.classify", skip_all)]
-pub(crate) async fn classify(
-    State(state): State<AppState>,
-    Path(id): Path<ProposalId>,
-) -> Response {
-    let result = classify_inner(&state, id).await;
-    respond(&state, "classify", result).await
-}
-
-async fn classify_inner(state: &AppState, id: ProposalId) -> Result<Json<ClassifyResponse>> {
-    let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let proposal = load(&mut tx, tenant_id, id).await?;
-    let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(
-        state,
-        &mut tx,
-        Some(&node),
-        synveda_store::anchors::AnchorSelection::none(),
-        Vec::new(),
-    )
-    .await?;
-    // Two decisions, the shape every governed act over material takes: may
-    // this principal classify here, and is it a stranger to the material.
-    // The read is at the working tier (ADR-0038 decision 10) — a
-    // reclassification discloses nothing to the actor, and how much
-    // authority the tier takes is the matrix's arithmetic, resolved below at
-    // the maximum of both tiers.
-    let authorized = authz::decide(
-        state,
-        &input,
-        Action::MemoryClassify,
-        Resource::Scope(node.id),
-    )?;
-    authz::decide_read(
-        state,
-        &input,
-        Resource::Scope(node.id),
-        Sensitivity::WORKING,
-    )?;
-    require_open(&proposal)?;
-    require_effect(&proposal, ProposalEffect::Classify, "classify")?;
-    let classifier = identity_of(&input)?;
-
-    let requirement = requirement_for(state, &mut tx, tenant_id, &input, &node, &proposal).await?;
-    let recorded = vedaflow::proposals::approvals(&mut tx, tenant_id, id).await?;
-    let cast = vedaflow::proposals::cast_for(&recorded, proposal.commit);
-    let outstanding = requirement.outstanding(&cast);
-    if !outstanding.is_empty() {
-        metrics::counter!(PUBLISH_REVIEW_REQUIRED_TOTAL, "surface" => "classify").increment(1);
-        return Err(Error::Conflict {
-            message: format!(
-                "proposal {id} still needs {}; it cannot reclassify yet",
-                outstanding.describe()
-            ),
-        });
-    }
-
-    // Approvals bind bytes here exactly as they do for a publication, with
-    // one substitution: the member objects were written at the *proposed*
-    // tier, so the address to compare against is the live record's with that
-    // tier substituted. Everything else — content, class, scope, validity —
-    // must be untouched, or the record moved under its own review and this
-    // effect would install a tier decided about different bytes.
-    let proposed = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
-    let ids = member_ids(&proposed)?;
-    let versions = records::current_many(&mut *tx, tenant_id, &ids).await?;
-    let moved = |what: &str, record: RecordId| Error::Conflict {
-        message: format!(
-            "record {record} {what} after this proposal was approved; withdraw it and \
-             open a new one so the change is reviewed"
-        ),
-    };
-    let mut classified: Vec<ClassifiedRecord> = Vec::with_capacity(ids.len());
-    for member in &proposed {
-        let record: RecordId = member.name.parse().map_err(|err| Error::Internal {
-            message: format!(
-                "proposal member {:?} is not a record id: {err}",
-                member.name
-            ),
-        })?;
-        let Some(version) = versions.iter().find(|version| version.id == record) else {
-            return Err(moved("no longer exists", record));
-        };
-        let mut asset = memory_asset(version.id, &version.state);
-        asset.sensitivity = proposal.sensitivity;
-        if asset.address() != member.object {
-            return Err(moved("changed", record));
-        }
-        // The record must still live where the proposal was decided: a
-        // reclassification is authorized at one scope, and material that
-        // moved out of it since is governed somewhere else now.
-        if version.state.scope_id != proposal.target_scope_id {
-            return Err(Error::Conflict {
-                message: format!(
-                    "record {record} no longer lives at scope {}; its classification is \
-                     decided where it lives",
-                    proposal.target_scope_id
-                ),
-            });
-        }
-        let was = version.state.sensitivity;
-        records::reclassify(&mut *tx, tenant_id, record, proposal.sensitivity)
-            .await?
-            .ok_or_else(|| moved("no longer exists", record))?;
-        classified.push(ClassifiedRecord {
-            record_id: record,
-            was,
-        });
-    }
-
-    close(
-        &mut tx,
-        tenant_id,
-        id,
-        ProposalState::Published,
-        classifier,
-        None,
-    )
-    .await?;
-
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::MemoryClassified,
-        Resource::Scope(proposal.target_scope_id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::MemoryClassify, &authorized),
-            "proposal_id": id,
-            "proposal_commit": proposal.commit.to_hex(),
-            "scope_id": proposal.target_scope_id,
-            // Both tiers per record, because the requirement was resolved at
-            // their maximum and an auditor reading this event has to be able
-            // to see why it cost what it cost.
-            "sensitivity": proposal.sensitivity.as_str(),
-            "records": classified.iter().map(|record| json!({
-                "record_id": record.record_id,
-                "was": record.was.as_str(),
-                "now": proposal.sensitivity.as_str(),
-            })).collect::<Vec<_>>(),
-            "approvals": approvals::audit_context(&requirement, &outstanding),
-            "approved_by": cast.iter().map(|approval| json!({
-                "identity_id": approval.identity,
-                "subject": approval.subject,
-                "roles": approval.roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    Ok(Json(ClassifyResponse {
-        proposal_id: id,
-        scope_id: proposal.target_scope_id,
-        sensitivity: proposal.sensitivity,
-        records: classified,
-        proposal_commit: proposal.commit.to_hex(),
-        state: ProposalState::Published.as_str(),
-    }))
-}
-
 /// Refuses a proposal whose effect is not the one this route runs.
 ///
-/// A route per effect, and each one checks: running a classification
-/// through the publish route would move a channel to member objects
-/// carrying a tier no row has, and running a publication through this one
-/// would rewrite tiers nobody proposed.
+/// A route per effect, and each one checks that an authored publication
+/// cannot execute a typed Knowledge change (or vice versa).
 fn require_effect(
     proposal: &vedaflow::StoredProposal,
     expected: ProposalEffect,
@@ -3115,79 +2725,14 @@ async fn member_views(
     if proposal.asset == AssetKind::Prompt {
         return prompt_member_views(tx, tenant_id, proposal, &proposed).await;
     }
-    let ids = member_ids(&proposed)?;
-    // Read wherever the records live, not at the target: a climb's members
-    // live below it, and rendering them as "changed, no content" would
-    // make every climb unreviewable (ADR-0034 decision 3). The address
-    // comparison below is what says whether they still match the review.
-    let versions = records::current_many(&mut *tx, tenant_id, &ids).await?;
-    // The baseline is the **target's** channel, which for a climb is the
-    // ancestor's: what the proposal would move is the target's published
-    // set, so that is what the diff is against.
-    let published = published_at(tx, tenant_id, proposal.target_scope_id).await?;
-    // Both sides of every member's diff, in one statement rather than two
-    // per member (ADR-0035 decision 10).
-    let mut wanted: Vec<vedaflow::hash::ObjectHash> =
-        proposed.iter().map(|member| member.object).collect();
-    wanted.extend(ids.iter().filter_map(|id| published.get(id).copied()));
-    let objects = vedaflow::read_objects(tx, tenant_id, &wanted).await?;
-    // The store is append-only, so an address a tree or a commit names
-    // always resolves; a miss would be corruption, and rendering it as an
-    // empty side is honest about having nothing to show rather than
-    // failing a review that is otherwise fine.
-    let text_at = |hash: &vedaflow::hash::ObjectHash| -> String {
-        objects
-            .get(hash)
-            .map(|object| String::from_utf8_lossy(&object.content).into_owned())
-            .unwrap_or_default()
-    };
-
-    Ok(proposed
-        .into_iter()
-        .zip(ids)
-        .map(|(member, record_id)| {
-            let current = versions.iter().find(|version| version.id == record_id);
-            let (unchanged, class, sensitivity, content) = match current {
-                Some(version) => {
-                    let asset = memory_asset(version.id, &version.state);
-                    (
-                        asset.address() == member.object,
-                        version.state.class.as_str().to_owned(),
-                        version.state.sensitivity,
-                        version.state.content.clone(),
-                    )
-                }
-                // The record was deleted or re-scoped under the proposal.
-                // Rendered as changed, with no content to show — which is
-                // exactly what publishing will refuse on.
-                None => (false, String::new(), proposal.sensitivity, String::new()),
-            };
-            let (effect, baseline) = match published.get(&record_id) {
-                None => (MemberEffect::Add, None),
-                Some(held) if *held == member.object => (MemberEffect::None, None),
-                Some(held) => (
-                    MemberEffect::Update,
-                    Some(BaselineView {
-                        object_hash: held.to_hex(),
-                        text: text_at(held),
-                    }),
-                ),
-            };
-            MemberView {
-                member: record_id.to_string(),
-                record_id: Some(record_id),
-                asset: AssetKind::Memory.as_str().to_owned(),
-                object_hash: member.object.to_hex(),
-                unchanged,
-                class: Some(class),
-                sensitivity,
-                content,
-                effect,
-                proposed: text_at(&member.object),
-                baseline,
-            }
-        })
-        .collect())
+    Err(Error::Invalid {
+        message: format!(
+            "proposal {} carries removed asset kind {}; the fresh context-platform epoch \
+             does not admit raw-record proposals",
+            proposal.id,
+            proposal.asset.as_str()
+        ),
+    })
 }
 
 /// [`member_views`] for a governed Knowledge command (CPR-16, ADR-0081).
@@ -3275,11 +2820,9 @@ async fn knowledge_member_views(
     };
     Ok(vec![MemberView {
         member: member.name.clone(),
-        record_id: None,
         asset: AssetKind::Knowledge.as_str().to_owned(),
         object_hash: member.object.to_hex(),
         unchanged: payload_matches && manifest_hash == Some(change.payload_hash.as_str()),
-        class: None,
         sensitivity: proposal.sensitivity,
         content: content.clone(),
         effect: MemberEffect::Apply,
@@ -3376,11 +2919,9 @@ async fn document_member_views(
             };
             MemberView {
                 member: path.to_string(),
-                record_id: None,
                 asset: AssetKind::ContextPack.as_str().to_owned(),
                 object_hash: member.object.to_hex(),
                 unchanged,
-                class: None,
                 sensitivity: reviewed
                     .as_ref()
                     .map_or(proposal.sensitivity, |asset| asset.sensitivity),
@@ -3395,7 +2936,7 @@ async fn document_member_views(
 
 /// [`member_views`] for a prompt proposal (PRMT-1, ADR-0049 decision 6).
 ///
-/// The same three questions FLOW-6 asks of a memory member — what the
+/// The same three questions FLOW-6 asks of every governed member — what the
 /// approvals bind, what publication would replace, and whether the source
 /// has moved since — read one table over. The baseline is still the
 /// **target's** tree, which for a climb is the ancestor's, and the "as it
@@ -3474,11 +3015,9 @@ async fn prompt_member_views(
             };
             MemberView {
                 member: name.to_string(),
-                record_id: None,
                 asset: AssetKind::Prompt.as_str().to_owned(),
                 object_hash: member.object.to_hex(),
                 unchanged,
-                class: None,
                 sensitivity: reviewed
                     .as_ref()
                     .map_or(proposal.sensitivity, |asset| asset.sensitivity),
@@ -3569,11 +3108,9 @@ async fn skill_member_views(
             };
             MemberView {
                 member: path.to_string(),
-                record_id: None,
                 asset: AssetKind::Skill.as_str().to_owned(),
                 object_hash: member.object.to_hex(),
                 unchanged,
-                class: None,
                 sensitivity: reviewed
                     .as_ref()
                     .map_or(proposal.sensitivity, |asset| asset.sensitivity),
@@ -3584,28 +3121,6 @@ async fn skill_member_views(
             }
         })
         .collect())
-}
-
-/// A proposal commit's entry names as record ids, in tree order.
-///
-/// Only this crate writes memory-asset entries and it names them by id,
-/// so an unparseable name means schema and code have drifted — a bug to
-/// name, not a member to drop silently from a review.
-fn member_ids(members: &[vedaflow::ChannelMember]) -> Result<Vec<RecordId>> {
-    members
-        .iter()
-        .map(|member| {
-            member
-                .name
-                .parse::<RecordId>()
-                .map_err(|err| Error::Internal {
-                    message: format!(
-                        "proposal member {:?} is not a record id: {err}",
-                        member.name
-                    ),
-                })
-        })
-        .collect()
 }
 
 /// Decides the asset kind's own read action at `scope_id`, at the working
@@ -3623,7 +3138,6 @@ fn decide_asset_read(
 ) -> Result<crate::authz::Authorized> {
     let resource = Resource::Scope(scope_id);
     match asset {
-        AssetKind::Memory => authz::decide_read(state, input, resource, Sensitivity::WORKING),
         AssetKind::Prompt => {
             authz::decide_prompt_read(state, input, resource, Sensitivity::WORKING)
         }
@@ -3642,6 +3156,20 @@ fn decide_asset_read(
     }
 }
 
+fn asset_read_action(asset: AssetKind) -> Result<Action> {
+    match asset {
+        AssetKind::Prompt => Ok(Action::PromptRead),
+        AssetKind::ContextPack => Ok(Action::ContextPackRead),
+        AssetKind::Skill => Ok(Action::SkillRead),
+        other => Err(Error::Invalid {
+            message: format!(
+                "{} is not an authored artifact a proposal carries",
+                other.as_str()
+            ),
+        }),
+    }
+}
+
 /// One member of a proposal-to-be, as the asset kind's own reader sees it.
 ///
 /// The per-asset-kind seam ADR-0035 predicted, arriving on the write side
@@ -3649,8 +3177,6 @@ fn decide_asset_read(
 /// name it in a tree — is one of these three questions, and the two kinds
 /// answer them from different tables.
 enum Proposed {
-    /// A memory record's current version.
-    Memory(synveda_store::records::RecordVersion),
     /// A prompt, as it will be addressed. Either the draft that lives at
     /// the source scope, or — for the second sense of "the source holds
     /// it" — the object the source's published tree already names.
@@ -3672,7 +3198,6 @@ impl Proposed {
     /// The tier the approval matrix prices this member at.
     fn sensitivity(&self) -> Sensitivity {
         match self {
-            Proposed::Memory(version) => version.state.sensitivity,
             Proposed::Prompt(asset) => asset.sensitivity,
             // Per document, never per pack (ADR-0050 decision 12) — so a
             // bundle mixing a public glossary and a confidential runbook is
@@ -3951,82 +3476,6 @@ async fn held_skills(
     Ok(held)
 }
 
-/// The current versions of `ids` that `scope` **holds**, refusing the
-/// whole request if any is not held there.
-///
-/// A scope holds material in one of two senses, and FLOW-5 needs both
-/// (ADR-0034 decision 3):
-///
-/// - the record **lives** there (`records.scope_id`), which is every
-///   same-scope proposal and the first hop of any climb; or
-/// - the scope **published** it — its `memory/published` tree names the
-///   record at exactly the address its current content produces — which
-///   is how a second hop starts from where the first one landed, with
-///   nothing new stored to make it possible.
-///
-/// The address is what makes the second sense safe: an edited record
-/// falls out of it by arithmetic, so a climb can never carry content the
-/// source scope did not stand behind (ADR-0031 decision 5).
-///
-/// Named rather than silently dropped: proposing (or publishing) a subset
-/// of what a curator asked for is the one outcome a review surface must
-/// never produce quietly.
-async fn held_versions(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    scope_id: ScopeId,
-    ids: &[RecordId],
-) -> Result<Vec<synveda_store::records::RecordVersion>> {
-    let mut requested = ids.to_vec();
-    requested.sort_unstable();
-    requested.dedup();
-    // Scope-blind: where each record lives is one of the two answers, not
-    // the predicate.
-    let versions = records::current_many(&mut *tx, tenant_id, &requested).await?;
-    let published = published_at(tx, tenant_id, scope_id).await?;
-    let held: Vec<synveda_store::records::RecordVersion> = versions
-        .into_iter()
-        .filter(|version| {
-            version.state.scope_id == scope_id
-                || published.get(&version.id)
-                    == Some(&memory_asset(version.id, &version.state).address())
-        })
-        .collect();
-    if held.len() != requested.len() {
-        let found: Vec<RecordId> = held.iter().map(|version| version.id).collect();
-        let missing: Vec<String> = requested
-            .iter()
-            .filter(|id| !found.contains(id))
-            .map(ToString::to_string)
-            .collect();
-        return Err(Error::Invalid {
-            message: format!(
-                "scope {scope_id} neither holds nor publishes: {} — name the scope \
-                 that does with source_scope_id, which must be {scope_id} or a scope \
-                 beneath it (FLOW-5 climbs the hierarchy, it does not cross it)",
-                missing.join(", ")
-            ),
-        });
-    }
-    Ok(held)
-}
-
-/// What `scope`'s published channel names, record id → admitted address.
-async fn published_at(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    scope_id: ScopeId,
-) -> Result<std::collections::HashMap<RecordId, vedaflow::hash::ObjectHash>> {
-    Ok(
-        vedaflow::read_memory_members(tx, tenant_id, &[scope_id], Channel::Published)
-            .await?
-            .into_iter()
-            .next()
-            .map(|channel| channel.members)
-            .unwrap_or_default(),
-    )
-}
-
 /// A set is reviewed as a set and is governed by its most sensitive
 /// element (ADR-0032 decision 3), whichever kind of asset it holds.
 fn max_sensitivity(members: &[Proposed]) -> Sensitivity {
@@ -4053,34 +3502,29 @@ fn validate_open(body: &OpenBody) -> Result<()> {
     // One asset kind per proposal (ADR-0049 decision 6): the approval
     // matrix resolves from it, and a mixed set would have to be priced at
     // the maximum by a rule nobody wrote.
-    let named = usize::from(!body.record_ids.is_empty())
-        + usize::from(!body.prompt_names.is_empty())
+    let named = usize::from(!body.prompt_names.is_empty())
         + usize::from(!body.document_paths.is_empty())
         + usize::from(!body.skill_names.is_empty());
     match named {
         0 => {
             return invalid(
-                "name at least one member: record_ids for memories, prompt_names for \
-                 prompts, document_paths for context pack documents, skill_names for \
-                 skills"
+                "name at least one member: prompt_names for prompts, document_paths for \
+                 context pack documents, or skill_names for skills"
                     .to_owned(),
             );
         }
         1 => {}
         _ => {
             return invalid(
-                "a proposal carries one asset kind: name record_ids, prompt_names, \
-                 document_paths or skill_names, never more than one — the approval matrix resolves \
-                 from the asset, and regulated-strict prices a prompt at two distinct \
-                 people where it prices a team's memory at one"
+                "a proposal carries one asset kind: name prompt_names, document_paths or \
+                 skill_names, never more than one — the approval matrix resolves from the asset"
                     .to_owned(),
             );
         }
     }
     let members = body
-        .record_ids
+        .prompt_names
         .len()
-        .max(body.prompt_names.len())
         .max(body.document_paths.len())
         .max(body.skill_names.len());
     if members > vedaflow::MAX_PROPOSAL_MEMBERS {
@@ -4089,54 +3533,9 @@ fn validate_open(body: &OpenBody) -> Result<()> {
             vedaflow::MAX_PROPOSAL_MEMBERS
         ));
     }
-    if (!body.prompt_names.is_empty() || !body.skill_names.is_empty())
-        && body.effect.unwrap_or(ProposalEffect::Published) != ProposalEffect::Published
-    {
-        return invalid(
-            "an authored-asset proposal publishes: reclassification is a records effect \
-             (ADR-0038 decision 9), and an authored asset's tier is a field of the \
-             version under review"
-                .to_owned(),
-        );
-    }
     let chars = body.title.chars().count();
     if chars == 0 || chars > MAX_TITLE_CHARS {
         return invalid(format!("title must be 1..={MAX_TITLE_CHARS} characters"));
-    }
-    // The effect and the tier travel together or not at all (AUTHZ-5,
-    // ADR-0038 decision 9). A body that says `classify` without a tier has
-    // not said what it would do; one that names a tier for a publication has
-    // described something the effect will not perform, and storing it would
-    // make the proposal read as a reclassification that never happens.
-    match body.effect.unwrap_or(ProposalEffect::Published) {
-        ProposalEffect::Classify if body.sensitivity.is_none() => {
-            return invalid(
-                "a classify proposal must name the sensitivity it would install".to_owned(),
-            );
-        }
-        ProposalEffect::Classify => {}
-        other if body.sensitivity.is_some() => {
-            return invalid(format!(
-                "sensitivity applies to the classify effect only; this proposal's \
-                 effect is {other} and would not move a tier"
-            ));
-        }
-        // A lapse's terms are a different body entirely, and refusing it
-        // here by name beats opening a policy proposal with no terms in it
-        // (ADR-0037 decision 1: POST /v1/lapses is its surface).
-        ProposalEffect::Lapse => {
-            return invalid(
-                "a lapse is proposed at POST /v1/lapses, which is where its terms live".to_owned(),
-            );
-        }
-        ProposalEffect::Apply => {
-            return invalid(
-                "a Knowledge change is opened by the governed Knowledge command layer; \
-                 the generic proposal route cannot supply its typed effect payload"
-                    .to_owned(),
-            );
-        }
-        ProposalEffect::Published => {}
     }
     Ok(())
 }
@@ -4154,23 +3553,4 @@ fn check_text(label: &str, value: Option<&str>) -> Result<()> {
         });
     }
     Ok(())
-}
-
-/// The VedaFlow view of a stored record version (ADR-0031 decision 6).
-/// The same field copy the pipeline, the composition engine, and the
-/// channel route make, for the reason recorded there: `synveda-store` and
-/// `synveda-vedaflow` are siblings, so neither can host a conversion
-/// between their types.
-fn memory_asset(id: RecordId, state: &RecordState) -> MemoryAsset {
-    MemoryAsset {
-        id,
-        scope_id: state.scope_id,
-        owner_id: state.owner_id,
-        kind: state.kind,
-        class: state.class,
-        content: state.content.clone(),
-        sensitivity: state.sensitivity,
-        valid_from: state.valid_from,
-        valid_to: state.valid_to,
-    }
 }

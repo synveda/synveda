@@ -1,5 +1,5 @@
-//! CPR-4 and CPR-5: the OpenAPI contract is authoritative (ADR-0071
-//! decision 7).
+//! Context-platform contract: the OpenAPI document is authoritative
+//! (ADR-0071 decision 7; CPR-17/ADR-0082).
 //!
 //! Three things have to be true for that sentence to mean anything, and this
 //! suite is each of them:
@@ -43,7 +43,7 @@ use tower::ServiceExt;
 /// The committed document, relative to the workspace root.
 const DOCUMENT: &str = "../../docs/api/openapi.json";
 
-/// Every path CPR-4 and CPR-5 put on the contract. Written out rather than
+/// Every path currently on this generated contract. Written out rather than
 /// derived from the document, because a check that read the document to decide
 /// what the document should contain would pass for any document at all.
 const DECLARED_PATHS: &[&str] = &[
@@ -56,6 +56,17 @@ const DECLARED_PATHS: &[&str] = &[
     "/v1/admin/scopes/{scope_id}/ancestors",
     "/v1/admin/scopes/{scope_id}/descendants",
     "/v1/invites/{invite_token}/accept",
+    // CPR-17 (ADR-0082): the public Knowledge plane.
+    "/v1/knowledge",
+    "/v1/knowledge/merge",
+    "/v1/knowledge/{id}",
+    "/v1/knowledge/{id}/archive",
+    "/v1/knowledge/{id}/history",
+    "/v1/knowledge/{id}/restore",
+    "/v1/knowledge/{id}/sources",
+    "/v1/knowledge/{id}/supersede",
+    "/v1/knowledge/{id}/usage",
+    "/v1/knowledge/{id}/verify",
     "/v1/me",
     "/v1/projects/{project_id}",
     "/v1/projects/{project_id}/members",
@@ -188,6 +199,7 @@ async fn every_documented_path_is_mounted() {
             .replace("{group_id}", &id)
             .replace("{principal_id}", "sam")
             .replace("{session_id}", &id)
+            .replace("{id}", &id)
             .replace("{invite_token}", TOKEN_PLACEHOLDER);
         let response = app
             .clone()
@@ -234,13 +246,15 @@ async fn a_path_this_plane_does_not_declare_is_not_mounted() {
         "/v1/projects/{project_id}/invites",
         "/v1/workspaces/{workspace_id}/members/{principal_id}",
         "/v1/admin/groups/{group_id}/members",
+        "/v1/proposals/{id}/classify",
     ] {
         let concrete = path
             .replace("{workspace_id}", &id)
             .replace("{project_id}", &id)
             .replace("{group_id}", &id)
             .replace("{principal_id}", "sam")
-            .replace("{session_id}", &id);
+            .replace("{session_id}", &id)
+            .replace("{id}", &id);
         let response = app
             .clone()
             .oneshot(
@@ -316,9 +330,9 @@ fn the_document_is_generatable() {
     }
     assert_eq!(
         operation_ids.len(),
-        40,
-        "CPR-4's twelve, CPR-5's fourteen, CPR-7's six, CPR-10's seven, \
-         CPR-11's one: {operation_ids:?}"
+        53,
+        "the 40-operation CPR-11 contract plus CPR-17's 13 Knowledge operations: \
+         {operation_ids:?}"
     );
 }
 

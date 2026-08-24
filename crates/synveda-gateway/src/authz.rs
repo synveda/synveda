@@ -492,22 +492,6 @@ pub(crate) fn decide_from(
     decide_inner(state, input, position, action, resource, None)
 }
 
-/// [`decide`] for `MemoryRead`, which is the one action that names the tier
-/// it is asking about (AUTHZ-5, ADR-0038 decision 2).
-///
-/// A separate function rather than a seventh parameter on [`decide`],
-/// because "which tier" is a question only this action answers, and a
-/// parameter every other call site passes `None` to is an invitation to
-/// pass `None` here.
-pub(crate) fn decide_read(
-    state: &AppState,
-    input: &DecisionInput,
-    resource: Resource,
-    sensitivity: Sensitivity,
-) -> Result<Authorized> {
-    decide_read_from(state, input, 0, resource, sensitivity)
-}
-
 /// [`decide`] for `KnowledgeRead` (CPR-16, ADR-0081).
 ///
 /// Knowledge names a tier like the retired record read, but deliberately
@@ -632,25 +616,6 @@ pub(crate) fn decide_skill_read_from(
         input,
         position,
         Action::SkillRead,
-        resource,
-        Some(sensitivity),
-    )
-}
-
-/// [`decide_read`] for a resource whose chain starts at `position` — the
-/// [`decide_from`] shape, for the cross-scope decisions FLOW-5 takes.
-pub(crate) fn decide_read_from(
-    state: &AppState,
-    input: &DecisionInput,
-    position: usize,
-    resource: Resource,
-    sensitivity: Sensitivity,
-) -> Result<Authorized> {
-    decide_inner(
-        state,
-        input,
-        position,
-        Action::MemoryRead,
         resource,
         Some(sensitivity),
     )

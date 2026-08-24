@@ -77,13 +77,12 @@ struct RollbackResponse {
     to: String,
     members: usize,
     removed: Vec<String>,
-    restored: Vec<RestoredRecord>,
+    restored: Vec<RestoredMember>,
 }
 
 #[derive(Deserialize)]
-struct RestoredRecord {
-    /// The tree entry name: a record id for a memory channel, a path for
-    /// a prompt one (PRMT-1, ADR-0049 decision 3).
+struct RestoredMember {
+    /// The authored member path.
     member: String,
 }
 
@@ -149,13 +148,14 @@ pub async fn status(profile: &str, scope: ScopeId, json_out: bool) -> Result<(),
 pub async fn history(
     profile: &str,
     scope: ScopeId,
-    channel: Option<String>,
+    channel: String,
     limit: Option<u32>,
     json_out: bool,
 ) -> Result<(), String> {
+    let selector = query(&channel, limit)?;
     let (api, origin) = Api::connect(profile).await?;
     announce(&api, &origin);
-    let path = format!("/v1/channels/{scope}/history{}", query(channel, limit));
+    let path = format!("/v1/channels/{scope}/history{selector}");
     if json_out {
         println!("{}", api.get(&path).await?);
         return Ok(());
@@ -202,7 +202,8 @@ pub async fn history(
     }
     println!();
     println!(
-        "rewind with: synveda channel rollback {scope} --from {} --to <commit> --message <why>",
+        "rewind with: synveda channel rollback {scope} --channel {} --from {} --to <commit> --message <why>",
+        response.channel,
         short(&response.head),
     );
     Ok(())
@@ -215,17 +216,17 @@ pub async fn rollback(
     from: String,
     to: String,
     message: String,
-    channel: Option<String>,
+    channel: String,
     json_out: bool,
 ) -> Result<(), String> {
-    let (api, origin) = Api::connect(profile).await?;
-    announce(&api, &origin);
     let mut body = json!({
         "from_commit": from,
         "to_commit": to,
         "message": message,
     });
-    with_channel(&mut body, channel)?;
+    with_channel(&mut body, &channel)?;
+    let (api, origin) = Api::connect(profile).await?;
+    announce(&api, &origin);
 
     let path = format!("/v1/channels/{scope}/rollback");
     if json_out {
@@ -241,11 +242,11 @@ pub async fn rollback(
         short(&response.to),
     );
     println!("  {} members published here now", response.members);
-    for record in &response.removed {
-        println!("  - {record} is no longer published material");
+    for member in &response.removed {
+        println!("  - {member} is no longer published material");
     }
-    for record in &response.restored {
-        println!("  ~ {} is published at an earlier version", record.member);
+    for member in &response.restored {
+        println!("  ~ {} is published at an earlier version", member.member);
     }
     // The FLOW-7 sentence, said out loud: nothing else has to happen.
     println!("  every session that starts from now composes the state above");
@@ -258,13 +259,13 @@ pub async fn pin(
     scope: ScopeId,
     commit: String,
     reason: String,
-    channel: Option<String>,
+    channel: String,
     json_out: bool,
 ) -> Result<(), String> {
+    let mut body = json!({ "commit": commit, "reason": reason });
+    with_channel(&mut body, &channel)?;
     let (api, origin) = Api::connect(profile).await?;
     announce(&api, &origin);
-    let mut body = json!({ "commit": commit, "reason": reason });
-    with_channel(&mut body, channel)?;
 
     let path = format!("/v1/channels/{scope}/pin");
     if json_out {
@@ -300,13 +301,13 @@ pub async fn unpin(
     profile: &str,
     scope: ScopeId,
     reason: String,
-    channel: Option<String>,
+    channel: String,
     json_out: bool,
 ) -> Result<(), String> {
+    let mut body = json!({ "reason": reason });
+    with_channel(&mut body, &channel)?;
     let (api, origin) = Api::connect(profile).await?;
     announce(&api, &origin);
-    let mut body = json!({ "reason": reason });
-    with_channel(&mut body, channel)?;
 
     let path = format!("/v1/channels/{scope}/unpin");
     if json_out {
@@ -333,39 +334,40 @@ pub async fn unpin(
 
 // ── Rendering ──────────────────────────────────────────────────────────
 
-/// Splits `memory/published` into the two fields the routes take.
+/// Splits an authored-artifact ref such as `skill/published` into the two
+/// fields the routes take.
 ///
 /// One flag rather than two, because a channel is written as one name
 /// everywhere else in the product — in refs, in the audit payloads, and in
 /// what `status` prints — and an operator who has just read one off the
 /// screen should be able to type it back.
-fn with_channel(body: &mut serde_json::Value, channel: Option<String>) -> Result<(), String> {
-    let Some(name) = channel else { return Ok(()) };
-    let (asset, channel) = name.split_once('/').ok_or_else(|| {
-        format!("--channel takes an asset/channel name such as memory/published, got {name:?}")
-    })?;
+fn with_channel(body: &mut serde_json::Value, name: &str) -> Result<(), String> {
+    let (asset, channel) = split_channel(name)?;
     body["asset"] = json!(asset);
     body["channel"] = json!(channel);
     Ok(())
 }
 
 /// The same two fields as a query string.
-fn query(channel: Option<String>, limit: Option<u32>) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(name) = channel
-        && let Some((asset, channel)) = name.split_once('/')
-    {
-        parts.push(format!("asset={asset}"));
-        parts.push(format!("channel={channel}"));
-    }
+fn query(name: &str, limit: Option<u32>) -> Result<String, String> {
+    let (asset, channel) = split_channel(name)?;
+    let mut parts = vec![format!("asset={asset}"), format!("channel={channel}")];
     if let Some(limit) = limit {
         parts.push(format!("limit={limit}"));
     }
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!("?{}", parts.join("&"))
+    Ok(format!("?{}", parts.join("&")))
+}
+
+fn split_channel(name: &str) -> Result<(&str, &str), String> {
+    let (asset, channel) = name.split_once('/').ok_or_else(|| {
+        format!("--channel takes an asset/channel name such as skill/published, got {name:?}")
+    })?;
+    if !matches!(asset, "prompt" | "context-pack" | "skill") || channel.is_empty() {
+        return Err(format!(
+            "--channel names a public authored-artifact ref: prompt, context-pack or skill; got {name:?}"
+        ));
     }
+    Ok((asset, channel))
 }
 
 /// A commit, abbreviated the way git does. Full hashes are in `--json`;
@@ -397,41 +399,39 @@ mod tests {
     #[test]
     fn a_channel_name_splits_into_the_two_fields_the_route_takes() {
         let mut body = json!({ "message": "why" });
-        with_channel(&mut body, Some("memory/published".to_owned())).expect("split");
-        assert_eq!(body["asset"], "memory");
+        with_channel(&mut body, "skill/published").expect("split");
+        assert_eq!(body["asset"], "skill");
         assert_eq!(body["channel"], "published");
         assert_eq!(body["message"], "why");
     }
 
-    /// Omitted means the defaults the route applies — the body must not
-    /// carry nulls that would deserialise as "asset: none".
     #[test]
-    fn an_omitted_channel_adds_nothing_to_the_body() {
+    fn the_removed_memory_channel_is_refused() {
         let mut body = json!({ "message": "why" });
-        with_channel(&mut body, None).expect("no channel");
-        assert_eq!(body, json!({ "message": "why" }));
+        let error = with_channel(&mut body, "memory/published")
+            .expect_err("the raw-record channel is not public");
+        assert!(error.contains("authored-artifact"), "{error}");
     }
 
     #[test]
     fn a_name_without_a_slash_is_refused_with_the_shape_it_wanted() {
         let mut body = json!({});
-        let error = with_channel(&mut body, Some("published".to_owned()))
+        let error = with_channel(&mut body, "published")
             .expect_err("a bare channel name is not a ref name");
-        assert!(error.contains("memory/published"), "{error}");
+        assert!(error.contains("skill/published"), "{error}");
     }
 
     #[test]
     fn the_query_string_carries_only_what_was_asked_for() {
-        assert_eq!(query(None, None), "");
-        assert_eq!(query(None, Some(5)), "?limit=5");
         assert_eq!(
-            query(Some("memory/staged".to_owned()), Some(5)),
-            "?asset=memory&channel=staged&limit=5"
+            query("context-pack/staged", Some(5)).expect("query"),
+            "?asset=context-pack&channel=staged&limit=5"
         );
-        // A name that is not a ref name contributes nothing rather than
-        // half a selector; the route then answers about the default
-        // channel, which is what the operator sees.
-        assert_eq!(query(Some("published".to_owned()), None), "");
+        assert_eq!(
+            query("prompt/published", None).expect("query"),
+            "?asset=prompt&channel=published"
+        );
+        assert!(query("published", None).is_err());
     }
 
     #[test]

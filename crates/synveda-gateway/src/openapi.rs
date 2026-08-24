@@ -33,6 +33,7 @@ use utoipa::OpenApi;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 
 use crate::access;
+use crate::knowledge_api;
 use crate::me;
 use crate::sessions;
 use crate::workspaces;
@@ -43,7 +44,7 @@ use crate::workspaces;
     info(
         title = "Synveda",
         description = "\
-Governed organisational memory and context for AI agents.
+Governed Knowledge and context for AI agents.
 
 **Coverage.** This document describes the context-platform surface: `/v1/me`, \
 the workspace, project and repository planes (CPR-4), the access plane — \
@@ -52,6 +53,10 @@ members, groups, grants and invitations (CPR-5), and the scope admin plane \
 and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, \
 append events, end, timeline, and the context-run endpoint), with CPR-11's \
 paginated and filtered listing and its diagnostic expansion of one event. \
+CPR-17 adds stable Knowledge, immutable revision history, independently \
+governed provenance and lifecycle mutations at `/v1/knowledge`; every write \
+is an idempotent VedaFlow change and the collection is current-active by \
+default with lexical and honestly degraded semantic search. \
 Since CPR-12 the session plane is also the **only** runtime plane: \
 `POST /v1/sessions/{session_id}/events` is where observations are admitted and \
 `POST /v1/sessions/{session_id}/context-runs` is where context is composed. \
@@ -94,6 +99,19 @@ revision, and its mutations are last-writer-wins under the PDP.",
         crate::admin_scopes::ancestors,
         crate::admin_scopes::descendants,
         me::get,
+        knowledge_api::list,
+        knowledge_api::create,
+        knowledge_api::get,
+        knowledge_api::edit,
+        knowledge_api::delete,
+        knowledge_api::history,
+        knowledge_api::sources_for_item,
+        knowledge_api::usage,
+        knowledge_api::verify,
+        knowledge_api::supersede,
+        knowledge_api::archive,
+        knowledge_api::restore,
+        knowledge_api::merge,
         workspaces::list,
         workspaces::create,
         workspaces::get,
@@ -135,6 +153,26 @@ revision, and its mutations are last-writer-wins under the PDP.",
         me::OnboardingView,
         me::OnboardingState,
         crate::capabilities::TenantCapabilities,
+        knowledge_api::KnowledgeRevisionView,
+        knowledge_api::KnowledgeRelationView,
+        knowledge_api::KnowledgeItemView,
+        knowledge_api::KnowledgeListView,
+        knowledge_api::KnowledgeHistoryView,
+        knowledge_api::KnowledgeSourceView,
+        knowledge_api::KnowledgeSourcesView,
+        knowledge_api::KnowledgeUsageView,
+        knowledge_api::KnowledgeUsageListView,
+        knowledge_api::KnowledgeMutationView,
+        knowledge_api::KnowledgeContentBody,
+        knowledge_api::KnowledgeSourceBody,
+        knowledge_api::CreateKnowledgeBody,
+        knowledge_api::EditKnowledgeBody,
+        knowledge_api::VerifyKnowledgeBody,
+        knowledge_api::SupersedeKnowledgeBody,
+        knowledge_api::MergeInputBody,
+        knowledge_api::MergeKnowledgeBody,
+        knowledge_api::LifecycleKnowledgeBody,
+        knowledge_api::DeleteKnowledgeBody,
         workspaces::WorkspaceView,
         workspaces::WorkspaceList,
         workspaces::ProjectView,
@@ -182,6 +220,7 @@ revision, and its mutations are last-writer-wins under the PDP.",
         (name = "repositories", description = "What a project is about, by canonical identity"),
         (name = "access", description = "Who may act where: members, groups, grants and invitations"),
         (name = "sessions", description = "Agent runs, their immutable event ledger, and the context composed for them"),
+        (name = "knowledge", description = "Stable governed Knowledge, immutable revisions, provenance and lifecycle"),
     ),
     modifiers(&BearerAuth),
 )]

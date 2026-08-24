@@ -29,12 +29,14 @@ programme convention established in Prompt 1.
 | Objective | Feature | Status | Start SHA | Result SHA | Focused tests | `make ci` | `make db-test` | Live/demo/evaluation evidence | Blockers |
 |---|---|---|---|---|---|---|---|---|---|
 | Versioned Knowledge aggregate, immutable revisions, normalised provenance and current projection | CPR-15 | **complete** | `6eb3e3b` | `874aa51` | types 5/5; store DB 5/5; RLS completeness PASS | PASS | PASS | isolated `demos/cpr-15-knowledge-aggregate.sh` PASS | none |
-| Governed create/edit/verify/supersede/merge/archive/restore/forget and durable erasure | CPR-16 | **complete** | `874aa51` | recorded by CPR-17 checkpoint | gateway lifecycle 3/3; policy approvals 6/6, packs 7/7, PDP 11/11; RLS completeness PASS | PASS | PASS | isolated `demos/cpr-16-knowledge-lifecycle.sh` PASS: 19 governed changes, zero old records | none |
+| Governed create/edit/verify/supersede/merge/archive/restore/forget and durable erasure | CPR-16 | **complete** | `874aa51` | `f2a7c5c` | gateway lifecycle 3/3; policy approvals 6/6, packs 7/7, PDP 11/11; RLS completeness PASS | PASS | PASS | isolated `demos/cpr-16-knowledge-lifecycle.sh` PASS: 19 governed changes, zero old records | none |
+| Public Knowledge API, lexical/semantic search, generated-client browser and raw-record product cutover | CPR-17 | **complete** | `f2a7c5c` | next checkpoint | gateway public API 1/1; OpenAPI 5/5; console 151/151; RLS 84/84 | PASS | PASS | isolated `demos/cpr-17-knowledge-browser.sh` PASS: one Knowledge item, zero old records | none |
 
-**Exact next objective:** implement CPR-17, the public Knowledge API, search
-and browser cutover; delete the raw-record product surface and classification
-seam named in CPR-16's controlled-cutover checklist, then commit and
-fast-forward push that bounded package.
+**Exact next objective:** implement CPR-18, session-based `CaptureBatch` and
+`CaptureCandidate` extraction, with candidate-only output and acceptance
+actions entering CPR-16's VedaFlow Knowledge command seam. Delete the final
+old direct extraction output writer; repeated extraction of one session must
+be idempotent.
 CPR-13 remains reserved for the demo-corpus re-point and follows the
 MVP surfaces it must demonstrate; rewriting those demos before Knowledge,
 capture and scoped recall exist would knowingly rewrite them twice.
@@ -3027,3 +3029,95 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(knowledge): govern knowledge lifecycle with VedaFlow
   (CPR-16)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by the CPR-17 checkpoint on Prompt 1's rule.
+
+### Prompt 15 objective — Public Knowledge API, search and browser (CPR-17)
+
+- **Selected feature and state.** **CPR-17** is delivered from `f2a7c5c` and
+  also subsumes the already-filed **CNSL-4** browser objective. This is the
+  public/read/browser half of CPR-15/16, not a record facade: Knowledge is the
+  only public product noun, every write enters CPR-16's typed VedaFlow command
+  layer and no DTO translates a record into Knowledge.
+
+- **Decision.** ADR-0082 makes the immutable current Knowledge revision the
+  read authority. Ordinary listing and search decide every item under its own
+  scope chain and pack; source descriptors are decided under their own scopes,
+  and a relation is disclosed only when both endpoints are readable. Cursors
+  bind the normalised filter/query and advance over the last candidate
+  considered rather than the last row served, so an all-denied page can still
+  make progress without leaking a count. Creation uses an idempotency key;
+  existing-head changes use the exact revision precondition the reader saw.
+
+- **Schema and retrieval.** Migration `0049_knowledge_search` takes the chain
+  to **47 migrations** at schema epoch **2**. The tenant-bound
+  `knowledge_revision_embeddings` sidecar is enabled-and-forced RLS, keyed by
+  immutable revision and model, indexed only at the reviewed 16/1024 vector
+  dimensions and cascades under authorised erasure. Lexical search uses the
+  current revision's stored weighted document. Configured TEI supplies the
+  semantic leg and bounded reciprocal-rank fusion; the deterministic hash
+  embedder is never queried or described as semantic and yields an explicit
+  lexical-only degradation. A restart-safe background sweep indexes revision
+  content outside the database transaction and inserts idempotently.
+
+- **API and console.** The handler-derived OpenAPI document grows from 40 to
+  **53 operations**, adding all thirteen Knowledge collection/item/history/
+  source/usage/lifecycle operation groups with the common error envelope,
+  cursor/filter schemas, idempotency metadata and revision preconditions. The
+  generated TypeScript operation table is the only Knowledge client contract.
+  `/console/knowledge` and `/console/knowledge/{item_id}` provide search and
+  filters, current content, immutable history, independently visible
+  provenance, relationships, verification and create/edit/merge/supersede/
+  archive/restore/forget flows. Usage is truthfully empty until the later
+  context-planning selection producer exists; mutation history is not
+  relabelled agent use.
+
+- **Hard-cut deletions.** The proposal classification route, `synveda proposal
+  classify` and the eval caller are deleted. Generic public proposals reject
+  the removed `record_ids` and `effect` fields. Channel publication no longer
+  accepts record ids; memory channel history, rollback, pin and unpin aliases
+  are refused in favour of explicit authored asset kinds. Raw-record review
+  fixtures and seven record-oriented public integration suites are deleted,
+  with their still-valid lapse regressions retained in a narrow suite. The one
+  remaining record plane is internal session-event extraction/context
+  composition owned by CPR-18; it is not exposed, translated or dual-written.
+
+- **PDP, RLS, audit and observability.** Ownership precedes policy so a real id
+  in another tenant and fiction are the same 404. Item, source and edge
+  decisions happen before data or counts enter a response. The new sidecar is
+  in the explicit and dynamic forced-RLS inventories. Read audit events carry
+  ids, filter hashes, counts and retrieval mode rather than content, query text
+  or source locators. Index and API paths carry tracing plus bounded metrics.
+
+- **Acceptance evidence and findings.** The public database case proves
+  idempotent create/conflict, filters and cursors, lexical search, honest
+  semantic degradation, immutable detail/history, private-source omission,
+  edit/verify, merge, supersession, archive/restore/forget, another tenant's
+  real id, embedding erasure and the removed route/payload/channel shapes.
+  `demos/cpr-17-knowledge-browser.sh` runs it in a disposable database, runs
+  OpenAPI and console contracts and reports **one Knowledge item, zero old
+  records**. The full database gate first found obsolete record-oriented
+  suites and a missing explicit RLS inventory entry; deleting the replaced
+  suites, retaining independent lapse coverage and adding the sidecar to the
+  inventory made the complete gate green. CI then caught two pagination
+  helpers over the clippy argument limit; their shared explicit page context
+  removed the duplication without a lint exemption. The managed sandbox
+  cannot bind the two existing CLI loopback tests; the permitted identical CI
+  rerun is the product result.
+
+- **Tests and exact results.** Gateway public Knowledge **1/1**, OpenAPI
+  **5/5**, console **151/151**, dynamic RLS **84/84**, and the isolated demo
+  **PASS**. `make db-test` **PASS** against a fresh scratch database. `make ci`
+  **PASS**, including Rust/clippy `-D warnings`, SQLx offline metadata,
+  dependency/licence/backlog/ADR/API drift, Helm, deterministic eval parsing,
+  Claude adapter **96/96** and console **151/151**.
+
+- **Limitations and next work.** CPR-17 is a browser/search surface, not the
+  final agent retrieval plane. CPR-18 must replace internal record extraction
+  with reviewable session-derived capture candidates; the later explainable
+  context package moves composition to current Knowledge revisions and adds
+  the scoped recall/query lenses. Live Entra/Okta and authentic Cursor evidence
+  remain unrelated external gaps. CPR-13 stays reserved until the surfaces its
+  demos must teach exist.
+
+- **Commit.** `feat(console): add knowledge browser and search (CPR-17)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-18 checkpoint on Prompt 1's rule.

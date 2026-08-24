@@ -1,11 +1,9 @@
 /**
  * The planes this epoch has not built yet (CPR-8, ADR-0075 decision 7).
  *
- * Knowledge, New Learnings and Tools are in the primary navigation because
- * they are what the product *is* — and none of them has an API at this
- * commit. The context-platform programme's own order says why: candidates
- * and knowledge versions are the next two prompts, the tool registry two
- * stages later. This page is what those three routes render meanwhile.
+ * New Learnings and Tools are in the primary navigation because they are
+ * what the product *is* — before their packages land, this page says so
+ * without pretending an absent API is an empty collection.
  *
  * **Sessions left this page at CPR-10** (ADR-0076), which is what the page is
  * for: an entry here is a debt with a name, and it is paid by deleting the
@@ -31,12 +29,6 @@ import type { RouteId } from "./routes.mjs";
 
 /** What each planned plane will hold, and what delivers it. */
 const PLANNED: Record<string, { what: string; owed: string }> = {
-  knowledge: {
-    what:
-      "What has been reviewed and published, as immutable versions: a stable id, a revision " +
-      "chain, and the proposal that put each one there.",
-    owed: "knowledge versions and the candidate → knowledge promotion path",
-  },
   learnings: {
     what:
       "What your sessions extracted and nobody has stood behind yet — the candidates, on " +

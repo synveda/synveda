@@ -126,6 +126,16 @@ test("a run has its own address, and the id in it is the id it renders", () => {
   assert.throws(() => hrefOf("session"), /session_id/);
 });
 
+test("a Knowledge item has a stable address", () => {
+  const href = hrefOf("knowledge-item", { knowledge_id: "018f-knowledge" });
+  assert.equal(href, "/console/knowledge/018f-knowledge");
+  assert.deepEqual(matchRoute(href), {
+    id: "knowledge-item",
+    params: { knowledge_id: "018f-knowledge" },
+  });
+  assert.throws(() => hrefOf("knowledge-item"), /knowledge_id/);
+});
+
 test("a path this console does not have matches nothing", () => {
   // `null` is rendered as a not-found page rather than redirected: the
   // gateway answers every path under the prefix with the bundle, so a typo

@@ -247,6 +247,7 @@ const COVERED: &[&str] = &[
     "knowledge_items",
     "knowledge_items_history",
     "knowledge_relations",
+    "knowledge_revision_embeddings",
     "knowledge_revision_sources",
     "knowledge_revisions",
     "knowledge_sources",

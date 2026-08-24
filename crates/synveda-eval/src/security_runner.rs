@@ -483,91 +483,26 @@ async fn wait_for_index(
     }
 }
 
-/// Installs the tiers the corpus declares, through the only mechanism the
-/// product has: a classification proposal the **author** opens at their own
-/// home scope, approved by however many distinct approvers the invariant
-/// floor asks for, and run by the author (ADR-0048 decision 7).
+/// Refuses the old tier premise explicitly. CPR-17 deleted raw-record
+/// classification; CPR-18 restores this benchmark against the separately
+/// authorised Knowledge query lens and Knowledge sensitivity.
 async fn classify(
-    client: &Client,
-    environment: &Environment,
+    _client: &Client,
+    _environment: &Environment,
     corpus: &Corpus,
-    placed: &BTreeMap<String, Placed>,
-    outcome: &mut SecurityOutcome,
+    _placed: &BTreeMap<String, Placed>,
+    _outcome: &mut SecurityOutcome,
 ) -> Result<(), String> {
-    for record in &corpus.material {
-        let Some(tier) = &record.classify else {
-            continue;
-        };
-        let Some(slot) = placed.get(&record.key) else {
-            continue;
-        };
-        let author = &environment.actor(&record.actor)?.token;
-        let opened = client
-            .propose(
-                author,
-                &ProposalRequest {
-                    scope_id: &slot.scope_id,
-                    source_scope_id: &slot.scope_id,
-                    record_ids: slot.record_ids.clone(),
-                    title: format!("eval: classify {} as {tier}", record.key),
-                    effect: Some("classify"),
-                    sensitivity: Some(tier),
-                },
-            )
-            .await?;
-        let proposal = opened.value;
-        let state =
-            approve_until_settled(client, environment, &proposal.id, &proposal.state).await?;
-        if state != "approved" {
-            outcome.failures.push(format!(
-                "classifying `{}` as {tier} ended `{state}` rather than approved, so the tier \
-                 this record's boundaries are about was never installed",
-                record.key
-            ));
-            continue;
-        }
-        // The author runs it: `MemoryClassify` is permitted role-free at
-        // `principal.home` and the effect asks a working-tier `MemoryRead`
-        // at the same scope, which the privacy floor grants to nobody else.
-        let done = client.classify(author, &proposal.id).await?.value;
-        // Checked rather than assumed, the same way a climb's landing
-        // scope is: a reclassification that ran somewhere else would leave
-        // this record at the working tier while the corpus's boundaries
-        // went on claiming a tier nothing installed.
-        if done.scope_id != slot.scope_id {
-            outcome.failures.push(format!(
-                "classifying `{}` ran at scope {} rather than {}",
-                record.key, done.scope_id, slot.scope_id
-            ));
-        }
-        let installed: BTreeSet<&str> = done
-            .records
-            .iter()
-            .map(|entry| entry.record_id.as_str())
-            .collect();
-        let missed: Vec<&str> = slot
-            .record_ids
-            .iter()
-            .map(String::as_str)
-            .filter(|id| !installed.contains(id))
-            .collect();
-        if !missed.is_empty() {
-            outcome.failures.push(format!(
-                "classifying `{}` left {} of its record(s) at the working tier: {}",
-                record.key,
-                missed.len(),
-                missed.join(", ")
-            ));
-        }
-        outcome.premise.push(format!(
-            "{} classified {} → {} ({} record(s))",
-            record.key,
-            done.records
-                .first()
-                .map_or("internal", |entry| entry.was.as_str()),
-            done.sensitivity,
-            done.records.len()
-        ));
+    if corpus
+        .material
+        .iter()
+        .any(|record| record.classify.is_some())
+    {
+        return Err(
+            "security evaluation unavailable: CPR-17 removed raw-record classification; \
+             CPR-18 must re-cut the labelled tier probes onto Knowledge and its exact query lens"
+                .to_owned(),
+        );
     }
     Ok(())
 }

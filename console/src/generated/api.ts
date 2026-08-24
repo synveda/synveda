@@ -329,6 +329,34 @@ export type CreateInviteBody = {
   };
 
 /**
+ * `POST /v1/knowledge`.
+ */
+export type CreateKnowledgeBody = {
+    /**
+     * First immutable revision.
+     */
+    content: KnowledgeContentBody;
+    knowledge_type: "fact" | "decision" | "preference" | "procedure" | "entity" | "episode" | "convention" | "warning" | "reference";
+    origin?: "observed" | "asserted" | "authored" | "imported";
+    /**
+     * Optional personal owner.
+     */
+    owner_principal_id?: string | null;
+    /**
+     * Optional project association.
+     */
+    project_id?: string | null;
+    /**
+     * Governing scope.
+     */
+    scope_id: string;
+    /**
+     * Provenance. Omission creates one manual descriptor at `scope_id`.
+     */
+    sources?: KnowledgeSourceBody[];
+  };
+
+/**
  * `POST /v1/workspaces/{workspace_id}/projects`.
  */
 export type CreateProjectBody = {
@@ -419,6 +447,39 @@ export type CreatedInviteView = {
      * The token. **Shown once.**
      */
     token: string;
+  };
+
+/**
+ * `DELETE /v1/knowledge/{id}`. Deletion without a mode is invalid.
+ */
+export type DeleteKnowledgeBody = {
+    /**
+     * Exact current revision inspected.
+     */
+    expected_revision_id: string;
+    mode: "archive" | "forget";
+    /**
+     * Bounded human reason.
+     */
+    reason: string;
+  };
+
+/**
+ * `PATCH /v1/knowledge/{id}`.
+ */
+export type EditKnowledgeBody = {
+    /**
+     * Complete replacement content.
+     */
+    content: KnowledgeContentBody;
+    /**
+     * Exact current revision the editor inspected.
+     */
+    expected_revision_id: string;
+    /**
+     * Provenance for this exact revision. Omission records a manual edit.
+     */
+    sources?: KnowledgeSourceBody[];
   };
 
 /**
@@ -658,6 +719,403 @@ export type InviteView = {
   };
 
 /**
+ * Complete content for a new immutable revision.
+ */
+export type KnowledgeContentBody = {
+    /**
+     * Markdown body.
+     */
+    body_markdown: string;
+    /**
+     * Integer confidence from 0 through 1000.
+     */
+    confidence_permille: number;
+    /**
+     * Forward-compatible product metadata.
+     */
+    metadata?: Record<string, unknown>;
+    sensitivity: "public" | "internal" | "confidential" | "restricted";
+    /**
+     * Verification due time.
+     */
+    stale_after?: string | null;
+    /**
+     * Short summary.
+     */
+    summary: string;
+    /**
+     * Canonicalised by the server to lower-case, sorted and unique.
+     */
+    tags?: string[];
+    /**
+     * Human title.
+     */
+    title: string;
+    /**
+     * Defaults to server time when omitted.
+     */
+    valid_from?: string | null;
+    /**
+     * Exclusive end of valid time.
+     */
+    valid_to?: string | null;
+    /**
+     * Bounded verification evidence.
+     */
+    verification_metadata?: Record<string, unknown>;
+  };
+
+/**
+ * Immutable revision history page.
+ */
+export type KnowledgeHistoryView = {
+    /**
+     * Resume position after the last revision considered.
+     */
+    next_cursor?: string | null;
+    /**
+     * Policy-visible revisions, newest first.
+     */
+    revisions: KnowledgeRevisionView[];
+  };
+
+/**
+ * Stable Knowledge head plus its exact current immutable revision.
+ */
+export type KnowledgeItemView = {
+    /**
+     * Aggregate creation time.
+     */
+    created_at: string;
+    /**
+     * Creation actor.
+     */
+    created_by?: string | null;
+    /**
+     * Current immutable revision.
+     */
+    current_revision: KnowledgeRevisionView;
+    /**
+     * Stable aggregate id.
+     */
+    id: string;
+    knowledge_type: "fact" | "decision" | "preference" | "procedure" | "entity" | "episode" | "convention" | "warning" | "reference";
+    lifecycle_state: "active" | "stale" | "superseded" | "archived" | "erasure_pending" | "erased";
+    /**
+     * Fused search score, absent outside a query listing.
+     */
+    match_score?: number | null;
+    origin: "observed" | "asserted" | "authored" | "imported";
+    /**
+     * Owning principal, for personal Knowledge.
+     */
+    owner_principal_id?: string | null;
+    /**
+     * Associated project.
+     */
+    project_id?: string | null;
+    /**
+     * Visible relations only; omitted from collection rows.
+     */
+    relationships?: KnowledgeRelationView[];
+    /**
+     * Governing scope.
+     */
+    scope_id: string;
+    /**
+     * Last head change.
+     */
+    updated_at: string;
+    /**
+     * Last head-change actor.
+     */
+    updated_by?: string | null;
+  };
+
+/**
+ * Cursor-paginated current Knowledge results.
+ */
+export type KnowledgeListView = {
+    /**
+     * Honest reason the semantic leg did not run, if any.
+     */
+    degradation?: string | null;
+    /**
+     * Policy-visible rows.
+     */
+    items: KnowledgeItemView[];
+    /**
+     * Resume position after the last candidate considered. May be present on
+     * an empty page when every candidate was denied.
+     */
+    next_cursor?: string | null;
+    /**
+     * `listing`, `lexical` or `hybrid`.
+     */
+    retrieval_mode: string;
+  };
+
+/**
+ * Every Knowledge mutation's stable VedaFlow result envelope.
+ */
+export type KnowledgeMutationView = {
+    /**
+     * VedaFlow change/proposal id.
+     */
+    change_id: string;
+    /**
+     * Stable result aggregate when applicable.
+     */
+    knowledge_item_id?: string | null;
+    /**
+     * Durable operation for long-running work such as erasure.
+     */
+    operation_id?: string | null;
+    outcome: "applied" | "pending_review" | "rejected";
+    /**
+     * Resulting immutable revision when applied.
+     */
+    revision_id?: string | null;
+  };
+
+/**
+ * One visible relation. Both endpoint ids passed independent PDP decisions.
+ */
+export type KnowledgeRelationView = {
+    /**
+     * Exact revision asserting the relation.
+     */
+    asserting_revision_id: string;
+    /**
+     * Assertion time.
+     */
+    created_at: string;
+    /**
+     * Stable relation id.
+     */
+    id: string;
+    /**
+     * Forward-compatible relation metadata.
+     */
+    metadata: Record<string, unknown>;
+    relation_type: "supports" | "duplicates" | "contradicts" | "supersedes" | "derived_from" | "references" | "related_to" | "transitions_to";
+    /**
+     * Visible source item.
+     */
+    source_item_id: string;
+    /**
+     * Visible target item.
+     */
+    target_item_id: string;
+  };
+
+/**
+ * One immutable Knowledge revision as served to an authorised reader.
+ */
+export type KnowledgeRevisionView = {
+    /**
+     * Canonical Markdown body.
+     */
+    body_markdown: string;
+    /**
+     * Confidence on a 0–1000 integer scale.
+     */
+    confidence_permille: number;
+    /**
+     * Canonical BLAKE3-256 digest.
+     */
+    content_hash: string;
+    /**
+     * Author label, when recorded.
+     */
+    created_by?: string | null;
+    /**
+     * Immutable revision id.
+     */
+    id: string;
+    /**
+     * Stable item this revision belongs to.
+     */
+    knowledge_item_id: string;
+    /**
+     * Forward-compatible product metadata.
+     */
+    metadata: Record<string, unknown>;
+    /**
+     * Monotonic number within the item.
+     */
+    revision_number: number;
+    sensitivity: "public" | "internal" | "confidential" | "restricted";
+    /**
+     * Whether verification is due at response time.
+     */
+    stale: boolean;
+    /**
+     * Verification due time, when configured.
+     */
+    stale_after?: string | null;
+    /**
+     * Retrieval/listing summary.
+     */
+    summary: string;
+    /**
+     * Canonical lower-case tags.
+     */
+    tags: string[];
+    /**
+     * Human title.
+     */
+    title: string;
+    /**
+     * Database-stamped transaction time.
+     */
+    transaction_time: string;
+    /**
+     * Beginning of valid time.
+     */
+    valid_from: string;
+    /**
+     * End of valid time, when known.
+     */
+    valid_to?: string | null;
+    /**
+     * Bounded verification evidence.
+     */
+    verification_metadata: Record<string, unknown>;
+  };
+
+/**
+ * A normalised provenance descriptor submitted with a revision.
+ */
+export type KnowledgeSourceBody = {
+    /**
+     * Lower-case BLAKE3-256 source-content hash.
+     */
+    content_hash?: string | null;
+    /**
+     * Stable logical locator for located source families.
+     */
+    locator?: string | null;
+    /**
+     * Bounded extension metadata.
+     */
+    metadata?: Record<string, unknown>;
+    /**
+     * Descriptor disclosure scope. Defaults to the item's governing scope.
+     */
+    scope_id?: string | null;
+    /**
+     * Exact immutable event for `session_event`.
+     */
+    session_event_id?: string | null;
+    /**
+     * External revision/version label.
+     */
+    source_revision?: string | null;
+    source_type: "session_event" | "manual" | "document" | "repository" | "url" | "okf" | "system_derived";
+  };
+
+/**
+ * One independently authorised provenance descriptor.
+ */
+export type KnowledgeSourceView = {
+    /**
+     * Source-content hash when known.
+     */
+    content_hash?: string | null;
+    /**
+     * Registration time.
+     */
+    created_at: string;
+    /**
+     * Stable source descriptor id.
+     */
+    id: string;
+    /**
+     * Logical locator; contains no source payload.
+     */
+    locator?: string | null;
+    /**
+     * Bounded extension metadata.
+     */
+    metadata: Record<string, unknown>;
+    /**
+     * Scope whose policy admitted this descriptor.
+     */
+    scope_id: string;
+    /**
+     * Exact session event for observed Knowledge.
+     */
+    session_event_id?: string | null;
+    /**
+     * External source revision/version.
+     */
+    source_revision?: string | null;
+    source_type: "session_event" | "manual" | "document" | "repository" | "url" | "okf" | "system_derived";
+  };
+
+/**
+ * Visible provenance attached to the current revision.
+ */
+export type KnowledgeSourcesView = {
+    /**
+     * Independently authorised descriptors, in provenance order.
+     */
+    sources: KnowledgeSourceView[];
+  };
+
+/**
+ * Cursor envelope for usage history. It is truthfully empty until CPR-18's
+ * `ContextSelection` aggregate produces entries.
+ */
+export type KnowledgeUsageListView = {
+    /**
+     * Resume cursor.
+     */
+    next_cursor?: string | null;
+    /**
+     * Recorded context uses.
+     */
+    usages: KnowledgeUsageView[];
+  };
+
+/**
+ * One future context-use entry. CPR-18 is the first producer.
+ */
+export type KnowledgeUsageView = {
+    /**
+     * Context run that selected the exact revision.
+     */
+    context_run_id: string;
+    /**
+     * Visible reason codes.
+     */
+    reason_codes: string[];
+    /**
+     * Exact revision used.
+     */
+    revision_id: string;
+    /**
+     * Selection time.
+     */
+    selected_at: string;
+  };
+
+/**
+ * Archive/restore body.
+ */
+export type LifecycleKnowledgeBody = {
+    /**
+     * Exact current revision inspected.
+     */
+    expected_revision_id: string;
+    /**
+     * Bounded human reason.
+     */
+    reason: string;
+  };
+
+/**
  * One level of the scope tree: the parent the level hangs from, and its
  * children.
  */
@@ -778,6 +1236,48 @@ export type MemberView = {
     scope_id: string;
     source: "owner" | "direct" | "invite" | "directory" | "automation";
     via_group?: unknown | null | GroupRefView;
+  };
+
+/**
+ * One merge input and stale-write precondition.
+ */
+export type MergeInputBody = {
+    /**
+     * Stable input item.
+     */
+    item_id: string;
+    /**
+     * Exact input head inspected.
+     */
+    revision_id: string;
+  };
+
+/**
+ * `POST /v1/knowledge/merge`.
+ */
+export type MergeKnowledgeBody = {
+    /**
+     * Result's first revision.
+     */
+    content: KnowledgeContentBody;
+    /**
+     * Two or more current inputs.
+     */
+    inputs: MergeInputBody[];
+    knowledge_type: "fact" | "decision" | "preference" | "procedure" | "entity" | "episode" | "convention" | "warning" | "reference";
+    origin: "observed" | "asserted" | "authored" | "imported";
+    /**
+     * Result owner.
+     */
+    owner_principal_id?: string | null;
+    /**
+     * Result project association.
+     */
+    project_id?: string | null;
+    /**
+     * Result governing scope.
+     */
+    scope_id: string;
   };
 
 /**
@@ -1300,6 +1800,38 @@ export type SessionView = {
   };
 
 /**
+ * `POST /v1/knowledge/{id}/supersede`.
+ */
+export type SupersedeKnowledgeBody = {
+    /**
+     * Replacement's first revision.
+     */
+    content: KnowledgeContentBody;
+    /**
+     * Exact old head inspected.
+     */
+    expected_revision_id: string;
+    knowledge_type: "fact" | "decision" | "preference" | "procedure" | "entity" | "episode" | "convention" | "warning" | "reference";
+    origin: "observed" | "asserted" | "authored" | "imported";
+    /**
+     * Replacement owner.
+     */
+    owner_principal_id?: string | null;
+    /**
+     * Replacement project association.
+     */
+    project_id?: string | null;
+    /**
+     * Replacement governing scope.
+     */
+    scope_id: string;
+    /**
+     * Replacement provenance.
+     */
+    sources?: KnowledgeSourceBody[];
+  };
+
+/**
  * What the caller may do on the **tenant** plane — `whoami`'s block, and
  * since CPR-4 `/v1/me`'s.
  *
@@ -1485,6 +2017,20 @@ export type UpdateGroupBody = {
   };
 
 /**
+ * `POST /v1/knowledge/{id}/verify`.
+ */
+export type VerifyKnowledgeBody = {
+    /**
+     * Exact current revision the verifier inspected.
+     */
+    expected_revision_id: string;
+    /**
+     * Complete bounded verification evidence.
+     */
+    verification_metadata: Record<string, unknown>;
+  };
+
+/**
  * The workspace listing.
  *
  * An envelope rather than a bare array, so that paging can arrive without
@@ -1659,6 +2205,126 @@ export type Operations = {
     readonly path: "/v1/invites/{invite_token}/accept";
     readonly method: "POST";
     readonly response: AcceptedInviteView;
+  };
+  /**
+   * `GET /v1/knowledge` — current policy-visible Knowledge.
+   */
+  readonly list_knowledge: {
+    readonly path: "/v1/knowledge";
+    readonly method: "GET";
+    readonly response: KnowledgeListView;
+  };
+  /**
+   * `POST /v1/knowledge` — create one governed aggregate and first revision.
+   */
+  readonly create_knowledge: {
+    readonly path: "/v1/knowledge";
+    readonly method: "POST";
+    readonly body: CreateKnowledgeBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  /**
+   * `POST /v1/knowledge/merge` — combine current items and all provenance.
+   */
+  readonly merge_knowledge: {
+    readonly path: "/v1/knowledge/merge";
+    readonly method: "POST";
+    readonly body: MergeKnowledgeBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  /**
+   * `GET /v1/knowledge/{id}` — current content and visible relationships.
+   */
+  readonly get_knowledge: {
+    readonly path: "/v1/knowledge/{id}";
+    readonly method: "GET";
+    readonly response: KnowledgeItemView;
+  };
+  /**
+   * `PATCH /v1/knowledge/{id}` — append a governed immutable revision.
+   */
+  readonly edit_knowledge: {
+    readonly path: "/v1/knowledge/{id}";
+    readonly method: "PATCH";
+    readonly body: EditKnowledgeBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  /**
+   * `DELETE /v1/knowledge/{id}` — explicit archive or governed forget.
+   */
+  readonly delete_knowledge: {
+    readonly path: "/v1/knowledge/{id}";
+    readonly method: "DELETE";
+    readonly body: DeleteKnowledgeBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  /**
+   * `POST /v1/knowledge/{id}/archive`.
+   */
+  readonly archive_knowledge: {
+    readonly path: "/v1/knowledge/{id}/archive";
+    readonly method: "POST";
+    readonly body: LifecycleKnowledgeBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  /**
+   * `GET /v1/knowledge/{id}/history` — immutable revisions newest first.
+   */
+  readonly get_knowledge_history: {
+    readonly path: "/v1/knowledge/{id}/history";
+    readonly method: "GET";
+    readonly response: KnowledgeHistoryView;
+  };
+  /**
+   * `POST /v1/knowledge/{id}/restore`.
+   */
+  readonly restore_knowledge: {
+    readonly path: "/v1/knowledge/{id}/restore";
+    readonly method: "POST";
+    readonly body: LifecycleKnowledgeBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  /**
+   * `GET /v1/knowledge/{id}/sources` — independently governed provenance.
+   */
+  readonly get_knowledge_sources: {
+    readonly path: "/v1/knowledge/{id}/sources";
+    readonly method: "GET";
+    readonly response: KnowledgeSourcesView;
+  };
+  /**
+   * `POST /v1/knowledge/{id}/supersede` — explicitly replace an item.
+   */
+  readonly supersede_knowledge: {
+    readonly path: "/v1/knowledge/{id}/supersede";
+    readonly method: "POST";
+    readonly body: SupersedeKnowledgeBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  /**
+   * `GET /v1/knowledge/{id}/usage` — context selections of exact revisions.
+   */
+  readonly get_knowledge_usage: {
+    readonly path: "/v1/knowledge/{id}/usage";
+    readonly method: "GET";
+    readonly response: KnowledgeUsageListView;
+  };
+  /**
+   * `POST /v1/knowledge/{id}/verify` — append verification evidence.
+   */
+  readonly verify_knowledge: {
+    readonly path: "/v1/knowledge/{id}/verify";
+    readonly method: "POST";
+    readonly body: VerifyKnowledgeBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
   };
   /**
    * `GET /v1/me`.
@@ -1923,6 +2589,19 @@ export const OPERATIONS = {
   list_scope_ancestors: { path: "/v1/admin/scopes/{scope_id}/ancestors", method: "GET" },
   list_scope_descendants: { path: "/v1/admin/scopes/{scope_id}/descendants", method: "GET" },
   accept_invite: { path: "/v1/invites/{invite_token}/accept", method: "POST" },
+  list_knowledge: { path: "/v1/knowledge", method: "GET" },
+  create_knowledge: { path: "/v1/knowledge", method: "POST", idempotent: true },
+  merge_knowledge: { path: "/v1/knowledge/merge", method: "POST", idempotent: true },
+  get_knowledge: { path: "/v1/knowledge/{id}", method: "GET" },
+  edit_knowledge: { path: "/v1/knowledge/{id}", method: "PATCH", idempotent: true },
+  delete_knowledge: { path: "/v1/knowledge/{id}", method: "DELETE", idempotent: true },
+  archive_knowledge: { path: "/v1/knowledge/{id}/archive", method: "POST", idempotent: true },
+  get_knowledge_history: { path: "/v1/knowledge/{id}/history", method: "GET" },
+  restore_knowledge: { path: "/v1/knowledge/{id}/restore", method: "POST", idempotent: true },
+  get_knowledge_sources: { path: "/v1/knowledge/{id}/sources", method: "GET" },
+  supersede_knowledge: { path: "/v1/knowledge/{id}/supersede", method: "POST", idempotent: true },
+  get_knowledge_usage: { path: "/v1/knowledge/{id}/usage", method: "GET" },
+  verify_knowledge: { path: "/v1/knowledge/{id}/verify", method: "POST", idempotent: true },
   get_me: { path: "/v1/me", method: "GET" },
   get_project: { path: "/v1/projects/{project_id}", method: "GET" },
   update_project: { path: "/v1/projects/{project_id}", method: "PATCH" },

@@ -37,6 +37,7 @@ import { hrefOf, offersRoute, routeOf, type RouteMatch } from "./routes.mjs";
 import type { MeView } from "./generated/api.js";
 
 import { Home } from "./Home.js";
+import { Knowledge, KnowledgeItem } from "./Knowledge.js";
 import { Onboarding } from "./Onboarding.js";
 import { People } from "./People.js";
 import { Planned } from "./Planned.js";
@@ -203,6 +204,9 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
       // the same run. `matchRoute` cannot produce this route without it.
       return <Session sessionId={route.params.session_id as string} />;
     case "knowledge":
+      return <Knowledge />;
+    case "knowledge-item":
+      return <KnowledgeItem knowledgeId={route.params.knowledge_id as string} />;
     case "learnings":
     case "tools":
       return <Planned route={route.id} />;

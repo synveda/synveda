@@ -96,7 +96,7 @@ test("every operation the document declares is callable, and none is invented", 
   // so this is really asserting the generator did not skip a row — the
   // failure that would make an operation typecheck and then throw.
   const ids = Object.keys(OPERATIONS);
-  assert.equal(ids.length, 40, "the contract's operation count moved; update the count here");
+  assert.equal(ids.length, 53, "the contract's operation count moved; update the count here");
   for (const id of ids) {
     const declared = OPERATIONS[id as keyof typeof OPERATIONS];
     assert.ok(declared.path.startsWith("/v1/"), `${id} is not a /v1 path`);
@@ -114,6 +114,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     .sort();
   assert.deepEqual(idempotent, [
     "add_project_member",
+    "archive_knowledge",
     "attach_repository",
     // CPR-10: opening a run and composing context for one are both creations
     // whose retry after a timeout would otherwise make a second row.
@@ -122,11 +123,18 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "create_context_run",
     "create_grant",
     "create_group",
+    "create_knowledge",
     "create_project",
     "create_scope",
     "create_workspace",
     "create_workspace_invite",
+    "delete_knowledge",
+    "edit_knowledge",
+    "merge_knowledge",
     "open_session",
+    "restore_knowledge",
+    "supersede_knowledge",
+    "verify_knowledge",
   ]);
 });
 

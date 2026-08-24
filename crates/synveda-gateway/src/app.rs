@@ -192,6 +192,45 @@ pub fn router(state: AppState) -> Router {
         // is missing, and what this caller may do — so a client never has to
         // infer "is this person set up yet" from a 404.
         .route("/v1/me", get(crate::me::get))
+        // Stable Knowledge and immutable revisions (CPR-17, ADR-0082). Every
+        // mutation creates one idempotent VedaFlow change; every read decides
+        // the exact item and independently filters sources/relations.
+        .route(
+            "/v1/knowledge",
+            get(crate::knowledge_api::list).post(crate::knowledge_api::create),
+        )
+        .route("/v1/knowledge/merge", post(crate::knowledge_api::merge))
+        .route(
+            "/v1/knowledge/{id}",
+            get(crate::knowledge_api::get)
+                .patch(crate::knowledge_api::edit)
+                .delete(crate::knowledge_api::delete),
+        )
+        .route(
+            "/v1/knowledge/{id}/history",
+            get(crate::knowledge_api::history),
+        )
+        .route(
+            "/v1/knowledge/{id}/sources",
+            get(crate::knowledge_api::sources_for_item),
+        )
+        .route("/v1/knowledge/{id}/usage", get(crate::knowledge_api::usage))
+        .route(
+            "/v1/knowledge/{id}/verify",
+            post(crate::knowledge_api::verify),
+        )
+        .route(
+            "/v1/knowledge/{id}/supersede",
+            post(crate::knowledge_api::supersede),
+        )
+        .route(
+            "/v1/knowledge/{id}/archive",
+            post(crate::knowledge_api::archive),
+        )
+        .route(
+            "/v1/knowledge/{id}/restore",
+            post(crate::knowledge_api::restore),
+        )
         // Workspaces and projects are product-level subtypes of a governed
         // scope: creating one creates its scope in the same transaction, and
         // there is no personal/team/enterprise variant of either row
@@ -376,8 +415,8 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/audit/knowledge", get(audit_query::knowledge))
         .route("/v1/audit/verify", get(audit_query::verify))
         // The VedaFlow channel plane (FLOW-2, ADR-0031 decision 12):
-        // reading a scope's standing channels, and publishing records
-        // across the trust boundary onto its published one. Since FLOW-3
+        // reading a scope's standing authored-artifact channels, and
+        // publishing immutable versions across the trust boundary. Since FLOW-3
         // the publish resolves the same approval matrix a proposal does,
         // satisfied by the acting principal alone (ADR-0032 decision 8).
         .route("/v1/channels/{scope_id}", get(channels::list))
@@ -405,7 +444,6 @@ pub fn router(state: AppState) -> Router {
             post(proposals::quality_override),
         )
         .route("/v1/proposals/{id}/publish", post(proposals::publish))
-        .route("/v1/proposals/{id}/classify", post(proposals::classify))
         .route("/v1/proposals/{id}/apply", post(proposals::apply))
         // The prompt registry (PRMT-1, ADR-0049). Authoring writes a draft
         // and moves nothing a consumer reads; resolution walks the caller's

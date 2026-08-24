@@ -1,32 +1,9 @@
-//! AUTHZ-4's acceptance criterion (ADR-0037): **a lapse grants cross-team
-//! read, expiry restores denial, and the audit shows the full story** —
-//! over the product's own HTTP surfaces, under the PDP, against a live
-//! Postgres.
+//! AUTHZ-4 regressions that remain meaningful until governed relaxations
+//! replace the lapse plane.
 //!
-//! The walk is the feature's own sentence made true, and it is asserted
-//! from the *reader's* side because that is what makes it a grant rather
-//! than a row: a payments engineer who cannot read the platform team's
-//! material receives it in her own `POST /v1/inject` while a two-steward
-//! lapse stands, and stops receiving it when the window closes — with
-//! nobody revoking anything, no restart, and nothing to wait out but the
-//! clock.
-//!
-//! **The expiry here is real.** The lapse runs for a few seconds and the
-//! test sleeps through it. There is no injected clock and no simulated
-//! instant: a duration is seconds with no minimum precisely so this
-//! assertion can be about the product rather than about a fixture
-//! (ADR-0037 decision 4).
-//!
-//! Around the AC: the refusals a proposer meets in the product's own words
-//! (a personal-scope target, a target the grantee already composes, an
-//! action outside the vocabulary, a window past the pack's ceiling), the
-//! separation that makes the two Cedar actions worth having (a
-//! security-reviewer revokes what they could never grant), and the two
-//! honest limits — a lapse discloses only what the target *published*, and
-//! one steward alone cannot open the door.
-//!
-//! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
-//! message when it is unset (CI has no database), the house convention.
+//! CPR-17 removed raw-record publication and composition. The surviving
+//! contract is fail-closed validation plus durable, queryable expiry evidence;
+//! Knowledge deliberately does not inherit the retired `memory.read` lapse.
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -39,34 +16,20 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_audit::StoredEvent;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::{access, identities, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
-use synveda_types::{
-    GrantId, Identity, IdentityId, IdentityKind, RecordClass, RecordId, RecordKind, ScopeId,
-    Sensitivity, TenantId, TenantStatus,
-};
+use synveda_types::{GrantId, Identity, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"authz-4-test-secret";
-
-/// The platform team's material — what a lapse discloses, and only because
-/// platform published it.
-const RUNBOOK: &str = "page the on-call via the incident bridge, never by direct message";
-
-/// The window the AC's lapse runs for. Short enough that a test can wait
-/// it out, long enough that the assertions before it are not racing.
 const WINDOW_SECS: u32 = 4;
-
-// ── Harness ──────────────────────────────────────────────────────────────────
 
 fn metrics_handle() -> PrometheusHandle {
     static HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
@@ -98,10 +61,7 @@ fn state(url: &str) -> AppState {
         ),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
         inject_embed_timeout: Duration::from_millis(100),
-        // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
-        // sealed column seals rather than skipping. `Kms::Disabled` is the
-        // production default when no key is configured.
-        keys: std::sync::Arc::new(synveda_store::keys::KeyRing::new(
+        keys: Arc::new(synveda_store::keys::KeyRing::new(
             synveda_crypto::Kms::Local(
                 synveda_crypto::LocalKms::from_hex(&"11".repeat(32), "local:test")
                     .expect("test kek"),
@@ -110,18 +70,15 @@ fn state(url: &str) -> AppState {
     }
 }
 
-fn issue(subject: &str, tenant_id: TenantId) -> String {
-    Hs256Verifier::new(SECRET).issue(subject, tenant_id, Duration::from_secs(300))
+fn issue(subject: &str, tenant: TenantId) -> String {
+    Hs256Verifier::new(SECRET).issue(subject, tenant, Duration::from_secs(300))
 }
 
 async fn admitted_tenant() -> Option<(PgPool, TenantId)> {
     let url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
         Err(_) => {
-            eprintln!(
-                "skipping AUTHZ-4 lapse test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
-            );
+            eprintln!("skipping AUTHZ-4 lapse test: DATABASE_URL is not set");
             return None;
         }
     };
@@ -133,75 +90,67 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId)> {
     synveda_store::migrate(&pool)
         .await
         .expect("apply migrations");
-    let id = TenantId::new();
-    let slug = format!("authz4-{}", id.as_uuid().simple());
+    let tenant = TenantId::new();
     tenants::create(
         &pool,
-        id,
-        &slug,
+        tenant,
+        &format!("authz4-{}", tenant.as_uuid().simple()),
         "AUTHZ-4 test tenant",
         TenantStatus::Active,
     )
     .await
     .expect("admit tenant");
-    Some((pool, id))
+    Some((pool, tenant))
 }
 
 fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("checked by admitted_tenant")
 }
 
-/// The org the lapse happens in:
-///
-/// ```text
-/// acme (org)
-/// └── eng (department)
-///     ├── platform (team)   ← the runbook lives and is published here
-///     └── payments (team)   ← reads it only while a lapse stands
-/// ```
 struct Org {
-    org: Scope,
     eng: Scope,
     platform: Scope,
     payments: Scope,
 }
 
+async fn child(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    parent: ScopeId,
+    slug: &str,
+) -> Scope {
+    scopes::create(
+        tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::OrgUnit,
+            parent_scope_id: Some(parent),
+            slug: slug.to_owned(),
+            display_name: slug.to_owned(),
+            attributes: json!({}),
+            principal_id: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("create scope")
+}
+
 async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> Org {
     let mut tx = pool.begin().await.expect("begin");
-    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("mint root");
-    let seeded = {
-        let mut node = async |parent: ScopeId, slug: &str, name: &str| {
-            scopes::create(
-                &mut tx,
-                &scopes::NewScope {
-                    id: ScopeId::new(),
-                    tenant_id: tenant,
-                    kind: ScopeKind::OrgUnit,
-                    parent_scope_id: Some(parent),
-                    slug: slug.to_owned(),
-                    display_name: name.to_owned(),
-                    attributes: serde_json::json!({}),
-                    principal_id: None,
-                    created_by: None,
-                },
-            )
-            .await
-            .expect("create org unit")
-        };
-        let eng = node(org.id, "eng", "Engineering").await;
-        let platform = node(eng.id, "platform", "Platform").await;
-        let payments = node(eng.id, "payments", "Payments").await;
-        Org {
-            org,
-            eng,
-            platform,
-            payments,
-        }
-    };
-    tx.commit().await.expect("commit hierarchy");
-    seeded
+    let eng = child(&mut tx, tenant, root.id, "eng").await;
+    let platform = child(&mut tx, tenant, eng.id, "platform").await;
+    let payments = child(&mut tx, tenant, eng.id, "payments").await;
+    tx.commit().await.expect("commit scopes");
+    Org {
+        eng,
+        platform,
+        payments,
+    }
 }
 
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
@@ -225,7 +174,7 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
+async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId) {
     let mut tx = pool.begin().await.expect("begin");
     access::create_grant(
         &mut *tx,
@@ -236,7 +185,7 @@ async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, ro
             subject: GrantSubject::Principal {
                 principal_id: subject.to_owned(),
             },
-            role_key: role,
+            role_key: RoleKey::Administrator,
             source: GrantSource::Automation,
             invite_id: None,
             granted_by: None,
@@ -245,39 +194,6 @@ async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, ro
     .await
     .expect("create grant");
     tx.commit().await.expect("commit grant");
-}
-
-async fn seed_record(
-    pool: &PgPool,
-    tenant: TenantId,
-    scope: ScopeId,
-    owner: IdentityId,
-    content: &str,
-) -> RecordId {
-    let id = RecordId::new();
-    records::insert(
-        pool,
-        id,
-        tenant,
-        &RecordState {
-            scope_id: scope,
-            owner_id: owner,
-            kind: RecordKind::Derived,
-            class: RecordClass::Procedure,
-            content: content.to_owned(),
-            sensitivity: Sensitivity::Internal,
-            provenance: json!({"source": "authz-4 acceptance test"}),
-            valid_from: chrono::Utc::now() - chrono::Duration::hours(1),
-            valid_to: None,
-        },
-        &RecordEmbedding {
-            model: DeterministicEmbedder::MODEL.to_owned(),
-            vector: vec![0.25; 16],
-        },
-    )
-    .await
-    .expect("insert record");
-    id
 }
 
 async fn call(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
@@ -298,71 +214,32 @@ async fn call(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
 }
 
 async fn post(app: &Router, token: &str, uri: &str, body: Value) -> (StatusCode, Value) {
-    let request = Request::builder()
-        .method("POST")
-        .uri(uri)
-        .header("authorization", format!("Bearer {token}"))
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .expect("build request");
-    call(app, request).await
+    call(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("build request"),
+    )
+    .await
 }
 
 async fn get(app: &Router, token: &str, uri: &str) -> (StatusCode, Value) {
-    let request = Request::builder()
-        .method("GET")
-        .uri(uri)
-        .header("authorization", format!("Bearer {token}"))
-        .body(Body::empty())
-        .expect("build request");
-    call(app, request).await
+    call(
+        app,
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .expect("build request"),
+    )
+    .await
 }
 
-#[path = "session_seed.rs"]
-mod session_seed;
-
-async fn inject(app: &Router, token: &str, run: synveda_types::SessionId) -> Value {
-    let request = Request::builder()
-        .method("POST")
-        .uri(format!("/v1/sessions/{run}/context-runs"))
-        .header("authorization", format!("Bearer {token}"))
-        .header(
-            "idempotency-key",
-            synveda_types::ContextRunId::new().to_string(),
-        )
-        .header("content-type", "application/json")
-        .body(Body::from("{}"))
-        .expect("build context-run request");
-    let (status, body) = call(app, request).await;
-    assert!(
-        status == StatusCode::CREATED || status == StatusCode::OK,
-        "context run: {status} {body}"
-    );
-    body
-}
-
-/// The caller's own composed block, as text.
-async fn block(app: &Router, token: &str, run: synveda_types::SessionId) -> String {
-    inject(app, token, run).await["rendered"]
-        .as_str()
-        .expect("block text")
-        .to_owned()
-}
-
-async fn events(pool: &PgPool, tenant: TenantId, action: &str) -> Vec<StoredEvent> {
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
-        .await
-        .expect("tenant tx");
-    let mut all = synveda_audit::tail(&mut tx, tenant, 500)
-        .await
-        .expect("read chain");
-    all.reverse();
-    all.into_iter()
-        .filter(|event| event.action == action)
-        .collect()
-}
-
-/// Opens a lapse proposal.
 async fn propose(
     app: &Router,
     token: &str,
@@ -386,17 +263,17 @@ async fn propose(
     .await
 }
 
-/// Opens a lapse proposal that must succeed, returning its proposal id.
-async fn proposed(
-    app: &Router,
-    token: &str,
-    target: ScopeId,
-    grantee: ScopeId,
-    duration_secs: u32,
-    reason: &str,
-) -> String {
-    let (status, body) = propose(app, token, target, grantee, duration_secs, reason).await;
-    assert_eq!(status, StatusCode::OK, "opening the lapse failed: {body}");
+async fn proposed(app: &Router, token: &str, target: ScopeId, grantee: ScopeId) -> String {
+    let (status, body) = propose(
+        app,
+        token,
+        target,
+        grantee,
+        WINDOW_SECS,
+        "joint incident review",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "opening lapse: {body}");
     body["proposal_id"]
         .as_str()
         .expect("proposal id")
@@ -411,538 +288,11 @@ async fn approve(app: &Router, token: &str, proposal: &str) {
         json!({}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "approval failed: {body}");
+    assert_eq!(status, StatusCode::OK, "approval: {body}");
 }
 
-/// Puts records on a scope's published channel through the review the pack
-/// asks for. The direct channel route resolves the same matrix, and under
-/// `regulated-strict` an org-unit publish needs a curator *and* an
-/// administrator — so the fixture goes through the governed route, with
-/// the curator running the effect.
-async fn publish_via_review(
-    app: &Router,
-    opener: &str,
-    approvers: &[&str],
-    target: ScopeId,
-    records: &[RecordId],
-    title: &str,
-) {
-    let (status, opened) = post(
-        app,
-        opener,
-        "/v1/proposals",
-        json!({"scope_id": target, "record_ids": records, "title": title}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "open the publication: {opened}");
-    let id = opened["id"].as_str().expect("proposal id").to_owned();
-    for token in approvers {
-        approve(app, token, &id).await;
-    }
-    let (status, published) = post(
-        app,
-        approvers[0],
-        &format!("/v1/proposals/{id}/publish"),
-        json!({}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "publish failed: {published}");
-}
-
-// ── The acceptance criterion ─────────────────────────────────────────────────
-
-/// **A lapse grants cross-team read, expiry restores denial, and the audit
-/// shows the full story.**
-///
-/// Every claim is made from the reader's side. Priya is on payments;
-/// `regulated-strict` gives her her own chain and nothing else, so the
-/// platform team's runbook is invisible to her — before the lapse and
-/// after it, with the identical request in between returning it.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_lapse_grants_cross_team_read_and_its_expiry_restores_the_denial() {
-    let Some((pool, tenant)) = admitted_tenant().await else {
-        return;
-    };
-    let app = router(state(&database_url()));
-    let org = seed_hierarchy(&pool, tenant).await;
-
-    // Platform: an engineer who owns the runbook, and a curator who
-    // publishes it. A lapse discloses what the target *stands behind*, so
-    // the publication is what gives it anything to disclose at all.
-    let sam = seed_user(&pool, tenant, "sam").await;
-    seed_user(&pool, tenant, "cara").await;
-    bind(&pool, tenant, "cara", org.platform.id, RoleKey::Curator).await;
-    let runbook = seed_record(&pool, tenant, org.platform.id, sam.id, RUNBOOK).await;
-    let cara = issue("cara", tenant);
-
-    // Payments: the reader the whole feature is about. Placement is
-    // identity since CPR-7, so "a payments engineer" is her own principal
-    // scope at the root — and that scope is the lapse's grantee, the one
-    // shape the route documents as covering "just Dana" as well as "team
-    // X" (ADR-0074 decision 3).
-    let priya_identity = seed_user(&pool, tenant, "priya").await;
-    let grantee = priya_identity.scope_id;
-    let priya = issue("priya", tenant);
-    let priya_run = session_seed::seed_run_for(&pool, tenant, "authz4-priya", "priya").await;
-
-    // Two administrators at the department, because `regulated-strict`'s
-    // `policy` cell asks for two *distinct* administrator approvers —
-    // tech plan §2.4's lapse row, carried in the matrix since FLOW-3.
-    seed_user(&pool, tenant, "nadia").await;
-    seed_user(&pool, tenant, "omar").await;
-    bind(&pool, tenant, "nadia", org.eng.id, RoleKey::Administrator).await;
-    bind(&pool, tenant, "omar", org.eng.id, RoleKey::Administrator).await;
-    let nadia = issue("nadia", tenant);
-    let omar = issue("omar", tenant);
-
-    publish_via_review(
-        &app,
-        &cara,
-        &[&cara, &nadia],
-        org.platform.id,
-        &[runbook],
-        "reviewed at the incident retro",
-    )
-    .await;
-
-    // ── Before ──────────────────────────────────────────────────────────
-    assert!(
-        !block(&app, &priya, priya_run.session_id)
-            .await
-            .contains(RUNBOOK),
-        "regulated-strict has no cross-team read: that is what a lapse is for"
-    );
-
-    // ── The proposal, opened on the disclosing side ─────────────────────
-    let proposal = proposed(
-        &app,
-        &nadia,
-        org.platform.id,
-        grantee,
-        WINDOW_SECS,
-        "joint incident review: payments is on the bridge for the outage",
-    )
-    .await;
-
-    // One administrator is not enough, and the refusal says what is
-    // missing rather than leaving someone to read a pack.
-    approve(&app, &nadia, &proposal).await;
-    let (status, body) = post(
-        &app,
-        &nadia,
-        &format!("/v1/proposals/{proposal}/lapse"),
-        json!({}),
-    )
-    .await;
-    assert_eq!(
-        status,
-        StatusCode::CONFLICT,
-        "one administrator must not open the door: {body}"
-    );
-    assert!(
-        body["message"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("distinct approver"),
-        "the refusal must name what is outstanding: {body}"
-    );
-
-    // ── The grant ───────────────────────────────────────────────────────
-    approve(&app, &omar, &proposal).await;
-    let (status, granted) = post(
-        &app,
-        &omar,
-        &format!("/v1/proposals/{proposal}/lapse"),
-        json!({}),
-    )
-    .await;
-    assert_eq!(
-        status,
-        StatusCode::OK,
-        "granting the lapse failed: {granted}"
-    );
-    assert_eq!(granted["outcome"].as_str(), Some("active"));
-    let lapse_id = granted["id"].as_str().expect("lapse id").to_owned();
-
-    // ── While it stands ─────────────────────────────────────────────────
-    let during = block(&app, &priya, priya_run.session_id).await;
-    assert!(
-        during.contains(RUNBOOK),
-        "the lapse must reach the reader's own inject: {during}"
-    );
-    // And the block says so. A reader who is not a member of platform
-    // must not be shown its material under a header identical to their own
-    // team's (ADR-0037 decision 12).
-    assert!(
-        during.contains("[lapse]"),
-        "a lapsed section has to declare itself: {during}"
-    );
-    assert!(
-        during.contains(&org.platform.slug),
-        "the section names the scope the material came from: {during}"
-    );
-
-    // ── Expiry: nothing is revoked, nothing runs, the window just closes ─
-    tokio::time::sleep(Duration::from_secs(u64::from(WINDOW_SECS) + 1)).await;
-    let after = block(&app, &priya, priya_run.session_id).await;
-    assert!(
-        !after.contains(RUNBOOK),
-        "expiry must restore the denial with no act by anyone: {after}"
-    );
-    assert!(!after.contains("[lapse]"), "and no empty lapsed section");
-
-    // The sweep is bookkeeping: it chains the event, and the access was
-    // already gone before it ran. Driving it directly rather than waiting
-    // on the background loop is the FLOW-4 discipline — a test asserts the
-    // pass, not the scheduler.
-    //
-    // What is asserted is the event on *this tenant's* chain, never the
-    // sweep's own return value: `expire_once` is tenant-wide, so a
-    // concurrent test's pass can chain this grant first and hand this call
-    // a zero. The property that matters is unchanged by who ran the pass —
-    // one window, exactly one expiry event, ever — and asserting the count
-    // a scheduler happened to produce would be asserting the scheduler.
-    synveda_gateway::lapses::expire_once(&pool)
-        .await
-        .expect("expiry sweep");
-    // Twice is once: the stamp is the idempotency key.
-    synveda_gateway::lapses::expire_once(&pool)
-        .await
-        .expect("second sweep");
-    let expired = events(&pool, tenant, "policy.lapse.expired").await;
-    assert_eq!(expired.len(), 1, "one window, one expiry event");
-
-    // ── The full story, on one chain, in order ──────────────────────────
-    let approvals: Vec<_> = events(&pool, tenant, "vedaflow.proposal.approved")
-        .await
-        .into_iter()
-        .filter(|event| event.payload["proposal_id"].as_str() == Some(proposal.as_str()))
-        .collect();
-    let grants = events(&pool, tenant, "policy.lapse.granted").await;
-    // The lapse's own proposal, named rather than counted: the fixture
-    // publishes the runbook through the governed route too (an org-unit
-    // publication takes two people under `regulated-strict`), so the
-    // tenant's chain carries more than one `proposal.opened` and the
-    // claim here is about *this* one.
-    let opened: Vec<_> = events(&pool, tenant, "vedaflow.proposal.opened")
-        .await
-        .into_iter()
-        .filter(|event| event.payload["proposal_id"].as_str() == Some(proposal.as_str()))
-        .collect();
-    assert_eq!(opened.len(), 1, "the lapse proposal was opened once");
-    assert_eq!(
-        approvals.len(),
-        2,
-        "two distinct administrators approved the lapse"
-    );
-    assert_eq!(grants.len(), 1, "the effect ran once");
-
-    let grant = &grants[0];
-    assert_eq!(grant.payload["lapse_id"].as_str(), Some(lapse_id.as_str()));
-    assert_eq!(
-        grant.payload["lapse"]["target_scope_id"].as_str(),
-        Some(org.platform.id.to_string().as_str())
-    );
-    assert_eq!(
-        grant.payload["lapse"]["grantee_scope_id"].as_str(),
-        Some(grantee.to_string().as_str())
-    );
-    assert!(
-        grant.payload["lapse"]["reason"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("joint incident review"),
-        "the mandatory reason rides the event: {}",
-        grant.payload
-    );
-    // The window is on the grant event, which is what keeps the trail
-    // complete even when the sweep never runs: when the grant stopped
-    // deciding is arithmetic over these two instants.
-    assert!(grant.payload["granted_at"].is_string());
-    assert!(grant.payload["expires_at"].is_string());
-    assert_eq!(
-        grant.payload["authz"]["action"].as_str(),
-        Some("lapse.grant")
-    );
-    // Never the material it disclosed.
-    assert!(
-        !grant.payload.to_string().contains(RUNBOOK),
-        "an audit payload must never carry record content"
-    );
-
-    // The expiry event is the sweep's, under system attribution.
-    assert_eq!(expired[0].actor_kind, "system");
-    assert_eq!(
-        expired[0].payload["lapse_id"].as_str(),
-        Some(lapse_id.as_str())
-    );
-
-    // Every act in order on one chain, and the chain verifies over all of
-    // it.
-    let ordering: Vec<i64> = [
-        opened[0].seq,
-        approvals[0].seq,
-        approvals[1].seq,
-        grants[0].seq,
-        expired[0].seq,
-    ]
-    .to_vec();
-    let mut sorted = ordering.clone();
-    sorted.sort_unstable();
-    assert_eq!(ordering, sorted, "the story reads in the order it happened");
-
-    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-        .await
-        .expect("tenant tx");
-    let report = synveda_audit::verify(&mut tx, tenant)
-        .await
-        .expect("verify chain");
-    assert!(
-        matches!(report, synveda_audit::ChainVerification::Valid { .. }),
-        "audit chain broke: {report}"
-    );
-}
-
-// ── What a lapse discloses ───────────────────────────────────────────────────
-
-/// A lapse admits the target's **published** channel and nothing else.
-///
-/// The honest half of the feature, and the reason two stewards can know
-/// what they are consenting to: unreviewed extraction output that nobody at
-/// the target has looked at does not travel on an override (ADR-0037
-/// decision 11).
-#[tokio::test(flavor = "multi_thread")]
-async fn a_lapse_discloses_only_what_the_target_published() {
-    let Some((pool, tenant)) = admitted_tenant().await else {
-        return;
-    };
-    let app = router(state(&database_url()));
-    let org = seed_hierarchy(&pool, tenant).await;
-
-    let sam = seed_user(&pool, tenant, "sam").await;
-    // Two records at platform: one published, one merely derived.
-    let published = seed_record(&pool, tenant, org.platform.id, sam.id, RUNBOOK).await;
-    let draft = "the draft nobody has reviewed: restart the broker by hand";
-    seed_record(&pool, tenant, org.platform.id, sam.id, draft).await;
-    seed_user(&pool, tenant, "cara").await;
-    bind(&pool, tenant, "cara", org.platform.id, RoleKey::Curator).await;
-    let cara = issue("cara", tenant);
-
-    let priya_identity = seed_user(&pool, tenant, "priya").await;
-    let grantee = priya_identity.scope_id;
-    let priya = issue("priya", tenant);
-    let priya_run = session_seed::seed_run_for(&pool, tenant, "authz4-priya", "priya").await;
-    for subject in ["nadia", "omar"] {
-        seed_user(&pool, tenant, subject).await;
-        bind(&pool, tenant, subject, org.eng.id, RoleKey::Administrator).await;
-    }
-    let nadia = issue("nadia", tenant);
-    let omar = issue("omar", tenant);
-
-    publish_via_review(
-        &app,
-        &cara,
-        &[&cara, &nadia],
-        org.platform.id,
-        &[published],
-        "reviewed",
-    )
-    .await;
-
-    let proposal = proposed(
-        &app,
-        &nadia,
-        org.platform.id,
-        grantee,
-        600,
-        "joint incident review",
-    )
-    .await;
-    approve(&app, &nadia, &proposal).await;
-    approve(&app, &omar, &proposal).await;
-    let (status, body) = post(
-        &app,
-        &omar,
-        &format!("/v1/proposals/{proposal}/lapse"),
-        json!({}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "grant failed: {body}");
-
-    let composed = block(&app, &priya, priya_run.session_id).await;
-    assert!(
-        composed.contains(RUNBOOK),
-        "the published record travels: {composed}"
-    );
-    assert!(
-        !composed.contains(draft),
-        "unreviewed material must not travel on an override: {composed}"
-    );
-    // And what did travel is not marked unreviewed, because it is not:
-    // platform published it.
-    assert!(
-        composed.contains("[lapse]"),
-        "the section still declares the grant: {composed}"
-    );
-}
-
-// ── Revocation ───────────────────────────────────────────────────────────────
-
-/// A security-reviewer ends a grant they could never have opened.
-///
-/// This is the whole reason `LapseGrant` and `LapseRevoke` are two actions
-/// rather than one (ADR-0037 decision 15): the responder who ends a
-/// disclosure at 3am is not the steward who authorises one, and a pack has
-/// to be able to say so.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_security_reviewer_revokes_what_they_could_never_grant() {
-    let Some((pool, tenant)) = admitted_tenant().await else {
-        return;
-    };
-    let app = router(state(&database_url()));
-    let org = seed_hierarchy(&pool, tenant).await;
-
-    let sam = seed_user(&pool, tenant, "sam").await;
-    let runbook = seed_record(&pool, tenant, org.platform.id, sam.id, RUNBOOK).await;
-    seed_user(&pool, tenant, "cara").await;
-    bind(&pool, tenant, "cara", org.platform.id, RoleKey::Curator).await;
-    let cara = issue("cara", tenant);
-
-    let priya_identity = seed_user(&pool, tenant, "priya").await;
-    let grantee = priya_identity.scope_id;
-    let priya = issue("priya", tenant);
-    let priya_run = session_seed::seed_run_for(&pool, tenant, "authz4-priya", "priya").await;
-    for subject in ["nadia", "omar"] {
-        seed_user(&pool, tenant, subject).await;
-        bind(&pool, tenant, subject, org.eng.id, RoleKey::Administrator).await;
-    }
-    // The responder: reviewer at the org, and nothing else.
-    seed_user(&pool, tenant, "raj").await;
-    bind(&pool, tenant, "raj", org.org.id, RoleKey::Reviewer).await;
-    let nadia = issue("nadia", tenant);
-    let omar = issue("omar", tenant);
-    let raj = issue("raj", tenant);
-
-    publish_via_review(
-        &app,
-        &cara,
-        &[&cara, &nadia],
-        org.platform.id,
-        &[runbook],
-        "reviewed",
-    )
-    .await;
-
-    // Raj cannot open one. `ProposalOpen` at platform is floored on
-    // membership plus member-and-above, and reviewer is neither.
-    let (status, body) = propose(
-        &app,
-        &raj,
-        org.platform.id,
-        grantee,
-        600,
-        "I would like to open this myself",
-    )
-    .await;
-    assert_eq!(
-        status,
-        StatusCode::FORBIDDEN,
-        "a reviewer must not be able to open a lapse: {body}"
-    );
-
-    let proposal = proposed(
-        &app,
-        &nadia,
-        org.platform.id,
-        grantee,
-        600,
-        "joint incident review",
-    )
-    .await;
-    approve(&app, &nadia, &proposal).await;
-    approve(&app, &omar, &proposal).await;
-    let (_, granted) = post(
-        &app,
-        &omar,
-        &format!("/v1/proposals/{proposal}/lapse"),
-        json!({}),
-    )
-    .await;
-    let lapse_id = granted["id"].as_str().expect("lapse id").to_owned();
-    assert!(
-        block(&app, &priya, priya_run.session_id)
-            .await
-            .contains(RUNBOOK)
-    );
-
-    // A revocation needs its reason, exactly as the grant does.
-    let (status, body) = post(
-        &app,
-        &raj,
-        &format!("/v1/lapses/{lapse_id}/revoke"),
-        json!({"reason": "   "}),
-    )
-    .await;
-    assert_eq!(
-        status,
-        StatusCode::BAD_REQUEST,
-        "a reasonless revocation is not a governed act: {body}"
-    );
-
-    let (status, revoked) = post(
-        &app,
-        &raj,
-        &format!("/v1/lapses/{lapse_id}/revoke"),
-        json!({"reason": "the bridge closed; access no longer needed"}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "revocation failed: {revoked}");
-    assert_eq!(revoked["outcome"].as_str(), Some("revoked"));
-
-    // The very next request, with no restart and nothing to wait out.
-    assert!(
-        !block(&app, &priya, priya_run.session_id)
-            .await
-            .contains(RUNBOOK),
-        "a revocation reaches the reader on their next session"
-    );
-
-    // Terminal: a second revocation finds no standing grant.
-    let (status, _) = post(
-        &app,
-        &raj,
-        &format!("/v1/lapses/{lapse_id}/revoke"),
-        json!({"reason": "again"}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "a revocation is terminal");
-
-    // A revoked grant gets no expiry event: its ending is already on the
-    // chain, and two events asserting one fact is something an auditor
-    // would have to reconcile.
-    synveda_gateway::lapses::expire_once(&pool)
-        .await
-        .expect("sweep");
-    assert!(
-        events(&pool, tenant, "policy.lapse.expired")
-            .await
-            .is_empty(),
-        "a revoked grant must not also expire"
-    );
-    let revocations = events(&pool, tenant, "policy.lapse.revoked").await;
-    assert_eq!(revocations.len(), 1);
-    assert!(
-        revocations[0].payload["would_have_expired_at"].is_string(),
-        "the event records the window the revocation cut short"
-    );
-}
-
-// ── Refusals, in the product's own words ─────────────────────────────────────
-
-/// The four ways a lapse proposal is refused before it exists, each naming
-/// what is wrong rather than leaving someone to read a pack.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_lapse_that_cannot_mean_anything_is_refused_at_the_surface() {
+async fn meaningless_lapses_fail_closed_at_the_surface() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
@@ -950,53 +300,27 @@ async fn a_lapse_that_cannot_mean_anything_is_refused_at_the_surface() {
     let org = seed_hierarchy(&pool, tenant).await;
     let sam = seed_user(&pool, tenant, "sam").await;
     seed_user(&pool, tenant, "nadia").await;
-    bind(&pool, tenant, "nadia", org.eng.id, RoleKey::Administrator).await;
+    bind(&pool, tenant, "nadia", org.eng.id).await;
     let nadia = issue("nadia", tenant);
 
-    // 1. A personal scope, twice over — the privacy floor holds at two
-    //    independent layers, and the test asserts both.
-    //
-    //    A steward is stopped by the PDP before the surface sees the
-    //    request at all: every pack's `ProposalOpen` role branch excludes
-    //    user-kind scopes, so nobody can even *propose* against somebody
-    //    else's personal memory.
-    let personal = {
-        let mut tx = pool.begin().await.expect("begin");
-        let node = scopes::get(&mut *tx, tenant, sam.scope_id)
-            .await
-            .expect("read sam's scope")
-            .expect("sam has a scope");
-        tx.commit().await.expect("commit");
-        node
-    };
     let (status, body) = propose(
         &app,
         &nadia,
-        personal.id,
+        sam.scope_id,
         org.payments.id,
         600,
-        "let us read sam's notes",
+        "read personal notes",
     )
     .await;
-    assert_eq!(
-        status,
-        StatusCode::FORBIDDEN,
-        "a steward must not reach another principal's personal scope at all: {body}"
-    );
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 
-    //    The one principal the membership floor *does* let in there is the
-    //    owner, and this is the surface's own refusal: sam cannot lapse his
-    //    own memory to a team either. No pack permits a lapse over a
-    //    personal scope, so a proposal for one could only ever be reviewed
-    //    and then refused at its effect — refusing it here is the ADR-0032
-    //    discipline of failing at install rather than at review.
     let (status, body) = propose(
         &app,
         &issue("sam", tenant),
-        personal.id,
+        sam.scope_id,
         org.payments.id,
         600,
-        "my own notes, to the payments team",
+        "share personal notes",
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -1005,18 +329,16 @@ async fn a_lapse_that_cannot_mean_anything_is_refused_at_the_surface() {
             .as_str()
             .unwrap_or_default()
             .contains("personal scope"),
-        "the refusal must name the floor: {body}"
+        "{body}"
     );
 
-    // 2. A target the grantee already composes through its own chain: two
-    //    stewards' review to change nothing.
     let (status, body) = propose(
         &app,
         &nadia,
         org.eng.id,
         org.payments.id,
         600,
-        "payments should read engineering",
+        "already inherited",
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -1025,11 +347,9 @@ async fn a_lapse_that_cannot_mean_anything_is_refused_at_the_surface() {
             .as_str()
             .unwrap_or_default()
             .contains("already composes"),
-        "the refusal must say the grant would do nothing: {body}"
+        "{body}"
     );
 
-    // 3. An action outside the closed vocabulary. Widening the admin plane
-    //    on a timer is a different product.
     let (status, body) = post(
         &app,
         &nadia,
@@ -1039,25 +359,19 @@ async fn a_lapse_that_cannot_mean_anything_is_refused_at_the_surface() {
             "grantee_scope_id": org.payments.id,
             "action": "policy.assign",
             "duration_secs": 600,
-            "reason": "let us administer platform for a while",
+            "reason": "unsupported action",
         }),
     )
     .await;
-    assert_eq!(
-        status,
-        StatusCode::BAD_REQUEST,
-        "an unlapsable action must be refused: {body}"
-    );
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
 
-    // 4. A window past the pack's ceiling. `regulated-strict` grants seed
-    //    §6's own 30 days, and the refusal names both numbers.
     let (status, body) = propose(
         &app,
         &nadia,
         org.platform.id,
         org.payments.id,
         60 * 60 * 24 * 45,
-        "forty-five days, please",
+        "past the ceiling",
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -1066,77 +380,46 @@ async fn a_lapse_that_cannot_mean_anything_is_refused_at_the_surface() {
             .as_str()
             .unwrap_or_default()
             .contains("ceiling"),
-        "the refusal must name the ceiling: {body}"
+        "{body}"
     );
 
-    // And a reasonless one, because the reason is the point.
     let (status, _) = propose(&app, &nadia, org.platform.id, org.payments.id, 600, "  ").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
-/// The listing answers "who could read this scope's material, and when" —
-/// including grants that have since ended, which is the only way it can.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_listing_keeps_grants_that_have_ended() {
+async fn the_listing_keeps_expired_grants() {
     let Some((pool, tenant)) = admitted_tenant().await else {
         return;
     };
     let app = router(state(&database_url()));
     let org = seed_hierarchy(&pool, tenant).await;
-    seed_user(&pool, tenant, "sam").await;
     for subject in ["nadia", "omar"] {
         seed_user(&pool, tenant, subject).await;
-        bind(&pool, tenant, subject, org.eng.id, RoleKey::Administrator).await;
+        bind(&pool, tenant, subject, org.eng.id).await;
     }
     let nadia = issue("nadia", tenant);
     let omar = issue("omar", tenant);
-
-    let proposal = proposed(
-        &app,
-        &nadia,
-        org.platform.id,
-        org.payments.id,
-        WINDOW_SECS,
-        "joint incident review",
-    )
-    .await;
+    let proposal = proposed(&app, &nadia, org.platform.id, org.payments.id).await;
     approve(&app, &nadia, &proposal).await;
     approve(&app, &omar, &proposal).await;
-    post(
+    let (status, body) = post(
         &app,
         &omar,
         &format!("/v1/proposals/{proposal}/lapse"),
         json!({}),
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "apply lapse: {body}");
 
-    let (status, body) = get(
-        &app,
-        &nadia,
-        &format!("/v1/lapses?scope_id={}", org.platform.id),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "listing failed: {body}");
-    let listed = body["lapses"].as_array().expect("lapses array");
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0]["outcome"].as_str(), Some("active"));
+    let path = format!("/v1/lapses?scope_id={}", org.platform.id);
+    let (status, body) = get(&app, &nadia, &path).await;
+    assert_eq!(status, StatusCode::OK, "listing: {body}");
+    assert_eq!(body["lapses"].as_array().expect("lapses").len(), 1);
+    assert_eq!(body["lapses"][0]["outcome"], json!("active"));
 
     tokio::time::sleep(Duration::from_secs(u64::from(WINDOW_SECS) + 1)).await;
-    let (_, body) = get(
-        &app,
-        &nadia,
-        &format!("/v1/lapses?scope_id={}", org.platform.id),
-    )
-    .await;
-    let listed = body["lapses"].as_array().expect("lapses array");
-    assert_eq!(
-        listed.len(),
-        1,
-        "an ended grant stays: 'who could read this in March' is the question"
-    );
-    assert_eq!(
-        listed[0]["outcome"].as_str(),
-        Some("expired"),
-        "and it renders as ended rather than being deleted"
-    );
+    let (_, body) = get(&app, &nadia, &path).await;
+    assert_eq!(body["lapses"].as_array().expect("lapses").len(), 1);
+    assert_eq!(body["lapses"][0]["outcome"], json!("expired"));
 }

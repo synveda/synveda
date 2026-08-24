@@ -42,6 +42,7 @@ export type RouteId =
   | "sessions"
   | "session"
   | "knowledge"
+  | "knowledge-item"
   | "learnings"
   | "skills"
   | "tools"
@@ -121,6 +122,13 @@ export const ROUTES: readonly RouteDef[] = [
     label: "Knowledge",
     group: "primary",
     blurb: "What has been reviewed and published.",
+  },
+  {
+    id: "knowledge-item",
+    segment: "knowledge/:knowledge_id",
+    label: "Knowledge item",
+    group: "none",
+    blurb: "Current content, immutable history, provenance, usage and governed changes.",
   },
   {
     id: "learnings",

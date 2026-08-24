@@ -409,23 +409,6 @@ pub struct ProposalRequest<'a> {
     pub sensitivity: Option<&'a str>,
 }
 
-/// What `POST /v1/proposals/{id}/classify` reports back (AUTHZ-5,
-/// ADR-0038 decision 9).
-#[derive(Debug, Deserialize)]
-pub struct Classified {
-    pub scope_id: String,
-    pub sensitivity: String,
-    pub records: Vec<ClassifiedRecord>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ClassifiedRecord {
-    pub record_id: String,
-    /// The tier it left, so a report can say what a reclassification cost
-    /// rather than only what it installed.
-    pub was: String,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct Proposal {
     pub id: String,
@@ -684,26 +667,6 @@ impl Client {
     pub async fn publish(&self, bearer: &str, proposal: &str) -> Result<Timed<Published>, String> {
         self.post(
             &format!("/v1/proposals/{proposal}/publish"),
-            bearer,
-            &serde_json::json!({}),
-        )
-        .await
-    }
-
-    /// Runs an approved classification. The **author's** call, not a
-    /// reviewer's, and that is forced rather than chosen (ADR-0048
-    /// decision 7): `MemoryClassify` is permitted role-free at
-    /// `principal.home`, the effect asks a `MemoryRead` at the working
-    /// tier at the same scope, and the privacy floor closes another
-    /// principal's personal leaf to every content role — so the one
-    /// identity that can run this is the one whose leaf it is.
-    pub async fn classify(
-        &self,
-        bearer: &str,
-        proposal: &str,
-    ) -> Result<Timed<Classified>, String> {
-        self.post(
-            &format!("/v1/proposals/{proposal}/classify"),
             bearer,
             &serde_json::json!({}),
         )

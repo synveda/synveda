@@ -86,9 +86,9 @@ consuming agent heals on its next session start.
 
 ## Project status
 
-**Phases 0–2 are complete. Phase 3 (enterprise surface) is in progress.**
-63 of 94 planned features are done, each one demonstrated by a runnable script in
-[`demos/`](demos/) and covered by an acceptance test.
+**Phases 0–2 are complete. Phase 5 is re-cutting the product while Phase 3 is
+paused.** 82 of 114 filed features are delivered, each with acceptance
+evidence and, where it has a runtime, a runnable script in [`demos/`](demos/).
 
 It installs, on somebody else's machine, with Docker as the only prerequisite:
 
@@ -110,11 +110,11 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **1 — The spine** | SSO → provisioned own-scope → append → extraction → compose → audit, live in Claude Code | ✅ 21/21 |
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
-| **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR, gateway scale | 🚧 1/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger, durable adapter delivery and governed versioned Knowledge | 🚧 15/33 |
+| **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger, durable adapter delivery and governed versioned Knowledge | 🚧 16/33 |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **113
-in total, 80 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **114
+in total, 82 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
@@ -142,17 +142,20 @@ Published benchmark scores, and what they do and do not measure:
   granted at a scope and inherited by its subtree (`owner`, `member`,
   `viewer`, `reviewer`, `curator`, `administrator`), ABAC conditions,
   time-boxed lapses, and Postgres row-level security as a backstop.
-- **The write path** — appending a session event → secret scan and redaction → extraction into
-  classified records → embedding → graph-linking → commit to `derived`, with
-  dedup and conflict detection, decay and TTL.
-- **The read path** — a context run composes along the specificity gradient
-  (the nearer scope beats the wider one, pinned beats derived, newer beats
-  older) under a token budget, watermarked with the record IDs it used.
-  `synveda recall` and the `recall` MCP tool ask the same question from a
-  terminal or an agent. (The deeper form — hybrid retrieval *widened past the
-  caller's own chain*, graph traversal and as-of queries — is out of service:
-  `/v1/recall` was deleted with the observe cutover, and Prompt 18 of the
-  context-platform programme re-cuts it over the governed scope model.)
+- **The write path** — adapters append immutable session events through the
+  public session API. Knowledge can be authored and revised through typed
+  VedaFlow create/edit/verify/merge/supersede/archive/restore/forget commands.
+  Automated session capture is deliberately paused until CPR-18 replaces the
+  final internal extraction projection with reviewable candidates.
+- **The read path** — the Knowledge Browser lists and searches current active
+  revisions with cursor pagination, per-object PDP decisions and independently
+  authorised provenance. Lexical search is immediate; configured TEI enables
+  semantic fusion, while the deterministic test embedder is honestly reported
+  as lexical-only. Session context composition still uses the one internal
+  controlled projection scheduled for CPR-18. The deleted global
+  `/v1/recall` route has not been restored; the existing CLI/MCP `recall`
+  command composes only through a public session context run and is not an
+  enumeration/query surface.
 - **VedaFlow end to end** — objects, commits, refs, proposals, an approval matrix,
   auto-promotion rules, cross-scope promotion, rollback and pinning, and a CLI
   review flow that needs no console.
@@ -247,7 +250,7 @@ make dev-down # stop; state persists in named volumes
 The first `dev-up` builds the Postgres image and downloads the BGE-M3 embedding
 model (~2.3 GB), so allow a few minutes.
 
-The 65 demos in [`demos/`](demos/) are each self-contained — one brings up what
+The 69 shell demos in [`demos/`](demos/) are intended to be self-contained — one brings up what
 it needs, seeds a scratch database, and prints what it proves. Good places to
 start:
 
@@ -257,12 +260,14 @@ sh demos/cpr-10-sessions.sh       # a run opened, appended to, composed for and
                                   # timeline over it and a chain that verifies
 sh demos/cpr-5-access.sh          # groups, grants and invitations
 sh demos/cpr-6-anchors.sh         # where a request stands, and what decides it
+sh demos/cpr-17-knowledge-browser.sh # public Knowledge + generated browser contract
 ```
 
-> **Most of the other demos do not currently run.** 43 of the 65 scripts under
-> `demos/` call `synveda role bind` or `synveda hierarchy`, which the scope
-> cutover deleted three prompts ago — see `docs/backlog/CPR-13.md`. The three
-> above are among the 22 that are current.
+> **The old corpus is not yet all runnable.** 43 of the 65 scripts inventoried
+> by CPR-13 call deleted hierarchy/role/global-runtime surfaces; the four newer
+> Phase 5 demos are current. See `docs/backlog/CPR-13.md`. The programme will
+> re-point the old narratives and add a drift gate after capture and scoped
+> Knowledge retrieval exist, so it does not rewrite them twice.
 
 Other useful targets:
 
@@ -282,7 +287,7 @@ make eval        # the eval harness against a live stack, gated by baselines
 crates/
   synveda-types       domain types, IDs, errors — depends on no other crate
   synveda-policy      the Cedar PDP facade, policy packs, roles, lapses
-  synveda-store       Postgres: records, scopes, audit, bitemporal versions
+  synveda-store       Postgres: Knowledge, sessions, scopes, audit, versions
   synveda-vedaflow    objects, trees, commits, refs, proposals
   synveda-retrieval   hybrid search, fusion, the composition engine
   synveda-ingest      redaction, extraction, dedup, embedding, graph-linking
@@ -297,9 +302,9 @@ sdks/                 rust, typescript, python — stubs, Phase 4
 policies/             Cedar policy packs
 deploy/compose/       the dev environment
 console/              the admin console (React); served from the gateway's origin
-demos/                66 runnable acceptance demos, one per feature
+demos/                69 runnable acceptance demos, one per runtime feature
 evals/                corpora, scenarios, and the committed baselines CI gates on
-docs/                 the seed, the tech plan, the backlog, and 71 ADRs
+docs/                 the seed, tech plan, backlog, and 82 numbered ADRs
 docs/api/openapi.json the API contract — generated from the gateway's handlers
 ```
 
@@ -312,7 +317,7 @@ API. `make check-deps` enforces it.
 ## The stack, and why
 
 Postgres-first, Rust-native, permissively licensed. One database engine for
-records, scopes, audit, versions, queues, vectors and graph — one backup
+Knowledge, sessions, scopes, audit, versions, queues, vectors and graph — one backup
 story, one HA story, one thing to explain to a bank's infrastructure review
 board.
 
@@ -343,7 +348,7 @@ Read in this order:
    Every piece of work maps to a feature ID.
 4. **[docs/backlog/STATUS.md](docs/backlog/STATUS.md)** — where everything stands,
    including what each finished feature actually proved and what it left standing.
-5. **[docs/adr/](docs/adr/)** — 71 architecture decision records. Every
+5. **[docs/adr/](docs/adr/)** — 82 numbered architecture decision records. Every
    architectural choice is written down *before* it is implemented.
 6. **[docs/api/openapi.json](docs/api/openapi.json)** — the API contract, and it
    is **generated**: `utoipa` derives it from the gateway's own request and

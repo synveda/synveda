@@ -11,16 +11,14 @@ word into something a test can fail.
 
 ## What is here
 
-Five cases recorded from the gateway, and one that no gateway can produce:
+Four skill cases recorded from the gateway, and one that no gateway can produce:
 
 | case | what it is in the corpus for |
 | --- | --- |
-| `memory-update` | FLOW-6's own shape, and the only case where a member's three contents differ from one another: the bytes under review, the baseline they would overwrite, and the record as it stands now. It also carries a `none` member, because "publishing changes nothing about this one" and "publishing replaces this one" must not render alike. |
 | `skill-clean` | A scan that ran and found nothing, over the bar, with a checklist bound to its bytes. In the corpus because *found nothing* and *no scan here* are different facts, and a renderer that conflates them fails only on this case. |
 | `skill-blocking-scan` | Authored under a pack whose floor permits the `high` band, reviewed under one that refuses it — the real way a proposal comes to be blocked, with nothing about the bundle changed. One blocking finding and two non-blocking ones, so a renderer that paints them alike fails. |
 | `skill-below-bar` | Two shortfalls at once, so the corpus pins that a refusal names every bar it missed rather than the first. |
 | `skill-checklist-stale` | A checklist answered against an earlier draft and therefore **not found**: `requires_checklist` true, `checklist` absent (ADR-0053 decision 4). |
-| `memory-drifted` | The only case where a member's **three** contents are three different strings: a record edited while its review is open, so the baseline, the proposed bytes and what the record says now all disagree. Without it the corpus cannot tell whether a surface renders the record or the proposal. |
 | `skill-unknown-severity` | **Synthesised.** What a *newer* gateway would serve: two severity bands outside `ScanSeverity`'s three, one above the pack's threshold and one below it. |
 
 The last one is the sharp case, and the reason it is worth synthesising. A
@@ -94,22 +92,22 @@ Ids, commit and object addresses and instants are replaced with stable
 stand-ins, or no two runs would produce the same bytes. Substitution is
 **shape-preserving on purpose**:
 
-- a record id is replaced by something that still parses as a UUID and is
-  still 36 characters of hex and hyphens;
+- an aggregate id is replaced by something that still parses as a UUID and
+  is still 36 characters of hex and hyphens;
 - an object address by something still 64 hex characters;
 - an instant by a real RFC 3339 instant, written to the precision the
   original carried — a canonical object's `valid_from` has microseconds and
   a `created_at` does not;
-- a member's `proposed` and `baseline.text` are canonical JSON objects
-  carried *as strings*, and are scrubbed inside rather than left alone.
+- nested identifiers inside string-carried canonical objects are scrubbed
+  rather than left alone.
 
 Both renderers key behaviour off those shapes — the CLI abbreviates a
 uuid-shaped member name and leaves a path alone — so a corpus that replaced
-a uuid with `uuid-01` would be one in which that rule is never exercised, and
+a UUID with `uuid-01` would be one in which that rule is never exercised, and
 both surfaces would agree on a rendering neither produces.
 
 Equal inputs stay equal, so the payload remains internally consistent: a
-member's `record_id` and the approval naming the same identity still match.
+member's id and another field naming the same identity still match.
 What is not promised is that the stand-ins preserve the originals' relative
 order.
 

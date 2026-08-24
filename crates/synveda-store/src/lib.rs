@@ -57,6 +57,7 @@ pub mod identities;
 pub mod keys;
 pub mod knowledge;
 pub mod knowledge_lifecycle;
+pub mod knowledge_search;
 pub mod lapses;
 
 pub mod packs;

@@ -39,6 +39,7 @@ use crate::app::AppState;
 use crate::approvals::{self, Requested};
 use crate::audit;
 use crate::authz::{self, Authorized, DecisionInput};
+use crate::idempotency::Claim;
 
 /// Maximum length of an archive/restore/forget reason.
 pub const MAX_KNOWLEDGE_REASON_CHARS: usize = 1_000;
@@ -59,6 +60,28 @@ pub const MAX_KNOWLEDGE_REASON_CHARS: usize = 1_000;
 pub async fn command(
     state: &AppState,
     command: KnowledgeCommand,
+) -> Result<KnowledgeMutationResult> {
+    command_inner(state, command, None).await
+}
+
+/// [`command`] with a creation idempotency claim recorded atomically beside
+/// the VedaFlow proposal and its applied or pending effect.
+///
+/// The stored resource id is the change id, not the proposed item id: a replay
+/// must return the same governance outcome even when the change is still
+/// pending and the item therefore does not exist yet.
+pub async fn command_idempotent(
+    state: &AppState,
+    command: KnowledgeCommand,
+    claim: &Claim,
+) -> Result<KnowledgeMutationResult> {
+    command_inner(state, command, Some(claim)).await
+}
+
+async fn command_inner(
+    state: &AppState,
+    command: KnowledgeCommand,
+    idempotency: Option<&Claim>,
 ) -> Result<KnowledgeMutationResult> {
     validate_command(&command)?;
     let tenant_id = ambient_tenant()?;
@@ -173,10 +196,48 @@ pub async fn command(
             operation_id: None,
         }
     };
+    if let Some(claim) = idempotency {
+        claim
+            .remember(&mut tx, tenant_id, proposal.id.as_uuid())
+            .await?;
+    }
     tx.commit().await.map_err(|err| Error::Storage {
         message: format!("commit Knowledge command: {err}"),
     })?;
     Ok(result)
+}
+
+/// Replays one idempotent Knowledge command after taking the original
+/// command's current ownership and PDP decisions again.
+///
+/// A replay is not cached authority. If the caller lost write or proposal
+/// authority after the first request, the same key is refused now. An erased
+/// result has no payload to re-authorise and is returned as vanished rather
+/// than creating a replacement item.
+pub async fn replay_command(
+    state: &AppState,
+    change_id: ProposalId,
+) -> Result<KnowledgeMutationResult> {
+    let tenant_id = ambient_tenant()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let proposal = vedaflow::proposals::read(&mut tx, tenant_id, change_id)
+        .await?
+        .filter(|proposal| {
+            proposal.asset == AssetKind::Knowledge && proposal.effect == ProposalEffect::Apply
+        })
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("Knowledge change {change_id}"),
+        })?;
+    let change = knowledge_lifecycle::read_change(&mut *tx, tenant_id, change_id)
+        .await?
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("Knowledge change {change_id}"),
+        })?;
+    let command = change.payload.as_ref().ok_or_else(|| Error::NotFound {
+        entity: format!("Knowledge affected by change {change_id}"),
+    })?;
+    authorize_command(state, &mut tx, tenant_id, command).await?;
+    change_result(&mut tx, tenant_id, &proposal).await
 }
 
 /// Apply an open Knowledge change after its recorded approvals satisfy the

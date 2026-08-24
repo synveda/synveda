@@ -365,6 +365,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let search_indexer =
         synveda_retrieval::indexer::spawn(pool.clone(), Arc::clone(&search_index), indexer_config);
 
+    // CPR-17's Knowledge revision sidecar. Unlike the retired record worker,
+    // this is index maintenance rather than a domain mutation: immutable
+    // revision text is embedded outside a transaction and the derivative row
+    // converges idempotently. An unavailable TEI instance degrades search to
+    // lexical and is retried; it never blocks a VedaFlow Knowledge commit.
+    let knowledge_index_config = synveda_gateway::knowledge_index::Config {
+        poll_interval: std::env::var("SYNVEDA_KNOWLEDGE_EMBED_POLL_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|millis| *millis > 0)
+            .map(Duration::from_millis)
+            .unwrap_or_else(|| synveda_gateway::knowledge_index::Config::default().poll_interval),
+        batch: std::env::var("SYNVEDA_KNOWLEDGE_EMBED_BATCH")
+            .ok()
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|batch| *batch > 0)
+            .unwrap_or_else(|| synveda_gateway::knowledge_index::Config::default().batch),
+    };
+    tracing::info!(
+        model = embedder.model(),
+        method = embedder.method(),
+        poll_ms = knowledge_index_config.poll_interval.as_millis() as u64,
+        batch = knowledge_index_config.batch,
+        "Knowledge revision embedding sweep starting (CPR-17, ADR-0082)"
+    );
+    let knowledge_indexer = synveda_gateway::knowledge_index::spawn(
+        pool.clone(),
+        Arc::clone(&embedder),
+        knowledge_index_config,
+    );
+
     // The inject route's embed deadline (CTX-3, ADR-0026 decision 3).
     let inject_embed_timeout_ms = std::env::var("SYNVEDA_INJECT_EMBED_TIMEOUT_MS")
         .ok()
@@ -437,6 +468,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     refresher.abort();
     search_indexer.abort();
+    knowledge_indexer.abort();
     lapse_sweep.abort();
     if let Some(sync) = directory_sync {
         sync.abort();

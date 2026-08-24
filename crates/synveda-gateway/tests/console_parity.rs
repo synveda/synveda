@@ -26,16 +26,10 @@
 //!
 //! # What is in it, and why each case is there
 //!
-//! Five cases are recorded from the gateway and one is synthesised, and the
+//! Four cases are recorded from the gateway and one is synthesised, and the
 //! set is chosen to cover the judgements a review makes rather than the
 //! shapes a serialiser emits:
 //!
-//! - **`memory-update`** — FLOW-6's own shape, and the only case where the
-//!   three member contents differ from each other: the bytes under review,
-//!   the baseline they would overwrite, and the record as it stands now
-//!   (ADR-0035 decisions 5 and 8). It also carries a `none` member, because
-//!   "publishing changes nothing about this one" and "publishing replaces
-//!   this one" must not render the same.
 //! - **`skill-clean`** — a scan that ran and found nothing, and a bundle
 //!   over the bar with a checklist bound to its bytes. The happy path is in
 //!   the corpus because "found nothing" and "no scan here" are different
@@ -68,7 +62,7 @@
 //!
 //! Ids, commit and object addresses and timestamps are replaced with stable
 //! stand-ins, or no two runs would ever produce the same bytes. The
-//! substitution is **shape-preserving on purpose**: a record id is replaced
+//! substitution is **shape-preserving on purpose**: an aggregate id is replaced
 //! by something that is still UUID-shaped, an object address by something
 //! still 64 hex characters, an instant by a real RFC 3339 instant written to
 //! the precision the original carried. Both renderers key behaviour off
@@ -77,8 +71,8 @@
 //! be a corpus in which that rule is never exercised and both surfaces agree
 //! on a rendering neither produces.
 //!
-//! The one part of this that is not obvious until it fails: a member's
-//! `proposed` and `baseline.text` are canonical JSON objects carried **as
+//! The one part of this that is not obvious until it fails: nested
+//! identifiers can sit in canonical JSON objects carried **as
 //! strings**, so the ids inside them are payload too. A scrubber that walked
 //! only the outer document leaves a corpus that changes every run for
 //! reasons nobody can see in a diff — which is how it was found.
@@ -106,13 +100,12 @@ use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::records::{self, RecordEmbedding, RecordState};
 use synveda_store::{access, identities, policy_assignments, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    GrantId, Identity, IdentityId, IdentityKind, PackConfig, RecordClass, RecordId, RecordKind,
-    ScopeId, Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId, TenantStatus,
+    GrantId, Identity, IdentityId, IdentityKind, PackConfig, ScopeId, SkillQualityConfig,
+    SkillScanConfig, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
 
@@ -127,8 +120,6 @@ const RECORD: &str = "SYNVEDA_RECORD_FIXTURES";
 /// facts derivation, and the CLI's renderer suite over in `synveda-cli` —
 /// and a case added to one and not the others is a case that proves nothing.
 const CASES: &[&str] = &[
-    "memory-update",
-    "memory-drifted",
     "skill-clean",
     "skill-below-bar",
     "skill-checklist-stale",
@@ -203,7 +194,7 @@ fn settle_file(file: &str, payload: &Value, provenance: &str) {
 
 /// Replaces the volatile parts of a payload with stable, *same-shaped*
 /// stand-ins, remembering each substitution so the payload stays internally
-/// consistent: a member's `record_id` and the approval that names the same
+/// consistent: a member's id and another field that names the same
 /// identity still match after scrubbing.
 #[derive(Default)]
 struct Stable {
@@ -387,8 +378,8 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 }
 
 /// One tenant, `acme → eng → platform`, and the cast a skill publication
-/// takes: an author, a curator who runs the effect, a steward, and the
-/// security reviewer the floor asks for on every skill.
+/// takes: an author, an administrator, and the security reviewer the floor
+/// asks for on every skill.
 struct World {
     pool: PgPool,
     tenant: TenantId,
@@ -396,7 +387,6 @@ struct World {
     pdp: Arc<Pdp>,
     platform: ScopeId,
     alice: String,
-    cora: String,
     sam: String,
     sec: String,
 }
@@ -435,18 +425,16 @@ async fn world() -> Option<World> {
         .await
         .expect("mint root");
     let eng = unit(&mut tx, tenant, root.id, "eng", ScopeKind::OrgUnit).await;
-    // `workspace`-shaped: the LOCAL cell of the approval matrix, which is
-    // what the old `team` rank meant. An `org_unit` is SHARED and prices a
-    // memory publication at a curator *and* an administrator (CPR-7); this
-    // suite is about what the console renders, not about that price.
+    // `workspace`-shaped: the LOCAL cell of the approval matrix. An
+    // `org_unit` is SHARED and asks for a curator *and* an administrator;
+    // this suite is about what the console renders, not about that price.
     let platform = unit(&mut tx, tenant, eng.id, "platform", ScopeKind::Workspace).await;
     tx.commit().await.expect("commit scopes");
 
-    for subject in ["alice", "cora", "sam", "sec"] {
+    for subject in ["alice", "sam", "sec"] {
         seed_user(&pool, tenant, subject).await;
     }
     bind(&pool, tenant, "alice", platform.id, RoleKey::Member).await;
-    bind(&pool, tenant, "cora", platform.id, RoleKey::Curator).await;
     bind(&pool, tenant, "sam", platform.id, RoleKey::Administrator).await;
     bind(&pool, tenant, "sec", platform.id, RoleKey::Reviewer).await;
 
@@ -459,7 +447,6 @@ async fn world() -> Option<World> {
         pdp,
         platform: platform.id,
         alice: issue("alice", tenant),
-        cora: issue("cora", tenant),
         sam: issue("sam", tenant),
         sec: issue("sec", tenant),
     })
@@ -731,221 +718,7 @@ async fn approve(w: &World, token: &str, id: &str, comment: &str) {
     assert_eq!(status, StatusCode::OK, "approve: {approved}");
 }
 
-// ── Memory ───────────────────────────────────────────────────────────────────
-
-fn record_state(scope: ScopeId, owner: IdentityId, content: &str) -> RecordState {
-    RecordState {
-        scope_id: scope,
-        owner_id: owner,
-        kind: RecordKind::Derived,
-        class: RecordClass::Procedure,
-        content: content.to_owned(),
-        sensitivity: Sensitivity::Internal,
-        provenance: json!({"source": "the CNSL-1 parity corpus"}),
-        // A fixed instant rather than `now`, so the only thing normalisation
-        // has to stabilise is the row's own bookkeeping.
-        valid_from: Utc
-            .with_ymd_and_hms(2026, 1, 1, 8, 0, 0)
-            .single()
-            .expect("a real instant"),
-        valid_to: None,
-    }
-}
-
-fn embedding() -> RecordEmbedding {
-    RecordEmbedding {
-        model: DeterministicEmbedder::MODEL.to_owned(),
-        vector: vec![0.25; 16],
-    }
-}
-
-async fn seed_record(
-    pool: &PgPool,
-    tenant: TenantId,
-    scope: ScopeId,
-    owner: IdentityId,
-    content: &str,
-) -> RecordId {
-    let id = RecordId::new();
-    records::insert(
-        pool,
-        id,
-        tenant,
-        &record_state(scope, owner, content),
-        &embedding(),
-    )
-    .await
-    .expect("insert record");
-    id
-}
-
-async fn rewrite(
-    pool: &PgPool,
-    record: RecordId,
-    scope: ScopeId,
-    owner: IdentityId,
-    content: &str,
-) {
-    records::update(
-        pool,
-        record,
-        &record_state(scope, owner, content),
-        &embedding(),
-    )
-    .await
-    .expect("rewrite record")
-    .expect("the record exists");
-}
-
 // ── The cases ────────────────────────────────────────────────────────────────
-
-const RUNBOOK: &str = "check the on-call rota\nrotate the signing key\nfile the change record";
-const REVISED: &str =
-    "check the on-call rota\nrotate the signing key every 90 days\nfile the change record";
-const STANDING: &str = "escalate to the platform lead before touching production";
-
-/// Three versions of one record, so the drift case's three contents are
-/// three visibly different strings rather than three copies of one.
-const DRIFT_V1: &str = "page the platform lead";
-const DRIFT_V2: &str = "page the platform lead, then the incident commander";
-const DRIFT_V3: &str = "page the incident commander first, then the platform lead";
-
-/// The memory case: a channel that already holds one version, an edit that
-/// would replace it, and a second member publication would not touch.
-async fn memory_update(w: &World) -> Value {
-    let alice = identities::by_subject(&w.pool, w.tenant, "alice")
-        .await
-        .expect("read alice")
-        .expect("alice exists");
-
-    let runbook = seed_record(&w.pool, w.tenant, w.platform, alice.id, RUNBOOK).await;
-    let standing = seed_record(&w.pool, w.tenant, w.platform, alice.id, STANDING).await;
-
-    // Publish both, so the channel has a baseline to overwrite.
-    let (status, opened) = post(
-        &w.app,
-        &w.alice,
-        "/v1/proposals",
-        json!({
-            "scope_id": w.platform,
-            "record_ids": [runbook, standing],
-            "title": "the on-call runbook and the standing instruction",
-        }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "open the first proposal: {opened}");
-    let first = opened["id"].as_str().expect("proposal id").to_owned();
-    approve(w, &w.sec, &first, "read it").await;
-    approve(w, &w.cora, &first, "ship it").await;
-    let (status, published) = post(
-        &w.app,
-        &w.cora,
-        &format!("/v1/proposals/{first}/publish"),
-        Value::Null,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "publish the baseline: {published}");
-
-    // Edit one of them and propose both again: one member updates, one is
-    // already at the address the channel names and changes nothing.
-    rewrite(&w.pool, runbook, w.platform, alice.id, REVISED).await;
-    let (status, opened) = post(
-        &w.app,
-        &w.alice,
-        "/v1/proposals",
-        json!({
-            "scope_id": w.platform,
-            "record_ids": [runbook, standing],
-            "title": "rotate the signing key on a schedule",
-        }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "open the second proposal: {opened}");
-    let second = opened["id"].as_str().expect("proposal id").to_owned();
-
-    // One approval cast and the requirement not yet met, so the corpus has
-    // both an approval to render and an `outstanding` line to render.
-    approve(
-        w,
-        &w.sec,
-        &second,
-        "the 90 days matches the policy we agreed",
-    )
-    .await;
-
-    record(detail(w, &second).await)
-}
-
-/// The drift case, and the only one in which a member's **three** contents
-/// are three different strings.
-///
-/// A record is published, proposed again, and then edited *while the review
-/// is open*. The proposal still names the bytes that were proposed, because
-/// approvals bind bytes and not records (ADR-0032 decision 6) — so
-/// `baseline` is what the channel holds, `proposed` is what the approvals
-/// are about, and `content` is what the record says right now, which is a
-/// third thing and belongs to nobody's decision yet. Publishing will refuse.
-///
-/// Without this case the corpus cannot tell whether a surface renders the
-/// record or the proposal, because everywhere else the two agree.
-async fn memory_drifted(w: &World) -> Value {
-    let alice = identities::by_subject(&w.pool, w.tenant, "alice")
-        .await
-        .expect("read alice")
-        .expect("alice exists");
-
-    let note = seed_record(&w.pool, w.tenant, w.platform, alice.id, DRIFT_V1).await;
-    let (status, opened) = post(
-        &w.app,
-        &w.alice,
-        "/v1/proposals",
-        json!({
-            "scope_id": w.platform,
-            "record_ids": [note],
-            "title": "the escalation note",
-        }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "open the first proposal: {opened}");
-    let first = opened["id"].as_str().expect("proposal id").to_owned();
-    approve(w, &w.sec, &first, "read it").await;
-    approve(w, &w.cora, &first, "ship it").await;
-    let (status, published) = post(
-        &w.app,
-        &w.cora,
-        &format!("/v1/proposals/{first}/publish"),
-        Value::Null,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "publish the baseline: {published}");
-
-    // v2 is proposed…
-    rewrite(&w.pool, note, w.platform, alice.id, DRIFT_V2).await;
-    let (status, opened) = post(
-        &w.app,
-        &w.alice,
-        "/v1/proposals",
-        json!({
-            "scope_id": w.platform,
-            "record_ids": [note],
-            "title": "the escalation note, revised",
-        }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "open the second proposal: {opened}");
-    let second = opened["id"].as_str().expect("proposal id").to_owned();
-
-    // …and then somebody edits the record underneath the open review.
-    rewrite(&w.pool, note, w.platform, alice.id, DRIFT_V3).await;
-
-    let detail = detail(w, &second).await;
-    assert_eq!(
-        detail["members"][0]["unchanged"],
-        json!(false),
-        "the case is only worth recording if the member really drifted: {detail}",
-    );
-    record(detail)
-}
 
 /// The clean case: a scan that found nothing, and a bundle over the bar with
 /// a checklist bound to exactly its bytes.
@@ -1043,8 +816,6 @@ async fn the_parity_corpus_is_what_the_gateway_serves() {
     // Order matters only through the pack: the blocking case installs one
     // and leaves it in force, so the cases that want the product default
     // run before it.
-    settle("memory-update", &memory_update(&w).await);
-    settle("memory-drifted", &memory_drifted(&w).await);
     settle("skill-clean", &skill_clean(&w).await);
     settle("skill-below-bar", &skill_below_bar(&w).await);
     settle("skill-checklist-stale", &skill_checklist_stale(&w).await);
@@ -1159,27 +930,6 @@ fn keys(value: &Value) -> Vec<&str> {
 /// claimed it would be inventing the other two. It needs a served field, and
 /// that is a decision to take with a screen in front of you rather than in a
 /// fixture generator.
-/// The text inside a member's bytes, as a reviewer reads it.
-///
-/// A memory's proposed bytes are a canonical JSON object and a skill file's
-/// are the file. Both renderers show the *content* either way — the CLI's
-/// diff is field-wise over the object rather than a diff of its braces — so
-/// the fact is the content, and the envelope is an implementation detail of
-/// how it travelled.
-fn readable(value: &Value) -> Value {
-    let Some(text) = value.as_str() else {
-        return Value::Null;
-    };
-    as_json_object(text)
-        .and_then(|object| {
-            object
-                .get("content")
-                .and_then(Value::as_str)
-                .map(String::from)
-        })
-        .map_or_else(|| value.clone(), Value::String)
-}
-
 fn facts(detail: &Value) -> Value {
     let mut out = Map::new();
     out.insert("state".to_owned(), detail["state"].clone());
@@ -1231,23 +981,19 @@ fn facts(detail: &Value) -> Value {
                         // to be told is the exceptional case: the bytes moved
                         // under the review and publishing will refuse.
                         "drifted": drifted,
-                        // The three contents ADR-0035 decision 5 puts in front
-                        // of a reviewer, as **text a person reads** rather than
-                        // as the bytes that carry it: a memory's canonical
-                        // object is JSON, and what has to be named is the
-                        // content inside it, not the envelope.
-                        "proposed": if shows_a_diff { readable(&member["proposed"]) } else { Value::Null },
+                        // The exact proposed bytes are what the approval binds.
+                        "proposed": if shows_a_diff { member["proposed"].clone() } else { Value::Null },
                         "baseline": match member.get("baseline") {
-                            Some(baseline) if shows_a_diff => readable(&baseline["text"]),
+                            Some(baseline) if shows_a_diff => baseline["text"].clone(),
                             _ => Value::Null,
                         },
-                        // The record as it stands now. Equal to `proposed`
+                        // The artifact as it stands now. Equal to `proposed`
                         // unless somebody edited underneath the review, which
                         // is the only condition under which it is a third
                         // fact rather than a repeat of the second — so it is
                         // carried only then, and a surface is asked to name
                         // it only when it means something.
-                        "current": if drifted { readable(&member["content"]) } else { Value::Null },
+                        "current": if drifted { member["content"].clone() } else { Value::Null },
                     })
                 })
                 .collect(),

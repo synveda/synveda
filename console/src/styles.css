@@ -985,3 +985,117 @@ button.link {
 .diagnostic-closed {
   font-size: 0.85rem;
 }
+
+/* ── Knowledge Browser (CPR-17, ADR-0082) ─────────────────────────────── */
+
+.knowledge-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: -2.9rem 0 1rem;
+}
+
+.knowledge-filters {
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.knowledge-filters input,
+.knowledge-filters select {
+  max-width: 16rem;
+}
+
+ul.knowledge-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.knowledge-list li {
+  border-bottom: 1px solid var(--line);
+}
+
+ul.knowledge-list a.row {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul.knowledge-list a.row:hover strong {
+  text-decoration: underline;
+}
+
+.search-mode {
+  border-left: 2px solid var(--accent);
+  padding-left: 0.6rem;
+}
+
+.tag-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.knowledge-detail > header,
+.knowledge-detail > section {
+  max-width: 72rem;
+}
+
+.knowledge-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 1rem;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.knowledge-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(18rem, 1fr));
+  gap: 1rem;
+}
+
+.knowledge-columns > section {
+  min-width: 0;
+}
+
+.revision-history,
+.knowledge-columns ul {
+  padding-left: 1.25rem;
+}
+
+.revision-history li,
+.knowledge-columns li {
+  margin: 0.5rem 0;
+}
+
+.knowledge-action {
+  max-width: 44rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.65rem 0;
+}
+
+.knowledge-action summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button.danger {
+  border-color: var(--error-line);
+  color: var(--error-line);
+}
+
+.banner.success {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+@media (max-width: 55rem) {
+  .knowledge-toolbar {
+    justify-content: flex-start;
+    margin: 0 0 1rem;
+  }
+
+  .knowledge-columns {
+    grid-template-columns: 1fr;
+  }
+}

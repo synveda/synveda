@@ -3,18 +3,16 @@
 //! Every verb here is an HTTP call to `/v1/proposals` under the reviewer's
 //! own bearer, and that is the feature. Approving is a governed act: the
 //! PDP decides who may cast a verdict (`ProposalReview`) and who may run
-//! the effect (`ChannelPublish` + `MemoryRead`), the approval matrix
+//! the artifact action, the approval matrix
 //! decides how many verdicts are needed, and the gateway chains the event.
 //! A CLI that wrote the approval row itself would be the counting rule
 //! acting as authority, from a laptop, with no decision anywhere in the
 //! trail — so this module opens no database connection at all.
 //!
-//! What it renders is the proposal's **effect on the target's published
-//! channel**: per record, whether publication would add it, replace an
-//! older version, or change nothing, with a diff of the two sides for the
-//! records it would replace. That is what a reviewer is actually voting
-//! on, and it is the half of a review a console would otherwise be needed
-//! for.
+//! What it renders is the proposal's effect on the target artifact: per
+//! member, whether publication would add it, replace an older version, or
+//! change nothing, with a diff of the two sides it would replace. That is
+//! what a reviewer is actually voting on.
 
 use std::io::{BufRead, IsTerminal, Write};
 
@@ -237,18 +235,13 @@ impl Shortfall {
 
 #[derive(Deserialize)]
 struct Member {
-    /// The tree entry name: a record id for a memory, a path for a prompt
-    /// (PRMT-1, ADR-0049 decision 3). The one field both asset kinds
-    /// carry, and the one this surface displays.
+    /// Stable member id or authored path. The one field every artifact
+    /// family carries, and the one this surface displays.
     member: String,
     /// What kind of asset this proposal carries.
     asset: String,
     object_hash: String,
     unchanged: bool,
-    /// A memory's class. Absent for an authored asset, which has none —
-    /// `asset` is what the line says instead.
-    #[serde(default)]
-    class: Option<String>,
     sensitivity: Sensitivity,
     effect: Effect,
     proposed: String,
@@ -279,11 +272,6 @@ impl Member {
         } else {
             self.member.clone()
         }
-    }
-
-    /// What it is, in one word: a record's class, or the asset kind.
-    fn kind(&self) -> &str {
-        self.class.as_deref().unwrap_or(&self.asset)
     }
 }
 
@@ -381,38 +369,6 @@ pub async fn withdraw(profile: &str, id: ProposalId) -> Result<(), String> {
         .await?;
     eprintln!("synveda: proposal {id} withdrawn");
     println!("{}", row(&summary));
-    Ok(())
-}
-
-/// `synveda proposal classify <id>` — run an approved classification
-/// proposal's effect (AUTHZ-5, ADR-0038 decision 9).
-///
-/// A sibling verb rather than a mode of `publish`, for the reason the two
-/// routes are separate: they install different things, and a reviewer who
-/// approved a tier change did not approve a channel move.
-pub async fn classify(profile: &str, id: ProposalId) -> Result<(), String> {
-    let (api, origin) = Api::connect(profile).await?;
-    announce(&api, &origin);
-    let classified = api
-        .post(&format!("/v1/proposals/{id}/classify"), None)
-        .await?;
-    let field = |name: &str| {
-        classified
-            .get(name)
-            .and_then(|value| value.as_str())
-            .unwrap_or("?")
-            .to_owned()
-    };
-    let records = classified
-        .get("records")
-        .and_then(|value| value.as_array())
-        .map(Vec::len)
-        .unwrap_or(0);
-    eprintln!(
-        "synveda: reclassified — {records} record(s) at scope {} now carry {}",
-        field("scope_id"),
-        field("sensitivity"),
-    );
     Ok(())
 }
 
@@ -1030,7 +986,7 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
             &format!(
                 "    {label}  {}  {} · {}",
                 member.label(),
-                member.kind(),
+                member.asset,
                 member.sensitivity.as_str()
             ),
         ));
@@ -1105,7 +1061,7 @@ fn describe(requirement: &Requirement) -> String {
     )
 }
 
-/// A 12-character prefix: enough to name a proposal, a record, or an
+/// A 12-character prefix: enough to name a proposal or aggregate, or an
 /// object at a glance, and short enough to read in a list.
 fn short(id: &str) -> String {
     id.chars().take(12).collect()
@@ -1253,7 +1209,7 @@ mod tests {
             source_scope_id: ScopeId::new(),
             target_scope_path: Some(target.to_owned()),
             source_scope_path: Some(source.to_owned()),
-            asset: "memory".to_owned(),
+            asset: "context_pack".to_owned(),
             effect: "published".to_owned(),
             state,
             sensitivity: Sensitivity::Internal,
@@ -1279,14 +1235,13 @@ mod tests {
     fn member(effect: Effect, before: Option<&str>, after: &str) -> Member {
         Member {
             member: "0198f000-0000-7000-8000-000000000001".to_owned(),
-            asset: "memory".to_owned(),
+            asset: "context_pack".to_owned(),
             object_hash: "b".repeat(64),
             unchanged: true,
-            class: Some("procedure".to_owned()),
             sensitivity: Sensitivity::Internal,
             effect,
             proposed: after.to_owned(),
-            // Undrifted, so the record still says what was proposed.
+            // Undrifted, so the artifact still says what was proposed.
             content: after.to_owned(),
             baseline: before.map(|text| Baseline {
                 object_hash: "c".repeat(64),
@@ -1295,26 +1250,23 @@ mod tests {
         }
     }
 
-    /// A prompt member: named by path, with no class (PRMT-1, ADR-0049
-    /// decision 3).
+    /// A prompt member is named by path (PRMT-1, ADR-0049 decision 3).
     fn prompt_member(effect: Effect, before: Option<&str>, after: &str) -> Member {
         Member {
             member: "support/triage-reply".to_owned(),
             asset: "prompt".to_owned(),
-            class: None,
             ..member(effect, before, after)
         }
     }
 
     fn asset(content: &str) -> String {
-        serde_json::json!({"class": "procedure", "content": content, "sensitivity": "internal"})
-            .to_string()
+        content.to_owned()
     }
 
     /// The per-asset-kind renderer ADR-0035 predicted, as a rendering
-    /// rather than a paragraph: a record id is abbreviated the way a
-    /// commit is, a prompt's path is shown whole because it is a name a
-    /// person typed, and a member with no class says what it is instead.
+    /// rather than a paragraph: a generated id is abbreviated the way a
+    /// commit is, and a prompt's path is shown whole because it is a name a
+    /// person typed.
     #[test]
     fn a_prompt_member_is_named_by_path_and_labelled_by_its_asset_kind() {
         let detail = Detail {
@@ -1346,10 +1298,9 @@ mod tests {
         );
     }
 
-    /// A memory member keeps the abbreviation, so the two kinds are
-    /// distinguishable at a glance in one queue.
+    /// A UUID-shaped member keeps the abbreviation.
     #[test]
-    fn a_record_id_is_still_abbreviated() {
+    fn a_uuid_shaped_member_is_abbreviated() {
         let detail = Detail {
             summary: summary(ProposalView::Open, "acme", "acme"),
             members: vec![member(Effect::Add, None, &asset("brand new"))],
@@ -1363,7 +1314,7 @@ mod tests {
             !rendered.contains("0198f000-0000-7000-8000-000000000001"),
             "a uuid-shaped member is shortened:\n{rendered}"
         );
-        assert!(rendered.contains("procedure · internal"), "{rendered}");
+        assert!(rendered.contains("context_pack · internal"), "{rendered}");
     }
 
     #[test]
@@ -1442,7 +1393,7 @@ mod tests {
         let rendered = render_detail(&detail, false);
         assert!(
             rendered.contains("publishing will refuse"),
-            "an edited record must be visible as such:\n{rendered}"
+            "an edited artifact must be visible as such:\n{rendered}"
         );
     }
 
@@ -1889,8 +1840,6 @@ mod tests {
     /// them; a case added there and not here is a case only one surface
     /// answers.
     const CASES: &[&str] = &[
-        "memory-update",
-        "memory-drifted",
         "skill-clean",
         "skill-below-bar",
         "skill-checklist-stale",

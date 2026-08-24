@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **113 features filed, 80 delivered**;
+Cursor frame has been replayed. **114 features filed, 82 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -130,10 +130,12 @@ Load-bearing facts about Phase 5:
   grant keys only. A login with the `synveda-admins` IdP group mints a
   tenant's first grant; a dev-token tenant seeds it by hand once
   (INSTALL.md's SQL).
-- The OpenAPI contract covers the context-platform plane (`/v1/me`,
-  workspaces, projects, repositories, the access plane and the six admin
-  scope routes, and the session plane — **40 operations** since CPR-11); the
-  rest of `/v1` joins it at Prompt 19.
+- The generated OpenAPI contract covers the context-platform plane (`/v1/me`,
+  workspaces, projects, repositories, access, admin scopes, sessions and the
+  public Knowledge lifecycle/search surface — **53 operations** since
+  CPR-17). The console's Knowledge Browser consumes generated operations only;
+  the remaining production planes join under the programme's public-contract
+  convergence package.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys
@@ -181,6 +183,15 @@ Load-bearing facts about Phase 5:
   held-or-completed erasure rather than a second workflow. The gateway no
   longer starts the old extraction, promotion or retention writers; CPR-17/18
   own the two explicitly recorded controlled-cutover seams.
+- CPR-17 (ADR-0082) is delivered and also subsumes CNSL-4: thirteen public
+  Knowledge operation groups expose current immutable revisions, filtered
+  cursor listing, lexical search and TEI-only semantic fusion. Every item,
+  source and relation endpoint is decided independently; all writes use
+  CPR-16's VedaFlow command seam. The proposal classification route/CLI/eval
+  call, public record proposal fields, record channel publication/aliases and
+  raw-record browser fixtures are deleted. Only CPR-18's internal
+  session-event/context record projection remains as a controlled cutover
+  seam.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

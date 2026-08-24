@@ -20,7 +20,6 @@ import {
   effectLabel,
   instant,
   label,
-  readable,
   showsDiff,
   type Approval,
   type Finding,
@@ -301,14 +300,14 @@ function Effect({ detail }: { detail: ProposalDetail }) {
 
 function MemberRow({ member }: { member: Member }) {
   const rows = showsDiff(member)
-    ? diffLines(member.baseline ? readable(member.baseline.text) : null, readable(member.proposed))
+    ? diffLines(member.baseline?.text ?? null, member.proposed)
     : [];
   return (
     <div className="member">
       <div className={`member-head ${member.effect}`}>
         <span className="effect">{effectLabel(member.effect)}</span> <code>{label(member.member)}</code>{" "}
         <span className="muted">
-          {member.class ?? member.asset} · {member.sensitivity}
+          {member.asset} · {member.sensitivity}
         </span>
       </div>
       {member.unchanged ? null : (
@@ -318,7 +317,7 @@ function MemberRow({ member }: { member: Member }) {
               and the proposal and belongs to nobody's decision yet
               (ADR-0035 decision 5). Telling a reviewer the bytes moved
               without telling them where to is telling them to go and look. */}
-          <pre className="now">{readable(member.content)}</pre>
+          <pre className="now">{member.content}</pre>
         </div>
       )}
       {rows.length > 0 ? (

@@ -14,7 +14,7 @@ anything AGPL/BSL is opt-in and isolated behind a trait.
 
 ### 1.1 Core data platform — PostgreSQL 17
 
-One database engine for records, hierarchy, audit, versioning, queues, and (initially) vectors
+One database engine for Knowledge, sessions, scopes, audit, versioning, queues, and (initially) vectors
 and graph. This is a feature: one backup story, one HA story, one thing to explain to a bank's
 infrastructure review board.
 
@@ -23,8 +23,8 @@ infrastructure review board.
 | System of record | **PostgreSQL 17** | PostgreSQL | Boring, auditable, runs anywhere incl. air-gapped |
 | Vector search | **pgvector** (HNSW) | PostgreSQL | Fine to ~10–50M vectors per tenant shard. Scale-out: **Qdrant** (Rust, Apache-2.0) behind the same `VectorIndex` trait. Note: VectorChord/pgvecto.rs is Rust and faster but AGPL — optional adapter only |
 | Sparse / lexical | Postgres FTS + **Tantivy** (Rust, MIT) sidecar via `synveda-retrieval` | MIT | BM25 quality without ParadeDB's AGPL. Hybrid fusion (RRF) done in Rust |
-| Graph | **Indexed adjacency in plain Postgres** (bitemporal edge pair; named graphs as a mandatory discriminator) | — | Amended 2026-07-27 by GRPH-1/ADR-0043, was **Apache AGE**: the GRPH-4 spike measured adjacency 3–8× faster at 2.5× less storage, and AGE's `cypher()` takes a name constant its statements cannot be sqlx-checked inside. Still transactional with records, still one engine. Ladder: materialised k-hop closure table (the HIER-1 pattern), then a dedicated engine with its own ADR and a licence exception (candidates: **IndraDB**, Rust, MPL; avoid SurrealDB/Memgraph — BSL) |
-| Hierarchy | Plain Postgres (closure table + materialised path) | — | No graph DB needed for tenancy |
+| Graph | **Indexed adjacency in plain Postgres** (bitemporal edge pair; named graphs as a mandatory discriminator) | — | Amended 2026-07-27 by GRPH-1/ADR-0043, was **Apache AGE**: the GRPH-4 spike measured adjacency 3–8× faster at 2.5× less storage. Relationship claims remain transactional with Knowledge. Ladder: materialised bounded expansion, then a dedicated engine with its own ADR and a licence exception (candidates: **IndraDB**, Rust, MPL; avoid SurrealDB/Memgraph — BSL) |
+| Governed scopes | Plain Postgres (`scopes` + closure table) | — | Five parent-shapes, no organisational rank and no graph DB needed for tenancy |
 | Queue (simple) | **PGMQ** (Postgres extension) | PostgreSQL | For observe-event ingestion buffer — no extra infra for SMB deployments |
 | Workflow (complex) | **Temporal** | MIT | Extraction pipelines, directory sync, retention jobs, approval timers. Go-based but the best-in-class; Rust SDK (community) or activities via gRPC workers |
 | Bitemporal versioning | Native tables (`tx_from/tx_to`, `valid_from/valid_to`) + triggers | — | No extension dependency; queryable "as-of" both dimensions |
@@ -86,37 +86,40 @@ proposals (id, scope, source_ref, target_ref, state,
            required_approvals[], obtained_approvals[])
 ```
 
-### 2.2 Channels (branches with meaning)
+### 2.2 Channels and typed aggregate effects
 
-Every scope (org / department / team / user) has three standing channels per asset type:
+Authored bundle assets — prompts, context packs and skills — retain three
+standing VedaFlow channels at a governed scope:
 
-- **`derived`** — auto-committed by the ingestion pipeline. Agents' extracted memories land
-  here continuously. Readable per policy, clearly watermarked as unreviewed.
+- **`derived`** — machine-produced material, readable only where policy permits
+  an explicitly unreviewed channel.
 - **`staged`** — proposals under review live here.
-- **`published`** — the trusted channel. `inject` composes **from `published` (+ `derived`
-  where policy allows)**. Regulated-strict policy packs can restrict injection to
-  `published`-only for designated scopes — that single switch is the "bank mode".
+- **`published`** — the trusted authored bundle.
+
+Knowledge is not a channel member and is never published by attaching a record
+id to a commit. A proposal instead carries a content-free, hash-bound typed
+aggregate effect. Applying it creates or advances a stable Knowledge item and
+its immutable revisions; personal auto-apply still creates and executes that
+same proposal.
 
 ### 2.3 The lifecycle
 
 ```
-agent session ──observe──▶ extraction ──▶ commit to {user|team}/derived      (automatic)
-                                              │
-                                   promotion proposal                        (human or
-                                              ▼                               rule-driven)
-                                        {scope}/staged ──review──▶ {scope}/published
-                                              ▲
-manual authoring (prompt, skill, ────────────┘
-context pack, pinned memory, policy)
+session events ──capture──▶ reviewable candidate ──accept/edit/merge/replace──┐
+                                                                              │
+manual Knowledge create/edit/verify/forget ──────────────────────────────────┤
+                                                                              ▼
+                                               typed VedaFlow change ──▶ Knowledge revision
+
+prompt / skill / context-pack authoring ──▶ staged review ──▶ published ref
 ```
 
-- **Promotion rules** can auto-open proposals: e.g. "a `procedure` memory recalled >N times
-  across ≥3 team members → propose promotion to team/published".
-- **Cross-scope promotion** (team → department → org) is a proposal against the higher scope,
-  requiring that scope's approvers. This is how tribal knowledge climbs the org gradient with
-  governance at each step.
-- **Policy packs and lapses are themselves assets** flowing through VedaFlow — a lapse *is* a
-  proposal with mandatory dual approval and an expiry commit scheduled by Temporal.
+- Capture output is a candidate, never active Knowledge. Accept, edit, merge or
+  replace calls the same Knowledge command layer as manual authoring.
+- Cross-scope publication is decided at the destination scope and uses that
+  scope's approval matrix. A proposal cannot carry authority from its source.
+- Policy profiles and time-boxed relaxations are governed artifact families;
+  they never create a second authorisation path.
 
 ### 2.4 Approval matrix (CODEOWNERS, generalised)
 
@@ -124,11 +127,11 @@ Required approvals resolve from **(asset type × sensitivity × target scope × 
 
 | Example | Required |
 |---|---|
-| Memory → `team/published`, internal | 1 × team `curator` |
-| Prompt → `department/published` | 1 × dept `steward` + 1 × any `curator` (peer review) |
-| Skill (executable!) → any `published` | steward + **security-reviewer role**; skills are treated like code because they are |
-| Anything `restricted` sensitivity | + `compliance` role, dual approval |
-| Policy lapse under regulated-strict | 2 × steward at target scope + auto-expiry mandatory |
+| Knowledge → project scope, internal | policy may auto-apply or require a project `curator` |
+| Prompt → workspace `published` | 1 × `administrator` + 1 × `curator` (peer review) |
+| Skill (executable!) → any `published` | `administrator` + `reviewer`; skills are treated like code because they are |
+| Anything `restricted` sensitivity | + distinct `reviewer`, no self-approval where the matrix requires it |
+| Policy relaxation under regulated-strict | distinct approvers + hard expiry mandatory |
 | SMB `standard` pack | most of the above collapses to single-approver or auto-approve |
 
 Reviews happen in the admin console or via a CLI (`synveda proposal review 142 --approve`),
@@ -136,8 +139,9 @@ and the git bridge means they can *also* surface as GitHub PRs for engineering-c
 
 ### 2.5 What this buys, concretely
 
-- **Reproducibility**: `inject` responses cite commit hashes → "what did the agent know on
-  March 3rd" is `synveda inject --as-of 2026-03-03` (bitemporal + refs).
+- **Reproducibility**: context selections cite immutable revision ids and
+  rendered hashes; valid-time and transaction-time lenses answer what was true
+  and what the system knew at an instant.
 - **Rollback**: bad prompt shipped? `refs` move back one commit; every consuming agent heals
   on next session start.
 - **Blame/lineage**: every published sentence of context traces to an author or a source
@@ -148,26 +152,24 @@ and the git bridge means they can *also* surface as GitHub PRs for engineering-c
 
 ## 3. Read/write paths (end-to-end)
 
-**`inject`** (hot path, target p99 <150ms):
-JWT verify → tenant/scope resolution (cached) → Cedar authorize (in-process, ~µs) →
-composition engine reads `published` refs for scope chain (org→…→user) + policy-permitted
-`derived` → hybrid retrieve within candidates (pgvector + Tantivy, RRF fusion) → budgeted
-assembly (specificity gradient, pinned-first) → watermark with commit hashes → audit event →
-return block.
+**Append a session event** (never blocks the agent on downstream work): JWT
+verify → derive tenant/principal/project from bearer and session → ownership
+check → Cedar decision → idempotent immutable append → content-free audit →
+asynchronous capture trigger.
 
-**`observe`** (never blocks):
-Gateway authZ → PGMQ enqueue (ack <20ms) → Temporal workflow: redact/secret-scan → extract
-(classify into fact/decision/procedure/…) → dedup & conflict-detect against existing records →
-summarise → embed (TEI) → graph-link (adjacency tables, ADR-0043) → **commit to `derived`** →
-maybe auto-open promotion proposal.
-_Amended 2026-07-28 (ADR-0044, GRPH-2): the arrow before "commit to `derived`" is sequence, not
-a transaction boundary — graph-link runs **inside** the write transaction, after the records it
-describes exist and before the channel commit, so a record and every claim about it land
-together or not at all._
+**Capture**: select real session events → redact/validate model output → compare
+with visible current Knowledge → create duplicate/conflict/supersession hints →
+persist reviewable candidates only. Acceptance calls a typed VedaFlow Knowledge
+command; extraction never writes active Knowledge directly.
 
-**`recall`** (explicit tool):
-Same authZ → richer retrieval incl. graph traversal + as-of queries → results carry
-provenance + channel labels so the agent can weigh derived vs published.
+**Compose a session context run** (hot path, target p99 <150ms): ownership and
+PDP → current Knowledge lexical/semantic anchors → policy filtering → bounded
+selection under the token budget → rendered block + immutable revision ids +
+reason codes + hash → audit. Denied candidates never enter trace details.
+
+**Scoped query/recall**: the same current/as-of Knowledge rules with a separate
+authorisation and pagination contract for deep query or evaluation. There is no
+global `/v1/recall` route and no direct-store adapter path.
 
 ---
 
@@ -184,20 +186,20 @@ provenance + channel labels so the agent can weigh derived vs published.
 
 ## 5. Revised build order
 
-- **Phase 0 (wk 1)**: workspace scaffold per seed §8 + `synveda-vedaflow` crate added; compose
-  file with Postgres(+extensions), Rauthy, Temporal; ADR-0001 (stack), ADR-0002 (Cedar over
-  OPA), ADR-0003 (VedaFlow in Postgres, not git repos).
-- **Phase 1 (wk 2–4) — the spine**: OIDC login → auto-provision hierarchy → observe →
-  extraction → commit to `derived` → inject from scope chain with Cedar checks → hash-chained
-  audit. Claude Code adapter live.
-- **Phase 2 (wk 5–8) — VedaFlow**: objects/commits/refs/proposals, channels, approval matrix,
-  promotion proposals, CLI review flow, prompts & context packs as first authored asset types,
-  policy packs + lapses through VedaFlow, bitemporal as-of inject.
-- **Phase 3 (wk 9–12) — enterprise surface**: SCIM + Entra/Okta, skills registry (with
-  security-review gate), admin console v1 (proposals inbox = the hero screen), Qdrant adapter,
-  residency routing, git bridge (export), Helm.
-- **Phase 4 — ecosystem**: SDKs, LangGraph/OpenAI shims, importers (claude-mem, Cognee, mem0),
-  benchmark + retrieval-quality eval harness, SOC2 control mapping doc.
+- **Phases 0–2 — delivered foundation and governance proof**: workspace,
+  Postgres-first stack, OIDC, embedded Cedar, RLS, hash-chained audit and
+  VedaFlow objects/commits/refs/proposals. Their fixed hierarchy, record and
+  global runtime-route implementations are replaced rather than preserved.
+- **Phase 3 — paused enterprise surface**: the delivered skill, directory,
+  console, deployment and key-plane foundations are re-anchored by explicit
+  Phase 5 packages before the remaining enterprise backlog resumes.
+- **Phase 4 — ecosystem**: SDKs, adapters, import/export, telemetry, DR and
+  scale-out work follows the public context-platform contract.
+- **Phase 5 — context platform hard cut (current)**: generic governed scopes;
+  workspace/project/session runtime; stable Knowledge and immutable revisions;
+  capture candidates; explainable retrieval; versioned skills, tools and
+  configuration; one generated application contract; security/evaluation/demo
+  gates; then one clean pre-1.0 baseline schema. ADR-0068 locks the programme.
 
 ---
 

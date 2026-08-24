@@ -1052,8 +1052,11 @@ CNSL-2 Hierarchy & policy explorer (M) — visualise scopes, packs, roles, activ
   reader's own capabilities cannot be derived client-side at all without producing a second
   implementation of "may I" that disagrees with the PDP immediately rather than eventually.
 CNSL-3 Audit explorer (M) — AUD-2 surfaced; "what did agent know at T" as a UI query.
-CNSL-4 Memory browser (M) — per-scope records with provenance, channel, validity; manual
-  pin/retire (as proposals). AC: no direct-mutation path exists — everything is a proposal.
+CNSL-4 Knowledge browser (M) — delivered and subsumed by CPR-17's generated-contract
+  Knowledge Browser. Scope-filtered immutable revisions expose independently authorised
+  provenance and validity/history; create/edit/verify/merge/supersede/archive/restore/forget
+  are typed VedaFlow changes. The old raw-record and channel pin/retire nouns are deleted.
+  AC: no direct-mutation path exists and no hand-written console contract exists.
 
 ──────────────────────────────────────────────
 EPIC CPR — Context platform redesign (Phase 5)
@@ -1747,6 +1750,26 @@ CPR-16  Governed Knowledge mutation lifecycle (XL)
   named for the read/context cutover rather than hidden; focused tests, a runnable demo,
   `make ci` and `make db-test` pass. ADR-0081.
 
+CPR-17  Public Knowledge API, search and browser (XL)
+  Filed 2026-08-24 by the autonomous continuation. Put the CPR-15/16 aggregate and
+  command seam behind one generated public application contract: current/detail/history,
+  independently governed provenance and relations, usage, create/edit/verify/supersede/
+  merge/archive/restore/forget, cursor pagination and the complete Knowledge Browser.
+  Search uses the immutable current revision's stored lexical document and a forced-RLS
+  revision embedding sidecar for a real configured semantic model. The deterministic
+  zero-config hash remains an honest lexical-only degradation, never a semantic claim.
+  Every candidate, source scope and relation endpoint is decided before disclosure; a
+  denied row advances the cursor but leaks no object, edge or count.
+  This is the public noun cutover: delete the record classification route/CLI/eval call,
+  generic proposal inputs naming `record_ids`, raw-record console DTOs and fixtures. The
+  record-backed context composer remains internal only until CPR-18; there is no bridge,
+  fallback, alias or dual read. AC: all thirteen route groups are mounted and generated;
+  creation is idempotent and mutations require revision preconditions through VedaFlow;
+  every requested filter and current-active default is exact; lexical and semantic modes
+  are honest; history/source/relationship isolation holds; the browser uses only generated
+  operations; embedding RLS/erasure and content-free read audit hold; focused tests, demo,
+  `make ci` and `make db-test` pass. ADR-0082.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1840,7 +1863,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

@@ -5,9 +5,9 @@
  * Since CPR-8 this file is two things and the split matters. The transport —
  * `call`, `classify`, the session — is what everything uses, generated or
  * not. The named calls below it are the routes the contract does not cover:
- * `docs/api/openapi.json` declares the context-platform plane (32
- * operations) and the rest of `/v1` joins it at Prompt 19 of the
- * context-platform programme. Everything the document *does* declare is
+ * `docs/api/openapi.json` declares the foundation, session and Knowledge
+ * planes (53 operations); the rest of `/v1` joins it in the public-contract
+ * convergence package. Everything the document *does* declare is
  * reached through `client.mts`, whose types are generated from it; nothing
  * here duplicates one of those routes.
  *

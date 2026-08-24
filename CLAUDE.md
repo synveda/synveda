@@ -53,6 +53,8 @@ delivered** and CPR-13's demo-corpus re-point is open. The external CPR-14
 acceptance gate is delivered at replay/live-gateway and real-client tiers.
 CPR-15, the versioned Knowledge persistence aggregate, is delivered.
 CPR-16, the governed Knowledge mutation lifecycle, is delivered.
+CPR-17, the generated public Knowledge API/search/browser hard cut, is
+delivered and also closes CNSL-4 by subsumption.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -113,9 +115,10 @@ is generated from that file (`make check-api-types`). **Never hand-edit
 either.** To refresh both: `SYNVEDA_WRITE_OPENAPI=1 cargo test -p
 synveda-gateway --test openapi` then `node scripts/generate-api-types.mjs`.
 The document covers the context-platform plane — `/v1/me`,
-workspaces/projects/repositories, the access plane, and the six admin
-scope routes, and the session plane (**40 operations** since CPR-11) — and
-says so in its own description; the rest of `/v1` joins it at Prompt 19.
+workspaces/projects/repositories, access, admin scopes, sessions and the public
+Knowledge lifecycle/search plane (**53 operations** since CPR-17) — and says
+so in its own description; the remaining production planes join under the
+programme's public-contract convergence package.
 Since CPR-8 the generator also emits
 the **runtime** path/method table beside the type table and marks the eight
 operations whose document requires an `Idempotency-Key`, so the console's
@@ -160,7 +163,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 80 of 113 features delivered — see docs/backlog/STATUS.md for
+features done. 82 of 114 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -215,6 +218,13 @@ aggregate and immutable revision/provenance boundary, with no bridge to
 `records`. **CPR-16 was filed and delivered the same day**, making it **113
 with 80 delivered**: one VedaFlow-governed lifecycle and durable erasure seam,
 with the old extractor, promotion and retention runtime writers stopped.
+**CPR-17 was filed and delivered the same day**, making it **114 with 81
+delivered**: current immutable Knowledge reached the generated public API and
+the console, with per-object/source/edge decisions and honest lexical/semantic
+search, while the public raw-record classification and channel seams were
+deleted. It simultaneously subsumed the already-filed **CNSL-4 Knowledge
+browser**, making it **114 with 82 delivered** rather than leaving the replaced
+Memory-browser objective falsely open.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

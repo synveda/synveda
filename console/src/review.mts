@@ -17,9 +17,9 @@
  * a client can only guess and the guess is wrong half the time.
  *
  * **No optional fields invented for convenience.** Where the gateway omits
- * something it means something: `scan` is absent for a memory proposal
- * because a scan is a statement about executable content, and `checklist`
- * is absent both when nobody answered one and when somebody did and the
+ * something it means something: `scan` is absent for an artifact family
+ * that has no executable content, and `checklist` is absent both when
+ * nobody answered one and when somebody did and the
  * bundle has changed since — which are the same fact from a publication's
  * point of view (ADR-0053 decision 4).
  */
@@ -68,13 +68,12 @@ export interface ProposalDetail extends Proposal {
 }
 
 export interface Member {
-  /** A record id for a memory, a path for an authored asset. */
+  /** Stable member id or authored path. */
   member: string;
   asset: string;
   object_hash: string;
   /** `false` means the content moved after the proposal opened. */
   unchanged: boolean;
-  class?: string;
   sensitivity: string;
   effect: "add" | "update" | "none";
   /** The canonical bytes at the proposed address — what the approvals bind. */
@@ -152,38 +151,6 @@ export interface Shortfall {
 }
 
 // ── The few pure readings the screen needs ──────────────────────────────
-
-/**
- * The text inside a member's bytes, as a person reads it.
- *
- * A memory's proposed bytes are a canonical JSON object (ADR-0030
- * decision 4) and a skill file's are the file. A reviewer is reviewing the
- * *content* either way, so a screen that showed the envelope would be
- * asking them to read past `"kind":"derived"` to find the sentence that
- * changed.
- *
- * This is a reading of a known format rather than a judgement about it,
- * which is why it is allowed here: unlike "does this block?", there is no
- * version of this question the gateway could answer differently.
- */
-export function readable(raw: string): string {
-  if (!raw.startsWith("{")) {
-    return raw;
-  }
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed === "object" && parsed !== null) {
-      const content = (parsed as { content?: unknown }).content;
-      if (typeof content === "string") {
-        return content;
-      }
-    }
-  } catch {
-    // Not JSON after all. The raw bytes are the honest fallback: a member
-    // this console cannot parse is still a member somebody has to review.
-  }
-  return raw;
-}
 
 /**
  * How a member is named on screen.

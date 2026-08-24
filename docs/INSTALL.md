@@ -58,7 +58,7 @@ and the audit chain contains one break-glass event to say so:
 1  tenant.created  BREAK-GLASS
 ```
 
-There are no scopes, no identities, no grants and no records, because
+There are no scopes, no identities, no grants and no Knowledge items, because
 everything the product has a governed surface for is created *through* that
 surface, by a person the PDP can decide about. An installer runs once, as
 root-equivalent, before anybody is watching — it is the worst place in this
@@ -261,8 +261,9 @@ delete an observation the gateway has not confirmed.
 
 ### Everything else — Claude Desktop, Cursor, Zed
 
-`synveda mcp` serves governed memory to any MCP client over stdio: `recall` to
-search, and `remember` to store one durable fact in your own personal scope.
+`synveda mcp` serves governed context to any MCP client over stdio: `recall`
+opens a session context run, and `remember` appends an assertion event to a
+session for later capture in your own personal scope.
 (`recall` used to fetch by handle and read the corpus at a past instant. It
 composes a context run now, and both went with `/v1/recall`; Prompt 18 of the
 context-platform programme is where they return.) You do not have to write the
@@ -303,30 +304,31 @@ is where clients collect them — Claude Desktop keeps them in
 `rmcp` is the protocol SDK, so including it shows the frames themselves — which
 is what you want when the handshake is the thing failing.
 
-## Choosing an embedder — do this before writing records
+## Choosing an embedder for semantic Knowledge search
 
 ```sh
 synveda init --embedder tei      # BGE-M3; downloads ~2.3 GB once
 synveda init --embedder deterministic   # the default; no download
 ```
 
-`record_embeddings` stores the model that wrote each vector, embed-or-fail is
-unconditional, and **nothing in the product re-embeds a corpus**.
+The public Knowledge collection is always lexically searchable from its
+immutable current revision. With `tei`, a restart-safe indexer also stores a
+model-labelled revision vector and search fuses bounded lexical and semantic
+candidates. A newly written revision is available lexically immediately and
+joins the semantic leg after that asynchronous index converges.
 
-The default is `deterministic`: BLAKE3 of the content expanded to a 16-dim
-unit vector, recorded as `hash@1`. It needs no network and no model, and the
-same text always gives the same vector — which is what makes tests and demos
-reproduce exactly. Its geometry carries no meaning, though: equal texts
-collide and similar texts do not attract, so the dense leg contributes
-nothing and BM25 does all the real work. Right for a functional demo, wrong
-for a quality one.
+The default `deterministic` embedder remains useful for reproducible functional
+tests, but its BLAKE3 geometry has no semantic meaning. The Knowledge API never
+queries or labels it as semantic: responses say `lexical` and report
+`deterministic_embedder_is_not_semantic`. Use TEI/BGE-M3 for a quality or
+semantic demonstration.
 
-If you switch after writing records, the older half does not rank badly — it
-**disappears from the dense leg**. That leg filters on `model` and `dim`, so
-records written under the previous embedder are excluded from it entirely and
-survive on BM25 alone, with no error and no warning. Choose before you write,
-or start a fresh tenant. Supported dimensions are 16 and 1024 (ADR-0024
-decision 5), so a third model is not simply a flag.
+Vectors are keyed by immutable revision and model, so changing models does not
+reinterpret old vectors. The indexer creates rows for the configured model as
+it converges. The old `record_embeddings` table is not a Knowledge search
+index; it survives only inside CPR-18's controlled context-composition cutover.
+Supported index dimensions remain 16 and 1024 (ADR-0024 decision 5), so adding
+a third model shape requires an explicit schema decision.
 
 ## Using your own IdP
 
