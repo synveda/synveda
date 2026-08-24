@@ -292,6 +292,7 @@ impl Member {
 enum Effect {
     Add,
     Update,
+    Apply,
     None,
 }
 
@@ -445,6 +446,30 @@ pub async fn publish(profile: &str, id: ProposalId) -> Result<(), String> {
         short(&field("commit")),
         field("members"),
         field("added"),
+    );
+    Ok(())
+}
+
+/// `synveda proposal apply <id>` — run an approved Knowledge change.
+///
+/// The gateway repeats the command's PDP and revision checks; this client
+/// supplies no effect payload and cannot turn an approval into authority.
+pub async fn apply(profile: &str, id: ProposalId) -> Result<(), String> {
+    let (api, origin) = Api::connect(profile).await?;
+    announce(&api, &origin);
+    let applied = api.post(&format!("/v1/proposals/{id}/apply"), None).await?;
+    let field = |name: &str| {
+        applied
+            .get(name)
+            .and_then(|value| value.as_str())
+            .unwrap_or("-")
+            .to_owned()
+    };
+    eprintln!(
+        "synveda: Knowledge change {} — item {}, revision {}",
+        field("outcome"),
+        field("knowledge_item_id"),
+        field("revision_id"),
     );
     Ok(())
 }
@@ -997,6 +1022,7 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
         let (mark, label) = match member.effect {
             Effect::Add => (Mark::Added, "add   "),
             Effect::Update => (Mark::Meta, "update"),
+            Effect::Apply => (Mark::Added, "apply "),
             Effect::None => (Mark::Plain, "same  "),
         };
         out.push_str(&paint(
@@ -2029,6 +2055,7 @@ mod tests {
                 let label = match member["effect"].as_str().expect("effect") {
                     "add" => "add",
                     "update" => "update",
+                    "apply" => "apply",
                     "none" => "same",
                     other => panic!("{case}: unknown effect {other}"),
                 };

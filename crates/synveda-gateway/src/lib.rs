@@ -61,6 +61,7 @@ pub mod directory_admin;
 pub mod directory_sync;
 pub mod error;
 pub mod idempotency;
+pub mod knowledge;
 pub mod lapses;
 pub mod me;
 pub mod openapi;

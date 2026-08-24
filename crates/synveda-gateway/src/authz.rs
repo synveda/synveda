@@ -508,6 +508,27 @@ pub(crate) fn decide_read(
     decide_read_from(state, input, 0, resource, sensitivity)
 }
 
+/// [`decide`] for `KnowledgeRead` (CPR-16, ADR-0081).
+///
+/// Knowledge names a tier like the retired record read, but deliberately
+/// carries no lapse override. Keeping the wrapper distinct prevents a caller
+/// from authorising one corpus with the other corpus's action.
+pub(crate) fn decide_knowledge_read(
+    state: &AppState,
+    input: &DecisionInput,
+    resource: Resource,
+    sensitivity: Sensitivity,
+) -> Result<Authorized> {
+    decide_inner(
+        state,
+        input,
+        0,
+        Action::KnowledgeRead,
+        resource,
+        Some(sensitivity),
+    )
+}
+
 /// [`decide_read`] for `PromptRead` (PRMT-1, ADR-0049 decision 4).
 ///
 /// The second action that names a tier, and the reason [`decide_inner`]

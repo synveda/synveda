@@ -20,6 +20,8 @@
       "channel.read": true,
       "channel.rollback": true,
       "context_pack.write": true,
+      "knowledge.forget": true,
+      "knowledge.write": true,
       "lapse.grant": true,
       "lapse.revoke": true,
       "membership.grant": true,

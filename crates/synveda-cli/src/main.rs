@@ -957,6 +957,23 @@ enum ProposalCommand {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Run an approved Knowledge proposal's typed effect. The gateway
+    /// repeats PDP and revision checks before applying it (CPR-16).
+    Apply {
+        /// The proposal UUID.
+        id: ProposalId,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Run an approved *classification* proposal's effect: move its
+    /// records to the tier the review approved (AUTHZ-5). Retained only
+    /// through CPR-16's controlled old-record read interval.
+    Classify {
+        /// The proposal UUID.
+        id: ProposalId,
+        #[arg(long)]
+        profile: Option<String>,
+    },
     /// Record a decision to publish a skill the quality gate refuses
     /// (SKIL-3, ADR-0053 decision 8).
     ///
@@ -1008,14 +1025,6 @@ enum ProposalCommand {
         /// Anything you want the record to say.
         #[arg(long)]
         note: Option<String>,
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Run an approved *classification* proposal's effect: move its
-    /// records to the tier the review approved (AUTHZ-5).
-    Classify {
-        /// The proposal UUID.
-        id: ProposalId,
         #[arg(long)]
         profile: Option<String>,
     },
@@ -2331,6 +2340,12 @@ async fn run(cli: Cli) -> Result<(), String> {
             ProposalCommand::Publish { id, profile } => {
                 proposal::publish(&profile_name(profile), id).await
             }
+            ProposalCommand::Apply { id, profile } => {
+                proposal::apply(&profile_name(profile), id).await
+            }
+            ProposalCommand::Classify { id, profile } => {
+                proposal::classify(&profile_name(profile), id).await
+            }
             ProposalCommand::OverrideQuality {
                 id,
                 reason,
@@ -2342,9 +2357,6 @@ async fn run(cli: Cli) -> Result<(), String> {
                 note,
                 profile,
             } => proposal::checklist(&profile_name(profile), id, &items, note).await,
-            ProposalCommand::Classify { id, profile } => {
-                proposal::classify(&profile_name(profile), id).await
-            }
         },
         Command::Prompt(command) => match command {
             PromptCommand::List { scope, profile } => {

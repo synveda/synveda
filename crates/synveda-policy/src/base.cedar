@@ -102,6 +102,7 @@ forbid (
     !(resource in principal.token_scope) &&
     !([
         Synveda::Action::"MemoryRead",
+        Synveda::Action::"KnowledgeRead",
         Synveda::Action::"PromptRead",
         Synveda::Action::"ContextPackRead",
         Synveda::Action::"SkillRead"
@@ -200,6 +201,15 @@ forbid (
     resource
 ) when { context.sensitivity == "restricted" }
 unless { context.lapsed };
+
+// Knowledge does not inherit the retired lapse override. Until the governed
+// relaxation successor explicitly extends the new vocabulary, restricted
+// Knowledge is not readable under any pack.
+forbid (
+    principal,
+    action == Synveda::Action::"KnowledgeRead",
+    resource
+) when { context.sensitivity == "restricted" };
 
 // Lapses (AUTHZ-4, ADR-0037 decision 7): the product's one base-layer
 // *permit*, and it is here rather than in each pack because a lapse is an

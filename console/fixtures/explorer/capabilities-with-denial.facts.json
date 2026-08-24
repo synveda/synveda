@@ -5,6 +5,8 @@
     "channel.read",
     "channel.rollback",
     "context_pack.write",
+    "knowledge.forget",
+    "knowledge.write",
     "lapse.grant",
     "lapse.revoke",
     "membership.grant",

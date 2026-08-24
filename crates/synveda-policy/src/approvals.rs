@@ -85,6 +85,18 @@ pub fn regulated_strict() -> ApprovalMatrix {
                 &[(RoleKey::Curator, 1), (RoleKey::Administrator, 1)],
                 2,
             ),
+            rule(
+                Some(AssetKind::Knowledge),
+                Some(LOCAL.to_vec()),
+                &[(RoleKey::Curator, 1)],
+                1,
+            ),
+            rule(
+                Some(AssetKind::Knowledge),
+                Some(SHARED.to_vec()),
+                &[(RoleKey::Curator, 1), (RoleKey::Administrator, 1)],
+                2,
+            ),
             // Tech plan §2.4: "1 × dept steward + 1 × any curator (peer
             // review)". Peer review is the point, so two distinct.
             rule(
@@ -149,6 +161,12 @@ pub fn standard() -> ApprovalMatrix {
                 &[(RoleKey::Curator, 1)],
                 1,
             ),
+            rule(
+                Some(AssetKind::Knowledge),
+                Some(SHARED.to_vec()),
+                &[(RoleKey::Curator, 1)],
+                1,
+            ),
             rule(Some(AssetKind::Prompt), None, &[(RoleKey::Curator, 1)], 1),
             rule(
                 Some(AssetKind::ContextPack),
@@ -182,6 +200,12 @@ pub fn open_collaboration() -> ApprovalMatrix {
         rules: vec![
             rule(
                 Some(AssetKind::Memory),
+                Some(vec![ScopeKind::Tenant]),
+                &[(RoleKey::Curator, 1)],
+                1,
+            ),
+            rule(
+                Some(AssetKind::Knowledge),
                 Some(vec![ScopeKind::Tenant]),
                 &[(RoleKey::Curator, 1)],
                 1,

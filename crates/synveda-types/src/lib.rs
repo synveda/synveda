@@ -35,6 +35,8 @@ pub mod knowledge;
 pub mod json;
 mod lapse;
 mod mover;
+// Reusable durable operation vocabulary (CPR-16, ADR-0081).
+pub mod operation;
 mod pack;
 mod policy;
 mod promotion;
@@ -84,10 +86,10 @@ pub use directory::{DirectoryGroup, DirectoryUser, ScimCredential};
 pub use error::{Error, Result};
 pub use graph::{Depth, Graph};
 pub use id::{
-    ContextRunId, DirectoryGroupId, DirectoryUserId, GrantId, GraphEdgeId, GraphVertexId, GroupId,
-    IdentityId, InviteId, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId,
-    KnowledgeSourceId, LapseId, ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId,
-    ScopeId, SessionEventId, SessionId, TenantId, WorkspaceId,
+    ContextRunId, DirectoryGroupId, DirectoryUserId, DurableOperationId, GrantId, GraphEdgeId,
+    GraphVertexId, GroupId, IdentityId, InviteId, KnowledgeItemId, KnowledgeRelationId,
+    KnowledgeRevisionId, KnowledgeSourceId, LapseId, ProjectId, ProposalId, RecordId, RepositoryId,
+    ScimCredentialId, ScopeId, SessionEventId, SessionId, TenantId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use lapse::{

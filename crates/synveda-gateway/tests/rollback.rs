@@ -943,10 +943,11 @@ fn only_set_channels_of_readable_assets_rewind() {
             );
         }
 
-        // `policy` is what remains, and it is refused for a different reason
-        // that will not shrink: it has no channel at all — a lapse writes a
-        // row (ADR-0037 decision 16). This is the assertion that keeps the
-        // route honest once every *channelled* kind is governed.
+        // `policy` is a row-effect exemplar and is refused for a different
+        // reason that will not shrink: it has no channel at all (ADR-0037
+        // decision 16). Knowledge is the other row-effect kind; the shared
+        // `AssetKind::CHANNELLED` and ChannelRef tests pin both. This route
+        // assertion keeps the public refusal honest.
         let (status, refused) = post(
             app,
             &fx.tara,
@@ -964,7 +965,7 @@ fn only_set_channels_of_readable_assets_rewind() {
             refused["message"]
                 .as_str()
                 .unwrap_or_default()
-                .contains("has no channel"),
+                .contains("has no VedaFlow channel"),
             "an asset kind with no channel is refused by name, and says so \
              rather than blaming a missing read action: {refused}"
         );

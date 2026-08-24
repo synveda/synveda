@@ -1,0 +1,116 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into durable_operations\n            (tenant_id, id, kind, proposal_id, knowledge_item_id, input_hash)\n        values ($1, $2, 'knowledge_erasure', $3, $4, $5)\n        returning tenant_id, id, proposal_id, knowledge_item_id, kind, state,\n                  input_hash, attempts, lease_owner, lease_expires_at,\n                  last_error_code, result, created_at, updated_at, started_at,\n                  completed_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "proposal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "knowledge_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "input_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "lease_owner",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "lease_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "last_error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "result",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "b4aebeca04af6545c6b153763aa4b97b8cd09871b938afc4f1e56827d6080429"
+}

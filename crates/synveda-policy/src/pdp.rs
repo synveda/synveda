@@ -155,10 +155,18 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// `open-collaboration`, which reads runs tenant-wide role-free, it takes
 /// any grant at all: somebody holding nothing can see that a run happened
 /// and cannot read what was said in it.
+/// `@21`: CPR-16 adds the stable Knowledge aggregate's three actions
+/// (`KnowledgeRead`, `KnowledgeWrite`, `KnowledgeForget`) and exact item
+/// entity (ADR-0081). Read/write reach mirrors each pack's existing content
+/// shape, while irreversible forget is own-home role-free and otherwise
+/// owner/administrator-only. Knowledge does not inherit the retired lapse
+/// override. The approval matrix mirrors memory so personal/small-scope
+/// changes can auto-apply under the permissive profiles but still pass
+/// through a real VedaFlow change.
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 20),
-    (STANDARD, 20),
-    (OPEN_COLLABORATION, 20),
+    (REGULATED_STRICT, 21),
+    (STANDARD, 21),
+    (OPEN_COLLABORATION, 21),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -370,6 +378,7 @@ pub struct Pdp {
     workspace_type: EntityTypeName,
     project_type: EntityTypeName,
     session_type: EntityTypeName,
+    knowledge_item_type: EntityTypeName,
     action_type: EntityTypeName,
     embedded: HashMap<&'static str, Arc<LoadedPack>>,
     tenant_packs: RwLock<HashMap<TenantId, HashMap<String, Arc<LoadedPack>>>>,
@@ -506,6 +515,7 @@ impl Pdp {
             workspace_type: type_name("Synveda::Workspace")?,
             project_type: type_name("Synveda::Project")?,
             session_type: type_name("Synveda::Session")?,
+            knowledge_item_type: type_name("Synveda::KnowledgeItem")?,
             action_type: type_name("Synveda::Action")?,
             embedded,
             tenant_packs: RwLock::new(HashMap::new()),
@@ -1303,6 +1313,18 @@ impl Pdp {
                 let entity = new_entity(uid.clone(), attrs, HashSet::from([scope]))?;
                 Ok((uid, entity))
             }
+            ResourceEntity::KnowledgeItem { id, scope_id } => {
+                let uid = self.uid(&self.knowledge_item_type, &id.to_string())?;
+                let scope = self.scope_uid(scope_id)?;
+                let mut attrs = HashMap::new();
+                tenant_attr(&mut attrs);
+                attrs.insert(
+                    "scope".to_owned(),
+                    RestrictedExpression::new_entity_uid(scope.clone()),
+                );
+                let entity = new_entity(uid.clone(), attrs, HashSet::from([scope]))?;
+                Ok((uid, entity))
+            }
             ResourceEntity::Group { id } => {
                 let uid = self.group_uid(id)?;
                 let mut attrs = HashMap::new();
@@ -1415,6 +1437,7 @@ impl Pdp {
             Resource::Workspace(id) => self.uid(&self.workspace_type, &id.to_string())?,
             Resource::Project(id) => self.uid(&self.project_type, &id.to_string())?,
             Resource::Session(id) => self.uid(&self.session_type, &id.to_string())?,
+            Resource::KnowledgeItem(id) => self.uid(&self.knowledge_item_type, &id.to_string())?,
             Resource::Group(id) => self.group_uid(id)?,
             Resource::Grant(id) => self.uid(&self.grant_type, &id.to_string())?,
         };
@@ -1437,7 +1460,11 @@ impl Pdp {
         }
         if matches!(
             action,
-            Action::MemoryRead | Action::PromptRead | Action::ContextPackRead | Action::SkillRead
+            Action::MemoryRead
+                | Action::KnowledgeRead
+                | Action::PromptRead
+                | Action::ContextPackRead
+                | Action::SkillRead
         ) {
             // The tier every read seam names (ADR-0038 decision 2; ADR-0049
             // decision 4; ADR-0050 decision 7; ADR-0051 decision 10). No
@@ -1646,6 +1673,7 @@ fn lapsing<'a>(
         | Resource::Workspace(_)
         | Resource::Project(_)
         | Resource::Session(_)
+        | Resource::KnowledgeItem(_)
         | Resource::Group(_)
         | Resource::Grant(_) => None,
     };

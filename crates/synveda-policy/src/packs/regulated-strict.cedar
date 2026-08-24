@@ -1,4 +1,4 @@
-// regulated-strict@20 — the default product pack (seed §6, ADR-0014,
+// regulated-strict@21 — the default product pack (seed §6, ADR-0014,
 // ADR-0015, ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032, ADR-0036,
 // ADR-0037, ADR-0038).
 //
@@ -185,6 +185,58 @@ permit (
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["curator", "member", "owner", "administrator"])
+};
+
+// Stable Knowledge uses its own action and aggregate entity (CPR-16,
+// ADR-0081). Scope decisions govern create/list; item decisions govern exact
+// reads and immutable-revision mutations. The reach mirrors memory without
+// inheriting its lapse override.
+permit (principal, action == Synveda::Action::"KnowledgeRead", resource)
+when {
+    resource is Synveda::Scope
+        && principal in resource
+        && ["public", "internal"].contains(context.sensitivity)
+};
+permit (principal, action == Synveda::Action::"KnowledgeRead", resource)
+when {
+    resource is Synveda::KnowledgeItem
+        && principal in resource.scope
+        && ["public", "internal"].contains(context.sensitivity)
+};
+permit (principal, action == Synveda::Action::"KnowledgeRead", resource)
+when {
+    principal has own_scope
+        && ((resource is Synveda::Scope && resource == principal.own_scope)
+            || (resource is Synveda::KnowledgeItem && resource.scope == principal.own_scope))
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+permit (principal, action == Synveda::Action::"KnowledgeRead", resource)
+when {
+    resource in principal.tenant
+        && context.roles.containsAny(["viewer", "curator", "member", "reviewer", "owner", "administrator"])
+        && ["public", "internal", "confidential"].contains(context.sensitivity)
+};
+permit (principal, action == Synveda::Action::"KnowledgeWrite", resource)
+when {
+    principal has own_scope
+        && ((resource is Synveda::Scope && resource == principal.own_scope)
+            || (resource is Synveda::KnowledgeItem && resource.scope == principal.own_scope))
+};
+permit (principal, action == Synveda::Action::"KnowledgeWrite", resource)
+when {
+    resource in principal.tenant
+        && context.roles.containsAny(["curator", "member", "owner", "administrator"])
+};
+permit (principal, action == Synveda::Action::"KnowledgeForget", resource)
+when {
+    principal has own_scope
+        && ((resource is Synveda::Scope && resource == principal.own_scope)
+            || (resource is Synveda::KnowledgeItem && resource.scope == principal.own_scope))
+};
+permit (principal, action == Synveda::Action::"KnowledgeForget", resource)
+when {
+    resource in principal.tenant
+        && context.roles.containsAny(["owner", "administrator"])
 };
 
 // The session ledger (CPR-10, ADR-0076 decision 6).

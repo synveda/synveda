@@ -52,6 +52,7 @@ docs/implementation/synveda-context-platform.md. **Prompts 1–12 are
 delivered** and CPR-13's demo-corpus re-point is open. The external CPR-14
 acceptance gate is delivered at replay/live-gateway and real-client tiers.
 CPR-15, the versioned Knowledge persistence aggregate, is delivered.
+CPR-16, the governed Knowledge mutation lifecycle, is delivered.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -159,7 +160,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 79 of 112 features delivered — see docs/backlog/STATUS.md for
+features done. 80 of 113 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -211,7 +212,9 @@ since CPR-12 filed** — the same drift, a fourth time, and once again found by
 reading the trail rather than by any gate.) **CPR-15 was filed and delivered
 on 2026-08-24**, making it **112 with 79 delivered**: the stable Knowledge
 aggregate and immutable revision/provenance boundary, with no bridge to
-`records`.
+`records`. **CPR-16 was filed and delivered the same day**, making it **113
+with 80 delivered**: one VedaFlow-governed lifecycle and durable erasure seam,
+with the old extractor, promotion and retention runtime writers stopped.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

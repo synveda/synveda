@@ -456,9 +456,11 @@ handing everybody a transcript of everybody's prompts. Where you hold it, each
 entry gets a *Show raw payload* control; where you do not, the page says which
 role it takes.
 
-Three items in that navigation — Knowledge, New Learnings and Tools — have no
-data behind them yet. Each says so, and says which piece of work brings it.
-They are listed rather than hidden because they are what the product is.
+The Knowledge aggregate and governed lifecycle now exist behind the application
+service, but the public browser/search contract and New Learnings workflow land
+in the following context-platform packages. Until then the navigation remains
+an honest empty state rather than exposing a second hand-written record API.
+Tools likewise names its later registry package.
 
 Signing in needs a **key plane**, because a console session seals its tokens
 under the deployment's encryption key (TEN-4). `init` mints one at
@@ -585,9 +587,11 @@ and container it would touch and changes nothing.
 
 **Your data survives by default.** The four named volumes stay, and the
 output names them and the command that would remove them. `--purge` destroys
-them, which is the *only* way to remove a tenant's memory — a tenant row
-cannot be deleted yet (TEN-5), so the volume is the smallest unit of erasure
-this product has. That is a deployment-level wipe, not a GDPR erasure.
+them. A governed Knowledge `forget` removes one authorised item's plaintext,
+sources and index state while retaining content-free audit evidence; it does
+not delete a tenant. A tenant row still cannot be deleted (TEN-5), so a volume
+purge remains the only whole-tenant wipe. That is a deployment-level wipe, not
+a GDPR erasure certificate.
 
 `~/.synveda/data/kms.key` goes with a default uninstall even though the data
 stays. Records are not sealed under it and remain readable, but console

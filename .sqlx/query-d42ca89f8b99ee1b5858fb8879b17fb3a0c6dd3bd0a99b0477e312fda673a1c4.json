@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select\n          (select count(*) from knowledge_changes where tenant_id = $1) as \"changes!\",\n          (select count(*) from durable_operations where tenant_id = $1) as \"operations!\",\n          (select count(*) from knowledge_erasure_tombstones where tenant_id = $1) as \"tombstones!\",\n          (select count(*) from knowledge_index_invalidations where tenant_id = $1) as \"invalidations!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "changes!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "operations!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "tombstones!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "invalidations!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "d42ca89f8b99ee1b5858fb8879b17fb3a0c6dd3bd0a99b0477e312fda673a1c4"
+}

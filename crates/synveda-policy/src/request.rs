@@ -8,8 +8,8 @@ use synveda_types::access::{GrantSource, RoleKey};
 use synveda_types::anchor::ScopeAnchor;
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Error, GrantId, GroupId, Lapse, PolicyAssignment, ProjectId, Result, ScopeId, Sensitivity,
-    SessionId, TenantId, WorkspaceId,
+    Error, GrantId, GroupId, KnowledgeItemId, Lapse, PolicyAssignment, ProjectId, Result, ScopeId,
+    Sensitivity, SessionId, TenantId, WorkspaceId,
 };
 
 /// The PDP's own view of a governed scope: a node with a parent, a tenant, a
@@ -98,6 +98,14 @@ pub enum ResourceEntity {
         /// The session.
         id: SessionId,
         /// The scope it is decided at — its project's, or its workspace's.
+        scope_id: ScopeId,
+    },
+    /// A stable Knowledge aggregate, parented to its governing scope
+    /// (CPR-16, ADR-0081).
+    KnowledgeItem {
+        /// The Knowledge item.
+        id: KnowledgeItemId,
+        /// Its governing scope.
         scope_id: ScopeId,
     },
     /// A group. Tenant-wide: a group is not anchored anywhere in the tree.
@@ -306,6 +314,14 @@ pub enum Action {
     /// principal's own personal scope role-free (zero-config) and bound
     /// content roles beyond it.
     MemoryWrite,
+    /// Read one Knowledge item or enumerate visible Knowledge at a scope
+    /// (CPR-16, ADR-0081).
+    KnowledgeRead,
+    /// Create or change a Knowledge aggregate through VedaFlow.
+    KnowledgeWrite,
+    /// Governed plaintext erasure. Separate from archive because it is
+    /// intentionally irreversible and may be refused by retention hooks.
+    KnowledgeForget,
     /// Run a classification proposal's effect at the resource scope: move
     /// records to the sensitivity their proposed versions carry (AUTHZ-5,
     /// ADR-0038 decision 9).
@@ -573,7 +589,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 44] = [
+    pub const ALL: [Action; 47] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -592,6 +608,9 @@ impl Action {
         Action::InviteAccept,
         Action::MemoryRead,
         Action::MemoryWrite,
+        Action::KnowledgeRead,
+        Action::KnowledgeWrite,
+        Action::KnowledgeForget,
         Action::MemoryClassify,
         Action::PromptRead,
         Action::PromptWrite,
@@ -635,7 +654,7 @@ impl Action {
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 35] = [
+    pub const PROBED_AT_SCOPE: [Action; 37] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -651,6 +670,8 @@ impl Action {
         Action::MembershipRead,
         Action::MembershipGrant,
         Action::MemoryWrite,
+        Action::KnowledgeWrite,
+        Action::KnowledgeForget,
         Action::MemoryClassify,
         Action::PromptWrite,
         Action::ContextPackWrite,
@@ -709,8 +730,9 @@ impl Action {
     /// A boolean here would have to choose a tier to ask at, and then the
     /// answer would be about that tier while looking like it was about the
     /// action — the failure ADR-0038 decision 2 refuses a default for.
-    pub const TIERED_READS: [Action; 4] = [
+    pub const TIERED_READS: [Action; 5] = [
         Action::MemoryRead,
+        Action::KnowledgeRead,
         Action::PromptRead,
         Action::ContextPackRead,
         Action::SkillRead,
@@ -739,6 +761,9 @@ impl Action {
             Action::InviteAccept => "invite.accept",
             Action::MemoryRead => "memory.read",
             Action::MemoryWrite => "memory.write",
+            Action::KnowledgeRead => "knowledge.read",
+            Action::KnowledgeWrite => "knowledge.write",
+            Action::KnowledgeForget => "knowledge.forget",
             Action::MemoryClassify => "memory.classify",
             Action::PromptRead => "prompt.read",
             Action::PromptWrite => "prompt.write",
@@ -789,6 +814,9 @@ impl Action {
             Action::InviteAccept => "InviteAccept",
             Action::MemoryRead => "MemoryRead",
             Action::MemoryWrite => "MemoryWrite",
+            Action::KnowledgeRead => "KnowledgeRead",
+            Action::KnowledgeWrite => "KnowledgeWrite",
+            Action::KnowledgeForget => "KnowledgeForget",
             Action::MemoryClassify => "MemoryClassify",
             Action::PromptRead => "PromptRead",
             Action::PromptWrite => "PromptWrite",
@@ -848,6 +876,8 @@ pub enum Resource {
     Project(ProjectId),
     /// One session — one run of an agent (CPR-10, ADR-0076).
     Session(SessionId),
+    /// One stable Knowledge aggregate.
+    KnowledgeItem(KnowledgeItemId),
     /// One group. Tenant-wide, like the action over it.
     Group(GroupId),
     /// One grant — what a revocation names.
@@ -869,6 +899,7 @@ impl Resource {
             Resource::Workspace(_)
             | Resource::Project(_)
             | Resource::Session(_)
+            | Resource::KnowledgeItem(_)
             | Resource::Grant(_) => context.scopes.first().map(|node| node.id),
             Resource::Tenant(_) | Resource::Group(_) => None,
         }
@@ -883,6 +914,7 @@ impl fmt::Display for Resource {
             Resource::Workspace(id) => write!(f, "workspace {id}"),
             Resource::Project(id) => write!(f, "project {id}"),
             Resource::Session(id) => write!(f, "session {id}"),
+            Resource::KnowledgeItem(id) => write!(f, "knowledge item {id}"),
             Resource::Group(id) => write!(f, "group {id}"),
             Resource::Grant(id) => write!(f, "grant {id}"),
         }

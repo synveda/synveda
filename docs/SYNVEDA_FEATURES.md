@@ -1724,6 +1724,29 @@ CPR-15  Versioned Knowledge aggregate and provenance (XL)
   relation constraints refuse cross-tenant or mismatched revision claims; a Knowledge write
   changes no old record table; and focused tests, `make ci` and `make db-test` pass.
 
+CPR-16  Governed Knowledge mutation lifecycle (XL)
+  Filed 2026-08-24 by the autonomous continuation. Extend the existing VedaFlow proposal
+  and approval engine with a typed Knowledge `apply` effect: create, edit, verify,
+  supersede, merge, archive, restore and forget all produce one content-addressed change,
+  pass the PDP, resolve the effective approval matrix and chain audit evidence. A
+  permissive policy may auto-apply the change; a strict one leaves the exact bytes pending
+  review. No command writes a VedaFlow-independent Knowledge mutation.
+  The immutable VedaFlow object binds a content-free manifest and canonical payload hash;
+  the erasable effect projection retains the pending payload so authorised forget can
+  remove plaintext without destroying governance history. Add one reusable durable
+  operation ledger, with erasure as its first consumer. Forget evaluates the retention/
+  legal-hold seam, removes authorised Knowledge, command payload and index plaintext, and
+  leaves only ids, timestamps and hashes in an append-only tombstone.
+  AC: every command returns its change id and applied/pending-review/rejected outcome;
+  auto-apply, review, rejection and stale preconditions are exact; edits and verification
+  append immutable revisions; supersession writes an explicit relation; merge retains all
+  source provenance; archive/restore preserve history; erasure is durable, held or
+  content-free and retry-safe; all new tenant tables are forced-RLS; every transition is
+  content-free audited; the gateway starts no old extraction, promotion or retention
+  writer and no Knowledge command touches records; the two controlled old-plane seams are
+  named for the read/context cutover rather than hidden; focused tests, a runnable demo,
+  `make ci` and `make db-test` pass. ADR-0081.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1817,7 +1840,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

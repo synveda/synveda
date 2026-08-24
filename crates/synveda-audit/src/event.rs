@@ -376,6 +376,21 @@ pub enum AuditAction {
     ProposalRejected,
     /// A proposer withdrew their own proposal, closing it.
     ProposalWithdrawn,
+    /// A typed Knowledge mutation was opened as a VedaFlow change. Carries
+    /// command kind, ids, hashes and approval arithmetic, never content.
+    KnowledgeChangeOpened,
+    /// A Knowledge change's typed effect completed. The command kind in the
+    /// payload distinguishes create/edit/verify/supersede/merge/lifecycle.
+    KnowledgeChangeApplied,
+    /// A Knowledge change was closed without applying because a revision,
+    /// lifecycle or retention precondition no longer permitted its effect.
+    /// Carries only a stable reason code and identifiers.
+    KnowledgeChangeRejected,
+    /// A retention or legal-hold hook blocked a governed erasure operation.
+    KnowledgeErasureBlocked,
+    /// Plaintext, owned source descriptors and indexes were removed, leaving
+    /// only hashes and identifiers in the tombstone and chain.
+    KnowledgeErased,
     /// An approved lapse proposal's effect ran: a time-boxed grant now
     /// stands over the target scope's material (AUTHZ-4, ADR-0037
     /// decision 17). Payload carries both scopes, the action granted, the
@@ -563,7 +578,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 77] = [
+    pub const ALL: [AuditAction; 82] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -626,6 +641,11 @@ impl AuditAction {
         AuditAction::ProposalApproved,
         AuditAction::ProposalRejected,
         AuditAction::ProposalWithdrawn,
+        AuditAction::KnowledgeChangeOpened,
+        AuditAction::KnowledgeChangeApplied,
+        AuditAction::KnowledgeChangeRejected,
+        AuditAction::KnowledgeErasureBlocked,
+        AuditAction::KnowledgeErased,
         AuditAction::LapseGranted,
         AuditAction::LapseRevoked,
         AuditAction::LapseExpired,
@@ -710,6 +730,11 @@ impl AuditAction {
             AuditAction::ProposalApproved => "vedaflow.proposal.approved",
             AuditAction::ProposalRejected => "vedaflow.proposal.rejected",
             AuditAction::ProposalWithdrawn => "vedaflow.proposal.withdrawn",
+            AuditAction::KnowledgeChangeOpened => "knowledge.change.opened",
+            AuditAction::KnowledgeChangeApplied => "knowledge.change.applied",
+            AuditAction::KnowledgeChangeRejected => "knowledge.change.rejected",
+            AuditAction::KnowledgeErasureBlocked => "knowledge.erasure.blocked",
+            AuditAction::KnowledgeErased => "knowledge.erased",
             AuditAction::LapseGranted => "policy.lapse.granted",
             AuditAction::LapseRevoked => "policy.lapse.revoked",
             AuditAction::LapseExpired => "policy.lapse.expired",

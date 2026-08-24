@@ -162,6 +162,15 @@ namespace Synveda {
         scope: Scope,
     };
 
+    // One stable Knowledge aggregate (CPR-16, ADR-0081). The item is the
+    // resource because edits, verification, supersession and erasure must be
+    // decidable per aggregate. It is parented to its governing scope, and
+    // carries that scope as an attribute for packs that need to name it.
+    entity KnowledgeItem in [Tenant, Scope] {
+        tenant: Tenant,
+        scope: Scope,
+    };
+
     // One grant: a subject's role at a scope (CPR-5, ADR-0072).
     //
     // It is an entity so that revoking *this* grant is a decidable act. Before
@@ -420,6 +429,25 @@ namespace Synveda {
         appliesTo {
             principal: [Principal],
             resource: [Scope],
+            context: { roles: Set<String> },
+        };
+
+    // Knowledge reads carry the exact immutable revision's sensitivity.
+    // Unlike the pre-cut MemoryRead action they have no lapse attribute:
+    // CPR-16 adds no second override path, and restricted Knowledge therefore
+    // remains behind the invariant floor until the governed-relaxation
+    // successor deliberately extends this vocabulary.
+    action KnowledgeRead
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope, KnowledgeItem],
+            context: { roles: Set<String>, sensitivity: String },
+        };
+
+    action KnowledgeWrite, KnowledgeForget
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope, KnowledgeItem],
             context: { roles: Set<String> },
         };
 

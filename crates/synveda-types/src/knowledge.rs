@@ -21,8 +21,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    Error, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, ProjectId,
-    Result, ScopeId, Sensitivity, SessionEventId, TenantId,
+    DurableOperationId, Error, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId,
+    KnowledgeSourceId, ProjectId, ProposalId, Result, ScopeId, Sensitivity, SessionEventId,
+    TenantId,
 };
 
 /// Longest Knowledge title, in characters.
@@ -510,6 +511,315 @@ pub struct KnowledgeRelation {
     pub created_by: Option<String>,
     /// Registration time.
     pub created_at: DateTime<Utc>,
+}
+
+/// Governed mutations supported by the Knowledge command layer (CPR-16,
+/// ADR-0081).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeCommandKind {
+    /// Create a stable aggregate and first revision.
+    Create,
+    /// Append a new immutable revision.
+    Edit,
+    /// Append a revision whose verification evidence changed.
+    Verify,
+    /// Create an explicit replacement and supersedes relation.
+    Supersede,
+    /// Combine multiple aggregates and their provenance into one.
+    Merge,
+    /// Remove an aggregate from current retrieval without erasing history.
+    Archive,
+    /// Return an archived aggregate to active current retrieval.
+    Restore,
+    /// Govern irreversible plaintext erasure.
+    Forget,
+}
+
+impl KnowledgeCommandKind {
+    /// Every command kind in storage order.
+    pub const ALL: &'static [Self] = &[
+        Self::Create,
+        Self::Edit,
+        Self::Verify,
+        Self::Supersede,
+        Self::Merge,
+        Self::Archive,
+        Self::Restore,
+        Self::Forget,
+    ];
+
+    /// Stable wire/storage name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Create => "create",
+            Self::Edit => "edit",
+            Self::Verify => "verify",
+            Self::Supersede => "supersede",
+            Self::Merge => "merge",
+            Self::Archive => "archive",
+            Self::Restore => "restore",
+            Self::Forget => "forget",
+        }
+    }
+}
+
+impl fmt::Display for KnowledgeCommandKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for KnowledgeCommandKind {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|kind| kind.as_str() == value)
+            .ok_or_else(|| Error::Invalid {
+                message: format!("unknown Knowledge command kind: {value:?}"),
+            })
+    }
+}
+
+/// A source descriptor carried inside a governed command until it applies.
+///
+/// The descriptor holds no raw source payload. A session event remains in the
+/// immutable session ledger; a document, repository, URL or OKF source is a
+/// locator plus hashes and metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnowledgeSourceDraft {
+    /// Stable source id minted by the command author.
+    pub id: KnowledgeSourceId,
+    /// Scope governing disclosure of the descriptor.
+    pub scope_id: ScopeId,
+    /// Source family.
+    pub source_type: KnowledgeSourceType,
+    /// Exact source event for an observed source.
+    pub session_event_id: Option<SessionEventId>,
+    /// Stable logical locator for located material.
+    pub locator: Option<String>,
+    /// External revision/version label.
+    pub source_revision: Option<String>,
+    /// Source-content digest when known.
+    pub content_hash: Option<String>,
+    /// Forward-compatible descriptor metadata.
+    pub metadata: Value,
+}
+
+/// One stale-write precondition used by merge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnowledgeExpectedRevision {
+    /// Stable aggregate.
+    pub item_id: KnowledgeItemId,
+    /// Exact head the caller inspected.
+    pub revision_id: KnowledgeRevisionId,
+}
+
+/// A complete, durable Knowledge mutation payload.
+///
+/// The VedaFlow object stores only a content-free manifest and this payload's
+/// hash. This value lives in the typed effect projection so a pending review
+/// can apply later; a successful forget clears every payload naming its item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case")]
+pub enum KnowledgeCommand {
+    /// Create an aggregate.
+    Create {
+        /// Stable item id.
+        item_id: KnowledgeItemId,
+        /// Governing scope.
+        scope_id: ScopeId,
+        /// Optional project association.
+        project_id: Option<ProjectId>,
+        /// Optional owning principal.
+        owner_principal_id: Option<String>,
+        /// Knowledge type.
+        knowledge_type: KnowledgeType,
+        /// Creation origin.
+        origin: KnowledgeOrigin,
+        /// First immutable revision id.
+        revision_id: KnowledgeRevisionId,
+        /// First revision content.
+        content: KnowledgeRevisionContent,
+        /// Normalised provenance descriptors.
+        sources: Vec<KnowledgeSourceDraft>,
+    },
+    /// Append a revision.
+    Edit {
+        /// Stable aggregate.
+        item_id: KnowledgeItemId,
+        /// Current head the caller inspected.
+        expected_revision_id: KnowledgeRevisionId,
+        /// Fresh immutable revision id.
+        revision_id: KnowledgeRevisionId,
+        /// Replacement content.
+        content: KnowledgeRevisionContent,
+        /// Sources for the exact new revision.
+        sources: Vec<KnowledgeSourceDraft>,
+    },
+    /// Record verification as a new immutable revision.
+    Verify {
+        /// Stable aggregate.
+        item_id: KnowledgeItemId,
+        /// Current head the verifier inspected.
+        expected_revision_id: KnowledgeRevisionId,
+        /// Fresh immutable revision id.
+        revision_id: KnowledgeRevisionId,
+        /// Complete bounded verification metadata.
+        verification_metadata: Value,
+    },
+    /// Replace one aggregate explicitly, retaining the old content.
+    Supersede {
+        /// Item being replaced.
+        item_id: KnowledgeItemId,
+        /// Current head the caller inspected.
+        expected_revision_id: KnowledgeRevisionId,
+        /// Stable replacement aggregate id.
+        replacement_item_id: KnowledgeItemId,
+        /// Fresh replacement revision id.
+        replacement_revision_id: KnowledgeRevisionId,
+        /// Governing scope of the replacement.
+        scope_id: ScopeId,
+        /// Optional project association.
+        project_id: Option<ProjectId>,
+        /// Optional owner.
+        owner_principal_id: Option<String>,
+        /// Replacement type.
+        knowledge_type: KnowledgeType,
+        /// Replacement origin.
+        origin: KnowledgeOrigin,
+        /// Replacement content.
+        content: KnowledgeRevisionContent,
+        /// Replacement provenance.
+        sources: Vec<KnowledgeSourceDraft>,
+    },
+    /// Merge multiple current aggregates into one stable result.
+    Merge {
+        /// Every input and the exact head inspected.
+        inputs: Vec<KnowledgeExpectedRevision>,
+        /// Stable result aggregate id.
+        result_item_id: KnowledgeItemId,
+        /// Fresh result revision id.
+        result_revision_id: KnowledgeRevisionId,
+        /// Governing scope of the result.
+        scope_id: ScopeId,
+        /// Optional project association.
+        project_id: Option<ProjectId>,
+        /// Optional owner.
+        owner_principal_id: Option<String>,
+        /// Result type.
+        knowledge_type: KnowledgeType,
+        /// Result origin.
+        origin: KnowledgeOrigin,
+        /// Merged content.
+        content: KnowledgeRevisionContent,
+    },
+    /// Archive current Knowledge while retaining all history.
+    Archive {
+        /// Stable aggregate.
+        item_id: KnowledgeItemId,
+        /// Current head the caller inspected.
+        expected_revision_id: KnowledgeRevisionId,
+        /// Bounded human reason, retained in the governed change.
+        reason: String,
+    },
+    /// Restore archived Knowledge.
+    Restore {
+        /// Stable aggregate.
+        item_id: KnowledgeItemId,
+        /// Current head the caller inspected.
+        expected_revision_id: KnowledgeRevisionId,
+        /// Bounded human reason.
+        reason: String,
+    },
+    /// Erase plaintext after the VedaFlow change and retention hooks permit it.
+    Forget {
+        /// Stable aggregate.
+        item_id: KnowledgeItemId,
+        /// Current head the caller inspected.
+        expected_revision_id: KnowledgeRevisionId,
+        /// Bounded human reason; only its hash survives successful erasure.
+        reason: String,
+    },
+}
+
+impl KnowledgeCommand {
+    /// Command family.
+    #[must_use]
+    pub const fn kind(&self) -> KnowledgeCommandKind {
+        match self {
+            Self::Create { .. } => KnowledgeCommandKind::Create,
+            Self::Edit { .. } => KnowledgeCommandKind::Edit,
+            Self::Verify { .. } => KnowledgeCommandKind::Verify,
+            Self::Supersede { .. } => KnowledgeCommandKind::Supersede,
+            Self::Merge { .. } => KnowledgeCommandKind::Merge,
+            Self::Archive { .. } => KnowledgeCommandKind::Archive,
+            Self::Restore { .. } => KnowledgeCommandKind::Restore,
+            Self::Forget { .. } => KnowledgeCommandKind::Forget,
+        }
+    }
+
+    /// Every item named by this command, including a newly created result.
+    ///
+    /// This is the content-free affected-aggregate index retained beside the
+    /// VedaFlow manifest. Governed erasure uses it to clear every historical
+    /// command payload that could still contain the forgotten item's text.
+    #[must_use]
+    pub fn target_item_ids(&self) -> Vec<KnowledgeItemId> {
+        match self {
+            Self::Create { item_id, .. } => vec![*item_id],
+            Self::Edit { item_id, .. }
+            | Self::Verify { item_id, .. }
+            | Self::Archive { item_id, .. }
+            | Self::Restore { item_id, .. }
+            | Self::Forget { item_id, .. } => vec![*item_id],
+            Self::Supersede {
+                item_id,
+                replacement_item_id,
+                ..
+            } => vec![*item_id, *replacement_item_id],
+            Self::Merge {
+                inputs,
+                result_item_id,
+                ..
+            } => inputs
+                .iter()
+                .map(|input| input.item_id)
+                .chain(std::iter::once(*result_item_id))
+                .collect(),
+        }
+    }
+}
+
+/// Outcome returned by every governed Knowledge command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeMutationOutcome {
+    /// The approval matrix permitted immediate application.
+    Applied,
+    /// The VedaFlow change is open and awaits reviewers.
+    PendingReview,
+    /// The VedaFlow change was rejected.
+    Rejected,
+}
+
+/// Stable result envelope shared by API, capture and import callers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnowledgeMutationResult {
+    /// The VedaFlow proposal/change id.
+    pub change_id: ProposalId,
+    /// Governance outcome.
+    pub outcome: KnowledgeMutationOutcome,
+    /// Resulting stable aggregate when applicable.
+    pub knowledge_item_id: Option<KnowledgeItemId>,
+    /// Resulting immutable revision when applicable.
+    pub revision_id: Option<KnowledgeRevisionId>,
+    /// Durable operation for a long-running effect such as forget.
+    pub operation_id: Option<DurableOperationId>,
 }
 
 /// Returns canonical lower-case, sorted and de-duplicated tags.

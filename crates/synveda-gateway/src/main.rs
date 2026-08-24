@@ -1,8 +1,8 @@
 //! Gateway entry point. Configuration is environment-only for now:
 //! `DATABASE_URL` (required), `SYNVEDA_DB_MAX_CONNECTIONS` (default 8 —
-//! one pool shared by the request handlers *and* the background workers;
-//! see the comment at the call site for what that has and has not been
-//! measured to cost), `SYNVEDA_LISTEN_ADDR` (default `127.0.0.1:8120`),
+//! one pool shared by the request handlers and remaining background tasks;
+//! see the comment at the call site), `SYNVEDA_LISTEN_ADDR` (default
+//! `127.0.0.1:8120`),
 //! and one auth mode (ADR-0010 — setting both is a startup error):
 //! `SYNVEDA_OIDC_ISSUERS` (JSON trust-entry array; enables OIDC verification
 //! and `/auth/*`, with `SYNVEDA_PUBLIC_URL` naming this gateway in redirect
@@ -13,28 +13,13 @@
 //! (default 3600) caps service identities' token lifetime at the
 //! enforcement seam (AUTH-3, ADR-0018).
 //!
-//! The extraction worker (MEM-3, ADR-0022) is selected by
-//! `SYNVEDA_EXTRACTOR` (`deterministic` [default] | `claude` | `vllm` |
-//! `off`). `claude` requires `ANTHROPIC_API_KEY` (never logged) and
-//! honours `SYNVEDA_ANTHROPIC_BASE_URL` (default
-//! `https://api.anthropic.com`); `vllm` requires `SYNVEDA_VLLM_BASE_URL`
-//! and `SYNVEDA_EXTRACTOR_MODEL`; `SYNVEDA_EXTRACTOR_MODEL` otherwise
-//! defaults per implementation. The embedder (MEM-4, ADR-0023) is
+//! The retired record extractor is not started (CPR-16, ADR-0081); capture
+//! from session events is introduced by CPR-18. The embedder is
 //! selected by `SYNVEDA_EMBEDDER` (`deterministic` [default] | `tei` —
 //! deliberately no `off`: embed-or-fail is unconditional); `tei`
 //! requires `SYNVEDA_TEI_URL` (the dev compose serves
 //! `http://localhost:8110`) and honours `SYNVEDA_EMBEDDER_MODEL`
-//! (default `BAAI/bge-m3`). Worker pacing:
-//! `SYNVEDA_EXTRACTION_POLL_MS` (default 1000),
-//! `SYNVEDA_EXTRACTION_BATCH` (default 16),
-//! `SYNVEDA_EXTRACTION_VT_SECS` (default 60),
-//! `SYNVEDA_EXTRACTION_MAX_READS` (default 5).
-//!
-//! The auto-promotion engine (FLOW-4, ADR-0033) runs every
-//! `SYNVEDA_PROMOTION_INTERVAL_SECS` (default 300) and folds up to
-//! `SYNVEDA_PROMOTION_BATCH` (default 1024) audit events per tenant per
-//! pass. It cannot be turned off because it does nothing until a pack
-//! carries promotion rules, and no embedded pack does.
+//! (default `BAAI/bge-m3`).
 //!
 //! The search index sidecar (CTX-1, ADR-0024) lives under
 //! `SYNVEDA_SEARCH_INDEX_DIR` (default `./data/search-index`; one
@@ -72,7 +57,6 @@ use synveda_gateway::app::{self, AppState};
 use synveda_gateway::{authz, telemetry};
 use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, OidcVerifier, TokenVerifier};
 use synveda_ingest::embedding::Embedder as _;
-use synveda_ingest::extraction::Extractor as _;
 use synveda_policy::Pdp;
 
 #[tokio::main]
@@ -326,77 +310,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // The extraction worker (MEM-3, ADR-0022 decision 1): the observe
-    // queue's consumer, embedded so SMB mode stays one process. It shares
-    // the gateway's scope-chain cache — hierarchy-move invalidations must
-    // reach the worker's authorization reads.
-    let extractor = extractor_from_env()?;
-    // Shared with the inject route (CTX-3, ADR-0026 decision 3): the
-    // query-embedding call and the pipeline's record vectors carry one
-    // config-declared model identity.
+    // The configured embedder remains available to authored-asset and
+    // context paths during the controlled read cutover. The old extraction,
+    // promotion and retention loops are deliberately not started after
+    // CPR-16: all three mutate the retired record aggregate. CPR-18's capture
+    // worker will consume `session_events` into reviewable candidates instead.
     let embedder = Arc::new(embedder_from_env()?);
-    let extraction_worker = extractor.map(|extractor| {
-        tracing::info!(
-            extractor = extractor.method(),
-            embedder = embedder.method(),
-            embedding_model = embedder.model(),
-            "extraction worker starting (MEM-3/MEM-4, ADR-0022/0023)"
-        );
-        synveda_ingest::worker::spawn(
-            synveda_ingest::worker::WorkerDeps {
-                pool: pool.clone(),
-                pdp: Arc::clone(&pdp),
-                extractor,
-                embedder: embedder.as_ref().clone(),
-            },
-            extraction_config_from_env(),
-        )
-    });
-    if extraction_worker.is_none() {
-        tracing::warn!("SYNVEDA_EXTRACTOR=off: observe signals will accumulate unconsumed");
-    }
-
-    // The auto-promotion engine (FLOW-4, ADR-0033): a second background
-    // loop, on a cadence of minutes rather than the extraction worker's
-    // second. It writes nothing on the read path — it folds
-    // `context.injected` events the gateway already records into a usage
-    // projection, and opens FLOW-3 proposals under the material owner's
-    // authority when a pack's rules fire.
-    let promotion_config = promotion_config_from_env();
     tracing::info!(
-        interval_secs = promotion_config.interval.as_secs(),
-        batch = promotion_config.batch,
-        "promotion engine starting (FLOW-4, ADR-0033)"
-    );
-    let promotion_engine = synveda_ingest::promotion::spawn(
-        synveda_ingest::promotion::SweepDeps {
-            pool: pool.clone(),
-            pdp: Arc::clone(&pdp),
-        },
-        promotion_config,
-    );
-
-    // The retention sweep (MEM-6, ADR-0040 decision 14): the third
-    // background loop. It enforces nothing — the read path already
-    // refused expired material in the query that asked — so what it does
-    // is disposal: the temporal delete, the destruction of closed
-    // versions past a second horizon, and the observe staging plane
-    // MEM-1 and MEM-2 have been accumulating since they landed. In the
-    // default configuration no pack sets a record horizon, so a pass
-    // expires nothing and destroys nothing; the staging plane is the one
-    // thing every pack disposes of.
-    let retention_config = retention_config_from_env();
-    tracing::info!(
-        interval_secs = retention_config.interval.as_secs(),
-        batch = retention_config.batch,
-        "retention sweep starting (MEM-6, ADR-0040)"
-    );
-    let retention_sweep = synveda_ingest::retention::spawn(
-        synveda_ingest::retention::SweepDeps {
-            pool: pool.clone(),
-            pdp: Arc::clone(&pdp),
-        },
-        retention_config,
+        embedder = embedder.method(),
+        embedding_model = embedder.model(),
+        "runtime embedder ready; retired record writers are disabled (CPR-16)"
     );
 
     // The lapse expiry sweep (AUTHZ-4, ADR-0037 decision 4). Bookkeeping:
@@ -514,14 +437,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     refresher.abort();
     search_indexer.abort();
-    promotion_engine.abort();
-    retention_sweep.abort();
     lapse_sweep.abort();
     if let Some(sync) = directory_sync {
         sync.abort();
-    }
-    if let Some(worker) = extraction_worker {
-        worker.abort();
     }
 
     // Flush batched spans before exit; a killed process loses the tail.
@@ -563,56 +481,6 @@ fn kms_from_env() -> Result<synveda_crypto::Kms, String> {
         .map_err(|err| format!("SYNVEDA_KMS_KEY is not usable: {err}"))
 }
 
-/// Builds the configured extractor from `SYNVEDA_EXTRACTOR` and its
-/// companions (module header). `None` means `off`. Misconfiguration is a
-/// startup error: a silently-idle pipeline would break the <60s lag SLO
-/// without a symptom.
-fn extractor_from_env() -> Result<Option<synveda_ingest::extraction::AnyExtractor>, String> {
-    use synveda_ingest::extraction::{
-        AnyExtractor, ClaudeExtractor, DeterministicExtractor, VllmExtractor,
-    };
-    let selected = std::env::var("SYNVEDA_EXTRACTOR")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "deterministic".to_owned());
-    let model = std::env::var("SYNVEDA_EXTRACTOR_MODEL")
-        .ok()
-        .filter(|value| !value.is_empty());
-    match selected.as_str() {
-        "off" => Ok(None),
-        "deterministic" => Ok(Some(AnyExtractor::Deterministic(
-            DeterministicExtractor::new(),
-        ))),
-        "claude" => {
-            let api_key = std::env::var("ANTHROPIC_API_KEY")
-                .ok()
-                .filter(|value| !value.is_empty())
-                .ok_or("SYNVEDA_EXTRACTOR=claude requires ANTHROPIC_API_KEY")?;
-            let base_url = std::env::var("SYNVEDA_ANTHROPIC_BASE_URL")
-                .ok()
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| ClaudeExtractor::DEFAULT_BASE_URL.to_owned());
-            let model = model.unwrap_or_else(|| ClaudeExtractor::DEFAULT_MODEL.to_owned());
-            Ok(Some(AnyExtractor::Claude(ClaudeExtractor::new(
-                api_key, model, base_url,
-            ))))
-        }
-        "vllm" => {
-            let base_url = std::env::var("SYNVEDA_VLLM_BASE_URL")
-                .ok()
-                .filter(|value| !value.is_empty())
-                .ok_or("SYNVEDA_EXTRACTOR=vllm requires SYNVEDA_VLLM_BASE_URL")?;
-            let model = model.ok_or("SYNVEDA_EXTRACTOR=vllm requires SYNVEDA_EXTRACTOR_MODEL")?;
-            Ok(Some(AnyExtractor::Vllm(VllmExtractor::new(
-                model, base_url,
-            ))))
-        }
-        other => Err(format!(
-            "SYNVEDA_EXTRACTOR must be off|deterministic|claude|vllm, got {other:?}"
-        )),
-    }
-}
-
 /// Builds the configured embedder from `SYNVEDA_EMBEDDER` and its
 /// companions (module header). There is no `off`: wherever the worker
 /// runs, records commit embed-or-fail (ADR-0023 decision 6).
@@ -639,27 +507,6 @@ fn embedder_from_env() -> Result<synveda_ingest::embedding::AnyEmbedder, String>
         other => Err(format!(
             "SYNVEDA_EMBEDDER must be deterministic|tei, got {other:?}"
         )),
-    }
-}
-
-/// Worker pacing from `SYNVEDA_EXTRACTION_*`, with the defaults the
-/// module header documents. Unparseable values fall back to defaults:
-/// pacing is tuning, never a fail-closed control.
-/// `SYNVEDA_PROMOTION_INTERVAL_SECS` / `SYNVEDA_PROMOTION_BATCH`, with
-/// the engine's defaults for anything unset or unparseable.
-fn promotion_config_from_env() -> synveda_ingest::promotion::SweepConfig {
-    let defaults = synveda_ingest::promotion::SweepConfig::default();
-    synveda_ingest::promotion::SweepConfig {
-        interval: std::env::var("SYNVEDA_PROMOTION_INTERVAL_SECS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|secs| *secs > 0)
-            .map_or(defaults.interval, Duration::from_secs),
-        batch: std::env::var("SYNVEDA_PROMOTION_BATCH")
-            .ok()
-            .and_then(|value| value.parse::<i64>().ok())
-            .filter(|batch| *batch > 0)
-            .unwrap_or(defaults.batch),
     }
 }
 
@@ -771,46 +618,6 @@ fn directory_sync_config_from_env()
             .filter(|floor| *floor >= 0)
             .unwrap_or(defaults.breaker_floor),
     })
-}
-
-fn retention_config_from_env() -> synveda_ingest::retention::SweepConfig {
-    let defaults = synveda_ingest::retention::SweepConfig::default();
-    synveda_ingest::retention::SweepConfig {
-        interval: std::env::var("SYNVEDA_RETENTION_INTERVAL_SECS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|secs| *secs > 0)
-            .map_or(defaults.interval, Duration::from_secs),
-        batch: std::env::var("SYNVEDA_RETENTION_BATCH")
-            .ok()
-            .and_then(|value| value.parse::<i64>().ok())
-            .filter(|batch| *batch > 0)
-            .unwrap_or(defaults.batch),
-    }
-}
-
-fn extraction_config_from_env() -> synveda_ingest::worker::WorkerConfig {
-    let defaults = synveda_ingest::worker::WorkerConfig::default();
-    let parse = |name: &str| {
-        std::env::var(name)
-            .ok()
-            .and_then(|value| value.parse::<i64>().ok())
-            .filter(|value| *value > 0)
-    };
-    synveda_ingest::worker::WorkerConfig {
-        poll_interval: parse("SYNVEDA_EXTRACTION_POLL_MS")
-            .map(|ms| Duration::from_millis(ms as u64))
-            .unwrap_or(defaults.poll_interval),
-        batch: parse("SYNVEDA_EXTRACTION_BATCH")
-            .and_then(|value| i32::try_from(value).ok())
-            .unwrap_or(defaults.batch),
-        vt_secs: parse("SYNVEDA_EXTRACTION_VT_SECS")
-            .and_then(|value| i32::try_from(value).ok())
-            .unwrap_or(defaults.vt_secs),
-        max_reads: parse("SYNVEDA_EXTRACTION_MAX_READS")
-            .and_then(|value| i32::try_from(value).ok())
-            .unwrap_or(defaults.max_reads),
-    }
 }
 
 #[cfg(test)]

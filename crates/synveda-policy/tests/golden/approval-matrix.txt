@@ -18,6 +18,26 @@ regulated-strict   memory restricted org_unit   curator×1 + administrator×1 + 
 regulated-strict   memory restricted workspace  curator×1 + administrator×1 + 2distinct
 regulated-strict   memory restricted project    curator×1 + administrator×1 + 2distinct
 regulated-strict   memory restricted principal  curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge public tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge public org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge public workspace  curator×1 + 1distinct
+regulated-strict   knowledge public project    curator×1 + 1distinct
+regulated-strict   knowledge public principal  curator×1 + 1distinct
+regulated-strict   knowledge internal tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge internal org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge internal workspace  curator×1 + 1distinct
+regulated-strict   knowledge internal project    curator×1 + 1distinct
+regulated-strict   knowledge internal principal  curator×1 + 1distinct
+regulated-strict   knowledge confidential tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge confidential org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge confidential workspace  curator×1 + 1distinct
+regulated-strict   knowledge confidential project    curator×1 + 1distinct
+regulated-strict   knowledge confidential principal  curator×1 + 1distinct
+regulated-strict   knowledge restricted tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge restricted org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge restricted workspace  curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge restricted project    curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge restricted principal  curator×1 + administrator×1 + 2distinct
 regulated-strict   prompt public tenant     curator×1 + administrator×1 + 2distinct
 regulated-strict   prompt public org_unit   curator×1 + administrator×1 + 2distinct
 regulated-strict   prompt public workspace  curator×1 + administrator×1 + 2distinct
@@ -118,6 +138,26 @@ standard           memory restricted org_unit   curator×1 + administrator×1 + 
 standard           memory restricted workspace  administrator×1 + 2distinct
 standard           memory restricted project    administrator×1 + 2distinct
 standard           memory restricted principal  administrator×1 + 2distinct
+standard           knowledge public tenant     curator×1 + 1distinct
+standard           knowledge public org_unit   curator×1 + 1distinct
+standard           knowledge public workspace  auto
+standard           knowledge public project    auto
+standard           knowledge public principal  auto
+standard           knowledge internal tenant     curator×1 + 1distinct
+standard           knowledge internal org_unit   curator×1 + 1distinct
+standard           knowledge internal workspace  auto
+standard           knowledge internal project    auto
+standard           knowledge internal principal  auto
+standard           knowledge confidential tenant     curator×1 + 1distinct
+standard           knowledge confidential org_unit   curator×1 + 1distinct
+standard           knowledge confidential workspace  auto
+standard           knowledge confidential project    auto
+standard           knowledge confidential principal  auto
+standard           knowledge restricted tenant     curator×1 + administrator×1 + 2distinct
+standard           knowledge restricted org_unit   curator×1 + administrator×1 + 2distinct
+standard           knowledge restricted workspace  administrator×1 + 2distinct
+standard           knowledge restricted project    administrator×1 + 2distinct
+standard           knowledge restricted principal  administrator×1 + 2distinct
 standard           prompt public tenant     curator×1 + 1distinct
 standard           prompt public org_unit   curator×1 + 1distinct
 standard           prompt public workspace  curator×1 + 1distinct
@@ -218,6 +258,26 @@ open-collaboration memory restricted org_unit   administrator×1 + 2distinct
 open-collaboration memory restricted workspace  administrator×1 + 2distinct
 open-collaboration memory restricted project    administrator×1 + 2distinct
 open-collaboration memory restricted principal  administrator×1 + 2distinct
+open-collaboration knowledge public tenant     curator×1 + 1distinct
+open-collaboration knowledge public org_unit   auto
+open-collaboration knowledge public workspace  auto
+open-collaboration knowledge public project    auto
+open-collaboration knowledge public principal  auto
+open-collaboration knowledge internal tenant     curator×1 + 1distinct
+open-collaboration knowledge internal org_unit   auto
+open-collaboration knowledge internal workspace  auto
+open-collaboration knowledge internal project    auto
+open-collaboration knowledge internal principal  auto
+open-collaboration knowledge confidential tenant     curator×1 + 1distinct
+open-collaboration knowledge confidential org_unit   auto
+open-collaboration knowledge confidential workspace  auto
+open-collaboration knowledge confidential project    auto
+open-collaboration knowledge confidential principal  auto
+open-collaboration knowledge restricted tenant     curator×1 + administrator×1 + 2distinct
+open-collaboration knowledge restricted org_unit   administrator×1 + 2distinct
+open-collaboration knowledge restricted workspace  administrator×1 + 2distinct
+open-collaboration knowledge restricted project    administrator×1 + 2distinct
+open-collaboration knowledge restricted principal  administrator×1 + 2distinct
 open-collaboration prompt public tenant     curator×1 + 1distinct
 open-collaboration prompt public org_unit   curator×1 + 1distinct
 open-collaboration prompt public workspace  curator×1 + 1distinct

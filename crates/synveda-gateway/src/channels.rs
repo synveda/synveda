@@ -708,11 +708,20 @@ const DEFAULT_HISTORY: u32 = 20;
 /// Spelled out on each request type rather than flattened into them: a
 /// flattened struct deserialises differently from a query string than
 /// from a body, and two fields are cheaper than that surprise.
-fn channel_of(asset: Option<AssetKind>, channel: Option<Channel>) -> ChannelRef {
-    ChannelRef::new(
-        asset.unwrap_or(AssetKind::Memory),
+fn channel_of(asset: Option<AssetKind>, channel: Option<Channel>) -> Result<ChannelRef> {
+    let asset = asset.unwrap_or(AssetKind::Memory);
+    if !asset.has_channels() {
+        return Err(Error::Invalid {
+            message: format!(
+                "{} has no VedaFlow channel; its governed state is not a ref",
+                asset.as_str()
+            ),
+        });
+    }
+    Ok(ChannelRef::new(
+        asset,
         channel.unwrap_or(Channel::Published),
-    )
+    ))
 }
 
 /// Decides the asset kind's own read action at the scope, at the working
@@ -828,7 +837,7 @@ async fn history_inner(
     scope_id: ScopeId,
     query: HistoryQuery,
 ) -> Result<Json<HistoryResponse>> {
-    let channel = channel_of(query.asset, query.channel);
+    let channel = channel_of(query.asset, query.channel)?;
     let limit = query.limit.unwrap_or(DEFAULT_HISTORY).clamp(1, MAX_HISTORY);
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
@@ -955,7 +964,7 @@ async fn rollback_inner(
 ) -> Result<Json<RollbackResponse>> {
     let body = body(payload)?;
     validate_message(&body.message)?;
-    let channel = channel_of(body.asset, body.channel);
+    let channel = channel_of(body.asset, body.channel)?;
     let from: vedaflow::CommitHash = body.from_commit.parse()?;
     let to: vedaflow::CommitHash = body.to_commit.parse()?;
 
@@ -1118,7 +1127,7 @@ async fn pin_inner(
 ) -> Result<Json<PinResponse>> {
     let body = body(payload)?;
     validate_message(&body.reason)?;
-    let channel = channel_of(body.asset, body.channel);
+    let channel = channel_of(body.asset, body.channel)?;
     let commit_hash: vedaflow::CommitHash = body.commit.parse()?;
 
     let tenant_id = tenant_id()?;
@@ -1199,7 +1208,7 @@ async fn unpin_inner(
 ) -> Result<Json<UnpinResponse>> {
     let body = body(payload)?;
     validate_message(&body.reason)?;
-    let channel = channel_of(body.asset, body.channel);
+    let channel = channel_of(body.asset, body.channel)?;
 
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;

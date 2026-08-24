@@ -2,8 +2,8 @@
 //! (ADR-0032 decisions 3 and 4).
 //!
 //! The matrix resolves from asset × sensitivity × target scope kind ×
-//! pack, so the golden table is every cell of that product — 3 packs × 5
-//! asset kinds × 4 sensitivities × 5 scope kinds = 300 — rendered
+//! pack, so the golden table is every cell of that product — 3 packs × 6
+//! asset kinds × 4 sensitivities × 5 scope kinds = 360 — rendered
 //! canonically and compared against one checked-in literal. A wrong
 //! requirement and a wrong *absence* of one both fail, and the diff names
 //! the exact cell that moved.

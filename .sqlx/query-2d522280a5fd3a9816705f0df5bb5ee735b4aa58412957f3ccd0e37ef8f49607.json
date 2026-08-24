@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update durable_operations\n        set state = 'blocked', completed_at = now(), updated_at = now(),\n            lease_owner = null, lease_expires_at = null,\n            last_error_code = $3, result = jsonb_build_object('blocked', true)\n        where tenant_id = $1 and id = $2 and state in ('pending', 'running', 'failed')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2d522280a5fd3a9816705f0df5bb5ee735b4aa58412957f3ccd0e37ef8f49607"
+}

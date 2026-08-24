@@ -406,6 +406,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/proposals/{id}/publish", post(proposals::publish))
         .route("/v1/proposals/{id}/classify", post(proposals::classify))
+        .route("/v1/proposals/{id}/apply", post(proposals::apply))
         // The prompt registry (PRMT-1, ADR-0049). Authoring writes a draft
         // and moves nothing a consumer reads; resolution walks the caller's
         // own placement chain nearest-first, or serves a named scope's

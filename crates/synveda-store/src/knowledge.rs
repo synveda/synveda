@@ -1013,6 +1013,40 @@ pub async fn visible_sources(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// Returns the exact ordered source ids attached to a revision.
+///
+/// This is an internal mutation primitive, not a disclosure surface: the
+/// governed command layer uses it to carry provenance into verification and
+/// merge revisions inside the same authorised transaction. Public reads must
+/// continue to use [`visible_sources`], which applies the independently
+/// decided source-scope set.
+#[tracing::instrument(
+    name = "store.knowledge.revision_source_ids",
+    skip_all,
+    fields(tenant.id = %tenant_id, knowledge.revision.id = %revision_id),
+    err(Display)
+)]
+pub async fn revision_source_ids(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    revision_id: KnowledgeRevisionId,
+) -> Result<Vec<KnowledgeSourceId>> {
+    let rows = sqlx::query_scalar!(
+        r#"
+        select knowledge_source_id
+        from knowledge_revision_sources
+        where tenant_id = $1 and knowledge_revision_id = $2
+        order by ordinal
+        "#,
+        tenant_id.as_uuid(),
+        revision_id.as_uuid(),
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    Ok(rows.into_iter().map(KnowledgeSourceId::from_uuid).collect())
+}
+
 /// Adds an immutable relation claim.
 #[tracing::instrument(
     name = "store.knowledge.add_relation",

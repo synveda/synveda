@@ -88,6 +88,10 @@ impl ChannelRef {
     /// The channel of `asset` named `channel`.
     #[must_use]
     pub const fn new(asset: AssetKind, channel: Channel) -> Self {
+        assert!(
+            asset.has_channels(),
+            "a VedaFlow channel requires a channelled asset kind"
+        );
         ChannelRef { asset, channel }
     }
 
@@ -176,7 +180,13 @@ impl FromStr for ChannelRef {
         let (asset, channel) = name.split_once('/').ok_or_else(|| Error::Invalid {
             message: format!("not a channel ref name: {name:?}"),
         })?;
-        Ok(ChannelRef::new(asset.parse()?, channel.parse()?))
+        let asset = asset.parse::<AssetKind>()?;
+        if !asset.has_channels() {
+            return Err(Error::Invalid {
+                message: format!("{} has no VedaFlow channels", asset.as_str()),
+            });
+        }
+        Ok(ChannelRef::new(asset, channel.parse()?))
     }
 }
 
@@ -1444,7 +1454,7 @@ mod tests {
 
     #[test]
     fn ref_names_round_trip_through_the_vocabulary() {
-        for asset in AssetKind::ALL {
+        for asset in AssetKind::CHANNELLED {
             for channel in Channel::ALL {
                 let reference = ChannelRef::new(asset, channel);
                 assert_eq!(reference.name().parse::<ChannelRef>().unwrap(), reference);
@@ -1479,7 +1489,7 @@ mod tests {
     /// `read_members` would compose one (ADR-0036 decision 5).
     #[test]
     fn a_pin_name_is_not_a_channel_name() {
-        for asset in AssetKind::ALL {
+        for asset in AssetKind::CHANNELLED {
             for channel in Channel::ALL {
                 let reference = ChannelRef::new(asset, channel);
                 let pin = reference.pin_name();
@@ -1503,7 +1513,7 @@ mod tests {
     /// and once here.
     #[test]
     fn every_pin_name_matches_what_the_schema_lets_go() {
-        for asset in AssetKind::ALL {
+        for asset in AssetKind::CHANNELLED {
             for channel in Channel::ALL {
                 let pin = ChannelRef::new(asset, channel).pin_name();
                 assert!(pin.starts_with("pin/"), "migration 0021 would refuse {pin}");
@@ -1520,7 +1530,7 @@ mod tests {
     /// it.
     #[test]
     fn only_set_channels_can_be_pinned_or_rewound() {
-        for asset in AssetKind::ALL {
+        for asset in AssetKind::CHANNELLED {
             assert!(
                 require_set_channel(ChannelRef::new(asset, Channel::Published), "rewound").is_ok()
             );
@@ -1539,6 +1549,16 @@ mod tests {
         assert!(ChannelRef::memory(Channel::Published).is_set());
         assert!(ChannelRef::memory(Channel::Staged).is_set());
         assert!(!ChannelRef::memory(Channel::Derived).is_set());
+    }
+
+    #[test]
+    fn aggregate_and_row_effect_assets_are_not_channels() {
+        for name in ["knowledge/published", "policy/published"] {
+            assert!(
+                name.parse::<ChannelRef>().is_err(),
+                "{name} must not create a second current-state pointer"
+            );
+        }
     }
 
     #[test]

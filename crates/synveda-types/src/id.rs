@@ -128,6 +128,14 @@ define_id!(
 );
 
 define_id!(
+    /// Identifies one durable background operation (CPR-16, ADR-0081).
+    ///
+    /// The operation is a retry-safe address for work whose transaction may
+    /// outlive the request that proposed it, beginning with Knowledge erasure.
+    DurableOperationId
+);
+
+define_id!(
     /// Identifies a VedaFlow proposal — one governed request to move a
     /// reviewed set of assets onto a scope's published channel (FLOW-3,
     /// ADR-0032).

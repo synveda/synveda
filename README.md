@@ -46,16 +46,21 @@ workspace it happened in — and the two primitives hang off it:
 run is in the path, so a memory lands where the *work* happened rather than
 wherever the writer's own account sits.
 
-### Knowledge is treated like code
+### Knowledge is governed like code
 
-This is the idea the whole product turns on. Every memory, prompt, context pack
-and skill flows through **propose → review → approve → publish** — a system
-called **VedaFlow**, implemented with git-like semantics natively in Postgres.
+A Knowledge item has a stable identity, immutable content revisions,
+normalised provenance and explicit relations. Create, edit, verify, supersede,
+merge, archive, restore and forget each open one **VedaFlow** change. A
+permissive profile may apply that change immediately, but it still records the
+proposal, PDP decision, immutable revision and hash-chained audit evidence; a
+stricter profile leaves the same typed payload for review. Forget runs as a
+durable, held-or-completed erasure operation and retains content-free hashes
+rather than plaintext.
 
-Each scope has three standing channels:
+Prompts, context packs and skills continue to use VedaFlow's three standing
+channels at each scope:
 
-- **`derived`** — what the extraction pipeline wrote automatically. Readable per
-  policy, clearly watermarked as unreviewed.
+- **`derived`** — unreviewed material where the governed profile permits it.
 - **`staged`** — proposals under review.
 - **`published`** — the trusted channel.
 
@@ -106,10 +111,10 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, shims, telemetry, DR, gateway scale | 🚧 1/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger, durable adapter delivery and versioned Knowledge persistence | 🚧 14/33 |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger, durable adapter delivery and governed versioned Knowledge | 🚧 15/33 |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **112
-in total, 79 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **113
+in total, 80 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary

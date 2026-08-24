@@ -783,6 +783,7 @@ mod tests {
             ProposalState::Rejected,
             ProposalState::Withdrawn,
             ProposalState::Published,
+            ProposalState::Applied,
         ] {
             assert!(state.is_terminal());
         }

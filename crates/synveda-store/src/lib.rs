@@ -56,6 +56,7 @@ pub mod idempotency;
 pub mod identities;
 pub mod keys;
 pub mod knowledge;
+pub mod knowledge_lifecycle;
 pub mod lapses;
 
 pub mod packs;

@@ -216,6 +216,10 @@ const COVERED: &[&str] = &[
     "context_pack_documents",
     "context_packs",
     "directory_sync_state",
+    // CPR-16 (ADR-0081): the reusable operation ledger is tenant-bound just
+    // like the effect it executes; a guessed job id must not reveal whether
+    // another tenant is erasing anything.
+    "durable_operations",
     "graph_edges",
     "graph_edges_history",
     "graph_vertices",
@@ -232,10 +236,14 @@ const COVERED: &[&str] = &[
     // that another used a key it guessed.
     "idempotency_records",
     "identities",
-    // CPR-15 (ADR-0080): stable Knowledge heads, immutable revisions,
-    // independently governed sources and explicit relation claims. History
-    // and link rows carry tenant_id too: neither provenance nor the fact that
-    // two artifacts are related may become a cross-tenant side channel.
+    // CPR-15/16 (ADR-0080/0081): stable Knowledge heads, immutable revisions,
+    // independently governed sources, explicit relation claims, typed
+    // VedaFlow effects and content-free erasure/index evidence. Neither
+    // provenance, governance state nor the fact that erasure happened may
+    // become a cross-tenant side channel.
+    "knowledge_changes",
+    "knowledge_erasure_tombstones",
+    "knowledge_index_invalidations",
     "knowledge_items",
     "knowledge_items_history",
     "knowledge_relations",

@@ -201,9 +201,10 @@ Two things it deliberately does **not** do:
   layout byte-identical. `synveda plugin uninstall` removes the Claude Code
   plugin. Run both *before* removing the CLI. The uninstaller lists any client
   configs it finds mentioning us, so you know what to clean.
-- **It cannot delete a tenant**, because nothing can — see TEN-5 below. The
-  volume is this product's only unit of erasure today, which is why `--purge`
-  is all-or-nothing and why it is not GDPR erasure.
+- **It cannot delete a tenant**, because nothing can — see TEN-5 below.
+  Governed Knowledge `forget` can erase one authorised Knowledge aggregate;
+  the volume remains the only whole-tenant wipe, so `--purge` is still
+  all-or-nothing and is not a GDPR erasure certificate.
 
 One thing to know before you keep data: `~/.synveda/data/kms.key` goes with a
 default uninstall. Your records stay readable — they are not sealed under it —

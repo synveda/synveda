@@ -28,15 +28,18 @@ pub enum ProposalState {
     Withdrawn,
     /// Its effect ran: the target channel moved. Terminal.
     Published,
+    /// Its non-channel effect ran (CPR-16, ADR-0081).
+    Applied,
 }
 
 impl ProposalState {
     /// Every stored state.
-    pub const ALL: [ProposalState; 4] = [
+    pub const ALL: [ProposalState; 5] = [
         ProposalState::Open,
         ProposalState::Rejected,
         ProposalState::Withdrawn,
         ProposalState::Published,
+        ProposalState::Applied,
     ];
 
     /// Stable wire name, identical to the serde form and the stored
@@ -48,6 +51,7 @@ impl ProposalState {
             ProposalState::Rejected => "rejected",
             ProposalState::Withdrawn => "withdrawn",
             ProposalState::Published => "published",
+            ProposalState::Applied => "applied",
         }
     }
 
@@ -77,9 +81,8 @@ impl FromStr for ProposalState {
     }
 }
 
-/// The five-state vocabulary tech plan §2.3 describes, as the API renders
-/// it: the stored state, with `approved` rendered from `open` plus a
-/// satisfied requirement.
+/// The API rendering of the stored vocabulary, with `approved` derived from
+/// `open` plus a satisfied requirement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProposalView {
@@ -94,6 +97,8 @@ pub enum ProposalView {
     Withdrawn,
     /// Its effect ran.
     Published,
+    /// A governed non-channel effect ran.
+    Applied,
 }
 
 impl ProposalView {
@@ -106,6 +111,7 @@ impl ProposalView {
             ProposalState::Rejected => ProposalView::Rejected,
             ProposalState::Withdrawn => ProposalView::Withdrawn,
             ProposalState::Published => ProposalView::Published,
+            ProposalState::Applied => ProposalView::Applied,
         }
     }
 
@@ -118,6 +124,7 @@ impl ProposalView {
             ProposalView::Rejected => "rejected",
             ProposalView::Withdrawn => "withdrawn",
             ProposalView::Published => "published",
+            ProposalView::Applied => "applied",
         }
     }
 }
@@ -168,14 +175,20 @@ pub enum ProposalEffect {
     /// leaving for, and the one direction that removes a control would be
     /// the cheap one.
     Classify,
+    /// Apply a typed Knowledge aggregate mutation (CPR-16, ADR-0081).
+    ///
+    /// The reviewed VedaFlow object binds a content-free command manifest and
+    /// payload hash; the effect projection holds erasable plaintext.
+    Apply,
 }
 
 impl ProposalEffect {
     /// Every effect.
-    pub const ALL: [ProposalEffect; 3] = [
+    pub const ALL: [ProposalEffect; 4] = [
         ProposalEffect::Published,
         ProposalEffect::Lapse,
         ProposalEffect::Classify,
+        ProposalEffect::Apply,
     ];
 
     /// Stable wire name, identical to the serde form and to the stored
@@ -186,6 +199,7 @@ impl ProposalEffect {
             ProposalEffect::Published => "published",
             ProposalEffect::Lapse => "lapse",
             ProposalEffect::Classify => "classify",
+            ProposalEffect::Apply => "apply",
         }
     }
 
@@ -198,7 +212,7 @@ impl ProposalEffect {
     pub const fn channel(&self) -> Option<Channel> {
         match self {
             ProposalEffect::Published => Some(Channel::Published),
-            ProposalEffect::Lapse | ProposalEffect::Classify => None,
+            ProposalEffect::Lapse | ProposalEffect::Classify | ProposalEffect::Apply => None,
         }
     }
 }
@@ -284,8 +298,7 @@ mod tests {
         }
     }
 
-    /// The stored vocabulary has four states; the rendered one has five,
-    /// and `approved` is the only one that is computed.
+    /// `approved` is the only state computed rather than persisted.
     #[test]
     fn approved_is_a_rendering_of_open_plus_a_satisfied_requirement() {
         assert_eq!(
@@ -302,6 +315,7 @@ mod tests {
             ProposalState::Rejected,
             ProposalState::Withdrawn,
             ProposalState::Published,
+            ProposalState::Applied,
         ] {
             for satisfied in [true, false] {
                 assert_eq!(ProposalView::of(state, satisfied).as_str(), state.as_str());
@@ -315,6 +329,7 @@ mod tests {
         assert!(ProposalState::Rejected.is_terminal());
         assert!(ProposalState::Withdrawn.is_terminal());
         assert!(ProposalState::Published.is_terminal());
+        assert!(ProposalState::Applied.is_terminal());
     }
 
     #[test]

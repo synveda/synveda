@@ -28,10 +28,13 @@ programme convention established in Prompt 1.
 
 | Objective | Feature | Status | Start SHA | Result SHA | Focused tests | `make ci` | `make db-test` | Live/demo/evaluation evidence | Blockers |
 |---|---|---|---|---|---|---|---|---|---|
-| Versioned Knowledge aggregate, immutable revisions, normalised provenance and current projection | CPR-15 | **complete** | `6eb3e3b` | written by CPR-16 checkpoint | types 5/5; store DB 5/5; RLS completeness PASS | PASS | PASS | isolated `demos/cpr-15-knowledge-aggregate.sh` PASS | none |
+| Versioned Knowledge aggregate, immutable revisions, normalised provenance and current projection | CPR-15 | **complete** | `6eb3e3b` | `874aa51` | types 5/5; store DB 5/5; RLS completeness PASS | PASS | PASS | isolated `demos/cpr-15-knowledge-aggregate.sh` PASS | none |
+| Governed create/edit/verify/supersede/merge/archive/restore/forget and durable erasure | CPR-16 | **complete** | `874aa51` | recorded by CPR-17 checkpoint | gateway lifecycle 3/3; policy approvals 6/6, packs 7/7, PDP 11/11; RLS completeness PASS | PASS | PASS | isolated `demos/cpr-16-knowledge-lifecycle.sh` PASS: 19 governed changes, zero old records | none |
 
-**Exact next objective:** open CPR-16 and govern every Knowledge mutation
-through the PDP, VedaFlow and the audit chain, including durable erasure work.
+**Exact next objective:** implement CPR-17, the public Knowledge API, search
+and browser cutover; delete the raw-record product surface and classification
+seam named in CPR-16's controlled-cutover checklist, then commit and
+fast-forward push that bounded package.
 CPR-13 remains reserved for the demo-corpus re-point and follows the
 MVP surfaces it must demonstrate; rewriting those demos before Knowledge,
 capture and scoped recall exist would knowingly rewrite them twice.
@@ -2913,3 +2916,114 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(knowledge): add versioned knowledge aggregate (CPR-15)` on
   `feat/context-platform-mvp`.
 - **Commit hash.** Written by the CPR-16 checkpoint on Prompt 1's rule.
+
+### Prompt 14 objective — Governed Knowledge mutation lifecycle (CPR-16)
+
+- **Selected feature and state.** **CPR-16** is delivered. It is the one
+  governed mutation seam over CPR-15's aggregate, not a Knowledge-specific
+  proposal inbox or a rename of record promotion. The preceding CPR-15
+  feature commit is `874aa51`.
+
+- **Decision.** ADR-0081 extends the existing VedaFlow proposal vocabulary
+  with `AssetKind::Knowledge`, row-effect `apply` and terminal `applied`.
+  Every command stores an erasable canonical typed payload in
+  `knowledge_changes` and an immutable content-free manifest in VedaFlow; the
+  manifest binds command kind, stable ids, expected revisions and a BLAKE3
+  payload hash. The proposal id is the change id. The effective pack's one
+  approval matrix decides auto-apply versus pending review, and the public
+  apply seam independently re-hashes the typed payload, verifies the exact
+  command, target ids and digest in the proposal's immutable manifest, then
+  re-runs object ownership, every PDP decision and all lifecycle/revision
+  preconditions against current state.
+
+- **Domain and schema.** Eight closed commands cover create, edit, verify,
+  supersede, merge, archive, restore and forget, with a common result carrying
+  `applied`, `pending_review` or `rejected` plus the resulting stable item,
+  revision and durable-operation addresses. Migration
+  `0048_knowledge_lifecycle` takes the chain to **46 migrations** at schema
+  epoch **2**. It adds four tenant-bound, enabled-and-forced-RLS tables:
+  `knowledge_changes`, reusable `durable_operations`, content-free
+  `knowledge_erasure_tombstones` and `knowledge_index_invalidations`. SQLx
+  offline metadata was regenerated from a fresh migrated database.
+
+- **Command semantics.** Create writes the first immutable revision. Edit and
+  verify append with an exact current-revision precondition. Supersede creates
+  a replacement, records `supersedes` and closes the old current state. Merge
+  carries every distinct source, records `derived_from` for every input and
+  supersedes those inputs. Archive/restore move lifecycle without changing
+  content identity. A stale or invalid reviewed command rolls its partial
+  effect back to a savepoint and closes the real proposal `rejected`; review
+  never turns old authority or an old head into a current write.
+
+- **Erasure.** Forget first creates a durable operation and evaluates the
+  retention/legal-hold seam. A hold blocks the operation, retains content and
+  terminally rejects the change. An authorised operation marks
+  `erasure_pending`, rejects every other open change naming the aggregate,
+  removes revisions, relations, exclusive source descriptors, future
+  embedding/index state and all affected typed command payloads, then removes
+  the head. The retained tombstone, VedaFlow objects and audit entries contain
+  ids, timestamps and hashes only. Retrieval invalidation is explicit, and
+  retry/lease state is reusable by later import, re-index and re-encryption
+  jobs.
+
+- **PDP, VedaFlow, audit and observability.** Cedar gains separately decidable
+  `knowledge.read`, `knowledge.write` and `knowledge.forget` actions plus the
+  `KnowledgeItem` entity. Every input and output scope of merge/supersession is
+  decided; made-up and foreign ids fail ownership before policy. Generic
+  proposal creation rejects `apply`, so only the typed command service can
+  create the effect. Proposal detail verifies and renders the erasable typed
+  payload, and the CLI can apply the already-reviewed proposal through the
+  gateway. Six lifecycle/erasure audit actions chain decisions and transitions
+  without content. New paths carry tracing and
+  `synveda_knowledge_lifecycle_acts_total`.
+
+- **Hard-cut boundary and deletions.** The gateway no longer starts the old
+  session-event extractor, promotion engine or retention sweep, so an ordinary
+  running process cannot manufacture, publish or destroy records behind the
+  Knowledge lifecycle. No Knowledge command reads or writes `records`. Two
+  controlled old-plane seams remain and are named rather than hidden:
+  VedaFlow-governed record classification supports the restricted-tier
+  adversarial proof until CPR-17 deletes its route/CLI/eval client; context-pack
+  chunks remain a retrieval projection until CPR-18 moves composition off
+  `records`. The feature record contains the exact CPR-17/18 deletion list.
+
+- **Security and acceptance evidence.** Three database-backed gateway tests
+  cover personal auto-apply with an Applied proposal, immutable edit/verify,
+  stale rejection, another principal's private scope, archive/restore,
+  supersession, merge provenance, regulated pending review, exact typed review
+  rendering, approval plus public apply, policy drift, allowed erasure, held
+  erasure, closure of competing open changes, content-free retained evidence
+  and cross-tenant RLS for all four new tables. Approval **6/6**, pack **7/7**,
+  PDP **11/11**, VedaFlow **79/79**, type **212/212**, leak **2/2** and RLS
+  completeness pass. The full database suite includes the lifecycle tests and
+  fresh epoch/bootstrap proof.
+
+- **Runnable evidence and findings.** `demos/cpr-16-knowledge-lifecycle.sh`
+  runs in an isolated database and reports **19 governed changes, zero old
+  records**. The first `make db-test` found a checked explorer fixture that
+  predated `knowledge.write`/`knowledge.forget`; it was re-recorded from the
+  gateway and its two-line semantic diff reviewed. The next run found one
+  rollback assertion pinned to the older substring `has no channel`; it now
+  pins the production's more precise `has no VedaFlow channel` refusal and the
+  focused test passes. Neither finding changed an authority or weakened an
+  assertion.
+
+- **Tests and exact results.** Focused tests above and the isolated demo
+  **PASS**. `make db-test` **PASS** against a fresh migrated scratch database.
+  `make ci` **PASS**, including Rust/clippy `-D warnings`, SQLx offline
+  compilation, dependency/licence/backlog/ADR/API drift, Helm, evaluation
+  parsing, console **150/150** and Claude adapter **96/96**. The first managed
+  sandbox CI invocation could not bind loopback in two existing CLI tests;
+  the permitted rerun is the product result.
+
+- **Limitations and next work.** CPR-16 deliberately adds the governed command
+  layer before exposing Knowledge CRUD/search. CPR-17 owns the generated
+  public contract and Knowledge Browser and deletes the raw-record product
+  surface and classification seam. CPR-18 then moves retrieval and context
+  composition to current Knowledge revisions and removes the final controlled
+  record projection. Live Entra/Okta and authentic Cursor evidence remain
+  unrelated external gaps.
+
+- **Commit.** `feat(knowledge): govern knowledge lifecycle with VedaFlow
+  (CPR-16)` on `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-17 checkpoint on Prompt 1's rule.

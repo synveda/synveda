@@ -1,12 +1,13 @@
 //! The VedaFlow proposal API (FLOW-3, ADR-0032): `/v1/proposals` behind
 //! tenant resolution, uniform-404 ownership, and the PDP.
 //!
-//! A proposal is the governed request to move reviewed content onto a
-//! scope's published channel. Its content is a commit — a tree naming
-//! every member at the object address of exactly the version proposed —
-//! and its workflow is a row. Approvals are append-only, each naming the
-//! commit it approved and the effective roles its caster held at the
-//! target when they cast it.
+//! A proposal is the governed request to run one reviewed effect. Most move
+//! content onto a scope's published channel; Knowledge proposals apply a
+//! typed aggregate command instead (CPR-16, ADR-0081). In both cases its
+//! content is a commit — a tree naming every member at the exact object
+//! address reviewed — and its workflow is one row. Approvals are append-only,
+//! each naming the commit it approved and the effective roles its caster held
+//! at the target when they cast it.
 //!
 //! # Two layers, kept apart
 //!
@@ -213,6 +214,8 @@ enum MemberEffect {
     /// The channel names it at a different address; publication replaces
     /// that version with this one.
     Update,
+    /// A non-channel Knowledge command will execute against its aggregate.
+    Apply,
     /// The channel already names it at exactly this address; publication
     /// changes nothing about this member.
     None,
@@ -1738,6 +1741,15 @@ async fn quality_override_inner(
 
 // ── Publish: the proposal's effect ─────────────────────────────────────
 
+/// `POST /v1/proposals/{id}/apply` — run an approved typed Knowledge
+/// effect. The command layer repeats ownership, PDP and revision checks at
+/// this boundary; approvals never become write authority by themselves.
+#[tracing::instrument(name = "proposals.apply", skip_all)]
+pub(crate) async fn apply(State(state): State<AppState>, Path(id): Path<ProposalId>) -> Response {
+    let result = crate::knowledge::apply_reviewed(&state, id).await.map(Json);
+    respond(&state, "apply", result).await
+}
+
 #[derive(Serialize)]
 struct PublishResponse {
     proposal_id: ProposalId,
@@ -3091,6 +3103,9 @@ async fn member_views(
     proposal: &vedaflow::StoredProposal,
 ) -> Result<Vec<MemberView>> {
     let proposed = vedaflow::proposals::members(tx, tenant_id, proposal.commit).await?;
+    if proposal.asset == AssetKind::Knowledge {
+        return knowledge_member_views(tx, tenant_id, proposal, &proposed).await;
+    }
     if proposal.asset == AssetKind::ContextPack {
         return document_member_views(tx, tenant_id, proposal, &proposed).await;
     }
@@ -3173,6 +3188,104 @@ async fn member_views(
             }
         })
         .collect())
+}
+
+/// [`member_views`] for a governed Knowledge command (CPR-16, ADR-0081).
+///
+/// The VedaFlow object is deliberately content-free so authorised erasure can
+/// remove plaintext without rewriting immutable governance history. The
+/// erasable typed effect projection supplies the review text while it exists;
+/// its canonical digest must still equal the digest in the reviewed manifest.
+async fn knowledge_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let [member] = proposed else {
+        return Err(Error::Internal {
+            message: format!(
+                "Knowledge change {} has {} members rather than one command",
+                proposal.id,
+                proposed.len()
+            ),
+        });
+    };
+    if member.name != "command" {
+        return Err(Error::Internal {
+            message: format!(
+                "Knowledge change {} names member {:?}, expected command",
+                proposal.id, member.name
+            ),
+        });
+    }
+    let change = synveda_store::knowledge_lifecycle::read_change(&mut *tx, tenant_id, proposal.id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "Knowledge change {} has no typed effect projection",
+                proposal.id
+            ),
+        })?;
+    let object = vedaflow::read_object(&mut *tx, tenant_id, member.object)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "Knowledge change {} names missing manifest object {}",
+                proposal.id,
+                member.object.to_hex()
+            ),
+        })?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&object.content).map_err(|err| Error::Internal {
+            message: format!(
+                "Knowledge change {} manifest is invalid: {err}",
+                proposal.id
+            ),
+        })?;
+    let manifest_hash = manifest
+        .get("payload_hash")
+        .and_then(serde_json::Value::as_str);
+    let (content, payload_matches) = match change.payload {
+        Some(command) => {
+            let value = synveda_types::json::canonicalise(&serde_json::to_value(command).map_err(
+                |err| Error::Internal {
+                    message: format!("encode Knowledge change {} for review: {err}", proposal.id),
+                },
+            )?);
+            let bytes = serde_json::to_vec(&value).map_err(|err| Error::Internal {
+                message: format!(
+                    "encode Knowledge change {} canonical bytes: {err}",
+                    proposal.id
+                ),
+            })?;
+            let hash = blake3::hash(&bytes).to_hex().to_string();
+            let rendered = serde_json::to_string_pretty(&value).map_err(|err| Error::Internal {
+                message: format!("render Knowledge change {}: {err}", proposal.id),
+            })?;
+            (rendered, hash == change.payload_hash)
+        }
+        None => (
+            format!(
+                "{{\n  \"payload\": \"erased\",\n  \"payload_hash\": \"{}\"\n}}",
+                change.payload_hash
+            ),
+            true,
+        ),
+    };
+    Ok(vec![MemberView {
+        member: member.name.clone(),
+        record_id: None,
+        asset: AssetKind::Knowledge.as_str().to_owned(),
+        object_hash: member.object.to_hex(),
+        unchanged: payload_matches && manifest_hash == Some(change.payload_hash.as_str()),
+        class: None,
+        sensitivity: proposal.sensitivity,
+        content: content.clone(),
+        effect: MemberEffect::Apply,
+        proposed: content,
+        baseline: None,
+    }])
 }
 
 /// [`member_views`] for a context-pack proposal (PRMT-2, ADR-0050).
@@ -4014,6 +4127,13 @@ fn validate_open(body: &OpenBody) -> Result<()> {
         ProposalEffect::Lapse => {
             return invalid(
                 "a lapse is proposed at POST /v1/lapses, which is where its terms live".to_owned(),
+            );
+        }
+        ProposalEffect::Apply => {
+            return invalid(
+                "a Knowledge change is opened by the governed Knowledge command layer; \
+                 the generic proposal route cannot supply its typed effect payload"
+                    .to_owned(),
             );
         }
         ProposalEffect::Published => {}
