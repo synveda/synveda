@@ -42,13 +42,13 @@ import { ContextInspector } from "./Context.js";
 import { Learnings } from "./Learnings.js";
 import { Onboarding } from "./Onboarding.js";
 import { People } from "./People.js";
-import { Planned } from "./Planned.js";
 import { Reviews } from "./Reviews.js";
 import { Session } from "./Session.js";
 import { Sessions } from "./Sessions.js";
 import { Scopes } from "./Scopes.js";
 import { Settings } from "./Settings.js";
 import { SkillItem, Skills } from "./Skills.js";
+import { ToolServerItem, Tools } from "./Tools.js";
 import { Audit } from "./Audit.js";
 import { Policies } from "./Policies.js";
 import { ServiceIdentities } from "./ServiceIdentities.js";
@@ -216,7 +216,9 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
     case "learnings":
       return <Learnings />;
     case "tools":
-      return <Planned route={route.id} />;
+      return <Tools />;
+    case "tool-server":
+      return <ToolServerItem serverId={route.params.server_id as string} />;
     case "reviews":
       return <Reviews />;
     case "scopes":

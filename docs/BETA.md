@@ -199,9 +199,14 @@ for a project is separately governed: the catalogue records an immutable
 discovery digest and an exact approved project binding. A changed server is
 quarantined and does not replace the bound version. Credentials remain secret
 references, and the gateway never executes an imported stdio command or
-proxies a tool call. The catalogue backend is available through the generated
-public API; its Tools console arrives in CPR-26, so the current Tools page
-still says that it is not built rather than displaying a false empty list.
+proxies a tool call. The catalogue backend and CPR-26's Tools console use the
+generated public API. Select a project, open **Tools**,
+and import a credential-free manifest or supported client entry. A changed
+version is visibly quarantined and links to **Advanced → Reviews**; even after
+approval, the project's existing exact binding does not move until it is
+explicitly repinned. The generated configuration masks opaque secret-reference
+identifiers in the browser, and read-only health rows are reports from a named
+trusted adapter rather than a gateway-side execution claim.
 
 ## 9. Removing it
 

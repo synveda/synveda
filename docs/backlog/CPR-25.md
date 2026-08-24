@@ -50,7 +50,8 @@ adapter; it is not the catalogue and confers no authority on imported tools.
 ## Status
 
 Done 2026-08-25 from `07ce9f3b32d67c4a50e83ff8fed38d6abdd7983f`
-under accepted ADR-0086. The commit hash is written by the CPR-26 checkpoint.
+under accepted ADR-0086. Commit
+`9845186b4dfed7a61c59e997f3c31c85b8840dba`.
 
 ## Implementation
 

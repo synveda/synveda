@@ -183,7 +183,11 @@ Published benchmark scores, and what they do and do not measure:
   the active policy matrix decides its reviewers. The Skills Library browses
   exact versions, files, provenance, scans, project/personal bindings,
   controlled tests and host-observed versus model-reported usage without
-  treating declared tools as permission.
+  treating declared tools as permission. The MCP Tools catalogue does the
+  same for external servers: immutable discovery snapshots, visible schema
+  drift and quarantine, VedaFlow review, exact project bindings, read-only
+  adapter evidence and secret-safe generated configuration. Neither surface
+  turns declared metadata into execution authority.
 - **A Claude Code integration** — installed hooks plus an MCP recall tool,
   with deterministic session-plane replay in CI and an installed authenticated
   Claude Code 2.1.241 lifecycle gate.
@@ -233,15 +237,13 @@ Being explicit, so nothing here misleads:
   evidence. Deterministic replay covers outage and duplicate recovery in CI.
   A host killed before any lifecycle hook writes the in-flight turn can still
   lose that tail; nothing which reached the local spool is lost.
-- **One console page has no plane behind it.** CPR-8 made the console a
+- **Public-contract convergence is not complete.** CPR-8 made the console a
   product shell — routes, switchers, People, first-run onboarding, and the
   proposals inbox (CNSL-1) and scope explorer (CNSL-2) re-homed under
-  **Advanced**. Sessions, Knowledge and New Learnings now have their product
-  planes. The trusted MCP catalogue backend now retains immutable discovery
-  evidence, quarantines changed schemas and pins approved project bindings,
-  but **Tools** remains an honest placeholder until CPR-26 builds its generated-
-  API product surface. Seven other console surfaces also still call hand-written
-  paths until the public-contract convergence package.
+  **Advanced**. Sessions, Knowledge, New Learnings, Skills and Tools now have
+  generated-contract product planes. Seven older governance and operator
+  surfaces still call hand-written paths until the public-contract convergence
+  package.
 - **No Python/TS SDKs** (ADPT-4) and **no importers** from claude-mem, Cognee or
   mem0 (ADPT-5).
 - **No per-tenant encryption keys, WORM export or SIEM streaming**

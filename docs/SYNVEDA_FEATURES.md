@@ -1986,6 +1986,29 @@ CPR-25  Trusted MCP server catalogue and project bindings (XL)
   audit; generated OpenAPI; authentic stateless discovery fixtures; focused
   tests, demo, `make ci` and `make db-test` pass. ADR-0086.
 
+CPR-26  MCP Tools catalogue product experience (L)
+  Filed 2026-08-25 by the autonomous continuation. Replace the Tools
+  placeholder with one generated-contract product surface over CPR-25's
+  stable catalogue, immutable versions, quarantined discovery evidence,
+  exact project bindings and discovery-only tests. This feature adds no
+  execution authority, secret resolver, schema, API, policy or audit
+  vocabulary: ADR-0075 and ADR-0086 already lock those boundaries.
+  AC: a policy-aware catalogue and stable detail route show source, immutable
+  version/digest, transport, protocol, authentication kind, secret-reference
+  presence without its value, trust/validation state, discovered tools,
+  resources and prompts with schemas, approved-version differences, exact
+  project bindings, last discovery, latest read-only health evidence and
+  generated client configuration; import and discovery retain bounded raw
+  metadata while approval links to the common VedaFlow review plane; binding
+  create, enable, disable, exact repin and removal call only generated public
+  operations and retain their revision preconditions; changed quarantined
+  versions are unmistakable and cannot be bound before approval; the test
+  reporter names its trusted adapter harness and offers discovery/list methods
+  only; declared capabilities visibly grant no authority; no secret-reference
+  value appears in rendered output or frontend snapshots; the obsolete Tools
+  placeholder is deleted; focused pure and real-component acceptance,
+  production build and `make ci` pass. No ADR.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2079,7 +2102,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

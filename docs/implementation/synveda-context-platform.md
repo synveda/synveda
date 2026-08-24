@@ -39,11 +39,13 @@ programme convention established in Prompt 1.
 | Re-point the executable demo corpus and gate CLI/OpenAPI drift | CPR-13 | **complete** | `c9e647d` | `9b8ad04` | checker fixtures 4/4; shell syntax PASS; generated inventory 73/73 | PASS | N/A — no persisted behaviour changed | MEM sessions 22/22 + load 1/1; CTX 1/1; FLOW 4/4; AUTHZ 2/2; ADPT authentic-frame 2/2 | none |
 | Immutable Agent Skills versions, project/principal bindings, evidence-labelled usage and controlled test runs | CPR-23 | **complete** | `9b8ad04` | `89b5f79` | gateway 1/1; RLS/immutability 1/1 + completeness 1/1; OpenAPI 5/5; policy packs 7/7; CLI 157/157; console 179/179 | PASS | PASS (`synveda_test_80706`) | official unversioned Agent Skills spec pinned to upstream `69ef37e`; isolated `demos/cpr-23-versioned-skills.sh` PASS | none |
 | Generated-API Skills Library, bindings, exact files/tests/usage and legacy Skill review-screen cutover | CPR-24 | **complete** | `89b5f79` | `07ce9f3` | helpers/components 10/10; shared review 5/5; console 186/186; CLI 151/151; production build PASS | PASS | N/A — console/client-only | no in-app browser exposed; real-component SSR and production bundle PASS | none |
-| Trusted MCP server catalogue, immutable versions/snapshots, exact project bindings, generated configuration and read-only tests | CPR-25 | **complete** | `07ce9f3` | next checkpoint | types 5/5; gateway unit 3/3 + public DB 1/1; policy PASS; RLS 1/1; OpenAPI 5/5; console 186/186 | PASS | PASS (`synveda_test_88082`) | official stable MCP 2026-07-28 pinned to `5f5440b`; isolated `demos/cpr-25-tool-registry.sh` PASS; deterministic report is not live-server evidence | none |
+| Trusted MCP server catalogue, immutable versions/snapshots, exact project bindings, generated configuration and read-only tests | CPR-25 | **complete** | `07ce9f3` | `9845186` | types 5/5; gateway unit 3/3 + public DB 1/1; policy PASS; RLS 1/1; OpenAPI 5/5; console 186/186 | PASS | PASS (`synveda_test_88082`) | official stable MCP 2026-07-28 pinned to `5f5440b`; isolated `demos/cpr-25-tool-registry.sh` PASS; deterministic report is not live-server evidence | none |
+| Generated-API MCP Tools catalogue, immutable evidence comparison, VedaFlow review linkage, exact bindings and secret-safe configuration | CPR-26 | **complete** | `9845186` | next checkpoint | helpers/components 10/10; complete console 196/196; production build PASS | PASS | N/A — console/client-only | no in-app browser exposed; real-component SSR and production bundle PASS | none |
 
-**Exact next objective:** implement CPR-26, the generated-API Tools console over
-CPR-25's immutable catalogue, comparisons, exact project bindings, read-only
-tests and secret-free client configuration, without adding execution authority.
+**Exact next objective:** implement CPR-27, the versioned OKF v0.2 knowledge
+exchange adapter that validates and plans imports into capture candidates and
+exports selected current Knowledge deterministically, never publishing an
+import directly.
 
 ### Starting-point objective map
 
@@ -3790,5 +3792,65 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `feat(tools): add trusted MCP server registry (CPR-25)` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by the CPR-26 checkpoint under the programme's
+- **Commit hash.** `9845186b4dfed7a61c59e997f3c31c85b8840dba`.
+
+### Prompt 24 objective — MCP Tools catalogue product experience (CPR-26)
+
+- **Selected feature and architecture.** **CPR-26** is delivered from
+  `9845186`; it records CPR-25's commit as
+  `9845186b4dfed7a61c59e997f3c31c85b8840dba`. No new ADR was needed:
+  ADR-0075 already makes the generated contract the console boundary and
+  ADR-0086 already fixes immutable MCP evidence, VedaFlow approval, exact
+  bindings, secret references and the no-execution line.
+
+- **One inspection surface.** `/console/tools` replaces the sole remaining
+  `Planned` page with a cursor-paginated catalogue, selected-project import and
+  secret-safe generated configuration. `/console/tools/{server_id}` is the
+  stable address for source, exact version/digest, MCP 2026-07-28, transport,
+  authentication kind, reference presence, trust, last discovery, honest
+  metadata-validation/executable-scan state and the complete normalised
+  tools/resources/prompts plus descriptions, arguments and JSON schemas.
+  Selecting a quarantined version produces a blocking visual state and a
+  deterministic diff against the exact approved head; its VedaFlow change
+  links to artifact-neutral Advanced Reviews rather than growing a second
+  approval UI.
+
+- **Exact project distribution and evidence.** Binding controls list approved
+  versions only and call the generated idempotent create/update operations for
+  enable, disable, exact repin, remove and restoration with the binding's
+  revision precondition. Approval alone therefore still moves no project.
+  Discovery reports compare against the exact approved head. Connection-test
+  evidence names a trusted local or remote adapter, its version, outcome,
+  latency and the closed discovery/list method set; the screen states that it
+  records an adapter report and that the gateway did not connect or execute.
+
+- **Secret and authority boundary.** The descriptor exposes authentication
+  kind and reference presence, never the reference identifier. Generated
+  configuration masks reference identifiers, and every extensible JSON value
+  is defensively sanitised before entering markup; component fixtures plant
+  both opaque-reference and plaintext credential sentinels and assert neither
+  reaches the rendered snapshot. CPR-25's public database acceptance already
+  proves credential-shaped imports do not echo, persist in audit or enter
+  generated configuration as plaintext. Descriptions, requested permissions
+  and schemas are visibly labelled non-authoritative, and no `tools/call`
+  control or method exists.
+
+- **Contract and deletion result.** The page uses CPR-25's sixteen generated
+  operations and DTOs only. OpenAPI stays **101 operations**, schema epoch stays
+  **2**, and the migration chain stays **51** files. The placeholder component,
+  placeholder test and dead prose are deleted; no duplicate Tool DTO, API,
+  reviewer, secret resolver, local command runner or execution proxy appears.
+
+- **Tests and exact results.** CPR-26 helpers and real-component acceptance
+  **10/10**; complete console **196/196**; generated client, backlog and demo
+  drift checks PASS; production TypeScript/Vite build PASS (66 modules,
+  386.50 kB JavaScript / 109.11 kB gzip, 18.54 kB CSS / 4.23 kB gzip).
+  Complete `make ci` **PASS**. `make db-test` is N/A because no persisted,
+  policy, RLS or database-backed behaviour changed. No in-app browser session
+  was exposed, so real-component SSR plus the production bundle is the honest
+  UI evidence and no interactive visual-run claim is made.
+
+- **Commit.** `feat(console): add MCP tool registry experience (CPR-26)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-27 checkpoint under the programme's
   next-checkpoint convention.

@@ -341,6 +341,16 @@ The accepted external contract is the stateless MCP `2026-07-28` specification
 over stdio or Streamable HTTP. Retired HTTP+SSE/session-shaped servers are not
 translated.
 
+In the console, select the target project and open **Tools**. The catalogue
+links each stable server to its immutable versions, exact digests, transport,
+authentication shape, tools/resources/prompts and JSON schemas. A quarantined
+version is never offered in the binding picker; use its **Advanced Reviews**
+link, then explicitly repin the project if that exact approved version is the
+one it should advertise. Disable and remove preserve binding history. The
+configuration preview masks opaque secret-reference identifiers, and its
+health section labels the trusted adapter and exact read-only methods behind
+each report. A `passed` row does not mean the gateway executed a tool.
+
 ## Choosing an embedder for semantic Knowledge search
 
 ```sh
@@ -474,6 +484,13 @@ page shows exact versions and files, provenance, scanner evidence, bindings,
 controlled tests and usage. Declared tools are metadata only. Installing,
 updating, pinning, disabling or rolling back reports the VedaFlow outcome, so a
 pending review is never presented as an active change.
+
+**Tools** is the trusted MCP catalogue. It shows immutable source and
+capability snapshots, quarantined changes and their approved-version diff,
+exact project bindings, discovery-only adapter reports and generated client
+configuration. Capability descriptions and requested permissions are review
+metadata, not authorisation; imported commands are never launched by the
+gateway and secret-reference values are masked in ordinary console output.
 
 Governance lives under **Advanced** — Reviews (the proposals inbox), Scopes
 (the scope tree, the pack in force, standing relaxations), Policies, Audit and

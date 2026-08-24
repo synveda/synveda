@@ -158,6 +158,17 @@ test("a Skill aggregate has a stable library address", () => {
   assert.throws(() => hrefOf("skill-item"), /skill_id/);
 });
 
+test("an MCP server has a stable catalogue address", () => {
+  const href = hrefOf("tool-server", { server_id: "018f-server" });
+  assert.equal(href, "/console/tools/018f-server");
+  assert.deepEqual(matchRoute(href), {
+    id: "tool-server",
+    params: { server_id: "018f-server" },
+  });
+  assert.equal(routeOf("tool-server").group, "none");
+  assert.throws(() => hrefOf("tool-server"), /server_id/);
+});
+
 test("a path this console does not have matches nothing", () => {
   // `null` is rendered as a not-found page rather than redirected: the
   // gateway answers every path under the prefix with the bundle, so a typo

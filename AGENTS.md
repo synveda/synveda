@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **122 features filed, 91 delivered**;
+Cursor frame has been replayed. **123 features filed, 92 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -264,6 +264,12 @@ Load-bearing facts about Phase 5:
   than descriptions or secrets. MCP `2026-07-28` is the pinned stateless
   contract; the gateway never launches imported stdio commands, proxies
   `tools/call`, treats descriptions as authority or emits a credential value.
+- CPR-26 is delivered: the generated Tools catalogue and stable server address
+  expose immutable discovery/schema evidence, approved-head diffs, obvious
+  quarantine linked to common VedaFlow review, exact revisioned project
+  bindings, named discovery-only adapter reports and masked configuration.
+  Capability forecasts hide unavailable controls, declared metadata grants no
+  authority, and the deleted `Planned` page has no successor placeholder.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

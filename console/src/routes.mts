@@ -48,6 +48,7 @@ export type RouteId =
   | "skills"
   | "skill-item"
   | "tools"
+  | "tool-server"
   | "people"
   | "settings"
   | "reviews"
@@ -165,7 +166,14 @@ export const ROUTES: readonly RouteDef[] = [
     segment: "tools",
     label: "Tools",
     group: "primary",
-    blurb: "The governed tool registry.",
+    blurb: "Trusted MCP servers, immutable versions and exact project bindings.",
+  },
+  {
+    id: "tool-server",
+    segment: "tools/:server_id",
+    label: "MCP server",
+    group: "none",
+    blurb: "Discovery evidence, trust, comparisons, tests and bindings for one MCP server.",
   },
   {
     id: "people",

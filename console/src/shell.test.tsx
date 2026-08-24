@@ -17,7 +17,6 @@ import { test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { NotFound, NotOffered, PageHeading, Shell, appContext } from "./Shell.js";
-import { Planned } from "./Planned.js";
 import { reconcile } from "./selection.mjs";
 import { toText } from "./text.mjs";
 import type { MeView, ProjectView, WorkspaceView } from "./generated/api.js";
@@ -163,14 +162,4 @@ test("a page heading comes from the route table", () => {
   const rendered = toText(renderToStaticMarkup(<PageHeading route="people" />));
   assert.ok(rendered.includes("People"));
   assert.ok(rendered.includes("Who may act here"));
-});
-
-test("the remaining plane that is not built says so, and shows no empty list", () => {
-  // The failure this prevents: an empty list is indistinguishable from a
-  // plane that works and has nothing in it, which is precisely the wrong
-  // thing to tell somebody whose agent has been running all week.
-  const rendered = toText(renderToStaticMarkup(<Planned route="tools" />));
-  assert.ok(rendered.includes("not built yet"), rendered);
-  assert.ok(rendered.includes("waiting on"), "Tools does not say what it is waiting on");
-  assert.ok(!/\b0 (sessions|items|rows)\b/.test(rendered), `Tools fabricated an empty count:\n\n${rendered}`);
 });
