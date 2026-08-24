@@ -48,7 +48,7 @@ import { Session } from "./Session.js";
 import { Sessions } from "./Sessions.js";
 import { Scopes } from "./Scopes.js";
 import { Settings } from "./Settings.js";
-import { Skills } from "./Skills.js";
+import { SkillItem, Skills } from "./Skills.js";
 import { Audit } from "./Audit.js";
 import { Policies } from "./Policies.js";
 import { ServiceIdentities } from "./ServiceIdentities.js";
@@ -199,6 +199,8 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
       return <Settings />;
     case "skills":
       return <Skills />;
+    case "skill-item":
+      return <SkillItem skillId={route.params.skill_id as string} />;
     case "sessions":
       return <Sessions />;
     case "session":

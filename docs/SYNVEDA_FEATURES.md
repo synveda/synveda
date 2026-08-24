@@ -1932,6 +1932,31 @@ CPR-23  Immutable skill versions, bindings and usage (XL)
   skill channel/draft residue; focused tests, demo, `make ci` and `make db-test`
   pass. ADR-0085.
 
+CPR-24  Skills Library product experience (L)
+  Filed 2026-08-24 by the autonomous continuation. Replace the obsolete
+  mutable-Skill listing and Skill-only proposal renderer with one generated-
+  contract Skills Library over CPR-23's stable aggregates, immutable versions,
+  revisioned personal/project bindings, controlled tests and evidence-labelled
+  usage. This is a product surface, not another registry: it adds no schema,
+  API, policy or audit vocabulary and makes no decision the gateway owns.
+  AC: the catalogue and linkable detail show installed Skills, current and
+  available exact versions, digest, source/provenance, manifest extensions,
+  compatibility, declared tools, quality and scan evidence; the file browser
+  reads exact immutable bytes; personal and selected-project binding cards
+  show enabled/following/pinned state and offer create, enable/disable, pin,
+  unpin and rollback only when the real anchor forecasts `skill.write`; session
+  availability is the generated resolver's answer; installation and complete-
+  bundle updates carry idempotency and stale-head preconditions and every
+  mutation reports its VedaFlow change/outcome; fixture testing names its
+  validation sandbox, states that it executes no scripts and distinguishes
+  controlled-client history; recent usage keeps host-observed and model-
+  reported evidence separate; declared tools are explicitly non-authoritative;
+  the console makes only generated Skill calls; old hand-written `skillsAt`,
+  Skill checklist/quality review UI, CLI renderer and fixture corpus are
+  deleted while artifact-neutral Advanced Reviews remains; focused pure and
+  real-component acceptance, CLI regression, production build and `make ci`
+  pass. No ADR: ADR-0075 and ADR-0085 already lock the consumed boundaries.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2025,7 +2050,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

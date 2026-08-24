@@ -9,19 +9,10 @@
  *
  * Two rules govern what is allowed in this file.
  *
- * **No verdicts.** `blocking` is read, never computed; a shortfall's
- * sentence is read, never composed. Decisions 5 and 6 moved those to the
- * gateway so that two renderers could not disagree about them, and a
- * `severityRank` here would put one straight back — including the case that
- * makes it matter, a severity from a gateway newer than this bundle, where
- * a client can only guess and the guess is wrong half the time.
- *
- * **No optional fields invented for convenience.** Where the gateway omits
- * something it means something: `scan` is absent for an artifact family
- * that has no executable content, and `checklist` is absent both when
- * nobody answered one and when somebody did and the
- * bundle has changed since — which are the same fact from a publication's
- * point of view (ADR-0053 decision 4).
+ * The old Skill-only scan/checklist payload was removed with the mutable
+ * Skill publication model in CPR-23/24. Scan, rubric and harness evidence is
+ * version metadata in the Skills Library; this type deliberately contains
+ * only the common VedaFlow review model.
  */
 
 export interface Proposal {
@@ -63,8 +54,6 @@ export interface Promotion {
 export interface ProposalDetail extends Proposal {
   members: Member[];
   approvals: Approval[];
-  scan?: ScanReport;
-  quality?: QualityReport;
 }
 
 export interface Member {
@@ -91,63 +80,6 @@ export interface Approval {
   counts: boolean;
   comment?: string;
   created_at: string;
-}
-
-export interface ScanReport {
-  ruleset_version: number;
-  worst?: string;
-  blocks_at: string;
-  /** Whether the pack in force would refuse this bundle. */
-  blocked: boolean;
-  findings: Finding[];
-}
-
-export interface Finding {
-  path: string;
-  rule: string;
-  severity: string;
-  title: string;
-  line: number;
-  count: number;
-  /**
-   * Whether *this* finding is one the pack in force refuses (ADR-0056
-   * decision 5). Served, because the gateway is the only participant
-   * holding both the severity order and the pack.
-   */
-  blocking: boolean;
-}
-
-export interface QualityReport {
-  rubric_version: number;
-  score: number;
-  min_score: number;
-  requires_checklist: boolean;
-  checks: QualityCheck[];
-  checklist?: Checklist;
-  shortfalls: Shortfall[];
-  needs_override: boolean;
-}
-
-export interface QualityCheck {
-  check: string;
-  passed: boolean;
-  weight: number;
-  title: string;
-  detail?: string;
-}
-
-export interface Checklist {
-  answers: Record<string, string>;
-  note?: string;
-  complete: boolean;
-  concerns: string[];
-  reviewed_at: string;
-}
-
-export interface Shortfall {
-  kind: string;
-  /** The gateway's own sentence (ADR-0056 decision 6). */
-  detail: string;
 }
 
 // ── The few pure readings the screen needs ──────────────────────────────

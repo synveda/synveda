@@ -177,8 +177,7 @@ h4 {
 }
 
 ul.plain,
-ul.queue,
-ul.findings {
+ul.queue {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -207,66 +206,18 @@ ul.queue li + li {
   font-weight: 600;
 }
 
-/*
- * A blocking finding is marked in the text, not only in the colour. The
- * chip is what a screen reader announces and what survives a copy-paste
- * into a ticket; the colour is the fast read for somebody looking at it.
- * Either alone would leave a reader unable to tell which findings stop the
- * publication — most acutely for a severity served by a newer gateway,
- * where the name itself tells them nothing (ADR-0056 decision 5).
- */
-.chip {
-  display: inline-block;
-  border: 1px solid var(--error-line);
-  background: var(--error-bg);
-  border-radius: 999px;
-  padding: 0 0.5rem;
-  margin-left: 0.4rem;
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.finding {
-  padding: 0.4rem 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.finding.blocking .severity {
-  font-weight: 700;
-}
-
-.severity {
-  display: inline-block;
-  min-width: 4.5rem;
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
 .refusal {
   color: var(--error-line);
   margin: 0.5rem 0;
 }
 
-.stale,
-.weight {
+.stale {
   color: var(--muted);
 }
 
 .comment {
   color: var(--muted);
   font-style: italic;
-}
-
-.answers .concern .verdict {
-  color: var(--error-line);
-  font-weight: 700;
-}
-
-.verdict {
-  display: inline-block;
-  min-width: 2.5rem;
 }
 
 .member {
@@ -339,11 +290,9 @@ button:disabled {
 
 /* ── The hierarchy & policy explorer (CNSL-2, ADR-0058) ─────────────────
  *
- * A neutral badge, deliberately not `.chip`. That class is CNSL-1's alert
- * for a finding that blocks a publication and is styled as one; an origin
- * or a grant's outcome is a fact rather than a warning, and painting
- * "assigned here" in the refusal colour would teach a reader that the
- * loudest thing on the screen is the ordinary one.
+ * A neutral badge: an origin or a grant's outcome is a fact rather than a
+ * warning, and painting "assigned here" in the refusal colour would teach a
+ * reader that the loudest thing on the screen is the ordinary one.
  */
 .tag {
   display: inline-block;
@@ -1365,6 +1314,148 @@ dl.context-scores dd {
   font-size: 0.88rem;
 }
 
+/* ── Skills Library (CPR-24, ADR-0085) ──────────────────────────────── */
+
+.skills-intro {
+  max-width: 52rem;
+}
+
+.skill-availability,
+.skill-form,
+.skill-detail > section,
+.skill-version > section {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+ul.skill-library-list,
+ul.inline-list,
+ul.evidence-list,
+ul.scan-findings,
+.skill-files ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.skill-library-list > li,
+ul.evidence-list > li,
+ul.scan-findings > li,
+.skill-files li {
+  border-bottom: 1px solid var(--line);
+  padding: 0.65rem 0;
+}
+
+ul.skill-library-list a.row {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul.skill-library-list a.row:hover strong {
+  text-decoration: underline;
+}
+
+ul.inline-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+ul.inline-list li {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+}
+
+.form-grid,
+.skill-binding-grid,
+.skill-version {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+.form-grid label,
+.full-field,
+.binding-actions label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.full-field {
+  margin-top: 1rem;
+}
+
+.full-field textarea,
+.json-value,
+.file-content {
+  width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 0.82rem/1.45 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+.skill-binding-card {
+  min-width: 0;
+  padding: 0.85rem;
+  border-left: 3px solid var(--line);
+}
+
+dl.facts.compact {
+  font-size: 0.88rem;
+}
+
+.binding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+  margin: 0.8rem 0;
+}
+
+.availability-state {
+  overflow-wrap: anywhere;
+}
+
+.skill-version {
+  margin-top: 1rem;
+}
+
+.skill-version > section {
+  min-width: 0;
+  margin: 0;
+}
+
+.skill-files button.selected,
+.evidence.host_observed {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.evidence {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.75rem;
+}
+
+.evidence.model_reported {
+  color: var(--muted);
+}
+
+.json-value,
+.file-content {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+  padding: 0.75rem;
+}
+
 @media (max-width: 55rem) {
   .knowledge-toolbar {
     justify-content: flex-start;
@@ -1372,6 +1463,12 @@ dl.context-scores dd {
   }
 
   .knowledge-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid,
+  .skill-binding-grid,
+  .skill-version {
     grid-template-columns: 1fr;
   }
 

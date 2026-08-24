@@ -37,12 +37,12 @@ programme convention established in Prompt 1.
 | Linkable Context Inspector, retention-aware evidence and exact revision outcome feedback | CPR-21 | **complete** | `8ed8aa6` | `8cdd1ee` | console helpers 7/7; component 6/6; complete console 179/179; context 3/3; sessions 22/22; production build PASS | PASS | PASS | in-app browser unavailable; real-component SSR covers full/redacted/hashes-only/disabled/refusal and the production bundle builds | none |
 | Core personal/team PulseBoard loop across sessions, capture, governed Knowledge, privacy, supersession and inspector evidence | CPR-22 | **complete** | `8cdd1ee` | `c9e647d` | consolidated DB acceptance 1/1; capture 4/4; context 3/3; console 179/179 | PASS | PASS | isolated `demos/cpr-22-mvp-acceptance.sh` PASS: 3 sessions, 5 candidates, 4 changes, 3 current + 1 superseded Knowledge, 2 runs, 3 selections, zero records | none |
 | Re-point the executable demo corpus and gate CLI/OpenAPI drift | CPR-13 | **complete** | `c9e647d` | `9b8ad04` | checker fixtures 4/4; shell syntax PASS; generated inventory 73/73 | PASS | N/A — no persisted behaviour changed | MEM sessions 22/22 + load 1/1; CTX 1/1; FLOW 4/4; AUTHZ 2/2; ADPT authentic-frame 2/2 | none |
-| Immutable Agent Skills versions, project/principal bindings, evidence-labelled usage and controlled test runs | CPR-23 | **complete** | `9b8ad04` | next checkpoint | gateway 1/1; RLS/immutability 1/1 + completeness 1/1; OpenAPI 5/5; policy packs 7/7; CLI 157/157; console 179/179 | PASS | PASS (`synveda_test_80706`) | official unversioned Agent Skills spec pinned to upstream `69ef37e`; isolated `demos/cpr-23-versioned-skills.sh` PASS | none |
+| Immutable Agent Skills versions, project/principal bindings, evidence-labelled usage and controlled test runs | CPR-23 | **complete** | `9b8ad04` | `89b5f79` | gateway 1/1; RLS/immutability 1/1 + completeness 1/1; OpenAPI 5/5; policy packs 7/7; CLI 157/157; console 179/179 | PASS | PASS (`synveda_test_80706`) | official unversioned Agent Skills spec pinned to upstream `69ef37e`; isolated `demos/cpr-23-versioned-skills.sh` PASS | none |
+| Generated-API Skills Library, bindings, exact files/tests/usage and legacy Skill review-screen cutover | CPR-24 | **complete** | `89b5f79` | next checkpoint | helpers/components 10/10; shared review 5/5; console 186/186; CLI 151/151; production build PASS | PASS | N/A — console/client-only | no in-app browser exposed; real-component SSR and production bundle PASS | none |
 
-**Exact next objective:** deliver CPR-24, the generated-API Skills Library,
-over CPR-23's exact immutable versions, bindings, scan/test evidence and usage;
-delete the superseded admin-only Skill review fixtures/screen while preserving
-Advanced Reviews as the shared VedaFlow surface.
+**Exact next objective:** begin CPR-25, the trusted MCP server catalogue and
+project-binding backend, after recording CPR-24's commit hash under the
+next-checkpoint convention.
 
 ### Starting-point objective map
 
@@ -3665,5 +3665,56 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `feat(skills): add immutable versions bindings and usage
   (CPR-23)` on `feat/context-platform-mvp`.
-- **Commit hash.** Written by the CPR-24 checkpoint under the programme's
+- **Commit hash.** `89b5f790a1268e55d8e0df849032ac06a954fd97`.
+
+### Prompt 22 objective — Skills Library product experience (CPR-24)
+
+- **Selected feature and architecture.** **CPR-24** is delivered from
+  `89b5f79`. ADR-0075 and ADR-0085 already fix the generated-client product
+  shell, immutable Skill aggregate, binding and controlled-harness boundaries,
+  so no new ADR or backend variation was introduced. Schema epoch **2** stays
+  at **50 migrations**, OpenAPI stays at **85 operations**, and
+  `make db-test` is not applicable to this console/client-only hard cut.
+
+- **One generated-contract Library.** `/console/skills` now lists installed
+  immutable heads and separately asks CPR-23's exact availability resolver
+  what a personal or selected-project session would receive. A stable
+  `/console/skills/{skill_id}` address exposes every visible immutable version,
+  exact file bytes, bundle digest, provenance and source revision, manifest
+  extensions, client compatibility, scanner evidence and quality score. Tool
+  declarations are labelled as metadata and explicitly grant no authority.
+
+- **Governed controls and evidence.** Complete-bundle installation and update,
+  personal/project bind, enable, disable, exact pin, follow-current and
+  rollback all call the generated idempotent VedaFlow operations and report
+  `applied`, `pending_review` or `rejected` without pretending a proposal moved
+  active state. Binding writes retain revision preconditions. Capability
+  forecasts decide which controls are offered, never whether an operation is
+  allowed. Validation names the in-process `validation_sandbox`, says no script
+  is executed, and keeps controlled-client runs distinct. Usage remains tied to
+  one immutable version and visibly separates host-observed evidence from model
+  self-report.
+
+- **Deleted implementation.** The last hand-written Skill request in
+  `api.mts`, the mutable-Skill scan/checklist/quality branch in console and CLI
+  proposal review, ten stale fixture files, their fixture-corpus tests and dead
+  styles are removed. Advanced Reviews remains as the artifact-neutral common
+  VedaFlow surface; immutable scan and quality evidence now lives where it is
+  actionable, on the Skills Library version.
+
+- **Tests and exact results.** Pure and real-component Skills acceptance
+  **10/10**, artifact-neutral shared review **5/5**, complete console
+  **186/186**, CLI **151/151**, both TypeScript compilations, generated-client
+  drift and the production Vite build pass. Complete `make ci` **PASS** across
+  Rust fmt/clippy/tests/build/licences, dependency/backlog/ADR/OpenAPI/demo/
+  corpus/chart/benchmark/evaluation checks and all TypeScript workspaces. The
+  initial sandboxed run failed only because two CLI tests could not bind a
+  loopback listener (`Operation not permitted`); the unrestricted full run
+  passed them. The in-app Browser exposed no browser instance, so interactive
+  browser QA was unavailable; real-component server rendering plus the
+  production bundle is the recorded UI evidence.
+
+- **Commit.** `feat(console): add Skills Library (CPR-24)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-25 checkpoint under the programme's
   next-checkpoint convention.

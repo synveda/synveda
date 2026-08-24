@@ -6,7 +6,7 @@
  * `call`, `classify`, the session — is what everything uses, generated or
  * not. The named calls below it are the routes the contract does not cover:
  * `docs/api/openapi.json` declares the foundation, session and Knowledge
- * planes (62 operations); the rest of `/v1` joins it in the public-contract
+ * planes, including Skills (85 operations); the rest of `/v1` joins it in the public-contract
  * convergence package. Everything the document *does* declare is
  * reached through `client.mts`, whose types are generated from it; nothing
  * here duplicates one of those routes.
@@ -383,19 +383,4 @@ export async function auditVerify(fetchImpl: typeof fetch = fetch): Promise<Outc
 /** The agents registered to act in this tenant. */
 export async function serviceIdentities(fetchImpl: typeof fetch = fetch): Promise<Outcome> {
   return call("/service-identities", { method: "GET" }, fetchImpl);
-}
-
-/**
- * The skills available at a scope.
- *
- * Skills the caller may not read at their tier are omitted by the gateway
- * rather than refused, so an empty list here means "nothing you may load",
- * which is what the page says.
- */
-export async function skillsAt(
-  scopeId: string | null,
-  fetchImpl: typeof fetch = fetch,
-): Promise<Outcome> {
-  const query = scopeId ? `?scope_id=${encodeURIComponent(scopeId)}` : "";
-  return call(`/skills${query}`, { method: "GET" }, fetchImpl);
 }

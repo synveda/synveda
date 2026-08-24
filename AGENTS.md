@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **120 features filed, 89 delivered**;
+Cursor frame has been replayed. **121 features filed, 90 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -248,6 +248,13 @@ Load-bearing facts about Phase 5:
   nothing, and context advertises the same exact resolved versions the public
   API serves. The old mutable drafts, `skill/published` distribution and
   special checklist/override mutation paths are gone.
+- CPR-24 is delivered: the generated Skills Library is the only Skill product
+  surface. Its catalogue and stable detail address expose exact immutable
+  versions, files, provenance, scans, personal/project bindings, controlled
+  tests and evidence-labelled usage; capability forecasts hide unavailable
+  controls while every mutation still enters CPR-23's VedaFlow API. The last
+  hand-written Skill request and mutable-Skill branch of console/CLI proposal
+  review are deleted; Advanced Reviews remains artifact-neutral.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

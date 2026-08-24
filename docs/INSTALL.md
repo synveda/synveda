@@ -444,6 +444,13 @@ nobody), see who may act in a workspace and who has access only to one
 project, and read *why* each of them does: granted here, inherited from a
 scope above, through a group, or managed by your directory.
 
+**Skills** is the immutable Skills Library. Its catalogue shows what the
+selected personal or project session would actually receive; a Skill's detail
+page shows exact versions and files, provenance, scanner evidence, bindings,
+controlled tests and usage. Declared tools are metadata only. Installing,
+updating, pinning, disabling or rolling back reports the VedaFlow outcome, so a
+pending review is never presented as an active change.
+
 Governance lives under **Advanced** — Reviews (the proposals inbox), Scopes
 (the scope tree, the pack in force, standing relaxations), Policies, Audit and
 Service identities. Those five appear only if the policy decision point says

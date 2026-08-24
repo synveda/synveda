@@ -180,7 +180,10 @@ Published benchmark scores, and what they do and do not measure:
 - **Governed assets** — prompt templates, context packs, and an
   Agent Skills-compatible immutable catalogue where installing, updating,
   binding or rolling back executable content is a typed VedaFlow change and
-  the active policy matrix decides its reviewers.
+  the active policy matrix decides its reviewers. The Skills Library browses
+  exact versions, files, provenance, scans, project/personal bindings,
+  controlled tests and host-observed versus model-reported usage without
+  treating declared tools as permission.
 - **A Claude Code integration** — installed hooks plus an MCP recall tool,
   with deterministic session-plane replay in CI and an installed authenticated
   Claude Code 2.1.241 lifecycle gate.

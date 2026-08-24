@@ -46,6 +46,7 @@ export type RouteId =
   | "knowledge-item"
   | "learnings"
   | "skills"
+  | "skill-item"
   | "tools"
   | "people"
   | "settings"
@@ -150,7 +151,14 @@ export const ROUTES: readonly RouteDef[] = [
     segment: "skills",
     label: "Skills",
     group: "primary",
-    blurb: "The governed skills your agents may load here.",
+    blurb: "Immutable Skills, exact bindings, tests and activation evidence.",
+  },
+  {
+    id: "skill-item",
+    segment: "skills/:skill_id",
+    label: "Skill",
+    group: "none",
+    blurb: "Versions, files, provenance, bindings, tests and usage for one Skill.",
   },
   {
     id: "tools",

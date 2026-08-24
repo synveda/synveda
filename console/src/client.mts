@@ -23,13 +23,11 @@
  *
  * # What it deliberately does not do
  *
- * It does not wrap the routes that are **not on the contract yet**. The
- * document covers the foundation, session, Knowledge and capture planes (62
- * operations); proposals, capabilities, policy packs, lapses, audit, skills
- * and service identities join it in the contract-convergence package. Those calls live in `api.mts`,
- * hand-written and marked, exactly as they were — putting them behind this
- * facade would make them *look* generated, which is the one thing worse
- * than a hand-written call you can see.
+ * It does not wrap routes absent from the contract. The document currently
+ * covers 85 operations, including the complete immutable Skill plane. Older
+ * governance calls still in `api.mts` remain visibly hand-written until the
+ * public-contract convergence package declares them; this facade never makes
+ * an undeclared call look generated.
  */
 
 import { call, type Outcome } from "./api.mjs";

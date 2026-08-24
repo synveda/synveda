@@ -147,6 +147,17 @@ test("a Knowledge item has a stable address", () => {
   assert.throws(() => hrefOf("knowledge-item"), /knowledge_id/);
 });
 
+test("a Skill aggregate has a stable library address", () => {
+  const href = hrefOf("skill-item", { skill_id: "018f-skill" });
+  assert.equal(href, "/console/skills/018f-skill");
+  assert.deepEqual(matchRoute(href), {
+    id: "skill-item",
+    params: { skill_id: "018f-skill" },
+  });
+  assert.equal(routeOf("skill-item").group, "none");
+  assert.throws(() => hrefOf("skill-item"), /skill_id/);
+});
+
 test("a path this console does not have matches nothing", () => {
   // `null` is rendered as a not-found page rather than redirected: the
   // gateway answers every path under the prefix with the bundle, so a typo
