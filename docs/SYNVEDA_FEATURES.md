@@ -1762,13 +1762,41 @@ CPR-17  Public Knowledge API, search and browser (XL)
   denied row advances the cursor but leaks no object, edge or count.
   This is the public noun cutover: delete the record classification route/CLI/eval call,
   generic proposal inputs naming `record_ids`, raw-record console DTOs and fixtures. The
-  record-backed context composer remains internal only until CPR-18; there is no bridge,
-  fallback, alias or dual read. AC: all thirteen route groups are mounted and generated;
+  record-backed context composer remains internal only until the explainable context
+  planner; there is no bridge, fallback, alias or dual read. AC: all thirteen route
+  groups are mounted and generated;
   creation is idempotent and mutations require revision preconditions through VedaFlow;
   every requested filter and current-active default is exact; lexical and semantic modes
   are honest; history/source/relationship isolation holds; the browser uses only generated
   operations; embedding RLS/erasure and content-free read audit hold; focused tests, demo,
   `make ci` and `make db-test` pass. ADR-0082.
+
+CPR-18  Session-based capture batches and reviewable candidates (XL)
+  Filed 2026-08-24 by the autonomous continuation. Replace the final internal
+  session-event-to-record extraction writer with `CaptureBatch` and
+  `CaptureCandidate` aggregates. Explicit requests and session end select
+  potentially durable information, classify it, retain exact source event ids,
+  compare it with policy-visible current Knowledge and record duplicate,
+  conflict and possible-supersession matches. Model output is validated and
+  becomes candidates only: an unreviewed candidate is never active Knowledge.
+  Candidate and batch acceptance, edit-and-accept, merge, replace and dismiss
+  are ordinary public application commands. Every publishing action calls
+  CPR-16's Knowledge command layer and therefore creates a VedaFlow change;
+  replace is governed supersession rather than deletion. Repeated extraction
+  of the same session and request is idempotent, and a retryable failed batch
+  has one durable address rather than duplicate candidate rows.
+  AC: the two aggregates and all seven candidate states have tenant-bound,
+  forced-RLS persistence; source event links prove same-session/same-tenant
+  provenance and cannot be forged; extraction creates candidates only and
+  writes zero Knowledge or record rows; duplicate/conflict/supersession matches
+  include only independently PDP-visible Knowledge; the nine capture route
+  groups are generated, cursor-paginated where applicable and use the common
+  error envelope; accept, edit, merge, replace, dismiss and whole-batch accept
+  are idempotent and record decision metadata; accepted actions return their
+  VedaFlow change and Knowledge ids, including pending-review outcomes; repeated
+  extraction is idempotent; the old record extraction writer and its runtime
+  tables/queue assumptions are deleted; audit evidence is content-free; and
+  focused tests, a runnable demo, `make ci` and `make db-test` pass. ADR-0083.
 
 ──────────────────────────────────────────────
 Sequencing (features → phases)
@@ -1863,7 +1891,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

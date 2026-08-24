@@ -5,8 +5,10 @@ a beta is driven by somebody who did not, so the limits stop being things we
 remember to mention and become something you can read before you hit them.
 
 **What this is.** Governed Knowledge and context for AI agents. Sessions append
-events, policy decides which immutable Knowledge revisions may be read, and
-every governed act is on an audit chain you can verify yourself.
+events and freeze them into reviewable capture candidates; accepting a
+candidate passes through VedaFlow before it can become an immutable Knowledge
+revision. Policy decides which candidates, revisions and provenance may be
+read, and every governed act is on an audit chain you can verify yourself.
 
 > **Phase 5 branch note (2026-08-24):** install, login and session delivery
 > remain current, but the organisation-seeding walkthrough in sections 4–7 is
@@ -84,8 +86,8 @@ seeder makes is made by *you*, after you log in, through the same routes the
 CLI and any harness use, which is why step 7's chain verifies.
 
 It builds two org units and three below them, assigns contrasting policy packs,
-observes six turns of memory through the real extraction pipeline, and opens
-one proposal. It is safe to re-run — it asks what exists rather than keeping a
+observes six turns through the session capture pipeline, and opens one
+proposal. It is safe to re-run — it asks what exists rather than keeping a
 list — and it refuses a tenant that already holds an organisation it did not
 build.
 
@@ -108,8 +110,8 @@ go through the PDP under the caller's identity.
 
 Open **http://127.0.0.1:8120/console/** and sign in with the same operator.
 
-There is a proposal in the inbox: memory climbing from your personal scope to
-the whole organisation. **Try to approve it.**
+There is a proposal in the inbox: Knowledge climbing from your personal scope
+to the whole organisation. **Try to approve it.**
 
 You cannot. Publishing to the tenant root under `regulated-strict` takes a
 `curator` *and* an `administrator`, two distinct people, and you are one

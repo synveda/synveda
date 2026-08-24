@@ -18,6 +18,8 @@ pub mod anchor;
 mod approval;
 mod asset;
 mod channel;
+// Session-derived, reviewable Knowledge proposals (CPR-18, ADR-0083).
+pub mod capture;
 mod composition;
 mod dedup;
 mod directory;
@@ -86,10 +88,11 @@ pub use directory::{DirectoryGroup, DirectoryUser, ScimCredential};
 pub use error::{Error, Result};
 pub use graph::{Depth, Graph};
 pub use id::{
-    ContextRunId, DirectoryGroupId, DirectoryUserId, DurableOperationId, GrantId, GraphEdgeId,
-    GraphVertexId, GroupId, IdentityId, InviteId, KnowledgeItemId, KnowledgeRelationId,
-    KnowledgeRevisionId, KnowledgeSourceId, LapseId, ProjectId, ProposalId, RecordId, RepositoryId,
-    ScimCredentialId, ScopeId, SessionEventId, SessionId, TenantId, WorkspaceId,
+    CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId, ContextRunId, DirectoryGroupId,
+    DirectoryUserId, DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId,
+    InviteId, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId,
+    LapseId, ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId, ScopeId,
+    SessionEventId, SessionId, TenantId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use lapse::{

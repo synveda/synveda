@@ -248,6 +248,18 @@ synveda session spool purge --acknowledged  # reclaim the delivered
 `purge` **requires** `--acknowledged` and there is no `--all`. It will not
 delete an observation the gateway has not confirmed.
 
+Once events reach the gateway, a terminal session freezes the exact eligible
+event snapshot as a durable capture batch. An explicit client can request the
+same operation with
+`POST /v1/sessions/{session_id}/capture-batches`; retrying either path resolves
+to the same snapshot rather than calling the extractor twice. Extraction
+creates candidates, not current Knowledge. Accept, edit-and-accept, merge or
+replace calls the governed Knowledge/VedaFlow command layer, and a strict
+profile can retain the result as `pending_review`. Dismissal publishes
+nothing. Candidate content needs both access to its source session and
+Knowledge-read authority at its proposed destination, so a private preference
+derived during a shared run is not a shared draft.
+
 > **The one thing that is lost.** If the host client is killed outright —
 > SIGKILL, a kernel panic, a battery dying — before any lifecycle hook can
 > run, the events since the last `Stop` go with it. No hook fires, so nothing
@@ -326,7 +338,8 @@ semantic demonstration.
 Vectors are keyed by immutable revision and model, so changing models does not
 reinterpret old vectors. The indexer creates rows for the configured model as
 it converges. The old `record_embeddings` table is not a Knowledge search
-index; it survives only inside CPR-18's controlled context-composition cutover.
+index; it survives only inside the controlled context-composition seam that
+the context-planning package removes.
 Supported index dimensions remain 16 and 1024 (ADR-0024 decision 5), so adding
 a third model shape requires an explicit schema decision.
 
@@ -458,11 +471,12 @@ handing everybody a transcript of everybody's prompts. Where you hold it, each
 entry gets a *Show raw payload* control; where you do not, the page says which
 role it takes.
 
-The Knowledge aggregate and governed lifecycle now exist behind the application
-service, but the public browser/search contract and New Learnings workflow land
-in the following context-platform packages. Until then the navigation remains
-an honest empty state rather than exposing a second hand-written record API.
-Tools likewise names its later registry package.
+The public Knowledge Browser now searches current active revisions and exposes
+immutable history and independently authorised provenance. Session extraction
+now produces reviewable capture candidates, but the lightweight **New
+Learnings** console over those public routes lands in the following package;
+until then that navigation entry remains an honest empty state rather than a
+second proposal inbox. Tools likewise names its later registry package.
 
 Signing in needs a **key plane**, because a console session seals its tokens
 under the deployment's encryption key (TEN-4). `init` mints one at

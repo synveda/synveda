@@ -24,7 +24,7 @@
  * # What it deliberately does not do
  *
  * It does not wrap the routes that are **not on the contract yet**. The
- * document covers the foundation, session and Knowledge planes (53
+ * document covers the foundation, session, Knowledge and capture planes (62
  * operations); proposals, capabilities, policy packs, lapses, audit, skills
  * and service identities join it in the contract-convergence package. Those calls live in `api.mts`,
  * hand-written and marked, exactly as they were — putting them behind this

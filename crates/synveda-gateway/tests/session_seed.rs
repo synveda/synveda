@@ -27,7 +27,7 @@
 //!   submitter's personal scope now asserts it is the workspace's, and needs
 //!   its grants there rather than on a personal leaf.
 //! - `kind` is gone. [`synveda_types::session::SessionEventType`] decides
-//!   routing, and only the types that answer `carries_memory` reach the
+//!   routing, and only the types that answer `capture_eligible` reach the
 //!   extractor at all — so a fixture that wants a memory must use one.
 //! - The read is a **context run**: `rendered` rather than `text`, and no
 //!   `record_ids`.

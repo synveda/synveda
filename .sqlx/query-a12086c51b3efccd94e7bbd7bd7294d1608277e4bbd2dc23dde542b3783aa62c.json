@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into capture_candidate_decisions\n            (id, tenant_id, candidate_id, action, actor_subject,\n             idempotency_key, request_hash, payload, payload_hash)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n        on conflict (tenant_id, candidate_id) do nothing\n        returning id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a12086c51b3efccd94e7bbd7bd7294d1608277e4bbd2dc23dde542b3783aa62c"
+}

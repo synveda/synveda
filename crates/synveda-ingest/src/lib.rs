@@ -35,6 +35,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod capture_worker;
 mod chain;
 pub mod dedup;
 pub mod embedding;
@@ -45,7 +46,6 @@ mod redaction;
 pub mod retention;
 mod skillrubric;
 mod skillscan;
-pub mod worker;
 
 pub use redaction::{Finding, FindingCategory, ScanOutcome, scan};
 pub use skillrubric::{

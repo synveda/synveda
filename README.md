@@ -111,10 +111,10 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger, durable adapter delivery and governed versioned Knowledge | 🚧 16/33 |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger, durable adapter delivery, governed versioned Knowledge and reviewable capture | 🚧 18/33 |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **114
-in total, 82 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **115
+in total, 83 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
@@ -145,14 +145,16 @@ Published benchmark scores, and what they do and do not measure:
 - **The write path** — adapters append immutable session events through the
   public session API. Knowledge can be authored and revised through typed
   VedaFlow create/edit/verify/merge/supersede/archive/restore/forget commands.
-  Automated session capture is deliberately paused until CPR-18 replaces the
-  final internal extraction projection with reviewable candidates.
+  Explicit requests and terminal sessions freeze exact event snapshots into
+  durable capture batches. Extraction creates reviewable candidates only;
+  accept, edit, merge and replace enter those same VedaFlow commands, while
+  dismissal publishes nothing.
 - **The read path** — the Knowledge Browser lists and searches current active
   revisions with cursor pagination, per-object PDP decisions and independently
   authorised provenance. Lexical search is immediate; configured TEI enables
   semantic fusion, while the deterministic test embedder is honestly reported
   as lexical-only. Session context composition still uses the one internal
-  controlled projection scheduled for CPR-18. The deleted global
+  controlled projection scheduled for the context-planning package. The deleted global
   `/v1/recall` route has not been restored; the existing CLI/MCP `recall`
   command composes only through a public session context run and is not an
   enumeration/query surface.
@@ -261,6 +263,7 @@ sh demos/cpr-10-sessions.sh       # a run opened, appended to, composed for and
 sh demos/cpr-5-access.sh          # groups, grants and invitations
 sh demos/cpr-6-anchors.sh         # where a request stands, and what decides it
 sh demos/cpr-17-knowledge-browser.sh # public Knowledge + generated browser contract
+sh demos/cpr-18-session-capture.sh # candidate-only session extraction + VedaFlow review
 ```
 
 > **The old corpus is not yet all runnable.** 43 of the 65 scripts inventoried

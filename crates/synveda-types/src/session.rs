@@ -330,7 +330,7 @@ impl SessionEventType {
         }
     }
 
-    /// Whether an event of this type is worth extracting a memory from.
+    /// Whether an event of this type is eligible for durable capture.
     ///
     /// A distinction the old four-value `ObserveKind` never had to make: all
     /// four of its values carried content somebody said or a tool returned.
@@ -339,12 +339,11 @@ impl SessionEventType {
     /// running an extractor over "session started" is LLM spend that can only
     /// produce noise.
     ///
-    /// So the gateway enqueues a work signal only for the types that answer
-    /// `true` here. The others are still appended, still ordered, still on the
-    /// timeline and still auditable: they are part of what happened, they are
-    /// just not part of what is *remembered*.
+    /// A capture batch freezes only the types that answer `true` here. The
+    /// others are still appended, ordered, visible on the timeline and
+    /// auditable: they are part of what happened, but not candidate input.
     #[must_use]
-    pub const fn carries_memory(&self) -> bool {
+    pub const fn capture_eligible(&self) -> bool {
         match self {
             SessionEventType::MessageUser
             | SessionEventType::MessageAssistant
@@ -353,10 +352,10 @@ impl SessionEventType {
             | SessionEventType::FileChanged
             | SessionEventType::CommandExecuted
             | SessionEventType::MemoryAsserted => true,
-            // Structure, not memory. `file.read` is here rather than above
+            // Structure, not durable content. `file.read` is here rather than above
             // deliberately: that a file was opened is provenance about the
             // run, and a memory saying "the agent read src/main.rs" is the
-            // kind of derived record that fills a corpus without informing
+            // kind of derived statement that fills a corpus without informing
             // anything. What the agent *did* with it lands as a message or a
             // change.
             SessionEventType::SessionStarted

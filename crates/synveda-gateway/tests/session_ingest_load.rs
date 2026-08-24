@@ -427,7 +427,7 @@ async fn append_ack_sustains_1k_events_per_second() {
     // Prior load runs (or a crashed one) may have left dead tuples in the
     // buffer tables; vacuum first so this run measures the ack path, not
     // a predecessor's cleanup debt.
-    sqlx::raw_sql("vacuum (analyze) session_events, pgmq.q_session_events")
+    sqlx::raw_sql("vacuum (analyze) session_events")
         .execute(&pool)
         .await
         .expect("pre-run vacuum");
@@ -504,18 +504,9 @@ async fn append_ack_sustains_1k_events_per_second() {
         "every load event admitted exactly once (plus the warmups)"
     );
 
-    // Hygiene: nothing consumes the queue yet (MEM-2/3), so this test's
-    // five thousand signals and staged rows would accumulate in the dev
-    // database run over run — and skew the next run's timings. Clean up
-    // on the RLS-exempt test connection.
-    sqlx::query!(
-        "delete from pgmq.q_session_events where message ->> 'tenant_id' = $1",
-        tenant.to_string(),
-    )
-    .execute(&pool)
-    .await
-    .expect("purge load-test queue signals");
-    // Declared as a disposal, because migration 0046's trigger refuses any
+    // Hygiene: the immutable session rows would accumulate in the dev
+    // database run over run and skew the next run's timings. Declared as a
+    // disposal, because migration 0046's trigger refuses any
     // other delete from this table — which is the point of the trigger: a
     // handler that has not said it is retention cannot retire a transcript.
     // A load run's own cleanup is exactly the case that has to say so.
@@ -533,7 +524,7 @@ async fn append_ack_sustains_1k_events_per_second() {
     .expect("purge load-test recorded rows");
     cleanup.commit().await.expect("commit cleanup");
     // Pay this run's vacuum debt here rather than in the next run's tail.
-    sqlx::raw_sql("vacuum (analyze) session_events, pgmq.q_session_events")
+    sqlx::raw_sql("vacuum (analyze) session_events")
         .execute(&pool)
         .await
         .expect("post-run vacuum");

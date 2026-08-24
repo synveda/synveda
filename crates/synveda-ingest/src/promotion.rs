@@ -28,7 +28,7 @@ use sqlx::PgPool;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome, StoredEvent};
 use synveda_policy::{Action, AuthzContext, AuthzDecision, Pdp, Principal, Resource, ScopeNode};
 use synveda_store::promotion::{self as usage, UsageDelta, UsageRow};
-use synveda_store::records::{self, RecordVersion};
+use synveda_store::records::{self, RecordState, RecordVersion};
 use synveda_store::{anchors, identities, policy_assignments, rls, tenants};
 
 use crate::chain::scope_chain as resolve_scope_chain;
@@ -37,7 +37,7 @@ use synveda_types::{
     PromotionRule, ProposalEffect, RecordId, Result, ScopeId, Sensitivity, TenantId,
 };
 use synveda_vedaflow::hash::{ObjectHash, object_hash};
-use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
+use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
 
 /// Counter: proposals the rule engine opened, labelled `rule`.
 pub const PROMOTION_PROPOSALS_TOTAL: &str = "synveda_promotion_proposals_total";
@@ -58,6 +58,24 @@ pub const PROMOTION_QUEUE_FULL_TOTAL: &str = "synveda_promotion_queue_full_total
 /// The audit actor component for this engine (ADR-0022 decision 5's
 /// actor kind).
 const ACTOR_COMPONENT: &str = "promotion";
+
+/// VedaFlow projection of the bounded record-backed context seam that remains
+/// until the context-planner cutover. CPR-18 deletes the extraction writer;
+/// promotion still needs to address historical members already present on a
+/// channel, and that read-only projection is not a record creation path.
+fn legacy_memory_asset(id: RecordId, state: &RecordState) -> MemoryAsset {
+    MemoryAsset {
+        id,
+        scope_id: state.scope_id,
+        owner_id: state.owner_id,
+        kind: state.kind,
+        class: state.class,
+        content: state.content.clone(),
+        sensitivity: state.sensitivity,
+        valid_from: state.valid_from,
+        valid_to: state.valid_to,
+    }
+}
 
 /// Which audit actions count as a recall (ADR-0033 decision 5, as CTX-5
 /// grew it — ADR-0042 decision 16).
@@ -415,7 +433,7 @@ async fn evaluate(deps: &SweepDeps, tenant_id: TenantId, swept: &Swept) -> Resul
         let Some(usage) = usage_by_id.get(&version.id).cloned() else {
             continue;
         };
-        let asset = crate::worker::memory_asset(version.id, &version.state);
+        let asset = legacy_memory_asset(version.id, &version.state);
         let address = object_hash(AssetKind::Memory, &asset.canonical_bytes());
         by_scope
             .entry(version.state.scope_id)
@@ -638,7 +656,7 @@ async fn open_proposal(
     // (ADR-0032 decision 6).
     let mut entries: Vec<(String, ObjectHash)> = Vec::with_capacity(members.len());
     for candidate in members {
-        let asset = crate::worker::memory_asset(candidate.version.id, &candidate.version.state);
+        let asset = legacy_memory_asset(candidate.version.id, &candidate.version.state);
         let written = vedaflow::put_memory(&mut tx, tenant_id, &asset).await?;
         entries.push((asset.entry_name(), written.hash));
     }

@@ -10,13 +10,13 @@
 //! The storage sweep is adversarial: after driving seeded secrets and
 //! PII through the append route under each mode, every surface that could
 //! have persisted them — event payloads and redaction summaries, the
-//! quarantine queue, both PGMQ tables, and the audit chain — is searched
+//! quarantine rows, capture candidates/decision intents, and the audit chain — is searched
 //! for the literals. The review E2E exercises `QuarantineRead`/
 //! `QuarantineReview` through the PDP proper: steward and
 //! security-reviewer (its first live action) adjudicate; the owner holds
-//! no self-release; release sends the standard work signal; review is
+//! no self-release; release makes the exact event capture-eligible; review is
 //! one-shot; redelivery of a quarantined event neither re-quarantines
-//! nor signals.
+//! nor changes capture eligibility.
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip when it
 //! is unset (CI has no database), same convention as tests/observe.rs
@@ -355,21 +355,25 @@ fn batch(_session: &str, events: Vec<Value>) -> Value {
     json!({ "events": events })
 }
 
-/// Queue signals for `tenant` (live queue plus archive — a consumed
-/// signal must count too).
-async fn queued(pool: &PgPool, tenant: TenantId) -> i64 {
+/// Events currently eligible for a future frozen capture snapshot. Pending or
+/// rejected quarantine rows are excluded; a released row becomes eligible
+/// without creating a second signal or copy.
+async fn capture_eligible(pool: &PgPool, tenant: TenantId) -> i64 {
     sqlx::query_scalar!(
         r#"
-        select (select count(*) from pgmq.q_session_events
-                where message ->> 'tenant_id' = $1)
-             + (select count(*) from pgmq.a_session_events
-                where message ->> 'tenant_id' = $1) as "count!"
+        select count(*) as "count!"
+        from session_events event
+        left join session_event_quarantine quarantine
+          on quarantine.tenant_id = event.tenant_id
+         and quarantine.event_id = event.id
+        where event.tenant_id = $1
+          and (quarantine.event_id is null or quarantine.state = 'released')
         "#,
-        tenant.to_string(),
+        tenant.as_uuid(),
     )
     .fetch_one(pool)
     .await
-    .expect("count queue signals")
+    .expect("count capture-eligible events")
 }
 
 /// The AC's adversarial sweep: every storage surface the tenant's data
@@ -397,19 +401,22 @@ async fn storage_contains(pool: &PgPool, tenant: TenantId, seed: &str) -> bool {
               and (payload::text like '%' || $2 || '%'
                    or resource like '%' || $2 || '%')
             union all
-            select 1 from pgmq.q_session_events
-            where message ->> 'tenant_id' = $4
-              and message::text like '%' || $2 || '%'
+            select 1 from capture_candidates
+            where tenant_id = $1
+              and (title like '%' || $2 || '%'
+                   or body_markdown like '%' || $2 || '%'
+                   or summary like '%' || $2 || '%'
+                   or metadata::text like '%' || $2 || '%'
+                   or verification_metadata::text like '%' || $2 || '%')
             union all
-            select 1 from pgmq.a_session_events
-            where message ->> 'tenant_id' = $4
-              and message::text like '%' || $2 || '%'
+            select 1 from capture_candidate_decisions
+            where tenant_id = $1
+              and coalesce(payload::text, '') like '%' || $2 || '%'
         ) as "found!"
         "#,
         tenant.as_uuid(),
         seed,
         compact,
-        tenant.to_string(),
     )
     .fetch_one(pool)
     .await
@@ -433,7 +440,7 @@ async fn assert_storage_clean(pool: &PgPool, tenant: TenantId) {
 // ── The AC: seeded secrets never reach storage, in any mode ─────────────────
 
 /// Quarantine mode (regulated-strict, the zero-config default): a secret
-/// stages redacted and signal-less behind a pending review; PII redacts
+/// stages redacted and capture-ineligible behind a pending review; PII redacts
 /// and flows. Redact mode (standard): the secret redacts and flows.
 /// Deny mode (a stored custom pack): the event is refused per event and
 /// nothing persists. After all three, the storage sweep finds no seeded
@@ -478,7 +485,7 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     // All three rows are written, and one of them is withheld from the
-    // pipeline. Quarantine is a **withheld signal**, not a refused append
+    // pipeline. Quarantine is **withheld eligibility**, not a refused append
     // (ADR-0078 decision 4): `session_events` has no UPDATE grant, so the
     // review state cannot live on the row and the row is stored either way.
     assert_eq!(body["appended"], 3, "{body}");
@@ -499,8 +506,13 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         .as_str()
         .expect("quarantined event id")
         .to_owned();
-    // The quarantined event sent no signal: only the two accepted did.
-    assert_eq!(queued(&pool, tenant).await, 2, "quarantine must not signal");
+    // The quarantined event is not capture-eligible: only the two accepted
+    // events can enter a frozen batch.
+    assert_eq!(
+        capture_eligible(&pool, tenant).await,
+        2,
+        "quarantine must not be capture-eligible"
+    );
     // The staged PII payload holds placeholders, not the finding.
     let pii_payload = sqlx::query_scalar!(
         r#"select payload::text as "payload!" from session_events
@@ -543,7 +555,11 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         body["quarantined"], 0,
         "under standard a secret redacts and flows: {body}"
     );
-    assert_eq!(queued(&pool, tenant).await, 3, "the redacted event signals");
+    assert_eq!(
+        capture_eligible(&pool, tenant).await,
+        3,
+        "the redacted event remains capture-eligible"
+    );
 
     // ── Deny mode: a stored custom pack, hot-installed like the
     //    refresher would, assigned at the org root. ──
@@ -767,8 +783,8 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         "and an org unit nobody's scope hangs under holds none: {elsewhere}"
     );
 
-    // Release: the signal goes out, the state flips, the chain records it.
-    let signals_before = queued(&pool, tenant).await;
+    // Release changes eligibility, the state flips, and the chain records it.
+    let eligible_before = capture_eligible(&pool, tenant).await;
     let (status, released) = send(
         &app,
         request(
@@ -783,9 +799,9 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
     assert_eq!(released["state"], "released", "{released}");
     assert_eq!(released["reviewer_subject"], "stew", "{released}");
     assert_eq!(
-        queued(&pool, tenant).await,
-        signals_before + 1,
-        "release sends the standard work signal"
+        capture_eligible(&pool, tenant).await,
+        eligible_before + 1,
+        "release makes the exact event capture-eligible"
     );
 
     // One-shot: a second verdict conflicts.
@@ -822,8 +838,8 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
 }
 
 /// The rest of the review contract: security-reviewer (its first live
-/// action) rejects without a signal; redelivery of a quarantined event
-/// reports duplicate and neither re-quarantines nor signals; unknown ids
+/// action) rejects without changing eligibility; redelivery of a quarantined
+/// event reports duplicate and neither re-quarantines nor changes eligibility; unknown ids
 /// answer the uniform 404.
 #[tokio::test]
 async fn quarantine_review_contract_holds() {
@@ -864,10 +880,14 @@ async fn quarantine_review_contract_holds() {
         .as_str()
         .expect("event id")
         .to_owned();
-    assert_eq!(queued(&pool, tenant).await, 0, "no signal while pending");
+    assert_eq!(
+        capture_eligible(&pool, tenant).await,
+        0,
+        "pending quarantine is not capture-eligible"
+    );
 
     // Redelivery: duplicate under the original id, still one quarantine
-    // row, still no signal — the winning delivery's disposition stands.
+    // row, still ineligible — the winning delivery's disposition stands.
     let (status, retry) = send(
         &app,
         request(Method::POST, &events_uri(run), &alice, Some(secret_batch)),
@@ -888,9 +908,13 @@ async fn quarantine_review_contract_holds() {
     .await
     .expect("count quarantine rows");
     assert_eq!(quarantine_rows, 1, "redelivery must not re-quarantine");
-    assert_eq!(queued(&pool, tenant).await, 0, "redelivery must not signal");
+    assert_eq!(
+        capture_eligible(&pool, tenant).await,
+        0,
+        "redelivery must not change eligibility"
+    );
 
-    // The security reviewer rejects: state flips, no signal, chained.
+    // The security reviewer rejects: state flips, stays ineligible, chained.
     let (status, rejected) = send(
         &app,
         request(
@@ -903,7 +927,11 @@ async fn quarantine_review_contract_holds() {
     .await;
     assert_eq!(status, StatusCode::OK, "{rejected}");
     assert_eq!(rejected["state"], "rejected", "{rejected}");
-    assert_eq!(queued(&pool, tenant).await, 0, "reject never signals");
+    assert_eq!(
+        capture_eligible(&pool, tenant).await,
+        0,
+        "rejection never becomes capture-eligible"
+    );
     let mut tx = rls::begin_tenant_tx(&pool, tenant).await.expect("tx");
     let events = synveda_audit::tail(&mut tx, tenant, 50)
         .await

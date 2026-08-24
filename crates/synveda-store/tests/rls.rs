@@ -212,6 +212,15 @@ async fn visible_rows(
 const COVERED: &[&str] = &[
     "audit_chain_heads",
     "audit_log",
+    // CPR-18 (ADR-0083): frozen session evidence, its reviewable proposals,
+    // visible match hints and durable decisions all disclose transcript- or
+    // Knowledge-derived state and therefore share the tenant boundary.
+    "capture_batch_events",
+    "capture_batches",
+    "capture_candidate_decisions",
+    "capture_candidate_events",
+    "capture_candidate_matches",
+    "capture_candidates",
     "context_pack_chunks",
     "context_pack_documents",
     "context_packs",
@@ -2201,8 +2210,8 @@ fn record_supersessions_are_tenant_isolated_and_append_only() {
 // The observe staging buffer and its review queue lived here until the observe
 // cutover. `session_events` carries the ingestion plane now, so these are the
 // same properties over the table that replaced it: cross-tenant blindness, an
-// immutability that is a *privilege* rather than a discipline, a work signal
-// per admitted event, and a review queue whose verdict is one-shot.
+// immutability that is a *privilege* rather than a discipline, explicit
+// capture eligibility, and a review queue whose verdict is one-shot.
 //
 // The seeding fixture is [`seed_session`], shared with the session-ledger
 // block below: a run is what an event now hangs off, so there is one fixture
@@ -2363,8 +2372,8 @@ fn session_events_are_immutable_and_only_retention_removes_them() {
     });
 }
 
-/// The full admission shape — insert, duplicate suppression, enqueue — works
-/// as `synveda_app` with the right GUC, PGMQ grants included: the backstop
+/// The full admission shape — insert, duplicate suppression and capture
+/// eligibility — works as `synveda_app` with the right GUC: the backstop
 /// isolates, it does not deny service.
 #[test]
 fn same_tenant_session_admission_works_under_rls() {
@@ -2414,26 +2423,36 @@ fn same_tenant_session_admission_works_under_rls() {
         );
         tx.commit().await.expect("commit admission");
 
-        // One queue signal per *memory-carrying* event actually appended: the
-        // seed's `message.user` plus e3. The seed's `tool.invoked` carries
-        // memory too, and the duplicate enqueued nothing.
+        // One eligible row per content-carrying event actually appended: the
+        // seed's `message.user` and `tool.invoked`, plus e3. The duplicate
+        // created no second row.
         let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
-        let signals = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from pgmq.q_session_events
-               where message ->> 'tenant_id' = $1"#,
-            fixture.tenant.to_string(),
+        let eligible = sqlx::query_scalar!(
+            r#"select count(*) as "count!"
+               from session_events event
+               left join session_event_quarantine quarantine
+                 on quarantine.tenant_id = event.tenant_id
+                and quarantine.event_id = event.id
+               where event.tenant_id = $1
+                 and event.event_type in (
+                     'message.user', 'message.assistant', 'tool.invoked',
+                     'tool.result', 'file.changed', 'command.executed',
+                     'memory.asserted'
+                 )
+                 and (quarantine.event_id is null or quarantine.state = 'released')"#,
+            fixture.tenant.as_uuid(),
         )
         .fetch_one(&mut *tx)
         .await
-        .expect("count queue signals as synveda_app");
+        .expect("count capture-eligible events as synveda_app");
         assert_eq!(
-            signals, 3,
-            "one signal per appended memory-carrying event, none per duplicate"
+            eligible, 3,
+            "one eligible row per appended content event, none per duplicate"
         );
     });
 }
 
-/// A type that carries no memory is recorded and **not** signalled: the
+/// A type that carries no memory is recorded and **not capture-eligible**: the
 /// timeline holds it, the extractor never sees it (ADR-0078 decision 2).
 #[test]
 fn bookkeeping_events_are_recorded_without_a_work_signal() {
@@ -2443,9 +2462,13 @@ fn bookkeeping_events_are_recorded_without_a_work_signal() {
         let before = {
             let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
             sqlx::query_scalar!(
-                r#"select count(*) as "count!" from pgmq.q_session_events
-                   where message ->> 'tenant_id' = $1"#,
-                fixture.tenant.to_string(),
+                r#"select count(*) as "count!" from session_events
+                   where tenant_id = $1 and event_type in (
+                       'message.user', 'message.assistant', 'tool.invoked',
+                       'tool.result', 'file.changed', 'command.executed',
+                       'memory.asserted'
+                   )"#,
+                fixture.tenant.as_uuid(),
             )
             .fetch_one(&mut *tx)
             .await
@@ -2473,9 +2496,13 @@ fn bookkeeping_events_are_recorded_without_a_work_signal() {
 
         let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
         let after = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from pgmq.q_session_events
-               where message ->> 'tenant_id' = $1"#,
-            fixture.tenant.to_string(),
+            r#"select count(*) as "count!" from session_events
+               where tenant_id = $1 and event_type in (
+                   'message.user', 'message.assistant', 'tool.invoked',
+                   'tool.result', 'file.changed', 'command.executed',
+                   'memory.asserted'
+               )"#,
+            fixture.tenant.as_uuid(),
         )
         .fetch_one(&mut *tx)
         .await
@@ -2489,8 +2516,8 @@ fn bookkeeping_events_are_recorded_without_a_work_signal() {
 
 // ── Quarantine review queue (MEM-2, ADR-0021; ADR-0078 decision 4) ──────────
 
-/// A quarantined event is recorded like any other and simply gets **no work
-/// signal**: the review state lives in its own table, because `session_events`
+/// A quarantined event is recorded like any other and is simply **not capture
+/// eligible**: the review state lives in its own table, because `session_events`
 /// has no UPDATE grant and must not acquire one.
 #[test]
 fn a_quarantined_event_is_recorded_and_withheld_from_the_pipeline() {
@@ -2506,15 +2533,21 @@ fn a_quarantined_event_is_recorded_and_withheld_from_the_pipeline() {
             stored.redactions.is_some(),
             "the finding summary rides the row as immutable provenance"
         );
-        let signals = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from pgmq.q_session_events
-               where message ->> 'event_id' = $1"#,
-            event_id.to_string(),
+        let eligible = sqlx::query_scalar!(
+            r#"select count(*) as "count!"
+               from session_events event
+               left join session_event_quarantine quarantine
+                 on quarantine.tenant_id = event.tenant_id
+                and quarantine.event_id = event.id
+               where event.tenant_id = $1 and event.id = $2
+                 and (quarantine.event_id is null or quarantine.state = 'released')"#,
+            tenant.as_uuid(),
+            event_id.as_uuid(),
         )
         .fetch_one(&mut *tx)
         .await
-        .expect("count signals for the withheld event");
-        assert_eq!(signals, 0, "a quarantined event must not be signalled");
+        .expect("count eligibility for the withheld event");
+        assert_eq!(eligible, 0, "a quarantined event must not be eligible");
     });
 }
 
@@ -2646,10 +2679,10 @@ fn quarantine_review_is_one_shot_and_column_bound_for_the_app_role() {
     });
 }
 
-/// A release enqueues the signal admission withheld, so the pipeline cannot
-/// tell a released event from an admitted one.
+/// A release makes the exact admitted row eligible, so a frozen batch treats
+/// it like an event that never needed review.
 #[test]
-fn releasing_a_quarantined_event_enqueues_its_withheld_signal() {
+fn releasing_a_quarantined_event_makes_it_capture_eligible() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let (tenant, _, event_id) = seed_quarantined(&db.pool).await;
@@ -2668,17 +2701,23 @@ fn releasing_a_quarantined_event_enqueues_its_withheld_signal() {
         tx.commit().await.expect("commit release");
 
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let signals = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from pgmq.q_session_events
-               where message ->> 'event_id' = $1"#,
-            event_id.to_string(),
+        let eligible = sqlx::query_scalar!(
+            r#"select count(*) as "count!"
+               from session_events event
+               left join session_event_quarantine quarantine
+                 on quarantine.tenant_id = event.tenant_id
+                and quarantine.event_id = event.id
+               where event.tenant_id = $1 and event.id = $2
+                 and (quarantine.event_id is null or quarantine.state = 'released')"#,
+            tenant.as_uuid(),
+            event_id.as_uuid(),
         )
         .fetch_one(&mut *tx)
         .await
-        .expect("count signals after release");
+        .expect("count eligibility after release");
         assert_eq!(
-            signals, 1,
-            "a release sends exactly the signal admission withheld"
+            eligible, 1,
+            "a release makes exactly the admitted row eligible"
         );
     });
 }

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            insert into capture_candidate_events\n                (tenant_id, candidate_id, batch_id, event_id, ordinal)\n            select $1, $2, $3, source.event_id, source.ordinal\n            from unnest($4::uuid[], $5::int[]) as source(event_id, ordinal)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "UuidArray",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "da2cb40155e3cd3c9c8783d8d0b15388e4105a746dc087cac8d91026e12b727c"
+}

@@ -55,6 +55,8 @@ CPR-15, the versioned Knowledge persistence aggregate, is delivered.
 CPR-16, the governed Knowledge mutation lifecycle, is delivered.
 CPR-17, the generated public Knowledge API/search/browser hard cut, is
 delivered and also closes CNSL-4 by subsumption.
+CPR-18, the session capture-batch and reviewable-candidate cutover, is
+delivered; the old record extraction writer and its PGMQ queue are gone.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -116,7 +118,7 @@ either.** To refresh both: `SYNVEDA_WRITE_OPENAPI=1 cargo test -p
 synveda-gateway --test openapi` then `node scripts/generate-api-types.mjs`.
 The document covers the context-platform plane — `/v1/me`,
 workspaces/projects/repositories, access, admin scopes, sessions and the public
-Knowledge lifecycle/search plane (**53 operations** since CPR-17) — and says
+Knowledge lifecycle/search and capture planes (**62 operations** since CPR-18) — and says
 so in its own description; the remaining production planes join under the
 programme's public-contract convergence package.
 Since CPR-8 the generator also emits
@@ -163,7 +165,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 82 of 114 features delivered — see docs/backlog/STATUS.md for
+features done. 83 of 115 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -225,6 +227,11 @@ search, while the public raw-record classification and channel seams were
 deleted. It simultaneously subsumed the already-filed **CNSL-4 Knowledge
 browser**, making it **114 with 82 delivered** rather than leaving the replaced
 Memory-browser objective falsely open.
+**CPR-18 was filed and delivered the same day**, making it **115 with 83
+delivered**: exact session-event snapshots now become restart-safe reviewable
+capture batches and candidates; publication enters CPR-16's VedaFlow Knowledge
+command seam, while the old record extraction writer and PGMQ queue are
+deleted.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and
@@ -294,12 +301,13 @@ harness all move onto the session plane, and `/v1/observe`, `/v1/inject`
 and `/v1/recall` are **deleted** with `observe_events`, the `observe`
 queue, `observe_quarantine` and `ObserveKind` (migration `0046`). Which
 closes the divergence CPR-11 left open in §10 of the implementation
-record. `POST /v1/sessions/{id}/events` is the only write seam and a
-session event is the **extraction unit**, so seven of the thirteen types
-enqueue work (`carries_memory()`) and the rest are ordered, auditable and
-not remembered. **A memory lands at the scope the run was decided at**,
-not the submitter's home — the difference between a workspace remembering
-what happened in it and every agent accumulating a private pile.
+record. `POST /v1/sessions/{id}/events` is the only write seam. Since CPR-18,
+a frozen event snapshot is the **capture unit**, so seven of the thirteen
+types are `capture_eligible()` and the rest are ordered and auditable but not
+candidate input. Extraction creates reviewable candidates only; accepting one
+enters VedaFlow before it can become Knowledge. **Shared Knowledge is proposed
+at the scope the run was decided at**, not the submitter's home — while a
+preference defaults to the submitter's private principal scope.
 Delivery is durable: a **versioned local spool**, one file per run, written
 temp → `fsync` → `rename`, holding attempt counts and an acknowledgement
 state, retried by the next `SessionStart` and never read in its
@@ -398,9 +406,9 @@ onboarding** — workspace, project, repository, agent client, connection
 instructions, connection check. The personal/team question **seeds** a policy
 pack and a membership posture and records **no edition anywhere** (ADR-0068
 decision 1). No npm dependency was added: routing and the cache are written
-in-repo. Three primary pages have no plane yet (Knowledge, New Learnings,
-Tools) and say so — Sessions got one at CPR-10 and its product surface at
-CPR-11; seven surfaces still call hand-written paths in `console/src/api.mts`
+in-repo. Two primary pages have no plane yet (New Learnings and Tools) and say
+so — Sessions got one at CPR-10/11 and Knowledge at CPR-17; seven surfaces
+still call hand-written paths in `console/src/api.mts`
 until Prompt 19 puts the rest of `/v1` on the contract.
 
 Phase demo goal: Entra/Okta live, spec-compliant governed skills into Claude

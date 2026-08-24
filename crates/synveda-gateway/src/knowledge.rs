@@ -751,6 +751,7 @@ async fn apply_loaded(
             knowledge_type,
             origin,
             content,
+            sources,
         } => {
             let mut source_ids = Vec::new();
             let mut seen = HashSet::new();
@@ -766,6 +767,11 @@ async fn apply_loaded(
                     }
                 }
                 snapshots.push(snapshot);
+            }
+            for source_id in create_sources(tx, tenant_id, sources, actor_subject).await? {
+                if seen.insert(source_id) {
+                    source_ids.push(source_id);
+                }
             }
             let result = store::create_item(
                 tx,
@@ -1560,13 +1566,16 @@ fn validate_command(command: &KnowledgeCommand) -> Result<()> {
             result_item_id,
             result_revision_id,
             content,
+            sources,
             ..
         } => {
             validate_knowledge_revision_content(content)?;
-            if inputs.len() < 2 || inputs.len() > vedaflow::MAX_PROPOSAL_MEMBERS {
+            validate_sources_allow_empty(sources)?;
+            let minimum = if sources.is_empty() { 2 } else { 1 };
+            if inputs.len() < minimum || inputs.len() > vedaflow::MAX_PROPOSAL_MEMBERS {
                 return Err(Error::Invalid {
                     message: format!(
-                        "merge requires 2..={} input items",
+                        "merge requires {minimum}..={} input items",
                         vedaflow::MAX_PROPOSAL_MEMBERS
                     ),
                 });
@@ -1611,6 +1620,14 @@ fn validate_sources(sources: &[KnowledgeSourceDraft]) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+fn validate_sources_allow_empty(sources: &[KnowledgeSourceDraft]) -> Result<()> {
+    if sources.is_empty() {
+        Ok(())
+    } else {
+        validate_sources(sources)
+    }
 }
 
 fn validate_reason(reason: &str) -> Result<()> {
@@ -1756,6 +1773,7 @@ mod tests {
             knowledge_type: KnowledgeType::Convention,
             origin: KnowledgeOrigin::Authored,
             content: content(),
+            sources: Vec::new(),
         };
         assert!(validate_command(&merge).is_err());
         assert!(validate_sources(&[source(scope)]).is_ok());

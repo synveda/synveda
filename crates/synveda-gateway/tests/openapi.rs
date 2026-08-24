@@ -1,5 +1,5 @@
 //! Context-platform contract: the OpenAPI document is authoritative
-//! (ADR-0071 decision 7; CPR-17/ADR-0082).
+//! (ADR-0071 decision 7; CPR-17/ADR-0082; CPR-18/ADR-0083).
 //!
 //! Three things have to be true for that sentence to mean anything, and this
 //! suite is each of them:
@@ -55,6 +55,15 @@ const DECLARED_PATHS: &[&str] = &[
     "/v1/admin/scopes/{scope_id}",
     "/v1/admin/scopes/{scope_id}/ancestors",
     "/v1/admin/scopes/{scope_id}/descendants",
+    // CPR-18 (ADR-0083): session evidence becomes reviewable candidates.
+    "/v1/capture-batches",
+    "/v1/capture-batches/{id}",
+    "/v1/capture-batches/{id}/accept",
+    "/v1/capture-candidates",
+    "/v1/capture-candidates/{id}/accept",
+    "/v1/capture-candidates/{id}/dismiss",
+    "/v1/capture-candidates/{id}/merge",
+    "/v1/capture-candidates/{id}/replace",
     "/v1/invites/{invite_token}/accept",
     // CPR-17 (ADR-0082): the public Knowledge plane.
     "/v1/knowledge",
@@ -76,6 +85,7 @@ const DECLARED_PATHS: &[&str] = &[
     // CPR-10 (ADR-0076): the session ledger and runtime API.
     "/v1/sessions",
     "/v1/sessions/{session_id}",
+    "/v1/sessions/{session_id}/capture-batches",
     "/v1/sessions/{session_id}/context-runs",
     "/v1/sessions/{session_id}/end",
     "/v1/sessions/{session_id}/events",
@@ -330,8 +340,8 @@ fn the_document_is_generatable() {
     }
     assert_eq!(
         operation_ids.len(),
-        53,
-        "the 40-operation CPR-11 contract plus CPR-17's 13 Knowledge operations: \
+        62,
+        "the 53-operation CPR-17 contract plus CPR-18's 9 capture operations: \
          {operation_ids:?}"
     );
 }

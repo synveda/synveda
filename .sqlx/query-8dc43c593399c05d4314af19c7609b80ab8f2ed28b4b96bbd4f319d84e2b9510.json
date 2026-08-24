@@ -1,0 +1,132 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, session_id, scope_id, workspace_id, project_id,\n               principal_id, input_hash, event_count, state, extractor_method,\n               model_version, attempts, candidate_count, error_code,\n               created_at, started_at, completed_at, updated_at\n        from capture_batches\n        where tenant_id = $1 and session_id = $2 and input_hash = $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "input_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "event_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "extractor_method",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "model_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "candidate_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "8dc43c593399c05d4314af19c7609b80ab8f2ed28b4b96bbd4f319d84e2b9510"
+}

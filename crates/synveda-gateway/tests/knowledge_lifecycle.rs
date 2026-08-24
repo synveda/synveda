@@ -672,6 +672,7 @@ async fn supersession_and_merge_are_explicit_and_retain_every_source() {
                 "Deduplicate and retry by provider event ID.",
                 json!({}),
             ),
+            sources: Vec::new(),
         },
     )
     .await

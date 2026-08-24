@@ -15,10 +15,9 @@ use axum::{Extension, Router};
 use chrono::Utc;
 use serde_json::{Value, json};
 use synveda_ingest::extraction::{ClaudeExtractor, ExtractionInput, Extractor, VllmExtractor};
+use synveda_types::knowledge::{KnowledgeOrigin, KnowledgeType};
 use synveda_types::session::SessionEventType;
-use synveda_types::{
-    Error, RecordClass, ScopeId, Sensitivity, SessionEventId, SessionId, TenantId,
-};
+use synveda_types::{Error, ScopeId, Sensitivity, SessionEventId, SessionId, TenantId};
 
 const API_KEY: &str = "test-key-never-real";
 
@@ -84,8 +83,11 @@ async fn claude_request_and_response_contract() {
             "name": "emit_extraction",
             "input": {
                 "candidates": [{
-                    "class": "decision",
-                    "content": "The token [REDACTED:github-pat] stays redacted.",
+                    "knowledge_type": "decision",
+                    "title": "Redacted token decision",
+                    "body_markdown": "The token [REDACTED:github-pat] stays redacted.",
+                    "summary": "Keep the redacted token redacted.",
+                    "tags": ["security"],
                     "confidence": 1.4,
                     "sensitivity": "confidential",
                     "entities": ["github"]
@@ -131,8 +133,9 @@ async fn claude_request_and_response_contract() {
     assert_eq!(outcome.model_version, "claude-opus-4-8");
     assert_eq!(outcome.candidates.len(), 1);
     let candidate = &outcome.candidates[0];
-    assert_eq!(candidate.class, RecordClass::Decision);
-    assert!(candidate.content.contains("[REDACTED:github-pat]"));
+    assert_eq!(candidate.knowledge_type, KnowledgeType::Decision);
+    assert_eq!(candidate.origin, KnowledgeOrigin::Observed);
+    assert!(candidate.body_markdown.contains("[REDACTED:github-pat]"));
     assert_eq!(candidate.confidence, 1.0, "confidence clamps into [0,1]");
     assert_eq!(candidate.sensitivity, Some(Sensitivity::Confidential));
     assert_eq!(candidate.entities, vec!["github".to_owned()]);
@@ -204,8 +207,9 @@ async fn vllm_parses_fenced_json_completions() {
                         "model": "qwen-72b-instruct",
                         "choices": [{
                             "message": {
-                                "content": "```json\n{\"candidates\":[{\"class\":\"fact\",\
-                                 \"content\":\"Fenced JSON parses.\",\"confidence\":0.7}]}\n```"
+                                "content": "```json\n{\"candidates\":[{\"knowledge_type\":\"fact\",\
+                                 \"title\":\"Fenced JSON\",\"body_markdown\":\"Fenced JSON parses.\",\
+                                 \"summary\":\"Fenced JSON parses.\",\"confidence\":0.7}]}\n```"
                             }
                         }]
                     }))
@@ -229,7 +233,7 @@ async fn vllm_parses_fenced_json_completions() {
     assert_eq!(outcome.method, "vllm");
     assert_eq!(outcome.model_version, "qwen-72b-instruct");
     assert_eq!(outcome.candidates.len(), 1);
-    assert_eq!(outcome.candidates[0].class, RecordClass::Fact);
+    assert_eq!(outcome.candidates[0].knowledge_type, KnowledgeType::Fact);
 }
 
 /// An error status is a `Dependency` error carrying the status, with the

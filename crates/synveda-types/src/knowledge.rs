@@ -717,6 +717,10 @@ pub enum KnowledgeCommand {
         origin: KnowledgeOrigin,
         /// Merged content.
         content: KnowledgeRevisionContent,
+        /// Additional provenance carried by an unpublished input such as a
+        /// capture candidate. Existing input revisions retain all of their
+        /// own sources independently.
+        sources: Vec<KnowledgeSourceDraft>,
     },
     /// Archive current Knowledge while retaining all history.
     Archive {
@@ -805,6 +809,39 @@ pub enum KnowledgeMutationOutcome {
     PendingReview,
     /// The VedaFlow change was rejected.
     Rejected,
+}
+
+impl KnowledgeMutationOutcome {
+    /// Stable wire and storage name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::PendingReview => "pending_review",
+            Self::Rejected => "rejected",
+        }
+    }
+}
+
+impl fmt::Display for KnowledgeMutationOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for KnowledgeMutationOutcome {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "applied" => Ok(Self::Applied),
+            "pending_review" => Ok(Self::PendingReview),
+            "rejected" => Ok(Self::Rejected),
+            _ => Err(Error::Invalid {
+                message: format!("unknown Knowledge mutation outcome: {value:?}"),
+            }),
+        }
+    }
 }
 
 /// Stable result envelope shared by API, capture and import callers.

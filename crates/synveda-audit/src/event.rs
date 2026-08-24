@@ -188,6 +188,15 @@ pub enum AuditAction {
     /// [`AuditAction::ContextInjected`]'s reason: the chain records what an
     /// agent was given, and the run row holds what that was.
     SessionContextComposed,
+    /// An exact eligible session-event snapshot was frozen for extraction.
+    /// Carries ids, digest and count, never transcript content.
+    CaptureBatchCreated,
+    /// A capture batch reached completed or failed. Carries extractor
+    /// identity, counts and a content-free error code.
+    CaptureBatchCompleted,
+    /// A person made one terminal candidate decision. Carries the action,
+    /// VedaFlow change/result ids and hashes, never candidate content.
+    CaptureCandidateDecided,
     /// A group was created (CPR-5, ADR-0072). The payload carries the
     /// group's handle and whether a directory owns it — a group nobody here
     /// maintains is a different fact from one somebody here made.
@@ -578,7 +587,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 82] = [
+    pub const ALL: [AuditAction; 85] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -604,6 +613,9 @@ impl AuditAction {
         AuditAction::SessionEnded,
         AuditAction::SessionEventsAppended,
         AuditAction::SessionContextComposed,
+        AuditAction::CaptureBatchCreated,
+        AuditAction::CaptureBatchCompleted,
+        AuditAction::CaptureCandidateDecided,
         AuditAction::GroupCreated,
         AuditAction::GroupUpdated,
         AuditAction::AccessGranted,
@@ -691,6 +703,9 @@ impl AuditAction {
             AuditAction::SessionEnded => "session.ended",
             AuditAction::SessionEventsAppended => "session.events.appended",
             AuditAction::SessionContextComposed => "session.context.composed",
+            AuditAction::CaptureBatchCreated => "capture.batch.created",
+            AuditAction::CaptureBatchCompleted => "capture.batch.completed",
+            AuditAction::CaptureCandidateDecided => "capture.candidate.decided",
             AuditAction::GroupCreated => "access.group.created",
             AuditAction::GroupUpdated => "access.group.updated",
             AuditAction::AccessGranted => "access.granted",

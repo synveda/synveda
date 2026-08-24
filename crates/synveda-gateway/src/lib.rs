@@ -54,6 +54,7 @@ mod audit_query;
 pub mod auth;
 pub mod authz;
 pub mod capabilities;
+pub mod capture;
 pub mod channels;
 pub mod console;
 pub mod curators;

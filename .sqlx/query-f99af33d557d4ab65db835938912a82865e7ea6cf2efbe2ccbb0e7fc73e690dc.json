@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select event.id, event.event_type, event.payload_hash, event.sequence\n        from session_events event\n        left join session_event_quarantine quarantine\n          on quarantine.tenant_id = event.tenant_id\n         and quarantine.event_id = event.id\n        where event.tenant_id = $1 and event.session_id = $2\n          and event.event_type in (\n              'message.user', 'message.assistant', 'tool.invoked', 'tool.result',\n              'file.changed', 'command.executed', 'memory.asserted'\n          )\n          and (quarantine.event_id is null or quarantine.state = 'released')\n        order by event.sequence\n        limit $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "event_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "sequence",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f99af33d557d4ab65db835938912a82865e7ea6cf2efbe2ccbb0e7fc73e690dc"
+}

@@ -14,7 +14,7 @@
  * `message.user`, `message.assistant`, `tool.invoked` and `tool.result`, and
  * they are separate events — which is what makes a timeline read as a
  * transcript rather than as a list of turns, and what lets
- * `SessionEventType::carries_memory` keep bookkeeping out of extraction.
+ * `SessionEventType::capture_eligible` keep bookkeeping out of extraction.
  *
  * **`tool.invoked` was named here and never emitted** until CPR-14 replayed a
  * real tool-using transcript: an assistant entry whose content is a single

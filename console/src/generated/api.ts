@@ -12,6 +12,35 @@
 // Source document: Synveda 0.2.0
 
 /**
+ * Batch accept currently applies every pending candidate at its proposed
+ * placement. Per-candidate editing remains on the candidate endpoint.
+ */
+export type AcceptBatchBody = Record<string, unknown>;
+
+/**
+ * Optional edits applied while accepting a candidate.
+ */
+export type AcceptCandidateBody = {
+    content?: unknown | null | KnowledgeContentBody;
+    /**
+     * Override the proposed Knowledge type.
+     */
+    knowledge_type?: string | null;
+    /**
+     * Override the proposed owner.
+     */
+    owner_principal_id?: string | null;
+    /**
+     * Override the proposed project association.
+     */
+    project_id?: string | null;
+    /**
+     * Override the proposed governing scope.
+     */
+    scope_id?: string | null;
+  };
+
+/**
  * The response to redeeming an invitation.
  */
 export type AcceptedInviteView = {
@@ -192,6 +221,226 @@ export type AttachRepositoryBody = {
      * identity**, whenever it is known. A filesystem path is refused.
      */
     remote_uri?: string | null;
+  };
+
+/**
+ * One page of capture batches.
+ */
+export type CaptureBatchListView = {
+    /**
+     * Visible batches.
+     */
+    batches: CaptureBatchView[];
+    /**
+     * Opaque resume cursor.
+     */
+    next_cursor?: string | null;
+  };
+
+/**
+ * One durable extraction job over an exact session-event snapshot.
+ */
+export type CaptureBatchView = {
+    /**
+     * Processing attempts.
+     */
+    attempts: number;
+    /**
+     * Reviewable candidates produced.
+     */
+    candidate_count: number;
+    /**
+     * Terminal instant.
+     */
+    completed_at?: string | null;
+    /**
+     * Creation instant.
+     */
+    created_at: string;
+    /**
+     * Content-free stable failure code.
+     */
+    error_code?: string | null;
+    /**
+     * Frozen event count.
+     */
+    event_count: number;
+    /**
+     * Extractor implementation, once known.
+     */
+    extractor_method?: string | null;
+    /**
+     * Stable batch id.
+     */
+    id: string;
+    /**
+     * Content-free digest of the ordered frozen evidence set.
+     */
+    input_hash: string;
+    /**
+     * Model or deterministic ruleset version, once known.
+     */
+    model_version?: string | null;
+    /**
+     * Project association, when the session had one.
+     */
+    project_id?: string | null;
+    /**
+     * Governed scope copied from the session.
+     */
+    scope_id: string;
+    /**
+     * Source session.
+     */
+    session_id: string;
+    /**
+     * First processing instant.
+     */
+    started_at?: string | null;
+    state: "pending" | "running" | "completed" | "failed";
+  };
+
+/**
+ * One page of capture candidates.
+ */
+export type CaptureCandidateListView = {
+    /**
+     * Visible reviewable candidates.
+     */
+    candidates: CaptureCandidateView[];
+    /**
+     * Opaque resume cursor.
+     */
+    next_cursor?: string | null;
+  };
+
+/**
+ * One reviewable proposal. It is not active Knowledge.
+ */
+export type CaptureCandidateView = {
+    /**
+     * Owning batch.
+     */
+    batch_id: string;
+    /**
+     * Proposed immutable revision content.
+     */
+    content: KnowledgeContentBody;
+    /**
+     * Whether governed erasure removed the proposal plaintext.
+     */
+    content_erased: boolean;
+    /**
+     * Canonical proposed-content hash.
+     */
+    content_hash: string;
+    /**
+     * Creation instant.
+     */
+    created_at: string;
+    /**
+     * Decision instant.
+     */
+    decided_at?: string | null;
+    /**
+     * Actor that made the terminal decision.
+     */
+    decided_by?: string | null;
+    /**
+     * Bounded dismissal reason.
+     */
+    decision_reason?: string | null;
+    /**
+     * Stable candidate id.
+     */
+    id: string;
+    /**
+     * Proposed Knowledge type.
+     */
+    knowledge_type: string;
+    /**
+     * Only matches that passed a fresh Knowledge read decision for this caller.
+     */
+    matches: CaptureMatchView[];
+    /**
+     * Stable position within the batch.
+     */
+    ordinal: number;
+    /**
+     * Proposed origin.
+     */
+    origin: string;
+    /**
+     * Proposed personal owner.
+     */
+    proposed_owner_principal_id?: string | null;
+    /**
+     * Proposed project association.
+     */
+    proposed_project_id?: string | null;
+    /**
+     * Proposed governing scope.
+     */
+    proposed_scope_id: string;
+    /**
+     * VedaFlow change opened by the decision.
+     */
+    resulting_change_id?: string | null;
+    /**
+     * Resulting Knowledge aggregate.
+     */
+    resulting_knowledge_item_id?: string | null;
+    resulting_outcome?: "applied" | "pending_review" | "rejected";
+    /**
+     * Resulting immutable revision, once applied.
+     */
+    resulting_revision_id?: string | null;
+    /**
+     * Source session.
+     */
+    session_id: string;
+    /**
+     * Exact immutable source event ids.
+     */
+    source_event_ids: string[];
+    state: "pending" | "accepted" | "edited_and_accepted" | "merged" | "replaced" | "dismissed" | "failed";
+  };
+
+/**
+ * Result of accepting, merging, replacing or dismissing a candidate.
+ */
+export type CaptureDecisionView = {
+    /**
+     * Candidate after its terminal decision.
+     */
+    candidate: CaptureCandidateView;
+    /**
+     * Whether this request executed the decision or replayed it.
+     */
+    replayed: boolean;
+  };
+
+/**
+ * One independently authorised current-Knowledge comparison.
+ */
+export type CaptureMatchView = {
+    kind: "duplicate" | "conflict" | "possible_supersession";
+    /**
+     * Existing stable aggregate.
+     */
+    knowledge_item_id: string;
+    /**
+     * Exact revision compared during extraction.
+     */
+    knowledge_revision_id: string;
+    /**
+     * Stable, content-free classifier reason.
+     */
+    reason_code: string;
+    /**
+     * Deterministic score in `0..=1000`.
+     */
+    similarity_permille: number;
   };
 
 /**
@@ -462,6 +711,16 @@ export type DeleteKnowledgeBody = {
      * Bounded human reason.
      */
     reason: string;
+  };
+
+/**
+ * Dismissal records no Knowledge mutation.
+ */
+export type DismissCandidateBody = {
+    /**
+     * Optional bounded human reason.
+     */
+    reason?: string | null;
   };
 
 /**
@@ -1239,6 +1498,20 @@ export type MemberView = {
   };
 
 /**
+ * Merge a candidate with visible current Knowledge.
+ */
+export type MergeCandidateBody = {
+    /**
+     * Existing current inputs and their exact inspected heads.
+     */
+    inputs: MergeInputBody[];
+    /**
+     * Optional result placement/content edits.
+     */
+    result?: AcceptCandidateBody;
+  };
+
+/**
  * One merge input and stale-write precondition.
  */
 export type MergeInputBody = {
@@ -1507,6 +1780,24 @@ export type ProjectView = {
      * The workspace it belongs to. Immutable.
      */
     workspace_id: string;
+  };
+
+/**
+ * Replace one visible current Knowledge item with this candidate.
+ */
+export type ReplaceCandidateBody = {
+    /**
+     * Exact existing head inspected.
+     */
+    expected_revision_id: string;
+    /**
+     * Existing item to supersede.
+     */
+    item_id: string;
+    /**
+     * Optional replacement placement/content edits.
+     */
+    replacement?: AcceptCandidateBody;
   };
 
 /**
@@ -2199,6 +2490,81 @@ export type Operations = {
     readonly response: ChainResponse;
   };
   /**
+   * `GET /v1/capture-batches`.
+   */
+  readonly list_capture_batches: {
+    readonly path: "/v1/capture-batches";
+    readonly method: "GET";
+    readonly response: CaptureBatchListView;
+  };
+  /**
+   * `GET /v1/capture-batches/{id}`.
+   */
+  readonly get_capture_batch: {
+    readonly path: "/v1/capture-batches/{id}";
+    readonly method: "GET";
+    readonly response: CaptureBatchView;
+  };
+  /**
+   * `POST /v1/capture-batches/{id}/accept` — accept every still-pending
+   * candidate with deterministic child idempotency keys.
+   */
+  readonly accept_capture_batch: {
+    readonly path: "/v1/capture-batches/{id}/accept";
+    readonly method: "POST";
+    readonly body: AcceptBatchBody;
+    readonly idempotent: true;
+    readonly response: CaptureCandidateListView;
+  };
+  /**
+   * `GET /v1/capture-candidates`.
+   */
+  readonly list_capture_candidates: {
+    readonly path: "/v1/capture-candidates";
+    readonly method: "GET";
+    readonly response: CaptureCandidateListView;
+  };
+  /**
+   * `POST /v1/capture-candidates/{id}/accept`.
+   */
+  readonly accept_capture_candidate: {
+    readonly path: "/v1/capture-candidates/{id}/accept";
+    readonly method: "POST";
+    readonly body: AcceptCandidateBody;
+    readonly idempotent: true;
+    readonly response: CaptureDecisionView;
+  };
+  /**
+   * `POST /v1/capture-candidates/{id}/dismiss`.
+   */
+  readonly dismiss_capture_candidate: {
+    readonly path: "/v1/capture-candidates/{id}/dismiss";
+    readonly method: "POST";
+    readonly body: DismissCandidateBody;
+    readonly idempotent: true;
+    readonly response: CaptureDecisionView;
+  };
+  /**
+   * `POST /v1/capture-candidates/{id}/merge`.
+   */
+  readonly merge_capture_candidate: {
+    readonly path: "/v1/capture-candidates/{id}/merge";
+    readonly method: "POST";
+    readonly body: MergeCandidateBody;
+    readonly idempotent: true;
+    readonly response: CaptureDecisionView;
+  };
+  /**
+   * `POST /v1/capture-candidates/{id}/replace`.
+   */
+  readonly replace_capture_candidate: {
+    readonly path: "/v1/capture-candidates/{id}/replace";
+    readonly method: "POST";
+    readonly body: ReplaceCandidateBody;
+    readonly idempotent: true;
+    readonly response: CaptureDecisionView;
+  };
+  /**
    * `POST /v1/invites/{invite_token}/accept` — redeem one.
    */
   readonly accept_invite: {
@@ -2431,6 +2797,16 @@ export type Operations = {
     readonly response: SessionView;
   };
   /**
+   * `POST /v1/sessions/{session_id}/capture-batches` — freeze the current
+   * eligible evidence snapshot for asynchronous extraction.
+   */
+  readonly create_capture_batch: {
+    readonly path: "/v1/sessions/{session_id}/capture-batches";
+    readonly method: "POST";
+    readonly idempotent: true;
+    readonly response: CaptureBatchView;
+  };
+  /**
    * `POST /v1/sessions/{session_id}/context-runs` — compose context for a run.
    */
   readonly create_context_run: {
@@ -2588,6 +2964,14 @@ export const OPERATIONS = {
   update_scope: { path: "/v1/admin/scopes/{scope_id}", method: "PATCH" },
   list_scope_ancestors: { path: "/v1/admin/scopes/{scope_id}/ancestors", method: "GET" },
   list_scope_descendants: { path: "/v1/admin/scopes/{scope_id}/descendants", method: "GET" },
+  list_capture_batches: { path: "/v1/capture-batches", method: "GET" },
+  get_capture_batch: { path: "/v1/capture-batches/{id}", method: "GET" },
+  accept_capture_batch: { path: "/v1/capture-batches/{id}/accept", method: "POST", idempotent: true },
+  list_capture_candidates: { path: "/v1/capture-candidates", method: "GET" },
+  accept_capture_candidate: { path: "/v1/capture-candidates/{id}/accept", method: "POST", idempotent: true },
+  dismiss_capture_candidate: { path: "/v1/capture-candidates/{id}/dismiss", method: "POST", idempotent: true },
+  merge_capture_candidate: { path: "/v1/capture-candidates/{id}/merge", method: "POST", idempotent: true },
+  replace_capture_candidate: { path: "/v1/capture-candidates/{id}/replace", method: "POST", idempotent: true },
   accept_invite: { path: "/v1/invites/{invite_token}/accept", method: "POST" },
   list_knowledge: { path: "/v1/knowledge", method: "GET" },
   create_knowledge: { path: "/v1/knowledge", method: "POST", idempotent: true },
@@ -2614,6 +2998,7 @@ export const OPERATIONS = {
   list_sessions: { path: "/v1/sessions", method: "GET" },
   open_session: { path: "/v1/sessions", method: "POST", idempotent: true },
   get_session: { path: "/v1/sessions/{session_id}", method: "GET" },
+  create_capture_batch: { path: "/v1/sessions/{session_id}/capture-batches", method: "POST", idempotent: true },
   create_context_run: { path: "/v1/sessions/{session_id}/context-runs", method: "POST", idempotent: true },
   end_session: { path: "/v1/sessions/{session_id}/end", method: "POST" },
   append_session_events: { path: "/v1/sessions/{session_id}/events", method: "POST" },

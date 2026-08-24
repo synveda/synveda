@@ -371,7 +371,7 @@ test("the database-backed Claude replay timeline renders without transcript cont
     "tool.invoked",
     "tool.result",
     "message.assistant (111 characters)",
-    "context composed: 1 entries, 109 tokens",
+    "context composed: 0 entries, 0 tokens",
   ]) {
     assert.ok(rendered.includes(summary), "missing gateway-produced summary: " + summary);
   }

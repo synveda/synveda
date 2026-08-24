@@ -13,9 +13,11 @@
 //! (default 3600) caps service identities' token lifetime at the
 //! enforcement seam (AUTH-3, ADR-0018).
 //!
-//! The retired record extractor is not started (CPR-16, ADR-0081); capture
-//! from session events is introduced by CPR-18. The embedder is
-//! selected by `SYNVEDA_EMBEDDER` (`deterministic` [default] | `tei` —
+//! The retired record extractor is not started (CPR-16, ADR-0081). CPR-18's
+//! capture worker polls frozen session-event batches and produces reviewable
+//! candidates; `SYNVEDA_EXTRACTOR` selects `deterministic` (default),
+//! `claude` or `vllm`. The embedder is selected by `SYNVEDA_EMBEDDER`
+//! (`deterministic` [default] | `tei` —
 //! deliberately no `off`: embed-or-fail is unconditional); `tei`
 //! requires `SYNVEDA_TEI_URL` (the dev compose serves
 //! `http://localhost:8110`) and honours `SYNVEDA_EMBEDDER_MODEL`
@@ -57,6 +59,7 @@ use synveda_gateway::app::{self, AppState};
 use synveda_gateway::{authz, telemetry};
 use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, OidcVerifier, TokenVerifier};
 use synveda_ingest::embedding::Embedder as _;
+use synveda_ingest::extraction::Extractor as _;
 use synveda_policy::Pdp;
 
 #[tokio::main]
@@ -310,16 +313,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // The configured embedder remains available to authored-asset and
-    // context paths during the controlled read cutover. The old extraction,
-    // promotion and retention loops are deliberately not started after
-    // CPR-16: all three mutate the retired record aggregate. CPR-18's capture
-    // worker will consume `session_events` into reviewable candidates instead.
+    // The configured extractor only emits reviewable candidates; the
+    // configured embedder remains available to Knowledge search and context
+    // paths. The old extraction, promotion and retention loops are not
+    // started: all three mutate the retired record aggregate.
+    let capture_extractor = Arc::new(extractor_from_env()?);
     let embedder = Arc::new(embedder_from_env()?);
     tracing::info!(
+        extractor = capture_extractor.method(),
         embedder = embedder.method(),
         embedding_model = embedder.model(),
-        "runtime embedder ready; retired record writers are disabled (CPR-16)"
+        "capture extractor and Knowledge embedder ready; retired record writers are disabled"
     );
 
     // The lapse expiry sweep (AUTHZ-4, ADR-0037 decision 4). Bookkeeping:
@@ -421,6 +425,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         keys,
     };
 
+    let capture_config = capture_config_from_env();
+    tracing::info!(
+        extractor = capture_extractor.method(),
+        poll_ms = capture_config.poll_interval.as_millis() as u64,
+        lease_secs = capture_config.lease_duration.as_secs(),
+        batches_per_tenant = capture_config.batches_per_tenant,
+        "session capture worker starting (CPR-18, ADR-0083)"
+    );
+    let capture_worker = synveda_ingest::capture_worker::spawn(
+        synveda_ingest::capture_worker::Deps {
+            pool: app_state.pool.clone(),
+            pdp: Arc::clone(&app_state.pdp),
+            extractor: capture_extractor,
+        },
+        capture_config,
+    );
+
     // The directory pull sync (AUTH-5, ADR-0060). Spawned only when an
     // issuer configures one, because an empty connector map is a loop that
     // wakes up to do nothing — and because "no tenant is being pulled"
@@ -469,6 +490,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     refresher.abort();
     search_indexer.abort();
     knowledge_indexer.abort();
+    capture_worker.abort();
     lapse_sweep.abort();
     if let Some(sync) = directory_sync {
         sync.abort();
@@ -513,10 +535,85 @@ fn kms_from_env() -> Result<synveda_crypto::Kms, String> {
         .map_err(|err| format!("SYNVEDA_KMS_KEY is not usable: {err}"))
 }
 
+/// Builds the CPR-18 extractor. There is deliberately no `off`: a terminal
+/// session has durably asked for candidate extraction, so silently leaving
+/// every batch pending would be a broken runtime rather than a deployment
+/// profile.
+fn extractor_from_env() -> Result<synveda_ingest::extraction::AnyExtractor, String> {
+    use synveda_ingest::extraction::{
+        AnyExtractor, ClaudeExtractor, DeterministicExtractor, VllmExtractor,
+    };
+    let selected = std::env::var("SYNVEDA_EXTRACTOR")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "deterministic".to_owned());
+    let model = std::env::var("SYNVEDA_EXTRACTOR_MODEL")
+        .ok()
+        .filter(|value| !value.is_empty());
+    match selected.as_str() {
+        "deterministic" => Ok(AnyExtractor::Deterministic(DeterministicExtractor::new())),
+        "claude" => {
+            let api_key = std::env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .ok_or("SYNVEDA_EXTRACTOR=claude requires ANTHROPIC_API_KEY")?;
+            let base_url = std::env::var("SYNVEDA_ANTHROPIC_BASE_URL")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| ClaudeExtractor::DEFAULT_BASE_URL.to_owned());
+            let model = model.unwrap_or_else(|| ClaudeExtractor::DEFAULT_MODEL.to_owned());
+            Ok(AnyExtractor::Claude(ClaudeExtractor::new(
+                api_key, model, base_url,
+            )))
+        }
+        "vllm" => {
+            let base_url = std::env::var("SYNVEDA_VLLM_BASE_URL")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .ok_or("SYNVEDA_EXTRACTOR=vllm requires SYNVEDA_VLLM_BASE_URL")?;
+            let model = model.ok_or("SYNVEDA_EXTRACTOR=vllm requires SYNVEDA_EXTRACTOR_MODEL")?;
+            Ok(AnyExtractor::Vllm(VllmExtractor::new(model, base_url)))
+        }
+        other => Err(format!(
+            "SYNVEDA_EXTRACTOR must be deterministic|claude|vllm, got {other:?}"
+        )),
+    }
+}
+
+/// Capture polling is operational tuning, not an authority boundary. Invalid
+/// values fall back to conservative defaults; the extractor selection above
+/// fails closed because a malformed provider choice would change behaviour.
+fn capture_config_from_env() -> synveda_ingest::capture_worker::Config {
+    let defaults = synveda_ingest::capture_worker::Config::default();
+    synveda_ingest::capture_worker::Config {
+        poll_interval: std::env::var("SYNVEDA_CAPTURE_POLL_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .map(Duration::from_millis)
+            .unwrap_or(defaults.poll_interval),
+        lease_duration: std::env::var("SYNVEDA_CAPTURE_LEASE_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .map(Duration::from_secs)
+            .unwrap_or(defaults.lease_duration),
+        batches_per_tenant: std::env::var("SYNVEDA_CAPTURE_BATCHES_PER_TENANT")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(defaults.batches_per_tenant),
+        lease_owner: std::env::var("SYNVEDA_CAPTURE_LEASE_OWNER")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(defaults.lease_owner),
+    }
+}
+
 /// Builds the configured embedder from `SYNVEDA_EMBEDDER` and its
-/// companions (module header). There is no `off`: wherever the worker
-/// runs, records commit embed-or-fail (ADR-0023 decision 6).
-/// Misconfiguration is a startup error, the extractor discipline.
+/// companions (module header). There is no `off`: Knowledge indexing and
+/// context composition share one explicit implementation identity.
+/// Misconfiguration is a startup error, like extractor selection.
 fn embedder_from_env() -> Result<synveda_ingest::embedding::AnyEmbedder, String> {
     use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder, TeiEmbedder};
     let selected = std::env::var("SYNVEDA_EMBEDDER")

@@ -43,9 +43,8 @@ use synveda_audit::ChainVerification;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::{Hs256Verifier, ProvisioningClaims};
-use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
+use synveda_ingest::capture_worker::{self, Config as CaptureConfig, Deps as CaptureDeps};
 use synveda_ingest::extraction::{AnyExtractor, DeterministicExtractor};
-use synveda_ingest::worker::{self, WorkerConfig, WorkerDeps};
 use synveda_types::TenantId;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
@@ -301,11 +300,10 @@ async fn harness() -> Option<Harness> {
         .unwrap_or_else(|| panic!("project id in {project_view}"))
         .to_owned();
 
-    // One thing already known in this workspace, so the composed block has
-    // something to say. Without it a fresh tenant composes an empty block and
-    // the hook — correctly — hands the model nothing, which would make the
-    // strongest assertion available here ("the model received a watermarked
-    // block") unavailable.
+    // Exercise the complete session -> capture -> VedaFlow -> Knowledge path
+    // before opening the adapter run. CPR-18 deliberately does not bridge the
+    // accepted item back into the temporary record-backed context composer;
+    // CPR-20 replaces that read seam with Knowledge retrieval.
     seed_memory_through_session_api(&gateway, &state, &token, &workspace_id, &project_id).await;
 
     let home = std::env::temp_dir().join(format!("synveda-cpr14-{}", tenant_id.as_uuid().simple()));
@@ -332,10 +330,10 @@ async fn harness() -> Option<Harness> {
     })
 }
 
-/// Creates the one pre-existing memory through the session plane itself, then
-/// runs the production ingestion worker with its deterministic extractor.
-/// This is intentionally more work than inserting a record: direct table
-/// mutation would bypass the PDP and invalidate the acceptance evidence.
+/// Creates one pre-existing Knowledge item through the complete capture and
+/// VedaFlow path. This is intentionally more work than inserting a row:
+/// direct table mutation would bypass the PDP and invalidate the acceptance
+/// evidence.
 async fn seed_memory_through_session_api(
     gateway: &Gateway,
     state: &AppState,
@@ -373,23 +371,64 @@ async fn seed_memory_through_session_api(
     .await;
     assert_eq!(status, 200, "{appended}");
 
-    let deps = WorkerDeps {
+    let (status, batch) = post(
+        &gateway.url(),
+        token,
+        &format!("/v1/sessions/{session_id}/capture-batches"),
+        Some("cpr14-seed-capture"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 201, "{batch}");
+    let batch_id = batch["id"].as_str().expect("seed capture batch id");
+
+    let deps = CaptureDeps {
         pool: state.pool.clone(),
         pdp: Arc::clone(&state.pdp),
-        extractor: AnyExtractor::Deterministic(DeterministicExtractor::new()),
-        embedder: AnyEmbedder::Deterministic(DeterministicEmbedder::new()),
+        extractor: Arc::new(AnyExtractor::Deterministic(DeterministicExtractor::new())),
     };
-    let config = WorkerConfig {
-        batch: 32,
-        vt_secs: 30,
-        ..WorkerConfig::default()
+    let config = CaptureConfig {
+        poll_interval: Duration::from_millis(1),
+        lease_duration: Duration::from_secs(30),
+        batches_per_tenant: 32,
+        lease_owner: "cpr14-seed".to_owned(),
     };
     for _ in 0..20 {
-        if worker::run_once(&deps, &config).await.expect("worker pass") == 0 {
-            return;
+        let summary = capture_worker::sweep_once(&deps, &config)
+            .await
+            .expect("capture worker pass");
+        if summary.completed > 0 {
+            break;
         }
     }
-    panic!("the seed session's extraction signal did not drain");
+    let (status, candidates) = get(
+        &gateway.url(),
+        token,
+        &format!("/v1/capture-candidates?batch_id={batch_id}"),
+    )
+    .await;
+    assert_eq!(status, 200, "{candidates}");
+    let candidate_id = candidates["candidates"]
+        .as_array()
+        .and_then(|items| items.first())
+        .and_then(|candidate| candidate["id"].as_str())
+        .unwrap_or_else(|| panic!("deterministic extraction produced no candidate: {candidates}"));
+    let (status, accepted) = post(
+        &gateway.url(),
+        token,
+        &format!("/v1/capture-candidates/{candidate_id}/accept"),
+        Some("cpr14-seed-accept"),
+        json!({}),
+    )
+    .await;
+    assert!(matches!(status, 200 | 201), "{accepted}");
+    assert!(
+        matches!(
+            accepted["candidate"]["resulting_outcome"].as_str(),
+            Some("applied" | "pending_review")
+        ),
+        "the candidate entered VedaFlow: {accepted}"
+    );
 }
 
 /// What one hook run produced.
@@ -657,7 +696,7 @@ async fn read(request: reqwest::RequestBuilder) -> (u16, Value) {
 /// queued them for is the run that later delivers them, and ten tests would
 /// each have to rebuild the nine steps before their own.
 #[tokio::test]
-async fn a_claude_code_session_is_a_governed_record_from_start_to_end() {
+async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
     let _guard = serial().await;
     let Some(mut h) = harness().await else { return };
     let live = h.gateway.url();
@@ -698,21 +737,31 @@ async fn a_claude_code_session_is_a_governed_record_from_start_to_end() {
     );
 
     // ── 2. Context comes through the session context endpoint ────────────────
-    let runs: i64 = sqlx::query_scalar(
-        "select count(*) from session_context_runs where tenant_id = $1 and session_id = $2",
+    let context_run: (i32, String, String) = sqlx::query_as(
+        "select entry_count, rendered, block_hash \
+         from session_context_runs \
+         where tenant_id = $1 and session_id = $2",
     )
     .bind(h.tenant_id.as_uuid())
     .bind(session_id)
     .fetch_one(&h.pool)
     .await
-    .expect("count context runs");
-    assert_eq!(runs, 1, "SessionStart composed exactly one context run");
-    let block = first
-        .context()
-        .expect("the hook handed the model the composed block");
+    .expect("SessionStart context run");
+    assert_eq!(
+        context_run.0, 0,
+        "CPR-18 publishes Knowledge without dual-writing the temporary record index"
+    );
     assert!(
-        block.contains("synveda:watermark"),
-        "a block is watermarked or it is not auditable: {block}"
+        context_run.1.is_empty(),
+        "the legacy composer must not translate accepted Knowledge: {context_run:?}"
+    );
+    assert!(
+        first.context().is_none(),
+        "the hook must not manufacture context when composition selected nothing"
+    );
+    assert!(
+        context_run.2.len() == 64 && context_run.2.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "even an empty composition has an auditable hash: {context_run:?}"
     );
 
     // ── 3. Stop is durable locally; the next start delivers ─────────────────
@@ -1087,16 +1136,25 @@ async fn a_claude_code_session_is_a_governed_record_from_start_to_end() {
         }),
         "each stored event carries the server's BLAKE3 digest: {hashes:?}"
     );
-    // Five of the six events carry memory, so five extraction signals are
-    // queued — the seam that makes a turn become knowledge.
-    let mut conn = h.pool.acquire().await.expect("a connection");
-    let depth = synveda_store::sessions::queue_depth(&mut conn)
-        .await
-        .expect("queue depth");
-    assert!(
-        depth >= 6,
-        "every memory-carrying event enqueues extraction work: {depth}"
-    );
+    // Terminal close freezes the complete eligible event set into one
+    // restart-safe batch. It does not wait on a model and it does not publish
+    // unreviewed output as Knowledge.
+    let capture: (String, i32, i64) = sqlx::query_as(
+        "select state, event_count, \
+                (select count(*) from capture_candidates candidate \
+                 where candidate.tenant_id = batch.tenant_id \
+                   and candidate.batch_id = batch.id) \
+         from capture_batches batch \
+         where tenant_id = $1 and session_id = $2",
+    )
+    .bind(h.tenant_id.as_uuid())
+    .bind(session_id)
+    .fetch_one(&h.pool)
+    .await
+    .expect("terminal capture batch");
+    assert_eq!(capture.0, "pending", "the hook never waits on extraction");
+    assert_eq!(capture.1, 6, "the batch freezes every eligible event once");
+    assert_eq!(capture.2, 0, "unprocessed output is not active Knowledge");
 
     // Performance evidence is emitted by this separately runnable target;
     // limits are the existing hook and route budgets, not values raised to

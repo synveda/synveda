@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **114 features filed, 82 delivered**;
+Cursor frame has been replayed. **115 features filed, 83 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -132,8 +132,8 @@ Load-bearing facts about Phase 5:
   (INSTALL.md's SQL).
 - The generated OpenAPI contract covers the context-platform plane (`/v1/me`,
   workspaces, projects, repositories, access, admin scopes, sessions and the
-  public Knowledge lifecycle/search surface — **53 operations** since
-  CPR-17). The console's Knowledge Browser consumes generated operations only;
+  public Knowledge lifecycle/search and capture surfaces — **62 operations**
+  since CPR-18). The console's Knowledge Browser consumes generated operations only;
   the remaining production planes join under the programme's public-contract
   convergence package.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
@@ -181,17 +181,26 @@ Load-bearing facts about Phase 5:
   VedaFlow proposal/approval engine, with policy auto-apply, live
   re-authorisation, immutable revisions, content-free audit and durable
   held-or-completed erasure rather than a second workflow. The gateway no
-  longer starts the old extraction, promotion or retention writers; CPR-17/18
-  own the two explicitly recorded controlled-cutover seams.
+  longer starts the old promotion or retention writers; CPR-17 deleted the
+  public record seam and CPR-18 deleted the extraction writer.
 - CPR-17 (ADR-0082) is delivered and also subsumes CNSL-4: thirteen public
   Knowledge operation groups expose current immutable revisions, filtered
   cursor listing, lexical search and TEI-only semantic fusion. Every item,
   source and relation endpoint is decided independently; all writes use
   CPR-16's VedaFlow command seam. The proposal classification route/CLI/eval
   call, public record proposal fields, record channel publication/aliases and
-  raw-record browser fixtures are deleted. Only CPR-18's internal
-  session-event/context record projection remains as a controlled cutover
-  seam.
+  raw-record browser fixtures are deleted. The temporary record-backed context
+  composer remains internal until the explainable context-planning package.
+- CPR-18 (ADR-0083) is delivered: terminal or explicit session capture freezes
+  an exact event snapshot into a restart-safe batch. Extraction creates only
+  reviewable candidates with same-session evidence and independently decided
+  Knowledge matches; accept/edit/merge/replace enter CPR-16's VedaFlow command
+  seam, while dismiss publishes nothing. Candidate and match disclosure is
+  re-authorised, candidate decisions are retry-safe, and Knowledge erasure
+  scrubs candidate plaintext. The PGMQ `session_events` queue and the old
+  record/embed/dedup/link extraction writer are deleted. The generated
+  contract has 62 operations; New Learnings and Knowledge-backed context
+  retrieval are the next two product packages.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

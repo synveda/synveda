@@ -301,6 +301,39 @@ pub fn router(state: AppState) -> Router {
             "/v1/sessions/{session_id}/context-runs",
             post(crate::sessions::create_context_run),
         )
+        // Extraction freezes immutable session evidence and stops at
+        // reviewable candidates (CPR-18, ADR-0083). Accepted decisions enter
+        // the same Knowledge/VedaFlow command seam as manual mutations.
+        .route(
+            "/v1/sessions/{session_id}/capture-batches",
+            post(crate::capture::create_batch),
+        )
+        .route("/v1/capture-batches", get(crate::capture::list_batches))
+        .route("/v1/capture-batches/{id}", get(crate::capture::get_batch))
+        .route(
+            "/v1/capture-batches/{id}/accept",
+            post(crate::capture::accept_batch),
+        )
+        .route(
+            "/v1/capture-candidates",
+            get(crate::capture::list_candidates),
+        )
+        .route(
+            "/v1/capture-candidates/{id}/accept",
+            post(crate::capture::accept_candidate),
+        )
+        .route(
+            "/v1/capture-candidates/{id}/merge",
+            post(crate::capture::merge_candidate),
+        )
+        .route(
+            "/v1/capture-candidates/{id}/replace",
+            post(crate::capture::replace_candidate),
+        )
+        .route(
+            "/v1/capture-candidates/{id}/dismiss",
+            post(crate::capture::dismiss_candidate),
+        )
         // Membership and access assignment (CPR-5, ADR-0072). One model for a
         // person working alone, four people sharing agent context, and a
         // company with a directory: a grant gives a principal or a group a

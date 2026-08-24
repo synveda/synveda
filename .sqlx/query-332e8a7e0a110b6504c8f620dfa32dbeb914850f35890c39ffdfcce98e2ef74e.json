@@ -1,0 +1,209 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, batch_id, session_id, ordinal, proposed_scope_id,\n               proposed_project_id, proposed_owner_principal_id, knowledge_type,\n               origin, title, body_markdown, summary, tags, sensitivity,\n               confidence_permille, valid_from, valid_to, stale_after,\n               verification_metadata, metadata, content_hash, state,\n               resulting_change_id, resulting_outcome,\n               resulting_knowledge_item_id, resulting_revision_id, decided_by,\n               decision_reason, decided_at, content_erased, created_at\n        from capture_candidates where tenant_id = $1 and id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "batch_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "ordinal",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "proposed_scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "proposed_project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "proposed_owner_principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "knowledge_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "origin",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "body_markdown",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "summary",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "tags",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 14,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "confidence_permille",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "valid_from",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "stale_after",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "verification_metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 20,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 21,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
+        "name": "resulting_change_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 24,
+        "name": "resulting_outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 25,
+        "name": "resulting_knowledge_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 26,
+        "name": "resulting_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 27,
+        "name": "decided_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 28,
+        "name": "decision_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 29,
+        "name": "decided_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 30,
+        "name": "content_erased",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 31,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "332e8a7e0a110b6504c8f620dfa32dbeb914850f35890c39ffdfcce98e2ef74e"
+}

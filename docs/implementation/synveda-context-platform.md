@@ -30,13 +30,13 @@ programme convention established in Prompt 1.
 |---|---|---|---|---|---|---|---|---|---|
 | Versioned Knowledge aggregate, immutable revisions, normalised provenance and current projection | CPR-15 | **complete** | `6eb3e3b` | `874aa51` | types 5/5; store DB 5/5; RLS completeness PASS | PASS | PASS | isolated `demos/cpr-15-knowledge-aggregate.sh` PASS | none |
 | Governed create/edit/verify/supersede/merge/archive/restore/forget and durable erasure | CPR-16 | **complete** | `874aa51` | `f2a7c5c` | gateway lifecycle 3/3; policy approvals 6/6, packs 7/7, PDP 11/11; RLS completeness PASS | PASS | PASS | isolated `demos/cpr-16-knowledge-lifecycle.sh` PASS: 19 governed changes, zero old records | none |
-| Public Knowledge API, lexical/semantic search, generated-client browser and raw-record product cutover | CPR-17 | **complete** | `f2a7c5c` | next checkpoint | gateway public API 1/1; OpenAPI 5/5; console 151/151; RLS 84/84 | PASS | PASS | isolated `demos/cpr-17-knowledge-browser.sh` PASS: one Knowledge item, zero old records | none |
+| Public Knowledge API, lexical/semantic search, generated-client browser and raw-record product cutover | CPR-17 | **complete** | `f2a7c5c` | `2d845b0` | gateway public API 1/1; OpenAPI 5/5; console 151/151; RLS 84/84 | PASS | PASS | isolated `demos/cpr-17-knowledge-browser.sh` PASS: one Knowledge item, zero old records | none |
+| Session-based capture batches, reviewable candidates and governed acceptance actions | CPR-18 | **complete** | `2d845b0` | next checkpoint | gateway 3/3; Claude lifecycle 2/2; ingest 64/64; OpenAPI 5/5; console 151/151; RLS 84/84 | PASS | PASS | isolated `demos/cpr-18-session-capture.sh` PASS: 8 candidates, 8 governed changes, zero old records/queue | none |
 
-**Exact next objective:** implement CPR-18, session-based `CaptureBatch` and
-`CaptureCandidate` extraction, with candidate-only output and acceptance
-actions entering CPR-16's VedaFlow Knowledge command seam. Delete the final
-old direct extraction output writer; repeated extraction of one session must
-be idempotent.
+**Exact next objective:** file and implement CPR-19, the New Learnings console
+over CPR-18's generated candidate/batch contract: source preview, scope-safe
+accept/edit/merge/replace/dismiss, pending-review outcomes and removal of the
+duplicate candidate product surfaces while retaining Advanced > Reviews.
 CPR-13 remains reserved for the demo-corpus re-point and follows the
 MVP surfaces it must demonstrate; rewriting those demos before Knowledge,
 capture and scoped recall exist would knowingly rewrite them twice.
@@ -2985,9 +2985,11 @@ frontend changes, deletions, tests, and the resulting commit hash.
   Knowledge lifecycle. No Knowledge command reads or writes `records`. Two
   controlled old-plane seams remain and are named rather than hidden:
   VedaFlow-governed record classification supports the restricted-tier
-  adversarial proof until CPR-17 deletes its route/CLI/eval client; context-pack
-  chunks remain a retrieval projection until CPR-18 moves composition off
-  `records`. The feature record contains the exact CPR-17/18 deletion list.
+  adversarial proof until CPR-17 deletes its route/CLI/eval client. This
+  checkpoint originally forecast that CPR-18 would also move composition off
+  `records`; CPR-18 removed the extraction writer instead, and the later
+  explainable context planner owns that read cutover. The feature record
+  contains the exact deletion list.
 
 - **Security and acceptance evidence.** Three database-backed gateway tests
   cover personal auto-apply with an Applied proposal, immutable edit/verify,
@@ -3121,3 +3123,111 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(console): add knowledge browser and search (CPR-17)` on
   `feat/context-platform-mvp`.
 - **Commit hash.** Written by the CPR-18 checkpoint on Prompt 1's rule.
+
+### Prompt 16 objective — Session capture batches and reviewable candidates (CPR-18)
+
+- **Selected feature and state.** **CPR-18** is delivered from `2d845b0`.
+  It replaces the last automatic session-event-to-record writer; it is not a
+  second Knowledge command service or a model-output publication path. The
+  preceding CPR-17 feature commit is
+  `2d845b0f8a43d66f802286df922b820bf1bf25cf`.
+
+- **Decision.** ADR-0083 makes an exact ordered session-event snapshot the
+  idempotency unit. Explicit capture and terminal close canonicalise eligible
+  event ids/types/payload hashes into one BLAKE3 snapshot digest. A durable
+  per-tenant lease owns extraction, and a candidate decision intent is stored
+  before its Knowledge command runs. Session authority decides extraction;
+  Knowledge authority independently decides every destination, merge input,
+  supersession endpoint and disclosed match.
+
+- **Domain and schema.** The closed batch states are `pending`, `running`,
+  `completed` and `failed`; the seven candidate outcomes are `pending`,
+  `accepted`, `edited_and_accepted`, `merged`, `replaced`, `dismissed` and
+  `failed`. Migration `0050_capture_candidates` takes the chain to **48
+  migrations** at schema epoch **2** and adds six tenant-bound,
+  enabled-and-forced-RLS tables: batches, frozen batch events, candidates,
+  candidate sources, independently visible matches and append-only decision
+  intents/results. Composite foreign keys make a fictional, cross-session or
+  cross-tenant source unrepresentable. Owner-level triggers preserve frozen
+  evidence and legal transitions; authorised Knowledge erasure scrubs
+  candidate/request plaintext while leaving only ids and hashes. SQLx
+  all-target metadata was regenerated from a fresh migration-0050 database.
+
+- **Extraction boundary.** The deterministic, Claude and OpenAI-compatible
+  extractor implementations now return bounded proposed Knowledge — type,
+  title, Markdown body, summary, tags, sensitivity, confidence and metadata.
+  The worker re-authorises the session principal before model work, rescans
+  output for secrets, applies the Knowledge validators, retrieves a bounded
+  current lexical neighbourhood and makes an exact `KnowledgeRead` decision
+  before comparing each item. It persists duplicate, conflict and possible-
+  supersession hints only for visible items and writes no Knowledge, records,
+  vectors, graph edges or VedaFlow channels.
+
+- **API and command semantics.** OpenAPI grows from 53 to **62 operations**:
+  create/list/detail batches, whole-batch accept, list candidates and
+  candidate accept/merge/replace/dismiss. Collections use bound opaque
+  cursors and the common envelope; retryable acts require idempotency keys.
+  Accept/edit creates Knowledge, merge carries the candidate's real source
+  evidence into the merged aggregate, replace invokes explicit governed
+  supersession and dismiss creates no Knowledge. The decision row binds the
+  canonical request hash and caller before execution; CPR-16's idempotency
+  ledger then converges lost acknowledgements, while the winner of the
+  terminal transition alone audits. Whole-batch acceptance derives stable
+  child keys and records its parent only after every child, so an interrupted
+  batch resumes rather than duplicates.
+
+- **PDP, disclosure and evidence.** Reading candidate plaintext requires both
+  `SessionRead` on the exact source run and `KnowledgeRead` at the proposed
+  destination; preferences default to the session principal's private scope,
+  while shared facts default to the governed run scope/project. Match rows are
+  re-authorised on every response, so a revoked grant cannot leak an item id,
+  revision, reason or count. Three new content-free audit actions record batch
+  creation/completion and candidate decisions; worker and API paths carry
+  spans plus bounded batch/candidate/extractor counters and duration metrics.
+
+- **Hard-cut deletions.** The PGMQ `session_events` queue, queue helpers, old
+  record/embed/dedup/graph-link/channel commit worker and five direct-active
+  extraction integration suites are deleted. Session append is once again
+  only an immutable ledger write; capture is explicit or terminal. There is
+  no record-to-Knowledge bridge or dual write. The old record-backed context
+  composer remains an explicitly read-only seam until the explainable
+  Knowledge context planner replaces it; the deterministic Claude acceptance
+  now asserts the resulting empty composition rather than manufacturing an
+  old record behind the public path.
+
+- **Acceptance evidence and findings.** The three database-backed capture API
+  cases cover exact-snapshot replay, terminal capture, candidate-only output,
+  all decision kinds, strict-profile pending review, stale/key conflicts,
+  merge provenance, governed erasure, append-only evidence, cross-session
+  source refusal, another tenant's real ids and match re-authorisation after a
+  sibling-project grant. The first broad run exposed two honest contract
+  updates: CPR-14's timeline golden still claimed the removed dual write had
+  supplied one record, and the console's exact idempotent-operation inventory
+  omitted all six new mutation groups. Both fixtures now pin the generated
+  zero-entry context and 62-operation contract; no product assertion was
+  disabled.
+
+- **Tests and runnable evidence.** Capture gateway **3/3**, deterministic
+  Claude lifecycle **2/2** (the separately named installed-client test remains
+  opt-in), Knowledge lifecycle **4/4**, session redaction **2/2**, ingest
+  **64/64**, types **213/213**, audit **20/20**, OpenAPI **5/5**, console
+  **151/151**, Claude adapter **96/96** and RLS **84/84** pass.
+  `demos/cpr-18-session-capture.sh` passes in an isolated database and reports
+  **8 candidates, 8 governed changes, zero old records and zero old queues**.
+  `make db-test` **PASS** against a fresh scratch database and `make ci`
+  **PASS**, including clippy `-D warnings`, SQLx offline compilation,
+  dependency/licence/backlog/ADR/API drift, Helm and deterministic eval parse.
+
+- **Limitations and next work.** No new external model or proprietary-client
+  claim was needed for this storage/application cutover; CPR-14's genuine
+  Claude Code 2.1.241 evidence remains the current live-client result. CPR-19
+  owns the New Learnings candidate experience. The later context-planning
+  package owns Knowledge-backed selection and the scoped recall/query lenses;
+  until it lands, accepted Knowledge is deliberately not translated into the
+  temporary record composer. CPR-13 stays reserved until those product
+  surfaces exist. Live Entra/Okta and authentic Cursor evidence remain
+  unrelated external gaps.
+
+- **Commit.** `feat(capture): extract reviewable session learnings (CPR-18)`
+  on `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-19 checkpoint on Prompt 1's rule.

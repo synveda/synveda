@@ -69,7 +69,7 @@ use synveda_store::anchors::AnchorSelection;
 use synveda_store::sessions::{
     self, AppendOutcome, NewContextRun, NewSession, NewSessionEvent, SessionFilter,
 };
-use synveda_store::{rls, scopes};
+use synveda_store::{capture, rls, scopes};
 use synveda_types::session::{
     CURRENT_EVENT_SCHEMA_VERSION, ContextRun, Session, SessionEvent, SessionEventType,
     SessionStatus,
@@ -786,7 +786,7 @@ async fn require(
 
 /// The allowed-read decision event (ADR-0019 decision 4): a read has no
 /// semantic event of its own, so the decision itself chains.
-async fn read_event(
+pub(crate) async fn read_event(
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     op: &'static str,
@@ -920,7 +920,7 @@ async fn page(
 /// a session that is not this tenant's is a 404, indistinguishable from an id
 /// nobody ever minted, because a caller who can tell the two apart can
 /// enumerate another tenant's runs a uuid at a time.
-async fn load(
+pub(crate) async fn load(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
@@ -1715,6 +1715,19 @@ pub(crate) async fn end(
             body.end_reason.as_deref(),
         )
         .await?;
+        // A terminal close freezes exactly the evidence eligible at this
+        // instant. The extractor runs asynchronously: Stop/SessionEnd hooks
+        // cross only the durable session boundary and never wait on a model.
+        // `ending` is the first half of the two-phase close, so later events
+        // remain eligible until the terminal transition.
+        let frozen = if matches!(
+            after.status,
+            SessionStatus::Ended | SessionStatus::Abandoned | SessionStatus::Failed
+        ) {
+            Some(capture::freeze_batch(&mut tx, &after).await?)
+        } else {
+            None
+        };
         audit::record(
             &mut tx,
             tenant_id,
@@ -1733,6 +1746,26 @@ pub(crate) async fn end(
             }),
         )
         .await?;
+        if let Some(frozen) = &frozen
+            && frozen.created
+        {
+            audit::record(
+                &mut tx,
+                tenant_id,
+                AuditAction::CaptureBatchCreated,
+                Resource::Session(after.id).to_string(),
+                Outcome::Success,
+                json!({
+                    "batch_id": frozen.batch.id,
+                    "session_id": after.id,
+                    "input_hash": frozen.batch.input_hash,
+                    "event_count": frozen.batch.event_count,
+                    "trigger": "session_terminal",
+                    "authz": audit::decision_context(Action::SessionWrite, &authorized),
+                }),
+            )
+            .await?;
+        }
         commit(tx).await?;
         Ok(Json(SessionView::from(after)))
     }

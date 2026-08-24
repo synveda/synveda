@@ -46,6 +46,7 @@
 
 pub mod access;
 pub mod anchors;
+pub mod capture;
 pub mod console_sessions;
 pub mod dedup;
 pub mod directory;

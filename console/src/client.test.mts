@@ -96,7 +96,7 @@ test("every operation the document declares is callable, and none is invented", 
   // so this is really asserting the generator did not skip a row — the
   // failure that would make an operation typecheck and then throw.
   const ids = Object.keys(OPERATIONS);
-  assert.equal(ids.length, 53, "the contract's operation count moved; update the count here");
+  assert.equal(ids.length, 62, "the contract's operation count moved; update the count here");
   for (const id of ids) {
     const declared = OPERATIONS[id as keyof typeof OPERATIONS];
     assert.ok(declared.path.startsWith("/v1/"), `${id} is not a /v1 path`);
@@ -113,6 +113,8 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     .map(([id]) => id)
     .sort();
   assert.deepEqual(idempotent, [
+    "accept_capture_batch",
+    "accept_capture_candidate",
     "add_project_member",
     "archive_knowledge",
     "attach_repository",
@@ -120,6 +122,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     // whose retry after a timeout would otherwise make a second row.
     // Appending events is deliberately **not** here — its idempotency unit is
     // the event, keyed by the client's own `client_event_id`.
+    "create_capture_batch",
     "create_context_run",
     "create_grant",
     "create_group",
@@ -129,9 +132,12 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "create_workspace",
     "create_workspace_invite",
     "delete_knowledge",
+    "dismiss_capture_candidate",
     "edit_knowledge",
+    "merge_capture_candidate",
     "merge_knowledge",
     "open_session",
+    "replace_capture_candidate",
     "restore_knowledge",
     "supersede_knowledge",
     "verify_knowledge",

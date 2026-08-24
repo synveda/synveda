@@ -7,10 +7,11 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
+use synveda_types::Result;
+use synveda_types::knowledge::{KnowledgeOrigin, KnowledgeType};
 use synveda_types::session::SessionEventType;
-use synveda_types::{RecordClass, Result};
 
-use super::{CandidateRecord, ExtractionInput, ExtractionOutcome, Extractor};
+use super::{CandidateKnowledge, ExtractionInput, ExtractionOutcome, Extractor};
 
 /// Content longer than this is truncated on a word boundary — a
 /// truncation is an honest summary only while it stays short.
@@ -24,7 +25,7 @@ const KEYWORD_CONFIDENCE: f64 = 0.6;
 /// The ruleset version recorded as `model_version` in provenance. Bump
 /// whenever a rule changes: provenance must name what actually ran.
 /// `@2` added entity mentions (GRPH-2, ADR-0044 decision 2).
-const RULESET_VERSION: &str = "builtin@2";
+const RULESET_VERSION: &str = "builtin@3";
 
 static PREFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(prefers?|always use|never use|i like|we like|favou?rite)\b")
@@ -199,15 +200,22 @@ impl Extractor for DeterministicExtractor {
             Vec::new()
         } else {
             let (class, confidence) = classify(input.event_type, &text);
-            // Mentions come from the content that will actually be
-            // persisted, not from the text before truncation: an edge
-            // claiming this record names a thing must be true of the
-            // record as stored (GRPH-2, ADR-0044 decision 2).
+            // Mentions come from the content that will actually be proposed,
+            // not from the text before truncation: a future relation claiming
+            // this revision names a thing must be true of its stored content.
             let content = truncate(&text);
             let entities = mentions(&content);
-            vec![CandidateRecord {
-                class,
-                content,
+            vec![CandidateKnowledge {
+                knowledge_type: class,
+                origin: if input.event_type == SessionEventType::MemoryAsserted {
+                    KnowledgeOrigin::Asserted
+                } else {
+                    KnowledgeOrigin::Observed
+                },
+                title: proposed_title(&content),
+                summary: content.clone(),
+                body_markdown: content,
+                tags: Vec::new(),
                 confidence,
                 sensitivity: None,
                 entities,
@@ -226,7 +234,7 @@ impl Extractor for DeterministicExtractor {
 /// `fact`.
 ///
 /// **Something that happened is an episode.** A tool call, a tool answer, a
-/// file change and a shell command are all records of an act, and their class
+/// file change and a shell command are all evidence of an act, and their class
 /// is decided by their type at `KIND_CONFIDENCE` — nothing in the text can
 /// make a `command.executed` into a preference.
 ///
@@ -237,30 +245,45 @@ impl Extractor for DeterministicExtractor {
 /// procedures and decisions as readily as bare facts. Routing it to a fixed
 /// class at `KIND_CONFIDENCE` would assert a classification the type does not
 /// carry, so the text is read the same way a message's is and the provenance
-/// claim rides on the record's `provenance.event_type` instead (worker.rs).
+/// claim rides on the candidate's source event instead.
 ///
-/// Types that answer `false` to [`SessionEventType::carries_memory`] never
-/// reach here: no signal is enqueued for them.
-fn classify(event_type: SessionEventType, text: &str) -> (RecordClass, f64) {
+/// Types that answer `false` to [`SessionEventType::capture_eligible`] never
+/// enter a frozen batch.
+fn classify(event_type: SessionEventType, text: &str) -> (KnowledgeType, f64) {
     match event_type {
         SessionEventType::ToolInvoked
         | SessionEventType::ToolResult
         | SessionEventType::FileChanged
-        | SessionEventType::CommandExecuted => (RecordClass::Episode, KIND_CONFIDENCE),
+        | SessionEventType::CommandExecuted => (KnowledgeType::Episode, KIND_CONFIDENCE),
         _ => {
             if PREFERENCE.is_match(text) {
-                (RecordClass::Preference, KEYWORD_CONFIDENCE)
+                (KnowledgeType::Preference, KEYWORD_CONFIDENCE)
             } else if DECISION.is_match(text) {
-                (RecordClass::Decision, KEYWORD_CONFIDENCE)
+                (KnowledgeType::Decision, KEYWORD_CONFIDENCE)
             } else if PROCEDURE.is_match(text) {
-                (RecordClass::Procedure, KEYWORD_CONFIDENCE)
+                (KnowledgeType::Procedure, KEYWORD_CONFIDENCE)
             } else if ENTITY.is_match(text) {
-                (RecordClass::Entity, KEYWORD_CONFIDENCE)
+                (KnowledgeType::Entity, KEYWORD_CONFIDENCE)
             } else {
-                (RecordClass::Fact, KEYWORD_CONFIDENCE)
+                (KnowledgeType::Fact, KEYWORD_CONFIDENCE)
             }
         }
     }
+}
+
+/// A deterministic title from the first sentence/line, bounded below the
+/// Knowledge title limit without splitting UTF-8.
+fn proposed_title(content: &str) -> String {
+    let sentence = content
+        .split(['\n', '.', '!', '?'])
+        .find(|part| !part.trim().is_empty())
+        .unwrap_or(content)
+        .trim();
+    let mut title: String = sentence.chars().take(100).collect();
+    if sentence.chars().count() > 100 {
+        title.push('…');
+    }
+    title
 }
 
 /// Concatenates every string value in the payload, in document order,
@@ -437,7 +460,7 @@ mod tests {
             let (class, confidence) = classify(event_type, "anything at all");
             assert_eq!(
                 class,
-                RecordClass::Episode,
+                KnowledgeType::Episode,
                 "{} should route to episode whatever the text says",
                 event_type.as_str()
             );
@@ -446,13 +469,13 @@ mod tests {
     }
 
     /// The gate that keeps the extractor away from bookkeeping. A type that
-    /// answers `false` never gets a work signal, so a change that made one of
+    /// answers `false` never enters a batch, so a change that made one of
     /// these `true` would start spending an LLM call on "session started".
     #[test]
-    fn only_the_types_that_hold_content_carry_memory() {
+    fn only_durable_content_types_are_capture_eligible() {
         let carrying: Vec<&str> = SessionEventType::ALL
             .iter()
-            .filter(|event_type| event_type.carries_memory())
+            .filter(|event_type| event_type.capture_eligible())
             .map(SessionEventType::as_str)
             .collect();
         assert_eq!(
@@ -507,14 +530,14 @@ mod tests {
         assert_eq!(
             classes,
             [
-                RecordClass::Preference,
-                RecordClass::Decision,
-                RecordClass::Procedure
+                KnowledgeType::Preference,
+                KnowledgeType::Decision,
+                KnowledgeType::Procedure
             ]
         );
         assert_eq!(
             classify(SessionEventType::MemoryAsserted, "the sky is a colour").0,
-            RecordClass::Fact,
+            KnowledgeType::Fact,
             "the default"
         );
     }

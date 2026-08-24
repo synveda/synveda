@@ -108,18 +108,6 @@ pub const SERVICE_IDENTITY_OPERATIONS_TOTAL: &str = "synveda_service_identity_op
 /// log lands.
 pub const SERVICE_TOKEN_REJECTIONS_TOTAL: &str = "synveda_service_token_rejections_total";
 
-/// Observe ingestion batches (MEM-1, ADR-0020), labelled by `outcome`
-/// (`ok`, `rejected`, `error`). Each `ok` batch chains one
-/// `memory.observed` audit event.
-pub const OBSERVE_BATCHES_TOTAL: &str = "synveda_observe_batches_total";
-
-/// Observe events admitted to the buffer (MEM-1, ADR-0020), labelled by
-/// `outcome`: `accepted` (staged and enqueued), `duplicate` (idempotency
-/// key already admitted — reported, never re-enqueued), `quarantined`
-/// (staged signal-less behind a pending review, MEM-2 ADR-0021), or
-/// `denied` (refused per event; nothing persisted).
-pub const OBSERVE_EVENTS_TOTAL: &str = "synveda_observe_events_total";
-
 /// Redaction findings on the observe scan seam (MEM-2, ADR-0021),
 /// labelled by `rule` and `category` (`secret`/`pii`). Counts findings
 /// only — matched text appears nowhere, metrics included.
@@ -502,50 +490,32 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Service tokens refused at the enforcement seam by reason \
          (lifetime_exceeded/lifetime_unknown)"
     );
-    // MEM-1 counters (ADR-0020): emitted in the gateway's observe route.
+    // CPR-18 metrics (ADR-0083): extraction freezes session evidence and
+    // produces reviewable candidates. Nothing here calls a candidate a
+    // published record or retains the retired per-event queue vocabulary.
     metrics::describe_counter!(
-        OBSERVE_BATCHES_TOTAL,
-        "Observe ingestion batches by outcome (ok/rejected/error)"
+        synveda_ingest::capture_worker::CAPTURE_BATCHES_TOTAL,
+        "Capture batches processed by outcome"
     );
     metrics::describe_counter!(
-        OBSERVE_EVENTS_TOTAL,
-        "Observe events admitted to the buffer by outcome (accepted/duplicate)"
-    );
-    // MEM-3 metrics (ADR-0022): emitted in synveda-ingest's extraction
-    // worker through the facade, described here where the recorder lives.
-    metrics::describe_counter!(
-        synveda_ingest::worker::EXTRACTION_EVENTS_TOTAL,
-        "Staged events resolved by the extraction worker by outcome \
-         (ok/empty/denied/dead_letter/error/skipped)"
+        synveda_ingest::capture_worker::CAPTURE_CANDIDATES_TOTAL,
+        "Reviewable capture candidates persisted by Knowledge type"
     );
     metrics::describe_counter!(
-        synveda_ingest::worker::EXTRACTION_RECORDS_TOTAL,
-        "Derived records committed by the extraction pipeline by class"
-    );
-    metrics::describe_histogram!(
-        synveda_ingest::worker::EXTRACTION_LAG_SECONDS,
-        "Seconds from observe admission to extraction commit (seed §10: <60s SLO)"
-    );
-    metrics::describe_counter!(
-        synveda_ingest::worker::EXTRACTOR_REQUESTS_TOTAL,
+        synveda_ingest::capture_worker::CAPTURE_EXTRACTOR_REQUESTS_TOTAL,
         "Extractor calls by method and outcome (ok/error)"
     );
     metrics::describe_histogram!(
-        synveda_ingest::worker::EXTRACTOR_REQUEST_SECONDS,
+        synveda_ingest::capture_worker::CAPTURE_EXTRACTOR_SECONDS,
         "Extractor call duration in seconds by method"
     );
     metrics::describe_counter!(
-        synveda_ingest::worker::EXTRACTION_RESCAN_FINDINGS_TOTAL,
-        "Redaction findings in extractor output (redacted before persistence, ADR-0022)"
+        synveda_store::capture::CAPTURE_MUTATIONS_TOTAL,
+        "Durable capture batch and candidate state transitions"
     );
-    // MEM-4 metrics (ADR-0023): emitted in the worker's embed stage.
     metrics::describe_counter!(
-        synveda_ingest::worker::EMBEDDER_REQUESTS_TOTAL,
-        "Embedder calls by method and outcome (ok/error)"
-    );
-    metrics::describe_histogram!(
-        synveda_ingest::worker::EMBEDDER_REQUEST_SECONDS,
-        "Embedder call duration in seconds by method"
+        crate::capture::CAPTURE_API_OPERATIONS_TOTAL,
+        "Capture API operations by op and outcome (ok/rejected/error)"
     );
     // AUD-1 counters (ADR-0019): appends and verifications in
     // synveda-audit through the facade; best-effort append failures at

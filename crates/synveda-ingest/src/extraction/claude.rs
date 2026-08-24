@@ -128,7 +128,7 @@ impl Extractor for ClaudeExtractor {
                 ))
             })?;
         Ok(ExtractionOutcome {
-            candidates: prompt::parse_candidates(SERVICE, tool_input)?,
+            candidates: prompt::parse_candidates(SERVICE, tool_input, input.event_type)?,
             method: SERVICE.to_owned(),
             // The response's model string: honest provenance even when
             // the configured id is an alias.

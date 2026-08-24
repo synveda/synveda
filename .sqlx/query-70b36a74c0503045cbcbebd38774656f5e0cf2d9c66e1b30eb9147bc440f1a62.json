@@ -1,0 +1,113 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, candidate_id, action, state, actor_subject, idempotency_key,\n               request_hash, payload, payload_hash, resulting_change_id,\n               resulting_outcome, resulting_knowledge_item_id,\n               resulting_revision_id, error_code, created_at, completed_at\n        from capture_candidate_decisions\n        where tenant_id = $1 and candidate_id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "candidate_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "action",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "actor_subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "idempotency_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "request_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "resulting_change_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "resulting_outcome",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "resulting_knowledge_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "resulting_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 13,
+        "name": "error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "70b36a74c0503045cbcbebd38774656f5e0cf2d9c66e1b30eb9147bc440f1a62"
+}

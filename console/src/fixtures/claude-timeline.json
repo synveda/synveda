@@ -66,14 +66,14 @@
       "id": "ID",
       "at": "INSTANT",
       "delayed": false,
-      "summary": "context composed: 1 entries, 109 tokens"
+      "summary": "context composed: 0 entries, 0 tokens"
     },
     {
       "kind": "context_run",
       "id": "ID",
       "at": "INSTANT",
       "delayed": false,
-      "summary": "context composed: 1 entries, 109 tokens"
+      "summary": "context composed: 0 entries, 0 tokens"
     }
   ],
   "event_counts": {

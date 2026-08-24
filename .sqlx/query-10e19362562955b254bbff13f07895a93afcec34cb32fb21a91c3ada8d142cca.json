@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select knowledge_item_id, knowledge_revision_id, match_kind,\n               similarity_permille, reason_code\n        from capture_candidate_matches\n        where tenant_id = $1 and candidate_id = $2\n        order by similarity_permille desc, knowledge_item_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "knowledge_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "knowledge_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "match_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "similarity_permille",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "reason_code",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "10e19362562955b254bbff13f07895a93afcec34cb32fb21a91c3ada8d142cca"
+}

@@ -916,7 +916,7 @@ fn decode_history_cursor(raw: &str, item_id: KnowledgeItemId) -> Result<i64> {
         .map_err(|_| invalid())
 }
 
-fn content(
+pub(crate) fn content(
     body: &KnowledgeContentBody,
     default_valid_from: DateTime<Utc>,
 ) -> Result<KnowledgeRevisionContent> {
@@ -1084,7 +1084,7 @@ async fn snapshot(
         .ok_or_else(|| item_not_found(item_id))
 }
 
-async fn authorize_snapshot(
+pub(crate) async fn authorize_snapshot(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
@@ -2141,6 +2141,7 @@ pub(crate) async fn merge(
                 knowledge_type: body.knowledge_type.parse()?,
                 origin: body.origin.parse()?,
                 content: content(&body.content, Utc::now())?,
+                sources: Vec::new(),
             })
         })
         .await

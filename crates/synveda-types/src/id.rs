@@ -256,3 +256,21 @@ define_id!(
     /// session (CPR-10, ADR-0076 decision 7).
     ContextRunId
 );
+
+define_id!(
+    /// Identifies one immutable snapshot of session evidence selected for
+    /// candidate extraction (CPR-18, ADR-0083).
+    CaptureBatchId
+);
+
+define_id!(
+    /// Identifies one reviewable learning proposed by a capture batch
+    /// (CPR-18, ADR-0083).
+    CaptureCandidateId
+);
+
+define_id!(
+    /// Identifies the durable intent/result record for one candidate decision
+    /// (CPR-18, ADR-0083).
+    CaptureCandidateDecisionId
+);

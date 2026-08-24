@@ -647,12 +647,13 @@ pub struct NewSessionEvent {
     /// matched text — stamped on the row as immutable provenance. `None`
     /// when the payload was clean.
     pub redactions: Option<serde_json::Value>,
-    /// Append the event but **withhold its work signal**, opening a pending
-    /// review row instead (ADR-0078 decision 4).
+    /// Append the event but withhold it from capture eligibility, opening a
+    /// pending review row instead (ADR-0083).
     ///
     /// The event is stored either way: idempotency stays single-point, and
     /// `session_events` has no UPDATE grant, so quarantine can never be a
-    /// state on the row. A release enqueues the signal admission withheld.
+    /// state on the row. A release makes the immutable event eligible for the
+    /// next frozen capture snapshot.
     pub quarantine: bool,
 }
 
@@ -1009,7 +1010,6 @@ pub async fn append_events(
 
     let mut written = 0usize;
     let mut newest: Option<DateTime<Utc>> = None;
-    let mut signals: Vec<serde_json::Value> = Vec::new();
     let mut review_ids: Vec<Uuid> = Vec::new();
     let mut review_findings: Vec<serde_json::Value> = Vec::new();
     let fresh_ids: std::collections::HashSet<&str> = fresh
@@ -1038,16 +1038,6 @@ pub async fn append_events(
                     .clone()
                     .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
             );
-        } else if event.event_type.carries_memory() {
-            // Only the types that hold content get a work signal (ADR-0078
-            // decision 2). A run starting, a skill loading and an adapter
-            // warning are part of the transcript and are not things to
-            // remember, and running an extractor over them is spend that can
-            // only produce noise.
-            signals.push(serde_json::json!({
-                "tenant_id": tenant_id,
-                "event_id": stored.id,
-            }));
         }
     }
 
@@ -1075,20 +1065,9 @@ pub async fn append_events(
         });
     }
 
-    // One work signal per row actually inserted *and not quarantined*, on the
-    // caller's transaction: the pipeline can never see a delivery twice, a
-    // withheld event stays invisible to it until a reviewer releases it, and a
-    // rollback retracts rows, signals and review markers together.
-    if !signals.is_empty() {
-        sqlx::query_scalar!(
-            r#"select pgmq.send_batch($1, $2::jsonb[]) as "msg_id!""#,
-            SESSION_EVENTS_QUEUE,
-            &signals,
-        )
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(storage_error)?;
-    }
+    // Review markers commit beside the immutable events. Non-quarantined
+    // events need no side signal: session end or an explicit capture request
+    // freezes the eligible set into a durable batch (CPR-18, ADR-0083).
     if !review_ids.is_empty() {
         sqlx::query!(
             r#"
@@ -1217,218 +1196,6 @@ pub async fn events(
     .await
     .map_err(storage_error)?;
     rows.into_iter().map(TryInto::try_into).collect()
-}
-
-// ── The ingestion queue ──────────────────────────────────────────────────────
-//
-// CPR-12 (ADR-0078 decisions 1 and 2). This half of the module used to be
-// `crate::observe`, keyed to a staging table and an opaque correlation string.
-// It is the same mechanism — content-free signals, an archive-lock for
-// exactly-once, a visibility timeout for redelivery — over rows that know
-// which run produced them.
-
-/// The PGMQ queue carrying extraction work signals.
-///
-/// Renamed rather than reused when the observe plane was cut: a queue called
-/// `observe` whose messages name session events is a trap for whoever reads it
-/// next.
-pub const SESSION_EVENTS_QUEUE: &str = "session_events";
-
-/// One work signal read from the queue, invisible to other readers until its
-/// visibility timeout elapses or it is archived.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct QueuedSignal {
-    /// PGMQ message id — the archive handle.
-    pub msg_id: i64,
-    /// How many times the message has been read, this read included. The
-    /// consumer dead-letters past its threshold.
-    pub read_ct: i32,
-    /// The tenant whose transaction can see the event.
-    pub tenant_id: TenantId,
-    /// The event the signal names.
-    pub event_id: SessionEventId,
-}
-
-/// One message read from the queue: a well-formed work signal, or a body only
-/// a database-credentialed writer could have produced.
-///
-/// The consumer archives malformed messages defensively — they can never
-/// become processable and must not wedge the queue.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SignalMessage {
-    /// A well-formed `{tenant_id, event_id}` work signal.
-    Signal(QueuedSignal),
-    /// A message whose body did not parse; carries the archive handle.
-    Malformed {
-        /// PGMQ message id — the archive handle.
-        msg_id: i64,
-    },
-}
-
-/// Parses the well-formed signal body — the shape [`append_events`] and the
-/// quarantine release path serialise. Hand-rolled: this crate takes no
-/// serde-derive dependency for one two-field object.
-fn parse_signal_body(message: &serde_json::Value) -> Option<(TenantId, SessionEventId)> {
-    let field = |name: &str| {
-        message
-            .get(name)
-            .and_then(serde_json::Value::as_str)
-            .and_then(|text| text.parse::<Uuid>().ok())
-    };
-    Some((
-        TenantId::from_uuid(field("tenant_id")?),
-        SessionEventId::from_uuid(field("event_id")?),
-    ))
-}
-
-/// Reads up to `qty` work signals with a `vt_secs` visibility timeout.
-///
-/// Runs on a plain pool connection: queue messages are content-free by design,
-/// so no tenant transaction is needed until the event itself is loaded.
-#[tracing::instrument(name = "store.sessions.read_signals", skip_all, err(Display))]
-pub async fn read_signals(
-    conn: &mut PgConnection,
-    vt_secs: i32,
-    qty: i32,
-) -> Result<Vec<SignalMessage>> {
-    let rows = sqlx::query!(
-        r#"
-        select msg_id as "msg_id!", read_ct as "read_ct!",
-               message as "message!"
-        from pgmq.read($1::text, $2::int, $3::int)
-        "#,
-        SESSION_EVENTS_QUEUE,
-        vt_secs,
-        qty,
-    )
-    .fetch_all(&mut *conn)
-    .await
-    .map_err(storage_error)?;
-    Ok(rows
-        .into_iter()
-        .map(|row| match parse_signal_body(&row.message) {
-            Some((tenant_id, event_id)) => SignalMessage::Signal(QueuedSignal {
-                msg_id: row.msg_id,
-                read_ct: row.read_ct,
-                tenant_id,
-                event_id,
-            }),
-            None => SignalMessage::Malformed { msg_id: row.msg_id },
-        })
-        .collect())
-}
-
-/// Archives one queue message, consuming it.
-///
-/// Returns `false` when the message was no longer in the queue — under
-/// redelivery races that means another consumer already committed this
-/// signal's work, and the caller must treat the signal as done. Callers commit
-/// records and archive in one transaction, so the delete's row lock serialises
-/// contenders and the loser sees `false`.
-#[tracing::instrument(
-    name = "store.sessions.archive_signal",
-    skip_all,
-    fields(msg.id = msg_id),
-    err(Display)
-)]
-pub async fn archive_signal(conn: &mut PgConnection, msg_id: i64) -> Result<bool> {
-    sqlx::query_scalar!(
-        r#"select pgmq.archive($1::text, $2::bigint) as "archived!""#,
-        SESSION_EVENTS_QUEUE,
-        msg_id,
-    )
-    .fetch_one(conn)
-    .await
-    .map_err(storage_error)
-}
-
-/// Enqueued signals not yet read or archived — the pipeline's backlog.
-#[tracing::instrument(name = "store.sessions.queue_depth", skip_all, err(Display))]
-pub async fn queue_depth(conn: &mut PgConnection) -> Result<i64> {
-    sqlx::query_scalar!(r#"select count(*) as "count!" from pgmq.q_session_events"#)
-        .fetch_one(conn)
-        .await
-        .map_err(storage_error)
-}
-
-/// One session event as the extraction pipeline loads it: the redacted content
-/// plus the run's own provenance.
-///
-/// The provenance is the point of the whole cutover (ADR-0078 decision 3).
-/// `/v1/observe` could offer the submitter's home scope and an opaque string;
-/// this offers the governed scope the run was **decided at**, derived by the
-/// schema from the workspace and project and unforgeable by a client.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StagedEvent {
-    /// The event row's id.
-    pub id: SessionEventId,
-    /// The run it belongs to.
-    pub session_id: SessionId,
-    /// The governed scope the run was decided at — where the memory lands.
-    pub scope_id: ScopeId,
-    /// The token subject that opened the run.
-    pub principal_id: String,
-    /// What happened; drives extraction routing.
-    pub event_type: SessionEventType,
-    /// The redacted event body: `[REDACTED:*]` placeholders are opaque tokens
-    /// from here on.
-    pub payload: serde_json::Value,
-    /// Client-asserted event time — the record's valid-from.
-    pub occurred_at: DateTime<Utc>,
-    /// When admission committed; the pipeline-lag clock starts here.
-    pub received_at: DateTime<Utc>,
-    /// The admission scan's finding summary, carried into record provenance.
-    pub redactions: Option<serde_json::Value>,
-}
-
-/// Loads one event and its run's provenance, inside the caller's tenant
-/// transaction.
-///
-/// `None` when the row does not exist — a signal naming a missing row is
-/// archived with a warning, never retried.
-#[tracing::instrument(
-    name = "store.sessions.staged_event",
-    skip_all,
-    fields(tenant.id = %tenant_id, event.id = %event_id),
-    err(Display)
-)]
-pub async fn staged_event(
-    conn: &mut PgConnection,
-    tenant_id: TenantId,
-    event_id: SessionEventId,
-) -> Result<Option<StagedEvent>> {
-    let row = sqlx::query!(
-        r#"
-        select e.session_id, s.scope_id, s.principal_id, e.event_type,
-               e.payload, e.occurred_at, e.received_at, e.redactions
-        from session_events e
-        join sessions s on s.tenant_id = e.tenant_id and s.id = e.session_id
-        where e.tenant_id = $1 and e.id = $2
-        "#,
-        tenant_id.as_uuid(),
-        event_id.as_uuid(),
-    )
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(storage_error)?;
-    row.map(|row| {
-        Ok(StagedEvent {
-            id: event_id,
-            session_id: SessionId::from_uuid(row.session_id),
-            scope_id: ScopeId::from_uuid(row.scope_id),
-            principal_id: row.principal_id,
-            // The CHECK constraint keeps `event_type` inside the vocabulary; a
-            // parse failure means schema and code drifted — a bug.
-            event_type: row.event_type.parse().map_err(|err| Error::Internal {
-                message: format!("stored value outside vocabulary: {err}"),
-            })?,
-            payload: row.payload,
-            occurred_at: row.occurred_at,
-            received_at: row.received_at,
-            redactions: row.redactions,
-        })
-    })
-    .transpose()
 }
 
 // ── Context runs ─────────────────────────────────────────────────────────────

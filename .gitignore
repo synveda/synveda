@@ -9,6 +9,7 @@
 /deploy/compose/.env
 
 node_modules/
+.pnpm-store/
 dist/
 # The console's Node-side test output (CNSL-1): the pure modules compiled
 # for `node --test`, separate from the Vite bundle in dist/.

@@ -2,13 +2,12 @@
 //! session events by CPR-12, ADR-0078 decision 4).
 //!
 //! A quarantined event's row exists — redacted, ordered, under RLS, idempotent
-//! by the client's own event id — but **no work signal was sent**; the
-//! `session_event_quarantine` row gates it. Review is one-shot (`pending →
-//! released | rejected`, schema-enforced by migration 0046's transition
-//! trigger): release sends the standard work signal in the caller's
-//! transaction, so the pipeline cannot distinguish a released event from an
-//! admitted one; reject leaves the event as immutable provenance that never
-//! enters the pipeline. Reach this module inside [`crate::rls::begin_tenant_tx`].
+//! by the client's own event id — but the `session_event_quarantine` row makes
+//! it ineligible for capture. Review is one-shot (`pending → released |
+//! rejected`, schema-enforced by migration 0046's transition trigger): release
+//! makes a future batch eligible to freeze it; reject leaves the event as
+//! immutable provenance that never enters extraction. Reach this module
+//! inside [`crate::rls::begin_tenant_tx`].
 //!
 //! ## Why the gate is a second table and not a column
 //!
@@ -62,9 +61,9 @@ pub struct QuarantinedEvent {
 /// A reviewer's verdict on one quarantined event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewDecision {
-    /// Send the work signal; the event joins the pipeline.
+    /// Make the event eligible for the next capture snapshot.
     Release,
-    /// Never signal; the event row stays provenance-only.
+    /// Keep the event as provenance only.
     Reject,
 }
 
@@ -204,9 +203,8 @@ pub async fn get(
     row.map(TryInto::try_into).transpose()
 }
 
-/// Reviews one pending event: flips its state and — on release — sends the
-/// standard work signal, both on the caller's transaction, so the review, its
-/// signal and the caller's audit event commit or vanish together.
+/// Reviews one pending event, changing its future capture eligibility in the
+/// caller's transaction so the verdict and its audit event commit together.
 ///
 /// Returns the reviewed row; `None` when no quarantine row exists (uniform
 /// 404); [`Error::Conflict`] when it was already reviewed (review is
@@ -272,29 +270,9 @@ pub async fn review(
         };
     };
     let event: QuarantinedEvent = row.try_into()?;
-    // A release enqueues only what the admission path would have (ADR-0078
-    // decision 2): a quarantined `adapter.warning` is still worth a reviewer's
-    // attention — the scan found something in its payload — but releasing it
-    // must not hand the extractor an event no admission would ever have sent.
-    let carries_memory = event
-        .event_type
-        .parse::<synveda_types::session::SessionEventType>()
-        .map(|event_type| event_type.carries_memory())
-        .unwrap_or(false);
-    if decision == ReviewDecision::Release && carries_memory {
-        // The standard content-free signal: the consumer contract cannot tell
-        // a released event from an admitted one.
-        sqlx::query_scalar!(
-            r#"select pgmq.send($1, $2::jsonb) as "msg_id!""#,
-            crate::sessions::SESSION_EVENTS_QUEUE,
-            serde_json::json!({
-                "tenant_id": tenant_id,
-                "event_id": event.event_id,
-            }),
-        )
-        .fetch_one(&mut *conn)
-        .await
-        .map_err(storage_error)?;
-    }
+    // A release changes eligibility only. The next explicit or terminal
+    // capture freezes a new immutable input digest when this event belongs in
+    // it; there is no per-event work signal and no direct active-content
+    // writer (CPR-18, ADR-0083).
     Ok(Some(event))
 }

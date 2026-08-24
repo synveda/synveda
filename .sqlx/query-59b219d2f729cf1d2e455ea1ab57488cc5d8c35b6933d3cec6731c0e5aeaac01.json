@@ -1,0 +1,133 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with candidate as (\n            select id\n            from capture_batches\n            where tenant_id = $1\n              and attempts < $2\n              and (state = 'pending'\n                   or (state = 'running' and lease_expires_at <= now()))\n            order by created_at, id\n            for update skip locked\n            limit 1\n        )\n        update capture_batches batch\n           set state = 'running', attempts = attempts + 1,\n               lease_owner = $3,\n               lease_expires_at = now() + make_interval(secs => $4::double precision),\n               started_at = coalesce(started_at, now()), updated_at = now(),\n               error_code = null\n          from candidate\n         where batch.tenant_id = $1 and batch.id = candidate.id\n        returning batch.id, batch.tenant_id, batch.session_id, batch.scope_id,\n                  batch.workspace_id, batch.project_id, batch.principal_id,\n                  batch.input_hash, batch.event_count, batch.state,\n                  batch.extractor_method, batch.model_version, batch.attempts,\n                  batch.candidate_count, batch.error_code, batch.created_at,\n                  batch.started_at, batch.completed_at, batch.updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "input_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "event_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "extractor_method",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "model_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "candidate_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "59b219d2f729cf1d2e455ea1ab57488cc5d8c35b6933d3cec6731c0e5aeaac01"
+}

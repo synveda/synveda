@@ -33,6 +33,7 @@ use utoipa::OpenApi;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 
 use crate::access;
+use crate::capture;
 use crate::knowledge_api;
 use crate::me;
 use crate::sessions;
@@ -57,6 +58,10 @@ CPR-17 adds stable Knowledge, immutable revision history, independently \
 governed provenance and lifecycle mutations at `/v1/knowledge`; every write \
 is an idempotent VedaFlow change and the collection is current-active by \
 default with lexical and honestly degraded semantic search. \
+CPR-18 adds `/v1/capture-batches` and `/v1/capture-candidates`: explicit or \
+session-end extraction freezes exact event evidence and produces reviewable \
+candidates only. Accept, edit, merge and replace enter the same Knowledge \
+VedaFlow command layer; dismissal publishes nothing. \
 Since CPR-12 the session plane is also the **only** runtime plane: \
 `POST /v1/sessions/{session_id}/events` is where observations are admitted and \
 `POST /v1/sessions/{session_id}/context-runs` is where context is composed. \
@@ -131,6 +136,15 @@ revision, and its mutations are last-writer-wins under the PDP.",
         sessions::end,
         sessions::timeline,
         sessions::create_context_run,
+        capture::create_batch,
+        capture::list_batches,
+        capture::get_batch,
+        capture::accept_batch,
+        capture::list_candidates,
+        capture::accept_candidate,
+        capture::merge_candidate,
+        capture::replace_candidate,
+        capture::dismiss_candidate,
         access::list_workspace_members,
         access::list_invites,
         access::create_invite,
@@ -197,6 +211,17 @@ revision, and its mutations are last-writer-wins under the PDP.",
         sessions::AppendEventsBody,
         sessions::EndSessionBody,
         sessions::ContextRunBody,
+        capture::CaptureBatchView,
+        capture::CaptureBatchListView,
+        capture::CaptureMatchView,
+        capture::CaptureCandidateView,
+        capture::CaptureCandidateListView,
+        capture::CaptureDecisionView,
+        capture::AcceptCandidateBody,
+        capture::MergeCandidateBody,
+        capture::ReplaceCandidateBody,
+        capture::DismissCandidateBody,
+        capture::AcceptBatchBody,
         access::MemberView,
         access::MemberList,
         access::GroupRefView,
@@ -221,6 +246,7 @@ revision, and its mutations are last-writer-wins under the PDP.",
         (name = "access", description = "Who may act where: members, groups, grants and invitations"),
         (name = "sessions", description = "Agent runs, their immutable event ledger, and the context composed for them"),
         (name = "knowledge", description = "Stable governed Knowledge, immutable revisions, provenance and lifecycle"),
+        (name = "capture", description = "Session evidence extraction into reviewable Knowledge candidates"),
     ),
     modifiers(&BearerAuth),
 )]
