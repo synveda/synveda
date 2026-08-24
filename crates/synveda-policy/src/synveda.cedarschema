@@ -549,32 +549,6 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // Publishing a bundle the quality gate would refuse (SKIL-3, ADR-0053
-    // decision 8): a *second* decision at the publish seam, beside the
-    // ChannelPublish the publication already takes.
-    //
-    // The separation is the whole content of the action — a publisher who
-    // may ship a good skill cannot necessarily ship one below the bar, and
-    // has to go and find somebody who can. ADR-0051 decision 18's argument
-    // in its own idiom: the content of separating two authorities is that
-    // they can be two people.
-    //
-    // No `sensitivity` in the context, unlike SkillRead: this is a
-    // statement about a *process* rather than about content, so a tier
-    // would be a field with nothing to say.
-    //
-    // There is deliberately no equivalent for the security scan and there
-    // must not be one. ADR-0052 decision 3 put `critical` on the invariant
-    // floor precisely so that no pack and no role can wave it through; an
-    // override that reached it would make that guarantee negotiable by
-    // whoever holds this action.
-    action SkillQualityOverride
-        appliesTo {
-            principal: [Principal],
-            resource: [Scope],
-            context: { roles: Set<String> },
-        };
-
     // The policy admin plane (/v1/policy/*, ADR-0014 decision 8): reading
     // packs and effective assignments, and assigning packs to nodes (or
     // the tenant default — the Tenant resource).

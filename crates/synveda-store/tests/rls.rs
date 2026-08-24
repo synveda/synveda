@@ -311,9 +311,12 @@ const COVERED: &[&str] = &[
     "session_event_quarantine",
     "session_events",
     "sessions",
-    "skill_files",
-    "skill_quality_overrides",
-    "skill_reviews",
+    "skill_bindings",
+    "skill_changes",
+    "skill_test_runs",
+    "skill_usage_events",
+    "skill_version_files",
+    "skill_versions",
     "skills",
     // TEN-4 (ADR-0064). `deployment_keys` is deliberately absent: it carries
     // no `tenant_id`, so this guard does not discover it and no exemption was
@@ -5048,456 +5051,207 @@ fn a_pack_cannot_be_forged_moved_renamed_raised_or_have_its_chunks_relabelled() 
     });
 }
 
-// ── SKIL-1: the skills registry ─────────────────────────────────────────────
+// ── CPR-23: immutable Skill versions and bindings ──────────────────────────
 
-/// A tenant with one skill and two files: its `SKILL.md` and a bundled
-/// script.
-///
-/// The objects are `seed_vedaflow`'s for migration 0029's reason. There is no
-/// third table to seed — a skill's content becomes no records at all
-/// (ADR-0051 decision 9), which is the shape of that decision showing up in
-/// a fixture.
+/// Seed one stable Skill, one immutable version with two content-addressed
+/// files, and one principal-scope binding. The fixture uses privileged setup;
+/// every assertion below runs as the forced-RLS application role.
 async fn seed_skill(pool: &PgPool) -> (TenantId, ScopeId) {
-    let (tenant, scope) = seed_vedaflow(pool).await;
+    let (tenant, _) = seed_vedaflow(pool).await;
     let author = IdentityId::new();
+    let mut tx = pool.begin().await.expect("begin Skill fixture");
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("ensure tenant root");
+    let principal = scopes::create(
+        &mut tx,
+        &new_scope(
+            tenant,
+            Some(root.id),
+            scope::ScopeKind::Principal,
+            "skill-owner",
+        ),
+    )
+    .await
+    .expect("create principal binding scope");
+    let skill_id = uuid::Uuid::now_v7();
+    let version_id = uuid::Uuid::now_v7();
+    let binding_id = uuid::Uuid::now_v7();
     sqlx::query!(
         "insert into skills
-             (tenant_id, scope_id, name, description, sensitivity, created_by, updated_by)
-         values ($1, $2, 'code-review', 'Reviews a diff.', 'internal', $3, $3)",
+             (id, tenant_id, governing_scope_id, name, current_version_id,
+              created_by, updated_by)
+         values ($1, $2, $3, 'code-review', $4, $5, $5)",
+        skill_id,
         tenant.as_uuid(),
-        scope.as_uuid(),
+        principal.id.as_uuid(),
+        version_id,
         author.as_uuid(),
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
-    .expect("seed skill");
-    for (path, hash) in [("SKILL.md", 1u8), ("scripts/check.py", 1u8)] {
+    .expect("seed Skill aggregate");
+    sqlx::query!(
+        r#"insert into skill_versions
+             (id, tenant_id, skill_id, ordinal, bundle_digest, sensitivity,
+              manifest, source_kind, provenance, scan_report,
+              scan_ruleset_version, quality_score, rubric_version, created_by)
+         values ($1, $2, $3, 1, $4, 'internal',
+                 '{"name":"code-review","description":"Reviews a diff."}'::jsonb,
+                 'authored', '{"source":"rls-fixture"}'::jsonb,
+                 '{"findings":[]}'::jsonb, 1, 80, 1, $5)"#,
+        version_id,
+        tenant.as_uuid(),
+        skill_id,
+        &[7u8; 32][..],
+        author.as_uuid(),
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("seed immutable Skill version");
+    for path in ["SKILL.md", "scripts/check.py"] {
         sqlx::query!(
-            "insert into skill_files
-                 (tenant_id, scope_id, skill_name, path, object_hash, created_by, updated_by)
-             values ($1, $2, 'code-review', $3, $4, $5, $5)",
+            "insert into skill_version_files
+                 (tenant_id, version_id, path, object_hash, chars)
+             values ($1, $2, $3, $4, 3)",
             tenant.as_uuid(),
-            scope.as_uuid(),
+            version_id,
             path,
-            &[hash; 32][..],
-            author.as_uuid(),
+            &[1u8; 32][..],
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await
-        .expect("seed skill file");
+        .expect("seed immutable Skill file");
     }
-    (tenant, scope)
+    sqlx::query!(
+        "insert into skill_bindings
+             (id, tenant_id, scope_id, skill_id, pinned_version_id, enabled,
+              created_by, updated_by)
+         values ($1, $2, $3, $4, $5, true, $6, $6)",
+        binding_id,
+        tenant.as_uuid(),
+        principal.id.as_uuid(),
+        skill_id,
+        version_id,
+        author.as_uuid(),
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("seed Skill binding");
+    tx.commit().await.expect("commit Skill fixture");
+    (tenant, principal.id)
 }
 
-/// The attacks a skill invites. They are the prompt registry's — forge,
-/// move, rename, raise the tier — plus the one difference SKIL-1 makes
-/// deliberately: `skill_files` carries the only DELETE grant in the three
-/// registries (ADR-0051 decision 17), because a client loads a bundle whole
-/// and a file the author removed must not be published back onto a laptop.
-///
-/// What that grant must NOT reach is a published version, and the reason it
-/// cannot is structural rather than a rule: a tree names object addresses,
-/// objects are append-only, and nothing here can remove one.
+/// Forced RLS isolates every active Skill table, and transition guards make
+/// versions/files immutable while aggregate and binding identity cannot move.
 #[test]
-fn a_skill_cannot_be_forged_moved_renamed_or_raised_and_its_files_delete_only_as_drafts() {
+fn versioned_skills_are_tenant_isolated_and_immutable() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (victim, victim_scope) = seed_skill(&db.pool).await;
+        let (victim, _) = seed_skill(&db.pool).await;
         let (adversary, adversary_scope) = seed_skill(&db.pool).await;
 
-        // 1. Isolation across both tables.
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        for table in ["skills", "skill_files"] {
+        for table in [
+            "skills",
+            "skill_versions",
+            "skill_version_files",
+            "skill_bindings",
+            "skill_usage_events",
+            "skill_test_runs",
+        ] {
             let seen: i64 = sqlx::query_scalar(&format!(
                 "select count(*) from {table} where tenant_id = $1"
             ))
             .bind(victim.as_uuid())
             .fetch_one(&mut *tx)
             .await
-            .expect("count another tenant's rows");
+            .expect("count another tenant's Skill rows");
             assert_eq!(seen, 0, "another tenant's {table} rows must be invisible");
         }
-
         let forged = sqlx::query!(
             "insert into skills
-                 (tenant_id, scope_id, name, description, sensitivity, created_by, updated_by)
-             values ($1, $2, 'forged', 'forged', 'internal', $3, $3)",
+                 (id, tenant_id, governing_scope_id, name, current_version_id,
+                  created_by, updated_by)
+             values ($1, $2, $3, 'forged', $4, $5, $5)",
+            uuid::Uuid::now_v7(),
             victim.as_uuid(),
-            victim_scope.as_uuid(),
+            adversary_scope.as_uuid(),
+            uuid::Uuid::now_v7(),
             IdentityId::new().as_uuid(),
         )
         .execute(&mut *tx)
         .await;
-        assert!(
-            forged.is_err(),
-            "a forged-tenant skill must be rejected: it would author executable \
-             content into a tenant no SkillWrite decision was taken in"
-        );
+        assert!(forged.is_err(), "a forged-tenant Skill must be rejected");
         drop(tx);
 
-        // 2. Identity is immutable, content is not.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        sqlx::query!(
-            "update skills set description = 'Reviews a diff, carefully.'
-             where tenant_id = $1 and scope_id = $2",
-            adversary.as_uuid(),
-            adversary_scope.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("editing your own skill is the authoring act");
-
-        let moved = sqlx::query!(
-            "update skills set scope_id = $3 where tenant_id = $1 and scope_id = $2",
-            adversary.as_uuid(),
-            adversary_scope.as_uuid(),
-            ScopeId::new().as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            moved.is_err(),
-            "a skill cannot change scope: SkillWrite was decided at the one it \
-             was authored in"
-        );
-        drop(tx);
-
-        // A rename bites harder here than anywhere else, because the name is
-        // inside the artefact: the open spec requires SKILL.md's frontmatter
-        // `name` to match the directory (ADR-0051 decision 5).
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
         let renamed = sqlx::query!(
-            "update skills set name = 'code-review-v2'
-             where tenant_id = $1 and scope_id = $2",
+            "update skills set name = 'renamed' where tenant_id = $1",
             adversary.as_uuid(),
-            adversary_scope.as_uuid(),
         )
         .execute(&mut *tx)
         .await;
-        assert!(
-            renamed.is_err(),
-            "a rename is a different skill, not an edit"
-        );
+        assert!(renamed.is_err(), "Skill aggregate identity is immutable");
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let rewritten = sqlx::query!(
+            "update skill_versions set manifest = '{}'::jsonb where tenant_id = $1",
+            adversary.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
+        assert!(rewritten.is_err(), "Skill versions are immutable");
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
         let repathed = sqlx::query!(
-            "update skill_files set path = 'scripts/other.py'
+            "update skill_version_files set path = 'scripts/other.py'
              where tenant_id = $1 and path = 'scripts/check.py'",
             adversary.as_uuid(),
         )
         .execute(&mut *tx)
         .await;
-        assert!(
-            repathed.is_err(),
-            "a re-path is a different file: a published entry would otherwise \
-             name bytes nobody reviewed at that path"
-        );
+        assert!(repathed.is_err(), "version file paths are immutable");
         drop(tx);
 
-        // 3. The tier nothing can mint (ADR-0051 decision 11).
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let raised = sqlx::query!(
-            "update skills set sensitivity = 'restricted'
-             where tenant_id = $1 and scope_id = $2",
+        let moved = sqlx::query!(
+            "update skill_bindings set scope_id = $2 where tenant_id = $1",
             adversary.as_uuid(),
-            adversary_scope.as_uuid(),
+            ScopeId::new().as_uuid(),
         )
         .execute(&mut *tx)
         .await;
-        assert!(
-            raised.is_err(),
-            "no path in the product mints `restricted` for an authored asset"
-        );
+        assert!(moved.is_err(), "a binding cannot move to another scope");
         drop(tx);
 
-        // 4. A file naming an address the store does not hold is rejected —
-        //    "the bytes a proposal will bind are already stored" is a
-        //    property of the schema rather than of a handler.
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
         let dangling = sqlx::query!(
-            "insert into skill_files
-                 (tenant_id, scope_id, skill_name, path, object_hash, created_by, updated_by)
-             values ($1, $2, 'code-review', 'references/api.md', $3, $4, $4)",
+            "insert into skill_version_files
+                 (tenant_id, version_id, path, object_hash, chars)
+             select tenant_id, id, 'references/missing.md', $2, 3
+               from skill_versions where tenant_id = $1 limit 1",
             adversary.as_uuid(),
-            adversary_scope.as_uuid(),
             &[9u8; 32][..],
-            IdentityId::new().as_uuid(),
         )
         .execute(&mut *tx)
         .await;
         assert!(
             dangling.is_err(),
-            "a bundled file naming an address the store does not hold must be \
-             rejected"
+            "a version file must name content-addressed bytes the tenant holds"
         );
         drop(tx);
 
-        // 5. The one DELETE grant in the three registries, and its boundary.
-        //    A draft file goes; the skill row does not, and no object does.
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        sqlx::query!(
-            "delete from skill_files
-             where tenant_id = $1 and path = 'scripts/check.py'",
-            adversary.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("removing a file from a draft bundle is an ordinary edit");
-        let objects: i64 = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from vedaflow_objects where tenant_id = $1"#,
-            adversary.as_uuid(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count objects");
-        assert!(
-            objects > 0,
-            "removing a draft file must not remove the bytes a published tree \
-             may still name: that is why a delete here cannot reach a \
-             published version"
-        );
         let deleted = sqlx::query!(
-            "delete from skills where tenant_id = $1",
-            adversary.as_uuid()
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            deleted.is_err(),
-            "the app role must hold no DELETE on skills: retracting a published \
-             skill is FLOW-7's rewind"
-        );
-    });
-}
-
-/// The attacks a reviewer's checklist invites (SKIL-3, ADR-0053).
-///
-/// Three of them are the shape every governed row has — forge into another
-/// tenant, read across one, edit the identity. The fourth is this table's
-/// own and is the reason it exists: **a checklist must not be erasable**.
-/// `skill_files` carries a DELETE grant because a bundle is authored whole;
-/// a checklist is a record that a person judged something on a day, and a
-/// product that can delete one is a product whose review trail can be
-/// edited.
-///
-/// The fifth is the design itself, checked here because it is a storage
-/// property rather than a handler's: answers are keyed by a digest of the
-/// bundle's bytes, so an edited bundle finds **no** checklist rather than
-/// the previous one.
-#[test]
-fn a_checklist_cannot_be_forged_read_across_tenants_or_erased_and_never_outlives_its_bytes() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (victim, victim_scope) = seed_skill(&db.pool).await;
-        let (adversary, adversary_scope) = seed_skill(&db.pool).await;
-        let reviewer = IdentityId::new();
-        let digest = [7u8; 32];
-        let answers = serde_json::json!({"tested": "yes", "scope-appropriate": "yes"});
-
-        // Seed one review for each tenant.
-        for (tenant, scope) in [(victim, victim_scope), (adversary, adversary_scope)] {
-            let mut tx = app_tx(&db.pool, Some(tenant)).await;
-            sqlx::query!(
-                "insert into skill_reviews
-                     (tenant_id, scope_id, skill_name, bundle_digest, answers, rubric_version,
-                      reviewed_by)
-                 values ($1, $2, 'code-review', $3, $4, 1, $5)",
-                tenant.as_uuid(),
-                scope.as_uuid(),
-                &digest[..],
-                answers,
-                reviewer.as_uuid(),
-            )
-            .execute(&mut *tx)
-            .await
-            .expect("seed a checklist");
-            tx.commit().await.expect("commit seed");
-        }
-
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-
-        // 1. Isolation. The digests are deliberately *identical* across the
-        //    two tenants, which is the sharpest form of this check: the key
-        //    is content-derived, so two tenants reviewing byte-identical
-        //    bundles collide on everything except tenant_id.
-        let seen: i64 = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from skill_reviews where tenant_id = $1"#,
-            victim.as_uuid(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count another tenant's reviews");
-        assert_eq!(
-            seen, 0,
-            "another tenant's checklist must be invisible even when it is about \
-             byte-identical bytes"
-        );
-
-        // 2. Forging into another tenant.
-        let forged = sqlx::query!(
-            "insert into skill_reviews
-                 (tenant_id, scope_id, skill_name, bundle_digest, answers, rubric_version,
-                  reviewed_by)
-             values ($1, $2, 'code-review', $3, $4, 1, $5)",
-            victim.as_uuid(),
-            victim_scope.as_uuid(),
-            &[9u8; 32][..],
-            serde_json::json!({"tested": "yes"}),
-            reviewer.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            forged.is_err(),
-            "a forged-tenant checklist must be rejected: it would let a low-quality \
-             publication clear a bar on a review nobody in that tenant performed"
-        );
-        drop(tx);
-
-        // 3. Re-answering is an ordinary act; the identity is not editable.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        sqlx::query!(
-            "update skill_reviews set answers = $3
-             where tenant_id = $1 and scope_id = $2",
+            "delete from skill_versions where tenant_id = $1",
             adversary.as_uuid(),
-            adversary_scope.as_uuid(),
-            serde_json::json!({"tested": "no"}),
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("re-answering your own checklist is an ordinary act");
-
-        // 4. No DELETE, which is this table's whole difference from
-        //    `skill_files` one migration earlier.
-        let erased = sqlx::query!(
-            "delete from skill_reviews where tenant_id = $1",
-            adversary.as_uuid()
         )
         .execute(&mut *tx)
         .await;
-        assert!(
-            erased.is_err(),
-            "the app role must hold no DELETE on skill_reviews: a checklist is a \
-             record that a person judged something, and a review trail that can be \
-             erased is not one"
-        );
-        drop(tx);
-
-        // 5. The design: answers are found by the bytes, so a bundle that
-        //    moved has none. This is what makes an edit beneath a review
-        //    fail closed rather than launder the old answers.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let after_edit: i64 = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from skill_reviews
-               where tenant_id = $1 and scope_id = $2 and skill_name = 'code-review'
-                 and bundle_digest = $3"#,
-            adversary.as_uuid(),
-            adversary_scope.as_uuid(),
-            &[8u8; 32][..],
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("look a moved bundle up by its digest");
-        assert_eq!(
-            after_edit, 0,
-            "a checklist must not be found for a bundle whose bytes have changed: \
-             the digest is the key precisely so that an edit finds nothing rather \
-             than finding answers about content nobody reviewed (ADR-0053 decision 4)"
-        );
-    });
-}
-
-/// The quality override is one grant narrower than the checklist beside it
-/// (SKIL-3, ADR-0053 decision 8): **insert and select, and no UPDATE**.
-///
-/// Re-answering a checklist is an ordinary act — a reviewer looked again.
-/// Rewriting the stated reason for shipping something below the bar is not
-/// an act anybody should have, because that sentence is the entire durable
-/// explanation of why the product shipped what it had itself marked down.
-/// A different reason is a different decision, and a different decision
-/// needs different bytes.
-#[test]
-fn an_override_is_tenant_isolated_write_once_and_never_rewritten() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (victim, victim_scope) = seed_skill(&db.pool).await;
-        let (adversary, adversary_scope) = seed_skill(&db.pool).await;
-        let granter = IdentityId::new();
-        let digest = [3u8; 32];
-
-        for (tenant, scope) in [(victim, victim_scope), (adversary, adversary_scope)] {
-            let mut tx = app_tx(&db.pool, Some(tenant)).await;
-            sqlx::query!(
-                "insert into skill_quality_overrides
-                     (tenant_id, scope_id, skill_name, bundle_digest, reason, score,
-                      rubric_version, granted_by)
-                 values ($1, $2, 'code-review', $3, 'needed for the incident review', 40, 1, $4)",
-                tenant.as_uuid(),
-                scope.as_uuid(),
-                &digest[..],
-                granter.as_uuid(),
-            )
-            .execute(&mut *tx)
-            .await
-            .expect("seed an override");
-            tx.commit().await.expect("commit seed");
-        }
-
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-
-        // 1. Isolation, again with identical digests across tenants —
-        //    the sharpest form, since the key is content-derived.
-        let seen: i64 = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from skill_quality_overrides where tenant_id = $1"#,
-            victim.as_uuid(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count another tenant's overrides");
-        assert_eq!(
-            seen, 0,
-            "another tenant's override must be invisible: it is what lets a bundle they              marked down go out"
-        );
-
-        // 2. Forging one into another tenant would be publishing below
-        //    their bar under a reason nobody there gave.
-        let forged = sqlx::query!(
-            "insert into skill_quality_overrides
-                 (tenant_id, scope_id, skill_name, bundle_digest, reason, score,
-                  rubric_version, granted_by)
-             values ($1, $2, 'code-review', $3, 'forged', 10, 1, $4)",
-            victim.as_uuid(),
-            victim_scope.as_uuid(),
-            &[4u8; 32][..],
-            granter.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(forged.is_err(), "a forged-tenant override must be rejected");
-        drop(tx);
-
-        // 3. **No UPDATE**, which is the difference from `skill_reviews`.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let rewritten = sqlx::query!(
-            "update skill_quality_overrides set reason = 'a better sounding reason'
-             where tenant_id = $1 and scope_id = $2",
-            adversary.as_uuid(),
-            adversary_scope.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            rewritten.is_err(),
-            "the app role must hold no UPDATE on skill_quality_overrides: the stated              reason is the whole durable explanation, and one that can be edited              explains nothing"
-        );
-
-        // 4. And no DELETE either — an override that can be erased is a
-        //    publication with no explanation, after the fact.
-        let erased = sqlx::query!(
-            "delete from skill_quality_overrides where tenant_id = $1",
-            adversary.as_uuid()
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(erased.is_err(), "the app role must hold no DELETE either");
+        assert!(deleted.is_err(), "immutable versions cannot be deleted");
     });
 }
 

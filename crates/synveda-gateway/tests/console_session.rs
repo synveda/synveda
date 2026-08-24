@@ -447,9 +447,8 @@ async fn a_cookie_read_needs_no_origin() {
 // ── Sign-out ─────────────────────────────────────────────────────────────────
 
 /// Sign-out destroys the row, and the next request is the uniform 401.
-/// This is what migration 0034's DELETE grant is for, and the reason the
-/// contrast with `skill_reviews` is drawn there: a credential that cannot
-/// be destroyed cannot be revoked.
+/// This is what migration 0034's DELETE grant is for: a credential that
+/// cannot be destroyed cannot be revoked.
 #[tokio::test]
 async fn signing_out_destroys_the_session_for_the_next_request() {
     let _guard = serial().await;

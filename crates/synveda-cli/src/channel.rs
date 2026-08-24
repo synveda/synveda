@@ -334,7 +334,7 @@ pub async fn unpin(
 
 // ── Rendering ──────────────────────────────────────────────────────────
 
-/// Splits an authored-artifact ref such as `skill/published` into the two
+/// Splits an authored-artifact ref such as `prompt/published` into the two
 /// fields the routes take.
 ///
 /// One flag rather than two, because a channel is written as one name
@@ -360,11 +360,11 @@ fn query(name: &str, limit: Option<u32>) -> Result<String, String> {
 
 fn split_channel(name: &str) -> Result<(&str, &str), String> {
     let (asset, channel) = name.split_once('/').ok_or_else(|| {
-        format!("--channel takes an asset/channel name such as skill/published, got {name:?}")
+        format!("--channel takes an asset/channel name such as prompt/published, got {name:?}")
     })?;
-    if !matches!(asset, "prompt" | "context-pack" | "skill") || channel.is_empty() {
+    if !matches!(asset, "prompt" | "context-pack") || channel.is_empty() {
         return Err(format!(
-            "--channel names a public authored-artifact ref: prompt, context-pack or skill; got {name:?}"
+            "--channel names a public authored-artifact ref: prompt or context-pack; got {name:?}"
         ));
     }
     Ok((asset, channel))
@@ -399,8 +399,8 @@ mod tests {
     #[test]
     fn a_channel_name_splits_into_the_two_fields_the_route_takes() {
         let mut body = json!({ "message": "why" });
-        with_channel(&mut body, "skill/published").expect("split");
-        assert_eq!(body["asset"], "skill");
+        with_channel(&mut body, "prompt/published").expect("split");
+        assert_eq!(body["asset"], "prompt");
         assert_eq!(body["channel"], "published");
         assert_eq!(body["message"], "why");
     }
@@ -418,7 +418,7 @@ mod tests {
         let mut body = json!({});
         let error = with_channel(&mut body, "published")
             .expect_err("a bare channel name is not a ref name");
-        assert!(error.contains("skill/published"), "{error}");
+        assert!(error.contains("prompt/published"), "{error}");
     }
 
     #[test]

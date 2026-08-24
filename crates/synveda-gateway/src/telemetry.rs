@@ -182,17 +182,6 @@ pub const SKILL_OPERATIONS_TOTAL: &str = "synveda_skill_operations_total";
 /// labelled by the `pack` that set the bar.
 ///
 /// **The one number that says whether this gate is working.** ADR-0053
-/// reversal trigger (a) is "overrides frequent enough to be routine", and
-/// this counter beside `SKILL_OPERATIONS_TOTAL{op="author"}` is how that
-/// gets noticed before somebody reads a year of audit events: a bar
-/// everybody steps over is a bar set wrong, and a bar nobody ever reaches
-/// is one set too low to mean anything.
-///
-/// There is deliberately no counter for a *refused* publication — that is
-/// `CHANNEL_OPERATIONS_TOTAL`'s `rejected` outcome already, and a second
-/// number asserting the same fact is one somebody would have to reconcile.
-pub const SKILL_QUALITY_OVERRIDES_TOTAL: &str = "synveda_skill_quality_overrides_total";
-
 /// Lapse API operations (AUTHZ-4, ADR-0037), labelled by `op`
 /// (`propose`/`grant`/`revoke`/`list`) and `outcome` (`ok`, `rejected`,
 /// `error`).

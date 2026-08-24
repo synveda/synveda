@@ -1,5 +1,6 @@
 //! Context-platform contract: the OpenAPI document is authoritative
-//! (ADR-0071 decision 7; CPR-17/ADR-0082; CPR-18/ADR-0083).
+//! (ADR-0071 decision 7; CPR-17/ADR-0082; CPR-18/ADR-0083;
+//! CPR-23/ADR-0085).
 //!
 //! Three things have to be true for that sentence to mean anything, and this
 //! suite is each of them:
@@ -97,6 +98,20 @@ const DECLARED_PATHS: &[&str] = &[
     "/v1/sessions/{session_id}/knowledge-evaluation",
     "/v1/sessions/{session_id}/knowledge-query",
     "/v1/sessions/{session_id}/timeline",
+    // CPR-23 (ADR-0085): immutable Agent Skills versions and bindings.
+    "/v1/skill-bindings",
+    "/v1/skill-bindings/{id}",
+    "/v1/skill-bindings/{id}/rollback",
+    "/v1/skill-usage",
+    "/v1/skills",
+    "/v1/skills/available",
+    "/v1/skills/{id}",
+    "/v1/skills/{id}/versions",
+    "/v1/skills/{id}/versions/{version_id}",
+    "/v1/skills/{id}/versions/{version_id}/files",
+    "/v1/skills/{id}/versions/{version_id}/files/{path}",
+    "/v1/skills/{id}/versions/{version_id}/tests",
+    "/v1/skills/{id}/versions/{version_id}/usage",
     "/v1/workspaces",
     "/v1/workspaces/{workspace_id}",
     "/v1/workspaces/{workspace_id}/invites",
@@ -215,6 +230,8 @@ async fn every_documented_path_is_mounted() {
             .replace("{group_id}", &id)
             .replace("{principal_id}", "sam")
             .replace("{session_id}", &id)
+            .replace("{version_id}", &id)
+            .replace("{path}", "SKILL.md")
             .replace("{id}", &id)
             .replace("{invite_token}", TOKEN_PLACEHOLDER);
         let response = app
@@ -346,8 +363,8 @@ fn the_document_is_generatable() {
     }
     assert_eq!(
         operation_ids.len(),
-        67,
-        "the 62-operation CPR-18 contract plus CPR-20's 5 new operations: \
+        85,
+        "the 67-operation CPR-20 contract plus CPR-23's 18 Skill operations: \
          {operation_ids:?}"
     );
 }

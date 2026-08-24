@@ -63,19 +63,15 @@ impl AssetKind {
     /// (CPR-16, ADR-0081). Policy effects likewise write governed rows, not
     /// refs. Keeping this list separate from [`Self::ALL`] prevents either
     /// non-channelled kind from acquiring a shadow `*/published` truth.
-    pub const CHANNELLED: [AssetKind; 4] = [
-        AssetKind::Memory,
-        AssetKind::Prompt,
-        AssetKind::Skill,
-        AssetKind::ContextPack,
-    ];
+    pub const CHANNELLED: [AssetKind; 3] =
+        [AssetKind::Memory, AssetKind::Prompt, AssetKind::ContextPack];
 
     /// Whether this asset family has VedaFlow channel refs.
     #[must_use]
     pub const fn has_channels(self) -> bool {
         matches!(
             self,
-            AssetKind::Memory | AssetKind::Prompt | AssetKind::Skill | AssetKind::ContextPack
+            AssetKind::Memory | AssetKind::Prompt | AssetKind::ContextPack
         )
     }
 

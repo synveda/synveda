@@ -1,117 +1,134 @@
-//! `synveda skill` — the registry from a terminal, and the **only** thing in
-//! the product that writes a skill onto a disk (SKIL-1, ADR-0051).
-//!
-//! HTTP-only for everything governed, on `prompt`'s precedent (ADR-0035
-//! decision 1): authoring is a `SkillWrite` decision, resolution a
-//! `SkillRead` at the tier the served version carries, and both chain their
-//! own event under the caller's identity.
-//!
-//! # Why the materialisation lives here
-//!
-//! Seed §2.6 — the harness is a guest — and ADR-0051 decision 12. A gateway
-//! that owned a per-client directory layout would need a release when one of
-//! forty agentskills.io clients moved a folder; the CLI can be wrong cheaply.
-//! So `install` resolves through the ordinary read route and writes what
-//! comes back.
-//!
-//! # What "installs unmodified" means, concretely
-//!
-//! Three properties, and none of them is a promise:
-//!
-//! 1. **The bundle directory holds exactly the reviewed files.** Nothing is
-//!    added — no receipt, no manifest, no header — because a file no
-//!    reviewer approved inside a directory a client walks is the
-//!    modification the criterion forbids (ADR-0051 option 7). The receipt
-//!    goes in this CLI's own config directory.
-//! 2. **Every file's content address recomputes.** [`install`] hashes what
-//!    it wrote and compares it to the address the published commit named. It
-//!    is the client doing the arithmetic rather than trusting the server's
-//!    number — which matters because a materialised bundle carries no
-//!    watermark of its own (ADR-0051 force 2), so this hash is its whole
-//!    provenance.
-//! 3. **The per-client difference is the root and nothing else.** The same
-//!    commit installs the same bytes into `~/.claude/skills/<name>/` and
-//!    `~/.codex/skills/<name>/`, which is what makes the trees comparable
-//!    file for file.
+//! Public-API client for the versioned Agent Skills catalogue (CPR-23,
+//! ADR-0085). The gateway owns governance; this module only reads bundles,
+//! opens typed VedaFlow changes, and materialises an already-authorised exact
+//! version into a client directory.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 use synveda_types::{
     MAX_SKILL_BUNDLE_CHARS, MAX_SKILL_FILE_CHARS, MAX_SKILL_FILES, SKILL_MANIFEST, ScopeId,
-    Sensitivity, SkillFile, SkillFilePath, SkillName,
+    Sensitivity, SkillBindingId, SkillBundle, SkillFile, SkillFilePath, SkillId, SkillName,
+    SkillVersionId,
 };
 use synveda_vedaflow::SkillAsset;
 
 use crate::api::{Api, Origin};
 
-// ── The wire shapes (`crates/synveda-gateway/src/skills.rs`) ───────────
-
-#[derive(Deserialize)]
-struct Resolved {
-    name: String,
-    scope_id: ScopeId,
-    scope_path: String,
-    channel: String,
-    origin: String,
-    commit: Option<String>,
-    sensitivity: Sensitivity,
-    description: String,
-    files: Vec<ResolvedFile>,
-}
-
-#[derive(Deserialize)]
-struct ResolvedFile {
-    path: String,
-    object_hash: String,
-    content: String,
-}
-
-#[derive(Deserialize)]
-struct Listing {
-    scope_path: String,
-    skills: Vec<ListEntry>,
-}
-
-#[derive(Deserialize)]
-struct ListEntry {
-    name: String,
-    description: String,
-    sensitivity: Sensitivity,
-    files: Vec<ListFile>,
-}
-
-#[derive(Deserialize)]
-struct ListFile {
-    path: String,
-    object_hash: String,
-    published: Option<PublishedFile>,
-}
-
-#[derive(Deserialize)]
-struct PublishedFile {
-    current: bool,
-}
-
-// ── Clients ────────────────────────────────────────────────────────────
-
-/// A client's skills root, relative to `$HOME`.
-///
-/// The agentskills.io ecosystem agrees on the *bundle* — `SKILL.md` plus
-/// files, in a directory named for the skill — and differs only on where
-/// that directory lives. This table is that difference and nothing else,
-/// which is the property `install --client` is built to demonstrate.
-///
-/// Kept here rather than in the gateway on ADR-0051 decision 12's reasoning:
-/// a client moving its folder should cost a CLI release, not a server one.
 const CLIENT_ROOTS: [(&str, &str); 2] = [
     ("claude-code", ".claude/skills"),
     ("codex", ".codex/skills"),
 ];
 
-/// The names `--client` takes, for a usage message.
+#[derive(Clone, Deserialize, Serialize)]
+struct VersionView {
+    id: SkillVersionId,
+    skill_id: SkillId,
+    ordinal: u64,
+    bundle_digest: String,
+    sensitivity: Sensitivity,
+    manifest: Value,
+    declared_tools_are_authorization: bool,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct SkillView {
+    id: SkillId,
+    governing_scope_id: ScopeId,
+    name: String,
+    current_version_id: SkillVersionId,
+    current_version: VersionView,
+}
+
+#[derive(Deserialize)]
+struct SkillList {
+    skills: Vec<SkillView>,
+    next_cursor: Option<SkillId>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct BindingView {
+    id: SkillBindingId,
+    scope_id: ScopeId,
+    skill_id: SkillId,
+    pinned_version_id: Option<SkillVersionId>,
+    enabled: bool,
+    revision: u64,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct AvailableEntry {
+    binding: BindingView,
+    name: String,
+    version: VersionView,
+    manifest_object_hash: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct AvailableList {
+    scope_id: ScopeId,
+    skills: Vec<AvailableEntry>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct FileView {
+    path: String,
+    object_hash: String,
+    chars: u32,
+}
+
+#[derive(Deserialize)]
+struct FileList {
+    files: Vec<FileView>,
+}
+
+#[derive(Deserialize)]
+struct FileContent {
+    path: String,
+    object_hash: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct Resolved {
+    skill: SkillView,
+    binding: BindingView,
+    version: VersionView,
+    files: Vec<FileContentView>,
+}
+
+#[derive(Serialize)]
+struct FileContentView {
+    path: String,
+    object_hash: String,
+    content: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Receipt {
+    version: u32,
+    client: String,
+    directory: String,
+    skill: String,
+    governing_scope_id: ScopeId,
+    distribution_scope_id: ScopeId,
+    binding_id: SkillBindingId,
+    version_id: SkillVersionId,
+    bundle_digest: String,
+    sensitivity: Sensitivity,
+    files: BTreeMap<String, String>,
+}
+
+#[derive(Serialize)]
+struct Synced {
+    skill: String,
+    version_id: SkillVersionId,
+    directory: String,
+    files: usize,
+}
+
 #[must_use]
 pub fn clients() -> String {
     CLIENT_ROOTS
@@ -121,7 +138,6 @@ pub fn clients() -> String {
         .join(", ")
 }
 
-/// Where `client` keeps its skills, under `$HOME`.
 fn client_root(client: &str) -> Result<PathBuf, String> {
     let (_, suffix) = CLIENT_ROOTS
         .iter()
@@ -131,157 +147,210 @@ fn client_root(client: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(home).join(suffix))
 }
 
-// ── List and show ──────────────────────────────────────────────────────
+fn description(version: &VersionView) -> &str {
+    version
+        .manifest
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+}
 
-/// `synveda skill list --scope <id>` — the registry at one scope.
-pub async fn list(profile: &str, scope: ScopeId) -> Result<(), String> {
+async fn catalogue(api: &Api) -> Result<Vec<SkillView>, String> {
+    let mut skills = Vec::new();
+    let mut cursor: Option<SkillId> = None;
+    loop {
+        let path = cursor.map_or_else(
+            || "/v1/skills?limit=200".to_owned(),
+            |cursor| format!("/v1/skills?limit=200&cursor={cursor}"),
+        );
+        let page: SkillList = api.get_as(&path).await?;
+        skills.extend(page.skills);
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => return Ok(skills),
+        }
+    }
+}
+
+async fn skill_named(api: &Api, name: &SkillName) -> Result<Option<SkillView>, String> {
+    Ok(catalogue(api)
+        .await?
+        .into_iter()
+        .find(|skill| skill.name == name.as_str()))
+}
+
+async fn available_at(api: &Api, scope: ScopeId) -> Result<AvailableList, String> {
+    api.get_as(&format!("/v1/skills/available?scope_id={scope}"))
+        .await
+}
+
+async fn exact_version(
+    api: &Api,
+    skill: SkillId,
+    version: SkillVersionId,
+) -> Result<VersionView, String> {
+    api.get_as(&format!("/v1/skills/{skill}/versions/{version}"))
+        .await
+}
+
+async fn exact_files(
+    api: &Api,
+    skill: SkillId,
+    version: SkillVersionId,
+) -> Result<Vec<FileContentView>, String> {
+    let listing: FileList = api
+        .get_as(&format!("/v1/skills/{skill}/versions/{version}/files"))
+        .await?;
+    let mut files = Vec::with_capacity(listing.files.len());
+    for file in listing.files {
+        let content: FileContent = api
+            .get_as(&format!(
+                "/v1/skills/{skill}/versions/{version}/files/{}",
+                file.path
+            ))
+            .await?;
+        if content.object_hash != file.object_hash || content.path != file.path {
+            return Err(format!(
+                "version {version} returned inconsistent metadata for {}",
+                file.path
+            ));
+        }
+        files.push(FileContentView {
+            path: content.path,
+            object_hash: content.object_hash,
+            content: content.content,
+        });
+    }
+    Ok(files)
+}
+
+async fn resolve_entry(api: &Api, entry: AvailableEntry) -> Result<Resolved, String> {
+    let skill: SkillView = api
+        .get_as(&format!("/v1/skills/{}", entry.version.skill_id))
+        .await?;
+    if skill.id != entry.binding.skill_id || skill.id != entry.version.skill_id {
+        return Err("the available binding, Skill and version disagree".to_owned());
+    }
+    let files = exact_files(api, skill.id, entry.version.id).await?;
+    Ok(Resolved {
+        skill,
+        binding: entry.binding,
+        version: entry.version,
+        files,
+    })
+}
+
+async fn resolve_available(api: &Api, scope: ScopeId, name: &str) -> Result<Resolved, String> {
+    let parsed = name.parse::<SkillName>().map_err(|err| err.to_string())?;
+    let listing = available_at(api, scope).await?;
+    let entry = listing
+        .skills
+        .into_iter()
+        .find(|entry| entry.name == parsed.as_str())
+        .ok_or_else(|| format!("skill {name:?} is not enabled and visible at scope {scope}"))?;
+    resolve_entry(api, entry).await
+}
+
+/// List stable catalogue entries, optionally filtering by governing scope.
+pub async fn list(profile: &str, scope: Option<ScopeId>, json_out: bool) -> Result<(), String> {
     let (api, origin) = Api::connect(profile).await?;
     announce(&api, &origin);
-    let listing: Listing = api.get_as(&format!("/v1/skills?scope_id={scope}")).await?;
-    if listing.skills.is_empty() {
-        println!("no skills at {}", listing.scope_path);
+    let mut skills = catalogue(&api).await?;
+    if let Some(scope) = scope {
+        skills.retain(|skill| skill.governing_scope_id == scope);
+    }
+    if json_out {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&skills).map_err(|err| err.to_string())?
+        );
         return Ok(());
     }
-    println!("skills at {}\n", listing.scope_path);
-    for entry in &listing.skills {
-        // A skill is published as a bundle, so the mark is about the bundle:
-        // `✓` every file published and current, `~` published and behind the
-        // draft in at least one file, `·` never reviewed.
-        let published = entry.files.iter().filter(|f| f.published.is_some()).count();
-        let current = entry
-            .files
-            .iter()
-            .filter(|f| f.published.as_ref().is_some_and(|p| p.current))
-            .count();
-        let (mark, note) = if published == 0 {
-            ("·", "draft only — no review has carried it".to_owned())
-        } else if current == entry.files.len() && published == entry.files.len() {
-            ("✓", "published and current".to_owned())
-        } else {
-            (
-                "~",
-                format!(
-                    "published, but {} of {} file(s) have moved since",
-                    entry.files.len() - current,
-                    entry.files.len()
-                ),
-            )
-        };
+    if skills.is_empty() {
+        println!("no visible skills");
+        return Ok(());
+    }
+    for skill in skills {
         println!(
-            "  {mark} {}  [{}]  {}",
-            entry.name,
-            entry.sensitivity.as_str(),
-            entry.description
+            "{}  {}  v{} {}  [{}]",
+            skill.id,
+            skill.name,
+            skill.current_version.ordinal,
+            short(&skill.current_version.bundle_digest),
+            skill.current_version.sensitivity.as_str(),
         );
-        println!("      {note}  {} file(s)", entry.files.len());
-        for file in &entry.files {
-            println!("        {}  {}", file.path, short(&file.object_hash));
-        }
+        println!(
+            "    {}  governed at {}",
+            description(&skill.current_version),
+            skill.governing_scope_id
+        );
     }
     Ok(())
 }
 
-/// What a `show` or an `install` is asking for.
-pub struct Ask<'a> {
-    /// The skill's name — also the directory an install creates.
-    pub name: &'a str,
-    /// Which scope, when naming one. Absent walks the caller's own chain.
-    pub scope: Option<ScopeId>,
-    /// `draft` for the authoring copy at a named scope.
-    pub draft: bool,
-    /// A commit to pin to: the version this caller was built against.
-    pub commit: Option<&'a str>,
-}
-
-impl Ask<'_> {
-    /// The resolve path this ask produces.
-    fn path(&self) -> String {
-        let mut query: Vec<String> = Vec::new();
-        if let Some(scope) = self.scope {
-            query.push(format!("scope_id={scope}"));
-        }
-        if self.draft {
-            query.push("channel=draft".to_owned());
-        }
-        if let Some(commit) = self.commit {
-            query.push(format!("commit={commit}"));
-        }
-        match query.is_empty() {
-            true => format!("/v1/skills/{}", self.name),
-            false => format!("/v1/skills/{}?{}", self.name, query.join("&")),
-        }
-    }
-}
-
-/// `synveda skill show <name>` — resolve and render, without writing
-/// anything.
-pub async fn show(profile: &str, ask: Ask<'_>, json_out: bool, quiet: bool) -> Result<(), String> {
+/// Inspect one exact immutable version by tenant-unique bundle name.
+pub async fn show(
+    profile: &str,
+    name: &str,
+    version: Option<SkillVersionId>,
+    json_out: bool,
+    quiet: bool,
+) -> Result<(), String> {
     let (api, origin) = Api::connect(profile).await?;
     if !quiet {
         announce(&api, &origin);
     }
-    let path = ask.path();
+    let name = name.parse::<SkillName>().map_err(|err| err.to_string())?;
+    let skill = skill_named(&api, &name)
+        .await?
+        .ok_or_else(|| format!("skill {name:?} is not visible"))?;
+    let version_id = version.unwrap_or(skill.current_version_id);
+    let version = exact_version(&api, skill.id, version_id).await?;
+    let files: FileList = api
+        .get_as(&format!(
+            "/v1/skills/{}/versions/{}/files",
+            skill.id, version.id
+        ))
+        .await?;
     if json_out {
-        println!("{}", api.get(&path).await?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "skill": skill,
+                "version": version,
+                "files": files.files,
+            }))
+            .map_err(|err| err.to_string())?
+        );
         return Ok(());
     }
-    let resolved: Resolved = api.get_as(&path).await?;
-    print_header(&resolved);
-    for file in &resolved.files {
+    println!(
+        "{}  {}  version {} ({})",
+        skill.name, skill.id, version.ordinal, version.id
+    );
+    println!(
+        "    {}  [{}]  digest {}",
+        description(&version),
+        version.sensitivity.as_str(),
+        version.bundle_digest
+    );
+    println!(
+        "    declared tools are metadata, never authorisation: {}",
+        !version.declared_tools_are_authorization
+    );
+    for file in files.files {
         println!(
-            "   {}  {}  {} char(s)",
+            "    {}  {}  {} char(s)",
             file.path,
             short(&file.object_hash),
-            file.content.chars().count()
+            file.chars
         );
     }
     Ok(())
 }
 
-fn print_header(resolved: &Resolved) {
-    // Where the bytes came from, said plainly: a response that cites a
-    // frozen commit without saying so overstates its own freshness.
-    let source = match resolved.origin.as_str() {
-        "pinned-commit" => " (pinned by this request)".to_owned(),
-        "channel-pin" => " (the scope's channel is pinned)".to_owned(),
-        "draft" => " (unreviewed)".to_owned(),
-        _ => String::new(),
-    };
-    println!(
-        "── {} [{}] {} at {}{}",
-        resolved.name,
-        resolved.sensitivity.as_str(),
-        resolved.channel,
-        resolved.scope_path,
-        source
-    );
-    println!(
-        "   {}  {}",
-        resolved.description,
-        resolved
-            .commit
-            .as_deref()
-            .map(short)
-            .unwrap_or_else(|| "no commit".to_owned()),
-    );
-    println!("   scope {}", resolved.scope_id);
-    println!();
-}
-
-// ── Import ─────────────────────────────────────────────────────────────
-
-/// `synveda skill import <dir> --scope <id>` — read an anthropics/skills
-/// directory and author it.
-///
-/// The AC's third clause ("import from anthropics/skills format"), and the
-/// format is the one the open standard defines, so there is nothing to
-/// convert: this reads a directory and posts it.
-///
-/// What it does is **refuse rather than partially import** (ADR-0051
-/// decision 15). A symlink is not content and is not followed; a missing
-/// `SKILL.md`, a file over the bound, or a path the grammar refuses is a
-/// refusal naming the offender. Importing three files of four and calling it
-/// a skill is the failure a registry exists to prevent.
+/// Import a complete Agent Skills-compatible directory as an install or a new
+/// immutable version. The returned change may still await review.
 pub async fn import(
     profile: &str,
     dir: &Path,
@@ -289,95 +358,106 @@ pub async fn import(
     name: Option<&str>,
     sensitivity: Option<Sensitivity>,
 ) -> Result<(), String> {
-    // The directory's own name is the default, which is the spec's rule
-    // (a skill's directory is named for it) used as a convenience.
     let default_name = dir
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            format!(
-                "{} has no directory name to take a skill name from",
-                dir.display()
-            )
-        })?;
+        .ok_or_else(|| format!("{} has no directory name", dir.display()))?;
     let name: SkillName = name
         .unwrap_or(default_name)
-        .parse()
-        .map_err(|err| format!("{err}"))?;
-
-    let mut files: Vec<SkillFile> = Vec::new();
+        .parse::<SkillName>()
+        .map_err(|err| err.to_string())?;
+    let mut files = Vec::new();
     collect(dir, dir, &mut files)?;
-    files.sort_by(|a, b| a.path.as_str().cmp(b.path.as_str()));
-    if !files.iter().any(|file| file.path.is_manifest()) {
-        return Err(format!(
-            "{} has no {SKILL_MANIFEST}; without one it is not a skill under the open \
-             spec and no client will load it",
-            dir.display()
-        ));
-    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    let bundle = SkillBundle {
+        name: name.clone(),
+        files: files.clone(),
+    };
+    bundle.validate().map_err(|err| err.to_string())?;
     let total: usize = files.iter().map(|file| file.content.chars().count()).sum();
     if total > MAX_SKILL_BUNDLE_CHARS {
         return Err(format!(
-            "{} is {total} characters across {} file(s), over the {MAX_SKILL_BUNDLE_CHARS} a \
-             skill may hold",
-            dir.display(),
-            files.len()
+            "{} is {total} characters, over the {MAX_SKILL_BUNDLE_CHARS} bundle limit",
+            dir.display()
         ));
     }
 
-    let body = json!({
-        "scope_id": scope,
-        "name": name.as_str(),
-        "sensitivity": sensitivity.map(|tier| tier.as_str()),
-        "files": files.iter().map(|file| json!({
-            "path": file.path.as_str(),
-            "content": file.content,
-        })).collect::<Vec<_>>(),
-    });
-
     let (api, origin) = Api::connect(profile).await?;
     announce(&api, &origin);
-    let response = api.post("/v1/skills", Some(body)).await?;
-    println!(
-        "synveda: wrote {} at {}  {} file(s) from {}",
-        response["name"].as_str().unwrap_or(name.as_str()),
-        response["scope_path"].as_str().unwrap_or_default(),
-        response["files"].as_array().map_or(0, Vec::len),
-        dir.display(),
-    );
-    let removed = response["removed"].as_u64().unwrap_or(0);
-    if removed > 0 {
-        // Decision 17 made visible: a client loads a bundle whole, so the
-        // request is the bundle and a dropped file is really gone.
-        println!("         {removed} file(s) the bundle no longer names were removed");
+    let existing = skill_named(&api, &name).await?;
+    if existing
+        .as_ref()
+        .is_some_and(|skill| skill.governing_scope_id != scope)
+    {
+        return Err(format!(
+            "skill {name} is governed at {}; installing it at {scope} would move stable identity",
+            existing.expect("checked").governing_scope_id
+        ));
     }
-    match response["published_commit"].as_str() {
-        None => println!("         nothing is published under this name yet — open a proposal"),
-        Some(commit) => println!(
-            "         consumers are still served {} — this edit reaches them through review",
-            short(commit)
-        ),
-    }
+    let sensitivity = sensitivity
+        .or_else(|| {
+            existing
+                .as_ref()
+                .map(|skill| skill.current_version.sensitivity)
+        })
+        .unwrap_or(Sensitivity::Internal);
+    let wire_files = files
+        .iter()
+        .map(|file| {
+            json!({
+                "path": file.path.as_str(),
+                "content": file.content,
+            })
+        })
+        .collect::<Vec<_>>();
+    let provenance = json!({
+        "kind": "authored",
+        "reference": format!("local-directory:{default_name}"),
+        "metadata": {"client": "synveda-cli"}
+    });
+    let key = SkillId::new().to_string();
+    let response = match existing {
+        Some(skill) => {
+            let body = json!({
+                "expected_current_version_id": skill.current_version_id,
+                "sensitivity": sensitivity.as_str(),
+                "files": wire_files,
+                "provenance": provenance,
+            });
+            api.patch_idempotent(&format!("/v1/skills/{}", skill.id), body, &key)
+                .await?
+        }
+        None => {
+            let body = json!({
+                "governing_scope_id": scope,
+                "name": name.as_str(),
+                "sensitivity": sensitivity.as_str(),
+                "files": wire_files,
+                "provenance": provenance,
+            });
+            api.post_with_header(
+                "/v1/skills",
+                Some(body),
+                ("Idempotency-Key", &key),
+                &api.subject,
+            )
+            .await?
+        }
+    };
+    print_change(&response);
     Ok(())
 }
 
-/// Walks `dir`, collecting every file as a bundled path relative to `root`.
-///
-/// Symlinks are skipped rather than followed: a symlink is a reference to
-/// bytes rather than bytes, and following one would let an import pull in
-/// whatever it points at (ADR-0051 decision 15).
 fn collect(root: &Path, dir: &Path, out: &mut Vec<SkillFile>) -> Result<(), String> {
     let entries = std::fs::read_dir(dir).map_err(|err| format!("read {}: {err}", dir.display()))?;
     for entry in entries {
         let entry = entry.map_err(|err| format!("read {}: {err}", dir.display()))?;
         let path = entry.path();
-        let meta = entry
-            .metadata()
+        let meta = std::fs::symlink_metadata(&path)
             .map_err(|err| format!("stat {}: {err}", path.display()))?;
-        if meta.is_symlink() {
+        if meta.file_type().is_symlink() {
             return Err(format!(
-                "{} is a symlink; a bundle carries bytes, and following one would import \
-                 whatever it points at (ADR-0051 decision 15)",
+                "{} is a symlink; bundles carry bytes",
                 path.display()
             ));
         }
@@ -385,32 +465,29 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<SkillFile>) -> Result<(), Stri
             collect(root, &path, out)?;
             continue;
         }
+        if !meta.is_file() {
+            return Err(format!("{} is not a regular file", path.display()));
+        }
         if out.len() >= MAX_SKILL_FILES {
             return Err(format!(
-                "more than {MAX_SKILL_FILES} files under {}; split it into two skills",
+                "more than {MAX_SKILL_FILES} files under {}",
                 root.display()
             ));
         }
         let relative = path
             .strip_prefix(root)
-            .map_err(|err| format!("{} is not under {}: {err}", path.display(), root.display()))?;
-        let relative = relative
+            .map_err(|err| format!("{} is not under {}: {err}", path.display(), root.display()))?
             .to_str()
-            .ok_or_else(|| format!("{} is not valid UTF-8", relative.display()))?
-            // Windows separators, normalised before the grammar sees them —
-            // the grammar refuses a backslash *inside a segment*, which is
-            // the traversal shape, and this is the path separator.
+            .ok_or_else(|| format!("{} is not valid UTF-8", path.display()))?
             .replace('\\', "/");
-        let bundled: SkillFilePath = relative.parse().map_err(|err| format!("{err}"))?;
-        let content = std::fs::read_to_string(&path).map_err(|err| {
-            format!(
-                "read {}: {err} — a skill bundle carries reviewable text, never binaries",
-                path.display()
-            )
-        })?;
+        let bundled = relative
+            .parse::<SkillFilePath>()
+            .map_err(|err| err.to_string())?;
+        let content = std::fs::read_to_string(&path)
+            .map_err(|err| format!("read {} as UTF-8 text: {err}", path.display()))?;
         if content.chars().count() > MAX_SKILL_FILE_CHARS {
             return Err(format!(
-                "{} is over the {MAX_SKILL_FILE_CHARS}-character bound for one bundled file",
+                "{} exceeds the {MAX_SKILL_FILE_CHARS}-character file limit",
                 path.display()
             ));
         }
@@ -419,42 +496,52 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<SkillFile>) -> Result<(), Stri
             content,
         });
     }
+    if dir == root && !out.iter().any(|file| file.path.is_manifest()) {
+        return Err(format!("{} has no {SKILL_MANIFEST}", root.display()));
+    }
     Ok(())
 }
 
-// ── Install ────────────────────────────────────────────────────────────
-
-/// What an install recorded, written beside the credentials and **never**
-/// inside the bundle (ADR-0051 decision 12, option 7).
-#[derive(Serialize, Deserialize)]
-struct Receipt {
-    version: u32,
-    /// The client whose root this was written into.
-    client: String,
-    /// Where the bundle went.
-    directory: String,
-    skill: String,
-    scope_id: ScopeId,
-    scope_path: String,
-    /// The commit the bytes came from — what a reinstall pins to, and what
-    /// a rewind will refuse by name.
-    commit: Option<String>,
-    sensitivity: Sensitivity,
-    /// Path → content address, as the CLI recomputed it from what it wrote.
-    files: BTreeMap<String, String>,
+/// List exact versions enabled by bindings at a project or principal scope.
+pub async fn available(profile: &str, scope: ScopeId, json_out: bool) -> Result<(), String> {
+    let (api, origin) = Api::connect(profile).await?;
+    announce(&api, &origin);
+    let listing = available_at(&api, scope).await?;
+    if json_out {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&listing).map_err(|err| err.to_string())?
+        );
+        return Ok(());
+    }
+    if listing.skills.is_empty() {
+        println!("no enabled skills at {}", listing.scope_id);
+        return Ok(());
+    }
+    for entry in listing.skills {
+        let pin = entry
+            .binding
+            .pinned_version_id
+            .map_or("follows current".to_owned(), |id| format!("pinned {id}"));
+        println!(
+            "{}  {}  v{} {}",
+            entry.name, entry.version.id, entry.version.ordinal, pin
+        );
+        println!(
+            "    binding {} revision {}  {}",
+            entry.binding.id,
+            entry.binding.revision,
+            description(&entry.version)
+        );
+    }
+    Ok(())
 }
 
-/// `synveda skill install <name> --client <client>` — resolve a bundle and
-/// write it into that client's own skills directory.
-///
-/// The bytes are written verbatim, the directory holds exactly the reviewed
-/// files, and every one of them is re-hashed against the address the
-/// published commit named before this returns. A mismatch is a hard error:
-/// it means the bytes on disk are not the bytes that were reviewed, which is
-/// the one thing an install must never leave true.
+/// Materialise one enabled exact version into a supported client's directory.
 pub async fn install(
     profile: &str,
-    ask: Ask<'_>,
+    name: &str,
+    scope: ScopeId,
     client: &str,
     root: Option<&Path>,
     json_out: bool,
@@ -463,71 +550,47 @@ pub async fn install(
     if !json_out {
         announce(&api, &origin);
     }
-    let root = match root {
-        Some(root) => root.to_path_buf(),
-        None => client_root(client)?,
-    };
-    let (receipt, receipt_path) = materialise(&api, &ask.path(), client, &root).await?;
-    let directory = PathBuf::from(&receipt.directory);
-
+    let root = root.map_or_else(|| client_root(client), |path| Ok(path.to_path_buf()))?;
+    let resolved = resolve_available(&api, scope, name).await?;
+    let (receipt, receipt_path) = materialise(resolved, client, &root)?;
     if json_out {
         println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "skill": receipt.skill,
-                "client": receipt.client,
+                "version_id": receipt.version_id,
+                "binding_id": receipt.binding_id,
                 "directory": receipt.directory,
-                "commit": receipt.commit,
-                "scope_path": receipt.scope_path,
                 "files": receipt.files,
                 "receipt": receipt_path.display().to_string(),
             }))
             .map_err(|err| err.to_string())?
         );
-        return Ok(());
+    } else {
+        println!(
+            "synveda: installed {} version {} into {}",
+            receipt.skill, receipt.version_id, receipt.directory
+        );
+        println!(
+            "         {} file(s), every content address recomputed; receipt {}",
+            receipt.files.len(),
+            receipt_path.display()
+        );
     }
-    println!(
-        "synveda: installed {} into {}",
-        receipt.skill,
-        directory.display()
-    );
-    println!(
-        "         {} file(s) from {} at {}, every address recomputed",
-        receipt.files.len(),
-        receipt.scope_path,
-        receipt
-            .commit
-            .as_deref()
-            .map(short)
-            .unwrap_or_else(|| "no commit".to_owned()),
-    );
-    // The sentence that says why the directory looks like nothing but a
-    // skill: the provenance is here, outside it.
-    println!("         receipt {}", receipt_path.display());
     Ok(())
 }
 
-/// Resolves one bundle through the ordinary read route and writes it into
-/// `root`, returning the receipt and where the receipt went.
-///
-/// The one place in the product that writes a skill onto a disk. `install`
-/// calls it for a name a person asked for; `sync` calls it for every name
-/// the registry serves them (SKIL-4, ADR-0054 decision 15) — so the
-/// byte-identity check, the non-executable mode and the receipt are the same
-/// code in both, and a reconcile can never be the cheaper cousin of an
-/// install.
-async fn materialise(
-    api: &Api,
-    path: &str,
+fn materialise(
+    resolved: Resolved,
     client: &str,
     root: &Path,
 ) -> Result<(Receipt, PathBuf), String> {
-    let resolved: Resolved = api.get_as(path).await?;
-    let name: SkillName = resolved.name.parse().map_err(|err| format!("{err}"))?;
+    let name = resolved
+        .skill
+        .name
+        .parse::<SkillName>()
+        .map_err(|err| err.to_string())?;
     let directory = root.join(name.as_str());
-    // A fresh directory, so a file the bundle no longer names does not
-    // survive an upgrade. A client loads what is there, not what a manifest
-    // says is there.
     if directory.exists() {
         std::fs::remove_dir_all(&directory)
             .map_err(|err| format!("remove {}: {err}", directory.display()))?;
@@ -536,8 +599,11 @@ async fn materialise(
         .map_err(|err| format!("create {}: {err}", directory.display()))?;
 
     let mut receipt_files = BTreeMap::new();
-    for file in &resolved.files {
-        let bundled: SkillFilePath = file.path.parse().map_err(|err| format!("{err}"))?;
+    for file in resolved.files {
+        let bundled = file
+            .path
+            .parse::<SkillFilePath>()
+            .map_err(|err| err.to_string())?;
         let target = directory.join(bundled.as_str());
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)
@@ -545,20 +611,13 @@ async fn materialise(
         }
         std::fs::write(&target, file.content.as_bytes())
             .map_err(|err| format!("write {}: {err}", target.display()))?;
-        // Non-executable, always (ADR-0051 decision 8): a governed bundle
-        // cannot arrive carrying a mode nobody reviewed, and a skill invokes
-        // its scripts through an interpreter.
         set_readable(&target)?;
-
-        // The measurement, not the claim. Read back what was written and
-        // recompute the address from it — the CLI's own arithmetic against
-        // the number the commit named.
         let written = std::fs::read_to_string(&target)
             .map_err(|err| format!("re-read {}: {err}", target.display()))?;
         let asset = SkillAsset {
-            scope_id: resolved.scope_id,
+            scope_id: resolved.skill.governing_scope_id,
             skill: name.clone(),
-            sensitivity: resolved.sensitivity,
+            sensitivity: resolved.version.sensitivity,
             file: SkillFile {
                 path: bundled.clone(),
                 content: written,
@@ -567,123 +626,35 @@ async fn materialise(
         let recomputed = asset.address().to_hex();
         if recomputed != file.object_hash {
             return Err(format!(
-                "{} does not hash to the address the published commit named \
-                 (wrote {recomputed}, expected {}). The bytes on disk are not the bytes \
-                 that were reviewed; the install is incomplete and this directory should \
-                 be removed",
+                "{} hashes to {recomputed}, not the approved address {}",
                 target.display(),
-                file.object_hash,
+                file.object_hash
             ));
         }
-        receipt_files.insert(bundled.as_str().to_owned(), recomputed);
+        receipt_files.insert(bundled.to_string(), recomputed);
     }
 
     let receipt = Receipt {
-        version: 1,
+        version: 2,
         client: client.to_owned(),
         directory: directory.display().to_string(),
         skill: name.to_string(),
-        scope_id: resolved.scope_id,
-        scope_path: resolved.scope_path.clone(),
-        commit: resolved.commit.clone(),
-        sensitivity: resolved.sensitivity,
+        governing_scope_id: resolved.skill.governing_scope_id,
+        distribution_scope_id: resolved.binding.scope_id,
+        binding_id: resolved.binding.id,
+        version_id: resolved.version.id,
+        bundle_digest: resolved.version.bundle_digest,
+        sensitivity: resolved.version.sensitivity,
         files: receipt_files,
     };
     let receipt_path = write_receipt(client, &name, &receipt)?;
     Ok((receipt, receipt_path))
 }
 
-// ── Available and sync ─────────────────────────────────────────────────
-
-/// One skill this identity may install, as `GET /v1/skills` answers it
-/// without a scope (`crates/synveda-gateway/src/skills.rs`).
-#[derive(Deserialize)]
-struct AvailableEntry {
-    name: String,
-    description: String,
-    sensitivity: Sensitivity,
-    scope_path: String,
-    commit: String,
-    pinned: bool,
-    files: usize,
-    #[serde(default)]
-    shadows: Vec<String>,
-}
-
-#[derive(Deserialize)]
-struct AvailableResponse {
-    chain: Vec<String>,
-    skills: Vec<AvailableEntry>,
-}
-
-/// `synveda skill available` — the shelf this identity may install from.
-pub async fn available(profile: &str, json_out: bool) -> Result<(), String> {
-    let (api, origin) = Api::connect(profile).await?;
-    announce(&api, &origin);
-    if json_out {
-        println!("{}", api.get("/v1/skills").await?);
-        return Ok(());
-    }
-    let listing: AvailableResponse = api.get_as("/v1/skills").await?;
-    // The chain first, because it is the answer to the question this
-    // listing is really asked: another team's skills are absent because
-    // that team is not in this line (ADR-0054 decision 2).
-    println!("chain  {}", listing.chain.join("  →  "));
-    if listing.skills.is_empty() {
-        println!("no skills are published to you on it");
-        return Ok(());
-    }
-    println!();
-    for entry in &listing.skills {
-        println!(
-            "  {}  [{}]  {}",
-            entry.name,
-            entry.sensitivity.as_str(),
-            entry.description
-        );
-        println!(
-            "      {}  {}{}  {} file(s)",
-            entry.scope_path,
-            short(&entry.commit),
-            if entry.pinned { " (pinned)" } else { "" },
-            entry.files,
-        );
-        if !entry.shadows.is_empty() {
-            // The gradient made visible: a client's skills namespace is
-            // flat, so only one copy of this name can exist on disk.
-            println!("      overrides the copy at {}", entry.shadows.join(", "));
-        }
-    }
-    Ok(())
-}
-
-/// What one `sync` did, per skill.
-#[derive(Serialize)]
-struct Synced {
-    skill: String,
-    scope_path: String,
-    commit: Option<String>,
-    directory: String,
-    files: usize,
-}
-
-/// `synveda skill sync --client <client>` — make a governed skills root
-/// match what this identity may install (SKIL-4, ADR-0054 decision 15).
-///
-/// Three outcomes per name and the third is the feature: **written** when
-/// the registry serves a version this root does not hold, **unchanged**
-/// when the receipt already records that commit and every file still hashes
-/// to what it recorded, and **removed** when the registry no longer serves
-/// a name this product previously wrote here.
-///
-/// Removal is bounded by the receipts (ADR-0051 decision 12), not by what
-/// is on the disk: a directory this product did not write has no receipt,
-/// so it is never a candidate. That is what makes a reconcile safe to point
-/// at a root a person also uses — and it is the property that lets FLOW-7's
-/// "<60s to fleet-wide effect" mean something about a laptop, because a
-/// rewound skill stops being served and therefore stops being installed.
+/// Reconcile a client root to the exact versions enabled at one scope.
 pub async fn sync(
     profile: &str,
+    scope: ScopeId,
     client: &str,
     root: Option<&Path>,
     dry_run: bool,
@@ -693,78 +664,64 @@ pub async fn sync(
     if !json_out {
         announce(&api, &origin);
     }
-    let root = match root {
-        Some(root) => root.to_path_buf(),
-        None => client_root(client)?,
-    };
-    let listing: AvailableResponse = api.get_as("/v1/skills").await?;
+    let root = root.map_or_else(|| client_root(client), |path| Ok(path.to_path_buf()))?;
+    let listing = available_at(&api, scope).await?;
+    let mut written = Vec::new();
+    let mut unchanged = Vec::new();
+    let mut removed = Vec::new();
 
-    let mut written: Vec<Synced> = Vec::new();
-    let mut unchanged: Vec<String> = Vec::new();
-    let mut removed: Vec<String> = Vec::new();
-
-    for entry in &listing.skills {
-        let name: SkillName = entry.name.parse().map_err(|err| format!("{err}"))?;
-        if current(client, &name, &entry.commit, &root)? {
-            unchanged.push(entry.name.clone());
+    for entry in listing.skills.clone() {
+        let name = entry
+            .name
+            .parse::<SkillName>()
+            .map_err(|err| err.to_string())?;
+        if current(client, &name, entry.version.id, &root)? {
+            unchanged.push(entry.name);
             continue;
         }
         if dry_run {
             written.push(Synced {
-                skill: entry.name.clone(),
-                scope_path: entry.scope_path.clone(),
-                commit: Some(entry.commit.clone()),
+                skill: entry.name,
+                version_id: entry.version.id,
                 directory: root.join(name.as_str()).display().to_string(),
-                files: entry.files,
+                files: 0,
             });
             continue;
         }
-        // Through the ordinary resolve route, by name, walking the same
-        // chain the listing walked — never by scope and never by commit, so
-        // a version published between the listing and this call is the one
-        // that lands rather than a stale one the listing happened to see.
-        let ask = Ask {
-            name: &entry.name,
-            scope: None,
-            draft: false,
-            commit: None,
-        };
-        let (receipt, _) = materialise(&api, &ask.path(), client, &root).await?;
+        let (receipt, _) = materialise(resolve_entry(&api, entry).await?, client, &root)?;
         written.push(Synced {
             skill: receipt.skill,
-            scope_path: receipt.scope_path,
-            commit: receipt.commit,
-            files: receipt.files.len(),
+            version_id: receipt.version_id,
             directory: receipt.directory,
+            files: receipt.files.len(),
         });
     }
 
-    // The removals: every receipt this client holds for this root whose
-    // skill the registry no longer serves us.
-    let serves: Vec<&str> = listing
+    let served = listing
         .skills
         .iter()
         .map(|entry| entry.name.as_str())
-        .collect();
+        .collect::<Vec<_>>();
     for receipt in receipts(client)? {
-        if serves.contains(&receipt.skill.as_str()) {
-            continue;
-        }
-        let directory = PathBuf::from(&receipt.directory);
-        if directory.parent() != Some(root.as_path()) {
-            // Written into a different root — a by-hand `install` into the
-            // client's own folder, say. Not this root's to reconcile.
+        if receipt.distribution_scope_id != scope
+            || served.contains(&receipt.skill.as_str())
+            || PathBuf::from(&receipt.directory).parent() != Some(root.as_path())
+        {
             continue;
         }
         removed.push(receipt.skill.clone());
         if dry_run {
             continue;
         }
+        let directory = PathBuf::from(&receipt.directory);
         if directory.exists() {
             std::fs::remove_dir_all(&directory)
                 .map_err(|err| format!("remove {}: {err}", directory.display()))?;
         }
-        let name: SkillName = receipt.skill.parse().map_err(|err| format!("{err}"))?;
+        let name = receipt
+            .skill
+            .parse::<SkillName>()
+            .map_err(|err| err.to_string())?;
         remove_receipt(client, &name)?;
     }
 
@@ -773,8 +730,8 @@ pub async fn sync(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "client": client,
+                "scope_id": scope,
                 "root": root.display().to_string(),
-                "available": listing.skills.len(),
                 "written": written,
                 "unchanged": unchanged,
                 "removed": removed,
@@ -782,61 +739,46 @@ pub async fn sync(
             }))
             .map_err(|err| err.to_string())?
         );
-        return Ok(());
-    }
-    let verb = if dry_run { "would sync" } else { "synced" };
-    println!(
-        "synveda: {verb} {} into {}",
-        match listing.skills.len() {
-            1 => "1 skill".to_owned(),
-            n => format!("{n} skills"),
-        },
-        root.display()
-    );
-    for entry in &written {
+    } else {
         println!(
-            "         + {}  {}  {} file(s)  from {}",
-            entry.skill,
-            entry.commit.as_deref().map(short).unwrap_or_default(),
-            entry.files,
-            entry.scope_path,
+            "synveda: {} {} skill(s) at {} into {}",
+            if dry_run { "would sync" } else { "synced" },
+            listing.skills.len(),
+            scope,
+            root.display()
         );
-    }
-    for skill in &removed {
-        // Named rather than counted: a skill leaving a laptop is the half
-        // of distribution nobody sees coming.
-        println!("         - {skill}  no longer served to you");
-    }
-    if !unchanged.is_empty() {
-        println!(
-            "         = {} unchanged ({})",
-            unchanged.len(),
-            unchanged.join(", ")
-        );
+        for entry in written {
+            println!("         + {} {}", entry.skill, entry.version_id);
+        }
+        for skill in removed {
+            println!("         - {skill}");
+        }
+        if !unchanged.is_empty() {
+            println!("         = {} unchanged", unchanged.join(", "));
+        }
     }
     Ok(())
 }
 
-/// Whether `root` already holds exactly what `commit` publishes for this
-/// skill, per this client's receipt.
-///
-/// Not "is there a directory": the receipt records every file's content
-/// address, so this re-hashes what is on the disk and says no when
-/// somebody has edited a governed bundle. A sync that trusted the
-/// directory's existence would leave a modified skill in place forever —
-/// and a governed root whose bytes drift is the one thing SKIL-1's
-/// byte-identity check exists to prevent.
-fn current(client: &str, name: &SkillName, commit: &str, root: &Path) -> Result<bool, String> {
+fn current(
+    client: &str,
+    name: &SkillName,
+    version: SkillVersionId,
+    root: &Path,
+) -> Result<bool, String> {
     let Some(receipt) = read_receipt(client, name)? else {
         return Ok(false);
     };
-    holds(&receipt, name, commit, root)
+    holds(&receipt, name, version, root)
 }
 
-/// The half of [`current`] that needs no config directory: whether this
-/// receipt describes exactly what is on the disk under `root`.
-fn holds(receipt: &Receipt, name: &SkillName, commit: &str, root: &Path) -> Result<bool, String> {
-    if receipt.commit.as_deref() != Some(commit) {
+fn holds(
+    receipt: &Receipt,
+    name: &SkillName,
+    version: SkillVersionId,
+    root: &Path,
+) -> Result<bool, String> {
+    if receipt.version_id != version {
         return Ok(false);
     }
     let directory = PathBuf::from(&receipt.directory);
@@ -844,13 +786,15 @@ fn holds(receipt: &Receipt, name: &SkillName, commit: &str, root: &Path) -> Resu
         return Ok(false);
     }
     for (path, address) in &receipt.files {
-        let bundled: SkillFilePath = path.parse().map_err(|err| format!("{err}"))?;
+        let bundled = path
+            .parse::<SkillFilePath>()
+            .map_err(|err| err.to_string())?;
         let target = directory.join(bundled.as_str());
         let Ok(content) = std::fs::read_to_string(&target) else {
             return Ok(false);
         };
         let asset = SkillAsset {
-            scope_id: receipt.scope_id,
+            scope_id: receipt.governing_scope_id,
             skill: name.clone(),
             sensitivity: receipt.sensitivity,
             file: SkillFile {
@@ -858,58 +802,50 @@ fn holds(receipt: &Receipt, name: &SkillName, commit: &str, root: &Path) -> Resu
                 content,
             },
         };
-        if &asset.address().to_hex() != address {
+        if asset.address().to_hex() != *address {
             return Ok(false);
         }
     }
     Ok(true)
 }
 
-/// Where this client's receipts live.
 fn receipt_dir(client: &str) -> Result<PathBuf, String> {
     Ok(crate::credentials::config_dir()?
         .join("skills")
         .join(client))
 }
 
-/// Every receipt this client holds — what this product knows it wrote.
 fn receipts(client: &str) -> Result<Vec<Receipt>, String> {
     let dir = receipt_dir(client)?;
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Ok(Vec::new());
     };
-    let mut out = Vec::new();
+    let mut out: Vec<Receipt> = Vec::new();
     for entry in entries {
         let path = entry
             .map_err(|err| format!("read {}: {err}", dir.display()))?
             .path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
             continue;
         }
         let body = std::fs::read_to_string(&path)
             .map_err(|err| format!("read {}: {err}", path.display()))?;
-        // A receipt this CLI cannot read is one it did not write in a
-        // shape it understands; skipping it means the directory it names
-        // is never removed, which is the safe direction.
-        if let Ok(receipt) = serde_json::from_str::<Receipt>(&body) {
+        if let Ok(receipt) = serde_json::from_str(&body) {
             out.push(receipt);
         }
     }
-    out.sort_by(|a, b| a.skill.cmp(&b.skill));
+    out.sort_by(|left, right| left.skill.cmp(&right.skill));
     Ok(out)
 }
 
-/// One receipt by name, if this client holds it.
 fn read_receipt(client: &str, name: &SkillName) -> Result<Option<Receipt>, String> {
     let path = receipt_dir(client)?.join(format!("{name}.json"));
-    let Ok(body) = std::fs::read_to_string(&path) else {
+    let Ok(body) = std::fs::read_to_string(path) else {
         return Ok(None);
     };
     Ok(serde_json::from_str(&body).ok())
 }
 
-/// Drops a receipt when its bundle leaves the disk, so the two never
-/// disagree about what is installed.
 fn remove_receipt(client: &str, name: &SkillName) -> Result<(), String> {
     let path = receipt_dir(client)?.join(format!("{name}.json"));
     match std::fs::remove_file(&path) {
@@ -919,7 +855,6 @@ fn remove_receipt(client: &str, name: &SkillName) -> Result<(), String> {
     }
 }
 
-/// Writes the receipt into the CLI's own config directory.
 fn write_receipt(client: &str, name: &SkillName, receipt: &Receipt) -> Result<PathBuf, String> {
     let dir = receipt_dir(client)?;
     std::fs::create_dir_all(&dir).map_err(|err| format!("create {}: {err}", dir.display()))?;
@@ -929,7 +864,6 @@ fn write_receipt(client: &str, name: &SkillName, receipt: &Receipt) -> Result<Pa
     Ok(path)
 }
 
-/// 0644 on POSIX; a no-op elsewhere, where there is no execute bit to clear.
 #[cfg(unix)]
 fn set_readable(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
@@ -942,69 +876,24 @@ fn set_readable(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-// ── Propose ────────────────────────────────────────────────────────────
-
-/// `synveda skill propose <name> --scope <id>` — open the review that can
-/// carry the bundle across the trust boundary.
-///
-/// The proposal names the **skill**, never a file: a client loads a bundle
-/// whole, so every file the source holds becomes a member.
-///
-/// Under every pack this is the only route: the invariant floor asks for a
-/// security reviewer and, since ADR-0051 decision 18, two distinct
-/// approvers, so no pack makes shipping executable code a one-signature act.
-pub async fn propose(
-    profile: &str,
-    name: &str,
-    scope: ScopeId,
-    source: Option<ScopeId>,
-    title: &str,
-) -> Result<(), String> {
-    let parsed: SkillName = name.parse().map_err(|err| format!("{err}"))?;
-    let mut body = json!({
-        "scope_id": scope,
-        "title": title,
-        "skill_names": [parsed.as_str()],
-    });
-    if let Some(source) = source {
-        body["source_scope_id"] = json!(source);
-    }
-    let (api, origin) = Api::connect(profile).await?;
-    announce(&api, &origin);
-    let response = api.post("/v1/proposals", Some(body)).await?;
-    // `id`, not `proposal_id`: opening returns the proposal's summary
-    // (`ProposalSummary`, flattened), and `proposal_id` is what the *other*
-    // responses and the audit payloads call it. Reading the wrong one
-    // printed an empty id beside "0 member(s)" — the summary carries no
-    // member list either — which is to say the verb's whole output was
-    // unusable, and the next thing anybody does with a proposal is name it.
-    // Found by `demos/cnsl-1-proposals-inbox.sh`, which had to parse this
-    // line to review what it had just proposed.
-    let id = response["id"].as_str().unwrap_or_default();
+fn print_change(response: &Value) {
     println!(
-        "synveda: opened proposal {} — {}, {}",
-        id,
-        response["asset"].as_str().unwrap_or("skill"),
-        response["state"].as_str().unwrap_or_default(),
+        "synveda: Skill change {} — {}",
+        response["change_id"].as_str().unwrap_or_default(),
+        response["outcome"].as_str().unwrap_or("unknown")
     );
-    if let Some(outstanding) = response["outstanding"].as_str() {
-        println!("         outstanding {outstanding}");
+    if response["outcome"] == "pending_review" {
+        println!(
+            "         review with synveda proposal review {}",
+            response["change_id"].as_str().unwrap_or_default()
+        );
     }
-    println!("         review with `synveda proposal review {id}`");
-    Ok(())
 }
 
-// ── Shared ─────────────────────────────────────────────────────────────
-
-/// The first twelve hex characters — enough to name a commit or an object
-/// in a terminal, as `synveda channel history` renders them.
 fn short(hash: &str) -> String {
     hash.chars().take(12).collect()
 }
 
-/// Which gateway and which identity, so a governed act never happens
-/// silently against a surprise host. On stderr, so `--json` and `--quiet`
-/// stay pipeable.
 fn announce(api: &Api, origin: &Origin) {
     match origin {
         Origin::Profile(profile) => eprintln!(
@@ -1024,152 +913,85 @@ fn announce(api: &Api, origin: &Origin) {
 mod tests {
     use super::*;
 
-    /// The table `install --client` exists to demonstrate: every client's
-    /// root is a different directory and nothing else differs, which is what
-    /// makes two installed trees comparable file for file.
-    #[test]
-    fn every_client_root_is_a_relative_path_under_home() {
-        for (name, suffix) in CLIENT_ROOTS {
-            assert!(!suffix.starts_with('/'), "{name} root must be under HOME");
-            assert!(suffix.ends_with("skills"), "{name} root names a skills dir");
-        }
-        assert!(clients().contains("claude-code"));
-        assert!(clients().contains("codex"));
+    fn scratch(label: &str) -> PathBuf {
+        let root = std::env::temp_dir()
+            .join("synveda-cpr23-cli")
+            .join(format!("{label}-{}", ScopeId::new()));
+        std::fs::create_dir_all(&root).expect("create scratch root");
+        root
     }
 
-    #[test]
-    fn an_unknown_client_names_the_ones_it_knows() {
-        let err = client_root("emacs").unwrap_err();
-        assert!(err.contains("claude-code"), "{err}");
-        assert!(err.contains("codex"), "{err}");
-    }
-
-    /// The receipt is a document about a directory, never a document *in*
-    /// it — which is ADR-0051 option 7 as a test rather than a comment.
-    #[test]
-    fn a_receipt_records_the_directory_it_is_not_inside() {
-        let receipt = Receipt {
-            version: 1,
-            client: "claude-code".to_owned(),
-            directory: "/home/dev/.claude/skills/code-review".to_owned(),
-            skill: "code-review".to_owned(),
-            scope_id: ScopeId::new(),
-            scope_path: "/acme/eng".to_owned(),
-            commit: Some("abcd".to_owned()),
-            sensitivity: Sensitivity::Internal,
-            files: BTreeMap::from([("SKILL.md".to_owned(), "beef".to_owned())]),
-        };
-        let text = serde_json::to_string(&receipt).unwrap();
-        assert!(text.contains("\"directory\""));
-        assert!(text.contains("code-review"));
-    }
-
-    /// A bundle on disk, with a receipt that describes it exactly.
-    fn installed(root: &Path, name: &str, content: &str) -> (Receipt, SkillName) {
-        let skill: SkillName = name.parse().expect("a legal skill name");
-        let scope_id = ScopeId::new();
-        let directory = root.join(name);
-        std::fs::create_dir_all(&directory).expect("create the bundle directory");
-        std::fs::write(directory.join(SKILL_MANIFEST), content).expect("write the manifest");
+    fn installed(root: &Path, content: &str) -> (Receipt, SkillName, SkillVersionId) {
+        let name: SkillName = "code-review".parse().unwrap();
+        let governing_scope_id = ScopeId::new();
+        let distribution_scope_id = ScopeId::new();
+        let version_id = SkillVersionId::new();
+        let directory = root.join(name.as_str());
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join(SKILL_MANIFEST), content).unwrap();
         let asset = SkillAsset {
-            scope_id,
-            skill: skill.clone(),
+            scope_id: governing_scope_id,
+            skill: name.clone(),
             sensitivity: Sensitivity::Internal,
             file: SkillFile {
-                path: SKILL_MANIFEST.parse().expect("a legal bundled path"),
+                path: SKILL_MANIFEST.parse().unwrap(),
                 content: content.to_owned(),
             },
         };
         let receipt = Receipt {
-            version: 1,
+            version: 2,
             client: "claude-code".to_owned(),
             directory: directory.display().to_string(),
-            skill: name.to_owned(),
-            scope_id,
-            scope_path: "/acme/eng".to_owned(),
-            commit: Some("c".repeat(64)),
+            skill: name.to_string(),
+            governing_scope_id,
+            distribution_scope_id,
+            binding_id: SkillBindingId::new(),
+            version_id,
+            bundle_digest: "d".repeat(64),
             sensitivity: Sensitivity::Internal,
             files: BTreeMap::from([(SKILL_MANIFEST.to_owned(), asset.address().to_hex())]),
         };
-        (receipt, skill)
+        (receipt, name, version_id)
     }
 
-    fn scratch(label: &str) -> PathBuf {
-        let root = std::env::temp_dir()
-            .join("synveda-skil4-cli")
-            .join(format!("{label}-{}", ScopeId::new()));
-        std::fs::create_dir_all(&root).expect("create the scratch root");
-        root
-    }
-
-    /// A sync leaves alone what it already wrote — the check that keeps a
-    /// session-start reconcile from re-resolving every skill every time
-    /// (SKIL-4, ADR-0054 decision 15).
     #[test]
-    fn a_bundle_at_the_published_commit_is_current() {
+    fn client_roots_are_relative_and_distinct() {
+        assert_ne!(CLIENT_ROOTS[0].1, CLIENT_ROOTS[1].1);
+        for (name, root) in CLIENT_ROOTS {
+            assert!(!root.starts_with('/'), "{name}");
+            assert!(root.ends_with("skills"), "{name}");
+        }
+    }
+
+    #[test]
+    fn exact_version_and_bytes_define_current() {
         let root = scratch("current");
-        let (receipt, name) = installed(&root, "code-review", "---\nname: code-review\n---\n");
-        assert!(holds(&receipt, &name, &"c".repeat(64), &root).unwrap());
-    }
-
-    /// A new commit is not current, which is the ordinary upgrade.
-    #[test]
-    fn a_bundle_at_another_commit_is_not_current() {
-        let root = scratch("stale");
-        let (receipt, name) = installed(&root, "code-review", "---\nname: code-review\n---\n");
-        assert!(!holds(&receipt, &name, &"d".repeat(64), &root).unwrap());
-    }
-
-    /// **An edited governed bundle is not current, so the next sync heals
-    /// it.** The receipt records every file's content address, so this is a
-    /// re-hash rather than an existence check — a governed root whose bytes
-    /// have drifted from the reviewed ones is the single thing SKIL-1's
-    /// byte-identity claim exists to prevent, and a reconcile that trusted
-    /// the directory would leave it that way forever.
-    #[test]
-    fn an_edited_bundle_is_not_current() {
-        let root = scratch("edited");
-        let (receipt, name) = installed(&root, "code-review", "---\nname: code-review\n---\n");
+        let (receipt, name, version) =
+            installed(&root, "---\nname: code-review\ndescription: Review.\n---\n");
+        assert!(holds(&receipt, &name, version, &root).unwrap());
+        assert!(!holds(&receipt, &name, SkillVersionId::new(), &root).unwrap());
         std::fs::write(
             root.join("code-review").join(SKILL_MANIFEST),
-            "---\nname: code-review\n---\nrm -rf /\n",
+            "---\nname: code-review\ndescription: Changed.\n---\n",
         )
-        .expect("tamper with the bundle");
-        assert!(!holds(&receipt, &name, &"c".repeat(64), &root).unwrap());
+        .unwrap();
+        assert!(!holds(&receipt, &name, version, &root).unwrap());
     }
 
-    /// A missing file is the same answer as an edited one.
     #[test]
-    fn a_deleted_file_is_not_current() {
-        let root = scratch("deleted");
-        let (receipt, name) = installed(&root, "code-review", "---\nname: code-review\n---\n");
-        std::fs::remove_file(root.join("code-review").join(SKILL_MANIFEST)).expect("remove");
-        assert!(!holds(&receipt, &name, &"c".repeat(64), &root).unwrap());
-    }
-
-    /// **A receipt naming another root is not this sync's to reconcile** —
-    /// the rule that lets `sync` prune at all (ADR-0054 decisions 15 and
-    /// 16). A by-hand `synveda skill install` into a person's own
-    /// `~/.claude/skills` writes a receipt too, and a reconcile of the
-    /// plugin's root must neither treat it as current nor delete it.
-    #[test]
-    fn a_receipt_written_into_another_root_is_not_this_ones() {
-        let mine = scratch("mine");
-        let theirs = scratch("theirs");
-        let (receipt, name) = installed(&theirs, "code-review", "---\nname: code-review\n---\n");
-        assert!(!holds(&receipt, &name, &"c".repeat(64), &mine).unwrap());
+    fn receipt_stays_outside_the_bundle() {
+        let root = scratch("receipt");
+        let (receipt, _, _) =
+            installed(&root, "---\nname: code-review\ndescription: Review.\n---\n");
         assert_eq!(
             PathBuf::from(&receipt.directory).parent(),
-            Some(theirs.as_path()),
-            "and the parent test is what `sync` filters removals by"
+            Some(root.as_path())
         );
+        assert!(!receipt.directory.ends_with(".json"));
     }
 
-    /// The one path shape `collect` normalises before the grammar sees it.
-    /// A backslash *inside a segment* stays refused — that is the traversal
-    /// shape — and this is the separator.
     #[test]
-    fn windows_separators_normalise_to_bundled_paths() {
+    fn windows_separators_normalise_before_path_validation() {
         assert_eq!(
             "scripts\\check.py"
                 .replace('\\', "/")
@@ -1179,14 +1001,5 @@ mod tests {
             "scripts/check.py"
         );
         assert!("scripts/che\\ck.py".parse::<SkillFilePath>().is_err());
-    }
-
-    #[test]
-    fn a_skill_path_is_what_a_channel_entry_carries() {
-        let path = synveda_types::SkillPath::new(
-            "code-review".parse().unwrap(),
-            "scripts/check.py".parse().unwrap(),
-        );
-        assert_eq!(path.to_string(), "code-review/scripts/check.py");
     }
 }

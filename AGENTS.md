@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **119 features filed, 88 delivered**;
+Cursor frame has been replayed. **120 features filed, 89 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -133,7 +133,7 @@ Load-bearing facts about Phase 5:
 - The generated OpenAPI contract covers the context-platform plane (`/v1/me`,
   workspaces, projects, repositories, access, admin scopes, sessions and the
   public Knowledge lifecycle/search, capture and explainable context surfaces —
-  **67 operations** since CPR-20). The console consumes generated operations only;
+  **85 operations** since CPR-23). The console consumes generated operations only;
   the remaining production planes join under the programme's public-contract
   convergence package.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
@@ -235,9 +235,19 @@ Load-bearing facts about Phase 5:
 - CPR-13 is delivered after that MVP checkpoint: 49 affected demo scripts are
   concise current-scope/session/capture/Knowledge/context narratives, 17,972
   lines smaller after copied retired setup was deleted. `make check-demos`
-  recursively validates all 73 shell scripts against freshly built Clap help
+  recursively validates all 74 shell scripts against freshly built Clap help
   and generated OpenAPI paths, including binary aliases; MEM, CTX, FLOW,
   AUTHZ and the authentic-frame ADPT live-Postgres representatives pass.
+- CPR-23 (ADR-0085) is delivered: stable Skill aggregates own immutable,
+  content-addressed versions; project/principal bindings follow current or pin
+  an exact version and revisioned disable/rollback changes distribution rather
+  than history. Install, update and binding effects all pass through typed
+  VedaFlow changes with live PDP, scan/rubric, RLS and content-free audit
+  evidence. Eight usage stages separate host observation from model report,
+  the controlled validation harness runs no bundle code, declared tools grant
+  nothing, and context advertises the same exact resolved versions the public
+  API serves. The old mutable drafts, `skill/published` distribution and
+  special checklist/override mutation paths are gone.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

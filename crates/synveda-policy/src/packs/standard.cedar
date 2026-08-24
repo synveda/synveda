@@ -550,24 +550,6 @@ permit (
         && context.roles.containsAny(["curator", "member", "owner", "administrator"])
 };
 
-// The quality override (SKIL-3, ADR-0053 decision 8): the strict pack's
-// two roles, unchanged.
-//
-// This pack is cheaper about the *bar* — `min_score` 50 and no mandatory
-// checklist — rather than about who may step over it, which is the
-// division of labour the config and the grant are for. A ten-person shop
-// that hits this at all has hit a rubric failure or a written-down
-// concern, and neither is a thing the person who wrote the bundle should
-// clear on their own.
-permit (
-    principal,
-    action == Synveda::Action::"SkillQualityOverride",
-    resource
-) when {
-    resource in principal.tenant
-        && context.roles.containsAny(["owner", "administrator"])
-};
-
 // The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform —
 // see regulated-strict for the full rationale.
 permit (

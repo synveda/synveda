@@ -1908,6 +1908,30 @@ CPR-22  Core individual and small-team MVP acceptance (L)
   isolated runnable demo, focused suites, `make ci` and `make db-test` pass.
   No ADR: this is the acceptance composition of ADR-0070 through ADR-0084.
 
+CPR-23  Immutable skill versions, bindings and usage (XL)
+  Filed 2026-08-24 by the autonomous continuation. Replace the mutable
+  draft-plus-`skill/published` registry with stable Skill aggregates, immutable
+  content-addressed SkillVersion rows, project/principal SkillBindings,
+  evidence-labelled SkillUsageEvents and controlled SkillTestRuns. Extend the
+  existing Agent Skills parser, scanners, quality rubric, VedaFlow object store
+  and approval engine; do not introduce a second registry or rewrite bundle
+  bytes. Pin the official unversioned Agent Skills specification to its tested
+  upstream commit, add its `compatibility` field and exact name grammar,
+  preserve extension metadata, and keep declared tools metadata-only.
+  Install, update, bind, disable, enable, pin, unpin and rollback become typed
+  VedaFlow `apply` changes with live PDP/precondition checks at execution.
+  Distribution and ContextRun advertisement resolve the same enabled bindings;
+  rollback changes a binding, never history. Eight usage stages distinguish
+  host observation from model report. The gateway's validation sandbox parses
+  and scans but never executes a bundled script; controlled-client evidence is
+  labelled separately. AC: immutable/version digest and old-row mutation
+  refusals; pending/applied/rejected changes; stale version/binding conflicts;
+  project/principal pin, disable and rollback; PDP/RLS tenant and private-scope
+  isolation; exact version/file/provenance/scan APIs; usage idempotency and
+  evidence separation; safe test runs; generated contract and CLI cutover; no
+  skill channel/draft residue; focused tests, demo, `make ci` and `make db-test`
+  pass. ADR-0085.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2001,7 +2025,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

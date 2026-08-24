@@ -88,8 +88,8 @@ proposals (id, scope, source_ref, target_ref, state,
 
 ### 2.2 Channels and typed aggregate effects
 
-Authored bundle assets — prompts, context packs and skills — retain three
-standing VedaFlow channels at a governed scope:
+Prompt and context-pack authored assets retain standing VedaFlow channels at
+a governed scope:
 
 - **`derived`** — machine-produced material, readable only where policy permits
   an explicitly unreviewed channel.
@@ -102,6 +102,11 @@ aggregate effect. Applying it creates or advances a stable Knowledge item and
 its immutable revisions; personal auto-apply still creates and executes that
 same proposal.
 
+Skills use the same typed-effect shape: a stable Skill points at immutable
+content-addressed versions and explicit project/principal bindings select or
+pin what is advertised. There is no `skill/published` ref, mutable draft or
+channel-wide Skill rollback. A binding revision is the distribution switch.
+
 ### 2.3 The lifecycle
 
 ```
@@ -111,7 +116,9 @@ manual Knowledge create/edit/verify/forget ────────────�
                                                                               ▼
                                                typed VedaFlow change ──▶ Knowledge revision
 
-prompt / skill / context-pack authoring ──▶ staged review ──▶ published ref
+prompt / context-pack authoring ──▶ staged review ──▶ published ref
+
+Skill install/update/bind/rollback ──▶ typed VedaFlow change ──▶ immutable version/binding
 ```
 
 - Capture output is a candidate, never active Knowledge. Accept, edit, merge or
@@ -129,7 +136,7 @@ Required approvals resolve from **(asset type × sensitivity × target scope × 
 |---|---|
 | Knowledge → project scope, internal | policy may auto-apply or require a project `curator` |
 | Prompt → workspace `published` | 1 × `administrator` + 1 × `curator` (peer review) |
-| Skill (executable!) → any `published` | `administrator` + `reviewer`; skills are treated like code because they are |
+| Skill version or binding change | live pack matrix, including the invariant security-reviewer requirement; skills are treated like code because they are |
 | Anything `restricted` sensitivity | + distinct `reviewer`, no self-approval where the matrix requires it |
 | Policy relaxation under regulated-strict | distinct approvers + hard expiry mandatory |
 | SMB `standard` pack | most of the above collapses to single-approver or auto-approve |

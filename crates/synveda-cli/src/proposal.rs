@@ -18,7 +18,7 @@ use std::io::{BufRead, IsTerminal, Write};
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::json;
 use synveda_types::{ProposalId, ProposalState, ProposalView, ScopeId, Sensitivity};
 
 use crate::api::{Api, Origin};
@@ -427,145 +427,6 @@ pub async fn apply(profile: &str, id: ProposalId) -> Result<(), String> {
         field("knowledge_item_id"),
         field("revision_id"),
     );
-    Ok(())
-}
-
-/// `synveda proposal override-quality` — record a decision to publish a
-/// skill the quality gate refuses (SKIL-3, ADR-0053 decision 8).
-///
-/// Its own verb rather than a flag on `publish`, because it is its own
-/// authority: a steward grants this and cannot publish a skill (no content
-/// read), a curator publishes and cannot grant this. Two acts, two people.
-pub async fn override_quality(profile: &str, id: ProposalId, reason: &str) -> Result<(), String> {
-    let (api, origin) = Api::connect(profile).await?;
-    announce(&api, &origin);
-    let granted = api
-        .post(
-            &format!("/v1/proposals/{id}/quality-override"),
-            Some(json!({"reason": reason})),
-        )
-        .await?;
-    let digest = granted
-        .get("bundle_digest")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    eprintln!(
-        "synveda: override recorded for {} at {}/100 — bound to bundle {}",
-        granted
-            .get("skill")
-            .and_then(Value::as_str)
-            .unwrap_or_default(),
-        granted.get("score").and_then(Value::as_u64).unwrap_or(0),
-        short(digest),
-    );
-    eprintln!(
-        "synveda: it stands over exactly these bytes; an edit needs a new one. \
-         Whoever ordinarily publishes can now run `synveda proposal publish {id}`"
-    );
-    Ok(())
-}
-
-/// `synveda proposal checklist` — record the reviewer's half of a skill's
-/// quality score (SKIL-3, ADR-0053 decision 6).
-///
-/// The answers are bound to the bundle's **bytes**, which is why the
-/// response echoes the digest: a reviewer who sees it change between two
-/// runs is a reviewer whose author edited something underneath them, and
-/// the previous answers no longer apply to anything.
-pub async fn checklist(
-    profile: &str,
-    id: ProposalId,
-    items: &[String],
-    note: Option<String>,
-) -> Result<(), String> {
-    let mut answers = serde_json::Map::new();
-    for item in items {
-        let (name, verdict) = item.split_once('=').ok_or_else(|| {
-            format!("--item wants ITEM=VERDICT, got {item:?} (e.g. --item tested=yes)")
-        })?;
-        let name = name.trim();
-        let verdict = verdict.trim();
-        // Spelling is checked at the gateway, where the vocabulary lives.
-        // What is checked here is the *shape*, because `--item tested` with
-        // no verdict is a typo a round trip should not be spent on.
-        if name.is_empty() || verdict.is_empty() {
-            return Err(format!(
-                "--item wants ITEM=VERDICT with both halves, got {item:?}"
-            ));
-        }
-        answers.insert(name.to_owned(), Value::String(verdict.to_owned()));
-    }
-
-    let (api, origin) = Api::connect(profile).await?;
-    announce(&api, &origin);
-    let mut body = serde_json::Map::new();
-    body.insert("answers".to_owned(), Value::Object(answers));
-    if let Some(note) = note {
-        body.insert("note".to_owned(), Value::String(note));
-    }
-    let recorded = api
-        .post(
-            &format!("/v1/proposals/{id}/checklist"),
-            Some(Value::Object(body)),
-        )
-        .await?;
-
-    let text = |name: &str| {
-        recorded
-            .get(name)
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned()
-    };
-    let complete = recorded
-        .get("complete")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let concerns: Vec<&str> = recorded
-        .get("concerns")
-        .and_then(Value::as_array)
-        .map(|items| items.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default();
-
-    eprintln!(
-        "synveda: checklist recorded for {} — {}, bound to bundle {}",
-        text("skill"),
-        if complete { "complete" } else { "PARTIAL" },
-        short(&text("bundle_digest")),
-    );
-    if !complete {
-        eprintln!(
-            "synveda: a pack that requires a checklist will not accept a partial one; \
-             answer the rest before publishing"
-        );
-    }
-    if !concerns.is_empty() {
-        eprintln!(
-            "synveda: you answered `no` to {} — publishing over that needs an override \
-             under every pack, which somebody holding SkillQualityOverride records with \
-             `synveda proposal override-quality <id> --reason ...`",
-            concerns.join(", "),
-        );
-    }
-    if let Some(quality) = recorded.get("quality") {
-        let score = quality.get("score").and_then(Value::as_u64).unwrap_or(0);
-        let min = quality
-            .get("min_score")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let needs = quality
-            .get("needs_override")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        eprintln!(
-            "synveda: the rubric scores it {score}/100 against this pack's {min}{}",
-            if needs {
-                " — publishing will need an override"
-            } else {
-                ""
-            },
-        );
-    }
     Ok(())
 }
 
@@ -1872,7 +1733,7 @@ mod tests {
         );
     }
 
-    fn corpus(case: &str, extension: &str) -> Value {
+    fn corpus(case: &str, extension: &str) -> serde_json::Value {
         let path = corpus_dir().join(format!("{case}.{extension}"));
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));

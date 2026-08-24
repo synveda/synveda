@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, skill_id, ordinal, bundle_digest, sensitivity, manifest, source_kind,\n                  provenance, scan_report, scan_ruleset_version, quality_score, rubric_version,\n                  created_at, created_by\n           from skill_versions where tenant_id = $1 and id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "skill_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "ordinal",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "bundle_digest",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 4,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "manifest",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "source_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "provenance",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "scan_report",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "scan_ruleset_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "quality_score",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 11,
+        "name": "rubric_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "created_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5ba0a823e0a29eafd299f972233a019a4fb617d931d5cebcf28ddbda33a44f16"
+}

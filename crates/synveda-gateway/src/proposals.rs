@@ -51,8 +51,6 @@
 //! one side of the change is not a review. The CLI does the rendering;
 //! this route ships bytes.
 
-use std::collections::BTreeMap;
-
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
@@ -65,11 +63,9 @@ use synveda_policy::{Action, Resource};
 use synveda_store::{rls, scopes};
 use synveda_types::scope::Scope;
 use synveda_types::{
-    ApprovalRequirement, AssetKind, CastApproval, Channel, Checklist, ChecklistItem,
-    ChecklistVerdict, DocumentPath, Error, IdentityId, PromotionEvidence, PromptName,
-    ProposalEffect, ProposalId, ProposalState, ProposalView, QualityShortfall, Result, ScopeId,
-    Sensitivity, SkillFile, SkillFilePath, SkillName, SkillPath, SkillQualityConfig,
-    SkillScanConfig, TenantId, Verdict,
+    ApprovalRequirement, AssetKind, CastApproval, Channel, DocumentPath, Error, IdentityId,
+    PromotionEvidence, PromptName, ProposalEffect, ProposalId, ProposalState, ProposalView, Result,
+    ScopeId, Sensitivity, TenantId, Verdict,
 };
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
 
@@ -273,38 +269,6 @@ struct ProposalDetail {
     summary: ProposalSummary,
     members: Vec<MemberView>,
     approvals: Vec<ApprovalView>,
-    /// The security scan of the bytes this proposal would publish
-    /// (SKIL-2, ADR-0052 decision 7).
-    ///
-    /// Present for `skill` proposals and absent for every other asset
-    /// kind, because it is a statement about executable content and a
-    /// field that was always there would be a field that means nothing
-    /// three times out of four.
-    ///
-    /// **Recomputed on this read, not stored** (decision 6): it is a pure
-    /// function of the members' bytes and the rule table, and both are
-    /// already here — the objects were read to draw the diff, and the
-    /// table is compiled in. What is durable is the audit record, because
-    /// a row is mutable and a chained event is not.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    scan: Option<crate::skills::ScanReport>,
-    /// The quality of the bytes this proposal would publish (SKIL-3,
-    /// ADR-0053 decision 11).
-    ///
-    /// Present for `skill` proposals and absent for every other kind, on
-    /// `scan`'s reasoning. **Two halves, never averaged**: the automated
-    /// rubric is recomputed here from the same member bytes the diff
-    /// renders, and the reviewer checklist is looked up by a digest of
-    /// exactly those members — so a checklist answered against an earlier
-    /// draft is simply not found, rather than laundering answers about
-    /// content nobody reviewed (decision 4).
-    ///
-    /// It is rendered against the pack that will decide the *publication*,
-    /// so `needs_override` means "this will need somebody holding
-    /// `SkillQualityOverride`" rather than "some pack somewhere would ask
-    /// for one".
-    #[serde(skip_serializing_if = "Option::is_none")]
-    quality: Option<crate::skills::QualityReport>,
 }
 
 // ── List ───────────────────────────────────────────────────────────────
@@ -444,87 +408,6 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
         )?;
         let summary = summarise(&state, &mut tx, tenant_id, &input, &proposal).await?;
         let members = member_views(&mut tx, tenant_id, &proposal).await?;
-        let members_of = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
-        // The report a reviewer reads, over the same bytes the diff above
-        // renders — recomputed here rather than looked up (ADR-0052
-        // decision 6), and reported against the pack that would decide the
-        // publication, so `blocked` means "this will be refused at publish"
-        // rather than "some pack somewhere would refuse it".
-        let effective = state
-            .pdp
-            .effective(tenant_id, Resource::Scope(node.id), &input.context());
-        let (scan, quality) = if proposal.asset == AssetKind::Skill {
-            let config = effective.scan;
-            // Labelled by the member name — `<skill>/<file>` — rather than
-            // the bare filename, because a proposal may carry more than one
-            // bundle and "SKILL.md" alone would not say whose.
-            let files: Vec<SkillFile> = members
-                .iter()
-                .filter_map(|member| {
-                    member
-                        .member
-                        .parse::<SkillFilePath>()
-                        .ok()
-                        .map(|path| SkillFile {
-                            path,
-                            content: member.proposed.clone(),
-                        })
-                })
-                .collect();
-            let scanned = crate::skills::scan_security(&files).await?;
-            // The rubric over the same bytes, and the checklist bound to
-            // exactly these members. The digest is computed from
-            // `(member name, object address)` pairs, which is what a
-            // publication will recompute — so what a reviewer is shown
-            // here and what the gate reads there are the same lookup.
-            // **From the objects, not from the member names.** A member
-            // is named `<skill>/<path>`, so reconstructing a `SkillFile`
-            // from that name gives a path of `code-review/SKILL.md` —
-            // and the rubric, which has to know which file is the
-            // manifest, then sees a bundle with no manifest at all and
-            // scores it as garbage. That is harmless for the scanner
-            // above, which reads every file's content regardless of its
-            // name, and fatal here.
-            //
-            // The acceptance test caught it by asserting that the review
-            // and the registry agree about the same bytes, which is the
-            // property a recomputed score has to have to be worth
-            // rendering beside a cached one.
-            let bundle = crate::skills::files_of_members(&mut tx, tenant_id, &members_of).await?;
-            let scored = crate::skills::score_quality(&bundle).await?;
-            let digest = crate::skills::digest_of_members(
-                &members
-                    .iter()
-                    .map(|member| (member.member.clone(), member.object_hash.clone()))
-                    .collect::<Vec<_>>(),
-            )?;
-            let review = match crate::skills::skill_of(
-                &members.iter().map(|m| m.member.clone()).collect::<Vec<_>>(),
-            ) {
-                Some(name) => {
-                    synveda_store::skill_reviews::for_bundle(
-                        &mut *tx,
-                        tenant_id,
-                        proposal.source_scope_id,
-                        &name,
-                        &digest,
-                    )
-                    .await?
-                }
-                None => None,
-            };
-            (
-                Some(crate::skills::ScanReport::new(&scanned, &config)),
-                Some(crate::skills::QualityReport::new(
-                    &scored,
-                    &effective.quality,
-                    &digest,
-                    review.as_ref(),
-                )),
-            )
-        } else {
-            (None, None)
-        };
         let recorded = vedaflow::proposals::approvals(&mut tx, tenant_id, id).await?;
         audit::record(
             &mut tx,
@@ -542,8 +425,6 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
         commit(tx).await?;
         Ok(Json(ProposalDetail {
             members,
-            scan,
-            quality,
             approvals: recorded
                 .into_iter()
                 .map(|approval| ApprovalView {
@@ -608,15 +489,6 @@ pub(crate) struct OpenBody {
     /// people where it prices a team's memory at one.
     #[serde(default)]
     document_paths: Vec<DocumentPath>,
-    /// The skills to promote, by **name** (SKIL-1, ADR-0051 decision 1).
-    /// Never by file: a client loads a bundle whole, so proposing three of
-    /// its four files would propose a version nobody can run. Every file
-    /// the source holds becomes a member.
-    ///
-    /// Exactly one of the four lists may be present, for `prompt_names`'
-    /// reason.
-    #[serde(default)]
-    skill_names: Vec<SkillName>,
     /// What this proposes, in one line. A reviewer reads it in a list.
     title: String,
 }
@@ -706,12 +578,10 @@ async fn open_inner(
         });
     }
 
-    let asset = if !body.prompt_names.is_empty() {
-        AssetKind::Prompt
-    } else if !body.document_paths.is_empty() {
+    let asset = if body.prompt_names.is_empty() {
         AssetKind::ContextPack
     } else {
-        AssetKind::Skill
+        AssetKind::Prompt
     };
     // The members, as the asset kind's own reader sees them: the two senses
     // of "the source holds it" (ADR-0034 decision 3) are the same two for
@@ -725,11 +595,6 @@ async fn open_inner(
                 .map(Proposed::ContextPack)
                 .collect()
         }
-        AssetKind::Skill => held_skills(&mut tx, tenant_id, source_scope_id, &body.skill_names)
-            .await?
-            .into_iter()
-            .map(Proposed::Skill)
-            .collect(),
         AssetKind::Prompt => held_prompts(&mut tx, tenant_id, source_scope_id, &body.prompt_names)
             .await?
             .into_iter()
@@ -794,14 +659,6 @@ async fn open_inner(
             // line where that stays true.
             Proposed::ContextPack(asset) => {
                 let object = vedaflow::put_context_pack(&mut tx, tenant_id, asset).await?;
-                (asset.entry_name(), object.hash)
-            }
-            // Same story again, and for the same reason: the file's object
-            // was stored at authoring — the draft row's foreign key required
-            // it — so this write dedups, and it runs anyway because a member
-            // reached through the *published* sense has no draft row here.
-            Proposed::Skill(asset) => {
-                let object = vedaflow::put_skill(&mut tx, tenant_id, asset).await?;
                 (asset.entry_name(), object.hash)
             }
         };
@@ -1259,426 +1116,43 @@ pub(crate) async fn withdraw(
     respond(&state, "withdraw", result).await
 }
 
-// ── Checklist: the reviewer's half of the quality score ────────────────
-
-/// What a reviewer submits (SKIL-3, ADR-0053 decision 6).
-#[derive(Deserialize)]
-pub(crate) struct ChecklistBody {
-    /// Item → verdict, by the wire names: `instructions-correct`,
-    /// `scope-appropriate`, `not-duplicate`, `dependencies-available`,
-    /// `tested`, each `yes`, `no` or `n/a`.
-    answers: BTreeMap<ChecklistItem, ChecklistVerdict>,
-    /// Anything the reviewer wants to say, in prose. Scanned before it is
-    /// stored, like every other author-supplied text in the product.
-    #[serde(default)]
-    note: Option<String>,
-}
-
-#[derive(Serialize)]
-struct ChecklistResponse {
-    proposal_id: ProposalId,
-    skill: String,
-    /// The digest the answers are bound to — what the publish gate will
-    /// look them up by, echoed so a caller can see the binding is to
-    /// bytes rather than to this proposal.
-    bundle_digest: String,
-    complete: bool,
-    concerns: Vec<&'static str>,
-    /// The quality of the bundle these answers are about, recomputed.
-    quality: crate::skills::QualityReport,
-}
-
-/// `POST /v1/proposals/{id}/checklist` — record the reviewer's half of a
-/// skill's quality score.
-///
-/// **Its own act, not part of casting a verdict.** An approval says "ship
-/// it"; a checklist says "here is what I checked", and a reviewer may
-/// legitimately do the second without the first — indeed the whole point
-/// of a mandatory checklist under `regulated-strict` is that somebody
-/// worked through it *before* anyone decided.
-///
-/// It takes `ProposalReview` at the target, which is the same decision
-/// approving takes: the people who may weigh a proposal are the people who
-/// may record what they weighed. It does not take `SkillRead` — a proposal
-/// carries the bytes to its reviewer without granting them the registry
-/// (ADR-0032 decision 16), and a checklist is a statement about what the
-/// proposal already showed them.
-#[tracing::instrument(name = "proposals.checklist", skip_all)]
-pub(crate) async fn checklist(
-    State(state): State<AppState>,
-    Path(id): Path<ProposalId>,
-    payload: std::result::Result<Json<ChecklistBody>, JsonRejection>,
-) -> Response {
-    let result = async {
-        let body = body(payload)?;
-        checklist_inner(&state, id, body).await
-    }
-    .await;
-    respond(&state, "checklist", result).await
-}
-
-async fn checklist_inner(
-    state: &AppState,
-    id: ProposalId,
-    body: ChecklistBody,
-) -> Result<Json<ChecklistResponse>> {
-    let submitted = Checklist {
-        answers: body.answers,
-        note: body.note,
-    };
-    submitted.validate()?;
-
-    let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let proposal = load(&mut tx, tenant_id, id).await?;
-    if proposal.asset != AssetKind::Skill {
-        return Err(Error::Invalid {
-            message: format!(
-                "proposal {id} carries {}, and a quality checklist is a statement about a \
-                 skill bundle; there is nothing here for it to be about",
-                proposal.asset.as_str()
-            ),
-        });
-    }
-    let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(
-        state,
-        &mut tx,
-        Some(&node),
-        synveda_store::anchors::AnchorSelection::none(),
-        Vec::new(),
-    )
-    .await?;
-    let authorized = authz::decide(
-        state,
-        &input,
-        Action::ProposalReview,
-        Resource::Scope(node.id),
-    )?;
-    require_open(&proposal)?;
-    let reviewer = identity_of(&input)?;
-
-    // The note is the first author-supplied prose this plane stores that
-    // is not a bundled file, so it goes through MEM-2's scanner before it
-    // is written. A reason carrying a credential is **refused rather than
-    // scrubbed**: unlike a bundled file there is nothing a placeholder
-    // would preserve, and the person who wrote it is on the other end of
-    // this request.
-    if let Some(note) = &submitted.note {
-        crate::skills::refuse_if_secret("checklist note", note).await?;
-    }
-
-    let members = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
-    let names: Vec<String> = members.iter().map(|member| member.name.clone()).collect();
-    let skill = crate::skills::skill_of(&names).ok_or_else(|| Error::Invalid {
-        message: format!("proposal {id} does not carry exactly one skill bundle"),
-    })?;
-    let pairs: Vec<(&str, vedaflow::hash::ObjectHash)> = members
-        .iter()
-        .map(|member| (member.name.as_str(), member.object))
-        .collect();
-    let digest = vedaflow::bundle_digest(&pairs);
-
-    // The rubric over the same bytes, so the response tells the reviewer
-    // what their answers were recorded *against*.
-    let files = crate::skills::files_of_members(&mut tx, tenant_id, &members).await?;
-    let scored = crate::skills::score_quality(&files).await?;
-
-    let stored = synveda_store::skill_reviews::record(
-        &mut *tx,
-        tenant_id,
-        &synveda_store::skill_reviews::NewReview {
-            // The **source** scope, which is where the bundle is drafted
-            // and where the publish seam will look the answers up. A
-            // climb's target is a different node, and keying by it would
-            // hide the checklist from the very gate it exists for.
-            scope_id: proposal.source_scope_id,
-            skill_name: &skill,
-            bundle_digest: digest,
-            checklist: &submitted,
-            rubric_version: scored.rubric_version,
-            reviewer,
-        },
-    )
-    .await?;
-
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::SkillChecklistRecorded,
-        Resource::Scope(node.id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::ProposalReview, &authorized),
-            "asset": AssetKind::Skill.as_str(),
-            "proposal_id": id,
-            "skill": skill.as_str(),
-            // The binding. An auditor reading this event can tell exactly
-            // which bytes were judged, and a later publication of
-            // different bytes will not find these answers.
-            "bundle_digest": crate::skills::hex(&digest),
-            "rubric_version": scored.rubric_version,
-            "score": scored.score,
-            "answers": submitted
-                .answers
-                .iter()
-                .map(|(item, verdict)| json!({
-                    "item": item.as_str(),
-                    "verdict": verdict.as_str(),
-                }))
-                .collect::<Vec<_>>(),
-            "complete": submitted.is_complete(),
-            "concerns": submitted
-                .concerns()
-                .iter()
-                .map(|item| item.as_str())
-                .collect::<Vec<_>>(),
-            // The note rides the chain because a reviewer wrote it to be
-            // read, and it has already passed the scanner.
-            "note": submitted.note,
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    let effective = state
-        .pdp
-        .effective(tenant_id, Resource::Scope(node.id), &input.context());
-    Ok(Json(ChecklistResponse {
-        proposal_id: id,
-        skill: skill.to_string(),
-        bundle_digest: crate::skills::hex(&digest),
-        complete: stored.checklist.is_complete(),
-        concerns: stored
-            .checklist
-            .concerns()
-            .iter()
-            .map(ChecklistItem::as_str)
-            .collect(),
-        quality: crate::skills::QualityReport::new(
-            &scored,
-            &effective.quality,
-            &digest,
-            Some(&stored),
-        ),
-    }))
-}
-
-// ── The quality override ───────────────────────────────────────────────
-
-/// What an override-holder sends (SKIL-3, ADR-0053 decision 8).
-#[derive(Deserialize)]
-pub(crate) struct OverrideBody {
-    /// Why this bundle should ship despite being below the bar.
-    ///
-    /// Mandatory, and it is the whole value of the act: it is what an
-    /// auditor reads in a year to find out why the product shipped
-    /// something it had itself marked down.
-    reason: String,
-}
-
-#[derive(Serialize)]
-struct OverrideResponse {
-    proposal_id: ProposalId,
-    skill: String,
-    /// The digest the override is granted over. An edit produces different
-    /// bytes and this override does not follow them.
-    bundle_digest: String,
-    score: u8,
-    /// The bars it steps over, so the response says what was excused.
-    shortfalls: Vec<QualityShortfall>,
-    granted_by: IdentityId,
-    granted_at: DateTime<Utc>,
-}
-
-/// `POST /v1/proposals/{id}/quality-override` — record a decision to
-/// publish a bundle the quality gate refuses.
-///
-/// **A separate act from the publication, and that is the design rather
-/// than a convenience.** Under the product packs `curator` holds the
-/// `SkillRead` and `ChannelPublish` that publishing a skill takes, and
-/// `steward` holds this action and no content read at all — so putting the
-/// override on the publish request would have meant nobody could publish a
-/// below-bar bundle under any pack. Splitting it is ADR-0032 decision 9's
-/// own shape, the one that already separates the approval that decides
-/// from the act that runs the effect.
-///
-/// It is refused when the bundle needs no override, which keeps the audit
-/// trail honest: an override standing over a bundle that never needed one
-/// is a record of a decision nobody had to make.
-#[tracing::instrument(name = "proposals.quality_override", skip_all)]
-pub(crate) async fn quality_override(
-    State(state): State<AppState>,
-    Path(id): Path<ProposalId>,
-    payload: std::result::Result<Json<OverrideBody>, JsonRejection>,
-) -> Response {
-    let result = async {
-        let body = body(payload)?;
-        quality_override_inner(&state, id, &body.reason).await
-    }
-    .await;
-    respond(&state, "quality_override", result).await
-}
-
-async fn quality_override_inner(
-    state: &AppState,
-    id: ProposalId,
-    reason: &str,
-) -> Result<Json<OverrideResponse>> {
-    check_text("reason", Some(reason))?;
-    if reason.trim().is_empty() {
-        return Err(Error::Invalid {
-            message: "an override must say why: it is the whole of what the audit trail will \
-                      carry about a publication the product itself scored below the bar"
-                .to_owned(),
-        });
-    }
-
-    let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let proposal = load(&mut tx, tenant_id, id).await?;
-    if proposal.asset != AssetKind::Skill {
-        return Err(Error::Invalid {
-            message: format!(
-                "proposal {id} carries {}, and the quality gate is a statement about a skill \
-                 bundle; there is nothing here to override",
-                proposal.asset.as_str()
-            ),
-        });
-    }
-    let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(
-        state,
-        &mut tx,
-        Some(&node),
-        synveda_store::anchors::AnchorSelection::none(),
-        Vec::new(),
-    )
-    .await?;
-    let authorized = authz::decide(
-        state,
-        &input,
-        Action::SkillQualityOverride,
-        Resource::Scope(node.id),
-    )?;
-    require_open(&proposal)?;
-    let granter = identity_of(&input)?;
-    crate::skills::refuse_if_secret("override reason", reason).await?;
-
-    let members = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
-    let names: Vec<String> = members.iter().map(|member| member.name.clone()).collect();
-    let skill = crate::skills::skill_of(&names).ok_or_else(|| Error::Invalid {
-        message: format!("proposal {id} does not carry exactly one skill bundle"),
-    })?;
-    let pairs: Vec<(&str, vedaflow::hash::ObjectHash)> = members
-        .iter()
-        .map(|member| (member.name.as_str(), member.object))
-        .collect();
-    let digest = vedaflow::bundle_digest(&pairs);
-
-    let files = crate::skills::files_of_members(&mut tx, tenant_id, &members).await?;
-    let scored = crate::skills::score_quality(&files).await?;
-    let review = synveda_store::skill_reviews::for_bundle(
-        &mut *tx,
-        tenant_id,
-        proposal.source_scope_id,
-        &skill,
-        &digest,
-    )
-    .await?;
-    let effective = state
-        .pdp
-        .effective(tenant_id, Resource::Scope(node.id), &input.context());
-    let shortfalls = effective
-        .quality
-        .shortfalls(scored.score, review.as_ref().map(|r| &r.checklist));
-    if shortfalls.is_empty() {
-        return Err(Error::Conflict {
-            message: format!(
-                "skill {skill} already clears this pack's quality bar (rubric v{} scored it \
-                 {}/100); an override standing over a bundle that never needed one is a \
-                 record of a decision nobody had to make",
-                scored.rubric_version, scored.score,
-            ),
-        });
-    }
-
-    let stored = synveda_store::skill_reviews::grant_override(
-        &mut *tx,
-        tenant_id,
-        &synveda_store::skill_reviews::NewOverride {
-            // The source scope, where the bundle is drafted and where the
-            // publish seam will look this up.
-            scope_id: proposal.source_scope_id,
-            skill_name: &skill,
-            bundle_digest: digest,
-            reason,
-            score: scored.score,
-            rubric_version: scored.rubric_version,
-            granter,
-        },
-    )
-    .await?;
-
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::SkillQualityOverridden,
-        Resource::Scope(node.id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::SkillQualityOverride, &authorized),
-            "asset": AssetKind::Skill.as_str(),
-            "proposal_id": id,
-            "skill": skill.as_str(),
-            "rubric_version": scored.rubric_version,
-            "score": scored.score,
-            "min_score": effective.quality.min_score,
-            // Which bars were stepped over, so an auditor filtering for
-            // "what did we ship below the bar" can tell a low-scoring
-            // bundle from one a reviewer objected to.
-            "shortfalls": shortfalls
-                .iter()
-                .map(|shortfall| json!({
-                    "kind": serde_json::to_value(shortfall)
-                        .ok()
-                        .and_then(|value| value.get("kind").cloned())
-                        .unwrap_or(serde_json::Value::Null),
-                    "detail": shortfall.describe(),
-                }))
-                .collect::<Vec<_>>(),
-            "bundle_digest": crate::skills::hex(&digest),
-            "reason": reason,
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-    metrics::counter!(
-        crate::telemetry::SKILL_QUALITY_OVERRIDES_TOTAL,
-        "pack" => authorized.decision.pack_name.clone(),
-    )
-    .increment(1);
-
-    Ok(Json(OverrideResponse {
-        proposal_id: id,
-        skill: skill.to_string(),
-        bundle_digest: crate::skills::hex(&digest),
-        score: stored.score,
-        shortfalls,
-        granted_by: stored.granted_by,
-        granted_at: stored.granted_at,
-    }))
-}
-
 // ── Publish: the proposal's effect ─────────────────────────────────────
 
-/// `POST /v1/proposals/{id}/apply` — run an approved typed Knowledge
-/// effect. The command layer repeats ownership, PDP and revision checks at
+/// `POST /v1/proposals/{id}/apply` — run an approved typed aggregate effect.
+/// The artifact command layer repeats ownership, PDP and revision checks at
 /// this boundary; approvals never become write authority by themselves.
 #[tracing::instrument(name = "proposals.apply", skip_all)]
 pub(crate) async fn apply(State(state): State<AppState>, Path(id): Path<ProposalId>) -> Response {
-    let result = crate::knowledge::apply_reviewed(&state, id).await.map(Json);
+    let result = apply_inner(&state, id).await;
     respond(&state, "apply", result).await
+}
+
+async fn apply_inner(state: &AppState, id: ProposalId) -> Result<Json<serde_json::Value>> {
+    let tenant_id = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let proposal = load(&mut tx, tenant_id, id).await?;
+    drop(tx);
+    let value = match (proposal.asset, proposal.effect) {
+        (AssetKind::Knowledge, ProposalEffect::Apply) => {
+            serde_json::to_value(crate::knowledge::apply_reviewed(state, id).await?)
+        }
+        (AssetKind::Skill, ProposalEffect::Apply) => {
+            serde_json::to_value(crate::skills::apply_reviewed(state, id).await?)
+        }
+        _ => {
+            return Err(Error::Invalid {
+                message: format!(
+                    "proposal {id} carries {}/{}; only typed apply effects use this route",
+                    proposal.asset.as_str(),
+                    proposal.effect.as_str()
+                ),
+            });
+        }
+    }
+    .map_err(|err| Error::Internal {
+        message: format!("encode result for proposal {id}: {err}"),
+    })?;
+    Ok(Json(value))
 }
 
 #[derive(Serialize)]
@@ -1773,32 +1247,6 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
             &cast,
             &outstanding,
             &proposed,
-        )
-        .await;
-    }
-    if proposal.asset == AssetKind::Skill {
-        // The pack in force at the *target*, resolved here because this is
-        // where the decision input lives. SKIL-2's gate runs inside the
-        // publish seam, so a bundle approved under one threshold and
-        // published under another is decided by the one standing when the
-        // bytes go fleet-wide (ADR-0052 decision 5).
-        let effective = state
-            .pdp
-            .effective(tenant_id, Resource::Scope(node.id), &input.context());
-        return publish_skills(
-            state,
-            tx,
-            tenant_id,
-            id,
-            &proposal,
-            publisher,
-            &authorized,
-            &requirement,
-            &cast,
-            &outstanding,
-            &proposed,
-            effective.scan,
-            effective.quality,
         )
         .await;
     }
@@ -1966,335 +1414,6 @@ async fn publish_documents(
             "source_scope_id": source,
             "target_scope_id": proposal.target_scope_id,
             // Paths and addresses, never document text.
-            "records": members.iter().map(|(name, hash)| json!({
-                "member": name,
-                "object_hash": hash.to_hex(),
-            })).collect::<Vec<_>>(),
-            "commit": committed.commit.to_hex(),
-            "parent": committed.parent.map(|parent| parent.to_hex()),
-            "members": committed.entries,
-            "added": committed.added,
-            "approvals": approvals::audit_context(requirement, outstanding),
-            "approvers": cast.len(),
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    Ok(Json(PublishResponse {
-        proposal_id: id,
-        scope_id: proposal.target_scope_id,
-        channel: channel.name(),
-        commit: committed.commit.to_hex(),
-        parent: committed.parent.map(|parent| parent.to_hex()),
-        proposal_commit: proposal.commit.to_hex(),
-        members: committed.entries,
-        added: committed.added,
-    }))
-}
-
-/// The publish effect for a skill proposal (SKIL-1, ADR-0051 decision 1).
-///
-/// [`publish_documents`] line for line, one table over: approvals bind
-/// bytes, so every member's address is required to equal what the approved
-/// commit named, and the source must still hold it. Every refusal is a
-/// `Conflict`, because the request was well formed when it was approved and
-/// what moved is the world.
-///
-/// It writes `skill/published` and chains the same
-/// `vedaflow.channel.published` event with `asset` reading `skill` — the
-/// same governed act with the same consequence (ADR-0019 decision 4).
-///
-/// **What it does not do is write a file.** Publication moves a ref; the
-/// bytes reach a client when somebody runs `synveda skill install`, and the
-/// receipt of that lives in the CLI's own state rather than in the bundle
-/// (ADR-0051 decision 12).
-#[allow(clippy::too_many_arguments)]
-async fn publish_skills(
-    state: &AppState,
-    mut tx: sqlx::Transaction<'static, sqlx::Postgres>,
-    tenant_id: TenantId,
-    id: ProposalId,
-    proposal: &vedaflow::StoredProposal,
-    publisher: IdentityId,
-    authorized: &crate::authz::Authorized,
-    requirement: &ApprovalRequirement,
-    cast: &[CastApproval],
-    outstanding: &synveda_types::Outstanding,
-    proposed: &[vedaflow::ChannelMember],
-    scan_config: SkillScanConfig,
-    quality_config: SkillQualityConfig,
-) -> Result<Json<PublishResponse>> {
-    let source = proposal.source_scope_id;
-    let paths: Vec<SkillPath> = proposed
-        .iter()
-        .map(|member| {
-            member
-                .name
-                .parse::<SkillPath>()
-                .map_err(|err| Error::Internal {
-                    message: format!(
-                        "proposal member {:?} is not a skill path: {err}",
-                        member.name
-                    ),
-                })
-        })
-        .collect::<Result<_>>()?;
-    let drafts: std::collections::HashMap<SkillPath, [u8; 32]> =
-        synveda_store::skills::list_all_files(&mut *tx, tenant_id, source)
-            .await?
-            .into_iter()
-            .map(|file| {
-                (
-                    SkillPath::new(file.skill_name.clone(), file.path.clone()),
-                    file.object_hash,
-                )
-            })
-            .collect();
-    let published_at_source = published_skills_at(&mut tx, tenant_id, source).await?;
-
-    let moved = |what: &str, path: &SkillPath| Error::Conflict {
-        message: format!(
-            "skill file {path} {what} after this proposal was approved; withdraw it and \
-             open a new one so the change is reviewed"
-        ),
-    };
-    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> = Vec::with_capacity(paths.len());
-    for (member, path) in proposed.iter().zip(&paths) {
-        match drafts.get(path) {
-            Some(address) if member.object.as_bytes() == address => {}
-            Some(_) => return Err(moved("changed", path)),
-            None => {
-                // No draft here — but a file *removed* from the bundle since
-                // the review lands here too, which is exactly the case
-                // ADR-0051 decision 17's DELETE grant creates and exactly
-                // the one this check exists to catch: a publication that
-                // silently dropped it would ship a bundle a reviewer never
-                // saw.
-                if published_at_source.get(path) != Some(&member.object) {
-                    return Err(Error::Conflict {
-                        message: format!(
-                            "scope {source} no longer holds skill file {path}; the bundle \
-                             was approved against files its source has since changed or \
-                             removed"
-                        ),
-                    });
-                }
-            }
-        }
-        members.push((member.name.clone(), member.object));
-    }
-
-    // ── The security gate, on exactly the approved bytes ───────────────
-    //
-    // SKIL-2, ADR-0052 decision 5. The loop above re-verified every
-    // address because approvals bind bytes; this re-verifies what those
-    // bytes *do*, because the rule table is what says whether they are
-    // publishable and it moves independently of them. A rule that landed
-    // between authoring and approval must not be one a proposal outruns.
-    //
-    // Its refusal is a `Conflict` for the same reason every other refusal
-    // in this function is: the request was well formed and was well
-    // formed when it was approved — what changed is the world.
-    let addresses: Vec<vedaflow::hash::ObjectHash> =
-        members.iter().map(|(_, hash)| *hash).collect();
-    let objects = vedaflow::read_objects(&mut tx, tenant_id, &addresses).await?;
-    let files: Vec<SkillFile> = members
-        .iter()
-        .filter_map(|(_, hash)| objects.get(hash))
-        .filter_map(|object| vedaflow::SkillAsset::from_bytes(&object.content).ok())
-        .map(|asset| asset.file)
-        .collect();
-    let security = crate::skills::scan_security(&files).await?;
-    if security.blocked_by(&scan_config) {
-        // The gate's own transaction: this one is about to be dropped, and
-        // the refusal has to chain even though the publication does not.
-        drop(tx);
-        let pack = format!(
-            "{}@{}",
-            authorized.decision.pack_name, authorized.decision.pack_version
-        );
-        let named = paths
-            .first()
-            .map_or_else(|| proposal.title.clone(), |path| path.skill.to_string());
-        return crate::skills::refuse_scan(
-            state,
-            tenant_id,
-            proposal.target_scope_id,
-            &named,
-            &security,
-            &scan_config,
-            &pack,
-            "publication",
-        )
-        .await;
-    }
-
-    // ── The quality gate ───────────────────────────────────────────────
-    //
-    // SKIL-3, ADR-0053 decision 7. Three bars, each named separately in
-    // the refusal because the remedy differs: an edit for a low score, a
-    // reviewer for a missing checklist, a conversation for a concern.
-    //
-    // **Recomputed here, never read from the registry cache** (decision
-    // 3). The cache on the `skills` row exists so a listing can draw a
-    // column without reading forty bundles; a gate that read it would be
-    // deciding on a number that was true when somebody last authored,
-    // which is exactly the staleness the recompute exists to avoid.
-    //
-    // The checklist is looked up at the **source** scope by a digest of
-    // exactly these members, which is the same lookup the review surface
-    // did — so answers given about these bytes are found, and answers
-    // given about an earlier draft are not (decision 4).
-    let scored = crate::skills::score_quality(&files).await?;
-    let digest = {
-        let pairs: Vec<(&str, vedaflow::hash::ObjectHash)> = members
-            .iter()
-            .map(|(name, hash)| (name.as_str(), *hash))
-            .collect();
-        vedaflow::bundle_digest(&pairs)
-    };
-    let named = paths
-        .first()
-        .map_or_else(|| proposal.title.clone(), |path| path.skill.to_string());
-    let review = match crate::skills::skill_of(
-        &members
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<_>>(),
-    ) {
-        Some(skill) => {
-            synveda_store::skill_reviews::for_bundle(&mut *tx, tenant_id, source, &skill, &digest)
-                .await?
-        }
-        None => None,
-    };
-    let mut overridden: Option<synveda_store::skill_reviews::StoredOverride> = None;
-    let shortfalls = quality_config.shortfalls(scored.score, review.as_ref().map(|r| &r.checklist));
-    if !shortfalls.is_empty() {
-        // **The override is looked up, not sent.** It is a separate
-        // governed act by a separate authority (ADR-0053 decision 8), and
-        // it has to be: under the product packs `curator` holds the
-        // `SkillRead` and `ChannelPublish` that publishing a skill takes,
-        // while `steward` holds the override and no content read at all —
-        // so requiring one principal to hold both would mean nobody could
-        // publish a below-bar bundle under any pack. That is ADR-0032
-        // decision 9's own separation, arriving one seam later: the
-        // authority records the override, the publisher spends it.
-        //
-        // It is looked up by the **same digest** as the checklist, so an
-        // override granted over one bundle does not carry to whatever the
-        // author edits it into. Nobody agreed to ship that.
-        let standing = match crate::skills::skill_of(
-            &members
-                .iter()
-                .map(|(name, _)| name.clone())
-                .collect::<Vec<_>>(),
-        ) {
-            Some(skill) => {
-                synveda_store::skill_reviews::override_for(
-                    &mut *tx, tenant_id, source, &skill, &digest,
-                )
-                .await?
-            }
-            None => None,
-        };
-        let Some(standing) = standing else {
-            // A `Conflict` rather than an `Invalid`, on this function's
-            // own rule: the request is well formed, and what stands in
-            // its way is a state — the bytes scored what they scored, and
-            // nobody has recorded an override over them.
-            return Err(Error::Conflict {
-                message: format!(
-                    "skill {named} is below this pack's quality bar: {}. \
-Somebody holding `SkillQualityOverride` at this scope — a steward or an org-admin under \
-the product packs, deliberately not the role that publishes — can record an override with \
-`POST /v1/proposals/{id}/quality-override`, after which this publication proceeds. \
-Or fix the bundle and open a new proposal",
-                    shortfalls
-                        .iter()
-                        .map(QualityShortfall::describe)
-                        .collect::<Vec<_>>()
-                        .join("; "),
-                ),
-            });
-        };
-        // The publication rides an override somebody else already
-        // recorded and the chain already carries. What is added here is
-        // the join: this commit went out under that decision.
-        overridden = Some(standing);
-    }
-
-    let channel = vedaflow::ChannelRef::skill(Channel::Published);
-    let snapshot = PolicySnapshot::new(
-        authorized.decision.pack_name.clone(),
-        authorized.decision.pack_version,
-    );
-    let committed = vedaflow::publish(
-        &mut tx,
-        tenant_id,
-        &vedaflow::ChannelWrite {
-            scope: proposal.target_scope_id,
-            channel,
-            members: &members,
-            merge_parents: &[proposal.commit],
-            author: publisher,
-            message: &proposal.title,
-            committed_at: Utc::now(),
-            policy_snapshot: &snapshot,
-        },
-        &Signer::Unsigned,
-    )
-    .await?;
-    close(
-        &mut tx,
-        tenant_id,
-        id,
-        ProposalState::Published,
-        publisher,
-        None,
-    )
-    .await?;
-    vedaflow::proposals::act("published", proposal.asset);
-
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::ChannelPublished,
-        Resource::Scope(proposal.target_scope_id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::ChannelPublish, authorized),
-            "channel": channel.name(),
-            "asset": channel.asset.as_str(),
-            "message": proposal.title,
-            "proposal_id": id,
-            "proposal_commit": proposal.commit.to_hex(),
-            "sensitivity": proposal.sensitivity.as_str(),
-            "source_scope_id": source,
-            // What the rubric made of the bytes that just went fleet-wide,
-            // and — when they were below the bar — whose override this
-            // publication spent (SKIL-3, ADR-0053).
-            //
-            // The override chained an event of its own when it was
-            // granted, so this is deliberately not a second copy of it: it
-            // is the *join*, the thing that says this commit went out
-            // under that decision. Without it an auditor holding a
-            // published commit would have to go looking for an override by
-            // digest to find out whether one was involved at all.
-            "quality": {
-                "rubric_version": scored.rubric_version,
-                "score": scored.score,
-                "min_score": quality_config.min_score,
-                "overridden_by": overridden.as_ref().map(|granted| json!({
-                    "granted_by": granted.granted_by,
-                    "granted_at": granted.granted_at,
-                    "reason": granted.reason,
-                })),
-            },
-            "target_scope_id": proposal.target_scope_id,
-            // Paths and addresses, never SKILL.md text and never file
-            // content.
             "records": members.iter().map(|(name, hash)| json!({
                 "member": name,
                 "object_hash": hash.to_hex(),
@@ -2720,7 +1839,7 @@ async fn member_views(
         return document_member_views(tx, tenant_id, proposal, &proposed).await;
     }
     if proposal.asset == AssetKind::Skill {
-        return skill_member_views(tx, tenant_id, proposal, &proposed).await;
+        return skill_change_member_views(tx, tenant_id, proposal, &proposed).await;
     }
     if proposal.asset == AssetKind::Prompt {
         return prompt_member_views(tx, tenant_id, proposal, &proposed).await;
@@ -2827,6 +1946,79 @@ async fn knowledge_member_views(
         content: content.clone(),
         effect: MemberEffect::Apply,
         proposed: content,
+        baseline: None,
+    }])
+}
+
+/// [`member_views`] for an immutable, typed Skill command (CPR-23,
+/// ADR-0085). Review binds the canonical command digest; bundle files remain
+/// content-addressed objects referenced by the command rather than mutable
+/// channel drafts.
+async fn skill_change_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let [member] = proposed else {
+        return Err(Error::Internal {
+            message: format!(
+                "Skill change {} has {} members rather than one command",
+                proposal.id,
+                proposed.len()
+            ),
+        });
+    };
+    if member.name != "command" {
+        return Err(Error::Internal {
+            message: format!(
+                "Skill change {} names member {:?}, expected command",
+                proposal.id, member.name
+            ),
+        });
+    }
+    let change = synveda_store::skills::change(&mut *tx, tenant_id, proposal.id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!("Skill change {} has no typed effect", proposal.id),
+        })?;
+    let object = vedaflow::read_object(&mut *tx, tenant_id, member.object)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "Skill change {} names missing manifest object {}",
+                proposal.id,
+                member.object.to_hex()
+            ),
+        })?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&object.content).map_err(|err| Error::Internal {
+            message: format!("Skill change {} manifest is invalid: {err}", proposal.id),
+        })?;
+    let manifest_hash = manifest
+        .get("payload_hash")
+        .and_then(serde_json::Value::as_str);
+    let value = synveda_types::json::canonicalise(&serde_json::to_value(&change.command).map_err(
+        |err| Error::Internal {
+            message: format!("encode Skill change {} for review: {err}", proposal.id),
+        },
+    )?);
+    let rendered = serde_json::to_string_pretty(&value).map_err(|err| Error::Internal {
+        message: format!("render Skill change {}: {err}", proposal.id),
+    })?;
+    let payload_hash = blake3::hash(value.to_string().as_bytes())
+        .to_hex()
+        .to_string();
+    Ok(vec![MemberView {
+        member: member.name.clone(),
+        asset: AssetKind::Skill.as_str().to_owned(),
+        object_hash: member.object.to_hex(),
+        unchanged: payload_hash == change.payload_hash
+            && manifest_hash == Some(change.payload_hash.as_str()),
+        sensitivity: change.command.sensitivity(),
+        content: rendered.clone(),
+        effect: MemberEffect::Apply,
+        proposed: rendered,
         baseline: None,
     }])
 }
@@ -3030,99 +2222,6 @@ async fn prompt_member_views(
         .collect())
 }
 
-/// [`member_views`] for a skill proposal (SKIL-1, ADR-0051 decision 1).
-///
-/// [`document_member_views`]'s shape, one table over — and the renderer
-/// ADR-0035 predicted for "SKIL-1's skill bundles", arriving as its third
-/// kind. A reviewer sees a file at a time, which is what makes reviewing a
-/// skill *like reviewing code* rather than like reviewing a blob.
-async fn skill_member_views(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    proposal: &vedaflow::StoredProposal,
-    proposed: &[vedaflow::ChannelMember],
-) -> Result<Vec<MemberView>> {
-    let paths: Vec<SkillPath> = proposed
-        .iter()
-        .map(|member| {
-            member
-                .name
-                .parse::<SkillPath>()
-                .map_err(|err| Error::Internal {
-                    message: format!(
-                        "proposal member {:?} is not a skill path: {err}",
-                        member.name
-                    ),
-                })
-        })
-        .collect::<Result<_>>()?;
-    let drafts: std::collections::HashMap<SkillPath, [u8; 32]> =
-        synveda_store::skills::list_all_files(&mut *tx, tenant_id, proposal.source_scope_id)
-            .await?
-            .into_iter()
-            .map(|file| {
-                (
-                    SkillPath::new(file.skill_name.clone(), file.path.clone()),
-                    file.object_hash,
-                )
-            })
-            .collect();
-    let published = published_skills_at(tx, tenant_id, proposal.target_scope_id).await?;
-
-    let mut wanted: Vec<vedaflow::hash::ObjectHash> =
-        proposed.iter().map(|member| member.object).collect();
-    wanted.extend(paths.iter().filter_map(|path| published.get(path).copied()));
-    let objects = vedaflow::read_objects(tx, tenant_id, &wanted).await?;
-    // The *file's* bytes rather than the envelope's: a reviewer reads the
-    // script, not the JSON around it. That is the same content a client
-    // will load, which is the whole point of reviewing it here.
-    let text_at = |hash: &vedaflow::hash::ObjectHash| -> String {
-        objects
-            .get(hash)
-            .and_then(|object| vedaflow::SkillAsset::from_bytes(&object.content).ok())
-            .map(|asset| asset.file.content)
-            .unwrap_or_default()
-    };
-
-    Ok(proposed
-        .iter()
-        .zip(&paths)
-        .map(|(member, path)| {
-            let reviewed = objects
-                .get(&member.object)
-                .and_then(|object| vedaflow::SkillAsset::from_bytes(&object.content).ok());
-            let (unchanged, content) = match drafts.get(path) {
-                Some(address) => (member.object.as_bytes() == address, text_at(&member.object)),
-                None => (true, String::new()),
-            };
-            let (effect, baseline) = match published.get(path) {
-                None => (MemberEffect::Add, None),
-                Some(held) if *held == member.object => (MemberEffect::None, None),
-                Some(held) => (
-                    MemberEffect::Update,
-                    Some(BaselineView {
-                        object_hash: held.to_hex(),
-                        text: text_at(held),
-                    }),
-                ),
-            };
-            MemberView {
-                member: path.to_string(),
-                asset: AssetKind::Skill.as_str().to_owned(),
-                object_hash: member.object.to_hex(),
-                unchanged,
-                sensitivity: reviewed
-                    .as_ref()
-                    .map_or(proposal.sensitivity, |asset| asset.sensitivity),
-                content,
-                effect,
-                proposed: text_at(&member.object),
-                baseline,
-            }
-        })
-        .collect())
-}
-
 /// Decides the asset kind's own read action at `scope_id`, at the working
 /// tier — the *whose-material* question every governance act asks
 /// (ADR-0031 decision 12, ADR-0038 decision 10, ADR-0049 decision 4).
@@ -3144,7 +2243,6 @@ fn decide_asset_read(
         AssetKind::ContextPack => {
             authz::decide_context_pack_read(state, input, resource, Sensitivity::WORKING)
         }
-        AssetKind::Skill => authz::decide_skill_read(state, input, resource, Sensitivity::WORKING),
         // `policy` is the one that remains, and it is not proposable here —
         // a lapse is its own route (ADR-0037 decision 16).
         other => Err(Error::Invalid {
@@ -3160,7 +2258,6 @@ fn asset_read_action(asset: AssetKind) -> Result<Action> {
     match asset {
         AssetKind::Prompt => Ok(Action::PromptRead),
         AssetKind::ContextPack => Ok(Action::ContextPackRead),
-        AssetKind::Skill => Ok(Action::SkillRead),
         other => Err(Error::Invalid {
             message: format!(
                 "{} is not an authored artifact a proposal carries",
@@ -3186,12 +2283,6 @@ enum Proposed {
     /// table over — and a bundle is several of these rather than one
     /// member, because the channel names documents.
     ContextPack(vedaflow::ContextPackAsset),
-    /// One **file** of a skill bundle, as it will be addressed (SKIL-1,
-    /// ADR-0051 decision 2). The same two senses again — and unlike the
-    /// other three, a caller never names one of these: it names the skill,
-    /// and every file of it becomes a member, because a client loads a
-    /// bundle whole.
-    Skill(vedaflow::SkillAsset),
 }
 
 impl Proposed {
@@ -3204,10 +2295,6 @@ impl Proposed {
             // priced at the runbook, which is `max_sensitivity`'s existing
             // rule doing exactly what it was written for.
             Proposed::ContextPack(asset) => asset.sensitivity,
-            // Per skill rather than per file (ADR-0051 decision 11), so
-            // every member of one bundle reports the same tier and the
-            // maximum over the set is that tier.
-            Proposed::Skill(asset) => asset.sensitivity,
         }
     }
 }
@@ -3391,91 +2478,6 @@ async fn held_documents(
     Ok(held)
 }
 
-/// What `scope`'s published skill channel names, by skill path.
-async fn published_skills_at(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    scope_id: ScopeId,
-) -> Result<std::collections::HashMap<SkillPath, vedaflow::hash::ObjectHash>> {
-    Ok(
-        vedaflow::read_skill_members(tx, tenant_id, &[scope_id], Channel::Published)
-            .await?
-            .into_iter()
-            .next()
-            .map(|state| state.members)
-            .unwrap_or_default(),
-    )
-}
-
-/// The skills `scope` **holds**, refusing the whole request if any is not
-/// held there — [`held_documents`]'s two senses, one table over, with one
-/// difference that is the whole of ADR-0051 decision 17.
-///
-/// A caller names the **bundle** and every file of it becomes a member,
-/// because a client loads a skill whole: proposing three files of four
-/// would put a version nobody can run in front of a reviewer, and approving
-/// it would publish one.
-async fn held_skills(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    scope_id: ScopeId,
-    names: &[SkillName],
-) -> Result<Vec<vedaflow::SkillAsset>> {
-    let mut requested: Vec<SkillName> = names.to_vec();
-    requested.sort();
-    requested.dedup();
-    let published = published_skills_at(tx, tenant_id, scope_id).await?;
-
-    let mut held = Vec::new();
-    let mut missing: Vec<String> = Vec::new();
-    for name in &requested {
-        // Sense one: the draft lives here, and its files are the bundle.
-        let drafts = synveda_store::skills::files_of(&mut *tx, tenant_id, scope_id, name).await?;
-        let addresses: Vec<vedaflow::hash::ObjectHash> = if drafts.is_empty() {
-            // Sense two: no draft here, but this scope published it — which
-            // is how a second hop starts from where the first one landed.
-            let names_here: Vec<vedaflow::hash::ObjectHash> = published
-                .iter()
-                .filter(|(path, _)| &path.skill == name)
-                .map(|(_, address)| *address)
-                .collect();
-            if names_here.is_empty() {
-                missing.push(name.to_string());
-                continue;
-            }
-            names_here
-        } else {
-            drafts
-                .into_iter()
-                .map(|file| vedaflow::hash::ObjectHash::from_bytes(file.object_hash))
-                .collect()
-        };
-        for address in addresses {
-            let object = vedaflow::read_object(&mut *tx, tenant_id, address)
-                .await?
-                .ok_or_else(|| Error::Internal {
-                    message: format!(
-                        "skill {name} names object {} which the append-only store does \
-                         not hold",
-                        address.to_hex()
-                    ),
-                })?;
-            held.push(vedaflow::SkillAsset::from_bytes(&object.content)?);
-        }
-    }
-    if !missing.is_empty() {
-        return Err(Error::Invalid {
-            message: format!(
-                "scope {scope_id} neither drafts nor publishes: {} — name the scope \
-                 that does with source_scope_id, which must be {scope_id} or a scope \
-                 beneath it (FLOW-5 climbs the hierarchy, it does not cross it)",
-                missing.join(", ")
-            ),
-        });
-    }
-    Ok(held)
-}
-
 /// A set is reviewed as a set and is governed by its most sensitive
 /// element (ADR-0032 decision 3), whichever kind of asset it holds.
 fn max_sensitivity(members: &[Proposed]) -> Sensitivity {
@@ -3502,31 +2504,26 @@ fn validate_open(body: &OpenBody) -> Result<()> {
     // One asset kind per proposal (ADR-0049 decision 6): the approval
     // matrix resolves from it, and a mixed set would have to be priced at
     // the maximum by a rule nobody wrote.
-    let named = usize::from(!body.prompt_names.is_empty())
-        + usize::from(!body.document_paths.is_empty())
-        + usize::from(!body.skill_names.is_empty());
+    let named =
+        usize::from(!body.prompt_names.is_empty()) + usize::from(!body.document_paths.is_empty());
     match named {
         0 => {
             return invalid(
-                "name at least one member: prompt_names for prompts, document_paths for \
-                 context pack documents, or skill_names for skills"
+                "name at least one member: prompt_names for prompts or document_paths for \
+                 context pack documents"
                     .to_owned(),
             );
         }
         1 => {}
         _ => {
             return invalid(
-                "a proposal carries one asset kind: name prompt_names, document_paths or \
-                 skill_names, never more than one — the approval matrix resolves from the asset"
+                "a proposal carries one asset kind: name prompt_names or document_paths, \
+                 never both — the approval matrix resolves from the asset"
                     .to_owned(),
             );
         }
     }
-    let members = body
-        .prompt_names
-        .len()
-        .max(body.document_paths.len())
-        .max(body.skill_names.len());
+    let members = body.prompt_names.len().max(body.document_paths.len());
     if members > vedaflow::MAX_PROPOSAL_MEMBERS {
         return invalid(format!(
             "a proposal may name at most {} members",

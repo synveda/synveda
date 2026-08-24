@@ -5,6 +5,12 @@
 - **Feature(s)**: SKIL-2
 - **Deciders**: sujitn
 
+**CPR-23 amendment (2026-08-24).** ADR-0085 re-anchors this unchanged
+security invariant on immutable version commands: every file is scanned before
+a VedaFlow change opens, the exact content-addressed objects are rebuilt and
+rescanned immediately before application, and a currently blocking result
+rejects the change. There is still no security override.
+
 ## Context
 
 SKIL-2's text is "static analysis of skill scripts (secret patterns, network

@@ -47,7 +47,6 @@
       "session.diagnostics": true,
       "session.read": true,
       "session.write": true,
-      "skill.quality.override": true,
       "skill.write": true,
       "workspace.create": true,
       "workspace.read": true,

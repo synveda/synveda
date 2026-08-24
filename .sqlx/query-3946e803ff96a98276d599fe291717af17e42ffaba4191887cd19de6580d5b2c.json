@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update skill_bindings\n           set enabled = $5, pinned_version_id = $6, revision = revision + 1,\n               updated_at = clock_timestamp(), updated_by = $7\n           where tenant_id = $1 and id = $2 and scope_id = $3 and revision = $4\n           returning id, scope_id, skill_id, pinned_version_id, enabled, revision, created_at,\n                     created_by, updated_at, updated_by",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "skill_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "pinned_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Bool",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3946e803ff96a98276d599fe291717af17e42ffaba4191887cd19de6580d5b2c"
+}

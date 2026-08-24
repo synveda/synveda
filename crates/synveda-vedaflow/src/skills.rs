@@ -31,18 +31,14 @@
 //! `SKILL.md`'s own bytes, so hashing it would be hashing the same bytes
 //! twice.
 
-use std::collections::HashMap;
-
 use serde_json::json;
 use sqlx::PgConnection;
 use synveda_types::{
-    AssetKind, Channel, Error, Result, ScopeId, Sensitivity, SkillFile, SkillFilePath, SkillName,
-    SkillPath, TenantId,
+    AssetKind, Error, Result, ScopeId, Sensitivity, SkillFile, SkillName, TenantId,
 };
 
 use crate::Written;
-use crate::channels::{ChannelRef, read_members};
-use crate::hash::{CommitHash, ObjectHash, object_hash};
+use crate::hash::{ObjectHash, object_hash};
 use crate::objects::put_object;
 use crate::policy::canonical_json;
 
@@ -87,18 +83,6 @@ impl SkillAsset {
     #[must_use]
     pub fn address(&self) -> ObjectHash {
         object_hash(AssetKind::Skill, &self.canonical_bytes())
-    }
-
-    /// The path this asset takes in a channel tree: `skill/path`.
-    #[must_use]
-    pub fn path(&self) -> SkillPath {
-        SkillPath::new(self.skill.clone(), self.file.path.clone())
-    }
-
-    /// That path as the tree entry name.
-    #[must_use]
-    pub fn entry_name(&self) -> String {
-        self.path().to_string()
     }
 
     /// Parses an asset back out of an object's bytes — what an install writes
@@ -150,79 +134,6 @@ pub async fn put_skill(
     asset: &SkillAsset,
 ) -> Result<Written<ObjectHash>> {
     put_object(conn, tenant, AssetKind::Skill, &asset.canonical_bytes()).await
-}
-
-/// One scope's skill channel, keyed the way a resolve reads it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SkillChannelState {
-    /// The scope whose channel this is.
-    pub scope_id: ScopeId,
-    /// The commit the channel serves — what a receipt records.
-    pub commit: CommitHash,
-    /// Whether a FLOW-7 pin chose that commit rather than the ref.
-    pub pinned: bool,
-    /// Skill path → the address that scope admitted it at.
-    pub members: HashMap<SkillPath, ObjectHash>,
-}
-
-impl SkillChannelState {
-    /// The files this channel names for one skill, by path.
-    #[must_use]
-    pub fn bundle(&self, skill: &SkillName) -> HashMap<SkillFilePath, ObjectHash> {
-        self.members
-            .iter()
-            .filter(|(path, _)| &path.skill == skill)
-            .map(|(path, object)| (path.file.clone(), *object))
-            .collect()
-    }
-}
-
-/// [`read_members`] for a skill channel, keyed by skill path.
-///
-/// An entry name that is not a skill path cannot occur — only this crate
-/// writes skill channels and the surfaces above it parse paths before they
-/// get here — so one is an internal error rather than a member to drop
-/// quietly from a bundle. Dropping it quietly would install a partial skill,
-/// which is the failure mode a registry exists to prevent.
-///
-/// # Errors
-///
-/// [`Error::Storage`] on a database failure; [`Error::Internal`] on a member
-/// name that is not a skill path.
-pub async fn read_skill_members(
-    conn: &mut PgConnection,
-    tenant: TenantId,
-    scopes: &[ScopeId],
-    channel: Channel,
-) -> Result<Vec<SkillChannelState>> {
-    read_members(conn, tenant, scopes, ChannelRef::skill(channel))
-        .await?
-        .into_iter()
-        .map(|snapshot| {
-            let members = snapshot
-                .members
-                .into_iter()
-                .map(|member| {
-                    let path = member
-                        .name
-                        .parse::<SkillPath>()
-                        .map_err(|err| Error::Internal {
-                            message: format!(
-                                "skill channel entry {:?} is not a skill path: {err}",
-                                member.name
-                            ),
-                        })?;
-                    Ok((path, member.object))
-                })
-                .collect::<Result<HashMap<SkillPath, ObjectHash>>>()?;
-            Ok(SkillChannelState {
-                scope_id: snapshot.scope_id,
-                commit: snapshot.commit,
-                pinned: snapshot.pinned,
-                members,
-            })
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -290,16 +201,6 @@ mod tests {
         // The frontmatter is a deterministic parse of SKILL.md's own bytes,
         // so hashing it would hash the same bytes twice.
         assert!(!text.contains("description"), "{text}");
-    }
-
-    #[test]
-    fn the_entry_name_is_the_skill_path() {
-        let asset = asset("print('ok')");
-        assert_eq!(asset.entry_name(), "code-review/scripts/check.py");
-        assert_eq!(
-            asset.entry_name().parse::<SkillPath>().unwrap(),
-            asset.path()
-        );
     }
 
     #[test]

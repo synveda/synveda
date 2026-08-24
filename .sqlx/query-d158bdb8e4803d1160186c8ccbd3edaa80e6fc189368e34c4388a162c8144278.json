@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update skills set name = 'renamed' where tenant_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d158bdb8e4803d1160186c8ccbd3edaa80e6fc189368e34c4388a162c8144278"
+}

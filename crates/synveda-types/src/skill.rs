@@ -56,6 +56,9 @@ pub const MAX_SKILL_NAME_CHARS: usize = 64;
 /// this is a `SKILL.md` body.
 pub const MAX_SKILL_DESCRIPTION_CHARS: usize = 1_024;
 
+/// Longest official Agent Skills `compatibility` value.
+pub const MAX_SKILL_COMPATIBILITY_CHARS: usize = 500;
+
 /// The most files one bundle may hold.
 pub const MAX_SKILL_FILES: usize = 64;
 
@@ -152,6 +155,9 @@ impl FromStr for SkillName {
         }
         if name.ends_with('-') {
             return invalid("ends with '-'");
+        }
+        if name.contains("--") {
+            return invalid("contains consecutive '-' characters");
         }
         Ok(SkillName(name.to_owned()))
     }
@@ -422,14 +428,13 @@ impl SkillBundle {
 /// `deny_unknown_fields` on every wire format since EVAL-1. An unknown key
 /// is not merely unread: it may change a client's behaviour (`allowed-tools`
 /// is the obvious one) in a way no reviewer's tooling rendered.
-const SPEC_KEYS: [&str; 7] = [
+const SPEC_KEYS: [&str; 6] = [
     "name",
     "description",
     "license",
-    "version",
+    "compatibility",
     "allowed-tools",
     "metadata",
-    "user-invocable",
 ];
 
 /// Keys real clients put in frontmatter that the spec does not define and
@@ -442,7 +447,13 @@ const SPEC_KEYS: [&str; 7] = [
 /// heard of. Widening is a one-line change **with a bundle to point at**,
 /// which is the whole discipline — the alternative was a general YAML parser
 /// (ADR-0051 option 4), and that is still refused.
-const CLIENT_KEYS: [&str; 3] = ["tools", "argument-hint", "disable-model-invocation"];
+const CLIENT_KEYS: [&str; 5] = [
+    "version",
+    "user-invocable",
+    "tools",
+    "argument-hint",
+    "disable-model-invocation",
+];
 
 /// A `SKILL.md`'s YAML frontmatter, as the strict subset reads it
 /// (ADR-0051 decision 4).
@@ -457,8 +468,12 @@ pub struct Frontmatter {
     /// Its licence, if declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+    /// Official environment requirements, if declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compatibility: Option<String>,
     /// Its version, if declared. The product's version is the commit; this
-    /// is the author's own label and is never interpreted.
+    /// is an observed client extension and is never interpreted. The official
+    /// specification places version labels under `metadata`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     /// The tools the skill declares it needs.
@@ -703,7 +718,15 @@ impl Frontmatter {
                         if folded.is_empty() {
                             Vec::new()
                         } else {
-                            flow_sequence(&folded)?
+                            let parsed = flow_sequence(&folded)?;
+                            if parsed.len() == 1 && !folded.trim_start().starts_with('[') {
+                                parsed[0]
+                                    .split_whitespace()
+                                    .map(ToOwned::to_owned)
+                                    .collect()
+                            } else {
+                                parsed
+                            }
                         }
                     } else {
                         if !folded.is_empty() {
@@ -729,6 +752,7 @@ impl Frontmatter {
                         "name" => out.name = value,
                         "description" => out.description = value,
                         "license" => out.license = Some(value),
+                        "compatibility" => out.compatibility = Some(value),
                         "version" => out.version = Some(value),
                         "user-invocable" => {
                             out.user_invocable = Some(match value.as_str() {
@@ -778,6 +802,14 @@ impl Frontmatter {
         if self.description.chars().count() > MAX_SKILL_DESCRIPTION_CHARS {
             return invalid(&format!(
                 "`description` is longer than {MAX_SKILL_DESCRIPTION_CHARS} characters"
+            ));
+        }
+        if let Some(compatibility) = &self.compatibility
+            && (compatibility.trim().is_empty()
+                || compatibility.chars().count() > MAX_SKILL_COMPATIBILITY_CHARS)
+        {
+            return invalid(&format!(
+                "`compatibility` must contain 1..={MAX_SKILL_COMPATIBILITY_CHARS} characters"
             ));
         }
         if self.allowed_tools.len() > MAX_FRONTMATTER_ENTRIES
@@ -907,119 +939,6 @@ fn flow_sequence(raw: &str) -> Result<Vec<String>> {
             })
         })
         .collect()
-}
-
-/// Which version of a skill a caller is asking for (ADR-0051 decision 1, on
-/// ADR-0049 decision 2's shape).
-///
-/// Deliberately **not** [`crate::Channel`], for [`crate::PromptChannel`]'s
-/// reason: `published` is a channel; `draft` is a row, because a set channel
-/// cannot express withdrawal and an author replacing a draft is exactly
-/// that.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SkillChannel {
-    /// The authored working copy at one named scope.
-    Draft,
-    /// The reviewed version its scope stands behind — and the only one an
-    /// install will write to a client's disk.
-    Published,
-}
-
-impl SkillChannel {
-    /// Both values.
-    pub const ALL: [SkillChannel; 2] = [SkillChannel::Draft, SkillChannel::Published];
-
-    /// Stable wire name, identical to the serde form.
-    #[must_use]
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            SkillChannel::Draft => "draft",
-            SkillChannel::Published => "published",
-        }
-    }
-}
-
-impl fmt::Display for SkillChannel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for SkillChannel {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        SkillChannel::ALL
-            .into_iter()
-            .find(|channel| channel.as_str() == s)
-            .ok_or_else(|| Error::Invalid {
-                message: format!("unknown skill channel: {s:?}"),
-            })
-    }
-}
-
-/// One entry of a scope's `skill/published` tree: `skill/path`
-/// (ADR-0051 decision 2).
-///
-/// [`crate::DocumentPath`]'s shape, and it parses back unambiguously for its
-/// reason: a skill name cannot contain `/`, so the split is at the first one
-/// and everything after it is the file.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SkillPath {
-    /// The bundle.
-    pub skill: SkillName,
-    /// The file inside it.
-    pub file: SkillFilePath,
-}
-
-impl SkillPath {
-    /// The pair as one path.
-    #[must_use]
-    pub fn new(skill: SkillName, file: SkillFilePath) -> Self {
-        SkillPath { skill, file }
-    }
-}
-
-impl fmt::Display for SkillPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/{}", self.skill, self.file)
-    }
-}
-
-impl FromStr for SkillPath {
-    type Err = Error;
-
-    fn from_str(path: &str) -> Result<Self> {
-        let (skill, file) = path.split_once('/').ok_or_else(|| Error::Invalid {
-            message: format!(
-                "skill path {path:?} names no file; a skill channel entry is `skill/path` \
-                 (ADR-0051 decision 2)"
-            ),
-        })?;
-        Ok(SkillPath {
-            skill: skill.parse()?,
-            file: file.parse()?,
-        })
-    }
-}
-
-impl Serialize for SkillPath {
-    fn serialize<S: serde::Serializer>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> Deserialize<'de> for SkillPath {
-    fn deserialize<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<Self, D::Error> {
-        let raw = String::deserialize(deserializer)?;
-        raw.parse().map_err(serde::de::Error::custom)
-    }
 }
 
 #[cfg(test)]
@@ -1330,54 +1249,5 @@ mod tests {
             });
         }
         assert!(format!("{}", b.validate().unwrap_err()).contains("at most"));
-    }
-
-    #[test]
-    fn a_skill_path_round_trips_through_its_rendered_form() {
-        let path: SkillPath = "code-review/scripts/check.py".parse().unwrap();
-        assert_eq!(path.skill.as_str(), "code-review");
-        assert_eq!(path.file.as_str(), "scripts/check.py");
-        assert_eq!(path.to_string(), "code-review/scripts/check.py");
-        assert_eq!(path.to_string().parse::<SkillPath>().unwrap(), path);
-        assert!("code-review".parse::<SkillPath>().is_err());
-    }
-
-    /// Every path that parses fits the columns it is stored in — the tree
-    /// entry (255) and a curator glob's ref name (200).
-    #[test]
-    fn every_parseable_path_fits_the_schema() {
-        let file = format!(
-            "{}/{}",
-            "y".repeat(MAX_SKILL_PATH_SEGMENT_CHARS),
-            "z".repeat(MAX_SKILL_PATH_CHARS - MAX_SKILL_PATH_SEGMENT_CHARS - 1)
-        );
-        let widest = SkillPath::new(
-            "x".repeat(MAX_SKILL_NAME_CHARS).parse().unwrap(),
-            file.parse().expect("the longest bundled path parses"),
-        )
-        .to_string();
-        assert_eq!(
-            widest.chars().count(),
-            MAX_SKILL_NAME_CHARS + 1 + MAX_SKILL_PATH_CHARS
-        );
-        assert!(widest.len() <= 200, "fits vedaflow_refs.name");
-        assert!(widest.len() <= 255, "fits a tree entry name");
-        assert_eq!(widest.parse::<SkillPath>().unwrap().to_string(), widest);
-    }
-
-    #[test]
-    fn skill_channels_round_trip_and_are_not_channels() {
-        for channel in SkillChannel::ALL {
-            assert_eq!(
-                channel.to_string().parse::<SkillChannel>().unwrap(),
-                channel
-            );
-            assert_eq!(
-                serde_json::to_string(&channel).unwrap(),
-                format!("\"{}\"", channel.as_str())
-            );
-        }
-        assert!("derived".parse::<SkillChannel>().is_err());
-        assert!("draft".parse::<crate::Channel>().is_err());
     }
 }

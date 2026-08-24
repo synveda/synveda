@@ -69,7 +69,9 @@ CPR-22, the core personal/team MVP acceptance gate, is delivered: its isolated
 PulseBoard cross-session scenario, complete CI and full database suite pass.
 CPR-13, deliberately sequenced after the final MVP surfaces it documents, is
 delivered: 49 affected demos now teach the current platform and a recursive
-generated-help/OpenAPI drift gate covers all 73 shell scripts in `make ci`.
+generated-help/OpenAPI drift gate covers all 74 shell scripts in `make ci`.
+CPR-23, the immutable Skill catalogue and governed binding cutover, is
+delivered under ADR-0085; the old draft/channel distribution path is gone.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -131,8 +133,8 @@ either.** To refresh both: `SYNVEDA_WRITE_OPENAPI=1 cargo test -p
 synveda-gateway --test openapi` then `node scripts/generate-api-types.mjs`.
 The document covers the context-platform plane — `/v1/me`,
 workspaces/projects/repositories, access, admin scopes, sessions and the public
-Knowledge lifecycle/search, capture and explainable context planes (**67
-operations** since CPR-20) — and says
+Knowledge lifecycle/search, capture, explainable context and immutable Skill
+planes (**85 operations** since CPR-23) — and says
 so in its own description; the remaining production planes join under the
 programme's public-contract convergence package.
 Since CPR-8 the generator also emits
@@ -179,7 +181,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 88 of 119 features delivered — see docs/backlog/STATUS.md for
+features done. 89 of 120 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -273,6 +275,12 @@ all 73 shell demos are checked against fresh recursive CLI help and generated
 OpenAPI, and the required MEM, CTX, FLOW, AUTHZ and ADPT representatives pass
 against isolated current Postgres (the ADPT run uses authentic captured frames;
 CPR-14 remains the distinct genuine-client evidence).
+**CPR-23 was filed next**, making it **120 with 88 delivered**: it replaces the
+mutable draft/channel skill registry with stable immutable versions, governed
+project/principal bindings, evidence-labelled usage and controlled test runs.
+It was delivered the same day, making it **120 with 89 delivered**: the public
+contract grows to 85 operations, exact bound versions reach context, and the
+old mutable/channel/checklist-override paths are deleted without translation.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

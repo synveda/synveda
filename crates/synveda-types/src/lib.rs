@@ -67,6 +67,7 @@ mod sensitivity;
 // login session, a console session or an HTTP one.
 pub mod session;
 mod skill;
+mod skill_registry;
 mod skillquality;
 mod skillscan;
 mod tenant;
@@ -99,7 +100,8 @@ pub use id::{
     DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId, InviteId,
     KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, LapseId,
     ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId, ScopeId, SessionEventId,
-    SessionId, TenantId, WorkspaceId,
+    SessionId, SkillBindingId, SkillId, SkillTestRunId, SkillUsageEventId, SkillVersionId,
+    TenantId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use lapse::{
@@ -132,9 +134,15 @@ pub use retention::{
 pub use sensitivity::{ScopeTier, Sensitivity};
 pub use skill::{
     Frontmatter, MAX_FRONTMATTER_ENTRIES, MAX_FRONTMATTER_VALUE_CHARS, MAX_SKILL_BUNDLE_CHARS,
-    MAX_SKILL_DESCRIPTION_CHARS, MAX_SKILL_FILE_CHARS, MAX_SKILL_FILES, MAX_SKILL_NAME_CHARS,
-    MAX_SKILL_PATH_CHARS, MAX_SKILL_PATH_SEGMENT_CHARS, MAX_SKILL_PATH_SEGMENTS, SKILL_MANIFEST,
-    SkillBundle, SkillChannel, SkillFile, SkillFilePath, SkillName, SkillPath,
+    MAX_SKILL_COMPATIBILITY_CHARS, MAX_SKILL_DESCRIPTION_CHARS, MAX_SKILL_FILE_CHARS,
+    MAX_SKILL_FILES, MAX_SKILL_NAME_CHARS, MAX_SKILL_PATH_CHARS, MAX_SKILL_PATH_SEGMENT_CHARS,
+    MAX_SKILL_PATH_SEGMENTS, SKILL_MANIFEST, SkillBundle, SkillFile, SkillFilePath, SkillName,
+};
+pub use skill_registry::{
+    AGENT_SKILLS_SPEC_COMMIT, AGENT_SKILLS_SPEC_VERIFIED_AT, MAX_SKILL_SOURCE_REFERENCE_CHARS,
+    MAX_SKILL_USAGE_CLIENT_EVENT_ID_CHARS, SkillCommand, SkillMutationOutcome, SkillMutationResult,
+    SkillProvenance, SkillSourceKind, SkillTestHarness, SkillTestOutcome, SkillUsageEvidence,
+    SkillUsageIdentity, SkillUsageStage, SkillVersionFileRef, validate_skill_usage_client_event_id,
 };
 pub use skillquality::{
     Checklist, ChecklistItem, ChecklistVerdict, MAX_CHECKLIST_NOTE_CHARS, QualityShortfall,

@@ -38,6 +38,7 @@ use crate::context_api;
 use crate::knowledge_api;
 use crate::me;
 use crate::sessions;
+use crate::skills;
 use crate::workspaces;
 
 /// The document root.
@@ -66,6 +67,11 @@ VedaFlow command layer; dismissal publishes nothing. \
 CPR-20 makes context runs explainable over current immutable Knowledge, adds \
 re-authorised trace and feedback operations, and provides ordinary and \
 diagnostic session-scoped Knowledge query lenses without a global recall. \
+CPR-23 adds the Agent Skills-compatible catalogue: stable Skills, immutable \
+versions and exact file content, revisioned project/principal bindings, \
+version-specific host/model usage evidence, and controlled non-executing test \
+runs. Install, update, bind, disable and rollback are typed VedaFlow changes; \
+declared tools are metadata and never authorisation. \
 Since CPR-12 the session plane is also the **only** runtime plane: \
 `POST /v1/sessions/{session_id}/events` is where observations are admitted and \
 `POST /v1/sessions/{session_id}/context-runs` is where context is composed. \
@@ -154,6 +160,24 @@ revision, and its mutations are last-writer-wins under the PDP.",
         capture::merge_candidate,
         capture::replace_candidate,
         capture::dismiss_candidate,
+        skills::install,
+        skills::update,
+        skills::list,
+        skills::get,
+        skills::list_versions,
+        skills::get_version,
+        skills::list_files,
+        skills::get_file,
+        skills::create_binding,
+        skills::update_binding,
+        skills::rollback_binding,
+        skills::list_bindings,
+        skills::get_binding,
+        skills::available,
+        skills::record_usage,
+        skills::list_usage,
+        skills::run_test,
+        skills::list_tests,
         access::list_workspace_members,
         access::list_invites,
         access::create_invite,
@@ -242,6 +266,31 @@ revision, and its mutations are last-writer-wins under the PDP.",
         capture::ReplaceCandidateBody,
         capture::DismissCandidateBody,
         capture::AcceptBatchBody,
+        skills::SkillFileBody,
+        skills::SkillProvenanceBody,
+        skills::InstallSkillBody,
+        skills::UpdateSkillBody,
+        skills::CreateSkillBindingBody,
+        skills::UpdateSkillBindingBody,
+        skills::RollbackSkillBindingBody,
+        skills::RecordSkillUsageBody,
+        skills::RunSkillTestBody,
+        skills::SkillMutationView,
+        skills::SkillVersionView,
+        skills::SkillView,
+        skills::SkillListView,
+        skills::SkillVersionFileView,
+        skills::SkillVersionFileContentView,
+        skills::SkillVersionListView,
+        skills::SkillVersionFileListView,
+        skills::SkillBindingView,
+        skills::SkillBindingListView,
+        skills::AvailableSkillView,
+        skills::AvailableSkillListView,
+        skills::SkillUsageEventView,
+        skills::SkillUsageListView,
+        skills::SkillTestRunView,
+        skills::SkillTestRunListView,
         access::MemberView,
         access::MemberList,
         access::GroupRefView,
@@ -268,6 +317,7 @@ revision, and its mutations are last-writer-wins under the PDP.",
         (name = "knowledge", description = "Stable governed Knowledge, immutable revisions, provenance and lifecycle"),
         (name = "capture", description = "Session evidence extraction into reviewable Knowledge candidates"),
         (name = "context", description = "Explainable Knowledge planning, scoped query and explicit feedback"),
+        (name = "skills", description = "Agent Skills-compatible immutable versions, governed bindings, usage and controlled tests"),
     ),
     modifiers(&BearerAuth),
 )]

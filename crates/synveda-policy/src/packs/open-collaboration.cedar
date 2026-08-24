@@ -518,31 +518,6 @@ permit (
         && context.roles.containsAny(["curator", "member", "owner", "administrator"])
 };
 
-// The quality override (SKIL-3, ADR-0053 decision 8): the same two roles
-// as every other pack, and this plane is **pack-uniform** on purpose.
-//
-// The first draft granted `curator` here, reasoning that a pack whose
-// quality config gates nothing (`min_score` 0, no mandatory checklist)
-// hardly reaches the action anyway. The role×action golden refused it, and
-// the golden was right: the *only* way to reach this action under this
-// pack is a reviewer having written down a concern and somebody publishing
-// over it — which is exactly the case that wants a second person, not the
-// case that wants a shortcut. Granting it to curator, the role that
-// approves and publishes skills here, would have made the gate
-// self-service in the one pack where it fires for the one reason that
-// matters.
-//
-// Openness is a property of what a pack *reads*. Who may record that the
-// product shipped something a reviewer objected to is not a read.
-permit (
-    principal,
-    action == Synveda::Action::"SkillQualityOverride",
-    resource
-) when {
-    resource in principal.tenant
-        && context.roles.containsAny(["owner", "administrator"])
-};
-
 // The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform —
 // see regulated-strict for the full rationale. Openness is a read-side
 // property; what a tier *means* is uniform, or `restricted` would mean

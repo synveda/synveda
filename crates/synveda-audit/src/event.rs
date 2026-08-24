@@ -493,20 +493,15 @@ pub enum AuditAction {
     /// `context.injected` with its object address like every other entry,
     /// which is why there is no third action here.
     ContextPackQuarantined,
-    /// A skill's draft was written at a scope (SKIL-1, ADR-0051
-    /// decision 16).
-    ///
-    /// The authoring act, not a publication, exactly as
-    /// [`AuditAction::ContextPackAuthored`] is. The payload carries the
-    /// name, the tier, the per-file object addresses and how many files
-    /// were removed from the bundle — never `SKILL.md` text and never file
-    /// content.
-    ///
-    /// There is deliberately no `skill.installed`: an install is a
-    /// client-side act on bytes an audited [`AuditAction::SkillResolved`]
-    /// already served, and an event the server cannot verify is a fact an
-    /// auditor would have to reconcile (ADR-0019 decision 4).
-    SkillAuthored,
+    /// A typed Skill/apply VedaFlow change was opened (CPR-23, ADR-0085).
+    /// Carries ids, command kind, hashes and approval requirements, never
+    /// bundle text.
+    SkillChangeOpened,
+    /// A typed Skill/apply effect installed an immutable version or changed
+    /// a revisioned binding.
+    SkillChangeApplied,
+    /// A Skill/apply effect reached a terminal precondition refusal.
+    SkillChangeRejected,
     /// A skill bundle was served to a consumer (ADR-0051 decision 16).
     ///
     /// A data-plane read, so it chains its own event for
@@ -540,44 +535,19 @@ pub enum AuditAction {
     /// the matched span, which for a credential rule *is* the credential
     /// path.
     ///
-    /// There is deliberately no event for a clean scan (every authored
-    /// bundle already chains [`AuditAction::SkillAuthored`], and a scan
-    /// that found nothing is not an act) and none for rendering a report
-    /// to a reviewer (the proposal read already chains, and the report is
-    /// recomputable from what it names).
+    /// There is deliberately no event for a clean scan (every governed
+    /// install or update already chains [`AuditAction::SkillChangeOpened`],
+    /// and a scan that found nothing is not an act) and none for rendering
+    /// a report to a reviewer (the proposal read already chains, and the
+    /// report is bound to the immutable version command).
     SkillScanRejected,
-    /// A reviewer recorded a quality checklist against a skill bundle
-    /// (SKIL-3, ADR-0053 decision 10).
-    ///
-    /// The **durable record of the human half of the score**, and the
-    /// reason the row it writes can be last-writer-wins: a row is mutable
-    /// and a chained event is not, so re-answering replaces a row while
-    /// the chain keeps every answer anybody gave.
-    ///
-    /// Carries the item ids, the verdicts, the bundle digest the answers
-    /// are bound to and the rubric version rendered beside the reviewer —
-    /// never file content, and the note only because a reviewer wrote it
-    /// to be read (it passes MEM-2's scanner before it is stored).
-    SkillChecklistRecorded,
-    /// A skill was published over the quality gate's objection (SKIL-3,
-    /// ADR-0053 decision 10).
-    ///
-    /// **The most valuable event this feature produces.** "What did we
-    /// ship that we knew was below the bar, and who said so" is a question
-    /// no other event in the product answers, and an override whose event
-    /// was lost would be a publication with no explanation — which is why
-    /// it chains inside the publish transaction rather than beside it.
-    ///
-    /// Carries the score, which of the three bars was missed, the reason
-    /// the publisher gave, the pack that set the bar and the identity that
-    /// held [`Action::SkillQualityOverride`](synveda_policy::Action).
-    ///
-    /// There is deliberately **no equivalent for the security scan**, and
-    /// there must not be: ADR-0052 decision 3 put the `critical` band on
-    /// the invariant floor precisely so nothing can wave it through, and
-    /// an event recording that somebody had would be evidence of a path
-    /// that should not exist.
-    SkillQualityOverridden,
+    /// One version-specific usage stage was appended. Host observation and
+    /// model self-report are distinct payload values.
+    SkillUsageRecorded,
+    /// A controlled harness completed against one immutable version. The
+    /// gateway's built-in harness validates and scans; it executes no bundle
+    /// script.
+    SkillTestRecorded,
     /// A grant reached the end of its window. Emitted by the sweep under
     /// `actor_kind=system`, and **bookkeeping only** — the grant stopped
     /// deciding anything at `expires_at` whether or not this was ever
@@ -598,7 +568,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 88] = [
+    pub const ALL: [AuditAction; 90] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -681,12 +651,14 @@ impl AuditAction {
         AuditAction::PromptResolved,
         AuditAction::ContextPackAuthored,
         AuditAction::ContextPackQuarantined,
-        AuditAction::SkillAuthored,
+        AuditAction::SkillChangeOpened,
+        AuditAction::SkillChangeApplied,
+        AuditAction::SkillChangeRejected,
         AuditAction::SkillResolved,
         AuditAction::SkillQuarantined,
         AuditAction::SkillScanRejected,
-        AuditAction::SkillChecklistRecorded,
-        AuditAction::SkillQualityOverridden,
+        AuditAction::SkillUsageRecorded,
+        AuditAction::SkillTestRecorded,
     ];
 
     /// The stable dotted name stored in the `action` column. Renaming an
@@ -776,12 +748,14 @@ impl AuditAction {
             AuditAction::PromptResolved => "prompt.resolved",
             AuditAction::ContextPackAuthored => "context_pack.authored",
             AuditAction::ContextPackQuarantined => "context_pack.quarantined",
-            AuditAction::SkillAuthored => "skill.authored",
+            AuditAction::SkillChangeOpened => "skill.change.opened",
+            AuditAction::SkillChangeApplied => "skill.change.applied",
+            AuditAction::SkillChangeRejected => "skill.change.rejected",
             AuditAction::SkillResolved => "skill.resolved",
             AuditAction::SkillQuarantined => "skill.quarantined",
             AuditAction::SkillScanRejected => "skill.scan.rejected",
-            AuditAction::SkillChecklistRecorded => "skill.checklist.recorded",
-            AuditAction::SkillQualityOverridden => "skill.quality.overridden",
+            AuditAction::SkillUsageRecorded => "skill.usage.recorded",
+            AuditAction::SkillTestRecorded => "skill.test.recorded",
         }
     }
 }

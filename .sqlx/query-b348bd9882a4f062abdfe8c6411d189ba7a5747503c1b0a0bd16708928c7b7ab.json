@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select current_version_id from skills\n           where tenant_id = $1 and id = $2 and governing_scope_id = $3 and name = $4\n           for update",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "current_version_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b348bd9882a4f062abdfe8c6411d189ba7a5747503c1b0a0bd16708928c7b7ab"
+}

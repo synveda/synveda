@@ -252,6 +252,35 @@ define_id!(
 );
 
 define_id!(
+    /// Identifies one stable Agent Skill aggregate (CPR-23, ADR-0085).
+    SkillId
+);
+
+define_id!(
+    /// Identifies one immutable version of an Agent Skill bundle (CPR-23,
+    /// ADR-0085).
+    SkillVersionId
+);
+
+define_id!(
+    /// Identifies one revisioned project- or principal-scope skill binding
+    /// (CPR-23, ADR-0085).
+    SkillBindingId
+);
+
+define_id!(
+    /// Identifies one append-only, evidence-labelled skill usage event
+    /// (CPR-23, ADR-0085).
+    SkillUsageEventId
+);
+
+define_id!(
+    /// Identifies one immutable controlled-harness skill test run (CPR-23,
+    /// ADR-0085).
+    SkillTestRunId
+);
+
+define_id!(
     /// Identifies one context run — one act of composing context for a
     /// session (CPR-10, ADR-0076 decision 7).
     ContextRunId

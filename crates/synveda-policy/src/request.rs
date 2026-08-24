@@ -397,44 +397,18 @@ pub enum Action {
     /// nowhere in the composition plan walk.
     ///
     /// Carries the tier for [`Action::PromptRead`]'s reason and carries no
-    /// `lapsed` for the same one. It is also the read action that makes a
-    /// rewind or a pin of `skill/published` decidable, which discharges
-    /// ADR-0036 decision 3 for the **last** of the three kinds it refused by
-    /// name — after this, every asset kind with a channel has a read action.
+    /// `lapsed` for the same one. CPR-23 applies it to exact immutable
+    /// versions selected by project/principal bindings; no Skill channel
+    /// remains.
     SkillRead,
-    /// Author a skill draft at the resource scope (ADR-0051 decision 10).
+    /// Install/update a stable Skill or change its binding at the resource
+    /// scope (CPR-23, ADR-0085).
     ///
     /// Its own action rather than [`Action::ContextPackWrite`] on
     /// [`Action::ChannelRollback`]'s separability rule, and here the reason
     /// is sharpest: a skill is executable, so a pack must be able to say
     /// "curate conventions here" without saying "author code here".
     SkillWrite,
-    /// Publish a skill bundle the quality gate would otherwise refuse
-    /// (SKIL-3, ADR-0053 decision 8).
-    ///
-    /// A *second* decision at the publish seam, distinct from the
-    /// [`Action::ChannelPublish`] the publication already takes, and that
-    /// separation is the entire content of the action: a publisher who
-    /// may ship a good skill cannot necessarily ship one below the bar,
-    /// and must go and find somebody who can. ADR-0051 decision 18's
-    /// argument in its own idiom — the content of separating two
-    /// authorities is that they can be two people.
-    ///
-    /// It exists at all because a quality bar with no way past it is a bar
-    /// that gets routed around (ADR-0053 force 3). That is the asymmetry
-    /// with SKIL-2's security gate and it is deliberate: `critical` is a
-    /// band defined by having no legitimate reading, so refusing an
-    /// exception costs an author only a wait for a rule fix; a *low score*
-    /// always has a legitimate reading, so refusing an exception costs the
-    /// product its registry. There is deliberately **no equivalent action
-    /// for the scan** and there must not be one — an override that could
-    /// reach the security floor would make ADR-0052 decision 3's guarantee
-    /// negotiable by whoever holds this.
-    ///
-    /// A scope action carrying no `context.sensitivity`: it is a statement
-    /// about a process rather than about content, so a tier would be a
-    /// field with nothing to say.
-    SkillQualityOverride,
     /// List/read quarantined observe events: the tenant's pending queue
     /// (the tenant resource) or a subtree's (a scope) — `/v1/quarantine`
     /// (MEM-2, ADR-0021 decision 6).
@@ -589,7 +563,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 47] = [
+    pub const ALL: [Action; 46] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -618,7 +592,6 @@ impl Action {
         Action::ContextPackWrite,
         Action::SkillRead,
         Action::SkillWrite,
-        Action::SkillQualityOverride,
         Action::QuarantineRead,
         Action::QuarantineReview,
         Action::PolicyRead,
@@ -654,7 +627,7 @@ impl Action {
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 37] = [
+    pub const PROBED_AT_SCOPE: [Action; 36] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -676,7 +649,6 @@ impl Action {
         Action::PromptWrite,
         Action::ContextPackWrite,
         Action::SkillWrite,
-        Action::SkillQualityOverride,
         Action::QuarantineRead,
         Action::QuarantineReview,
         Action::PolicyRead,
@@ -771,7 +743,6 @@ impl Action {
             Action::ContextPackWrite => "context_pack.write",
             Action::SkillRead => "skill.read",
             Action::SkillWrite => "skill.write",
-            Action::SkillQualityOverride => "skill.quality.override",
             Action::QuarantineRead => "quarantine.read",
             Action::QuarantineReview => "quarantine.review",
             Action::PolicyRead => "policy.read",
@@ -824,7 +795,6 @@ impl Action {
             Action::ContextPackWrite => "ContextPackWrite",
             Action::SkillRead => "SkillRead",
             Action::SkillWrite => "SkillWrite",
-            Action::SkillQualityOverride => "SkillQualityOverride",
             Action::QuarantineRead => "QuarantineRead",
             Action::QuarantineReview => "QuarantineReview",
             Action::PolicyRead => "PolicyRead",

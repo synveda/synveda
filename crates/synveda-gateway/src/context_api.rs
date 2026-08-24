@@ -1529,7 +1529,9 @@ async fn plan_context_run(
                         "name": skill.name,
                         "scope_id": skill.scope_id,
                         "position": skill.position,
-                        "commit": skill.commit,
+                        "binding_id": skill.binding_id,
+                        "version_id": skill.version_id,
+                        "bundle_digest": skill.bundle_digest,
                         "object_hash": skill.object_hash,
                         "sensitivity": skill.sensitivity,
                     }))
@@ -1670,7 +1672,9 @@ async fn plan_context_run(
             "skills": authored.skills.iter().map(|skill| json!({
                 "name": skill.name.as_str(),
                 "scope_id": skill.scope_id,
-                "commit": skill.commit,
+                "binding_id": skill.binding_id,
+                "version_id": skill.version_id,
+                "bundle_digest": skill.bundle_digest,
                 "object_hash": skill.object_hash,
                 "sensitivity": skill.sensitivity.as_str(),
             })).collect::<Vec<_>>(),

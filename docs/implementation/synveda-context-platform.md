@@ -36,11 +36,13 @@ programme convention established in Prompt 1.
 | Explainable Knowledge context planning, trace retention, feedback and scoped query/evaluation lenses | CPR-20 | **complete** | `e90dac9` | `8ed8aa6` | context 3/3; audit 13/13; packs 10/10; sessions 22/22; OpenAPI 5/5; console 165/165; RLS guards PASS | PASS | PASS | isolated `demos/cpr-20-context-planning.sh` PASS: 55 Knowledge, 47 plans, 75 selections, 2 feedback, zero records | none |
 | Linkable Context Inspector, retention-aware evidence and exact revision outcome feedback | CPR-21 | **complete** | `8ed8aa6` | `8cdd1ee` | console helpers 7/7; component 6/6; complete console 179/179; context 3/3; sessions 22/22; production build PASS | PASS | PASS | in-app browser unavailable; real-component SSR covers full/redacted/hashes-only/disabled/refusal and the production bundle builds | none |
 | Core personal/team PulseBoard loop across sessions, capture, governed Knowledge, privacy, supersession and inspector evidence | CPR-22 | **complete** | `8cdd1ee` | `c9e647d` | consolidated DB acceptance 1/1; capture 4/4; context 3/3; console 179/179 | PASS | PASS | isolated `demos/cpr-22-mvp-acceptance.sh` PASS: 3 sessions, 5 candidates, 4 changes, 3 current + 1 superseded Knowledge, 2 runs, 3 selections, zero records | none |
-| Re-point the executable demo corpus and gate CLI/OpenAPI drift | CPR-13 | **complete** | `c9e647d` | next checkpoint | checker fixtures 4/4; shell syntax PASS; generated inventory 73/73 | PASS | N/A — no persisted behaviour changed | MEM sessions 22/22 + load 1/1; CTX 1/1; FLOW 4/4; AUTHZ 2/2; ADPT authentic-frame 2/2 | none |
+| Re-point the executable demo corpus and gate CLI/OpenAPI drift | CPR-13 | **complete** | `c9e647d` | `9b8ad04` | checker fixtures 4/4; shell syntax PASS; generated inventory 73/73 | PASS | N/A — no persisted behaviour changed | MEM sessions 22/22 + load 1/1; CTX 1/1; FLOW 4/4; AUTHZ 2/2; ADPT authentic-frame 2/2 | none |
+| Immutable Agent Skills versions, project/principal bindings, evidence-labelled usage and controlled test runs | CPR-23 | **complete** | `9b8ad04` | next checkpoint | gateway 1/1; RLS/immutability 1/1 + completeness 1/1; OpenAPI 5/5; policy packs 7/7; CLI 157/157; console 179/179 | PASS | PASS (`synveda_test_80706`) | official unversioned Agent Skills spec pinned to upstream `69ef37e`; isolated `demos/cpr-23-versioned-skills.sh` PASS | none |
 
-**Exact next objective:** finish the CPR-13 package gate, commit and push it,
-then allocate CPR-23 to Prompt 21's immutable versioned, project-bindable Agent
-Skills backend by extending the existing registry and VedaFlow seams.
+**Exact next objective:** deliver CPR-24, the generated-API Skills Library,
+over CPR-23's exact immutable versions, bindings, scan/test evidence and usage;
+delete the superseded admin-only Skill review fixtures/screen while preserving
+Advanced Reviews as the shared VedaFlow surface.
 
 ### Starting-point objective map
 
@@ -3595,5 +3597,73 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `test(demos): re-point demo corpus and gate drift (CPR-13)` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by the CPR-23 checkpoint under the programme's
+- **Commit hash.** `9b8ad04f68b2aa2f1b90d9b066b926327fd1f9ba`.
+
+### Prompt 21 objective — immutable Skill versions, bindings and usage (CPR-23)
+
+- **Selected feature and specification.** **CPR-23** is delivered from
+  `9b8ad04`. ADR-0085 is accepted. The official Agent Skills format remains
+  unversioned; this implementation pins the tested contract to upstream
+  `agentskills/agentskills@69ef37e9424c0a7ea9dd2293b559e43ec8176379`,
+  observed 2026-08-24, rather than inventing a protocol number. Required and
+  optional frontmatter, the published name grammar, extension metadata and
+  exact bundle bytes are fixture-pinned; `allowed-tools` stays a declaration
+  and creates no Cedar authority.
+
+- **Domain and schema hard cut.** Migration `0052_versioned_skills.sql` drops
+  the mutable draft `skills`/`skill_files` rows plus their special
+  `skill_reviews`/`skill_quality_overrides`, with no translation, and creates
+  stable Skill aggregates, immutable ordinal versions and files, revisioned
+  project/principal bindings, typed VedaFlow Skill effects, append-only usage
+  evidence and immutable test runs. All seven tables are tenant-bound with
+  enabled/forced RLS and composite ownership constraints; immutable history
+  has no application update/delete grant. Schema epoch **2** now has **50
+  migrations** and **630** checked SQLx query descriptions.
+
+- **One governed mutation path.** Install, content update, binding creation,
+  enable/disable/pin/unpin and rollback all open an `AssetKind::Skill`
+  VedaFlow `Apply` change whose typed command is payload-hash bound. Apply
+  repeats target ownership, `SkillWrite`, `ProposalOpen`, revision/current-
+  version preconditions, exact object reconstruction and current scanner and
+  rubric gates. Auto-apply therefore still creates/applies a change; stricter
+  packs retain a pending review. Stale competing changes reject without moving
+  a head or binding. Five semantic audit actions cover change, usage and test
+  transitions without file/frontmatter/tool/output content.
+
+- **Read, distribution and evidence.** Eighteen generated public operations
+  expose catalogues, exact versions/files, binding history/control,
+  PDP-filtered availability, eight usage stages and controlled tests. The
+  OpenAPI inventory grows **67 → 85** and the generated TypeScript client has
+  **119 schemas**. Context composition and client materialisation resolve the
+  same enabled binding set and retain binding id, version id, digest and
+  object address. Usage is idempotent per client event and distinguishes
+  `host_observed` from `model_reported`. The built-in
+  `validation_sandbox` parses, rescans and scores stored bytes but never runs a
+  script; an external controlled-client harness remains explicitly labelled.
+
+- **Deleted implementation.** `SkillChannel`, `ChannelRef::skill`,
+  `skill/published`, mutable draft/file CRUD, skill publish/channel pin and
+  rewind, direct-store CLI operations, special checklist/quality-override
+  actions/routes/tables and duplicate skill telemetry leave production. The
+  existing content-addressed VedaFlow object store, common proposal review
+  engine, scanner/rubric and client-side materialisation remain because they
+  serve the new aggregate. CPR-24 immediately replaces the still-offline old
+  admin Skill review renderer/fixture corpus with the Skills Library; those
+  fixtures are not a served backend path.
+
+- **Tests and exact results.** Gateway end-to-end **1/1** proves pending
+  review, approval/apply, two immutable versions, stale rejection, exact file
+  bytes, binding/follow-current/rollback, eight-stage model, idempotent usage,
+  a non-executing idempotent test run, content-free audit and cross-tenant 404.
+  Forced-RLS/immutability **1/1**, RLS completeness **1/1**, policy packs
+  **7/7**, OpenAPI **5/5**, CLI **157/157**, console **179/179**, generated API
+  drift and workspace clippy with warnings denied all pass. The isolated
+  `demos/cpr-23-versioned-skills.sh` reports one aggregate, two versions, one
+  binding, one usage event and one validation run. Complete `make ci` **PASS**
+  and full `make db-test` **PASS** against disposable
+  `synveda_test_80706`, which was removed on success.
+
+- **Commit.** `feat(skills): add immutable versions bindings and usage
+  (CPR-23)` on `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-24 checkpoint under the programme's
   next-checkpoint convention.

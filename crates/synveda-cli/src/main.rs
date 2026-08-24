@@ -335,10 +335,10 @@ enum Command {
     /// a terminal can never disagree with it about a document's address.
     #[command(subcommand, name = "context-pack")]
     ContextPack(ContextPackCommand),
-    /// The skills registry (SKIL-1, ADR-0051): import an
-    /// agentskills.io-format bundle, list what a scope holds, open the
-    /// review that carries it, and **install** it into a client's own
-    /// skills directory.
+    /// The immutable Skills catalogue (CPR-23, ADR-0085): import an Agent
+    /// Skills-compatible bundle through VedaFlow, inspect exact versions,
+    /// resolve project/personal bindings, and **install** an authorised
+    /// version into a client's own skills directory.
     ///
     /// `install` is the only thing in the product that writes a skill onto
     /// a disk, and it is here rather than in the gateway because the
@@ -534,166 +534,105 @@ enum PromptCommand {
 
 #[derive(Subcommand)]
 enum SkillCommand {
-    /// The registry at one scope: every skill, its files, and whether what
-    /// a client would install is what was last written.
+    /// List stable Skill aggregates and their current immutable versions.
     List {
-        /// The scope UUID.
-        scope: ScopeId,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Resolve a bundle the way a client would: by name, walking your own
-    /// placement chain nearest-first, unless you name a scope.
-    ///
-    /// Because the name is also the installed directory name and a client's
-    /// skills root is flat, that walk is what decides which of two
-    /// same-named skills exists on your disk at all.
-    Show {
-        /// The skill's name, e.g. `code-review`.
-        name: String,
-        /// Resolve at this scope instead of walking your chain. Required
-        /// with --draft and with --commit.
+        /// Restrict the listing to this governing scope.
         #[arg(long)]
         scope: Option<ScopeId>,
-        /// Read the authoring copy at --scope rather than the reviewed
-        /// version. Unreviewed by construction.
-        #[arg(long)]
-        draft: bool,
-        /// Pin to a commit that scope's channel has held.
-        #[arg(long)]
-        commit: Option<String>,
-        /// Print the gateway's answer verbatim.
+        /// Print JSON.
         #[arg(long)]
         json: bool,
-        /// Suppress the connection banner — for piping.
+        /// Credential profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Inspect one exact immutable version by tenant-unique bundle name.
+    Show {
+        /// Agent Skills bundle name.
+        name: String,
+        /// Inspect this immutable version instead of the current one.
+        #[arg(long)]
+        version: Option<synveda_types::SkillVersionId>,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+        /// Suppress the connection banner.
         #[arg(long)]
         quiet: bool,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
+        /// Credential profile.
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Read an anthropics/skills-format directory and write it as a draft.
-    /// This moves nothing a client installs.
+    /// Install or update a complete Agent Skills-compatible directory.
     ///
-    /// The request is the bundle: a file you removed from the directory is
-    /// removed from the draft, because a client loads a skill whole and a
-    /// leftover file would be published back onto a laptop.
+    /// The mutation is a typed VedaFlow change. Content changes create an
+    /// immutable version; the command never edits a version in place.
     Import {
-        /// The directory holding SKILL.md and its bundled files.
+        /// Directory holding SKILL.md and its text resources/scripts.
         dir: std::path::PathBuf,
-        /// The scope that will stand behind it.
+        /// Scope governing the stable Skill aggregate.
         #[arg(long)]
         scope: ScopeId,
-        /// Override the skill name. Defaults to the directory's own name,
-        /// which is the spec's rule; the frontmatter `name` must agree
-        /// either way.
+        /// Override the directory-derived bundle name.
         #[arg(long)]
         name: Option<String>,
-        /// public | internal | confidential. Defaults to internal;
-        /// `restricted` is refused — nothing in the product mints that tier
-        /// for an authored asset.
+        /// public | internal | confidential.
         #[arg(long)]
         sensitivity: Option<String>,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
+        /// Credential profile.
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Write a published bundle into a client's own skills directory, byte
-    /// for byte, and re-hash every file against the address the commit
-    /// named.
+    /// Materialise the exact version enabled at a project/principal scope.
     Install {
-        /// The skill's name — also the directory this creates.
+        /// Tenant-unique Agent Skills bundle name.
         name: String,
-        /// Which client's layout to write. The per-client difference is the
-        /// root and nothing else.
+        /// Project or principal scope whose binding authorises exposure.
+        #[arg(long)]
+        scope: ScopeId,
+        /// Supported client layout.
         #[arg(long, default_value = "claude-code")]
         client: String,
-        /// Write under this directory instead of the client's own root.
+        /// Write under this directory instead of the client's default root.
         #[arg(long)]
         root: Option<std::path::PathBuf>,
-        /// Install this scope's copy instead of walking your chain.
-        #[arg(long)]
-        scope: Option<ScopeId>,
-        /// Install the commit you were built against. A rewind that took it
-        /// off the channel refuses this, naming both commits.
-        #[arg(long)]
-        commit: Option<String>,
         /// Print the receipt as JSON.
         #[arg(long)]
         json: bool,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
+        /// Credential profile.
         #[arg(long)]
         profile: Option<String>,
     },
-    /// What you may install: every published skill on your own placement
-    /// chain, nearest scope first (SKIL-4, ADR-0054).
-    ///
-    /// The plural of `show`, and the same walk — a scope you may not read
-    /// skills at is skipped as though it published nothing, so it cannot
-    /// shadow a copy further up that you can read. Another team's skills
-    /// are absent because that team is not on your chain at all.
+    /// List exact immutable versions enabled by bindings at a scope.
     Available {
-        /// Print the gateway's answer verbatim.
-        #[arg(long)]
-        json: bool,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Make a client's governed skills directory match what you may
-    /// install: write every available skill, remove what is no longer
-    /// available (SKIL-4, ADR-0054 decision 15).
-    ///
-    /// The removal is the half that makes a rollback mean something on a
-    /// laptop. It is bounded to directories this command wrote — the root
-    /// is a directory Synveda owns, never a client's own skills folder —
-    /// and to names the registry no longer serves you.
-    Sync {
-        /// Which client's layout to write. The per-client difference is the
-        /// root and nothing else.
-        #[arg(long, default_value = "claude-code")]
-        client: String,
-        /// Write under this directory instead of the client's own root.
-        /// The adapter passes its plugin's own `skills/` here.
-        #[arg(long)]
-        root: Option<std::path::PathBuf>,
-        /// Report what would change and write nothing.
-        #[arg(long)]
-        dry_run: bool,
-        /// Print the outcome as JSON — what an adapter reads.
-        #[arg(long)]
-        json: bool,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Open the review that can carry a bundle onto a scope's published
-    /// channel. Everything after this is `synveda proposal`.
-    ///
-    /// Under every pack this is the only route: the invariant floor asks
-    /// for a security reviewer and two distinct approvers, so no pack makes
-    /// shipping executable code a one-signature act.
-    Propose {
-        /// The skill's name. The proposal names the bundle, never a file.
-        name: String,
-        /// The scope whose channel would move. Requirements resolve here.
+        /// Project or principal scope whose bindings resolve.
         #[arg(long)]
         scope: ScopeId,
-        /// The scope that holds it, when climbing. Defaults to --scope.
+        /// Print JSON.
         #[arg(long)]
-        source: Option<ScopeId>,
-        /// What this proposes, in one line. Defaults to the name.
+        json: bool,
+        /// Credential profile.
         #[arg(long)]
-        title: Option<String>,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
+        profile: Option<String>,
+    },
+    /// Reconcile a supported client root to one scope's enabled bindings.
+    Sync {
+        /// Project or principal scope whose bindings resolve.
+        #[arg(long)]
+        scope: ScopeId,
+        /// Supported client layout.
+        #[arg(long, default_value = "claude-code")]
+        client: String,
+        /// Write under this directory instead of the client's default root.
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
+        /// Report changes without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+        /// Credential profile.
         #[arg(long)]
         profile: Option<String>,
     },
@@ -785,7 +724,7 @@ enum ChannelCommand {
         /// The scope UUID.
         scope: ScopeId,
         /// Which authored-artifact channel, as its ref name (for example
-        /// `skill/published`).
+        /// `prompt/published`).
         #[arg(long)]
         channel: String,
         /// How many states, 1..=200.
@@ -957,60 +896,6 @@ enum ProposalCommand {
     Apply {
         /// The proposal UUID.
         id: ProposalId,
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Record a decision to publish a skill the quality gate refuses
-    /// (SKIL-3, ADR-0053 decision 8).
-    ///
-    /// Takes `SkillQualityOverride` at the target scope — deliberately a
-    /// *different* authority from the one that publishes. Under the
-    /// product packs a `curator` publishes skills and a `steward` grants
-    /// this, so the person who decided a bundle was good enough is never
-    /// the person who records that it was not.
-    ///
-    /// It is its own act rather than a flag on `publish` for a plainer
-    /// reason too: a steward holds no content read, so a steward cannot
-    /// publish a skill at all. Grant the override, then let whoever
-    /// ordinarily publishes publish.
-    ///
-    /// The reason is what an auditor will read in a year to find out why
-    /// the product shipped something it had itself marked down, so write
-    /// it for them. It never waves the *security* scan through: that has
-    /// no override at any tier and must not acquire one.
-    OverrideQuality {
-        /// The proposal UUID.
-        id: ProposalId,
-        /// Why. Mandatory.
-        #[arg(long)]
-        reason: String,
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Record the reviewer's quality checklist for a skill proposal
-    /// (SKIL-3): the half of a skill's score no machine can supply.
-    ///
-    /// Its own act rather than part of approving, because a reviewer may
-    /// legitimately work through the checklist without yet deciding to
-    /// ship — indeed under `regulated-strict` that is the point, since the
-    /// pack requires one to exist *before* anybody publishes.
-    ///
-    /// The answers are bound to the bundle's bytes, not to this proposal:
-    /// if the author edits a file afterwards, the answers are not found
-    /// and the checklist has to be redone. That is deliberate — a review
-    /// of bytes nobody has since changed is the only kind worth recording.
-    Checklist {
-        /// The proposal UUID.
-        id: ProposalId,
-        /// An answer, repeatable: `--item tested=yes`. Items are
-        /// `instructions-correct`, `scope-appropriate`, `not-duplicate`,
-        /// `dependencies-available` and `tested`; verdicts are `yes`,
-        /// `no` and `n/a`.
-        #[arg(long = "item", value_name = "ITEM=VERDICT", required = true)]
-        items: Vec<String>,
-        /// Anything you want the record to say.
-        #[arg(long)]
-        note: Option<String>,
         #[arg(long)]
         profile: Option<String>,
     },
@@ -2330,17 +2215,6 @@ async fn run(cli: Cli) -> Result<(), String> {
             ProposalCommand::Apply { id, profile } => {
                 proposal::apply(&profile_name(profile), id).await
             }
-            ProposalCommand::OverrideQuality {
-                id,
-                reason,
-                profile,
-            } => proposal::override_quality(&profile_name(profile), id, &reason).await,
-            ProposalCommand::Checklist {
-                id,
-                items,
-                note,
-                profile,
-            } => proposal::checklist(&profile_name(profile), id, &items, note).await,
         },
         Command::Prompt(command) => match command {
             PromptCommand::List { scope, profile } => {
@@ -2406,31 +2280,18 @@ async fn run(cli: Cli) -> Result<(), String> {
             } => prompt::propose(&profile_name(profile), &name, scope, title.as_deref()).await,
         },
         Command::Skill(command) => match command {
-            SkillCommand::List { scope, profile } => {
-                skill::list(&profile_name(profile), scope).await
-            }
+            SkillCommand::List {
+                scope,
+                json,
+                profile,
+            } => skill::list(&profile_name(profile), scope, json).await,
             SkillCommand::Show {
                 name,
-                scope,
-                draft,
-                commit,
+                version,
                 json,
                 quiet,
                 profile,
-            } => {
-                skill::show(
-                    &profile_name(profile),
-                    skill::Ask {
-                        name: &name,
-                        scope,
-                        draft,
-                        commit: commit.as_deref(),
-                    },
-                    json,
-                    quiet,
-                )
-                .await
-            }
+            } => skill::show(&profile_name(profile), &name, version, json, quiet).await,
             SkillCommand::Import {
                 dir,
                 scope,
@@ -2454,31 +2315,29 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
             SkillCommand::Install {
                 name,
+                scope,
                 client,
                 root,
-                scope,
-                commit,
                 json,
                 profile,
             } => {
                 skill::install(
                     &profile_name(profile),
-                    skill::Ask {
-                        name: &name,
-                        scope,
-                        draft: false,
-                        commit: commit.as_deref(),
-                    },
+                    &name,
+                    scope,
                     &client,
                     root.as_deref(),
                     json,
                 )
                 .await
             }
-            SkillCommand::Available { json, profile } => {
-                skill::available(&profile_name(profile), json).await
-            }
+            SkillCommand::Available {
+                scope,
+                json,
+                profile,
+            } => skill::available(&profile_name(profile), scope, json).await,
             SkillCommand::Sync {
+                scope,
                 client,
                 root,
                 dry_run,
@@ -2487,6 +2346,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             } => {
                 skill::sync(
                     &profile_name(profile),
+                    scope,
                     &client,
                     root.as_deref(),
                     dry_run,
@@ -2494,23 +2354,8 @@ async fn run(cli: Cli) -> Result<(), String> {
                 )
                 .await
             }
-            SkillCommand::Propose {
-                name,
-                scope,
-                source,
-                title,
-                profile,
-            } => {
-                skill::propose(
-                    &profile_name(profile),
-                    &name,
-                    scope,
-                    source,
-                    title.as_deref().unwrap_or(&name),
-                )
-                .await
-            }
         },
+
         Command::ContextPack(command) => match command {
             ContextPackCommand::List { scope, profile } => {
                 pack::list(&profile_name(profile), scope).await

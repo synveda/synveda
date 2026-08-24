@@ -45,19 +45,16 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use sqlx::PgConnection;
-use synveda_store::packs;
 use synveda_store::records::{RecordState, RecordVersion};
 use synveda_store::search::{self, ScopeClassCutoff};
+use synveda_store::{packs, skills as skill_store};
 use synveda_types::scope::ScopeKind;
 use synveda_types::{
-    Channel, ContextPackName, DocumentName, EntryTier, Frontmatter, IndexTier, LapseId,
-    RecordClass, RecordId, RecordKind, Result, RetentionConfig, ScopeId, ScopeTier, Sensitivity,
-    SkillIndex, SkillName, TenantId,
+    Channel, ContextPackName, DocumentName, EntryTier, IndexTier, LapseId, RecordClass, RecordId,
+    RecordKind, Result, RetentionConfig, ScopeId, ScopeTier, Sensitivity, SkillBindingId,
+    SkillIndex, SkillName, SkillVersionId, TenantId,
 };
-use synveda_vedaflow::{
-    ChannelRef, MemoryAsset, SkillAsset, read_context_pack_members, read_memory_members,
-    read_objects, read_skill_members,
-};
+use synveda_vedaflow::{ChannelRef, MemoryAsset, read_context_pack_members, read_memory_members};
 
 use crate::TOKENS_PER_INJECT;
 use crate::hybrid::union_sensitivities;
@@ -447,15 +444,18 @@ pub struct AdvertisedSkill {
     /// name at once (ADR-0051 decision 6), which is why it needs no
     /// separate handle.
     pub name: SkillName,
-    /// The scope whose published channel names it: the nearest one on the
-    /// caller's chain that publishes this name *and* permits the read
-    /// (ADR-0054 decision 3).
+    /// The project/principal scope whose enabled binding exposes it: the
+    /// nearest one on the caller's chain that binds this name and permits
+    /// the read (CPR-23, ADR-0085).
     pub scope_id: ScopeId,
     /// That scope's position in the gradient, nearest = 0.
     pub position: usize,
-    /// The commit the scope's skill channel served — what a receipt records
-    /// and what `--commit` reinstalls.
-    pub commit: String,
+    /// Revisioned binding that made the version available.
+    pub binding_id: SkillBindingId,
+    /// Exact immutable version advertised.
+    pub version_id: SkillVersionId,
+    /// Digest over every path/object-address pair in that version.
+    pub bundle_digest: String,
     /// The `SKILL.md` object address the description was read from,
     /// hex-encoded: the block's claim about this skill is recomputable from
     /// stored bytes, exactly as an entry's is.
@@ -846,7 +846,9 @@ struct Available {
     name: SkillName,
     scope_id: ScopeId,
     position: usize,
-    commit: String,
+    binding_id: SkillBindingId,
+    version_id: SkillVersionId,
+    bundle_digest: String,
     object_hash: String,
     sensitivity: Sensitivity,
     /// The frontmatter's own `description`: what a client loads at ~80
@@ -868,24 +870,18 @@ struct Availability {
 /// The skills this plan advertises, nearest scope first (SKIL-4, ADR-0054
 /// decisions 2, 3 and 12).
 ///
-/// The same walk the resolve route takes for one name, taken for a whole
-/// shelf: each planned scope's `skill/published` channel, the tier each
-/// bundle carries decided against the `SkillRead` tiers the plan already
-/// holds for that scope, and the gradient applied **after** that decision
-/// so a nearer copy nobody may read does not shadow the further readable
-/// one.
+/// The same walk the public availability route takes for a whole shelf:
+/// enabled project/principal bindings resolve to exact immutable versions,
+/// the tier each version carries is checked against the `SkillRead` tiers
+/// the plan already holds for that scope, and the gradient is applied
+/// **after** that decision so a nearer denied copy does not shadow a wider
+/// readable one.
 ///
 /// Two properties are load-bearing and neither is obvious:
 ///
-/// - **The tree alone says what a scope publishes**, because a channel
-///   member is named `<skill>/<path>` (ADR-0031 decision 1), so enumerating
-///   the shelf costs no object read at all. Only the manifests are fetched,
-///   in one batched read, and each carries both the tier the decision needs
-///   and the description the line shows (ADR-0054 decision 14).
-/// - **A bundle that will not parse is omitted rather than fatal.** This is
-///   an advertisement, not a read of material somebody asked for: refusing
-///   the whole inject because one published skill is odd would break the
-///   session over a line nobody needed.
+/// The manifest, scan evidence and content address all belong to that exact
+/// version. Declared tools remain metadata: this advertisement confers no
+/// tool authority (CPR-23, ADR-0085).
 async fn advertise_skills(
     conn: &mut PgConnection,
     tenant_id: TenantId,
@@ -911,96 +907,60 @@ async fn advertise_skills(
         });
     }
     let scope_ids: Vec<ScopeId> = scopes.iter().map(|scope| scope.scope_id).collect();
-    let channels = read_skill_members(conn, tenant_id, &scope_ids, Channel::Published).await?;
-
-    // Every manifest the plan's scopes publish, in gradient order, capped
-    // per scope so a shelf of hundreds cannot make this read hundreds.
-    let mut candidates: Vec<(
-        usize,
-        &ComposeScope,
-        SkillName,
-        synveda_vedaflow::hash::ObjectHash,
-        String,
-    )> = Vec::new();
+    let resolved = skill_store::resolve_for_scopes(conn, tenant_id, &scope_ids).await?;
     let mut omitted = 0_usize;
-    for (position, scope) in scopes.iter().enumerate() {
-        let Some(state) = channels
-            .iter()
-            .find(|channel| channel.scope_id == scope.scope_id)
-        else {
-            continue;
-        };
-        let mut shelf: Vec<(SkillName, synveda_vedaflow::hash::ObjectHash)> = state
-            .members
-            .iter()
-            .filter(|(path, _)| path.file.is_manifest())
-            .map(|(path, address)| (path.skill.clone(), *address))
-            .collect();
-        // By name, so the cap cuts the same shelf the same way every time —
-        // CTX-2's byte-identical re-composition holds over this section too.
-        shelf.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
-        if shelf.len() > MAX_ADVERTISED_SKILLS {
-            omitted += shelf.len() - MAX_ADVERTISED_SKILLS;
-            shelf.truncate(MAX_ADVERTISED_SKILLS);
-        }
-        let commit = state.commit.to_hex();
-        candidates.extend(
-            shelf
-                .into_iter()
-                .map(|(name, address)| (position, *scope, name, address, commit.clone())),
-        );
-    }
-    if candidates.is_empty() {
-        return Ok(Availability {
-            skills: Vec::new(),
-            omitted,
-        });
-    }
-
-    let addresses: Vec<synveda_vedaflow::hash::ObjectHash> = candidates
-        .iter()
-        .map(|(_, _, _, address, _)| *address)
-        .collect();
-    let objects = read_objects(conn, tenant_id, &addresses).await?;
-
     let mut named: HashSet<SkillName> = HashSet::new();
     let mut skills: Vec<Available> = Vec::new();
-    for (position, scope, name, address, commit) in candidates {
-        let Some(object) = objects.get(&address) else {
+    let mut per_scope: HashMap<ScopeId, usize> = HashMap::new();
+    for resolved in resolved {
+        let Some((position, scope)) = scopes
+            .iter()
+            .enumerate()
+            .find(|(_, scope)| scope.scope_id == resolved.binding.scope_id)
+        else {
             omitted += 1;
             continue;
         };
-        let Ok(asset) = SkillAsset::from_bytes(&object.content) else {
+        let seen_here = per_scope.entry(scope.scope_id).or_default();
+        if *seen_here >= MAX_ADVERTISED_SKILLS {
             omitted += 1;
             continue;
-        };
-        // The tier the *published* bundle carries, decided against the
-        // tiers this scope's pack permitted this caller — the same pair the
-        // resolve route decides, at the same seam (ADR-0054 decision 2).
-        if !scope.skill_sensitivities.contains(&asset.sensitivity) {
+        }
+        *seen_here += 1;
+        if !scope
+            .skill_sensitivities
+            .contains(&resolved.version.sensitivity)
+        {
             omitted += 1;
             continue;
         }
         // The gradient, applied here and not before: a nearer scope that
         // publishes this name but denied the read never reached this line,
         // so it cannot shadow the readable copy behind it (decision 3).
-        if !named.insert(name.clone()) {
+        if !named.insert(resolved.name.clone()) {
             omitted += 1;
             continue;
         }
-        let Ok(frontmatter) = Frontmatter::parse(&asset.file.content) else {
+        let Some(description) = resolved
+            .version
+            .manifest
+            .get("description")
+            .and_then(serde_json::Value::as_str)
+        else {
             omitted += 1;
-            named.remove(&name);
+            named.remove(&resolved.name);
             continue;
         };
         skills.push(Available {
-            name,
+            name: resolved.name,
             scope_id: scope.scope_id,
             position,
-            commit,
-            object_hash: address.to_hex(),
-            sensitivity: asset.sensitivity,
-            description: frontmatter.description,
+            binding_id: resolved.binding.id,
+            version_id: resolved.version.id,
+            bundle_digest: skill_store::hex_32(&resolved.version.bundle_digest),
+            object_hash: skill_store::hex_32(&resolved.manifest_object_hash),
+            sensitivity: resolved.version.sensitivity,
+            description: description.to_owned(),
         });
     }
     // Gradient order, then by name — the order the section renders in and
@@ -1875,7 +1835,9 @@ fn assemble(
             name: skill.name,
             scope_id: skill.scope_id,
             position: skill.position,
-            commit: skill.commit,
+            binding_id: skill.binding_id,
+            version_id: skill.version_id,
+            bundle_digest: skill.bundle_digest,
             object_hash: skill.object_hash,
             sensitivity: skill.sensitivity,
             tokens: line_tokens + header_cost,
@@ -2327,7 +2289,9 @@ mod tests {
             name: "code-review".parse().expect("a legal skill name"),
             scope_id: ScopeId::from_uuid(uuid::Uuid::from_bytes([7; 16])),
             position: 0,
-            commit: "c".repeat(64),
+            binding_id: SkillBindingId::from_uuid(uuid::Uuid::from_bytes([8; 16])),
+            version_id: SkillVersionId::from_uuid(uuid::Uuid::from_bytes([9; 16])),
+            bundle_digest: "d".repeat(64),
             object_hash: "o".repeat(64),
             sensitivity,
             description: description.to_owned(),

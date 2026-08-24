@@ -485,11 +485,6 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/proposals/{id}/approve", post(proposals::approve))
         .route("/v1/proposals/{id}/reject", post(proposals::reject))
         .route("/v1/proposals/{id}/withdraw", post(proposals::withdraw))
-        .route("/v1/proposals/{id}/checklist", post(proposals::checklist))
-        .route(
-            "/v1/proposals/{id}/quality-override",
-            post(proposals::quality_override),
-        )
         .route("/v1/proposals/{id}/publish", post(proposals::publish))
         .route("/v1/proposals/{id}/apply", post(proposals::apply))
         // The prompt registry (PRMT-1, ADR-0049). Authoring writes a draft
@@ -506,15 +501,47 @@ pub fn router(state: AppState) -> Router {
         // omission: a prompt is fetched by name, and a pack's content
         // arrives through a context run as ranked pinned material.
         .route("/v1/context-packs", get(packs::list).post(packs::author))
-        // The skills registry (SKIL-1, ADR-0051). Shaped like the prompt
-        // registry and not the pack one, because a skill IS fetched by name
-        // — and unlike a prompt, what comes back is the whole bundle from
-        // one commit, since a client loads a skill whole. There is no
-        // materialisation route: writing files into a client's own skills
-        // directory is `synveda skill install`, because the harness is a
-        // guest (seed §2.6, ADR-0051 decision 12).
-        .route("/v1/skills", get(skills::list).post(skills::author))
-        .route("/v1/skills/{name}", get(skills::resolve))
+        // Stable skills, immutable versions and explicit project/principal
+        // bindings (CPR-23, ADR-0085). Mutations are typed VedaFlow apply
+        // changes; file reads return exact version bytes and never execute
+        // them in the gateway.
+        .route("/v1/skills", get(skills::list).post(skills::install))
+        .route("/v1/skills/available", get(skills::available))
+        .route("/v1/skills/{id}", get(skills::get).patch(skills::update))
+        .route("/v1/skills/{id}/versions", get(skills::list_versions))
+        .route(
+            "/v1/skills/{id}/versions/{version_id}",
+            get(skills::get_version),
+        )
+        .route(
+            "/v1/skills/{id}/versions/{version_id}/files",
+            get(skills::list_files),
+        )
+        .route(
+            "/v1/skills/{id}/versions/{version_id}/files/{*path}",
+            get(skills::get_file),
+        )
+        .route(
+            "/v1/skills/{id}/versions/{version_id}/usage",
+            get(skills::list_usage),
+        )
+        .route(
+            "/v1/skills/{id}/versions/{version_id}/tests",
+            get(skills::list_tests).post(skills::run_test),
+        )
+        .route(
+            "/v1/skill-bindings",
+            get(skills::list_bindings).post(skills::create_binding),
+        )
+        .route(
+            "/v1/skill-bindings/{id}",
+            get(skills::get_binding).patch(skills::update_binding),
+        )
+        .route(
+            "/v1/skill-bindings/{id}/rollback",
+            post(skills::rollback_binding),
+        )
+        .route("/v1/skill-usage", post(skills::record_usage))
         // The lapse plane (AUTHZ-4, ADR-0037). `POST /v1/lapses` opens a
         // *proposal* and grants nothing; the grant is that proposal's
         // effect, beside `/publish` and taking the same shape.

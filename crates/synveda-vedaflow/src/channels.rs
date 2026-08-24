@@ -120,19 +120,6 @@ impl ChannelRef {
         ChannelRef::new(AssetKind::ContextPack, channel)
     }
 
-    /// The `skill/{channel}` ref (SKIL-1, ADR-0051 decision 2) — the fourth
-    /// asset type with a writer, and the last one ADR-0036 decision 3
-    /// refused a rewind and a pin to by name. One entry per bundled file,
-    /// named `skill/path`.
-    ///
-    /// Unlike every other channel here, what this one publishes is not read
-    /// by this product at all: an install writes the bytes into a client's
-    /// own skills directory and the client's loader reads them (decision 9).
-    #[must_use]
-    pub const fn skill(channel: Channel) -> Self {
-        ChannelRef::new(AssetKind::Skill, channel)
-    }
-
     /// The ref name this channel is stored under.
     #[must_use]
     pub fn name(&self) -> String {

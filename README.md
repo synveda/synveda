@@ -57,7 +57,7 @@ stricter profile leaves the same typed payload for review. Forget runs as a
 durable, held-or-completed erasure operation and retains content-free hashes
 rather than plaintext.
 
-Prompts, context packs and skills continue to use VedaFlow's three standing
+Prompts and context packs continue to use VedaFlow's standing authored-asset
 channels at each scope:
 
 - **`derived`** — unreviewed material where the governed profile permits it.
@@ -67,6 +67,14 @@ channels at each scope:
 Restricting a context run to `published` only is a single policy switch — that switch
 is "bank mode". A bad prompt shipped? Move the ref back one commit; every
 consuming agent heals on its next session start.
+
+Skills use the same VedaFlow proposal and approval engine without a shadow
+channel current-state. A stable Skill owns immutable, content-addressed
+versions; an enabled project or personal binding follows current or pins an
+exact version. Update and rollback change a version pointer or binding revision,
+never history. Usage names the exact binding/version and distinguishes host
+observation from model report; the built-in validation sandbox executes no
+bundle code and manifest-declared tools grant no authority.
 
 ### Governance is enforced, not suggested
 
@@ -170,8 +178,9 @@ Published benchmark scores, and what they do and do not measure:
 - **Audit** — a tamper-evident chain, plus a query surface that answers
   *"who could see X on date D"* and *"what did agent A know at time T"*.
 - **Governed assets** — prompt templates, context packs, and an
-  agentskills.io-compliant skills registry where publishing executable code
-  requires a `reviewer` and two distinct approvers.
+  Agent Skills-compatible immutable catalogue where installing, updating,
+  binding or rolling back executable content is a typed VedaFlow change and
+  the active policy matrix decides its reviewers.
 - **A Claude Code integration** — installed hooks plus an MCP recall tool,
   with deterministic session-plane replay in CI and an installed authenticated
   Claude Code 2.1.241 lifecycle gate.

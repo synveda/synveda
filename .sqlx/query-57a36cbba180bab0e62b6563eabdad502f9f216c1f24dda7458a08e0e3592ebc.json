@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into skill_changes\n               (tenant_id, proposal_id, command_kind, payload, payload_hash)\n           values ($1,$2,$3,$4,$5)\n           returning proposal_id, payload, payload_hash, resulting_skill_id,\n                     resulting_version_id, resulting_binding_id,\n                     resulting_binding_revision, applied_at, created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "proposal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "resulting_skill_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "resulting_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "resulting_binding_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "resulting_binding_revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "applied_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "57a36cbba180bab0e62b6563eabdad502f9f216c1f24dda7458a08e0e3592ebc"
+}

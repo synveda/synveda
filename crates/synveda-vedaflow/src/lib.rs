@@ -120,7 +120,7 @@ pub use refs::{
     RefUpdate, StoredRef, create_ref, force_update_ref, list_refs, read_ref, update_ref,
 };
 pub use signer::{CommitSignature, CommitSigner, Ed25519Signer, Signer, verify_ed25519};
-pub use skills::{SkillAsset, SkillChannelState, put_skill, read_skill_members};
+pub use skills::{SkillAsset, put_skill};
 pub use trees::{TreeEntry, TreeTarget, put_tree, read_tree};
 pub use verify::{ObjectClass, StoreVerification, verify};
 

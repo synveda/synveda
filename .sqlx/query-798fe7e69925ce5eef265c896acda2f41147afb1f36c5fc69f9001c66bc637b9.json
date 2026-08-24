@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into skill_bindings\n             (id, tenant_id, scope_id, skill_id, pinned_version_id, enabled,\n              created_by, updated_by)\n         values ($1, $2, $3, $4, $5, true, $6, $6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "798fe7e69925ce5eef265c896acda2f41147afb1f36c5fc69f9001c66bc637b9"
+}

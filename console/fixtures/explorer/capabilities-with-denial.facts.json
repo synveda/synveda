@@ -31,7 +31,6 @@
     "session.diagnostics",
     "session.read",
     "session.write",
-    "skill.quality.override",
     "skill.write",
     "workspace.create",
     "workspace.read",

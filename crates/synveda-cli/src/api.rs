@@ -207,6 +207,21 @@ impl Api {
         self.send(request, "PATCH", path).await
     }
 
+    /// `PATCH path` with a required idempotency key.
+    pub async fn patch_idempotent(
+        &self,
+        path: &str,
+        body: Value,
+        idempotency_key: &str,
+    ) -> Result<Value, String> {
+        let request = self
+            .http
+            .patch(format!("{}{path}", self.base))
+            .header("Idempotency-Key", idempotency_key)
+            .json(&body);
+        self.send(request, "PATCH", path).await
+    }
+
     /// `POST path` with a JSON body and one extra header — the
     /// idempotency-keyed creations (CPR-4's discipline, kept by CPR-7's
     /// scope plane).

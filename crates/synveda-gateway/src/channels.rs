@@ -90,7 +90,7 @@ async fn respond<T: IntoResponse>(
 /// One standing channel as the API renders it.
 #[derive(Serialize)]
 struct ChannelView {
-    /// The ref name, e.g. `skill/published`.
+    /// The ref name, e.g. `prompt/published`.
     name: String,
     asset: String,
     channel: Channel,
@@ -163,7 +163,7 @@ pub(crate) async fn list(State(state): State<AppState>, Path(scope_id): Path<Sco
             .filter(|status| {
                 matches!(
                     status.channel.asset,
-                    AssetKind::Prompt | AssetKind::ContextPack | AssetKind::Skill
+                    AssetKind::Prompt | AssetKind::ContextPack
                 )
             })
             .collect();
@@ -232,22 +232,6 @@ pub(crate) struct PublishBody {
     /// directly, which is the governed `SHARED`/`LOCAL` split.
     #[serde(default)]
     document_paths: Vec<synveda_types::DocumentPath>,
-    /// The skills to admit, by name (SKIL-1, ADR-0051 decision 1). Must be
-    /// drafts of **this** scope, for the reason the other lists must
-    /// be its material: the direct route stays same-scope.
-    ///
-    /// A skill names the *bundle*, never a file: a client loads a skill
-    /// whole, so publishing three of its four files would publish a version
-    /// nobody can run. Every file the draft holds becomes a member.
-    ///
-    /// Exactly one list may be present. Under **every** pack a
-    /// skill publication refuses here on its own arithmetic — the invariant
-    /// floor asks for a security reviewer and, since ADR-0051 decision 18,
-    /// two distinct approvers — and names the proposal route. That
-    /// uniformity is the difference from the other three: a skill is
-    /// executable, and no pack makes shipping code a one-signature act.
-    #[serde(default)]
-    skill_names: Vec<synveda_types::SkillName>,
     /// Why — an auditor and a reviewer both read this. Required: a
     /// publication with nothing to say is one nobody can review after
     /// the fact.
@@ -352,12 +336,10 @@ async fn publish_inner(
     // subset — and both stop there: everything below this point is shared,
     // because one matrix governs every path across the trust boundary
     // (ADR-0032 decision 8).
-    let asset_kind = if !body.prompt_names.is_empty() {
-        AssetKind::Prompt
-    } else if !body.skill_names.is_empty() {
-        AssetKind::Skill
-    } else {
+    let asset_kind = if body.prompt_names.is_empty() {
         AssetKind::ContextPack
+    } else {
+        AssetKind::Prompt
     };
     let mut paths = body.document_paths.clone();
     paths.sort();
@@ -413,35 +395,6 @@ async fn publish_inner(
             ),
         });
     }
-    // A skill names the bundle, so this reads every file of it: publishing
-    // a subset would publish a version no client can run (ADR-0051
-    // decision 17's rule, one surface over).
-    let mut skill_names = body.skill_names.clone();
-    skill_names.sort();
-    skill_names.dedup();
-    let mut skill_drafts: Vec<(
-        synveda_store::skills::StoredSkill,
-        Vec<synveda_store::skills::StoredFile>,
-    )> = Vec::with_capacity(skill_names.len());
-    for name in &skill_names {
-        let Some(skill) = synveda_store::skills::skill(&mut *tx, tenant_id, scope_id, name).await?
-        else {
-            return Err(Error::Invalid {
-                message: format!(
-                    "not a skill draft of this scope: {name} — promote from a child scope \
-                     with POST /v1/proposals and a source_scope_id (FLOW-5)"
-                ),
-            });
-        };
-        let files = synveda_store::skills::files_of(&mut *tx, tenant_id, scope_id, name).await?;
-        if files.is_empty() {
-            return Err(Error::Invalid {
-                message: format!("skill {name} holds no files; there is nothing to publish"),
-            });
-        }
-        skill_drafts.push((skill, files));
-    }
-
     // The approval matrix, resolved at this scope from this pack, this
     // asset kind, the *maximum* sensitivity over the set (a set is
     // reviewed as a set), and the nearest curator file on the chain —
@@ -452,7 +405,6 @@ async fn publish_inner(
         .iter()
         .map(|draft| draft.sensitivity)
         .chain(documents.iter().map(|document| document.sensitivity))
-        .chain(skill_drafts.iter().map(|(skill, _)| skill.sensitivity))
         .max()
         .unwrap_or(Sensitivity::Public);
     // The second decision (ADR-0031 decision 12): may this principal *read*
@@ -479,7 +431,6 @@ async fn publish_inner(
             )
             .to_string()
         }))
-        .chain(skill_drafts.iter().map(|(skill, _)| skill.name.to_string()))
         .collect();
     let requirement = approvals::resolve(
         state,
@@ -506,7 +457,7 @@ async fn publish_inner(
     // re-publishing unchanged content stores nothing new — and a prompt's
     // object was already written at authoring time, so that write dedups.
     let mut members: Vec<(String, vedaflow::hash::ObjectHash)> =
-        Vec::with_capacity(drafts.len() + documents.len() + skill_drafts.len());
+        Vec::with_capacity(drafts.len() + documents.len());
     let mut published: Vec<PublishedMember> = Vec::with_capacity(members.capacity());
     for draft in &drafts {
         let asset = vedaflow::PromptAsset {
@@ -538,21 +489,6 @@ async fn publish_inner(
             object_hash: address.to_hex(),
         });
     }
-    // A skill file's object is already stored, for the pack document's
-    // reason — and every file of the bundle goes, because a client loads it
-    // whole.
-    for (skill, files) in &skill_drafts {
-        for file in files {
-            let address = vedaflow::hash::ObjectHash::from_bytes(file.object_hash);
-            let path = synveda_types::SkillPath::new(skill.name.clone(), file.path.clone());
-            members.push((path.to_string(), address));
-            published.push(PublishedMember {
-                member: path.to_string(),
-                object_hash: address.to_hex(),
-            });
-        }
-    }
-
     let channel = ChannelRef::new(asset_kind, Channel::Published);
     let snapshot = PolicySnapshot::new(
         authorized.decision.pack_name.clone(),
@@ -657,10 +593,7 @@ const DEFAULT_HISTORY: u32 = 20;
 /// flattened struct deserialises differently from a query string than
 /// from a body, and two fields are cheaper than that surprise.
 fn channel_of(asset: AssetKind, channel: Option<Channel>) -> Result<ChannelRef> {
-    if !matches!(
-        asset,
-        AssetKind::Prompt | AssetKind::ContextPack | AssetKind::Skill
-    ) {
+    if !matches!(asset, AssetKind::Prompt | AssetKind::ContextPack) {
         return Err(Error::Invalid {
             message: format!(
                 "{} is not a public authored-artifact channel",
@@ -708,7 +641,6 @@ fn decide_asset_read(
         AssetKind::ContextPack => {
             authz::decide_context_pack_read(state, input, resource, Sensitivity::WORKING)
         }
-        AssetKind::Skill => authz::decide_skill_read(state, input, resource, Sensitivity::WORKING),
         // `policy` is the one that remains, and it has no channel at all —
         // a lapse writes a row (ADR-0037 decision 16). ADR-0036 decision 3's
         // refusal-by-name now reaches no asset kind that has one.
@@ -1246,33 +1178,26 @@ fn validate(body: &PublishBody) -> Result<()> {
     let invalid = |message: String| Err(Error::Invalid { message });
     // One asset kind per publication, for the reason a proposal carries one
     // (ADR-0049 decision 6): the approval matrix resolves from it.
-    let named = usize::from(!body.prompt_names.is_empty())
-        + usize::from(!body.document_paths.is_empty())
-        + usize::from(!body.skill_names.is_empty());
+    let named =
+        usize::from(!body.prompt_names.is_empty()) + usize::from(!body.document_paths.is_empty());
     match named {
         0 => {
             return invalid(
-                "name at least one member: prompt_names for prompts, document_paths for \
-                 context pack documents, or skill_names for skills"
+                "name at least one member: prompt_names for prompts or document_paths for \
+                 context pack documents"
                     .to_owned(),
             );
         }
         1 => {}
         _ => {
             return invalid(
-                "a publication carries one asset kind: name prompt_names, document_paths \
-                 or skill_names, never more than one"
+                "a publication carries one asset kind: name prompt_names or document_paths, \
+                 never both"
                     .to_owned(),
             );
         }
     }
-    if body
-        .prompt_names
-        .len()
-        .max(body.document_paths.len())
-        .max(body.skill_names.len())
-        > MAX_PUBLISH_MEMBERS
-    {
+    if body.prompt_names.len().max(body.document_paths.len()) > MAX_PUBLISH_MEMBERS {
         return invalid(format!(
             "a publication may name at most {MAX_PUBLISH_MEMBERS} members"
         ));

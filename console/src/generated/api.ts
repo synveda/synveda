@@ -224,6 +224,42 @@ export type AttachRepositoryBody = {
   };
 
 /**
+ * Visible available skills after binding and PDP evaluation.
+ */
+export type AvailableSkillListView = {
+    /**
+     * Project or principal scope resolved for the session.
+     */
+    scope_id: string;
+    /**
+     * Enabled and policy-visible exact versions.
+     */
+    skills: AvailableSkillView[];
+  };
+
+/**
+ * Exact version made available by one enabled binding.
+ */
+export type AvailableSkillView = {
+    /**
+     * Binding that makes this version available.
+     */
+    binding: SkillBindingView;
+    /**
+     * Content-addressed SKILL.md object.
+     */
+    manifest_object_hash: string;
+    /**
+     * Agent Skills bundle name.
+     */
+    name: string;
+    /**
+     * Exact version resolved from the binding.
+     */
+    version: SkillVersionView;
+  };
+
+/**
  * One page of capture batches.
  */
 export type CaptureBatchListView = {
@@ -943,6 +979,28 @@ export type CreateScopeBody = {
   };
 
 /**
+ * Create a project- or principal-scope binding.
+ */
+export type CreateSkillBindingBody = {
+    /**
+     * Initial activation state.
+     */
+    enabled?: boolean;
+    /**
+     * Exact version pin; absent follows the current version.
+     */
+    pinned_version_id?: string | null;
+    /**
+     * Project or principal scope receiving the binding.
+     */
+    scope_id: string;
+    /**
+     * Stable catalogue entry.
+     */
+    skill_id: string;
+  };
+
+/**
  * `POST /v1/workspaces`.
  */
 export type CreateWorkspaceBody = {
@@ -1209,6 +1267,29 @@ export type GroupView = {
      * When it last changed.
      */
     updated_at: string;
+  };
+
+/**
+ * Install the first immutable version of a stable skill.
+ */
+export type InstallSkillBody = {
+    /**
+     * Whole Agent Skills-compatible bundle.
+     */
+    files: SkillFileBody[];
+    /**
+     * Scope governing the catalogue aggregate.
+     */
+    governing_scope_id: string;
+    /**
+     * Agent Skills bundle name.
+     */
+    name: string;
+    /**
+     * Retained bundle provenance.
+     */
+    provenance?: SkillProvenanceBody;
+    sensitivity: "public" | "internal" | "confidential" | "restricted";
   };
 
 /**
@@ -2119,6 +2200,42 @@ export type ProjectView = {
   };
 
 /**
+ * Append one idempotent usage observation.
+ */
+export type RecordSkillUsageBody = {
+    /**
+     * Active binding observed.
+     */
+    binding_id: string;
+    /**
+     * Client idempotency key.
+     */
+    client_event_id: string;
+    evidence: "host_observed" | "model_reported";
+    /**
+     * Bounded, content-free evidence.
+     */
+    metadata?: Record<string, unknown>;
+    /**
+     * Client occurrence time.
+     */
+    occurred_at: string;
+    /**
+     * Resource/script path for the stages that name one.
+     */
+    resource_path?: string | null;
+    /**
+     * Session carrying the event, when applicable.
+     */
+    session_id?: string | null;
+    stage: "advertised" | "discovered" | "activated" | "instructions_loaded" | "resource_loaded" | "script_requested" | "executed" | "outcome_reported";
+    /**
+     * Exact immutable version involved.
+     */
+    version_id: string;
+  };
+
+/**
  * Replace one visible current Knowledge item with this candidate.
  */
 export type ReplaceCandidateBody = {
@@ -2197,6 +2314,27 @@ export type RepositoryView = {
      * When it last changed.
      */
     updated_at: string;
+  };
+
+/**
+ * Roll a binding back by pinning an older immutable version.
+ */
+export type RollbackSkillBindingBody = {
+    /**
+     * Exact binding revision required when the change applies.
+     */
+    expected_revision: number;
+    /**
+     * Older version of the same skill.
+     */
+    version_id: string;
+  };
+
+/**
+ * Run the non-executing built-in validation sandbox.
+ */
+export type RunSkillTestBody = {
+    harness: "validation_sandbox" | "controlled_client";
   };
 
 /**
@@ -2427,6 +2565,426 @@ export type SessionView = {
   };
 
 /**
+ * Binding collection.
+ */
+export type SkillBindingListView = {
+    /**
+     * Policy-visible bindings.
+     */
+    bindings: SkillBindingView[];
+    /**
+     * Cursor after the last candidate considered.
+     */
+    next_cursor?: string | null;
+  };
+
+/**
+ * One revisioned binding.
+ */
+export type SkillBindingView = {
+    /**
+     * Binding creation time.
+     */
+    created_at: string;
+    /**
+     * Principal that created the binding.
+     */
+    created_by: string;
+    /**
+     * Whether sessions may discover this binding.
+     */
+    enabled: boolean;
+    /**
+     * Stable binding identifier.
+     */
+    id: string;
+    /**
+     * Exact version pin, or absent to follow the current pointer.
+     */
+    pinned_version_id?: string | null;
+    /**
+     * Optimistic-concurrency revision.
+     */
+    revision: number;
+    /**
+     * Bound project or principal scope.
+     */
+    scope_id: string;
+    /**
+     * Bound Skill aggregate.
+     */
+    skill_id: string;
+    /**
+     * Last binding transition time.
+     */
+    updated_at: string;
+    /**
+     * Principal that made the last binding transition.
+     */
+    updated_by: string;
+  };
+
+/**
+ * One file supplied for an immutable version.
+ */
+export type SkillFileBody = {
+    /**
+     * UTF-8 text stored and installed byte-for-byte.
+     */
+    content: string;
+    /**
+     * Bundle-relative path.
+     */
+    path: string;
+  };
+
+/**
+ * Cursor-paginated catalogue page.
+ */
+export type SkillListView = {
+    /**
+     * Cursor after the last candidate considered.
+     */
+    next_cursor?: string | null;
+    /**
+     * Policy-visible catalogue entries.
+     */
+    skills: SkillView[];
+  };
+
+/**
+ * Stable result envelope for every governed Skill mutation.
+ */
+export type SkillMutationView = {
+    /**
+     * Revisioned binding created or changed by the change.
+     */
+    binding_id?: string | null;
+    /**
+     * Binding revision produced by the change.
+     */
+    binding_revision?: number | null;
+    /**
+     * VedaFlow change id.
+     */
+    change_id: string;
+    outcome: "applied" | "pending_review" | "rejected";
+    /**
+     * Stable Skill aggregate affected by the change.
+     */
+    skill_id?: string | null;
+    /**
+     * Immutable version created or selected by the change.
+     */
+    version_id?: string | null;
+  };
+
+/**
+ * Provenance supplied for an imported or authored bundle.
+ */
+export type SkillProvenanceBody = {
+    kind: "authored" | "directory" | "archive" | "git" | "registry";
+    /**
+     * Forward-compatible source metadata.
+     */
+    metadata?: Record<string, unknown>;
+    /**
+     * Non-secret source reference.
+     */
+    reference?: string | null;
+    /**
+     * Exact upstream revision, when present.
+     */
+    revision?: string | null;
+  };
+
+/**
+ * Test-run collection.
+ */
+export type SkillTestRunListView = {
+    /**
+     * Cursor after the last returned run.
+     */
+    next_cursor?: string | null;
+    /**
+     * Immutable controlled-harness results.
+     */
+    runs: SkillTestRunView[];
+  };
+
+/**
+ * One immutable controlled-harness result.
+ */
+export type SkillTestRunView = {
+    /**
+     * Test-run creation time.
+     */
+    created_at: string;
+    /**
+     * Principal that requested the test.
+     */
+    created_by: string;
+    /**
+     * Content-free validation evidence.
+     */
+    evidence: Record<string, unknown>;
+    harness: "validation_sandbox" | "controlled_client";
+    /**
+     * Exact harness implementation version.
+     */
+    harness_version: string;
+    /**
+     * Stable test-run identifier.
+     */
+    id: string;
+    outcome: "passed" | "failed" | "error";
+    /**
+     * Quality rubric used by the run.
+     */
+    rubric_version: number;
+    /**
+     * Scanner ruleset used by the run.
+     */
+    scan_ruleset_version: number;
+    /**
+     * Exact immutable version tested.
+     */
+    version_id: string;
+  };
+
+/**
+ * One append-only usage event.
+ */
+export type SkillUsageEventView = {
+    /**
+     * Binding that advertised the version.
+     */
+    binding_id: string;
+    /**
+     * Adapter-provided idempotency key.
+     */
+    client_event_id: string;
+    evidence: "host_observed" | "model_reported";
+    /**
+     * Stable append-only usage event identifier.
+     */
+    id: string;
+    /**
+     * Bounded content-free evidence.
+     */
+    metadata: Record<string, unknown>;
+    /**
+     * Client occurrence time.
+     */
+    occurred_at: string;
+    /**
+     * Principal associated with the lifecycle event.
+     */
+    principal_id: string;
+    /**
+     * Server receipt time.
+     */
+    received_at: string;
+    /**
+     * Resource or script path, when the stage names one.
+     */
+    resource_path?: string | null;
+    /**
+     * Governed session, when the lifecycle event occurred in one.
+     */
+    session_id?: string | null;
+    stage: "advertised" | "discovered" | "activated" | "instructions_loaded" | "resource_loaded" | "script_requested" | "executed" | "outcome_reported";
+    /**
+     * Exact immutable version involved.
+     */
+    version_id: string;
+  };
+
+/**
+ * Usage collection.
+ */
+export type SkillUsageListView = {
+    /**
+     * Append-only usage evidence.
+     */
+    events: SkillUsageEventView[];
+    /**
+     * Cursor after the last returned event.
+     */
+    next_cursor?: string | null;
+  };
+
+/**
+ * One authorised file with its exact immutable content.
+ */
+export type SkillVersionFileContentView = {
+    /**
+     * Exact authorised text content.
+     */
+    content: string;
+    /**
+     * Content-addressed VedaFlow object hash.
+     */
+    object_hash: string;
+    /**
+     * Relative bundle path.
+     */
+    path: string;
+    /**
+     * Exact immutable version containing the file.
+     */
+    version_id: string;
+  };
+
+/**
+ * Immutable file collection.
+ */
+export type SkillVersionFileListView = {
+    /**
+     * Immutable file descriptors in path order.
+     */
+    files: SkillVersionFileView[];
+  };
+
+/**
+ * One immutable file descriptor.
+ */
+export type SkillVersionFileView = {
+    /**
+     * Unicode scalar count retained for bounded clients.
+     */
+    chars: number;
+    /**
+     * File-reference creation time.
+     */
+    created_at: string;
+    /**
+     * Content-addressed VedaFlow object hash.
+     */
+    object_hash: string;
+    /**
+     * Relative bundle path.
+     */
+    path: string;
+  };
+
+/**
+ * Immutable-version collection.
+ */
+export type SkillVersionListView = {
+    /**
+     * Ordinal cursor for the next page.
+     */
+    next_cursor?: number | null;
+    /**
+     * Immutable versions, newest first.
+     */
+    versions: SkillVersionView[];
+  };
+
+/**
+ * Immutable version metadata. File bytes use the dedicated file route.
+ */
+export type SkillVersionView = {
+    /**
+     * Stable digest over exact bundle paths and object addresses.
+     */
+    bundle_digest: string;
+    /**
+     * Immutable version creation time.
+     */
+    created_at: string;
+    /**
+     * Principal that created the version through VedaFlow.
+     */
+    created_by: string;
+    /**
+     * Declared tools are metadata and grant no authority.
+     */
+    declared_tools_are_authorization: boolean;
+    /**
+     * Immutable version identifier.
+     */
+    id: string;
+    /**
+     * Parsed Agent Skills manifest with extension metadata preserved.
+     */
+    manifest: Record<string, unknown>;
+    /**
+     * Monotonic version number within the aggregate.
+     */
+    ordinal: number;
+    /**
+     * Version-specific provenance evidence.
+     */
+    provenance: Record<string, unknown>;
+    /**
+     * Automated quality score from zero through one hundred.
+     */
+    quality_score: number;
+    /**
+     * Rubric version that produced the score.
+     */
+    rubric_version: number;
+    /**
+     * Content-free scanner evidence.
+     */
+    scan: Record<string, unknown>;
+    /**
+     * Scanner ruleset that produced the evidence.
+     */
+    scan_ruleset_version: number;
+    sensitivity: "public" | "internal" | "confidential" | "restricted";
+    /**
+     * Stable Skill aggregate identifier.
+     */
+    skill_id: string;
+    source_kind: "authored" | "directory" | "archive" | "git" | "registry";
+  };
+
+/**
+ * Stable skill head and its current immutable version.
+ */
+export type SkillView = {
+    /**
+     * Aggregate creation time.
+     */
+    created_at: string;
+    /**
+     * Principal that installed the aggregate.
+     */
+    created_by: string;
+    /**
+     * Current immutable version metadata.
+     */
+    current_version: SkillVersionView;
+    /**
+     * Current immutable version pointer.
+     */
+    current_version_id: string;
+    /**
+     * Scope governing installation and updates.
+     */
+    governing_scope_id: string;
+    /**
+     * Stable Skill aggregate identifier.
+     */
+    id: string;
+    /**
+     * Tenant-unique Agent Skills bundle name.
+     */
+    name: string;
+    /**
+     * Last current-pointer update time.
+     */
+    updated_at: string;
+    /**
+     * Principal that last advanced the current pointer.
+     */
+    updated_by: string;
+  };
+
+/**
  * `POST /v1/knowledge/{id}/supersede`.
  */
 export type SupersedeKnowledgeBody = {
@@ -2641,6 +3199,47 @@ export type UpdateGroupBody = {
      */
     members?: string[] | null;
     status?: "active" | "archived";
+  };
+
+/**
+ * Change a binding using optimistic concurrency.
+ */
+export type UpdateSkillBindingBody = {
+    /**
+     * Complete resulting activation state.
+     */
+    enabled: boolean;
+    /**
+     * Exact binding revision required when the change applies.
+     */
+    expected_revision: number;
+    /**
+     * Complete resulting pin state; null follows current.
+     */
+    pinned_version_id?: string | null;
+    /**
+     * Stable reason code (`disable`, `enable`, `pin`, `unpin`).
+     */
+    reason: string;
+  };
+
+/**
+ * Add and select a new immutable version.
+ */
+export type UpdateSkillBody = {
+    /**
+     * Exact current version required when the change applies.
+     */
+    expected_current_version_id: string;
+    /**
+     * Complete replacement bundle; history remains immutable.
+     */
+    files: SkillFileBody[];
+    /**
+     * Retained bundle provenance.
+     */
+    provenance?: SkillProvenanceBody;
+    sensitivity: "public" | "internal" | "confidential" | "restricted";
   };
 
 /**
@@ -3232,6 +3831,163 @@ export type Operations = {
     readonly response: TimelineView;
   };
   /**
+   * List revisioned bindings at one project/principal scope.
+   */
+  readonly list_skill_bindings: {
+    readonly path: "/v1/skill-bindings";
+    readonly method: "GET";
+    readonly response: SkillBindingListView;
+  };
+  /**
+   * Create a project/principal binding through VedaFlow.
+   */
+  readonly create_skill_binding: {
+    readonly path: "/v1/skill-bindings";
+    readonly method: "POST";
+    readonly body: CreateSkillBindingBody;
+    readonly idempotent: true;
+    readonly response: SkillMutationView;
+  };
+  /**
+   * Get one revisioned binding.
+   */
+  readonly get_skill_binding: {
+    readonly path: "/v1/skill-bindings/{id}";
+    readonly method: "GET";
+    readonly response: SkillBindingView;
+  };
+  /**
+   * Update, enable, disable, pin or unpin a binding through VedaFlow.
+   */
+  readonly update_skill_binding: {
+    readonly path: "/v1/skill-bindings/{id}";
+    readonly method: "PATCH";
+    readonly body: UpdateSkillBindingBody;
+    readonly idempotent: true;
+    readonly response: SkillMutationView;
+  };
+  /**
+   * Roll a binding back by changing its pin, never its version history.
+   */
+  readonly rollback_skill_binding: {
+    readonly path: "/v1/skill-bindings/{id}/rollback";
+    readonly method: "POST";
+    readonly body: RollbackSkillBindingBody;
+    readonly idempotent: true;
+    readonly response: SkillMutationView;
+  };
+  /**
+   * Record one version-specific usage stage idempotently.
+   */
+  readonly record_skill_usage: {
+    readonly path: "/v1/skill-usage";
+    readonly method: "POST";
+    readonly body: RecordSkillUsageBody;
+    readonly response: SkillUsageEventView;
+  };
+  /**
+   * List visible stable skills. Each row is decided at its governing scope.
+   */
+  readonly list_skills: {
+    readonly path: "/v1/skills";
+    readonly method: "GET";
+    readonly response: SkillListView;
+  };
+  /**
+   * Install a stable skill and first immutable version through VedaFlow.
+   */
+  readonly install_skill: {
+    readonly path: "/v1/skills";
+    readonly method: "POST";
+    readonly body: InstallSkillBody;
+    readonly idempotent: true;
+    readonly response: SkillMutationView;
+  };
+  /**
+   * Resolve enabled bindings to exact immutable versions for a context scope.
+   */
+  readonly list_available_skills: {
+    readonly path: "/v1/skills/available";
+    readonly method: "GET";
+    readonly response: AvailableSkillListView;
+  };
+  /**
+   * Get one stable skill and current version.
+   */
+  readonly get_skill: {
+    readonly path: "/v1/skills/{id}";
+    readonly method: "GET";
+    readonly response: SkillView;
+  };
+  /**
+   * Create a new immutable version through VedaFlow.
+   */
+  readonly update_skill: {
+    readonly path: "/v1/skills/{id}";
+    readonly method: "PATCH";
+    readonly body: UpdateSkillBody;
+    readonly idempotent: true;
+    readonly response: SkillMutationView;
+  };
+  /**
+   * List immutable versions, newest first.
+   */
+  readonly list_skill_versions: {
+    readonly path: "/v1/skills/{id}/versions";
+    readonly method: "GET";
+    readonly response: SkillVersionListView;
+  };
+  /**
+   * Get exact immutable version metadata.
+   */
+  readonly get_skill_version: {
+    readonly path: "/v1/skills/{id}/versions/{version_id}";
+    readonly method: "GET";
+    readonly response: SkillVersionView;
+  };
+  /**
+   * List exact immutable file descriptors.
+   */
+  readonly list_skill_version_files: {
+    readonly path: "/v1/skills/{id}/versions/{version_id}/files";
+    readonly method: "GET";
+    readonly response: SkillVersionFileListView;
+  };
+  /**
+   * Fetch one exact version file. The wildcard remains bundle-relative.
+   */
+  readonly get_skill_version_file: {
+    readonly path: "/v1/skills/{id}/versions/{version_id}/files/{path}";
+    readonly method: "GET";
+    readonly response: SkillVersionFileContentView;
+  };
+  /**
+   * List controlled test runs for one immutable version.
+   */
+  readonly list_skill_tests: {
+    readonly path: "/v1/skills/{id}/versions/{version_id}/tests";
+    readonly method: "GET";
+    readonly response: SkillTestRunListView;
+  };
+  /**
+   * Run the built-in non-executing validation sandbox.
+   */
+  readonly run_skill_test: {
+    readonly path: "/v1/skills/{id}/versions/{version_id}/tests";
+    readonly method: "POST";
+    readonly body: RunSkillTestBody;
+    readonly idempotent: true;
+    readonly response: SkillTestRunView;
+  };
+  /**
+   * List usage evidence for one exact version.
+   */
+  readonly list_skill_usage: {
+    readonly path: "/v1/skills/{id}/versions/{version_id}/usage";
+    readonly method: "GET";
+    readonly response: SkillUsageListView;
+  };
+  /**
    * `GET /v1/workspaces` — the tenant's workspaces.
    */
   readonly list_workspaces: {
@@ -3389,6 +4145,24 @@ export const OPERATIONS = {
   evaluate_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-evaluation", method: "POST" },
   query_session_knowledge: { path: "/v1/sessions/{session_id}/knowledge-query", method: "POST" },
   get_session_timeline: { path: "/v1/sessions/{session_id}/timeline", method: "GET" },
+  list_skill_bindings: { path: "/v1/skill-bindings", method: "GET" },
+  create_skill_binding: { path: "/v1/skill-bindings", method: "POST", idempotent: true },
+  get_skill_binding: { path: "/v1/skill-bindings/{id}", method: "GET" },
+  update_skill_binding: { path: "/v1/skill-bindings/{id}", method: "PATCH", idempotent: true },
+  rollback_skill_binding: { path: "/v1/skill-bindings/{id}/rollback", method: "POST", idempotent: true },
+  record_skill_usage: { path: "/v1/skill-usage", method: "POST" },
+  list_skills: { path: "/v1/skills", method: "GET" },
+  install_skill: { path: "/v1/skills", method: "POST", idempotent: true },
+  list_available_skills: { path: "/v1/skills/available", method: "GET" },
+  get_skill: { path: "/v1/skills/{id}", method: "GET" },
+  update_skill: { path: "/v1/skills/{id}", method: "PATCH", idempotent: true },
+  list_skill_versions: { path: "/v1/skills/{id}/versions", method: "GET" },
+  get_skill_version: { path: "/v1/skills/{id}/versions/{version_id}", method: "GET" },
+  list_skill_version_files: { path: "/v1/skills/{id}/versions/{version_id}/files", method: "GET" },
+  get_skill_version_file: { path: "/v1/skills/{id}/versions/{version_id}/files/{path}", method: "GET" },
+  list_skill_tests: { path: "/v1/skills/{id}/versions/{version_id}/tests", method: "GET" },
+  run_skill_test: { path: "/v1/skills/{id}/versions/{version_id}/tests", method: "POST", idempotent: true },
+  list_skill_usage: { path: "/v1/skills/{id}/versions/{version_id}/usage", method: "GET" },
   list_workspaces: { path: "/v1/workspaces", method: "GET" },
   create_workspace: { path: "/v1/workspaces", method: "POST", idempotent: true },
   get_workspace: { path: "/v1/workspaces/{workspace_id}", method: "GET" },

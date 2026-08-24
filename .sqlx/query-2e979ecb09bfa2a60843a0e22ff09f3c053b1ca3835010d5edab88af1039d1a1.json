@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into skill_version_files (tenant_id, version_id, path, object_hash, chars)\n               values ($1,$2,$3,$4,$5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Bytea",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2e979ecb09bfa2a60843a0e22ff09f3c053b1ca3835010d5edab88af1039d1a1"
+}
