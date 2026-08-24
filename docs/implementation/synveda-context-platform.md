@@ -34,11 +34,11 @@ programme convention established in Prompt 1.
 | Session-based capture batches, reviewable candidates and governed acceptance actions | CPR-18 | **complete** | `2d845b0` | `e778a60` | gateway 3/3; Claude lifecycle 2/2; ingest 64/64; OpenAPI 5/5; console 151/151; RLS 84/84 | PASS | PASS | isolated `demos/cpr-18-session-capture.sh` PASS: 8 candidates, 8 governed changes, zero old records/queue | none |
 | New Learnings lightweight candidate review and scope-safe governed decisions | CPR-19 | **complete** | `e778a60` | `e90dac9` | console pure 8/8; component acceptance 6/6; complete console 165/165; production build PASS | PASS | N/A — console-only | real-component server-rendered acceptance covers evidence, comparisons, all actions, denial and applied/pending outcomes | none |
 | Explainable Knowledge context planning, trace retention, feedback and scoped query/evaluation lenses | CPR-20 | **complete** | `e90dac9` | `8ed8aa6` | context 3/3; audit 13/13; packs 10/10; sessions 22/22; OpenAPI 5/5; console 165/165; RLS guards PASS | PASS | PASS | isolated `demos/cpr-20-context-planning.sh` PASS: 55 Knowledge, 47 plans, 75 selections, 2 feedback, zero records | none |
-| Linkable Context Inspector, retention-aware evidence and exact revision outcome feedback | CPR-21 | **complete** | `8ed8aa6` | next checkpoint | console helpers 7/7; component 6/6; complete console 179/179; context 3/3; sessions 22/22; production build PASS | PASS | PASS | in-app browser unavailable; real-component SSR covers full/redacted/hashes-only/disabled/refusal and the production bundle builds | none |
+| Linkable Context Inspector, retention-aware evidence and exact revision outcome feedback | CPR-21 | **complete** | `8ed8aa6` | `8cdd1ee` | console helpers 7/7; component 6/6; complete console 179/179; context 3/3; sessions 22/22; production build PASS | PASS | PASS | in-app browser unavailable; real-component SSR covers full/redacted/hashes-only/disabled/refusal and the production bundle builds | none |
+| Core personal/team PulseBoard loop across sessions, capture, governed Knowledge, privacy, supersession and inspector evidence | CPR-22 | **complete** | `8cdd1ee` | next checkpoint | consolidated DB acceptance 1/1; capture 4/4; context 3/3; console 179/179 | PASS | PASS | isolated `demos/cpr-22-mvp-acceptance.sh` PASS: 3 sessions, 5 candidates, 4 changes, 3 current + 1 superseded Knowledge, 2 runs, 3 selections, zero records | none |
 
-**Exact next objective:** file and implement CPR-22, the core individual/small-
-team MVP acceptance gate over sessions, capture, governed Knowledge, clean-
-session/team reuse, private isolation, supersession and the Context Inspector.
+**Exact next objective:** commit and push CPR-22, then execute the already-filed
+CPR-13 demo-corpus re-point over the final MVP surfaces and add the drift gate.
 CPR-13 remains reserved for the demo-corpus re-point and follows the
 MVP surfaces it must demonstrate; rewriting those demos before Knowledge,
 capture and scoped recall exist would knowingly rewrite them twice.
@@ -3456,4 +3456,80 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(console): add context inspector and feedback (CPR-21)` on
   `feat/context-platform-mvp`.
 - **Commit hash.** Written by the CPR-22 checkpoint under the programme's
+  next-checkpoint convention.
+
+### Prompt 20 objective — core individual/small-team MVP acceptance (CPR-22)
+
+- **Selected feature and state.** **CPR-22** is delivered from `8cdd1ee`. It
+  records CPR-21's commit as `8cdd1ee` and makes no architecture change: the
+  package composes the public seams and accepted ADR-0070 through ADR-0084 in
+  one adversarial product scenario.
+
+- **PulseBoard loop.** The database-backed acceptance uses only the documented
+  identity/root-grant test bootstrap beneath the gateway. Alice creates the
+  workspace/project and Bob's grant through public operations, then every
+  product act uses the public session, event, capture, Knowledge and context
+  API. Four Alice events freeze to four candidate-only proposals. She publishes
+  the webhook identity and request-header convention at the project, keeps the
+  quick-test preference at her principal scope and dismisses the incidental
+  detail. Each publication is an ordinary applied Knowledge VedaFlow change;
+  the dismissal has no change and extraction itself has no active item.
+
+- **Clean team reuse and correction.** A fresh Bob session receives both exact
+  project revisions with Alice's session-event provenance. His rendered block,
+  candidate/selection trace, Knowledge detail and scoped query disclose no id
+  or content from her personal preference. Bob then records the `traceparent`
+  correction as another event and capture candidate and resolves it with the
+  public replace command against the exact inspected `X-Request-Id` revision.
+  The replacement owns an immutable `supersedes` relation; the old aggregate
+  remains history. A third fresh run selects the replacement and excludes the
+  old item explicitly as `superseded`, never as current truth.
+
+- **Evidence across the boundaries.** The generated context detail used by the
+  Inspector contains the replacement revision, exact source event, reason
+  codes, rank, token charge, retrieval version and rendered hash. Its session
+  timeline has the exact link target and content-free `Synveda supplied N
+  knowledge items` summary. Database assertions finish at three sessions, five
+  events/candidates/decisions, four Knowledge items/revisions/VedaFlow changes,
+  three active and one superseded head, two context runs, three selections and
+  zero record writes. `/v1/observe`, `/v1/inject` and `/v1/recall` remain 404.
+  The tenant audit chain verifies and contains allowed PDP decisions plus every
+  session/capture/Knowledge/context transition without the three content
+  sentinels.
+
+- **Tests and exact results.** Consolidated MVP AC **1/1**, complete capture
+  integration **4/4**, context **3/3**, complete real-component console
+  **179/179**. The isolated `demos/cpr-22-mvp-acceptance.sh` passed with the
+  counts above. `make ci` **PASS** and full fresh-scratch `make db-test`
+  **PASS**, including the 1k-event ingestion gate. The first restricted CI
+  invocation was denied permission to bind two loopback test listeners; the
+  unchanged unrestricted invocation passed. This deterministic test is not a
+  live-client claim; CPR-14 remains the genuine Claude Code 2.1.241 run.
+
+- **Schema and contract.** No migration, route, DTO, Cedar action or audit
+  action moved. Schema epoch **2** remains **49 migrations** and OpenAPI remains
+  **67 operations**.
+
+#### Core MVP checkpoint
+
+- One runtime serves a personal user and a project team: **proved** by Alice,
+  Bob and their shared workspace/project/session API.
+- Sessions produce reviewable candidates and candidates remain separate from
+  active Knowledge: **proved** before the first decision and by dismissal.
+- Accepted Knowledge has immutable revisions and exact provenance: **proved**
+  for all four published aggregates and their session-event sources.
+- A clean session and teammate reuse project Knowledge: **proved** by Bob's
+  second session; private Knowledge stays private across detail, query, plan
+  and rendered context.
+- Superseded Knowledge is not current or supplied: **proved** by the explicit
+  edge/current projection and third clean run.
+- Context selection is explainable: **proved** by the generated Inspector
+  detail and timeline address.
+- The complete path is PDP-, VedaFlow-, RLS- and audit-governed: **proved** by
+  per-object decisions, one change per mutation, forced-RLS full suite and a
+  verifying content-free chain.
+
+- **Commit.** `test(mvp): verify cross-session team knowledge loop (CPR-22)`
+  on `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-13 checkpoint under the programme's
   next-checkpoint convention.

@@ -394,6 +394,40 @@ fn revised_content(title: &str, body: &str) -> Value {
     })
 }
 
+async fn compose_context(
+    app: &Router,
+    token: &str,
+    session_id: &str,
+    key: &str,
+    query: &str,
+) -> Value {
+    let (status, value) = call(
+        app,
+        "POST",
+        &format!("/v1/sessions/{session_id}/context-runs"),
+        token,
+        Some(key),
+        Some(json!({"query": query, "budget_tokens": 512})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{value}");
+    value
+}
+
+async fn context_detail(app: &Router, token: &str, run_id: &str) -> Value {
+    let (status, value) = call(
+        app,
+        "GET",
+        &format!("/v1/context-runs/{run_id}"),
+        token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    value
+}
+
 #[tokio::test]
 async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
     let _guard = serial().await;
@@ -972,4 +1006,529 @@ async fn candidate_matches_are_reauthorised_and_foreign_tenants_see_404() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{hidden_candidate}");
+}
+
+/// CPR-22's product checkpoint deliberately crosses every seam in one test.
+/// The only direct writes are the documented test-policy bootstrap (identity
+/// and root grant); sessions, events, membership, candidate decisions,
+/// Knowledge, supersession and context all use their public application APIs.
+#[tokio::test]
+async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant(synveda_policy::STANDARD).await else {
+        return;
+    };
+    let app = router(state.clone());
+    let alice = issue(ADMIN, tenant_id);
+    add_identity(&state, tenant_id, MEMBER).await;
+    let bob = issue(MEMBER, tenant_id);
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin identity lookup");
+    let alice_scope = identities::by_subject(&mut *tx, tenant_id, ADMIN)
+        .await
+        .expect("read Alice identity")
+        .expect("Alice identity")
+        .scope_id;
+    tx.commit().await.expect("commit identity lookup");
+
+    let (workspace_id, _) = workspace(&app, &alice, "pulseboard-mvp").await;
+    let (project_id, project_scope) = project(&app, &alice, &workspace_id, "delivery-api").await;
+    let project_scope: ScopeId = project_scope.parse().expect("parse project scope");
+    let (grant_status, grant) = call(
+        &app,
+        "POST",
+        &format!("/v1/projects/{project_id}/members"),
+        &alice,
+        Some("cpr22-grant-bob"),
+        Some(json!({"principal_id": MEMBER, "role": "member"})),
+    )
+    .await;
+    assert_eq!(grant_status, StatusCode::CREATED, "{grant}");
+
+    // Alice's first supported run records three durable facts and one detail
+    // that the reviewer will deliberately decline to publish.
+    let alice_session = session(
+        &app,
+        &alice,
+        &workspace_id,
+        &project_id,
+        "cpr22-alice-session",
+    )
+    .await;
+    let statements = [
+        "Webhook deliveries are deduplicated by provider event ID.",
+        "Public requests currently use X-Request-Id.",
+        "I prefer my local quick-test command to be just test-fast.",
+        "The cafe beside the office closes at four.",
+    ];
+    let appended = append(
+        &app,
+        &alice,
+        &alice_session,
+        statements
+            .iter()
+            .enumerate()
+            .map(|(ordinal, text)| event(&format!("cpr22-alice-{ordinal}"), text))
+            .collect(),
+    )
+    .await;
+    let source_event_ids = appended["events"]
+        .as_array()
+        .expect("appended events")
+        .iter()
+        .map(|entry| entry["event"]["id"].as_str().expect("event id").to_owned())
+        .collect::<Vec<_>>();
+    let (batch_status, batch) = freeze(&app, &alice, &alice_session, "cpr22-alice-capture").await;
+    assert_eq!(batch_status, StatusCode::CREATED, "{batch}");
+    let alice_batch = batch["id"].as_str().expect("Alice batch id");
+
+    let unpublished: i64 =
+        sqlx::query_scalar("select count(*) from knowledge_items where tenant_id = $1")
+            .bind(tenant_id.as_uuid())
+            .fetch_one(&state.pool)
+            .await
+            .expect("count pre-review Knowledge");
+    assert_eq!(
+        unpublished, 0,
+        "extraction intent must not publish Knowledge"
+    );
+    run_capture(&state).await;
+    let proposed = candidates(&app, &alice, alice_batch).await;
+    assert_eq!(proposed.len(), statements.len());
+    assert!(proposed.iter().all(|value| value["state"] == "pending"));
+    for (candidate, source_id) in proposed.iter().zip(&source_event_ids) {
+        assert_eq!(candidate["source_event_ids"], json!([source_id]));
+        assert!(candidate["resulting_change_id"].is_null());
+    }
+    assert_eq!(proposed[0]["proposed_scope_id"], project_scope.to_string());
+    assert_eq!(proposed[1]["proposed_scope_id"], project_scope.to_string());
+    assert_eq!(proposed[2]["knowledge_type"], "preference");
+    assert_eq!(proposed[2]["proposed_scope_id"], alice_scope.to_string());
+    assert_eq!(proposed[2]["proposed_project_id"], Value::Null);
+    assert_eq!(proposed[2]["proposed_owner_principal_id"], ADMIN);
+
+    let (first_status, first) = decide(
+        &app,
+        &alice,
+        proposed[0]["id"].as_str().expect("first candidate"),
+        "accept",
+        "cpr22-share-webhooks",
+        json!({}),
+    )
+    .await;
+    assert_eq!(first_status, StatusCode::CREATED, "{first}");
+    assert_eq!(first["candidate"]["resulting_outcome"], "applied");
+    let webhook_item = first["candidate"]["resulting_knowledge_item_id"]
+        .as_str()
+        .expect("webhook Knowledge")
+        .to_owned();
+    let webhook_revision = first["candidate"]["resulting_revision_id"]
+        .as_str()
+        .expect("webhook revision")
+        .to_owned();
+
+    let (second_status, second) = decide(
+        &app,
+        &alice,
+        proposed[1]["id"].as_str().expect("second candidate"),
+        "accept",
+        "cpr22-share-request-id",
+        json!({}),
+    )
+    .await;
+    assert_eq!(second_status, StatusCode::CREATED, "{second}");
+    assert_eq!(second["candidate"]["resulting_outcome"], "applied");
+    let request_id_item = second["candidate"]["resulting_knowledge_item_id"]
+        .as_str()
+        .expect("request-id Knowledge")
+        .to_owned();
+    let request_id_revision = second["candidate"]["resulting_revision_id"]
+        .as_str()
+        .expect("request-id revision")
+        .to_owned();
+
+    let (private_status, private) = decide(
+        &app,
+        &alice,
+        proposed[2]["id"].as_str().expect("private candidate"),
+        "accept",
+        "cpr22-keep-private",
+        json!({}),
+    )
+    .await;
+    assert_eq!(private_status, StatusCode::CREATED, "{private}");
+    assert_eq!(private["candidate"]["resulting_outcome"], "applied");
+    let private_item = private["candidate"]["resulting_knowledge_item_id"]
+        .as_str()
+        .expect("private Knowledge")
+        .to_owned();
+
+    let (dismiss_status, dismissed) = decide(
+        &app,
+        &alice,
+        proposed[3]["id"].as_str().expect("incidental candidate"),
+        "dismiss",
+        "cpr22-dismiss-incidental",
+        json!({"reason": "not durable project knowledge"}),
+    )
+    .await;
+    assert_eq!(dismiss_status, StatusCode::CREATED, "{dismissed}");
+    assert_eq!(dismissed["candidate"]["state"], "dismissed");
+    assert!(dismissed["candidate"]["resulting_change_id"].is_null());
+
+    // A genuinely fresh Bob session uses the same project runtime. Both
+    // shared revisions arrive with source evidence; Alice's principal-owned
+    // preference is absent from the rendered block and every trace address.
+    let bob_session = session(&app, &bob, &workspace_id, &project_id, "cpr22-bob-session").await;
+    let reused = compose_context(
+        &app,
+        &bob,
+        &bob_session,
+        "cpr22-bob-reuse",
+        "provider event ID OR X-Request-Id OR quick-test",
+    )
+    .await;
+    let reused_text = reused["rendered"].as_str().expect("Bob rendered context");
+    assert!(reused_text.contains("provider event ID"), "{reused_text}");
+    assert!(reused_text.contains("X-Request-Id"), "{reused_text}");
+    assert!(!reused_text.contains("test-fast"), "{reused_text}");
+    let reused_detail =
+        context_detail(&app, &bob, reused["id"].as_str().expect("reuse run id")).await;
+    let reused_selections = reused_detail["selections"]
+        .as_array()
+        .expect("reuse selections");
+    for (item, revision) in [
+        (&webhook_item, &webhook_revision),
+        (&request_id_item, &request_id_revision),
+    ] {
+        let selected = reused_selections
+            .iter()
+            .find(|selection| {
+                selection["knowledge_item_id"] == item.as_str()
+                    && selection["knowledge_revision_id"] == revision.as_str()
+            })
+            .unwrap_or_else(|| {
+                panic!("shared revision absent from context trace: {reused_detail}")
+            });
+        assert!(selected["rank"].as_i64().is_some());
+        assert!(selected["token_count"].as_i64().is_some());
+        assert!(
+            !selected["reason_codes"]
+                .as_array()
+                .expect("reason codes")
+                .is_empty()
+        );
+        assert_eq!(
+            selected["sources"][0]["source_type"], "session_event",
+            "selected Knowledge must retain its conversation evidence: {selected}"
+        );
+    }
+    assert!(!reused_detail.to_string().contains(&private_item));
+    assert!(!reused_detail.to_string().contains("test-fast"));
+    let (private_read_status, private_read) = call(
+        &app,
+        "GET",
+        &format!("/v1/knowledge/{private_item}"),
+        &bob,
+        None,
+        None,
+    )
+    .await;
+    assert!(
+        matches!(
+            private_read_status,
+            StatusCode::FORBIDDEN | StatusCode::NOT_FOUND
+        ),
+        "Bob read Alice's private Knowledge: {private_read_status} {private_read}"
+    );
+    assert!(!private_read.to_string().contains("test-fast"));
+    let (private_query_status, private_query) = call(
+        &app,
+        "POST",
+        &format!("/v1/sessions/{bob_session}/knowledge-query"),
+        &bob,
+        None,
+        Some(json!({"query": "test-fast", "limit": 20})),
+    )
+    .await;
+    assert_eq!(private_query_status, StatusCode::OK, "{private_query}");
+    assert_eq!(private_query["items"], json!([]));
+
+    // Bob's correction is another captured proposal. Replace names the exact
+    // old revision, and its reviewed content stops repeating the obsolete
+    // convention while retaining the original session event as provenance.
+    let correction = append(
+        &app,
+        &bob,
+        &bob_session,
+        vec![event(
+            "cpr22-bob-correction",
+            "We decided traceparent replaces X-Request-Id for public requests.",
+        )],
+    )
+    .await;
+    let correction_event = correction["events"][0]["event"]["id"]
+        .as_str()
+        .expect("correction event")
+        .to_owned();
+    let (correction_batch_status, correction_batch) =
+        freeze(&app, &bob, &bob_session, "cpr22-bob-capture").await;
+    assert_eq!(
+        correction_batch_status,
+        StatusCode::CREATED,
+        "{correction_batch}"
+    );
+    run_capture(&state).await;
+    let correction_candidates = candidates(
+        &app,
+        &bob,
+        correction_batch["id"]
+            .as_str()
+            .expect("correction batch id"),
+    )
+    .await;
+    assert_eq!(correction_candidates.len(), 1);
+    assert_eq!(
+        correction_candidates[0]["source_event_ids"],
+        json!([correction_event])
+    );
+    let (replace_status, replaced) = decide(
+        &app,
+        &bob,
+        correction_candidates[0]["id"]
+            .as_str()
+            .expect("correction candidate"),
+        "replace",
+        "cpr22-replace-request-id",
+        json!({
+            "item_id": request_id_item,
+            "expected_revision_id": request_id_revision,
+            "replacement": {
+                "knowledge_type": "convention",
+                "content": revised_content(
+                    "Current request correlation convention",
+                    "PulseBoard public requests use the W3C traceparent header."
+                )
+            }
+        }),
+    )
+    .await;
+    assert_eq!(replace_status, StatusCode::CREATED, "{replaced}");
+    assert_eq!(replaced["candidate"]["state"], "replaced");
+    assert_eq!(replaced["candidate"]["resulting_outcome"], "applied");
+    let replacement_item = replaced["candidate"]["resulting_knowledge_item_id"]
+        .as_str()
+        .expect("replacement Knowledge")
+        .to_owned();
+    let replacement_revision = replaced["candidate"]["resulting_revision_id"]
+        .as_str()
+        .expect("replacement revision")
+        .to_owned();
+
+    let (old_status, old_detail) = call(
+        &app,
+        "GET",
+        &format!("/v1/knowledge/{request_id_item}"),
+        &alice,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(old_status, StatusCode::OK, "{old_detail}");
+    assert_eq!(old_detail["lifecycle_state"], "superseded");
+    let relation_count: i64 = sqlx::query_scalar(
+        "select count(*) from knowledge_relations where tenant_id = $1 \
+         and source_item_id = $2 and target_item_id = $3 and relation_type = 'supersedes'",
+    )
+    .bind(tenant_id.as_uuid())
+    .bind(uuid::Uuid::parse_str(&replacement_item).expect("replacement item UUID"))
+    .bind(uuid::Uuid::parse_str(&request_id_item).expect("old item UUID"))
+    .fetch_one(&state.pool)
+    .await
+    .expect("count explicit supersession");
+    assert_eq!(relation_count, 1);
+
+    // A third clean run receives the correction, never the superseded head.
+    // The returned detail is the exact generated contract the Context
+    // Inspector renders, so these are also its user-visible assertions.
+    let third_session = session(
+        &app,
+        &bob,
+        &workspace_id,
+        &project_id,
+        "cpr22-third-session",
+    )
+    .await;
+    let current = compose_context(
+        &app,
+        &bob,
+        &third_session,
+        "cpr22-third-context",
+        "traceparent OR X-Request-Id",
+    )
+    .await;
+    let current_text = current["rendered"].as_str().expect("current context");
+    assert!(current_text.contains("traceparent"), "{current_text}");
+    assert!(!current_text.contains("X-Request-Id"), "{current_text}");
+    assert!(!current_text.contains("test-fast"), "{current_text}");
+    let current_run_id = current["id"].as_str().expect("current run id");
+    let inspector = context_detail(&app, &bob, current_run_id).await;
+    let selected = inspector["selections"]
+        .as_array()
+        .expect("inspector selections");
+    let replacement_selection = selected
+        .iter()
+        .find(|selection| {
+            selection["knowledge_item_id"] == replacement_item
+                && selection["knowledge_revision_id"] == replacement_revision
+        })
+        .unwrap_or_else(|| panic!("replacement missing from inspector: {inspector}"));
+    assert_eq!(
+        replacement_selection["sources"][0]["session_event_id"],
+        correction_event
+    );
+    assert!(
+        selected
+            .iter()
+            .all(|selection| selection["knowledge_item_id"] != request_id_item),
+        "superseded Knowledge was selected: {inspector}"
+    );
+    let obsolete = inspector["candidates"]
+        .as_array()
+        .expect("inspector candidates")
+        .iter()
+        .find(|candidate| candidate["knowledge_item_id"] == request_id_item)
+        .unwrap_or_else(|| panic!("obsolete candidate absent from explanation: {inspector}"));
+    assert_eq!(obsolete["lifecycle_state"], "superseded");
+    assert_eq!(obsolete["exclusion_reason"], "superseded");
+    assert_eq!(
+        inspector["run"]["retrieval_version"],
+        "knowledge-planner-v1"
+    );
+    assert!(inspector["run"]["block_hash"].as_str().is_some());
+
+    let (timeline_status, timeline) = call(
+        &app,
+        "GET",
+        &format!("/v1/sessions/{third_session}/timeline"),
+        &bob,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(timeline_status, StatusCode::OK, "{timeline}");
+    let timeline_context = timeline["entries"]
+        .as_array()
+        .expect("timeline entries")
+        .iter()
+        .find(|entry| entry["kind"] == "context_run" && entry["id"] == current_run_id)
+        .expect("timeline Context Inspector link target");
+    assert!(
+        timeline_context["summary"]
+            .as_str()
+            .expect("context summary")
+            .starts_with("Synveda supplied ")
+    );
+
+    // The product path remains one model: every publication has a VedaFlow
+    // change, no record dual-write occurred, and the deleted global runtime
+    // endpoints are still hard 404s.
+    let counts: (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
+        "select \
+           (select count(*) from sessions where tenant_id = $1), \
+           (select count(*) from session_events where tenant_id = $1), \
+           (select count(*) from capture_batches where tenant_id = $1), \
+           (select count(*) from capture_candidates where tenant_id = $1), \
+           (select count(*) from capture_candidate_decisions where tenant_id = $1), \
+           (select count(*) from knowledge_items where tenant_id = $1), \
+           (select count(*) from knowledge_revisions where tenant_id = $1), \
+           (select count(*) from knowledge_changes where tenant_id = $1), \
+           (select count(*) from session_context_runs where tenant_id = $1), \
+           (select count(*) from records where tenant_id = $1)",
+    )
+    .bind(tenant_id.as_uuid())
+    .fetch_one(&state.pool)
+    .await
+    .expect("read MVP database state");
+    assert_eq!(counts, (3, 5, 2, 5, 5, 4, 4, 4, 2, 0));
+    let active: i64 = sqlx::query_scalar(
+        "select count(*) from knowledge_items where tenant_id = $1 and lifecycle_state = 'active'",
+    )
+    .bind(tenant_id.as_uuid())
+    .fetch_one(&state.pool)
+    .await
+    .expect("count current Knowledge");
+    let superseded: i64 = sqlx::query_scalar(
+        "select count(*) from knowledge_items where tenant_id = $1 and lifecycle_state = 'superseded'",
+    )
+    .bind(tenant_id.as_uuid())
+    .fetch_one(&state.pool)
+    .await
+    .expect("count superseded Knowledge");
+    assert_eq!((active, superseded), (3, 1));
+
+    for path in ["/v1/observe", "/v1/inject", "/v1/recall"] {
+        let (status, body) = call(&app, "POST", path, &alice, None, Some(json!({}))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "dead route {path}: {body}");
+    }
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin audit verification");
+    let audit = synveda_audit::tail(&mut tx, tenant_id, 1_000)
+        .await
+        .expect("read MVP audit chain");
+    let verification = synveda_audit::verify(&mut tx, tenant_id)
+        .await
+        .expect("verify MVP audit chain");
+    tx.commit().await.expect("commit audit verification");
+    assert!(
+        matches!(
+            verification,
+            synveda_audit::ChainVerification::Valid { events } if events == audit.len() as i64
+        ),
+        "invalid audit chain: {verification:?}"
+    );
+    let actions = audit
+        .iter()
+        .map(|entry| entry.action.as_str())
+        .collect::<Vec<_>>();
+    for action in [
+        "authz.decision",
+        "session.opened",
+        "session.events.appended",
+        "capture.batch.created",
+        "capture.batch.completed",
+        "capture.candidate.decided",
+        "knowledge.change.opened",
+        "knowledge.change.applied",
+        "context.candidates.retrieved",
+        "context.selections.made",
+        "session.context.composed",
+    ] {
+        assert!(
+            actions.contains(&action),
+            "missing audit action {action}: {actions:?}"
+        );
+    }
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| **action == "knowledge.change.opened")
+            .count(),
+        4,
+        "every active mutation must open exactly one VedaFlow change"
+    );
+    let audit_text = audit
+        .iter()
+        .map(|entry| entry.payload.to_string())
+        .collect::<String>();
+    for sensitive in ["test-fast", "X-Request-Id", "traceparent"] {
+        assert!(
+            !audit_text.contains(sensitive),
+            "ordinary audit metadata leaked Knowledge or session content: {sensitive}"
+        );
+    }
 }

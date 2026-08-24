@@ -65,6 +65,8 @@ delivered; current immutable Knowledge, re-authorised traces and exact feedback
 replace the final runtime record reader under accepted ADR-0084.
 CPR-21, the generated Context Inspector and outcome-feedback product surface,
 is delivered with no new ADR, schema, policy/audit action or API operation.
+CPR-22, the core personal/team MVP acceptance gate, is delivered: its isolated
+PulseBoard cross-session scenario, complete CI and full database suite pass.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -174,7 +176,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 86 of 118 features delivered — see docs/backlog/STATUS.md for
+features done. 87 of 119 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -256,6 +258,11 @@ delivered**: its linkable generated Context Inspector renders those traces
 under all four retention modes, binds explicit feedback to one revision and
 links a freshly visibility-counted, content-free session timeline summary
 without adding a second telemetry model.
+**CPR-22 was filed and delivered the same day**, making it **119 with 87
+delivered**: the isolated PulseBoard acceptance proves the session → candidates
+→ VedaFlow Knowledge → clean teammate context → explicit supersession →
+inspector loop with Alice's private preference absent; complete CI and the full
+fresh-scratch database suite pass.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

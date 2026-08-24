@@ -1880,6 +1880,26 @@ CPR-21  Context Inspector and outcome feedback (L)
   and `make db-test` gates pass. No ADR: ADR-0075, ADR-0077 and ADR-0084 already
   lock every consumed boundary.
 
+CPR-22  Core individual and small-team MVP acceptance (L)
+  Filed 2026-08-24 by the autonomous continuation. Prove the complete
+  PulseBoard loop over one public application runtime: Alice's real session
+  events become reviewable candidates; two project items and one principal-
+  private preference publish only through Knowledge VedaFlow changes; Bob
+  reuses the project revisions from a clean session without seeing the private
+  one; Bob's captured correction explicitly supersedes the old convention; and
+  a third clean run plus the Context Inspector show the replacement and why it
+  was selected while retaining the obsolete item only as history.
+  AC: one database-backed public-API scenario asserts the workspace/project/
+  grant, three session records, exact event evidence, candidate decisions,
+  VedaFlow changes, immutable Knowledge revisions and sources, private PDP
+  isolation, explicit supersession relation/current projection, context
+  selections and visible inspector/timeline contract; the audit chain verifies
+  with allowed decisions and all semantic transitions but no content; no old
+  record is written and deleted global runtime paths remain 404; no schema,
+  route, DTO, Cedar/audit vocabulary or second implementation is added; an
+  isolated runnable demo, focused suites, `make ci` and `make db-test` pass.
+  No ADR: this is the acceptance composition of ADR-0070 through ADR-0084.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1973,7 +1993,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who
