@@ -1,0 +1,140 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into knowledge_revisions\n            (id, tenant_id, knowledge_item_id, revision_number, title,\n             body_markdown, summary, tags, sensitivity, confidence_permille,\n             valid_from, valid_to, stale_after, verification_metadata,\n             content_hash, metadata, created_by)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,\n                $11, $12, $13, $14, $15, $16, $17)\n        returning id, tenant_id, knowledge_item_id, revision_number, title,\n                  body_markdown, summary, tags as \"tags!: Vec<String>\",\n                  sensitivity, confidence_permille, valid_from, valid_to,\n                  stale_after, verification_metadata, content_hash, metadata,\n                  created_by, transaction_time\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "knowledge_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "revision_number",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "body_markdown",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "summary",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "tags!: Vec<String>",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 8,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "confidence_permille",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "valid_from",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "stale_after",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "verification_metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 14,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 16,
+        "name": "created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "transaction_time",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "TextArray",
+        "Text",
+        "Int4",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Jsonb",
+        "Text",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "1d3007a837ecf37a38bcd8194cb4eb0d218179679c9a6ea161a2eb163fc4b85b"
+}

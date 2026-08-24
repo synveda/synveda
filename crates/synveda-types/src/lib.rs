@@ -25,6 +25,10 @@ mod error;
 mod graph;
 mod id;
 mod identity;
+// Stable Knowledge aggregates and immutable revisions (CPR-15, ADR-0080).
+// Public because these are the product's primary content vocabulary and the
+// store, command, gateway and generated API layers must share one copy.
+pub mod knowledge;
 // Canonical JSON (CPR-10). Public as a module because both callers hash a
 // **caller-supplied** object and neither is in this crate: the gateway's
 // idempotency digest and the session ledger's payload hash.
@@ -81,7 +85,8 @@ pub use error::{Error, Result};
 pub use graph::{Depth, Graph};
 pub use id::{
     ContextRunId, DirectoryGroupId, DirectoryUserId, GrantId, GraphEdgeId, GraphVertexId, GroupId,
-    IdentityId, InviteId, LapseId, ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId,
+    IdentityId, InviteId, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId,
+    KnowledgeSourceId, LapseId, ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId,
     ScopeId, SessionEventId, SessionId, TenantId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};

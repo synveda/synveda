@@ -1694,6 +1694,36 @@ CPR-14  Live Claude Code session acceptance gate (L)
   the real client reported four hooks plus one MCP server enabled, composed one context run,
   persisted four ordered user/tool/assistant events and ended the same governed session.
 
+CPR-15  Versioned Knowledge aggregate and provenance (XL)
+  Filed 2026-08-24 by the autonomous continuation of the context-platform programme. The
+  session plane is now real and live-verified, but what extraction produces is still the old
+  mutable `records` model: stable record identity, trigger-copied history, provenance in a JSON
+  bag and an embedding tied to the mutable row. ADR-0068 locked a different model — candidates
+  and published Knowledge are different aggregates, and Knowledge has stable item ids plus
+  immutable revisions — so this feature creates that persistence boundary without bridging the
+  two.
+  What it adds: `KnowledgeItem`, the stable aggregate head carrying tenant, governed scope,
+  optional project and owner, type, origin, lifecycle and current revision;
+  `KnowledgeRevision`, immutable Markdown content with summary, canonical tags, sensitivity,
+  integer confidence, valid time, database transaction time, stale-after, verification,
+  extension metadata and canonical BLAKE3 hash; independently scoped `KnowledgeSource`
+  provenance, linked many-to-many so merge can retain every source; and append-only
+  `KnowledgeRelation` claims over the eight initial edge types. The aggregate head uses an
+  ADR-0006 current/history pair so lifecycle, scope and current-pointer state remain bitemporal
+  without mutating content revisions. A security-invoker current projection and stored lexical
+  search document are the retrieval seam.
+  This is persistence only: no HTTP, CLI or adapter mutation exists until the next package wraps
+  it in the PDP, VedaFlow and audit chain. It reads and writes no old record table. ADR-0080
+  carries the exact record/storage/API/browser deletion checklist the governed lifecycle and
+  public Knowledge packages must complete; no dual write, fallback or translator may stand in.
+  AC: stable item identity survives revision append; old revisions and head-state history remain
+  immutable and queryable; current projection follows exactly the current revision; all seven
+  source types and eight relations round-trip; every revision has at least one source; a
+  separately scoped private source is omitted from a visible-source read; all new tenant tables
+  are forced-RLS and cross-tenant ids are invisible; both views are security-invoker; source and
+  relation constraints refuse cross-tenant or mismatched revision claims; a Knowledge write
+  changes no old record table; and focused tests, `make ci` and `make db-test` pass.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -1787,7 +1817,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

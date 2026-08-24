@@ -13,6 +13,53 @@ this programme.
 
 ---
 
+## Autonomous continuation queue
+
+This journal was opened on **2026-08-24** for the autonomous continuation
+that began at `6eb3e3bdf01d035c79caca3ccc3e0b0d1cdee4ff`. The remote
+`origin/feat/context-platform-mvp` branch and the local branch were identical
+and the worktree was clean after a fresh fetch and fast-forward-only pull.
+CPR-14 was reconstructed from code, tests, durable evidence and both commits:
+its Claude Code 2.1.241 run is genuine live-client evidence, not replay.
+
+The objectives below are journal entries, not another specification. A
+feature commit's hash is written by the following checkpoint, following the
+programme convention established in Prompt 1.
+
+| Objective | Feature | Status | Start SHA | Result SHA | Focused tests | `make ci` | `make db-test` | Live/demo/evaluation evidence | Blockers |
+|---|---|---|---|---|---|---|---|---|---|
+| Versioned Knowledge aggregate, immutable revisions, normalised provenance and current projection | CPR-15 | **complete** | `6eb3e3b` | written by CPR-16 checkpoint | types 5/5; store DB 5/5; RLS completeness PASS | PASS | PASS | isolated `demos/cpr-15-knowledge-aggregate.sh` PASS | none |
+
+**Exact next objective:** open CPR-16 and govern every Knowledge mutation
+through the PDP, VedaFlow and the audit chain, including durable erasure work.
+CPR-13 remains reserved for the demo-corpus re-point and follows the
+MVP surfaces it must demonstrate; rewriting those demos before Knowledge,
+capture and scoped recall exist would knowingly rewrite them twice.
+
+### Starting-point objective map
+
+- **Delivered and retained:** the one governed scope tree; workspace/project
+  subtypes; groups, grants and invitations; per-object PDP decisions; the
+  session ledger; the session-event write seam; durable Claude spool; public
+  session/context endpoint; and genuine CPR-14 live acceptance.
+- **Deleted and still absent:** the fixed hierarchy, old role bindings and
+  global `/v1/observe`, `/v1/inject` and `/v1/recall` routes.
+- **Present only as replaced implementation:** `records`, record embeddings,
+  record supersession, record-centred retrieval, quarantine/proposal product
+  surfaces and the extraction commit path. CPR-15 does not read, translate or
+  dual-write them; the lifecycle and public Knowledge packages complete their
+  controlled cutover.
+- **Absent at this SHA:** Knowledge aggregates, capture batches/candidates,
+  New Learnings, explainable context planning, a true scoped recall/query
+  lens, versioned skill bindings, a trusted MCP catalogue, OKF, governed
+  configuration artifacts and the later convergence packages.
+- **Truthful external limitations:** no live Entra/Okta tenant and no authentic
+  Cursor lifecycle replay. Three evaluation paths deliberately refuse to
+  report until a real Knowledge query lens replaces the deleted sweep; a
+  budgeted context run is not used as an enumeration substitute.
+
+---
+
 ## 1. Baseline
 
 | | |
@@ -2779,3 +2826,90 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `fix(adapter): preserve headless Claude turns` on
   `feat/context-platform-mvp`.
 - **Commit hash.** Written by the next prompt on Prompt 1's rule.
+
+### Prompt 13 objective — Versioned Knowledge aggregate (CPR-15)
+
+- **Selected feature and state.** **CPR-15**, because CPR-13 remains reserved
+  for the demo-corpus re-point and CPR-14 was consumed by the live Claude
+  acceptance gate. The package is delivered. It is the persistence boundary
+  locked by ADR-0068, not a rename or synchronisation of the old `records`
+  aggregate.
+
+- **Decision.** ADR-0080 separates stable item identity, immutable content,
+  independently authorised provenance and explicit relationship claims.
+  `knowledge_items` is a bitemporal aggregate head; an optimistic head
+  precondition moves it between immutable `knowledge_revisions`. Valid time
+  belongs to content, transaction time belongs to the database, and the head's
+  current/history interval records when a revision or lifecycle was current.
+  Sources are many-to-many and scoped independently so a shared result cannot
+  disclose a private session or locator. The canonical BLAKE3 envelope hashes
+  integer confidence, normalised tags and recursively ordered metadata rather
+  than ids or database timestamps.
+
+- **Schema and domain.** Migration `0047_knowledge` takes the chain from 44 to
+  **45 migrations** without changing schema epoch **2**. It creates six
+  tenant-bound, enabled-and-forced-RLS tables: `knowledge_items`,
+  `knowledge_items_history`, `knowledge_revisions`, `knowledge_sources`,
+  `knowledge_revision_sources` and `knowledge_relations`. It adds
+  `knowledge_item_versions` and `knowledge_current` as `security_invoker`
+  views, a stored language-neutral lexical document and its GIN index,
+  tenant-qualified foreign keys, a deferred every-revision-has-source
+  constraint, and owner-level append-only guards. A session-event source must
+  name a real event whose session-derived scope is exactly the source scope.
+  Rust types cover nine Knowledge types, four origins, six lifecycle states,
+  seven source types and eight relation types, all closed and schema-matched.
+
+- **Store seam.** Instrumented transaction-scoped primitives create sources,
+  items and first revisions, append with an expected-current precondition,
+  transition lifecycle, read current/as-known/history, filter sources by the
+  already PDP-authorised scope set, and add/read relations. New write paths
+  carry tracing spans and `synveda_knowledge_mutations_total`. No public
+  route, Cedar action or audit action exists yet, so the primitives are not a
+  second application service and no caller can publish around CPR-16.
+
+- **Hard-cut boundary.** No code reads, copies, translates or dual-writes an
+  old record. ADR-0080's deletion checklist names the record tables, store
+  entry points, direct extraction commit, DTO/browser terminology and
+  record-shaped query branches that CPR-16/17 must remove once governed
+  mutations and public reads replace them. Semantic vectors remain on the old
+  aggregate until the Knowledge retrieval cutover; no pretend embedding was
+  attached to a revision.
+
+- **Security and correctness evidence.** Five Postgres acceptance tests prove
+  immutable revision and relation rows, exact current and as-known projection,
+  stale-revision rejection, all seven sources and eight relations, separately
+  filtered private provenance, session-event scope-confusion refusal,
+  lifecycle history and cross-tenant invisibility across all six tables and
+  both views. The dynamic RLS inventory includes every new object. Five type
+  tests cover closed vocabularies, validation and canonical hashing. Creating
+  Knowledge leaves every old record table unchanged.
+
+- **Runnable evidence and findings.** `demos/cpr-15-knowledge-aggregate.sh`
+  runs the focused database and RLS evidence in a disposable database and
+  removes it. Its first run against the persistent development database was
+  correctly refused because that database still records removed migration
+  `0009`; the demo was changed to isolation rather than resetting somebody's
+  state. A first full database run found a test-fixture error: its two
+  supposedly equivalent canonical hash inputs had different `Utc::now()`
+  values. Cloning the input before reordering metadata made the assertion test
+  only the intended property; no product assertion was weakened.
+
+- **Tests and exact results.** Focused type tests **5/5**, focused store
+  database tests **5/5**, RLS completeness **PASS**, and the isolated demo
+  **PASS**. `make db-test` **PASS**. `make ci` **PASS**, including Rust,
+  clippy `-D warnings`, SQLx offline metadata, dependency/licence/ADR/backlog
+  checks, console and adapter suites. The first managed-sandbox CI invocation
+  could not bind loopback for two existing CLI tests (`EPERM`); the permitted
+  rerun is the product result.
+
+- **Limitations and next work.** This package intentionally cannot mutate or
+  read Knowledge through a supported application API. It has no VedaFlow or
+  audit event to bypass: CPR-16 is the only planned entry point and must add
+  create/edit/verify/supersede/merge/archive/restore/forget, durable erasure
+  work and the deletion of direct old record mutation paths. CPR-17 then owns
+  public reads/search/browser and completes the old record cutover. Live
+  Entra/Okta and authentic Cursor evidence remain unrelated external gaps.
+
+- **Commit.** `feat(knowledge): add versioned knowledge aggregate (CPR-15)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-16 checkpoint on Prompt 1's rule.

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select current_revision_id as \"current_revision_id!\",\n               lifecycle_state as \"lifecycle_state!\"\n        from knowledge_items\n        where tenant_id = $1 and id = $2\n        for update\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "current_revision_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "lifecycle_state!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "aecc125b1bfc1bf910a2e8a4c7a5f34df0f1aa6177d85aabb81e430d68923dd1"
+}

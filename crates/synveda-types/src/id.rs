@@ -103,6 +103,31 @@ define_id!(
 );
 
 define_id!(
+    /// Identifies one stable Knowledge aggregate (CPR-15, ADR-0080).
+    ///
+    /// The id survives edits, verification and lifecycle changes; callers
+    /// that need exact content cite a [`KnowledgeRevisionId`] instead.
+    KnowledgeItemId
+);
+
+define_id!(
+    /// Identifies one immutable content revision of a Knowledge item
+    /// (CPR-15, ADR-0080).
+    KnowledgeRevisionId
+);
+
+define_id!(
+    /// Identifies one normalised provenance source (CPR-15, ADR-0080).
+    KnowledgeSourceId
+);
+
+define_id!(
+    /// Identifies one explicit relation between stable Knowledge items
+    /// (CPR-15, ADR-0080).
+    KnowledgeRelationId
+);
+
+define_id!(
     /// Identifies a VedaFlow proposal — one governed request to move a
     /// reviewed set of assets onto a scope's published channel (FLOW-3,
     /// ADR-0032).

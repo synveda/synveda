@@ -55,6 +55,7 @@ pub mod graph;
 pub mod idempotency;
 pub mod identities;
 pub mod keys;
+pub mod knowledge;
 pub mod lapses;
 
 pub mod packs;

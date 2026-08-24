@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **111 features filed, 78 delivered**;
+Cursor frame has been replayed. **112 features filed, 79 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -171,6 +171,10 @@ Load-bearing facts about Phase 5:
   events and ended the same run. Stop and PreCompact synchronously cross only
   the atomic local-spool boundary; SessionEnd/next SessionStart deliver. This
   also closes ADPT-8 without changing the host-killed-before-any-hook tail.
+- CPR-15 (ADR-0080) is delivered: stable Knowledge heads, immutable
+  revisions, normalised independently scoped sources, explicit relations and
+  a bitemporal current projection. It creates no application mutation path
+  and neither reads nor writes the old record model.
 - CPR-9 (no ADR — the foundation audit of Prompts 1–7): **a listing decides
   per row.** `GET /v1/workspaces` and `/v1/me` took one decision at the
   tenant root and applied it to every row, so a caller granted `member` at a

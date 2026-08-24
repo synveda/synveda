@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update knowledge_items\n        set current_revision_id = $3, updated_by = $4\n        where tenant_id = $1 and id = $2 and current_revision_id = $5\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "da13d2173185b599ac8995796c69e175cb80c5204e79828f9c528b39dd89e89b"
+}

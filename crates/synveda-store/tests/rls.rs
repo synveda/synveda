@@ -232,6 +232,16 @@ const COVERED: &[&str] = &[
     // that another used a key it guessed.
     "idempotency_records",
     "identities",
+    // CPR-15 (ADR-0080): stable Knowledge heads, immutable revisions,
+    // independently governed sources and explicit relation claims. History
+    // and link rows carry tenant_id too: neither provenance nor the fact that
+    // two artifacts are related may become a cross-tenant side channel.
+    "knowledge_items",
+    "knowledge_items_history",
+    "knowledge_relations",
+    "knowledge_revision_sources",
+    "knowledge_revisions",
+    "knowledge_sources",
     "memory_usage",
     // CPR-5 (ADR-0072): an outstanding invitation is a live credential's
     // shadow. Tenant-bound so a hash lookup runs inside one tenant's own row
@@ -296,8 +306,8 @@ const COVERED: &[&str] = &[
 /// Discovers every tenant-scoped table (structural definition, ADR-0009: any
 /// public base table with a `tenant_id` column) and fails unless each is
 /// covered here and carries enabled + FORCED row security with at least one
-/// policy. Also pins `records_versions` to `security_invoker`, without which
-/// the view would evaluate RLS as its owner and bypass the backstop.
+/// policy. Also pins every current/as-of view to `security_invoker`, without
+/// which the view would evaluate RLS as its owner and bypass the backstop.
 #[test]
 fn every_tenant_scoped_table_is_covered_and_forced() {
     let Some(db) = db() else { return };
@@ -351,9 +361,15 @@ fn every_tenant_scoped_table_is_covered_and_forced() {
             );
         }
 
-        // Both as-of surfaces: the corpus's (ADR-0006) and the graph's
-        // (ADR-0043 decision 3, the same pair shape over `graph_edges`).
-        for view in ["records_versions", "graph_edges_versions"] {
+        // Every composed current/as-of surface: the old corpus's (ADR-0006),
+        // the graph's (ADR-0043 decision 3), and CPR-15's Knowledge pair
+        // (ADR-0080 decisions 2 and 6).
+        for view in [
+            "records_versions",
+            "graph_edges_versions",
+            "knowledge_item_versions",
+            "knowledge_current",
+        ] {
             let invoker = sqlx::query_scalar!(
                 r#"
                 select coalesce((
