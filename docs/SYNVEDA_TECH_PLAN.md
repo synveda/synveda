@@ -82,8 +82,9 @@ trees     (hash, entries[])                            -- directory-like groupin
 commits   (hash, tree, parents[], author_identity,
            message, signature, policy_snapshot_hash)   -- every commit records WHICH policy
 refs      (tenant, scope, name, commit_hash)           --   pack was in force when created
-proposals (id, scope, source_ref, target_ref, state,
-           required_approvals[], obtained_approvals[])
+proposals (id, scope, source_ref, target_ref, state, commit_hash,
+           typed_artifact_references[], proposer, close_actor)
+proposal_approvals (proposal, commit_hash, approver, verdict, roles)
 ```
 
 ### 2.2 Channels and typed aggregate effects
@@ -106,6 +107,11 @@ Skills use the same typed-effect shape: a stable Skill points at immutable
 content-addressed versions and explicit project/principal bindings select or
 pin what is advertised. There is no `skill/published` ref, mutable draft or
 channel-wide Skill rollback. A binding revision is the distribution switch.
+Tool servers and bindings, governed Configuration and policy relaxations use
+that same proposal/change row. Its content-free typed references name the
+stable artifact, operation, exact version or digest and stale-head
+precondition; OKF publication carries both the Knowledge and import-artifact
+references rather than opening an import-specific review queue.
 
 ### 2.3 The lifecycle
 
@@ -137,12 +143,29 @@ Required approvals resolve from **(asset type × sensitivity × target scope × 
 | Knowledge → project scope, internal | policy may auto-apply or require a project `curator` |
 | Prompt → workspace `published` | 1 × `administrator` + 1 × `curator` (peer review) |
 | Skill version or binding change | live pack matrix, including the invariant security-reviewer requirement; skills are treated like code because they are |
-| Anything `restricted` sensitivity | + distinct `reviewer`, no self-approval where the matrix requires it |
-| Policy relaxation under regulated-strict | distinct approvers + hard expiry mandatory |
+| Anything `restricted` sensitivity | + distinct `reviewer`; the author cannot review |
+| Policy relaxation under regulated-strict | distinct approvers, separate effect actor + hard expiry mandatory |
 | SMB `standard` pack | most of the above collapses to single-approver or auto-approve |
 
-Reviews happen in the admin console or via a CLI (`synveda proposal review 142 --approve`),
-and the git bridge means they can *also* surface as GitHub PRs for engineering-culture teams.
+Reviews happen in Advanced → Reviews or via the proposal CLI. A verdict binds
+the exact commit the reviewer read; the gateway refuses a moved commit before
+recording the act. Rules can require the reviewer to differ from the author and
+the effect actor to differ from both author and counting reviewers. Applying or
+publishing remains a separate PDP-authorised act and repeats artifact revision
+checks. The author cancels through the one withdrawal transition; rejection is
+a reviewer verdict with a reason. The git bridge may also surface authored
+channel reviews as pull requests for engineering-culture teams.
+
+### 2.4.1 Approval threat boundary
+
+Typed references, approval counts and separation constraints narrow an
+otherwise authorised act; none grants authority. Proposal reads, verdicts and
+effects independently cross Cedar at the target scope, and forced RLS confines
+the common rows by tenant. References and ordinary audit events contain only
+ids, operations, versions/digests, reasons and policy evidence—never Knowledge
+body text, Skill files, Tool credentials or Configuration documents. A denied
+artifact cannot be discovered by probing the family filter because listing
+still authorises and renders each visible proposal under its own scope.
 
 ### 2.5 What this buys, concretely
 

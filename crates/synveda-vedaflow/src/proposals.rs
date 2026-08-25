@@ -36,8 +36,9 @@ use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
 use synveda_types::access::RoleKey;
 use synveda_types::{
-    AssetKind, CastApproval, Error, IdentityId, PromotionEvidence, ProposalEffect, ProposalId,
-    ProposalState, Result, ScopeId, Sensitivity, TenantId, Verdict,
+    ArtifactFamily, ArtifactReference, AssetKind, CastApproval, Error, IdentityId,
+    PromotionEvidence, ProposalEffect, ProposalId, ProposalState, Result, ScopeId, Sensitivity,
+    TenantId, Verdict,
 };
 use uuid::Uuid;
 
@@ -58,6 +59,9 @@ pub const PROPOSAL_ACTS_TOTAL: &str = "synveda_vedaflow_proposal_acts_total";
 /// reviewed act, and two hundred records in one review is a migration
 /// wearing a reviewer's hat.
 pub const MAX_PROPOSAL_MEMBERS: usize = 200;
+
+/// The most typed artifact addresses one common review may carry.
+pub const MAX_ARTIFACT_REFERENCES: usize = 200;
 
 /// The most proposals that may stand open at one scope.
 ///
@@ -108,6 +112,9 @@ pub struct NewProposal<'a> {
     /// That is the right shape anyway — it is a fact about why the
     /// proposal was opened.
     pub evidence: Option<&'a PromotionEvidence>,
+    /// Content-free typed domain addresses under review. Stored on the
+    /// common lifecycle row so every artifact family has one queue contract.
+    pub artifact_references: &'a [ArtifactReference],
 }
 
 /// A proposal as stored.
@@ -149,6 +156,8 @@ pub struct StoredProposal {
     /// Why a rule opened it, when one did (FLOW-4, ADR-0033 decision
     /// 12). `None` on a human's proposal.
     pub evidence: Option<PromotionEvidence>,
+    /// Canonically ordered typed domain addresses under review.
+    pub artifact_references: Vec<ArtifactReference>,
 }
 
 /// One recorded review act.
@@ -254,6 +263,32 @@ pub async fn open(
             ),
         });
     }
+    if new.artifact_references.is_empty() || new.artifact_references.len() > MAX_ARTIFACT_REFERENCES
+    {
+        return Err(Error::Invalid {
+            message: format!(
+                "a proposal carries 1..={MAX_ARTIFACT_REFERENCES} typed artifact references, got {}",
+                new.artifact_references.len()
+            ),
+        });
+    }
+    let mut artifact_references = new.artifact_references.to_vec();
+    for reference in &artifact_references {
+        reference.validate()?;
+    }
+    artifact_references.sort();
+    if artifact_references
+        .windows(2)
+        .any(|pair| pair[0] == pair[1])
+    {
+        return Err(Error::Invalid {
+            message: "a proposal cannot name the same typed artifact reference twice".to_owned(),
+        });
+    }
+    let artifact_references_json =
+        serde_json::to_value(&artifact_references).map_err(|err| Error::Internal {
+            message: format!("serialise proposal artifact references: {err}"),
+        })?;
     let entries: Vec<TreeEntry> = new
         .members
         .iter()
@@ -290,8 +325,8 @@ pub async fn open(
         r#"insert into vedaflow_proposals
                (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
                 target_channel, commit_hash, sensitivity, title, proposer_id,
-                proposer_subject, evidence)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                proposer_subject, evidence, artifact_references)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            returning created_at, updated_at"#,
         tenant.as_uuid(),
         id.as_uuid(),
@@ -305,6 +340,7 @@ pub async fn open(
         new.proposer.as_uuid(),
         new.proposer_subject,
         evidence,
+        artifact_references_json,
     )
     .fetch_one(&mut *conn)
     .await
@@ -332,6 +368,7 @@ pub async fn open(
         closed_by: None,
         close_reason: None,
         evidence: new.evidence.cloned(),
+        artifact_references,
     })
 }
 
@@ -346,7 +383,8 @@ pub async fn read(
         ProposalRow,
         r#"select id, target_scope_id, source_scope_id, asset_kind, target_channel,
                   commit_hash, sensitivity, state, title, proposer_id, proposer_subject,
-                  created_at, updated_at, closed_at, closed_by, close_reason, evidence
+                  created_at, updated_at, closed_at, closed_by, close_reason, evidence,
+                  artifact_references
            from vedaflow_proposals
            where tenant_id = $1 and id = $2"#,
         tenant.as_uuid(),
@@ -366,6 +404,8 @@ pub struct ProposalFilter {
     pub target_scope: Option<ScopeId>,
     /// Only proposals in this state.
     pub state: Option<ProposalState>,
+    /// Only proposals whose typed reference index contains this family.
+    pub artifact_family: Option<ArtifactFamily>,
     /// At most this many, newest first.
     pub limit: i64,
 }
@@ -381,16 +421,21 @@ pub async fn list(
         ProposalRow,
         r#"select id, target_scope_id, source_scope_id, asset_kind, target_channel,
                   commit_hash, sensitivity, state, title, proposer_id, proposer_subject,
-                  created_at, updated_at, closed_at, closed_by, close_reason, evidence
+                  created_at, updated_at, closed_at, closed_by, close_reason, evidence,
+                  artifact_references
            from vedaflow_proposals
            where tenant_id = $1
              and ($2::uuid is null or target_scope_id = $2)
              and ($3::text is null or state = $3)
+             and ($4::jsonb is null or artifact_references @> $4)
            order by created_at desc, id desc
-           limit $4"#,
+           limit $5"#,
         tenant.as_uuid(),
         filter.target_scope.map(|scope| scope.as_uuid()),
         filter.state.map(|state| state.as_str()),
+        filter
+            .artifact_family
+            .map(|family| { serde_json::json!([{ "family": family.as_str() }]) }),
         filter.limit,
     )
     .fetch_all(&mut *conn)
@@ -680,6 +725,7 @@ struct ProposalRow {
     closed_by: Option<Uuid>,
     close_reason: Option<String>,
     evidence: Option<serde_json::Value>,
+    artifact_references: serde_json::Value,
 }
 
 impl TryFrom<ProposalRow> for StoredProposal {
@@ -719,8 +765,40 @@ impl TryFrom<ProposalRow> for StoredProposal {
                     })
                     .ok()
             }),
+            artifact_references: parse_artifact_references(row.id, row.artifact_references)?,
         })
     }
+}
+
+fn parse_artifact_references(
+    proposal_id: Uuid,
+    value: serde_json::Value,
+) -> Result<Vec<ArtifactReference>> {
+    let mut references: Vec<ArtifactReference> =
+        serde_json::from_value(value).map_err(|err| Error::Internal {
+            message: format!("proposal {proposal_id} has invalid typed artifact references: {err}"),
+        })?;
+    if references.is_empty() || references.len() > MAX_ARTIFACT_REFERENCES {
+        return Err(Error::Internal {
+            message: format!(
+                "proposal {proposal_id} has an invalid typed artifact reference count"
+            ),
+        });
+    }
+    for reference in &references {
+        reference.validate().map_err(|err| Error::Internal {
+            message: format!(
+                "proposal {proposal_id} has an invalid typed artifact reference: {err}"
+            ),
+        })?;
+    }
+    references.sort();
+    if references.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(Error::Internal {
+            message: format!("proposal {proposal_id} contains duplicate typed artifact references"),
+        });
+    }
+    Ok(references)
 }
 
 /// The CHECK constraints keep these columns inside their vocabularies, so

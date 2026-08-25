@@ -21,6 +21,7 @@ function proposal(overrides: Partial<ProposalDetail> = {}): ProposalDetail {
     proposer_id: "0199bb11-1111-7111-8111-111111111110",
     proposer_subject: "alice@example.test",
     created_at: "2026-08-24T10:00:00Z",
+    updated_at: "2026-08-24T10:10:00Z",
     target_scope_id: "scope-project",
     target_scope_path: "acme/pulseboard",
     source_scope_id: "scope-personal",
@@ -31,8 +32,19 @@ function proposal(overrides: Partial<ProposalDetail> = {}): ProposalDetail {
         { role: "curator", count: 1 },
       ],
       distinct_approvers: 2,
+      forbid_author_approval: true,
+      separate_effect_actor: false,
       origins: ["human"],
     },
+    artifact_references: [
+      {
+        family: "knowledge",
+        artifact_id: "knowledge-1",
+        operation: "edit",
+        version: "revision-2",
+        expected_revision: "revision-1",
+      },
+    ],
     outstanding: "one curator approval",
     promotion: {
       rule: "knowledge-review",
@@ -62,6 +74,23 @@ function proposal(overrides: Partial<ProposalDetail> = {}): ProposalDetail {
         counts: false,
         created_at: "2026-08-24T09:55:00Z",
         commit: "b".repeat(64),
+      },
+    ],
+    timeline: [
+      {
+        kind: "opened",
+        actor_id: "0199bb11-1111-7111-8111-111111111110",
+        actor_subject: "alice@example.test",
+        at: "2026-08-24T10:00:00Z",
+        commit: "c".repeat(64),
+      },
+      {
+        kind: "approved",
+        actor_id: "0199bb11-1111-7111-8111-111111111111",
+        actor_subject: "robin@example.test",
+        at: "2026-08-24T10:10:00Z",
+        commit: "c".repeat(64),
+        reason: "Source evidence checked.",
       },
     ],
     members: [
@@ -104,11 +133,16 @@ test("the common review names requirement, approvals, immutable effect and sourc
     "1 × reviewer",
     "1 × curator",
     "2 distinct approvers",
+    "reviewer distinct from author",
     "one curator approval",
     "knowledge-review",
     "audit seq 41..=44",
     "robin@example.test",
     "Source evidence checked.",
+    "governed artifacts",
+    "knowledge · edit · knowledge-1",
+    "revision-2 from revision-1",
+    "timeline",
     "old-reviewer@example.test",
     "does not count",
     "update knowledge-command",
@@ -178,4 +212,25 @@ test("an unreadable capability forecast fails closed and a gateway error stays v
   assert.match(unknown, /could not be read/);
   assert.match(unknown, /proposal moved/);
   assert.doesNotMatch(unknown, /Approve/);
+});
+
+test("the common surface exposes cancellation and the correct approved effect", () => {
+  const apply = renderToStaticMarkup(
+    <Review
+      detail={proposal({ state: "approved", effect: "apply" })}
+      onCancel={() => {}}
+      onExecute={() => {}}
+    />,
+  );
+  assert.match(apply, />Apply approved change<\/button>/);
+  assert.match(apply, />Cancel proposal<\/button>/);
+
+  const publish = renderToStaticMarkup(
+    <Review
+      detail={proposal({ state: "approved", effect: "published" })}
+      onExecute={() => {}}
+    />,
+  );
+  assert.match(publish, />Publish approved change<\/button>/);
+  assert.doesNotMatch(publish, /Cancel proposal/);
 });

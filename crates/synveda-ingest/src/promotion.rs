@@ -33,8 +33,9 @@ use synveda_store::{anchors, identities, policy_assignments, rls, tenants};
 
 use crate::chain::scope_chain as resolve_scope_chain;
 use synveda_types::{
-    AssetKind, Channel, Error, IdentityId, IdentityKind, MemberEvidence, PromotionEvidence,
-    PromotionRule, ProposalEffect, RecordId, Result, ScopeId, Sensitivity, TenantId,
+    ArtifactFamily, ArtifactReference, AssetKind, Channel, Error, IdentityId, IdentityKind,
+    MemberEvidence, PromotionEvidence, PromotionRule, ProposalEffect, RecordId, Result, ScopeId,
+    Sensitivity, TenantId,
 };
 use synveda_vedaflow::hash::{ObjectHash, object_hash};
 use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
@@ -685,6 +686,18 @@ async fn open_proposal(
             .collect(),
     };
     let title = evidence.summary();
+    let artifact_references = entries
+        .iter()
+        .map(|(entry, hash)| {
+            ArtifactReference::new(
+                ArtifactFamily::Memory,
+                entry,
+                "publish",
+                hash.to_hex(),
+                None,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     let snapshot = PolicySnapshot::new(decision.pack_name.clone(), decision.pack_version);
     let proposal = vedaflow::proposals::open(
@@ -699,6 +712,7 @@ async fn open_proposal(
             asset: AssetKind::Memory,
             effect: ProposalEffect::Published,
             members: &entries,
+            artifact_references: &artifact_references,
             sensitivity: key.sensitivity,
             title: &title,
             proposer: key.owner_id,

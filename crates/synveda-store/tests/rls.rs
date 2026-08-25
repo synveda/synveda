@@ -34,12 +34,12 @@ use synveda_types::repository;
 use synveda_types::scope;
 use synveda_types::session::{SessionEventType, SessionStatus};
 use synveda_types::{
-    ContextCandidateId, ContextCompletionStatus, ContextFeedbackId, ContextFeedbackType,
-    ContextReasonCode, ContextRunId, ContextSelectionId, Error, GrantId, GroupId, IdentityId,
-    IdentityKind, InviteId, KnowledgeItemId, KnowledgeRevisionId, KnowledgeSourceId, PackConfig,
-    ProjectId, ProposalId, RecordClass, RecordId, RecordKind, RelaxationId, RelaxationVersionId,
-    RepositoryId, ScopeId, Sensitivity, SessionId, TenantId, TenantStatus, TraceRetentionMode,
-    WorkspaceId,
+    ArtifactFamily, ArtifactReference, ContextCandidateId, ContextCompletionStatus,
+    ContextFeedbackId, ContextFeedbackType, ContextReasonCode, ContextRunId, ContextSelectionId,
+    Error, GrantId, GroupId, IdentityId, IdentityKind, InviteId, KnowledgeItemId,
+    KnowledgeRevisionId, KnowledgeSourceId, PackConfig, ProjectId, ProposalId, RecordClass,
+    RecordId, RecordKind, RelaxationId, RelaxationVersionId, RepositoryId, ScopeId, Sensitivity,
+    SessionId, TenantId, TenantStatus, TraceRetentionMode, WorkspaceId,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -1484,6 +1484,84 @@ fn same_tenant_policy_pack_lifecycle_works_under_rls() {
 
 // ── Governed Configuration (CPR-30, ADR-0089) ─────────────────────────────
 
+fn encoded_artifact_reference(reference: ArtifactReference) -> serde_json::Value {
+    serde_json::to_value([reference]).expect("encode typed artifact reference")
+}
+
+fn fixture_configuration_reference(
+    command: &synveda_types::configuration::ConfigurationCommand,
+    payload_hash: &str,
+) -> ArtifactReference {
+    use synveda_types::configuration::ConfigurationCommand;
+
+    match command {
+        ConfigurationCommand::Create {
+            artifact_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            artifact_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            None,
+        ),
+        ConfigurationCommand::Publish {
+            artifact_id,
+            expected_current_version_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            artifact_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            Some(expected_current_version_id.to_string()),
+        ),
+        ConfigurationCommand::Bind {
+            binding_id,
+            pinned_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            binding_id.to_string(),
+            command.kind(),
+            pinned_version_id.map_or_else(|| payload_hash.to_owned(), |id| id.to_string()),
+            None,
+        ),
+        ConfigurationCommand::SetBinding {
+            binding_id,
+            expected_revision,
+            pinned_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            binding_id.to_string(),
+            command.kind(),
+            pinned_version_id.map_or_else(|| payload_hash.to_owned(), |id| id.to_string()),
+            Some(expected_revision.to_string()),
+        ),
+    }
+    .expect("valid Configuration fixture reference")
+}
+
+fn fixture_memory_references(
+    proposal: uuid::Uuid,
+    operation: &str,
+    commit_hash: [u8; 32],
+) -> serde_json::Value {
+    encoded_artifact_reference(
+        ArtifactReference::new(
+            ArtifactFamily::Memory,
+            proposal.to_string(),
+            operation,
+            blake3::Hash::from_bytes(commit_hash).to_hex().to_string(),
+            None,
+        )
+        .expect("valid Memory fixture reference"),
+    )
+}
+
 async fn fixture_configuration_command(
     tx: &mut sqlx::PgConnection,
     tenant: TenantId,
@@ -1492,22 +1570,6 @@ async fn fixture_configuration_command(
 ) -> configuration::AppliedConfiguration {
     let proposal = synveda_types::ProposalId::new();
     let actor = IdentityId::new();
-    sqlx::query!(
-        "insert into vedaflow_proposals
-             (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
-              target_channel, commit_hash, sensitivity, title, proposer_id,
-              proposer_subject)
-         values ($1, $2, $3, $3, 'configuration', 'apply', $4, 'internal',
-                 'RLS Configuration fixture', $5, 'rls-fixture')",
-        tenant.as_uuid(),
-        proposal.as_uuid(),
-        scope.as_uuid(),
-        &[4_u8; 32][..],
-        actor.as_uuid(),
-    )
-    .execute(&mut *tx)
-    .await
-    .expect("open Configuration fixture proposal");
     let payload_hash = blake3::hash(
         synveda_types::json::canonicalise(
             &serde_json::to_value(command).expect("encode Configuration command"),
@@ -1517,6 +1579,25 @@ async fn fixture_configuration_command(
     )
     .to_hex()
     .to_string();
+    let artifact_references =
+        encoded_artifact_reference(fixture_configuration_reference(command, &payload_hash));
+    sqlx::query!(
+        "insert into vedaflow_proposals
+             (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
+              target_channel, commit_hash, sensitivity, title, proposer_id,
+              proposer_subject, artifact_references)
+         values ($1, $2, $3, $3, 'configuration', 'apply', $4, 'internal',
+                 'RLS Configuration fixture', $5, 'rls-fixture', $6)",
+        tenant.as_uuid(),
+        proposal.as_uuid(),
+        scope.as_uuid(),
+        &[4_u8; 32][..],
+        actor.as_uuid(),
+        artifact_references,
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("open Configuration fixture proposal");
     configuration::insert_change(&mut *tx, tenant, proposal, command, &payload_hash)
         .await
         .expect("store Configuration change");
@@ -3476,18 +3557,20 @@ async fn seed_proposal(pool: &PgPool) -> (TenantId, ScopeId, uuid::Uuid) {
     let (tenant, scope) = seed_vedaflow(pool).await;
     let proposal = uuid::Uuid::now_v7();
     let approver = IdentityId::new();
+    let artifact_references = fixture_memory_references(proposal, "publish", [4_u8; 32]);
     sqlx::query!(
         "insert into vedaflow_proposals
              (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
               target_channel, commit_hash, sensitivity, title, proposer_id,
-              proposer_subject)
+              proposer_subject, artifact_references)
          values ($1, $2, $3, $3, 'memory', 'published', $4, 'internal',
-                 'rls fixture proposal', $5, 'rls-fixture')",
+                 'rls fixture proposal', $5, 'rls-fixture', $6)",
         tenant.as_uuid(),
         proposal,
         scope.as_uuid(),
         &[4u8; 32][..],
         approver.as_uuid(),
+        artifact_references,
     )
     .execute(pool)
     .await
@@ -3571,18 +3654,21 @@ fn cross_tenant_proposal_write_is_rejected() {
         let (adversary, _, _) = seed_proposal(&db.pool).await;
 
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let forged_proposal = uuid::Uuid::now_v7();
+        let artifact_references = fixture_memory_references(forged_proposal, "publish", [4_u8; 32]);
         let forged = sqlx::query!(
             "insert into vedaflow_proposals
                  (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
                   target_channel, commit_hash, sensitivity, title, proposer_id,
-                  proposer_subject)
+                  proposer_subject, artifact_references)
              values ($1, $2, $3, $3, 'memory', 'published', $4, 'internal',
-                     'forged', $5, 'intruder')",
+                     'forged', $5, 'intruder', $6)",
             victim.as_uuid(),
-            uuid::Uuid::now_v7(),
+            forged_proposal,
             victim_scope.as_uuid(),
             &[4u8; 32][..],
             IdentityId::new().as_uuid(),
+            artifact_references,
         )
         .execute(&mut *tx)
         .await;
@@ -3712,20 +3798,22 @@ fn same_tenant_proposal_lifecycle_works_under_rls() {
         let (tenant, scope, _) = seed_proposal(&db.pool).await;
         let proposal = uuid::Uuid::now_v7();
         let proposer = IdentityId::new();
+        let artifact_references = fixture_memory_references(proposal, "publish", [3_u8; 32]);
 
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
         sqlx::query!(
             "insert into vedaflow_proposals
                  (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
                   target_channel, commit_hash, sensitivity, title, proposer_id,
-                  proposer_subject)
+                  proposer_subject, artifact_references)
              values ($1, $2, $3, $3, 'memory', 'published', $4, 'restricted',
-                     'own proposal', $5, 'own-subject')",
+                     'own proposal', $5, 'own-subject', $6)",
             tenant.as_uuid(),
             proposal,
             scope.as_uuid(),
             &[3u8; 32][..],
             proposer.as_uuid(),
+            artifact_references,
         )
         .execute(&mut *tx)
         .await
@@ -4002,19 +4090,30 @@ async fn seed_relaxation(
             reason: "time-boxed incident investigation".to_owned(),
         },
     };
+    let artifact_references = encoded_artifact_reference(
+        ArtifactReference::new(
+            ArtifactFamily::PolicyRelaxation,
+            relaxation_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            None,
+        )
+        .expect("valid Relaxation fixture reference"),
+    );
     sqlx::query!(
         "insert into vedaflow_proposals
              (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
               target_channel, commit_hash, sensitivity, title, proposer_id,
-              proposer_subject)
+              proposer_subject, artifact_references)
          values ($1, $2, $3, $3, 'policy', 'apply', $4, 'internal',
-                 'RLS Relaxation fixture', $5, $6)",
+                 'RLS Relaxation fixture', $5, $6, $7)",
         tenant.as_uuid(),
         proposal_id.as_uuid(),
         target.as_uuid(),
         &[4_u8; 32][..],
         actor.as_uuid(),
         &subject,
+        artifact_references,
     )
     .execute(&mut *tx)
     .await

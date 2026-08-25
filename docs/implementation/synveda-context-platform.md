@@ -45,14 +45,14 @@ programme convention established in Prompt 1.
 | Public-API OKF CLI and generated project-console import/export workflows | CPR-28 | **complete** | `0dbf163` | `683a17d` | adapter 6/6; CLI 150/150; console 207/207; public API 1/1; production build PASS | PASS | N/A — client/pure-validation only | isolated `demos/cpr-28-okf-workflows.sh` PASS: real local fixture + public lifecycle + generated console; no remote-host claim | none |
 | Exact generated public contract and console/CLI/generic-MCP client convergence | CPR-29 | **complete** | `683a17d` | `b33ba51` | OpenAPI 6/6; service 5/5; audit 13/13; CLI 156/156 + corpus 5/5; MCP 44/44; console 208/208; Claude adapter 98/98 | PASS | PASS | isolated `demos/cpr-29-public-contract.sh` PASS; generated API + 78-script demo gate PASS | none |
 | Versioned governed runtime configuration, templates and scope bindings | CPR-30 | **complete** | `b33ba51` | `ed7d233` | domain 4/4; API 1/1; capture 4/4; context 3/3; approvals 6/6; packs 7/7; PDP 11/11; RLS 83/83; OpenAPI 6/6; console 210/210 | PASS | PASS | isolated `demos/cpr-30-governed-configuration.sh` PASS: 2 artifacts, 3 versions, 2 bindings, 6 audited applies, zero assignment tables; 79-script demo gate PASS | none |
-| Governed auto-apply audit and versioned exact-subject policy-relaxation successor | CPR-31 | **complete** | `ed7d233` | next checkpoint | types 210/210 + serde 50/50; policy relaxation 3/3; API 2/2; RLS 83/83; OpenAPI 6/6; audit 27/27; CLI 155/155 + MCP 5/5; console 209/209; retrieval 53/53 | PASS | PASS (`synveda_test_35856`) | isolated `demos/cpr-31-governed-relaxations.sh` PASS: 2 aggregates, 3 immutable versions, 5 governed changes, zero predecessor tables; 79-script demo gate PASS | none |
+| Governed auto-apply audit and versioned exact-subject policy-relaxation successor | CPR-31 | **complete** | `ed7d233` | `9281951` | types 210/210 + serde 50/50; policy relaxation 3/3; API 2/2; RLS 83/83; OpenAPI 6/6; audit 27/27; CLI 155/155 + MCP 5/5; console 209/209; retrieval 53/53 | PASS | PASS (`synveda_test_35856`) | isolated `demos/cpr-31-governed-relaxations.sh` PASS: 2 aggregates, 3 immutable versions, 5 governed changes, zero predecessor tables; 79-script demo gate PASS | none |
+| One typed VedaFlow approval lifecycle across Knowledge, Skills, Tools, Configuration, relaxations and OKF publication | CPR-32 | **complete** | `9281951` | pending (record in next checkpoint) | types 212/212 + serde 50/50; policy 77/77; VedaFlow 73/73 + store 10/10; gateway family suites 27/27; OpenAPI 6/6; console 210/210; store policy packs 5/5 + RLS 83/83 | PASS | PASS (`synveda_test_43866`) | isolated `demos/cpr-32-unified-approvals.sh` PASS: 81 typed proposals, 7 families, 23 exact-commit reviews, regulated three-person separation, zero audited content; 80-script demo gate PASS | none |
 
-**Exact next objective:** allocate and execute CPR-32 from the CPR-31
-checkpoint: extend the one VedaFlow proposal/change model across Knowledge,
-Skills, Tool servers/bindings, Configuration, policy relaxations and OKF
-publication, including distinct-person and self-approval rules, inherited
-review requirements, revision-aware verdicts, cancellation and one Advanced
-Reviews surface.
+**Exact next objective:** file and implement the audit-query/export package from
+the resulting CPR-32 commit: re-cut policy-authorised bitemporal artifact,
+session/context, Skill, Tool, Configuration and relaxation questions over the
+context-platform chain, with cursor pagination and deterministic offline
+verification evidence, and delete old-noun branches.
 
 ### Starting-point objective map
 
@@ -4260,5 +4260,85 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `feat(governance): add governed auto-apply and relaxations
   (CPR-31)` on `feat/context-platform-mvp`.
+- **Commit hash.** Written by the next checkpoint under the programme's
+  next-checkpoint convention.
+
+### Repository governance objective — unified approvals and review (CPR-32)
+
+- **Selected feature and decision.** **CPR-32** is delivered from `9281951`;
+  it records CPR-31's commit as
+  `92819516ee35abf3f5a0fe6cd8c0658f666269af`. Accepted ADR-0091 keeps one
+  VedaFlow proposal/change rather than building review systems per noun. A
+  closed `ArtifactFamily` and validated `ArtifactReference` bind each proposal
+  to stable aggregate or binding ids, the exact operation, immutable
+  version/digest and any stale-head precondition. Knowledge additionally names
+  immutable OKF import evidence where applicable; authored multi-member
+  proposals carry one reference per member.
+
+- **One live approval calculation.** The inherited pack matrix and nearest
+  curator requirements still resolve on every act. Rules now monotonically
+  add an author self-review prohibition and, where configured, require the
+  effect actor to differ from both the author and every counting reviewer.
+  `open-collaboration` retains intentional personal auto-apply only where the
+  complete live requirement is empty; `standard` separates author and
+  reviewer; `regulated-strict` also separates the executor. Cedar remains the
+  source of authority: these rules narrow otherwise allowed combinations and
+  never grant an action.
+
+- **Commit- and revision-bound lifecycle.** Approve and reject both require
+  the exact proposal commit the reviewer inspected, with a stale commit
+  rejected before a review or close row is written. Rejection still requires a
+  reason; an author barred from reviewing cancels through the existing
+  proposer withdrawal semantics. Apply/publish repeats ownership, PDP, live
+  matrix, separation, canonical payload and artifact revision checks. Every
+  production caller—Knowledge and OKF, Skills, Tool servers/bindings,
+  Configuration, policy relaxations, Prompts, Context Packs and the pre-cut
+  authored-Memory path—constructs the common typed evidence.
+
+- **Schema and security.** Migration `0057_unified_artifact_approvals` adds a
+  mandatory bounded JSONB reference array, database validator, family GIN
+  index and immutability trigger to `vedaflow_proposals`. It creates no second
+  table, default, backfill or old-row translation. The proposal remains
+  tenant-bound under enabled and forced RLS, and opened/reviewed/closed audit
+  metadata carries ids, hashes, references and separation flags without
+  artifact content or secrets. Epoch **2** now has **55 migration files**,
+  **693** checked SQLx descriptions and **91** tenant tables in the forced-RLS
+  completeness inventory.
+
+- **Generated product surface.** The exact authenticated application contract
+  remains **164 operations** and grows **260 → 262 schemas** for typed
+  references and lifecycle entries. Proposal listing accepts an artifact
+  family filter; list/detail responses expose references, live requirement,
+  approvals and deterministic content-free timeline. Advanced Reviews uses
+  only generated operations/types to inspect the family and exact version,
+  submit commit-bound verdicts, cancel as proposer and execute an approved
+  effect. New Learnings remains the lightweight capture decision surface and
+  session-event quarantine remains pre-extraction admission control; neither
+  is falsely counted as an artifact review implementation.
+
+- **Gate finding.** The first complete database run reached two old direct-SQL
+  test fixtures that omitted the newly required references. Production callers
+  and focused gateway suites were already correct; the fixtures now construct
+  the same typed Configuration, relaxation and authored-Memory addresses, so
+  RLS tests reach the tenant boundary instead of failing early on a non-null
+  constraint. The corrected policy-pack **5/5** and forced-RLS **83/83** suites
+  pass, and regenerated SQLx metadata compiles fully offline.
+
+- **Tests and exact results.** Types **212/212** plus serde **50/50**, policy
+  **77/77**, VedaFlow **73/73** plus object-store **10/10**, public
+  Configuration **1/1**, Knowledge **4/4**, OKF **1/1**, relaxations **3/3**,
+  Skills **1/1**, Tools **1/1**, Context Packs **10/10**, Prompts **6/6**,
+  OpenAPI **6/6**, complete console **210/210**, policy-pack store **5/5** and
+  forced RLS **83/83** pass. Generated API/SQLx, dependency, licence, backlog,
+  ADR and **80-script** demo-drift checks pass. Isolated
+  `demos/cpr-32-unified-approvals.sh` passes with 81 typed proposals across
+  seven families, 23 exact-commit review acts, regulated three-person
+  separation and zero audited artifact content. Complete final-byte `make ci`
+  and full disposable-Postgres `make db-test` **PASS**, the latter against
+  `synveda_test_43866`. This is deterministic local evidence and adds no live
+  external-provider claim.
+
+- **Commit.** `feat(governance): extend approvals across artifact families
+  (CPR-32)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by the next checkpoint under the programme's
   next-checkpoint convention.

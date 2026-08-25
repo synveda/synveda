@@ -25,6 +25,10 @@ export interface ReviewProps {
   detail: ProposalDetail;
   /** Cast a verdict. Absent when the screen is read-only. */
   onVerdict?: (verdict: "approve" | "reject", reason: string) => void;
+  /** Cancel this open change as its author. */
+  onCancel?: () => void;
+  /** Execute an approved apply or publication effect. */
+  onExecute?: () => void;
   /**
    * Why no verdict is offered, when none is (CNSL-2, ADR-0058).
    *
@@ -38,7 +42,15 @@ export interface ReviewProps {
   busy?: boolean;
 }
 
-export function Review({ detail, onVerdict, cannotReview, error, busy }: ReviewProps) {
+export function Review({
+  detail,
+  onVerdict,
+  onCancel,
+  onExecute,
+  cannotReview,
+  error,
+  busy,
+}: ReviewProps) {
   return (
     <article className="review">
       <Heading detail={detail} />
@@ -48,6 +60,8 @@ export function Review({ detail, onVerdict, cannotReview, error, busy }: ReviewP
         </div>
       ) : null}
       <Reviews approvals={detail.approvals} />
+      <Artifacts detail={detail} />
+      <Timeline detail={detail} />
       <Effect detail={detail} />
       {onVerdict ? (
         <Verdict onVerdict={onVerdict} busy={busy ?? false} />
@@ -57,7 +71,61 @@ export function Review({ detail, onVerdict, cannotReview, error, busy }: ReviewP
           <p className="muted">{cannotReview}</p>
         </section>
       ) : null}
+      {onCancel || onExecute ? (
+        <section className="verdict-section">
+          <h3>change lifecycle</h3>
+          <div className="actions">
+            {onExecute ? (
+              <button type="button" disabled={busy} onClick={onExecute}>
+                {detail.effect === "apply" ? "Apply approved change" : "Publish approved change"}
+              </button>
+            ) : null}
+            {onCancel ? (
+              <button type="button" disabled={busy} onClick={onCancel}>
+                Cancel proposal
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
     </article>
+  );
+}
+
+function Artifacts({ detail }: { detail: ProposalDetail }) {
+  return (
+    <section>
+      <h3>governed artifacts</h3>
+      <ul className="plain">
+        {detail.artifact_references.map((reference) => (
+          <li key={`${reference.family}:${reference.artifact_id}:${reference.operation}`}>
+            <strong>{reference.family}</strong> · {reference.operation} · <code>{reference.artifact_id}</code>
+            <div className="muted">
+              proposed <code>{reference.version}</code>
+              {reference.expected_revision ? (
+                <> from <code>{reference.expected_revision}</code></>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Timeline({ detail }: { detail: ProposalDetail }) {
+  return (
+    <section>
+      <h3>timeline</h3>
+      <ol className="plain">
+        {detail.timeline.map((event, index) => (
+          <li key={`${event.kind}:${event.at}:${index}`}>
+            {event.kind} {event.actor_subject ? `by ${event.actor_subject}` : ""} at {instant(event.at)}
+            {event.reason ? <div className="comment">“{event.reason}”</div> : null}
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 

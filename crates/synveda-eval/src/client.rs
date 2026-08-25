@@ -432,6 +432,8 @@ pub struct ProposalRequest<'a> {
 #[derive(Debug, Deserialize)]
 pub struct Proposal {
     pub id: String,
+    /// Exact immutable commit a verdict must echo.
+    pub commit: String,
     /// `open` | `approved` | `rejected` | `withdrawn` | `published`.
     pub state: String,
     /// What the proposal still lacks, in the pack's own words. The runner
@@ -741,10 +743,13 @@ impl Client {
     /// bearer until the proposal leaves `open`, because how many distinct
     /// approvers and which roles is the pack's answer, not the harness's.
     pub async fn approve(&self, bearer: &str, proposal: &str) -> Result<Timed<Proposal>, String> {
+        let current: Proposal = self
+            .get(&format!("/v1/proposals/{proposal}"), bearer, &[])
+            .await?;
         self.post(
             &format!("/v1/proposals/{proposal}/approve"),
             bearer,
-            &serde_json::json!({}),
+            &serde_json::json!({"expected_commit": current.commit}),
         )
         .await
     }

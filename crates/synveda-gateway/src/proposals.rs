@@ -63,9 +63,9 @@ use synveda_policy::{Action, Resource};
 use synveda_store::{rls, scopes};
 use synveda_types::scope::Scope;
 use synveda_types::{
-    ApprovalRequirement, AssetKind, CastApproval, Channel, DocumentPath, Error, IdentityId,
-    PromotionEvidence, PromptName, ProposalEffect, ProposalId, ProposalState, ProposalView, Result,
-    ScopeId, Sensitivity, TenantId, Verdict,
+    ApprovalRequirement, ArtifactFamily, ArtifactReference, AssetKind, CastApproval, Channel,
+    DocumentPath, Error, IdentityId, PromotionEvidence, PromptName, ProposalEffect, ProposalId,
+    ProposalState, ProposalView, Result, ScopeId, Sensitivity, TenantId, Verdict,
 };
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
 
@@ -144,6 +144,35 @@ pub(crate) struct PromotionEvidenceSchema {
     members: Vec<PromotionMemberEvidenceSchema>,
 }
 
+/// Content-free typed address shared by every governed artifact family.
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalArtifactReference)]
+pub(crate) struct ArtifactReferenceView {
+    /// Closed common-review family vocabulary.
+    family: String,
+    /// Stable aggregate, binding, import job, or authored member id.
+    artifact_id: String,
+    /// Domain mutation carried by the reviewed effect.
+    operation: String,
+    /// Exact immutable revision, binding-state digest, or content digest.
+    version: String,
+    /// Head inspected by a revision-aware mutation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_revision: Option<String>,
+}
+
+impl From<&ArtifactReference> for ArtifactReferenceView {
+    fn from(reference: &ArtifactReference) -> Self {
+        Self {
+            family: reference.family.as_str().to_owned(),
+            artifact_id: reference.artifact_id.clone(),
+            operation: reference.operation.clone(),
+            version: reference.version.clone(),
+            expected_revision: reference.expected_revision.clone(),
+        }
+    }
+}
+
 /// One proposal in a listing.
 #[derive(Serialize, utoipa::ToSchema)]
 pub(crate) struct ProposalSummary {
@@ -182,10 +211,13 @@ pub(crate) struct ProposalSummary {
     proposer_id: IdentityId,
     proposer_subject: String,
     created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
     closed_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     close_reason: Option<String>,
+    /// Stable, content-free artifacts and exact versions bound by the commit.
+    artifact_references: Vec<ArtifactReferenceView>,
     /// What the matrix asks for here, resolved now.
     required: RequirementView,
     /// What it still lacks, in one line a reviewer reads.
@@ -220,6 +252,24 @@ pub(crate) struct ApprovalView {
     #[serde(skip_serializing_if = "Option::is_none")]
     comment: Option<String>,
     created_at: DateTime<Utc>,
+}
+
+/// One common proposal lifecycle event, oldest first.
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalTimelineEvent)]
+pub(crate) struct TimelineEventView {
+    /// `opened`, `approved`, `rejected`, `withdrawn`, `applied`, or `published`.
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    actor_id: Option<IdentityId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actor_subject: Option<String>,
+    at: DateTime<Utc>,
+    /// Exact proposal commit the act bound.
+    commit: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 /// What publishing this proposal would do to the target's published
@@ -305,6 +355,7 @@ pub(crate) struct ProposalDetail {
     summary: ProposalSummary,
     members: Vec<MemberView>,
     approvals: Vec<ApprovalView>,
+    timeline: Vec<TimelineEventView>,
 }
 
 // ── List ───────────────────────────────────────────────────────────────
@@ -318,6 +369,8 @@ pub(crate) struct ListParams {
     /// Restrict to one stored state. `approved` is not a stored state —
     /// it is computed — so filter on `open` and read `state` per row.
     state: Option<ProposalState>,
+    /// Restrict to proposals whose typed artifact index contains this family.
+    artifact_family: Option<ArtifactFamily>,
     limit: Option<i64>,
 }
 
@@ -336,6 +389,7 @@ pub(crate) struct ListResponse {
     params(
         ("scope_id" = Option<String>, Query, format = "uuid"),
         ("state" = Option<String>, Query),
+        ("artifact_family" = Option<String>, Query),
         ("limit" = Option<i64>, Query)
     ),
     responses(
@@ -399,6 +453,7 @@ pub(crate) async fn list(
             vedaflow::ProposalFilter {
                 target_scope: params.scope_id,
                 state: params.state,
+                artifact_family: params.artifact_family,
                 limit,
             },
         )
@@ -479,6 +534,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
         let summary = summarise(&state, &mut tx, tenant_id, &input, &proposal).await?;
         let members = member_views(&mut tx, tenant_id, &proposal).await?;
         let recorded = vedaflow::proposals::approvals(&mut tx, tenant_id, id).await?;
+        let timeline = timeline(&proposal, &recorded);
         audit::record(
             &mut tx,
             tenant_id,
@@ -512,11 +568,67 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
                     created_at: approval.created_at,
                 })
                 .collect(),
+            timeline,
             summary,
         }))
     }
     .await;
     respond(&state, "get", result).await
+}
+
+fn timeline(
+    proposal: &vedaflow::StoredProposal,
+    approvals: &[vedaflow::StoredApproval],
+) -> Vec<TimelineEventView> {
+    let commit = proposal.commit.to_hex();
+    let mut events = vec![TimelineEventView {
+        kind: "opened".to_owned(),
+        actor_id: Some(proposal.proposer_id),
+        actor_subject: Some(proposal.proposer_subject.clone()),
+        at: proposal.created_at,
+        commit: commit.clone(),
+        reason: None,
+    }];
+    events.extend(approvals.iter().map(|approval| {
+        TimelineEventView {
+            kind: match approval.verdict {
+                Verdict::Approve => "approved",
+                Verdict::Reject => "rejected",
+            }
+            .to_owned(),
+            actor_id: Some(approval.approver_id),
+            actor_subject: Some(approval.approver_subject.clone()),
+            at: approval.created_at,
+            commit: approval.commit.to_hex(),
+            reason: approval.comment.clone(),
+        }
+    }));
+    let rejection_is_recorded = approvals
+        .iter()
+        .any(|approval| approval.verdict == Verdict::Reject);
+    if proposal.state.is_terminal()
+        && !(proposal.state == ProposalState::Rejected && rejection_is_recorded)
+    {
+        let actor_subject = proposal.closed_by.and_then(|actor| {
+            approvals
+                .iter()
+                .find(|approval| approval.approver_id == actor)
+                .map(|approval| approval.approver_subject.clone())
+                .or_else(|| {
+                    (actor == proposal.proposer_id).then(|| proposal.proposer_subject.clone())
+                })
+        });
+        events.push(TimelineEventView {
+            kind: proposal.state.as_str().to_owned(),
+            actor_id: proposal.closed_by,
+            actor_subject,
+            at: proposal.closed_at.unwrap_or(proposal.updated_at),
+            commit,
+            reason: proposal.close_reason.clone(),
+        });
+    }
+    events.sort_by_key(|event| event.at);
+    events
 }
 
 // ── Open ───────────────────────────────────────────────────────────────
@@ -760,6 +872,22 @@ async fn open_inner(
         authorized.decision.pack_name.clone(),
         authorized.decision.pack_version,
     );
+    let artifact_family = match asset {
+        AssetKind::Prompt => ArtifactFamily::Prompt,
+        AssetKind::ContextPack => ArtifactFamily::ContextPack,
+        _ => {
+            return Err(Error::Invalid {
+                message: "authored proposals support prompt and context-pack assets only"
+                    .to_owned(),
+            });
+        }
+    };
+    let artifact_references = members
+        .iter()
+        .map(|(entry, hash)| {
+            ArtifactReference::new(artifact_family, entry, "publish", hash.to_hex(), None)
+        })
+        .collect::<Result<Vec<_>>>()?;
     let proposal = vedaflow::proposals::open(
         &mut tx,
         tenant_id,
@@ -773,6 +901,7 @@ async fn open_inner(
             asset,
             effect,
             members: &members,
+            artifact_references: &artifact_references,
             sensitivity,
             title: &body.title,
             proposer,
@@ -832,6 +961,7 @@ async fn open_inner(
             "title": body.title,
             "sensitivity": sensitivity.as_str(),
             "commit": proposal.commit.to_hex(),
+            "artifact_references": artifact_reference_audit(&proposal),
             // Where it came from, and — when that is not the target — the
             // second governed decision the climb took: the proposer's read
             // at the source, which is the disclosure this proposal makes
@@ -870,7 +1000,10 @@ async fn open_inner(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[schema(as = ProposalReviewBody)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ReviewBody {
+    /// Exact proposal commit the reviewer inspected.
+    expected_commit: String,
     /// What the reviewer wants to say. Optional on an approval; a
     /// rejection carries its reason in `reason` instead.
     #[serde(default)]
@@ -879,7 +1012,10 @@ pub(crate) struct ReviewBody {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 #[schema(as = ProposalRejectBody)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RejectBody {
+    /// Exact proposal commit the reviewer inspected.
+    expected_commit: String,
     /// Why. Mandatory — a rejection an auditor cannot read the reason for
     /// is not a review, and FLOW-5 inherits this reason for its
     /// per-level denials.
@@ -902,7 +1038,7 @@ pub(crate) struct ReviewResponse {
     operation_id = "approve_proposal",
     tag = "proposals",
     params(("id" = String, Path, format = "uuid")),
-    request_body(content = Option<ReviewBody>, description = "Optional review comment"),
+    request_body(content = ReviewBody, description = "Commit-bound review verdict"),
     responses(
         (status = 200, description = "The proposal after this approval", body = ReviewResponse),
         (status = 400, description = "The review comment is invalid", body = crate::workspaces::ApiErrorBody),
@@ -920,14 +1056,8 @@ pub(crate) async fn approve(
     payload: std::result::Result<Json<ReviewBody>, JsonRejection>,
 ) -> Response {
     let result = async {
-        // An approval with no body at all is the common case: `comment`
-        // is the only field and it is optional, so a bodiless POST is a
-        // bare "I approve".
-        let comment = match payload {
-            Ok(Json(body)) => body.comment,
-            Err(_) => None,
-        };
-        approve_inner(&state, id, comment.as_deref()).await
+        let body = body(payload)?;
+        approve_inner(&state, id, &body.expected_commit, body.comment.as_deref()).await
     }
     .await;
     respond(&state, "approve", result).await
@@ -936,6 +1066,7 @@ pub(crate) async fn approve(
 async fn approve_inner(
     state: &AppState,
     id: ProposalId,
+    expected_commit: &str,
     comment: Option<&str>,
 ) -> Result<Json<ReviewResponse>> {
     check_text("comment", comment)?;
@@ -958,9 +1089,11 @@ async fn approve_inner(
         Resource::Scope(node.id),
     )?;
     require_open(&proposal)?;
+    require_expected_commit(&proposal, expected_commit)?;
     let approver = identity_of(&input)?;
 
     let requirement = requirement_for(state, &mut tx, tenant_id, &input, &node, &proposal).await?;
+    approvals::require_review_actor(&requirement, id, proposal.proposer_id, approver)?;
     let recorded = vedaflow::proposals::approvals(&mut tx, tenant_id, id).await?;
     let cast = vedaflow::proposals::cast_for(&recorded, proposal.commit);
     let outstanding = requirement.outstanding(&cast);
@@ -1022,6 +1155,7 @@ async fn approve_inner(
             "commit": proposal.commit.to_hex(),
             "source_scope_id": proposal.source_scope_id,
             "target_scope_id": proposal.target_scope_id,
+            "artifact_references": artifact_reference_audit(&proposal),
             "roles": candidate.roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
             "comment": comment,
             "approvals": approvals::audit_context(&requirement, &after),
@@ -1071,7 +1205,7 @@ pub(crate) async fn reject(
 ) -> Response {
     let result = async {
         let body = body(payload)?;
-        reject_inner(&state, id, &body.reason).await
+        reject_inner(&state, id, &body.expected_commit, &body.reason).await
     }
     .await;
     respond(&state, "reject", result).await
@@ -1080,6 +1214,7 @@ pub(crate) async fn reject(
 async fn reject_inner(
     state: &AppState,
     id: ProposalId,
+    expected_commit: &str,
     reason: &str,
 ) -> Result<Json<ProposalSummary>> {
     check_text("reason", Some(reason))?;
@@ -1107,8 +1242,11 @@ async fn reject_inner(
         Resource::Scope(node.id),
     )?;
     require_open(&proposal)?;
+    require_expected_commit(&proposal, expected_commit)?;
     let reviewer = identity_of(&input)?;
     let roles = approvals::roles_at(&input, &node);
+    let requirement = requirement_for(state, &mut tx, tenant_id, &input, &node, &proposal).await?;
+    approvals::require_review_actor(&requirement, id, proposal.proposer_id, reviewer)?;
 
     vedaflow::proposals::record_approval(
         &mut tx,
@@ -1135,7 +1273,6 @@ async fn reject_inner(
     .await?;
     vedaflow::proposals::act("rejected", proposal.asset);
 
-    let requirement = requirement_for(state, &mut tx, tenant_id, &input, &node, &proposal).await?;
     let paths = ScopePaths::resolve(&mut tx, tenant_id, &proposal, &node).await?;
     audit::record(
         &mut tx,
@@ -1153,6 +1290,7 @@ async fn reject_inner(
             // mandatory (ADR-0034 decision 9).
             "source_scope_id": proposal.source_scope_id,
             "target_scope_id": proposal.target_scope_id,
+            "artifact_references": artifact_reference_audit(&proposal),
             "roles": roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
             "reason": reason,
         }),
@@ -1247,6 +1385,7 @@ pub(crate) async fn withdraw(
                 "commit": proposal.commit.to_hex(),
                 "source_scope_id": proposal.source_scope_id,
                 "target_scope_id": proposal.target_scope_id,
+                "artifact_references": artifact_reference_audit(&proposal),
             }),
         )
         .await?;
@@ -1414,6 +1553,7 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
             ),
         });
     }
+    approvals::require_effect_actor(&requirement, id, proposal.proposer_id, &cast, publisher)?;
 
     // Approvals bind bytes. Recompute every member's address from the
     // artifact as it stands *now* and require it to equal what the approved
@@ -1601,6 +1741,7 @@ async fn publish_documents(
             "sensitivity": proposal.sensitivity.as_str(),
             "source_scope_id": source,
             "target_scope_id": proposal.target_scope_id,
+            "artifact_references": artifact_reference_audit(proposal),
             // Paths and addresses, never document text.
             "records": members.iter().map(|(name, hash)| json!({
                 "member": name,
@@ -1760,6 +1901,7 @@ async fn publish_prompts(
             "sensitivity": proposal.sensitivity.as_str(),
             "source_scope_id": source,
             "target_scope_id": proposal.target_scope_id,
+            "artifact_references": artifact_reference_audit(proposal),
             // Names and addresses, never template text.
             "records": members.iter().map(|(name, hash)| json!({
                 "member": name,
@@ -1854,6 +1996,24 @@ fn require_open(proposal: &vedaflow::StoredProposal) -> Result<()> {
         });
     }
     Ok(())
+}
+
+fn require_expected_commit(
+    proposal: &vedaflow::StoredProposal,
+    expected_commit: &str,
+) -> Result<()> {
+    let expected: vedaflow::CommitHash = expected_commit.parse()?;
+    if expected == proposal.commit {
+        return Ok(());
+    }
+    Err(Error::Conflict {
+        message: format!(
+            "proposal {} is at commit {}; the reviewed commit {} is stale",
+            proposal.id,
+            proposal.commit.to_hex(),
+            expected.to_hex()
+        ),
+    })
 }
 
 /// The proposing/reviewing identity. A verified subject with no identity
@@ -2003,12 +2163,23 @@ fn render(
         proposer_id: proposal.proposer_id,
         proposer_subject: proposal.proposer_subject.clone(),
         created_at: proposal.created_at,
+        updated_at: proposal.updated_at,
         closed_at: proposal.closed_at,
         close_reason: proposal.close_reason.clone(),
+        artifact_references: proposal
+            .artifact_references
+            .iter()
+            .map(ArtifactReferenceView::from)
+            .collect(),
         required: RequirementView::of(requirement),
         outstanding: outstanding.describe(),
         promotion: proposal.evidence.clone(),
     }
+}
+
+fn artifact_reference_audit(proposal: &vedaflow::StoredProposal) -> serde_json::Value {
+    serde_json::to_value(&proposal.artifact_references)
+        .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()))
 }
 
 /// A proposal's members with their current content, a drift flag, and the

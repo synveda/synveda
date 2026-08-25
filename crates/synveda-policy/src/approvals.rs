@@ -72,7 +72,7 @@ const SHARED: [ScopeKind; 2] = [ScopeKind::Tenant, ScopeKind::OrgUnit];
 /// a team takes two people.
 #[must_use]
 pub fn regulated_strict() -> ApprovalMatrix {
-    ApprovalMatrix {
+    let mut matrix = ApprovalMatrix {
         rules: vec![
             rule(
                 Some(AssetKind::Memory),
@@ -156,7 +156,12 @@ pub fn regulated_strict() -> ApprovalMatrix {
                 2,
             ),
         ],
+    };
+    for rule in &mut matrix.rules {
+        rule.forbid_author_approval = true;
+        rule.separate_effect_actor = true;
     }
+    matrix
 }
 
 /// `standard`: the SMB collapse tech plan §2.4 names — "most of the above
@@ -167,7 +172,7 @@ pub fn regulated_strict() -> ApprovalMatrix {
 /// a curator may publish without a second look — never that anyone may.
 #[must_use]
 pub fn standard() -> ApprovalMatrix {
-    ApprovalMatrix {
+    let mut matrix = ApprovalMatrix {
         rules: vec![
             rule(
                 Some(AssetKind::Memory),
@@ -213,7 +218,11 @@ pub fn standard() -> ApprovalMatrix {
                 1,
             ),
         ],
+    };
+    for rule in &mut matrix.rules {
+        rule.forbid_author_approval = true;
     }
+    matrix
 }
 
 /// `open-collaboration`: share by default, review at the org boundary.
@@ -292,6 +301,8 @@ fn rule(
             .map(|(role, count)| RoleRequirement::new(*role, *count))
             .collect(),
         distinct_approvers,
+        forbid_author_approval: false,
+        separate_effect_actor: false,
     }
 }
 

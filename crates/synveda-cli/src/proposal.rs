@@ -354,9 +354,13 @@ pub async fn review(
 // ── The two acts, shared by `review` and the direct verbs ───────────────
 
 async fn cast_approval(api: &Api, id: ProposalId, comment: Option<&str>) -> Result<(), String> {
-    let body = comment.map(|comment| json!({ "comment": comment }));
+    let detail: Detail = api.get_as(&format!("/v1/proposals/{id}")).await?;
+    let mut body = json!({ "expected_commit": detail.summary.commit });
+    if let Some(comment) = comment {
+        body["comment"] = json!(comment);
+    }
     let response = api
-        .post(&format!("/v1/proposals/{id}/approve"), body)
+        .post(&format!("/v1/proposals/{id}/approve"), Some(body))
         .await?;
     let summary: Summary = serde_json::from_value(response.clone())
         .map_err(|err| format!("the gateway's answer is not the shape expected: {err}"))?;
@@ -385,10 +389,14 @@ async fn cast_rejection(api: &Api, id: ProposalId, reason: &str) -> Result<(), S
     if reason.trim().is_empty() {
         return Err("a rejection must say why".to_owned());
     }
+    let detail: Detail = api.get_as(&format!("/v1/proposals/{id}")).await?;
     let _: Summary = api
         .post_as(
             &format!("/v1/proposals/{id}/reject"),
-            Some(json!({ "reason": reason })),
+            Some(json!({
+                "expected_commit": detail.summary.commit,
+                "reason": reason,
+            })),
         )
         .await?;
     eprintln!("synveda: rejected {id} — {reason}");

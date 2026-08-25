@@ -76,6 +76,14 @@ never history. Usage names the exact binding/version and distinguishes host
 observation from model report; the built-in validation sandbox executes no
 bundle code and manifest-declared tools grant no authority.
 
+Advanced Reviews is the one comprehensive workflow for Knowledge, Skills,
+Tool servers and bindings, Configuration, policy relaxations, OKF-sourced
+publication, prompts and context packs. Every row names content-free typed
+artifact/version references; approve and reject bind the exact proposal commit,
+and configured profiles may prohibit author review or require a distinct effect
+actor. The author can cancel, and an approved change is applied or published
+only through its original PDP- and revision-checked command path.
+
 ### Governance is enforced, not suggested
 
 - **Every read and write passes a Policy Decision Point.** Cedar, compiled into
@@ -95,7 +103,7 @@ bundle code and manifest-declared tools grant no authority.
 ## Project status
 
 **Phases 0–2 are complete. Phase 5 is re-cutting the product while Phase 3 is
-paused.** 96 of 127 filed features are delivered, each with acceptance
+paused.** 98 of 129 filed features are delivered, each with acceptance
 evidence and, where it has a runtime, a runnable script in [`demos/`](demos/).
 
 It installs, on somebody else's machine, with Docker as the only prerequisite:
@@ -119,10 +127,10 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration and policy relaxations | 🚧 31 packages delivered; programme continues |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration and policy relaxations | 🚧 32 packages delivered; programme continues |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **128
-in total, 97 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **129
+in total, 98 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
@@ -150,7 +158,7 @@ Published benchmark scores, and what they do and do not measure:
   (`regulated-strict`, `standard`, `open-collaboration`), six role keys
   granted at a scope and inherited by its subtree (`owner`, `member`,
   `viewer`, `reviewer`, `curator`, `administrator`), ABAC conditions,
-  time-boxed lapses, and Postgres row-level security as a backstop.
+  time-boxed governed relaxations, and Postgres row-level security as a backstop.
 - **The write path** — adapters append immutable session events through the
   public session API. Knowledge can be authored and revised through typed
   VedaFlow create/edit/verify/merge/supersede/archive/restore/forget commands.
@@ -173,9 +181,11 @@ Published benchmark scores, and what they do and do not measure:
   hashes-only or disabled retention. The deleted global `/v1/recall` route has
   not returned; CLI/MCP recall uses the ordinary session-scoped Knowledge query,
   while corpus enumeration is a separately authorised diagnostics operation.
-- **VedaFlow end to end** — objects, commits, refs, proposals, an approval matrix,
-  auto-promotion rules, cross-scope promotion, rollback and pinning, and a CLI
-  review flow that needs no console.
+- **VedaFlow end to end** — objects, commits, refs and one typed proposal
+  lifecycle across every governed artifact family. Verdicts bind exact commits;
+  the live matrix combines roles, distinct people, author-review restrictions
+  and optional author/reviewer/effect-actor separation. Advanced Reviews and
+  the CLI expose the same cancel, verdict and effect operations.
 - **Governed runtime configuration** — stable Configuration aggregates own
   immutable content-hashed versions. Revisioned nearest-scope bindings select
   policy, capture rules, context budgets/channels/trace retention, freshness,

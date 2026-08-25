@@ -30,9 +30,9 @@ use synveda_types::json::canonicalise;
 use synveda_types::relaxation::RelaxationAction;
 use synveda_types::scope::Scope;
 use synveda_types::{
-    AssetKind, ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, Error,
-    IdentityId, ProposalEffect, ProposalId, ProposalState, Result, ScopeId, Sensitivity, TenantId,
-    TraceRetentionMode,
+    ArtifactFamily, ArtifactReference, AssetKind, ConfigurationArtifactId, ConfigurationBindingId,
+    ConfigurationVersionId, Error, IdentityId, ProposalEffect, ProposalId, ProposalState, Result,
+    ScopeId, Sensitivity, TenantId, TraceRetentionMode,
 };
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
 use utoipa::ToSchema;
@@ -895,6 +895,54 @@ async fn open_command(
 ) -> Result<ConfigurationMutationResult> {
     let actor = identity_of(&authorization.input)?;
     let payload_hash = command_payload_hash(command)?;
+    let artifact_reference = match command {
+        ConfigurationCommand::Create {
+            artifact_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            artifact_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            None,
+        )?,
+        ConfigurationCommand::Publish {
+            artifact_id,
+            expected_current_version_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            artifact_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            Some(expected_current_version_id.to_string()),
+        )?,
+        ConfigurationCommand::Bind {
+            binding_id,
+            pinned_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            binding_id.to_string(),
+            command.kind(),
+            pinned_version_id.map_or_else(|| payload_hash.clone(), |id| id.to_string()),
+            None,
+        )?,
+        ConfigurationCommand::SetBinding {
+            binding_id,
+            expected_revision,
+            pinned_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            binding_id.to_string(),
+            command.kind(),
+            pinned_version_id.map_or_else(|| payload_hash.clone(), |id| id.to_string()),
+            Some(expected_revision.to_string()),
+        )?,
+    };
     let manifest = canonicalise(&json!({
         "command": command.kind(),
         "payload_hash": payload_hash,
@@ -920,6 +968,7 @@ async fn open_command(
             asset: AssetKind::Configuration,
             effect: ProposalEffect::Apply,
             members: &members,
+            artifact_references: &[artifact_reference],
             sensitivity: Sensitivity::Internal,
             title: &format!("{} runtime configuration", command.kind()),
             proposer: actor,
@@ -957,6 +1006,7 @@ async fn open_command(
             "command": command.kind(),
             "payload_hash": payload_hash,
             "manifest_hash": object.hash.to_hex(),
+            "artifact_references": &proposal.artifact_references,
             "artifact_id": command.artifact_id(),
             "version_id": command.version_id(),
             "binding_id": command.binding_id(),
@@ -1255,8 +1305,8 @@ pub(crate) async fn apply_reviewed(
     )
     .await?;
     let recorded = vedaflow::proposals::approvals(&mut tx, tenant, id).await?;
-    let outstanding =
-        requirement.outstanding(&vedaflow::proposals::cast_for(&recorded, proposal.commit));
+    let cast = vedaflow::proposals::cast_for(&recorded, proposal.commit);
+    let outstanding = requirement.outstanding(&cast);
     if !outstanding.is_empty() {
         return Err(Error::Conflict {
             message: format!(
@@ -1266,6 +1316,7 @@ pub(crate) async fn apply_reviewed(
         });
     }
     let actor = identity_of(&authorization.input)?;
+    approvals::require_effect_actor(&requirement, id, proposal.proposer_id, &cast, actor)?;
     let result = apply_loaded(
         state,
         &mut tx,

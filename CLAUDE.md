@@ -99,6 +99,10 @@ CPR-31, governed policy relaxation, is delivered under ADR-0090; immutable
 exact-subject `knowledge.read` versions replace the pre-cut mutable plane, and
 personal auto-apply is an outcome of the same VedaFlow/PDP/audit path stricter
 profiles retain for review.
+CPR-32, unified approvals, is delivered under ADR-0091; immutable typed
+artifact references, exact-commit verdicts and configurable separation of
+duties now span Knowledge, Skills, Tools, Configuration, relaxations and OKF
+through one generated Advanced Reviews lifecycle.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -210,7 +214,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 97 of 128 features delivered — see docs/backlog/STATUS.md for
+features done. 98 of 129 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -371,6 +375,15 @@ immutable versions retain exact subject/scope/permission/tier/window,
 approvers and Configuration evidence; Cedar and database time decide the
 window, while open collaboration auto-applies only by completing the same
 typed VedaFlow change standard retains for review or rejection.
+**CPR-32 was filed next**, making it **129 with 97 delivered**: it extends the
+one VedaFlow review across every context-platform artifact family with typed
+aggregate/version references, configurable author/reviewer/effect-actor
+separation, commit-preconditioned verdicts and one comprehensive Advanced
+Reviews lifecycle.
+It was delivered the same day, making it **129 with 98 delivered**: every
+proposal now carries immutable typed artifact addresses, both verdicts bind
+the inspected commit, stricter profiles separate author, reviewer and effect
+actor, and generated Advanced Reviews completes that one common lifecycle.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

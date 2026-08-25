@@ -5,7 +5,164 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Channel, Error};
+use crate::{Channel, Error, Result};
+
+/// The stable artifact family a common VedaFlow proposal refers to
+/// (CPR-32, ADR-0091).
+///
+/// This is deliberately more precise than [`crate::AssetKind`]: one Tool
+/// asset may change a server version or an exact project binding, and an OKF
+/// import publishes through Knowledge without becoming a second Knowledge
+/// aggregate. The family says what stable domain address a reviewer is
+/// looking at; it never grants authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactFamily {
+    /// Stable Knowledge aggregate.
+    Knowledge,
+    /// Stable Agent Skill aggregate or binding.
+    Skill,
+    /// Stable trusted MCP server catalogue entry.
+    ToolServer,
+    /// Exact project-to-Tool-version binding.
+    ToolBinding,
+    /// Stable governed runtime Configuration aggregate or binding.
+    Configuration,
+    /// Stable time-boxed policy-relaxation aggregate.
+    PolicyRelaxation,
+    /// Immutable OKF import job or source artifact cited by a Knowledge change.
+    OkfImport,
+    /// Authored prompt template.
+    Prompt,
+    /// Authored context-pack document.
+    ContextPack,
+    /// Pre-cut authored Memory proposal retained only until the final hard cut.
+    Memory,
+}
+
+impl ArtifactFamily {
+    /// Every supported common-review family.
+    pub const ALL: [Self; 10] = [
+        Self::Knowledge,
+        Self::Skill,
+        Self::ToolServer,
+        Self::ToolBinding,
+        Self::Configuration,
+        Self::PolicyRelaxation,
+        Self::OkfImport,
+        Self::Prompt,
+        Self::ContextPack,
+        Self::Memory,
+    ];
+
+    /// Stable wire/storage name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Knowledge => "knowledge",
+            Self::Skill => "skill",
+            Self::ToolServer => "tool_server",
+            Self::ToolBinding => "tool_binding",
+            Self::Configuration => "configuration",
+            Self::PolicyRelaxation => "policy_relaxation",
+            Self::OkfImport => "okf_import",
+            Self::Prompt => "prompt",
+            Self::ContextPack => "context_pack",
+            Self::Memory => "memory",
+        }
+    }
+}
+
+impl fmt::Display for ArtifactFamily {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ArtifactFamily {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|family| family.as_str() == value)
+            .ok_or_else(|| Error::Invalid {
+                message: format!("unknown governed artifact family: {value:?}"),
+            })
+    }
+}
+
+/// One immutable typed address carried by the common proposal row.
+///
+/// `version` is the exact revision, content digest or binding revision the
+/// proposal commit binds. `expected_revision` is the head the command author
+/// inspected, when the domain command has a stale-write precondition. Both
+/// are identifiers only: review lists and audit events never need artifact
+/// content or secret-bearing configuration here.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactReference {
+    /// Closed artifact-family vocabulary.
+    pub family: ArtifactFamily,
+    /// Stable aggregate, binding, import job or authored member id.
+    pub artifact_id: String,
+    /// Typed domain operation (`edit`, `bind`, `approve_version`, ...).
+    pub operation: String,
+    /// Exact immutable revision/digest proposed.
+    pub version: String,
+    /// Existing head inspected by a mutable command, if one exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<String>,
+}
+
+impl ArtifactReference {
+    /// Constructs and validates one content-free typed address.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Invalid`] when any component is empty, contains control
+    /// characters, or exceeds the bounded common-review contract.
+    pub fn new(
+        family: ArtifactFamily,
+        artifact_id: impl Into<String>,
+        operation: impl Into<String>,
+        version: impl Into<String>,
+        expected_revision: Option<String>,
+    ) -> Result<Self> {
+        let reference = Self {
+            family,
+            artifact_id: artifact_id.into(),
+            operation: operation.into(),
+            version: version.into(),
+            expected_revision,
+        };
+        reference.validate()?;
+        Ok(reference)
+    }
+
+    /// Validates an address loaded from or about to enter persistence.
+    pub fn validate(&self) -> Result<()> {
+        bounded_component("artifact_id", &self.artifact_id, 1_024)?;
+        bounded_component("operation", &self.operation, 64)?;
+        bounded_component("version", &self.version, 512)?;
+        if let Some(expected) = &self.expected_revision {
+            bounded_component("expected_revision", expected, 512)?;
+        }
+        Ok(())
+    }
+}
+
+fn bounded_component(name: &str, value: &str, max_chars: usize) -> Result<()> {
+    let chars = value.chars().count();
+    if chars == 0 || chars > max_chars || value.chars().any(char::is_control) {
+        return Err(Error::Invalid {
+            message: format!(
+                "artifact reference {name} must contain 1..={max_chars} non-control characters"
+            ),
+        });
+    }
+    Ok(())
+}
 
 /// A proposal's stored lifecycle — only what *happened* (ADR-0032
 /// decision 11).
@@ -345,5 +502,39 @@ mod tests {
             "approved".parse::<ProposalState>(),
             Err(Error::Invalid { .. })
         ));
+    }
+
+    #[test]
+    fn typed_artifact_references_round_trip_and_reject_loose_addresses() {
+        for family in ArtifactFamily::ALL {
+            assert_eq!(
+                family.to_string().parse::<ArtifactFamily>().unwrap(),
+                family
+            );
+        }
+        let reference = ArtifactReference::new(
+            ArtifactFamily::Knowledge,
+            "item-1",
+            "edit",
+            "revision-2",
+            Some("revision-1".to_owned()),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_value::<ArtifactReference>(serde_json::to_value(&reference).unwrap())
+                .unwrap(),
+            reference
+        );
+        assert!(
+            ArtifactReference::new(
+                ArtifactFamily::ToolBinding,
+                "binding-1",
+                "bind",
+                "digest-1",
+                Some("\n".to_owned())
+            )
+            .is_err()
+        );
+        assert!("tool-server".parse::<ArtifactFamily>().is_err());
     }
 }

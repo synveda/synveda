@@ -205,6 +205,10 @@ export type ApprovalRequirementView = {
      */
     distinct_approvers: number;
     /**
+     * The proposal author cannot cast a verdict when true.
+     */
+    forbid_author_approval: boolean;
+    /**
      * Where the requirement came from: `floor`, `pack`, and the scope of
      * any curator file that contributed — so a trail explains what a
      * proposal needed without reading a pack that has since changed.
@@ -214,6 +218,11 @@ export type ApprovalRequirementView = {
      * Roles required, with counts.
      */
     roles: ApprovalRoleView[];
+    /**
+     * Applying or publishing requires an actor distinct from the author
+     * and every recorded approver when true.
+     */
+    separate_effect_actor: boolean;
     /**
      * Named subjects a curator file requires.
      */
@@ -3823,6 +3832,32 @@ export type ProposalApprovalView = {
   };
 
 /**
+ * Content-free typed address shared by every governed artifact family.
+ */
+export type ProposalArtifactReference = {
+    /**
+     * Stable aggregate, binding, import job, or authored member id.
+     */
+    artifact_id: string;
+    /**
+     * Head inspected by a revision-aware mutation.
+     */
+    expected_revision?: string | null;
+    /**
+     * Closed common-review family vocabulary.
+     */
+    family: string;
+    /**
+     * Domain mutation carried by the reviewed effect.
+     */
+    operation: string;
+    /**
+     * Exact immutable revision, binding-state digest, or content digest.
+     */
+    version: string;
+  };
+
+/**
  * The version the target's published channel holds for a member now —
  * the old side of the diff, present only for [`MemberEffect::Update`].
  *
@@ -3851,6 +3886,7 @@ export type ProposalBaselineView = {
 export type ProposalDetail = ProposalSummary & {
     approvals: ProposalApprovalView[];
     members: ProposalMemberView[];
+    timeline: ProposalTimelineEvent[];
   };
 
 export type ProposalListResponse = {
@@ -3982,6 +4018,10 @@ export type ProposalPublishResponse = {
 
 export type ProposalRejectBody = {
     /**
+     * Exact proposal commit the reviewer inspected.
+     */
+    expected_commit: string;
+    /**
      * Why. Mandatory — a rejection an auditor cannot read the reason for
      * is not a review, and FLOW-5 inherits this reason for its
      * per-level denials.
@@ -3995,6 +4035,10 @@ export type ProposalReviewBody = {
      * rejection carries its reason in `reason` instead.
      */
     comment?: string | null;
+    /**
+     * Exact proposal commit the reviewer inspected.
+     */
+    expected_commit: string;
   };
 
 export type ProposalReviewResponse = ProposalSummary & {
@@ -4008,6 +4052,10 @@ export type ProposalReviewResponse = ProposalSummary & {
  * One proposal in a listing.
  */
 export type ProposalSummary = {
+    /**
+     * Stable, content-free artifacts and exact versions bound by the commit.
+     */
+    artifact_references: ProposalArtifactReference[];
     asset: string;
     close_reason?: string | null;
     closed_at?: string | null;
@@ -4053,6 +4101,25 @@ export type ProposalSummary = {
      */
     target_scope_path?: string | null;
     title: string;
+    updated_at: string;
+  };
+
+/**
+ * One common proposal lifecycle event, oldest first.
+ */
+export type ProposalTimelineEvent = {
+    actor_id?: string | null;
+    actor_subject?: string | null;
+    at: string;
+    /**
+     * Exact proposal commit the act bound.
+     */
+    commit: string;
+    /**
+     * `opened`, `approved`, `rejected`, `withdrawn`, `applied`, or `published`.
+     */
+    kind: string;
+    reason?: string | null;
   };
 
 /**
@@ -6706,7 +6773,7 @@ export type Operations = {
   readonly approve_proposal: {
     readonly path: "/v1/proposals/{id}/approve";
     readonly method: "POST";
-    readonly body: null | ProposalReviewBody;
+    readonly body: ProposalReviewBody;
     readonly response: ProposalReviewResponse;
   };
   /**

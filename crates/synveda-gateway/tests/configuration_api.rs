@@ -257,6 +257,25 @@ async fn immutable_versions_bindings_and_runtime_evidence_share_one_governed_pat
     let artifact_id = created["artifact_id"].as_str().expect("artifact id");
     let first_version = created["version_id"].as_str().expect("first version");
     let first_change = created["change_id"].as_str().expect("first change");
+    let (proposal_status, proposal) = call(
+        &app,
+        "GET",
+        &format!("/v1/proposals/{first_change}"),
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(proposal_status, StatusCode::OK, "{proposal}");
+    assert_eq!(
+        proposal["artifact_references"][0]["family"],
+        "configuration"
+    );
+    assert_eq!(
+        proposal["artifact_references"][0]["artifact_id"],
+        artifact_id
+    );
+    assert_eq!(proposal["artifact_references"][0]["version"], first_version);
     let (replay_status, replay) = call(
         &app,
         "POST",

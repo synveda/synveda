@@ -111,8 +111,8 @@ pub use packs::{
 pub use policy::PolicySnapshot;
 pub use prompts::{PromptAsset, PromptChannelState, put_prompt, read_prompt_members};
 pub use proposals::{
-    MAX_OPEN_PROPOSALS, MAX_PROPOSAL_MEMBERS, NewApproval, NewProposal, ProposalFilter,
-    StoredApproval, StoredProposal,
+    MAX_ARTIFACT_REFERENCES, MAX_OPEN_PROPOSALS, MAX_PROPOSAL_MEMBERS, NewApproval, NewProposal,
+    ProposalFilter, StoredApproval, StoredProposal,
 };
 pub use refs::{
     RefUpdate, StoredRef, create_ref, force_update_ref, list_refs, read_ref, update_ref,

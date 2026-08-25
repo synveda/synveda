@@ -34,6 +34,8 @@ mod configuration_support;
 const SECRET: &[u8] = b"cpr-31-governed-relaxations";
 const AUTHOR: &str = "cpr31-author";
 const REVIEWER: &str = "cpr31-reviewer";
+const REVIEWER_TWO: &str = "cpr32-reviewer-two";
+const EXECUTOR: &str = "cpr32-executor";
 const ALICE: &str = "cpr31-alice";
 const BOB: &str = "cpr31-bob";
 
@@ -178,6 +180,8 @@ struct World {
     alice_id: IdentityId,
     author: String,
     reviewer: String,
+    reviewer_two: String,
+    executor: String,
     alice: String,
     bob: String,
 }
@@ -216,6 +220,8 @@ async fn admitted(pack: &str) -> Option<World> {
         .expect("create tenant root");
     administrator(&mut tx, tenant, root.id, AUTHOR).await;
     administrator(&mut tx, tenant, root.id, REVIEWER).await;
+    administrator(&mut tx, tenant, root.id, REVIEWER_TWO).await;
+    administrator(&mut tx, tenant, root.id, EXECUTOR).await;
     let alice_id = provision(&mut tx, tenant, ALICE).await;
     provision(&mut tx, tenant, BOB).await;
     configuration_support::bind_tenant_pack(&mut tx, tenant, pack).await;
@@ -229,6 +235,8 @@ async fn admitted(pack: &str) -> Option<World> {
         alice_id,
         author: token(AUTHOR, tenant),
         reviewer: token(REVIEWER, tenant),
+        reviewer_two: token(REVIEWER_TWO, tenant),
+        executor: token(EXECUTOR, tenant),
         alice: token(ALICE, tenant),
         bob: token(BOB, tenant),
     })
@@ -481,6 +489,63 @@ async fn standard_profile_returns_pending_and_rejected_without_a_fast_path() {
     assert_eq!(pending["outcome"], "pending_review", "{pending}");
     let change = pending["change_id"].as_str().expect("change id");
     let relaxation = pending["relaxation_id"].as_str().expect("relaxation id");
+    let (status, proposal) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/proposals/{change}"),
+        &world.reviewer,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{proposal}");
+    assert_eq!(
+        proposal["artifact_references"][0]["family"],
+        "policy_relaxation"
+    );
+    assert_eq!(proposal["artifact_references"][0]["operation"], "create");
+    assert_eq!(proposal["timeline"][0]["kind"], "opened");
+    assert_eq!(proposal["required"]["forbid_author_approval"], true);
+
+    let (status, filtered) = call(
+        &world.app,
+        "GET",
+        "/v1/proposals?state=open&artifact_family=policy_relaxation",
+        &world.reviewer,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{filtered}");
+    assert!(
+        filtered["proposals"]
+            .as_array()
+            .expect("filtered proposals")
+            .iter()
+            .any(|listed| listed["id"] == change),
+        "typed family filter lost the pending relaxation: {filtered}"
+    );
+
+    let (status, stale) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/proposals/{change}/approve"),
+        &world.reviewer,
+        None,
+        Some(json!({"expected_commit": "00".repeat(32)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{stale}");
+    let (status, self_review) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/proposals/{change}/approve"),
+        &world.author,
+        None,
+        Some(json!({"expected_commit": proposal["commit"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{self_review}");
 
     let (status, approved) = call(
         &world.app,
@@ -488,7 +553,7 @@ async fn standard_profile_returns_pending_and_rejected_without_a_fast_path() {
         &format!("/v1/proposals/{change}/approve"),
         &world.reviewer,
         None,
-        None,
+        Some(json!({"expected_commit": proposal["commit"]})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{approved}");
@@ -561,13 +626,26 @@ async fn standard_profile_returns_pending_and_rejected_without_a_fast_path() {
     let rejected_id = rejected_pending["relaxation_id"]
         .as_str()
         .expect("rejected relaxation");
+    let (status, proposal) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/proposals/{rejected_change}"),
+        &world.reviewer,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{proposal}");
     let (status, rejected) = call(
         &world.app,
         "POST",
         &format!("/v1/proposals/{rejected_change}/reject"),
         &world.reviewer,
         None,
-        Some(json!({"reason": "scope is broader than the incident requires"})),
+        Some(json!({
+            "expected_commit": proposal["commit"],
+            "reason": "scope is broader than the incident requires"
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{rejected}");
@@ -597,6 +675,44 @@ async fn standard_profile_returns_pending_and_rejected_without_a_fast_path() {
         "rejected change created an aggregate"
     );
 
+    let mut cancelled_body = terms(world.alice_id, "author cancels a mistaken request");
+    cancelled_body["target_scope_id"] = json!(scope);
+    let (status, cancelled_pending) = call(
+        &world.app,
+        "POST",
+        "/v1/relaxations",
+        &world.author,
+        Some("cpr32-cancelled"),
+        Some(cancelled_body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{cancelled_pending}");
+    let cancelled_change = cancelled_pending["change_id"]
+        .as_str()
+        .expect("cancelled change");
+    let (status, cancelled) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/proposals/{cancelled_change}/withdraw"),
+        &world.author,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled}");
+    assert_eq!(cancelled["state"], "withdrawn");
+    let (status, cancelled_detail) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/proposals/{cancelled_change}"),
+        &world.author,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled_detail}");
+    assert_eq!(cancelled_detail["timeline"][1]["kind"], "withdrawn");
+
     let changes = sqlx::query_scalar!(
         r#"select count(*) as "count!" from policy_relaxation_changes
            where tenant_id = $1"#,
@@ -606,8 +722,8 @@ async fn standard_profile_returns_pending_and_rejected_without_a_fast_path() {
     .await
     .expect("count typed changes");
     assert_eq!(
-        changes, 2,
-        "both outcomes retained a typed VedaFlow command"
+        changes, 3,
+        "applied, rejected and cancelled outcomes retained typed VedaFlow commands"
     );
     let versions = sqlx::query_scalar!(
         r#"select count(*) as "count!" from policy_relaxation_versions
@@ -619,4 +735,77 @@ async fn standard_profile_returns_pending_and_rejected_without_a_fast_path() {
     .expect("count applied versions");
     assert_eq!(versions, 1, "a rejected command published no version");
     assert_ne!(world.root.to_string(), scope);
+}
+
+#[tokio::test]
+async fn regulated_profile_separates_author_reviewers_and_effect_actor() {
+    let _guard = serial().await;
+    let Some(world) = admitted(synveda_policy::REGULATED_STRICT).await else {
+        return;
+    };
+    let workspace = workspace(&world, "cpr32-separated").await;
+    let scope = workspace["scope_id"].as_str().expect("workspace scope");
+    let mut body = terms(world.alice_id, "regulated separation acceptance");
+    body["target_scope_id"] = json!(scope);
+    let (status, pending) = call(
+        &world.app,
+        "POST",
+        "/v1/relaxations",
+        &world.author,
+        Some("cpr32-separated"),
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{pending}");
+    assert_eq!(pending["outcome"], "pending_review");
+    let change = pending["change_id"].as_str().expect("change id");
+    let (status, proposal) = call(
+        &world.app,
+        "GET",
+        &format!("/v1/proposals/{change}"),
+        &world.reviewer,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{proposal}");
+    assert_eq!(proposal["required"]["forbid_author_approval"], true);
+    assert_eq!(proposal["required"]["separate_effect_actor"], true);
+
+    for credential in [&world.reviewer, &world.reviewer_two] {
+        let (status, reviewed) = call(
+            &world.app,
+            "POST",
+            &format!("/v1/proposals/{change}/approve"),
+            credential,
+            None,
+            Some(json!({"expected_commit": proposal["commit"]})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{reviewed}");
+    }
+
+    for credential in [&world.author, &world.reviewer] {
+        let (status, refused) = call(
+            &world.app,
+            "POST",
+            &format!("/v1/proposals/{change}/apply"),
+            credential,
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    }
+    let (status, applied) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/proposals/{change}/apply"),
+        &world.executor,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{applied}");
+    assert_eq!(applied["outcome"], "applied");
 }

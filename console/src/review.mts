@@ -102,6 +102,12 @@ export function describeRequirement(required: Requirement): string {
   for (const subject of required.subjects ?? []) {
     parts.push(`@${subject}`);
   }
+  if (required.forbid_author_approval) {
+    parts.push("reviewer distinct from author");
+  }
+  if (required.separate_effect_actor) {
+    parts.push("effect actor distinct from author and reviewers");
+  }
   if (parts.length === 0) {
     parts.push("nothing");
   }

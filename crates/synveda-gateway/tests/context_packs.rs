@@ -155,8 +155,11 @@ struct World {
     platform: ScopeId,
     /// The author: a contributor at the platform team.
     alice: String,
-    /// The curator who reviews and runs the effect.
+    /// The curator who reviews.
     cora: String,
+    /// A distinct curator who runs the reviewed effect under the regulated
+    /// profile's separation rule.
+    publisher: String,
     /// The steward the pack also asks for above a team — placed in the
     /// *other* team, so his authority at the platform team is a role
     /// binding and nothing else.
@@ -208,22 +211,25 @@ async fn world() -> Option<World> {
     let platform = unit(&mut tx, tenant, eng.id, "platform").await;
     tx.commit().await.expect("commit scopes");
 
-    for subject in ["alice", "cora", "sam", "bea"] {
+    for subject in ["alice", "cora", "pat", "sam", "bea"] {
         seed_user(&pool, tenant, subject).await;
     }
     bind(&pool, tenant, "alice", platform.id, RoleKey::Member).await;
     bind(&pool, tenant, "cora", platform.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "pat", platform.id, RoleKey::Curator).await;
     bind(&pool, tenant, "sam", platform.id, RoleKey::Administrator).await;
     // The department too: decision 15's split is about *shared* scopes, so
     // the test needs the same two people to be able to act there.
     bind(&pool, tenant, "alice", eng.id, RoleKey::Member).await;
     bind(&pool, tenant, "cora", eng.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "pat", eng.id, RoleKey::Curator).await;
     bind(&pool, tenant, "sam", eng.id, RoleKey::Administrator).await;
     // And the root, where the publications a session composes from live:
     // a grant at the root is on every scope's chain, so the same cast can
     // publish org-wide material (CPR-7, ADR-0074).
     bind(&pool, tenant, "alice", root.id, RoleKey::Member).await;
     bind(&pool, tenant, "cora", root.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "pat", root.id, RoleKey::Curator).await;
     bind(&pool, tenant, "sam", root.id, RoleKey::Administrator).await;
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
@@ -244,6 +250,7 @@ async fn world() -> Option<World> {
         platform: platform.id,
         alice: issue("alice", tenant),
         cora: issue("cora", tenant),
+        publisher: issue("pat", tenant),
         sam: issue("sam", tenant),
         bea: issue("bea", tenant),
         runs,
@@ -480,7 +487,7 @@ async fn review_and_publish(
             &w.app,
             &format!("/v1/proposals/{id}/approve"),
             token,
-            json!({}),
+            json!({"expected_commit": opened["commit"]}),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "approve: {cast}");
@@ -488,7 +495,7 @@ async fn review_and_publish(
     let (status, published) = post(
         &w.app,
         &format!("/v1/proposals/{id}/publish"),
-        &w.cora,
+        &w.publisher,
         json!({}),
     )
     .await;
@@ -560,7 +567,7 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
     let (status, refused) = post(
         &w.app,
         &format!("/v1/channels/{}/publish", w.eng),
-        &w.cora,
+        &w.publisher,
         json!({
             "document_paths": ["payments/runbooks/refunds.md"],
             "message": "ship it",
@@ -611,7 +618,7 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
         &w.app,
         &format!("/v1/proposals/{id}/approve"),
         &w.cora,
-        json!({}),
+        json!({"expected_commit": opened["commit"]}),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "curator approval failed: {first}");
@@ -623,7 +630,7 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
         &w.app,
         &format!("/v1/proposals/{id}/approve"),
         &w.sam,
-        json!({}),
+        json!({"expected_commit": opened["commit"]}),
     )
     .await;
     assert_eq!(
@@ -635,7 +642,7 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
     let (status, published) = post(
         &w.app,
         &format!("/v1/proposals/{id}/publish"),
-        &w.cora,
+        &w.publisher,
         json!({}),
     )
     .await;

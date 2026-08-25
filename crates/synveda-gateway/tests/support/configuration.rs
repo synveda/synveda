@@ -141,6 +141,19 @@ async fn apply_command(
     let object = synveda_vedaflow::put_object(tx, tenant, AssetKind::Configuration, &bytes)
         .await
         .expect("store Configuration fixture object");
+    let artifact_reference = synveda_types::ArtifactReference::new(
+        synveda_types::ArtifactFamily::Configuration,
+        command.binding_id().map_or_else(
+            || command.artifact_id().expect("artifact id").to_string(),
+            |id| id.to_string(),
+        ),
+        command.kind(),
+        command
+            .version_id()
+            .map_or_else(|| object.hash.to_hex(), |id| id.to_string()),
+        None,
+    )
+    .expect("valid Configuration fixture reference");
     let proposal = synveda_vedaflow::proposals::open(
         tx,
         tenant,
@@ -150,6 +163,7 @@ async fn apply_command(
             asset: AssetKind::Configuration,
             effect: ProposalEffect::Apply,
             members: &[("command".to_owned(), object.hash)],
+            artifact_references: &[artifact_reference],
             sensitivity: Sensitivity::Internal,
             title: "integration-test runtime Configuration",
             proposer: actor,

@@ -28,12 +28,12 @@ use synveda_store::{configuration as runtime_configuration, projects, rls, scope
 use synveda_types::configuration::ExternalProvider;
 use synveda_types::json::canonicalise;
 use synveda_types::{
-    AssetKind, CapabilitySnapshotId, Error, IdentityId, NormalizedCapabilities, ProjectId,
-    ProposalEffect, ProposalId, ProposalState, Result, ScopeId, Sensitivity, TenantId,
-    ToolAuthenticationKind, ToolBindingId, ToolBindingState, ToolCommand, ToolMutationOutcome,
-    ToolMutationResult, ToolServerDescriptor, ToolServerId, ToolServerSourceKind,
-    ToolServerVersionId, ToolTestHarness, ToolTestOutcome, ToolTestRunId, ToolTransport,
-    ToolVersionState, normalize_capabilities,
+    ArtifactFamily, ArtifactReference, AssetKind, CapabilitySnapshotId, Error, IdentityId,
+    NormalizedCapabilities, ProjectId, ProposalEffect, ProposalId, ProposalState, Result, ScopeId,
+    Sensitivity, TenantId, ToolAuthenticationKind, ToolBindingId, ToolBindingState, ToolCommand,
+    ToolMutationOutcome, ToolMutationResult, ToolServerDescriptor, ToolServerId,
+    ToolServerSourceKind, ToolServerVersionId, ToolTestHarness, ToolTestOutcome, ToolTestRunId,
+    ToolTransport, ToolVersionState, normalize_capabilities,
 };
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
 use utoipa::ToSchema;
@@ -1105,6 +1105,54 @@ async fn open_command(
 ) -> Result<ToolMutationResult> {
     let actor = identity_of(&authorization.input, "changing trusted MCP metadata")?;
     let payload_hash = command_payload_hash(command)?;
+    let artifact_reference = match command {
+        ToolCommand::Register {
+            server_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::ToolServer,
+            server_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            None,
+        )?,
+        ToolCommand::StageVersion {
+            server_id,
+            expected_current_version_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::ToolServer,
+            server_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            Some(expected_current_version_id.to_string()),
+        )?,
+        ToolCommand::Bind {
+            binding_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::ToolBinding,
+            binding_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            None,
+        )?,
+        ToolCommand::SetBinding {
+            binding_id,
+            expected_revision,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::ToolBinding,
+            binding_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            Some(expected_revision.to_string()),
+        )?,
+    };
     let manifest = canonicalise(&json!({
         "command": command.kind(),
         "payload_hash": payload_hash,
@@ -1130,6 +1178,7 @@ async fn open_command(
             asset: AssetKind::Tool,
             effect: ProposalEffect::Apply,
             members: &members,
+            artifact_references: &[artifact_reference],
             sensitivity: Sensitivity::Internal,
             title: &format!("{} MCP tool registry", command.kind()),
             proposer: actor,
@@ -1168,6 +1217,7 @@ async fn open_command(
             "command": command.kind(),
             "payload_hash": payload_hash,
             "manifest_hash": object.hash.to_hex(),
+            "artifact_references": &proposal.artifact_references,
             "server_id": command.server_id(),
             "version_id": command.version_id(),
             "binding_id": command.binding_id(),
@@ -1546,6 +1596,7 @@ pub async fn apply_reviewed(state: &AppState, id: ProposalId) -> Result<ToolMuta
         });
     }
     let actor = identity_of(&authorization.input, "applying a Tool change")?;
+    approvals::require_effect_actor(&requirement, id, proposal.proposer_id, &cast, actor)?;
     let result = apply_loaded(
         state,
         &mut tx,

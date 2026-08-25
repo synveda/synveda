@@ -733,6 +733,7 @@ async fn review_is_live_and_forget_leaves_only_content_free_evidence() {
     let workspace = seed_workspace(&state.pool, tenant.id).await;
     seed_user(&state.pool, tenant.id, "member@pulseboard.test").await;
     seed_user(&state.pool, tenant.id, "curator@pulseboard.test").await;
+    seed_user(&state.pool, tenant.id, "publisher@pulseboard.test").await;
     grant(
         &state.pool,
         tenant.id,
@@ -746,6 +747,14 @@ async fn review_is_live_and_forget_leaves_only_content_free_evidence() {
         tenant.id,
         workspace.id,
         "curator@pulseboard.test",
+        RoleKey::Curator,
+    )
+    .await;
+    grant(
+        &state.pool,
+        tenant.id,
+        workspace.id,
+        "publisher@pulseboard.test",
         RoleKey::Curator,
     )
     .await;
@@ -789,6 +798,15 @@ async fn review_is_live_and_forget_leaves_only_content_free_evidence() {
     )
     .expect("decode proposal detail");
     assert_eq!(detail["asset"], "knowledge");
+    assert_eq!(detail["artifact_references"][0]["family"], "knowledge");
+    assert_eq!(
+        detail["artifact_references"][0]["artifact_id"],
+        shared_id.to_string()
+    );
+    assert_eq!(
+        detail["artifact_references"][0]["version"],
+        shared_revision.to_string()
+    );
     assert_eq!(detail["members"][0]["effect"], "apply");
     assert!(
         detail["members"][0]["proposed"]
@@ -805,14 +823,17 @@ async fn review_is_live_and_forget_leaves_only_content_free_evidence() {
                 .method("POST")
                 .uri(format!("/v1/proposals/{}/approve", pending.change_id))
                 .header("authorization", format!("Bearer {token}"))
-                .body(Body::empty())
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"expected_commit": detail["commit"]}).to_string(),
+                ))
                 .expect("build approval request"),
         )
         .await
         .expect("approval route responds");
     assert_eq!(response.status(), StatusCode::OK);
-    let member_token = Hs256Verifier::new(SECRET).issue(
-        "member@pulseboard.test",
+    let executor_token = Hs256Verifier::new(SECRET).issue(
+        "publisher@pulseboard.test",
         tenant.id,
         Duration::from_secs(300),
     );
@@ -822,7 +843,7 @@ async fn review_is_live_and_forget_leaves_only_content_free_evidence() {
             Request::builder()
                 .method("POST")
                 .uri(format!("/v1/proposals/{}/apply", pending.change_id))
-                .header("authorization", format!("Bearer {member_token}"))
+                .header("authorization", format!("Bearer {executor_token}"))
                 .body(Body::empty())
                 .expect("build Knowledge apply request"),
         )

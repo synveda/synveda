@@ -75,6 +75,14 @@ pub struct ApprovalRule {
     /// unilateral action (ADR-0032 decision 7).
     #[serde(default)]
     pub distinct_approvers: u8,
+    /// Whether the proposal author is forbidden from casting a reviewer
+    /// verdict. This narrows a Cedar allow; it never grants review authority.
+    #[serde(default)]
+    pub forbid_author_approval: bool,
+    /// Whether the principal executing an approved effect must differ from
+    /// both the proposal author and every counting approver.
+    #[serde(default)]
+    pub separate_effect_actor: bool,
 }
 
 fn lowest_sensitivity() -> Sensitivity {
@@ -153,6 +161,10 @@ pub struct RequiredAudit {
     pub subjects: Vec<String>,
     /// Where each part came from: `floor`, `pack`, or `curators:{scope}`.
     pub origins: Vec<String>,
+    /// Whether the proposal author is excluded from reviewer verdicts.
+    pub forbid_author_approval: bool,
+    /// Whether a third, separately authorised principal must run the effect.
+    pub separate_effect_actor: bool,
 }
 
 /// One role line of a [`RequiredAudit`].
@@ -214,6 +226,8 @@ static FLOOR: LazyLock<Vec<ApprovalRule>> = LazyLock::new(|| {
             scope_kinds: None,
             roles: vec![RoleRequirement::new(RoleKey::Administrator, 1)],
             distinct_approvers: 2,
+            forbid_author_approval: true,
+            separate_effect_actor: false,
         },
         ApprovalRule {
             asset: Some(AssetKind::Skill),
@@ -221,6 +235,8 @@ static FLOOR: LazyLock<Vec<ApprovalRule>> = LazyLock::new(|| {
             scope_kinds: None,
             roles: vec![RoleRequirement::new(RoleKey::Reviewer, 1)],
             distinct_approvers: 2,
+            forbid_author_approval: true,
+            separate_effect_actor: false,
         },
         ApprovalRule {
             asset: Some(AssetKind::Tool),
@@ -228,6 +244,8 @@ static FLOOR: LazyLock<Vec<ApprovalRule>> = LazyLock::new(|| {
             scope_kinds: None,
             roles: vec![RoleRequirement::new(RoleKey::Reviewer, 1)],
             distinct_approvers: 2,
+            forbid_author_approval: true,
+            separate_effect_actor: false,
         },
     ]
 });
@@ -314,6 +332,16 @@ impl ApprovalMatrix {
                     });
                 }
             }
+            if (rule.forbid_author_approval || rule.separate_effect_actor)
+                && rule.roles.is_empty()
+                && rule.distinct_approvers == 0
+            {
+                return Err(crate::Error::Invalid {
+                    message: format!(
+                        "approval rule {index}: separation requires at least one reviewer"
+                    ),
+                });
+            }
         }
         Ok(())
     }
@@ -337,6 +365,12 @@ pub struct ApprovalRequirement {
     pub subjects: Vec<String>,
     /// Which sources contributed, for the audit event.
     pub origins: Vec<RequirementOrigin>,
+    /// Whether the author may not cast a reviewer verdict on this proposal.
+    #[serde(default)]
+    pub forbid_author_approval: bool,
+    /// Whether the effect actor must be distinct from author and reviewers.
+    #[serde(default)]
+    pub separate_effect_actor: bool,
 }
 
 impl ApprovalRequirement {
@@ -373,6 +407,8 @@ impl ApprovalRequirement {
                 distinct_approvers: self.distinct_approvers,
                 subjects: self.subjects.clone(),
                 origins: self.origins.iter().map(RequirementOrigin::label).collect(),
+                forbid_author_approval: self.forbid_author_approval,
+                separate_effect_actor: self.separate_effect_actor,
             },
             outstanding: outstanding.describe(),
             satisfied: outstanding.is_empty(),
@@ -395,12 +431,22 @@ impl ApprovalRequirement {
         if self.distinct_approvers > 1 {
             parts.push(format!("{} distinct approvers", self.distinct_approvers));
         }
+        if self.forbid_author_approval {
+            parts.push("author cannot review".to_owned());
+        }
+        if self.separate_effect_actor {
+            parts.push("effect actor separate from author and reviewers".to_owned());
+        }
         parts.join(", ")
     }
 
     /// Merges one matching rule in, taking maxima.
     fn absorb(&mut self, origin: RequirementOrigin, rule: &ApprovalRule) {
-        if rule.roles.is_empty() && rule.distinct_approvers == 0 {
+        if rule.roles.is_empty()
+            && rule.distinct_approvers == 0
+            && !rule.forbid_author_approval
+            && !rule.separate_effect_actor
+        {
             return;
         }
         for required in &rule.roles {
@@ -414,6 +460,8 @@ impl ApprovalRequirement {
             }
         }
         self.distinct_approvers = self.distinct_approvers.max(rule.distinct_approvers);
+        self.forbid_author_approval |= rule.forbid_author_approval;
+        self.separate_effect_actor |= rule.separate_effect_actor;
         self.roles.sort_unstable();
         self.note(origin);
     }
@@ -499,6 +547,26 @@ impl ApprovalRequirement {
     #[must_use]
     pub fn satisfied_by(&self, cast: &[CastApproval]) -> bool {
         self.outstanding(cast).is_empty()
+    }
+
+    /// Whether `reviewer` is eligible to cast a verdict after Cedar has
+    /// independently authorised review at the target scope.
+    #[must_use]
+    pub fn allows_review_by(&self, author: IdentityId, reviewer: IdentityId) -> bool {
+        !self.forbid_author_approval || author != reviewer
+    }
+
+    /// Whether `actor` may execute an approved effect after the artifact
+    /// command layer has independently authorised that write.
+    #[must_use]
+    pub fn allows_effect_by(
+        &self,
+        author: IdentityId,
+        approvals: &[CastApproval],
+        actor: IdentityId,
+    ) -> bool {
+        !self.separate_effect_actor
+            || (actor != author && approvals.iter().all(|approval| approval.identity != actor))
     }
 }
 
@@ -599,6 +667,8 @@ mod tests {
             scope_kinds: None,
             roles: vec![RoleRequirement::new(RoleKey::Curator, 1)],
             distinct_approvers: 1,
+            forbid_author_approval: false,
+            separate_effect_actor: false,
         }
     }
 
@@ -706,6 +776,8 @@ mod tests {
             scope_kinds: Some(vec![ScopeKind::OrgUnit, ScopeKind::Tenant]),
             roles: vec![RoleRequirement::new(RoleKey::Administrator, 1)],
             distinct_approvers: 1,
+            forbid_author_approval: false,
+            separate_effect_actor: false,
         };
         assert!(rule.matches(
             AssetKind::Memory,
@@ -751,8 +823,7 @@ mod tests {
         assert!(requirement.satisfied_by(&two));
     }
 
-    /// The proposer is not special-cased: what forbids acting alone is
-    /// the distinct count, and it forbids it the same way everywhere.
+    /// A permissive rule still permits an author-held reviewer role to count.
     #[test]
     fn one_curator_satisfies_a_single_approver_requirement() {
         let requirement = ApprovalMatrix {
@@ -761,6 +832,31 @@ mod tests {
         .resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit);
         assert!(requirement.satisfied_by(&[approval(1, &[RoleKey::Curator])]));
         assert!(!requirement.satisfied_by(&[approval(1, &[RoleKey::Viewer])]));
+    }
+
+    #[test]
+    fn separation_rules_narrow_author_review_and_effect_execution() {
+        let author = identity(1);
+        let reviewer = approval(2, &[RoleKey::Curator]);
+        let third = identity(3);
+        let requirement = ApprovalMatrix {
+            rules: vec![ApprovalRule {
+                forbid_author_approval: true,
+                separate_effect_actor: true,
+                ..memory_rule()
+            }],
+        }
+        .resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit);
+
+        assert!(!requirement.allows_review_by(author, author));
+        assert!(requirement.allows_review_by(author, reviewer.identity));
+        assert!(!requirement.allows_effect_by(author, std::slice::from_ref(&reviewer), author));
+        assert!(!requirement.allows_effect_by(
+            author,
+            std::slice::from_ref(&reviewer),
+            reviewer.identity
+        ));
+        assert!(requirement.allows_effect_by(author, &[reviewer], third));
     }
 
     #[test]

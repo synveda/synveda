@@ -26,8 +26,9 @@ use synveda_types::relaxation::{
 };
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    AssetKind, Error, IdentityId, IdentityStatus, ProposalEffect, ProposalId, ProposalState,
-    RelaxationId, RelaxationVersionId, Result, ScopeId, Sensitivity, TenantId,
+    ArtifactFamily, ArtifactReference, AssetKind, Error, IdentityId, IdentityStatus,
+    ProposalEffect, ProposalId, ProposalState, RelaxationId, RelaxationVersionId, Result, ScopeId,
+    Sensitivity, TenantId,
 };
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
 use utoipa::ToSchema;
@@ -580,6 +581,42 @@ async fn open_command(
 ) -> Result<RelaxationMutationResult> {
     let actor = identity_of(&authorization.input)?;
     let payload_hash = command_payload_hash(command)?;
+    let artifact_reference = match command {
+        RelaxationCommand::Create {
+            relaxation_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::PolicyRelaxation,
+            relaxation_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            None,
+        )?,
+        RelaxationCommand::Revise {
+            relaxation_id,
+            expected_current_version_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::PolicyRelaxation,
+            relaxation_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            Some(expected_current_version_id.to_string()),
+        )?,
+        RelaxationCommand::Revoke {
+            relaxation_id,
+            expected_current_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::PolicyRelaxation,
+            relaxation_id.to_string(),
+            command.kind(),
+            payload_hash.clone(),
+            Some(expected_current_version_id.to_string()),
+        )?,
+    };
     let manifest = canonicalise(&json!({
         "command": command.kind(),
         "payload_hash": payload_hash,
@@ -603,6 +640,7 @@ async fn open_command(
             asset: AssetKind::Policy,
             effect: ProposalEffect::Apply,
             members: &[("command".to_owned(), object.hash)],
+            artifact_references: &[artifact_reference],
             sensitivity: command_sensitivity(command),
             title: &format!("{} policy relaxation", command.kind()),
             proposer: actor,
@@ -641,6 +679,7 @@ async fn open_command(
             "command": command.kind(),
             "payload_hash": payload_hash,
             "manifest_hash": object.hash.to_hex(),
+            "artifact_references": &proposal.artifact_references,
             "relaxation_id": command.relaxation_id(),
             "version_id": command.version_id(),
             "authz": audit::decision_context(Action::ProposalOpen, &authorization.proposal_allowed),
@@ -975,6 +1014,7 @@ pub(crate) async fn apply_reviewed(
     approver_ids.sort_unstable();
     approver_ids.dedup();
     let actor = identity_of(&authorization.input)?;
+    approvals::require_effect_actor(&requirement, id, proposal.proposer_id, &cast, actor)?;
     let rendered = apply_loaded(
         state,
         &mut tx,

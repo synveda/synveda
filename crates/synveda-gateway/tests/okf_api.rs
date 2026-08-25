@@ -389,6 +389,27 @@ async fn okf_plan_materialization_vedaflow_provenance_export_and_isolation() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{accepted}");
     assert_eq!(accepted["candidate"]["resulting_outcome"], "applied");
+    let change_id = accepted["candidate"]["resulting_change_id"]
+        .as_str()
+        .expect("resulting VedaFlow change");
+    let (status, change) = call(
+        &app,
+        "GET",
+        &format!("/v1/proposals/{change_id}"),
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{change}");
+    let families = change["artifact_references"]
+        .as_array()
+        .expect("typed artifact references")
+        .iter()
+        .map(|reference| reference["family"].as_str().expect("family"))
+        .collect::<Vec<_>>();
+    assert!(families.contains(&"knowledge"), "{families:?}");
+    assert!(families.contains(&"okf_import"), "{families:?}");
     let item_id = accepted["candidate"]["resulting_knowledge_item_id"]
         .as_str()
         .expect("resulting item");

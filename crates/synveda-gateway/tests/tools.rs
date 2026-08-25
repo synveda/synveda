@@ -312,13 +312,36 @@ fn capabilities(version: u8) -> Value {
 }
 
 async fn approve_and_apply(world: &World, change_id: &str) -> Value {
+    let (status, proposal) = call(
+        &world.app,
+        Method::GET,
+        &format!("/v1/proposals/{change_id}"),
+        &world.reviewer,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "proposal read failed: {proposal}");
+    assert!(
+        matches!(
+            proposal["artifact_references"][0]["family"].as_str(),
+            Some("tool_server" | "tool_binding")
+        ),
+        "proposal must name its Tool server or binding family: {proposal}"
+    );
+    assert!(
+        proposal["artifact_references"][0]["version"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()),
+        "proposal must bind an exact Tool version or state digest: {proposal}"
+    );
     for token in [&world.reviewer, &world.administrator] {
         let (status, reviewed) = call(
             &world.app,
             Method::POST,
             &format!("/v1/proposals/{change_id}/approve"),
             token,
-            None,
+            Some(json!({"expected_commit": proposal["commit"]})),
             None,
         )
         .await;

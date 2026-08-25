@@ -24,6 +24,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Outcome } from "./api.mjs";
 import { request } from "./client.mjs";
 import { offers, type Capabilities, type CapabilityBatch } from "./explorer.mjs";
+import type { MeView } from "./generated/api.js";
 import { Review } from "./Review.js";
 import { PageHeading } from "./Shell.js";
 import type { Proposal, ProposalDetail } from "./review.mjs";
@@ -31,10 +32,15 @@ import type { Proposal, ProposalDetail } from "./review.mjs";
 export function Reviews() {
   const [queue, setQueue] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
   const [selected, setSelected] = useState<string | null>(null);
+  const [family, setFamily] = useState("");
 
   const load = useCallback(async () => {
-    setQueue(await request("list_proposals", { query: { state: "open" } }));
-  }, []);
+    setQueue(
+      await request("list_proposals", {
+        query: { state: "open", artifact_family: family || undefined },
+      }),
+    );
+  }, [family]);
 
   useEffect(() => {
     void load();
@@ -43,6 +49,21 @@ export function Reviews() {
   return (
     <section className="inbox">
       <PageHeading route="reviews" />
+      <label>
+        Artifact family{" "}
+        <select value={family} onChange={(event) => setFamily(event.target.value)}>
+          <option value="">All governed artifacts</option>
+          <option value="knowledge">Knowledge</option>
+          <option value="skill">Skills</option>
+          <option value="tool_server">Tool servers</option>
+          <option value="tool_binding">Tool bindings</option>
+          <option value="configuration">Configuration</option>
+          <option value="policy_relaxation">Policy relaxations</option>
+          <option value="okf_import">OKF imports</option>
+          <option value="prompt">Prompts</option>
+          <option value="context_pack">Context packs</option>
+        </select>
+      </label>
       <div className="split">
         <Queue state={queue} selected={selected} onSelect={setSelected} onRetry={() => void load()} />
         {selected ? (
@@ -103,6 +124,9 @@ function Queue({
                 that showed only a state would make a reviewer open every
                 row to find the one waiting on them. */}
             <span className="muted">{proposal.outstanding}</span>
+            <span className="muted">
+              {Array.from(new Set(proposal.artifact_references.map((reference) => reference.family))).join(", ")}
+            </span>
           </button>
         </li>
       ))}
@@ -124,13 +148,17 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
   // 2): a reader who gets past this because the forecast aged still meets
   // the gateway's refusal, which `onVerdict` already displays.
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [principalIdentity, setPrincipalIdentity] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const outcome = await request("get_proposal", { path: { id } });
     setState(outcome);
     if (outcome.kind === "ok") {
       const scope = (outcome.body as ProposalDetail).target_scope_id;
-      const batch = await request("get_capabilities", { query: { scopes: scope } });
+      const [batch, me] = await Promise.all([
+        request("get_capabilities", { query: { scopes: scope } }),
+        request("get_me", {}),
+      ]);
       const probe =
         batch.kind === "ok"
           ? { kind: "ok", body: (batch.body as CapabilityBatch).capabilities[0] }
@@ -139,6 +167,9 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
       // nothing — fail closed, so an unreachable PDP shows a reviewer no
       // buttons rather than buttons that will not work.
       setCapabilities(probe.kind === "ok" ? (probe.body as Capabilities) : null);
+      setPrincipalIdentity(
+        me.kind === "ok" ? ((me.body as MeView).principal.identity_id ?? null) : null,
+      );
     }
   }, [id]);
 
@@ -154,11 +185,17 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
         verdict === "approve"
           ? await request("approve_proposal", {
               path: { id },
-              body: reason.trim().length > 0 ? { comment: reason.trim() } : {},
+              body: {
+                expected_commit: (state as { kind: "ok"; body: ProposalDetail }).body.commit,
+                ...(reason.trim().length > 0 ? { comment: reason.trim() } : {}),
+              },
             })
           : await request("reject_proposal", {
               path: { id },
-              body: { reason: reason.trim() },
+              body: {
+                expected_commit: (state as { kind: "ok"; body: ProposalDetail }).body.commit,
+                reason: reason.trim(),
+              },
             });
       setBusy(false);
       if (outcome.kind !== "ok") {
@@ -173,7 +210,29 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
       await load();
       onSettled();
     },
-    [id, load, onSettled],
+    [id, load, onSettled, state],
+  );
+
+  const onTransition = useCallback(
+    async (operation: "cancel" | "execute") => {
+      setBusy(true);
+      setError(null);
+      const detail = (state as { kind: "ok"; body: ProposalDetail }).body;
+      const outcome =
+        operation === "cancel"
+          ? await request("withdraw_proposal", { path: { id } })
+          : detail.effect === "apply"
+            ? await request("apply_proposal", { path: { id } })
+            : await request("publish_proposal", { path: { id } });
+      setBusy(false);
+      if (outcome.kind !== "ok") {
+        setError(outcome.kind === "unauthenticated" ? "Your session has expired." : outcome.message);
+        return;
+      }
+      await load();
+      onSettled();
+    },
+    [id, load, onSettled, state],
   );
 
   if (state.kind === "loading") {
@@ -182,10 +241,39 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
   if (state.kind !== "ok") {
     return <Failure state={state} onRetry={() => void load()} />;
   }
-  const mayReview = offers(capabilities, "proposal.review");
+  const detail = state.body as ProposalDetail;
+  const hasReviewAuthority = offers(capabilities, "proposal.review");
+  const separatedReviewer =
+    !detail.required.forbid_author_approval || principalIdentity !== detail.proposer_id;
+  const mayReview = hasReviewAuthority && separatedReviewer;
+  const mayCancel =
+    principalIdentity === detail.proposer_id &&
+    (detail.state === "open" || detail.state === "approved") &&
+    offers(capabilities, "proposal.open");
+  const effectAction =
+    detail.effect === "published"
+      ? "channel.publish"
+      : detail.asset === "knowledge"
+        ? "knowledge.write"
+        : detail.asset === "skill"
+          ? "skill.write"
+          : detail.asset === "tool"
+            ? "tool.write"
+            : detail.asset === "configuration"
+              ? "configuration.write"
+              : detail.asset === "policy"
+                ? "relaxation.write"
+                : "channel.publish";
+  const separatedActor =
+    !detail.required.separate_effect_actor ||
+    (principalIdentity !== null &&
+      principalIdentity !== detail.proposer_id &&
+      detail.approvals.every((approval) => approval.approver_id !== principalIdentity));
+  const mayExecute =
+    detail.state === "approved" && separatedActor && offers(capabilities, effectAction);
   return (
     <Review
-      detail={state.body as ProposalDetail}
+      detail={detail}
       // Absent rather than disabled: a disabled Approve button is a promise
       // that signing in harder would enable it, and it would not — the
       // answer is a role this reader does not hold at this scope.
@@ -193,6 +281,8 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
       cannotReview={
         mayReview
           ? null
+          : hasReviewAuthority && !separatedReviewer
+            ? "This approval matrix requires a reviewer distinct from the proposal author. Cancel the proposal or ask another authorised reviewer."
           : capabilities === null
             ? "Your capabilities here could not be read, so no verdict is offered."
             : `You hold ${
@@ -201,6 +291,8 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
       }
       error={error}
       busy={busy}
+      onCancel={mayCancel ? () => void onTransition("cancel") : undefined}
+      onExecute={mayExecute ? () => void onTransition("execute") : undefined}
     />
   );
 }

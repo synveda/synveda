@@ -117,6 +117,16 @@ are offered only where `/v1/me` forecasts `knowledge.write`; the gateway still
 decides the act. A pending VedaFlow outcome links to Advanced Reviews rather
 than pretending it was published.
 
+Advanced Reviews is the one full governance queue across Knowledge, Skills,
+Tools, Configuration, relaxations, OKF-sourced publication, prompts and context
+packs. Each entry shows the exact typed artifact/version references and
+lifecycle evidence a verdict binds. Approve or Reject is commit-preconditioned;
+the author can Cancel, and an approved effect still needs a separately
+authorised Apply or Publish. A stricter profile can require a reviewer distinct
+from the author and, under `regulated-strict`, an effect actor distinct from
+both author and reviewers. New Learnings stays intentionally simpler because it
+decides candidates before they become governed Knowledge.
+
 Open **Advanced → Configuration** to see the exact immutable runtime document
 selected at a scope. The personal, team and enterprise choices are templates
 over one binary and schema; they are copied into ordinary content-hashed

@@ -2115,6 +2115,26 @@ CPR-31  Governed auto-apply and policy relaxations (XL)
   markers are deleted without translation; all new tables are forced-RLS;
   focused tests, demo, `make ci` and `make db-test` pass. ADR-0090.
 
+CPR-32  Unified approvals across governed artifacts (XL)
+  Filed 2026-08-25 by the autonomous continuation. Extend the existing
+  VedaFlow proposal/change model rather than adding per-noun review queues.
+  AC: every Knowledge, Skill, Tool server/binding, Configuration, policy
+  relaxation and OKF-publication change exposes immutable typed artifact
+  references on the common proposal; approval rules express required roles,
+  distinct people, author self-review restrictions and optional separation of
+  author, reviewers and effect executor, resolved from the effective inherited
+  profile and curator requirements; approve/reject requests bind the exact
+  proposal commit, rejection requires a reason, stale verdicts fail, and the
+  proposer can cancel without impersonating a reviewer; auto-apply still opens
+  and completes the same change when the matrix asks for no reviewer; Advanced
+  Reviews uses generated API types to filter all artifact families, display
+  requirements, immutable refs and lifecycle evidence, cast verdicts, cancel
+  and execute approved effects; New Learnings remains the lightweight capture
+  workflow and the distinct session-event secret quarantine remains a security
+  control, while no duplicate artifact proposal/review handler or screen
+  survives; audit, PDP, RLS, focused acceptance, demo, `make ci` and
+  `make db-test` pass. ADR-0091.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2208,7 +2228,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

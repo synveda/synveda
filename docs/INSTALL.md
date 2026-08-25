@@ -211,6 +211,34 @@ assignment routes have no aliases; `/v1/policy/packs` remains a read-only Cedar
 source catalogue and local `synveda policy apply|clear` remains documented
 operator break-glass for source installation, not runtime selection.
 
+## Unified reviews
+
+**Advanced → Reviews** is the comprehensive VedaFlow queue for Knowledge,
+Skills, Tool servers and bindings, Configuration, policy relaxations,
+OKF-sourced publication, prompts and context packs. Filter by artifact family,
+then inspect the stable artifact id, operation, exact version or digest,
+stale-head precondition, immutable effect, inherited approval requirement and
+opened/reviewed/closed timeline. New Learnings remains the lightweight capture
+decision page; the session-event quarantine remains a separate secret-admission
+control.
+
+Approve and Reject send the exact proposal commit currently displayed. If the
+proposal changed, the gateway returns a conflict and records no verdict.
+Rejection requires a reason. Where the live profile forbids author review, the
+author must Cancel or ask another authorised reviewer. Under
+`regulated-strict`, a person who authored or counted as a reviewer cannot also
+apply or publish the effect; a separately authorised actor completes it. The
+`standard` profile requires a reviewer distinct from the author but permits the
+author to execute after that review. Personal auto-apply is unchanged: an empty
+live requirement still creates the proposal, object/commit, typed command and
+audit evidence before applying it.
+
+API clients use `expected_commit` in both verdict bodies. CLI
+`synveda proposal approve|reject` first reads the proposal and supplies that
+precondition automatically. Cancel uses the existing withdrawal operation—no
+second lifecycle or alias exists—and Apply/Publish repeat Cedar, the live
+matrix, separation and artifact revision checks.
+
 ## Governed policy relaxations
 
 A relaxation temporarily widens one provisioned subject's ability to read

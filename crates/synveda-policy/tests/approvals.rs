@@ -170,6 +170,8 @@ fn restricted_always_requires_compliance_and_dual_approval() {
                 scope_kinds: None,
                 roles: Vec::new(),
                 distinct_approvers: 0,
+                forbid_author_approval: false,
+                separate_effect_actor: false,
             }],
         },
     ));
@@ -257,6 +259,8 @@ fn a_stored_packs_matrix_rides_its_effective_pack() {
             scope_kinds: None,
             roles: vec![RoleRequirement::new(RoleKey::Administrator, 2)],
             distinct_approvers: 2,
+            forbid_author_approval: false,
+            separate_effect_actor: false,
         }],
     };
     pdp.install_source(
@@ -343,6 +347,8 @@ fn an_unsatisfiable_matrix_is_refused_at_install_time() {
                     scope_kinds: None,
                     roles: vec![RoleRequirement::new(RoleKey::Curator, 2)],
                     distinct_approvers: 1,
+                    forbid_author_approval: false,
+                    separate_effect_actor: false,
                 }],
             }),
             ..Default::default()

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select id, target_scope_id, source_scope_id, asset_kind, target_channel,\n                  commit_hash, sensitivity, state, title, proposer_id, proposer_subject,\n                  created_at, updated_at, closed_at, closed_by, close_reason, evidence\n           from vedaflow_proposals\n           where tenant_id = $1 and id = $2",
+  "query": "select id, target_scope_id, source_scope_id, asset_kind, target_channel,\n                  commit_hash, sensitivity, state, title, proposer_id, proposer_subject,\n                  created_at, updated_at, closed_at, closed_by, close_reason, evidence,\n                  artifact_references\n           from vedaflow_proposals\n           where tenant_id = $1\n             and ($2::uuid is null or target_scope_id = $2)\n             and ($3::text is null or state = $3)\n             and ($4::jsonb is null or artifact_references @> $4)\n           order by created_at desc, id desc\n           limit $5",
   "describe": {
     "columns": [
       {
@@ -87,12 +87,20 @@
         "ordinal": 16,
         "name": "evidence",
         "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 17,
+        "name": "artifact_references",
+        "type_info": "Jsonb"
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid"
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Int8"
       ]
     },
     "nullable": [
@@ -112,8 +120,9 @@
       true,
       true,
       true,
-      true
+      true,
+      false
     ]
   },
-  "hash": "e2e929682bbf845ed1dfcdd0986bc872a8cafa1e99566e7ff459ab41bade781a"
+  "hash": "206a11fb217f0868cc63ad660c17f7683c0980d1f01a79380adcf9438a88e42d"
 }

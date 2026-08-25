@@ -6850,6 +6850,14 @@
             }
           },
           {
+            "name": "artifact_family",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -7174,21 +7182,15 @@
           }
         ],
         "requestBody": {
-          "description": "Optional review comment",
+          "description": "Commit-bound review verdict",
           "content": {
             "application/json": {
               "schema": {
-                "oneOf": [
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "$ref": "#/components/schemas/ProposalReviewBody"
-                  }
-                ]
+                "$ref": "#/components/schemas/ProposalReviewBody"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -12886,6 +12888,8 @@
         "required": [
           "roles",
           "distinct_approvers",
+          "forbid_author_approval",
+          "separate_effect_actor",
           "origins"
         ],
         "properties": {
@@ -12894,6 +12898,10 @@
             "format": "int32",
             "description": "Distinct identities required.",
             "minimum": 0
+          },
+          "forbid_author_approval": {
+            "type": "boolean",
+            "description": "The proposal author cannot cast a verdict when true."
           },
           "origins": {
             "type": "array",
@@ -12908,6 +12916,10 @@
               "$ref": "#/components/schemas/ApprovalRoleView"
             },
             "description": "Roles required, with counts."
+          },
+          "separate_effect_actor": {
+            "type": "boolean",
+            "description": "Applying or publishing requires an actor distinct from the author\nand every recorded approver when true."
           },
           "subjects": {
             "type": "array",
@@ -19552,6 +19564,41 @@
           }
         }
       },
+      "ProposalArtifactReference": {
+        "type": "object",
+        "description": "Content-free typed address shared by every governed artifact family.",
+        "required": [
+          "family",
+          "artifact_id",
+          "operation",
+          "version"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "description": "Stable aggregate, binding, import job, or authored member id."
+          },
+          "expected_revision": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Head inspected by a revision-aware mutation."
+          },
+          "family": {
+            "type": "string",
+            "description": "Closed common-review family vocabulary."
+          },
+          "operation": {
+            "type": "string",
+            "description": "Domain mutation carried by the reviewed effect."
+          },
+          "version": {
+            "type": "string",
+            "description": "Exact immutable revision, binding-state digest, or content digest."
+          }
+        }
+      },
       "ProposalBaselineView": {
         "type": "object",
         "description": "The version the target's published channel holds for a member now —\nthe old side of the diff, present only for [`MemberEffect::Update`].\n\nThis is the one content-visibility widening in FLOW-6 (ADR-0035\ndecision 8): a reviewer sees what a publication would overwrite.\nBounded by the proposal's own member set,\nthe target's own channel, and the target scope the reviewer already\nholds `ProposalRead` on — and admitted because a review of a change\nthat hides one side of the change is not a review.",
@@ -19579,7 +19626,8 @@
             "type": "object",
             "required": [
               "members",
-              "approvals"
+              "approvals",
+              "timeline"
             ],
             "properties": {
               "approvals": {
@@ -19592,6 +19640,12 @@
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/ProposalMemberView"
+                }
+              },
+              "timeline": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProposalTimelineEvent"
                 }
               }
             }
@@ -19779,17 +19833,26 @@
       "ProposalRejectBody": {
         "type": "object",
         "required": [
+          "expected_commit",
           "reason"
         ],
         "properties": {
+          "expected_commit": {
+            "type": "string",
+            "description": "Exact proposal commit the reviewer inspected."
+          },
           "reason": {
             "type": "string",
             "description": "Why. Mandatory — a rejection an auditor cannot read the reason for\nis not a review, and FLOW-5 inherits this reason for its\nper-level denials."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "ProposalReviewBody": {
         "type": "object",
+        "required": [
+          "expected_commit"
+        ],
         "properties": {
           "comment": {
             "type": [
@@ -19797,8 +19860,13 @@
               "null"
             ],
             "description": "What the reviewer wants to say. Optional on an approval; a\nrejection carries its reason in `reason` instead."
+          },
+          "expected_commit": {
+            "type": "string",
+            "description": "Exact proposal commit the reviewer inspected."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "ProposalReviewResponse": {
         "allOf": [
@@ -19838,10 +19906,19 @@
           "proposer_id",
           "proposer_subject",
           "created_at",
+          "updated_at",
+          "artifact_references",
           "required",
           "outstanding"
         ],
         "properties": {
+          "artifact_references": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProposalArtifactReference"
+            },
+            "description": "Stable, content-free artifacts and exact versions bound by the commit."
+          },
           "asset": {
             "type": "string"
           },
@@ -19930,6 +20007,52 @@
           },
           "title": {
             "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ProposalTimelineEvent": {
+        "type": "object",
+        "description": "One common proposal lifecycle event, oldest first.",
+        "required": [
+          "kind",
+          "at",
+          "commit"
+        ],
+        "properties": {
+          "actor_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "actor_subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "commit": {
+            "type": "string",
+            "description": "Exact proposal commit the act bound."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`opened`, `approved`, `rejected`, `withdrawn`, `applied`, or `published`."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

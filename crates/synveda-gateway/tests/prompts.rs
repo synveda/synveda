@@ -119,8 +119,11 @@ struct World {
     platform: ScopeId,
     /// The author: a member grant at the platform team.
     alice: String,
-    /// The curator who reviews and runs the effect.
+    /// The curator who reviews.
     cora: String,
+    /// A distinct curator who runs the reviewed effect under regulated
+    /// separation of duties.
+    publisher: String,
     /// The administrator whose approval the pack also asks for. Under the
     /// grant vocabulary the administrator *can* read content, so the
     /// separation this suite demonstrates is the one the model still
@@ -174,7 +177,7 @@ async fn world() -> Option<World> {
     let payments = unit(&mut tx, tenant, eng.id, "payments").await;
     tx.commit().await.expect("commit hierarchy");
 
-    for subject in ["alice", "cora", "sam"] {
+    for subject in ["alice", "cora", "pat", "sam"] {
         seed_user(&pool, tenant, subject).await;
     }
     // The consumers are headless agents anchored at their teams: placement
@@ -186,6 +189,7 @@ async fn world() -> Option<World> {
     seed_agent(&pool, tenant, "dave", payments.id).await;
     bind(&pool, tenant, "alice", platform.id, RoleKey::Member).await;
     bind(&pool, tenant, "cora", platform.id, RoleKey::Curator).await;
+    bind(&pool, tenant, "pat", platform.id, RoleKey::Curator).await;
     bind(&pool, tenant, "sam", platform.id, RoleKey::Administrator).await;
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
@@ -200,6 +204,7 @@ async fn world() -> Option<World> {
         platform: platform.id,
         alice: issue("alice", tenant),
         cora: issue("cora", tenant),
+        publisher: issue("pat", tenant),
         sam: issue("sam", tenant),
         bea: issue("bea", tenant),
         dave: issue("dave", tenant),
@@ -422,7 +427,7 @@ async fn review_and_publish(w: &World, name: &str, title: &str) -> String {
             &w.app,
             &format!("/v1/proposals/{id}/approve"),
             token,
-            json!({}),
+            json!({"expected_commit": opened["commit"]}),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "approve: {cast}");
@@ -430,7 +435,7 @@ async fn review_and_publish(w: &World, name: &str, title: &str) -> String {
     let (status, published) = post(
         &w.app,
         &format!("/v1/proposals/{id}/publish"),
-        &w.cora,
+        &w.publisher,
         json!({}),
     )
     .await;
@@ -482,7 +487,7 @@ async fn a_prompt_change_reaches_a_consumer_only_through_review() {
     let (status, refused) = post(
         &w.app,
         &format!("/v1/channels/{}/publish", w.platform),
-        &w.cora,
+        &w.publisher,
         json!({"prompt_names": ["support/triage"], "message": "ship it"}),
     )
     .await;
@@ -546,7 +551,7 @@ async fn a_prompt_change_reaches_a_consumer_only_through_review() {
             &w.app,
             &format!("/v1/proposals/{id}/approve"),
             token,
-            json!({}),
+            json!({"expected_commit": opened["commit"]}),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{cast}");
@@ -568,7 +573,7 @@ async fn a_prompt_change_reaches_a_consumer_only_through_review() {
     let (status, published) = post(
         &w.app,
         &format!("/v1/proposals/{id}/publish"),
-        &w.cora,
+        &w.publisher,
         json!({}),
     )
     .await;
@@ -755,7 +760,7 @@ async fn a_pinned_commit_holds_while_the_channel_moves_and_a_rewind_refuses_it()
     let (status, rolled) = post(
         &w.app,
         &format!("/v1/channels/{}/rollback", w.platform),
-        &w.cora,
+        &w.publisher,
         json!({
             "asset": "prompt",
             "from_commit": second,
@@ -952,9 +957,11 @@ async fn resolution_walks_the_chain_nearest_first_and_skips_what_it_may_not_read
     // platform team only, so the org's publication needs its own
     // authority: bind her there for the two publications this test needs.
     bind(&w.pool, w.tenant, "cora", w.org, RoleKey::Curator).await;
+    bind(&w.pool, w.tenant, "pat", w.org, RoleKey::Curator).await;
     bind(&w.pool, w.tenant, "sam", w.org, RoleKey::Administrator).await;
     bind(&w.pool, w.tenant, "alice", w.org, RoleKey::Member).await;
     bind(&w.pool, w.tenant, "cora", w.eng, RoleKey::Curator).await;
+    bind(&w.pool, w.tenant, "pat", w.eng, RoleKey::Curator).await;
     bind(&w.pool, w.tenant, "sam", w.eng, RoleKey::Administrator).await;
     bind(&w.pool, w.tenant, "alice", w.eng, RoleKey::Member).await;
 
@@ -1074,7 +1081,7 @@ async fn carry(w: &World, scope: ScopeId, name: &str, title: &str) {
             &w.app,
             &format!("/v1/proposals/{id}/approve"),
             token,
-            json!({}),
+            json!({"expected_commit": opened["commit"]}),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{cast}");
@@ -1082,7 +1089,7 @@ async fn carry(w: &World, scope: ScopeId, name: &str, title: &str) {
     let (status, published) = post(
         &w.app,
         &format!("/v1/proposals/{id}/publish"),
-        &w.cora,
+        &w.publisher,
         json!({}),
     )
     .await;

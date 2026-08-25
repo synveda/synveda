@@ -29,9 +29,9 @@ use synveda_types::knowledge::{
     validate_knowledge_source,
 };
 use synveda_types::{
-    AssetKind, DurableOperationId, Error, IdentityId, KnowledgeItemId, KnowledgeRelationId,
-    KnowledgeRevisionId, KnowledgeSourceId, ProposalEffect, ProposalId, ProposalState, Result,
-    ScopeId, Sensitivity, TenantId,
+    ArtifactFamily, ArtifactReference, AssetKind, DurableOperationId, Error, IdentityId,
+    KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, ProposalEffect,
+    ProposalId, ProposalState, Result, ScopeId, Sensitivity, TenantId,
 };
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
 
@@ -90,6 +90,7 @@ async fn command_inner(
     let actor = identity_of(&authorization.proposal_input)?;
     let actor_subject = authorization.proposal_input.principal.subject.clone();
     let payload_hash = command_payload_hash(&command)?;
+    let artifact_references = artifact_references(&command, &payload_hash)?;
     let target_ids = command.target_item_ids();
     let manifest = canonicalise(&json!({
         "command": command.kind().as_str(),
@@ -116,6 +117,7 @@ async fn command_inner(
             asset: AssetKind::Knowledge,
             effect: ProposalEffect::Apply,
             members: &members,
+            artifact_references: &artifact_references,
             sensitivity: authorization.sensitivity,
             title: &title,
             proposer: actor,
@@ -157,6 +159,7 @@ async fn command_inner(
             "payload_hash": payload_hash,
             "manifest_hash": object.hash.to_hex(),
             "commit": proposal.commit.to_hex(),
+            "artifact_references": &proposal.artifact_references,
             "target_item_ids": target_ids,
             "target_scope_id": authorization.target.id,
             "sensitivity": authorization.sensitivity.as_str(),
@@ -205,6 +208,148 @@ async fn command_inner(
         message: format!("commit Knowledge command: {err}"),
     })?;
     Ok(result)
+}
+
+fn artifact_references(
+    command: &KnowledgeCommand,
+    payload_hash: &str,
+) -> Result<Vec<ArtifactReference>> {
+    let mut references = match command {
+        KnowledgeCommand::Create {
+            item_id,
+            revision_id,
+            ..
+        } => vec![ArtifactReference::new(
+            ArtifactFamily::Knowledge,
+            item_id.to_string(),
+            "create",
+            revision_id.to_string(),
+            None,
+        )?],
+        KnowledgeCommand::Edit {
+            item_id,
+            expected_revision_id,
+            revision_id,
+            ..
+        }
+        | KnowledgeCommand::Verify {
+            item_id,
+            expected_revision_id,
+            revision_id,
+            ..
+        } => vec![ArtifactReference::new(
+            ArtifactFamily::Knowledge,
+            item_id.to_string(),
+            command.kind().as_str(),
+            revision_id.to_string(),
+            Some(expected_revision_id.to_string()),
+        )?],
+        KnowledgeCommand::Supersede {
+            item_id,
+            expected_revision_id,
+            replacement_item_id,
+            replacement_revision_id,
+            ..
+        } => vec![
+            ArtifactReference::new(
+                ArtifactFamily::Knowledge,
+                item_id.to_string(),
+                "supersede",
+                payload_hash,
+                Some(expected_revision_id.to_string()),
+            )?,
+            ArtifactReference::new(
+                ArtifactFamily::Knowledge,
+                replacement_item_id.to_string(),
+                "create_replacement",
+                replacement_revision_id.to_string(),
+                None,
+            )?,
+        ],
+        KnowledgeCommand::Merge {
+            inputs,
+            result_item_id,
+            result_revision_id,
+            ..
+        } => {
+            let mut references = Vec::with_capacity(inputs.len() + 1);
+            for input in inputs {
+                references.push(ArtifactReference::new(
+                    ArtifactFamily::Knowledge,
+                    input.item_id.to_string(),
+                    "merge_source",
+                    payload_hash,
+                    Some(input.revision_id.to_string()),
+                )?);
+            }
+            references.push(ArtifactReference::new(
+                ArtifactFamily::Knowledge,
+                result_item_id.to_string(),
+                "merge",
+                result_revision_id.to_string(),
+                None,
+            )?);
+            references
+        }
+        KnowledgeCommand::Archive {
+            item_id,
+            expected_revision_id,
+            ..
+        }
+        | KnowledgeCommand::Restore {
+            item_id,
+            expected_revision_id,
+            ..
+        }
+        | KnowledgeCommand::Forget {
+            item_id,
+            expected_revision_id,
+            ..
+        } => vec![ArtifactReference::new(
+            ArtifactFamily::Knowledge,
+            item_id.to_string(),
+            command.kind().as_str(),
+            payload_hash,
+            Some(expected_revision_id.to_string()),
+        )?],
+    };
+
+    let sources = match command {
+        KnowledgeCommand::Create { sources, .. }
+        | KnowledgeCommand::Edit { sources, .. }
+        | KnowledgeCommand::Supersede { sources, .. }
+        | KnowledgeCommand::Merge { sources, .. } => sources.as_slice(),
+        KnowledgeCommand::Verify { .. }
+        | KnowledgeCommand::Archive { .. }
+        | KnowledgeCommand::Restore { .. }
+        | KnowledgeCommand::Forget { .. } => &[],
+    };
+    for source in sources
+        .iter()
+        .filter(|source| source.source_type.as_str() == "okf")
+    {
+        let artifact_id = source
+            .metadata
+            .get("artifact_id")
+            .and_then(Value::as_str)
+            .or(source.locator.as_deref())
+            .map_or_else(|| source.id.to_string(), str::to_owned);
+        let version = source
+            .content_hash
+            .as_deref()
+            .or(source.source_revision.as_deref())
+            .map_or_else(|| source.id.to_string(), str::to_owned);
+        references.push(ArtifactReference::new(
+            ArtifactFamily::OkfImport,
+            artifact_id,
+            "publish_candidate",
+            version,
+            None,
+        )?);
+    }
+    references.sort();
+    references.dedup();
+    Ok(references)
 }
 
 /// Replays one idempotent Knowledge command after taking the original
@@ -306,6 +451,7 @@ pub async fn apply_reviewed(
         });
     }
     let actor = identity_of(&authorization.proposal_input)?;
+    approvals::require_effect_actor(&requirement, change_id, proposal.proposer_id, &cast, actor)?;
     let actor_subject = authorization.proposal_input.principal.subject.clone();
     let result = apply_loaded(
         &mut tx,

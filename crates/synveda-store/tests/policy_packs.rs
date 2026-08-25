@@ -18,8 +18,9 @@ use synveda_types::configuration::{
 };
 use synveda_types::scope::ScopeKind;
 use synveda_types::{
-    CompositionConfig, ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId,
-    Error, IdentityId, InjectChannels, PackConfig, ProposalId, ScopeId, TenantId, TenantStatus,
+    ArtifactFamily, ArtifactReference, CompositionConfig, ConfigurationArtifactId,
+    ConfigurationBindingId, ConfigurationVersionId, Error, IdentityId, InjectChannels, PackConfig,
+    ProposalId, ScopeId, TenantId, TenantStatus,
 };
 
 /// Seeding shape the old hierarchy-create calls had, on the governed
@@ -100,6 +101,65 @@ async fn apply_configuration_command(
     let tree_hash = blake3::hash(&[b"tree".as_slice(), nonce].concat());
     let commit_hash = blake3::hash(&[b"commit".as_slice(), nonce].concat());
     let content = serde_json::to_vec(command).expect("encode Configuration command");
+    let payload_hash = blake3::hash(
+        synveda_types::json::canonicalise(
+            &serde_json::to_value(command).expect("encode Configuration command value"),
+        )
+        .to_string()
+        .as_bytes(),
+    )
+    .to_hex()
+    .to_string();
+    let reference = match command {
+        ConfigurationCommand::Create {
+            artifact_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            artifact_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            None,
+        ),
+        ConfigurationCommand::Publish {
+            artifact_id,
+            expected_current_version_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            artifact_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            Some(expected_current_version_id.to_string()),
+        ),
+        ConfigurationCommand::Bind {
+            binding_id,
+            pinned_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            binding_id.to_string(),
+            command.kind(),
+            pinned_version_id.map_or_else(|| payload_hash.clone(), |id| id.to_string()),
+            None,
+        ),
+        ConfigurationCommand::SetBinding {
+            binding_id,
+            expected_revision,
+            pinned_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            binding_id.to_string(),
+            command.kind(),
+            pinned_version_id.map_or_else(|| payload_hash.clone(), |id| id.to_string()),
+            Some(expected_revision.to_string()),
+        ),
+    }
+    .expect("valid Configuration fixture reference");
+    let artifact_references = serde_json::to_value([reference]).expect("encode typed reference");
     sqlx::query!(
         "insert into vedaflow_objects (tenant_id, hash, kind, content, size_bytes)
          values ($1, $2, 'configuration', $3, $4)",
@@ -147,27 +207,19 @@ async fn apply_configuration_command(
         "insert into vedaflow_proposals
              (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
               target_channel, commit_hash, sensitivity, title, proposer_id,
-              proposer_subject)
+              proposer_subject, artifact_references)
          values ($1, $2, $3, $3, 'configuration', 'apply', $4, 'internal',
-                 'test Configuration change', $5, 'configuration-fixture')",
+                 'test Configuration change', $5, 'configuration-fixture', $6)",
         tenant.as_uuid(),
         proposal.as_uuid(),
         scope.as_uuid(),
         commit_hash.as_bytes().as_slice(),
         actor.as_uuid(),
+        artifact_references,
     )
     .execute(&mut *tx)
     .await
     .expect("open Configuration proposal");
-    let payload_hash = blake3::hash(
-        synveda_types::json::canonicalise(
-            &serde_json::to_value(command).expect("encode Configuration command value"),
-        )
-        .to_string()
-        .as_bytes(),
-    )
-    .to_hex()
-    .to_string();
     configuration::insert_change(&mut *tx, tenant, proposal, command, &payload_hash)
         .await
         .expect("bind Configuration command to proposal");

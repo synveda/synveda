@@ -26,12 +26,12 @@ use synveda_store::{configuration, rls, scopes};
 use synveda_types::json::canonicalise;
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    AssetKind, Error, IdentityId, IdentityKind, ProposalEffect, ProposalId, ProposalState, Result,
-    ScanSeverity, ScopeId, Sensitivity, SessionId, SkillBindingId, SkillBundle, SkillCommand,
-    SkillFile, SkillFilePath, SkillId, SkillMutationOutcome, SkillMutationResult, SkillName,
-    SkillProvenance, SkillTestHarness, SkillTestOutcome, SkillTestRunId, SkillUsageEventId,
-    SkillUsageEvidence, SkillUsageStage, SkillVersionFileRef, SkillVersionId, TenantId,
-    validate_skill_usage_client_event_id,
+    ArtifactFamily, ArtifactReference, AssetKind, Error, IdentityId, IdentityKind, ProposalEffect,
+    ProposalId, ProposalState, Result, ScanSeverity, ScopeId, Sensitivity, SessionId,
+    SkillBindingId, SkillBundle, SkillCommand, SkillFile, SkillFilePath, SkillId,
+    SkillMutationOutcome, SkillMutationResult, SkillName, SkillProvenance, SkillTestHarness,
+    SkillTestOutcome, SkillTestRunId, SkillUsageEventId, SkillUsageEvidence, SkillUsageStage,
+    SkillVersionFileRef, SkillVersionId, TenantId, validate_skill_usage_client_event_id,
 };
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer, SkillAsset};
 use utoipa::ToSchema;
@@ -1046,6 +1046,54 @@ async fn open_command(
 ) -> Result<SkillMutationResult> {
     let actor = identity_of(&authorization.input, "changing a skill")?;
     let payload_hash = command_payload_hash(command)?;
+    let artifact_reference = match command {
+        SkillCommand::Install {
+            skill_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Skill,
+            skill_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            None,
+        )?,
+        SkillCommand::Update {
+            skill_id,
+            expected_current_version_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Skill,
+            skill_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            Some(expected_current_version_id.to_string()),
+        )?,
+        SkillCommand::Bind {
+            binding_id,
+            pinned_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Skill,
+            binding_id.to_string(),
+            command.kind(),
+            pinned_version_id.map_or_else(|| payload_hash.clone(), |id| id.to_string()),
+            None,
+        )?,
+        SkillCommand::SetBinding {
+            binding_id,
+            expected_revision,
+            pinned_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Skill,
+            binding_id.to_string(),
+            command.kind(),
+            pinned_version_id.map_or_else(|| payload_hash.clone(), |id| id.to_string()),
+            Some(expected_revision.to_string()),
+        )?,
+    };
     let manifest = canonicalise(&json!({
         "command": command.kind(),
         "payload_hash": payload_hash,
@@ -1071,6 +1119,7 @@ async fn open_command(
             asset: AssetKind::Skill,
             effect: ProposalEffect::Apply,
             members: &members,
+            artifact_references: &[artifact_reference],
             sensitivity: command.sensitivity(),
             title: &format!("{} Skill", command.kind()),
             proposer: actor,
@@ -1108,6 +1157,7 @@ async fn open_command(
             "command": command.kind(),
             "payload_hash": payload_hash,
             "manifest_hash": object.hash.to_hex(),
+            "artifact_references": &proposal.artifact_references,
             "skill_id": command.skill_id(),
             "version_id": command.version_id(),
             "binding_id": command.binding_id(),
@@ -1611,6 +1661,7 @@ pub async fn apply_reviewed(state: &AppState, id: ProposalId) -> Result<SkillMut
         });
     }
     let actor = identity_of(&authorization.input, "applying a skill change")?;
+    approvals::require_effect_actor(&requirement, id, proposal.proposer_id, &cast, actor)?;
     let result = apply_loaded(
         state,
         &mut tx,
