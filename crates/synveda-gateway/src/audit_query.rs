@@ -93,8 +93,9 @@ async fn respond<T: IntoResponse>(
 
 /// Where the chain stood when the answer was taken, and what the answer
 /// covered (ADR-0045 decision 9).
-#[derive(Serialize)]
-struct Frame {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = AuditFrame)]
+pub(crate) struct Frame {
     /// The chain head's sequence number when the query ran.
     head_seq: i64,
     /// The head hash, hex — the value that makes an answer re-derivable.
@@ -126,8 +127,9 @@ impl<T> From<&synveda_audit::Page<T>> for Frame {
 }
 
 /// One chain row as the API renders it.
-#[derive(Serialize)]
-struct EventView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = AuditEventView)]
+pub(crate) struct EventView {
     seq: i64,
     occurred_at: DateTime<Utc>,
     /// How the actor was established (`subject`/`break_glass`/`system`).
@@ -184,14 +186,38 @@ pub(crate) struct EventsParams {
     limit: Option<i64>,
 }
 
-#[derive(Serialize)]
-struct EventsResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = AuditEventsResponse)]
+pub(crate) struct EventsResponse {
     events: Vec<EventView>,
     #[serde(flatten)]
     frame: Frame,
 }
 
 /// `GET /v1/audit/events` — the search (ADR-0045 decision 3).
+#[utoipa::path(
+    get,
+    path = "/v1/audit/events",
+    operation_id = "list_audit_events",
+    tag = "audit",
+    params(
+        ("actor" = Option<String>, Query),
+        ("action" = Option<String>, Query),
+        ("outcome" = Option<String>, Query),
+        ("resource" = Option<String>, Query),
+        ("from" = Option<DateTime<Utc>>, Query),
+        ("until" = Option<DateTime<Utc>>, Query),
+        ("after" = Option<i64>, Query),
+        ("limit" = Option<i64>, Query)
+    ),
+    responses(
+        (status = 200, description = "A cursor page from the tenant audit chain", body = EventsResponse),
+        (status = 400, description = "A filter or page bound is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Audit read is not permitted", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "audit.events", skip_all)]
 pub(crate) async fn events(
     State(state): State<AppState>,
@@ -246,8 +272,9 @@ pub(crate) async fn events(
 
 /// One disclosure as the API renders it — the shape of what was served,
 /// never the substance.
-#[derive(Serialize)]
-struct DisclosureView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = AuditDisclosureView)]
+pub(crate) struct DisclosureView {
     seq: i64,
     occurred_at: DateTime<Utc>,
     actor_kind: String,
@@ -295,8 +322,9 @@ pub(crate) struct DisclosuresParams {
     limit: Option<i64>,
 }
 
-#[derive(Serialize)]
-struct DisclosuresResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = AuditDisclosuresResponse)]
+pub(crate) struct DisclosuresResponse {
     /// Who the chain records the Knowledge item being **served** to in the window,
     /// with what they got. This is evidence.
     disclosed: Vec<DisclosureView>,
@@ -326,6 +354,26 @@ const DISCLOSURE_NOTE: &str = "`disclosed` is who the chain records being served
 
 /// `GET /v1/audit/disclosures` — "who could see X on date D", as two lists
 /// (ADR-0045 decision 4).
+#[utoipa::path(
+    get,
+    path = "/v1/audit/disclosures",
+    operation_id = "list_audit_disclosures",
+    tag = "audit",
+    params(
+        ("knowledge_item" = String, Query, format = "uuid"),
+        ("from" = DateTime<Utc>, Query),
+        ("until" = Option<DateTime<Utc>>, Query),
+        ("after" = Option<i64>, Query),
+        ("limit" = Option<i64>, Query)
+    ),
+    responses(
+        (status = 200, description = "Knowledge disclosure and authority evidence", body = DisclosuresResponse),
+        (status = 400, description = "A filter or page bound is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Audit read is not permitted", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "audit.disclosures", skip_all)]
 pub(crate) async fn disclosures(
     State(state): State<AppState>,
@@ -404,8 +452,9 @@ pub(crate) async fn disclosures(
 }
 
 /// One Knowledge item a subject was last served, with what they got.
-#[derive(Serialize)]
-struct KnownView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = AuditKnownView)]
+pub(crate) struct KnownView {
     knowledge_item_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     knowledge_revision_id: Option<String>,
@@ -432,8 +481,9 @@ pub(crate) struct KnowledgeParams {
     limit: Option<i64>,
 }
 
-#[derive(Serialize)]
-struct KnowledgeResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = AuditKnowledgeResponse)]
+pub(crate) struct KnowledgeResponse {
     subject: String,
     at: DateTime<Utc>,
     /// One row per item, carrying the revision *last* delivered at or
@@ -453,6 +503,24 @@ const KNOWLEDGE_NOTE: &str = "What the chain records this subject being served a
 
 /// `GET /v1/audit/knowledge` — "what did agent A know at time T" (ADR-0045
 /// decision 5).
+#[utoipa::path(
+    get,
+    path = "/v1/audit/knowledge",
+    operation_id = "get_audit_knowledge",
+    tag = "audit",
+    params(
+        ("subject" = String, Query),
+        ("at" = Option<DateTime<Utc>>, Query),
+        ("limit" = Option<i64>, Query)
+    ),
+    responses(
+        (status = 200, description = "Knowledge revisions delivered to a subject", body = KnowledgeResponse),
+        (status = 400, description = "The subject or page bound is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Audit read is not permitted", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "audit.knowledge", skip_all)]
 pub(crate) async fn knowledge(
     State(state): State<AppState>,
@@ -512,8 +580,9 @@ pub(crate) async fn knowledge(
     respond(&state, "knowledge", result).await
 }
 
-#[derive(Serialize)]
-struct VerifyResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = AuditVerifyResponse)]
+pub(crate) struct VerifyResponse {
     /// Whether every row recomputes to its stored hash and the head
     /// matches.
     valid: bool,
@@ -534,6 +603,18 @@ struct VerifyResponse {
 /// `GET /v1/audit/verify` — the chain check, under the same `AuditRead`
 /// (ADR-0045 decision 1): it returns a verdict and a sequence number and
 /// no event content, so a principal who may read the chain may check it.
+#[utoipa::path(
+    get,
+    path = "/v1/audit/verify",
+    operation_id = "verify_audit_chain",
+    tag = "audit",
+    responses(
+        (status = 200, description = "Audit chain verification result", body = VerifyResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Audit read is not permitted", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "audit.verify", skip_all)]
 pub(crate) async fn verify(State(state): State<AppState>) -> Response {
     let result = async {

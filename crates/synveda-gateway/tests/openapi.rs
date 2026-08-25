@@ -11,9 +11,9 @@
 //! 2. **Every documented path is actually mounted.** A contract that describes
 //!    a route the router does not serve is worse than no contract: a client
 //!    generated from it fails at runtime with a 404 it cannot explain.
-//! 3. **The document does not quietly grow or shrink.** The set of paths is
-//!    asserted here explicitly, so adding a route to this plane without
-//!    documenting it — or documenting one and forgetting to mount it — fails.
+//! 3. **The document does not quietly grow or shrink.** The macro that mounts
+//!    `/v1` also emits its executable method/path catalogue; exact equality in
+//!    both directions replaces the old hand-maintained expected-path list.
 //!
 //! Needs no database: every assertion is either pure or an unauthenticated
 //! request that the tenant middleware refuses before anything opens a
@@ -37,107 +37,12 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
-use synveda_gateway::{openapi, telemetry};
+use synveda_gateway::{openapi, routes, telemetry};
 use synveda_identity::Hs256Verifier;
 use tower::ServiceExt;
 
 /// The committed document, relative to the workspace root.
 const DOCUMENT: &str = "../../docs/api/openapi.json";
-
-/// Every path currently on this generated contract. Written out rather than
-/// derived from the document, because a check that read the document to decide
-/// what the document should contain would pass for any document at all.
-const DECLARED_PATHS: &[&str] = &[
-    "/v1/admin/grants",
-    "/v1/admin/grants/{grant_id}",
-    "/v1/admin/groups",
-    "/v1/admin/groups/{group_id}",
-    "/v1/admin/scopes",
-    "/v1/admin/scopes/{scope_id}",
-    "/v1/admin/scopes/{scope_id}/ancestors",
-    "/v1/admin/scopes/{scope_id}/descendants",
-    // CPR-18 (ADR-0083): session evidence becomes reviewable candidates.
-    "/v1/capture-batches",
-    "/v1/capture-batches/{id}",
-    "/v1/capture-batches/{id}/accept",
-    "/v1/capture-candidates",
-    "/v1/capture-candidates/{id}/accept",
-    "/v1/capture-candidates/{id}/dismiss",
-    "/v1/capture-candidates/{id}/merge",
-    "/v1/capture-candidates/{id}/replace",
-    // CPR-20 (ADR-0084): explainable context traces and explicit feedback.
-    "/v1/context-runs",
-    "/v1/context-runs/{id}",
-    "/v1/context-runs/{id}/feedback",
-    "/v1/invites/{invite_token}/accept",
-    // CPR-17 (ADR-0082): the public Knowledge plane.
-    "/v1/knowledge",
-    "/v1/knowledge/merge",
-    "/v1/knowledge/{id}",
-    "/v1/knowledge/{id}/archive",
-    "/v1/knowledge/{id}/history",
-    "/v1/knowledge/{id}/restore",
-    "/v1/knowledge/{id}/sources",
-    "/v1/knowledge/{id}/supersede",
-    "/v1/knowledge/{id}/usage",
-    "/v1/knowledge/{id}/verify",
-    "/v1/me",
-    // CPR-27 (ADR-0087): inert OKF v0.2 plans, candidate materialisation and
-    // deterministic exports. Importing never publishes Knowledge directly.
-    "/v1/okf/imports",
-    "/v1/okf/imports/{id}",
-    "/v1/okf/imports/{id}/materialize",
-    "/v1/projects/{project_id}",
-    "/v1/projects/{project_id}/members",
-    "/v1/projects/{project_id}/members/{principal_id}",
-    "/v1/projects/{project_id}/okf/exports",
-    "/v1/projects/{project_id}/okf/imports",
-    "/v1/projects/{project_id}/repositories",
-    "/v1/projects/{project_id}/repositories/{repository_id}",
-    "/v1/projects/{project_id}/tool-config",
-    // CPR-10 (ADR-0076): the session ledger and runtime API.
-    "/v1/sessions",
-    "/v1/sessions/{session_id}",
-    "/v1/sessions/{session_id}/capture-batches",
-    "/v1/sessions/{session_id}/context-runs",
-    "/v1/sessions/{session_id}/end",
-    "/v1/sessions/{session_id}/events",
-    "/v1/sessions/{session_id}/events/{event_id}",
-    "/v1/sessions/{session_id}/knowledge-evaluation",
-    "/v1/sessions/{session_id}/knowledge-query",
-    "/v1/sessions/{session_id}/timeline",
-    // CPR-23 (ADR-0085): immutable Agent Skills versions and bindings.
-    "/v1/skill-bindings",
-    "/v1/skill-bindings/{id}",
-    "/v1/skill-bindings/{id}/rollback",
-    "/v1/skill-usage",
-    "/v1/skills",
-    "/v1/skills/available",
-    "/v1/skills/{id}",
-    "/v1/skills/{id}/versions",
-    "/v1/skills/{id}/versions/{version_id}",
-    "/v1/skills/{id}/versions/{version_id}/files",
-    "/v1/skills/{id}/versions/{version_id}/files/{path}",
-    "/v1/skills/{id}/versions/{version_id}/tests",
-    "/v1/skills/{id}/versions/{version_id}/usage",
-    // CPR-25 (ADR-0086): trusted MCP catalogue and exact project bindings.
-    "/v1/tool-bindings",
-    "/v1/tool-bindings/{id}",
-    "/v1/tool-servers",
-    "/v1/tool-servers/import-client-config",
-    "/v1/tool-servers/{id}",
-    "/v1/tool-servers/{id}/discoveries",
-    "/v1/tool-servers/{id}/versions",
-    "/v1/tool-servers/{id}/versions/{version_id}",
-    "/v1/tool-servers/{id}/versions/{version_id}/diff",
-    "/v1/tool-servers/{id}/versions/{version_id}/tests",
-    "/v1/workspaces",
-    "/v1/workspaces/{workspace_id}",
-    "/v1/workspaces/{workspace_id}/invites",
-    "/v1/workspaces/{workspace_id}/invites/{invite_id}",
-    "/v1/workspaces/{workspace_id}/members",
-    "/v1/workspaces/{workspace_id}/projects",
-];
 
 const SECRET: &[u8] = b"cpr-4-openapi-test-secret";
 
@@ -211,22 +116,39 @@ fn the_committed_document_is_the_trees_document() {
     );
 }
 
-/// The document declares exactly this plane — no more (a path nobody mounted)
-/// and no fewer (a route nobody documented).
+/// The generated contract and executable route catalogue agree exactly in
+/// both directions. The catalogue itself is generated by the macro that
+/// mounts the handlers, so this is not a second hand-maintained route list.
 #[test]
-fn the_document_declares_exactly_this_plane() {
-    let mut declared = openapi::declared_paths();
-    declared.sort();
-    let mut expected: Vec<String> = DECLARED_PATHS
+fn contract_and_executable_application_routes_agree_exactly() {
+    let declared = openapi::declared_operations();
+    let mut executable: Vec<(String, String)> = routes::OPERATIONS
         .iter()
-        .map(|path| (*path).to_owned())
+        .map(|operation| (operation.method.to_owned(), operation.path.to_owned()))
         .collect();
-    expected.sort();
+    executable.sort();
     assert_eq!(
-        declared, expected,
-        "the OpenAPI document and this suite's list of CPR-4 paths disagree. \
-         A route added to this plane belongs in both."
+        declared, executable,
+        "the OpenAPI contract and the executable `/v1` route catalogue disagree"
     );
+}
+
+/// The equality check is authoritative only while the application router has
+/// one `/v1` source. Pin that structural seam: a future direct route or merged
+/// sibling must move into `routes.rs`, where it enters both inventories.
+#[test]
+fn the_application_router_mounts_only_the_catalogue() {
+    let source = include_str!("../src/app.rs");
+    assert!(source.contains("crate::routes::router()"));
+    for forbidden in [
+        concat!(".route(\"/", "v1"),
+        concat!("credential_", "routes()"),
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "app.rs bypasses the executable catalogue through {forbidden}"
+        );
+    }
 }
 
 /// Every documented path is mounted on the router.
@@ -249,8 +171,11 @@ async fn every_documented_path_is_mounted() {
             .replace("{group_id}", &id)
             .replace("{principal_id}", "sam")
             .replace("{session_id}", &id)
+            .replace("{scope_id}", &id)
+            .replace("{event_id}", &id)
             .replace("{version_id}", &id)
             .replace("{path}", "SKILL.md")
+            .replace("{name}", "demo")
             .replace("{id}", &id)
             .replace("{invite_token}", TOKEN_PLACEHOLDER);
         let response = app
@@ -382,8 +307,8 @@ fn the_document_is_generatable() {
     }
     assert_eq!(
         operation_ids.len(),
-        106,
-        "the 67-operation CPR-20 contract plus CPR-23's 18 Skill, CPR-25's 16 Tool and CPR-27's 5 OKF operations: \
+        routes::OPERATIONS.len(),
+        "every executable application operation must have one unique generated operation id: \
          {operation_ids:?}"
     );
 }

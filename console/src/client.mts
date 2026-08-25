@@ -23,11 +23,10 @@
  *
  * # What it deliberately does not do
  *
- * It does not wrap routes absent from the contract. The document currently
- * covers 106 operations, including the immutable Skill, trusted MCP and OKF
- * exchange planes. Older governance calls still in `api.mts` remain visibly
- * hand-written until the public-contract convergence package declares them;
- * this facade never makes an undeclared call look generated.
+ * It does not wrap routes absent from the contract. Since CPR-29 the document
+ * covers all 156 bearer-authenticated production `/v1` operations; auth,
+ * operational probes and the separately authenticated SCIM protocol remain
+ * outside this application client by design.
  */
 
 import { call, type Outcome } from "./api.mjs";

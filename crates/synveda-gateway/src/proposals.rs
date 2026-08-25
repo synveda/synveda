@@ -121,11 +121,37 @@ async fn respond<T: IntoResponse>(
 
 // ── Views ──────────────────────────────────────────────────────────────
 
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)] // Contract-only projection for upstream evidence.
+pub(crate) struct PromotionMemberEvidenceSchema {
+    #[schema(value_type = String, format = "uuid")]
+    record_id: synveda_types::RecordId,
+    recalls: u64,
+    distinct_members: u64,
+    first_recall_at: DateTime<Utc>,
+    last_recall_at: DateTime<Utc>,
+}
+
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)] // Contract-only projection for upstream evidence.
+pub(crate) struct PromotionEvidenceSchema {
+    rule: String,
+    pack_name: String,
+    pack_version: i64,
+    actions: Vec<String>,
+    from_seq: i64,
+    to_seq: i64,
+    members: Vec<PromotionMemberEvidenceSchema>,
+}
+
 /// One proposal in a listing.
-#[derive(Serialize)]
-struct ProposalSummary {
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct ProposalSummary {
+    #[schema(value_type = String, format = "uuid")]
     id: ProposalId,
+    #[schema(value_type = String, format = "uuid")]
     target_scope_id: ScopeId,
+    #[schema(value_type = String, format = "uuid")]
     source_scope_id: ScopeId,
     /// The target's hierarchy path. A review surface that renders two
     /// UUIDs is not one a person can use, and for a climb the *source*
@@ -143,15 +169,19 @@ struct ProposalSummary {
     /// has no channel, and a field that said `published` on a proposal that
     /// publishes nothing would be the paper-over this feature refused at
     /// the schema.
+    #[schema(value_type = String)]
     effect: ProposalEffect,
     /// The five-state vocabulary tech plan §2.3 describes: the stored
     /// state, with `approved` rendered from `open` plus a satisfied
     /// requirement (ADR-0032 decision 11).
+    #[schema(value_type = String)]
     state: ProposalView,
+    #[schema(value_type = String)]
     sensitivity: Sensitivity,
     title: String,
     /// The commit holding exactly what is proposed.
     commit: String,
+    #[schema(value_type = String, format = "uuid")]
     proposer_id: IdentityId,
     proposer_subject: String,
     created_at: DateTime<Utc>,
@@ -168,14 +198,18 @@ struct ProposalSummary {
     /// were folded from — so a reviewer can check the claim against the
     /// chain rather than trust it. Absent on a human's proposal.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<PromotionEvidenceSchema>)]
     promotion: Option<PromotionEvidence>,
 }
 
 /// One review act as the API renders it.
-#[derive(Serialize)]
-struct ApprovalView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalApprovalView)]
+pub(crate) struct ApprovalView {
+    #[schema(value_type = String, format = "uuid")]
     approver_id: IdentityId,
     approver_subject: String,
+    #[schema(value_type = String)]
     verdict: Verdict,
     /// The effective roles the approver held at the target when they cast
     /// it — recorded then, never re-derived now (ADR-0032 decision 5).
@@ -195,9 +229,10 @@ struct ApprovalView {
 /// channel, for one member (FLOW-6, ADR-0035 decision 5). Membership in
 /// the target's tree is the predicate — the same sense of "this scope
 /// holds it" ADR-0034 decision 3 used one scope over.
-#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug, utoipa::ToSchema)]
+#[schema(as = ProposalMemberEffect)]
 #[serde(rename_all = "snake_case")]
-enum MemberEffect {
+pub(crate) enum MemberEffect {
     /// The channel names no version of this member; publication admits it.
     Add,
     /// The channel names it at a different address; publication replaces
@@ -219,8 +254,9 @@ enum MemberEffect {
 /// the target's own channel, and the target scope the reviewer already
 /// holds `ProposalRead` on — and admitted because a review of a change
 /// that hides one side of the change is not a review.
-#[derive(Serialize)]
-struct BaselineView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalBaselineView)]
+pub(crate) struct BaselineView {
     /// The address the target's tree names for this member today.
     object_hash: String,
     /// That object's canonical bytes as text (ADR-0030 decision 4's
@@ -231,8 +267,9 @@ struct BaselineView {
 /// One member of a proposal — the id and the address that was proposed,
 /// plus what a reviewer needs to review it: the bytes under review, the
 /// bytes they would replace, and the artifact's current content.
-#[derive(Serialize)]
-struct MemberView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalMemberView)]
+pub(crate) struct MemberView {
     /// The tree entry name: a path for an authored asset or `command` for a
     /// typed aggregate effect. The one field every artifact family carries.
     member: String,
@@ -245,6 +282,7 @@ struct MemberView {
     /// content moved after the proposal opened, and publishing will
     /// refuse (ADR-0032 decision 6).
     unchanged: bool,
+    #[schema(value_type = String)]
     sensitivity: Sensitivity,
     /// The member's text **as it stands now**. Beside `unchanged` this is what makes drift
     /// legible; it is not what the approvals bind.
@@ -263,8 +301,9 @@ struct MemberView {
 }
 
 /// One proposal, in full.
-#[derive(Serialize)]
-struct ProposalDetail {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalDetail)]
+pub(crate) struct ProposalDetail {
     #[serde(flatten)]
     summary: ProposalSummary,
     members: Vec<MemberView>,
@@ -285,12 +324,32 @@ pub(crate) struct ListParams {
     limit: Option<i64>,
 }
 
-#[derive(Serialize)]
-struct ListResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalListResponse)]
+pub(crate) struct ListResponse {
     proposals: Vec<ProposalSummary>,
 }
 
 /// `GET /v1/proposals` — proposals, newest first.
+#[utoipa::path(
+    get,
+    path = "/v1/proposals",
+    operation_id = "list_proposals",
+    tag = "proposals",
+    params(
+        ("scope_id" = Option<String>, Query, format = "uuid"),
+        ("state" = Option<String>, Query),
+        ("limit" = Option<i64>, Query)
+    ),
+    responses(
+        (status = 200, description = "Visible proposals", body = ListResponse),
+        (status = 400, description = "The filter or limit is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Proposal read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The requested scope is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.list", skip_all)]
 pub(crate) async fn list(
     State(state): State<AppState>,
@@ -384,7 +443,21 @@ pub(crate) async fn list(
 /// read action at the *source* instead would break the product: `compliance`
 /// holds no content read in any pack, so the invariant floor's own role
 /// could never review a `restricted` climb. The read that guards a climb is the
-/// proposer's, taken once at open time and recorded under their name.
+/// proposer’s, taken once at open time and recorded under their name.
+#[utoipa::path(
+    get,
+    path = "/v1/proposals/{id}",
+    operation_id = "get_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The proposal, members, and review log", body = ProposalDetail),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Proposal read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.get", skip_all)]
 pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId>) -> Response {
     let result = async {
@@ -451,19 +524,22 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
 
 // ── Open ───────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ProposalOpenBody)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct OpenBody {
     /// The scope whose published channel would move. Requirements resolve
     /// here, and only here — "each level's approvers" is true because
     /// each level's proposal resolves at that level (ADR-0034
     /// decision 4).
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// Where the material is now. Absent means the target — the
     /// same-scope case, a climb of zero levels. Present, it must be the
     /// target or a **descendant** of it: a climb goes up the chain that
     /// composition walks down (ADR-0034 decision 2).
     #[serde(default)]
+    #[schema(value_type = Option<String>, format = "uuid")]
     source_scope_id: Option<ScopeId>,
     /// The prompts to propose, by name (PRMT-1, ADR-0049 decision 6).
     ///
@@ -475,6 +551,7 @@ pub(crate) struct OpenBody {
     /// which is what lets a department propose onward what a team climbed
     /// into it, with no draft row at the department at all.
     #[serde(default)]
+    #[schema(value_type = Vec<String>)]
     prompt_names: Vec<PromptName>,
     /// The context-pack documents to propose, by path (PRMT-2, ADR-0050
     /// decision 1).
@@ -488,19 +565,37 @@ pub(crate) struct OpenBody {
     /// `regulated-strict` prices a pack at a department at two distinct
     /// people where it prices a team's memory at one.
     #[serde(default)]
+    #[schema(value_type = Vec<String>)]
     document_paths: Vec<DocumentPath>,
     /// What this proposes, in one line. A reviewer reads it in a list.
     title: String,
 }
 
-#[derive(Serialize)]
-struct OpenResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalOpenResponse)]
+pub(crate) struct OpenResponse {
     #[serde(flatten)]
     summary: ProposalSummary,
 }
 
 /// `POST /v1/proposals` — open a proposal against a scope's published
 /// channel.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals",
+    operation_id = "open_proposal",
+    tag = "proposals",
+    request_body = OpenBody,
+    responses(
+        (status = 200, description = "The opened proposal", body = OpenResponse),
+        (status = 400, description = "The proposal shape or direction is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Opening this proposal is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "A scope or member is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The scope has reached its open-proposal limit", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.open", skip_all)]
 pub(crate) async fn open(
     State(state): State<AppState>,
@@ -776,7 +871,8 @@ async fn open_inner(
 
 // ── Review ─────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ProposalReviewBody)]
 pub(crate) struct ReviewBody {
     /// What the reviewer wants to say. Optional on an approval; a
     /// rejection carries its reason in `reason` instead.
@@ -784,7 +880,8 @@ pub(crate) struct ReviewBody {
     comment: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ProposalRejectBody)]
 pub(crate) struct RejectBody {
     /// Why. Mandatory — a rejection an auditor cannot read the reason for
     /// is not a review, and FLOW-5 inherits this reason for its
@@ -792,8 +889,9 @@ pub(crate) struct RejectBody {
     reason: String,
 }
 
-#[derive(Serialize)]
-struct ReviewResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalReviewResponse)]
+pub(crate) struct ReviewResponse {
     #[serde(flatten)]
     summary: ProposalSummary,
     /// What this act contributed: the roles it counted under.
@@ -801,6 +899,23 @@ struct ReviewResponse {
 }
 
 /// `POST /v1/proposals/{id}/approve` — cast an approval.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals/{id}/approve",
+    operation_id = "approve_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    request_body(content = Option<ReviewBody>, description = "Optional review comment"),
+    responses(
+        (status = 200, description = "The proposal after this approval", body = ReviewResponse),
+        (status = 400, description = "The review comment is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Proposal review is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The proposal is closed or this approval advances nothing", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.approve", skip_all)]
 pub(crate) async fn approve(
     State(state): State<AppState>,
@@ -934,6 +1049,23 @@ async fn approve_inner(
 /// proposal whose content changes under its approvals is a review nobody
 /// consented to, and "withdraw and open a new one" says that plainly in
 /// the trail.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals/{id}/reject",
+    operation_id = "reject_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    request_body = RejectBody,
+    responses(
+        (status = 200, description = "The rejected proposal", body = ProposalSummary),
+        (status = 400, description = "The rejection reason is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Proposal review is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The proposal is already closed", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.reject", skip_all)]
 pub(crate) async fn reject(
     State(state): State<AppState>,
@@ -1043,6 +1175,21 @@ async fn reject_inner(
 /// Authorized by `ProposalOpen` at the target *and* by being the
 /// proposer: withdrawing is the proposer's act, and a reviewer who wants
 /// it gone rejects it with a reason instead.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals/{id}/withdraw",
+    operation_id = "withdraw_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The withdrawn proposal", body = ProposalSummary),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Only the proposer may withdraw this proposal", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The proposal is already closed", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.withdraw", skip_all)]
 pub(crate) async fn withdraw(
     State(state): State<AppState>,
@@ -1121,6 +1268,22 @@ pub(crate) async fn withdraw(
 /// `POST /v1/proposals/{id}/apply` — run an approved typed aggregate effect.
 /// The artifact command layer repeats ownership, PDP and revision checks at
 /// this boundary; approvals never become write authority by themselves.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals/{id}/apply",
+    operation_id = "apply_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The typed aggregate mutation result", body = serde_json::Value),
+        (status = 400, description = "The proposal does not carry a typed apply effect", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Applying the governed mutation is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal or aggregate is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The proposal is stale, closed, or incomplete", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.apply", skip_all)]
 pub(crate) async fn apply(State(state): State<AppState>, Path(id): Path<ProposalId>) -> Response {
     let result = apply_inner(&state, id).await;
@@ -1158,9 +1321,12 @@ async fn apply_inner(state: &AppState, id: ProposalId) -> Result<Json<serde_json
     Ok(Json(value))
 }
 
-#[derive(Serialize)]
-struct PublishResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalPublishResponse)]
+pub(crate) struct PublishResponse {
+    #[schema(value_type = String, format = "uuid")]
     proposal_id: ProposalId,
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     channel: String,
     /// The commit the channel now points at. Its parents are
@@ -1176,6 +1342,22 @@ struct PublishResponse {
 }
 
 /// `POST /v1/proposals/{id}/publish` — run an approved proposal's effect.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals/{id}/publish",
+    operation_id = "publish_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The published channel state", body = PublishResponse),
+        (status = 400, description = "The proposal does not carry a publish effect", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Publishing the proposal is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal or target scope is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The proposal is stale, closed, or lacks approval", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.publish", skip_all)]
 pub(crate) async fn publish(State(state): State<AppState>, Path(id): Path<ProposalId>) -> Response {
     let result = publish_inner(&state, id).await;

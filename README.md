@@ -249,13 +249,14 @@ Being explicit, so nothing here misleads:
   evidence. Deterministic replay covers outage and duplicate recovery in CI.
   A host killed before any lifecycle hook writes the in-flight turn can still
   lose that tail; nothing which reached the local spool is lost.
-- **Public-contract convergence is not complete.** CPR-8 made the console a
-  product shell — routes, switchers, People, first-run onboarding, and the
-  proposals inbox (CNSL-1) and scope explorer (CNSL-2) re-homed under
-  **Advanced**. Sessions, Knowledge, New Learnings, Skills and Tools now have
-  generated-contract product planes. Seven older governance and operator
-  surfaces still call hand-written paths until the public-contract convergence
-  package.
+- **The authenticated application contract is exact.** CPR-29 derives one
+  executable catalogue for all 156 bearer-authenticated `/v1` operations,
+  checks it against OpenAPI in both directions, and generates the console
+  operation/type table from that document. The console contains no
+  hand-written application route wrappers; ordinary service-identity and audit
+  CLI commands and the generic MCP adapter use public PDP-governed routes.
+  OAuth, operational probes and the separately authenticated `/scim/v2`
+  protocol intentionally remain outside this application contract.
 - **No Python/TS SDKs** (ADPT-4) and **no importers** from claude-mem, Cognee or
   mem0 (ADPT-5).
 - **No per-tenant encryption keys, WORM export or SIEM streaming**

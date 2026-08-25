@@ -64,8 +64,8 @@ const MAX_WINDOW_SECS: f64 = 86_400.0;
 const DEFAULT_WINDOW_SECS: f64 = 7_200.0;
 
 /// `GET /v1/directory/sync` — what the last pass did.
-#[derive(Debug, Serialize)]
-pub struct SyncStatus {
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub(crate) struct SyncStatus {
     /// Which connector last wrote this state.
     pub connector: String,
     /// Passes that completed. An absence count means nothing without it.
@@ -86,8 +86,8 @@ pub struct SyncStatus {
 }
 
 /// A standing authorisation, as an operator sees it.
-#[derive(Debug, Serialize)]
-pub struct AuthorisationView {
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub(crate) struct AuthorisationView {
     /// When it was signed.
     pub granted_at: DateTime<Utc>,
     /// When it stops covering anything.
@@ -101,8 +101,8 @@ pub struct AuthorisationView {
 }
 
 /// `POST /v1/directory/seal-authorisations`.
-#[derive(Debug, Deserialize)]
-pub struct AuthoriseRequest {
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub(crate) struct AuthoriseRequest {
     /// The most this authorisation permits a pass to seal.
     pub ceiling: i32,
     /// Why, in the operator's words. Required, and stored — an
@@ -113,9 +113,27 @@ pub struct AuthoriseRequest {
     pub expires_in_secs: Option<f64>,
 }
 
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub(crate) struct AuthoriseResponse {
+    ceiling: i32,
+}
+
 /// `GET /v1/directory/sync`.
+#[utoipa::path(
+    get,
+    path = "/v1/directory/sync",
+    operation_id = "get_directory_sync",
+    tag = "directory",
+    responses(
+        (status = 200, description = "Directory synchronisation state", body = SyncStatus),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Directory synchronisation state is not visible", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "No directory synchronisation has run", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "directory.sync.status", skip_all)]
-pub async fn status(State(state): State<AppState>) -> Response {
+pub(crate) async fn status(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
@@ -161,8 +179,23 @@ pub async fn status(State(state): State<AppState>) -> Response {
 }
 
 /// `POST /v1/directory/seal-authorisations`.
+#[utoipa::path(
+    post,
+    path = "/v1/directory/seal-authorisations",
+    operation_id = "authorise_directory_seals",
+    tag = "directory",
+    request_body = AuthoriseRequest,
+    responses(
+        (status = 201, description = "A bounded seal authorisation was granted", body = AuthoriseResponse),
+        (status = 400, description = "The ceiling or reason is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Seal authorisation is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "No directory synchronisation has run", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "directory.seal.authorise", skip_all)]
-pub async fn authorise(
+pub(crate) async fn authorise(
     State(state): State<AppState>,
     payload: std::result::Result<Json<AuthoriseRequest>, JsonRejection>,
 ) -> Response {
@@ -253,7 +286,9 @@ pub async fn authorise(
         );
         Ok((
             StatusCode::CREATED,
-            Json(json!({"ceiling": request.ceiling})),
+            Json(AuthoriseResponse {
+                ceiling: request.ceiling,
+            }),
         ))
     }
     .await;

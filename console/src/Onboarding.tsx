@@ -27,7 +27,6 @@
 
 import { useCallback, useState } from "react";
 
-import { assignScopePolicy } from "./api.mjs";
 import { ME_KEY } from "./App.js";
 import { idempotencyKey, request } from "./client.mjs";
 import { invalidate } from "./Query.js";
@@ -94,7 +93,10 @@ export function Onboarding() {
 
       // Seeding: best-effort, reported either way. See the module note.
       const plan = seedPlan(shape);
-      const assigned = await assignScopePolicy(workspace.scope_id, plan.pack);
+      const assigned = await request("assign_scope_policy", {
+        path: { scope_id: workspace.scope_id },
+        body: { name: plan.pack },
+      });
       setSeed(
         assigned.kind === "ok"
           ? { kind: "applied", what: `The ${plan.pack} policy pack at this workspace` }

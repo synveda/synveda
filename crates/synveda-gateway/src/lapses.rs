@@ -115,24 +115,31 @@ async fn respond<T: IntoResponse>(
 
 /// One standing or historical grant, as the listing and the detail render
 /// it.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(crate) struct LapseView {
+    #[schema(value_type = String, format = "uuid")]
     id: LapseId,
+    #[schema(value_type = String, format = "uuid")]
     proposal_id: ProposalId,
+    #[schema(value_type = String, format = "uuid")]
     grantee_scope_id: ScopeId,
+    #[schema(value_type = String, format = "uuid")]
     target_scope_id: ScopeId,
     #[serde(skip_serializing_if = "Option::is_none")]
     grantee_scope_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     target_scope_path: Option<String>,
+    #[schema(value_type = String)]
     action: LapseAction,
     reason: String,
     granted_at: DateTime<Utc>,
     expires_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     granted_by: IdentityId,
     /// Standing, expired, or revoked — rendered from the row rather than
     /// stored on it, the [`synveda_types::ProposalView`] discipline: a
     /// stored state would need something to run to stay true.
+    #[schema(value_type = String)]
     outcome: LapseOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     revoked_at: Option<DateTime<Utc>>,
@@ -161,18 +168,22 @@ fn render(lapse: &Lapse, paths: (Option<String>, Option<String>), now: DateTime<
 
 // ── Propose ────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = LapseProposeBody)]
 pub(crate) struct ProposeBody {
     /// The scope whose material would be disclosed. Requirements resolve
     /// here, `ProposalOpen` is decided here, and this is the only scope the
     /// permit will cover.
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// Who would get the access: every principal placed at or under this
     /// scope. A single person is their own personal scope, so this one
     /// shape covers "team X" and "just Dana".
+    #[schema(value_type = String, format = "uuid")]
     grantee_scope_id: ScopeId,
     /// What to relax. A closed vocabulary; anything outside it is refused
     /// by name (ADR-0037 decision 2).
+    #[schema(value_type = String)]
     action: LapseAction,
     /// The most sensitive material this grant would disclose, and therefore
     /// the tier its approval matrix resolves at (AUTHZ-5, ADR-0038
@@ -183,6 +194,7 @@ pub(crate) struct ProposeBody {
     /// `compliance` plus two distinct approvers — so the ask and the price
     /// of the ask are the same statement.
     #[serde(default)]
+    #[schema(value_type = Option<String>)]
     max_sensitivity: Option<Sensitivity>,
     /// How long the grant runs **once its effect executes** — never from
     /// now, because a proposal that sits in a queue for a week must not
@@ -193,7 +205,45 @@ pub(crate) struct ProposeBody {
     reason: String,
 }
 
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = LapseProposeResponse)]
+pub(crate) struct ProposeResponse {
+    #[schema(value_type = String, format = "uuid")]
+    proposal_id: ProposalId,
+    commit: String,
+    state: String,
+    effect: String,
+    #[schema(value_type = String, format = "uuid")]
+    target_scope_id: ScopeId,
+    target_scope_slug: String,
+    #[schema(value_type = String, format = "uuid")]
+    grantee_scope_id: ScopeId,
+    grantee_scope_slug: String,
+    action: String,
+    max_sensitivity: String,
+    duration_secs: u32,
+    reason: String,
+    required: String,
+    outstanding: String,
+}
+
 /// `POST /v1/lapses` — open a lapse proposal. Grants nothing.
+#[utoipa::path(
+    post,
+    path = "/v1/lapses",
+    operation_id = "propose_lapse",
+    tag = "policy-relaxations",
+    request_body = ProposeBody,
+    responses(
+        (status = 200, description = "The opened relaxation proposal", body = ProposeResponse),
+        (status = 400, description = "The relaxation terms are invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Opening this proposal is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "A named scope is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The scope has reached its open-proposal limit", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "lapses.propose", skip_all)]
 pub(crate) async fn propose(
     State(state): State<AppState>,
@@ -206,7 +256,7 @@ pub(crate) async fn propose(
 async fn propose_inner(
     state: &AppState,
     payload: std::result::Result<Json<ProposeBody>, JsonRejection>,
-) -> Result<Json<serde_json::Value>> {
+) -> Result<Json<ProposeResponse>> {
     let request = body(payload)?;
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
@@ -349,22 +399,22 @@ async fn propose_inner(
     .await?;
     commit(tx).await?;
 
-    Ok(Json(json!({
-        "proposal_id": proposal.id,
-        "commit": proposal.commit.to_hex(),
-        "state": ProposalState::Open.as_str(),
-        "effect": ProposalEffect::Lapse.as_str(),
-        "target_scope_id": target.id,
-        "target_scope_slug": target.slug,
-        "grantee_scope_id": grantee.id,
-        "grantee_scope_slug": grantee.slug,
-        "action": terms.action.as_str(),
-        "max_sensitivity": terms.max_sensitivity.as_str(),
-        "duration_secs": terms.duration_secs,
-        "reason": terms.reason,
-        "required": requirement.describe(),
-        "outstanding": outstanding.describe(),
-    })))
+    Ok(Json(ProposeResponse {
+        proposal_id: proposal.id,
+        commit: proposal.commit.to_hex(),
+        state: ProposalState::Open.as_str().to_owned(),
+        effect: ProposalEffect::Lapse.as_str().to_owned(),
+        target_scope_id: target.id,
+        target_scope_slug: target.slug,
+        grantee_scope_id: grantee.id,
+        grantee_scope_slug: grantee.slug,
+        action: terms.action.as_str().to_owned(),
+        max_sensitivity: terms.max_sensitivity.as_str().to_owned(),
+        duration_secs: terms.duration_secs,
+        reason: terms.reason,
+        required: requirement.describe(),
+        outstanding: outstanding.describe(),
+    }))
 }
 
 /// The two refusals that need the hierarchy, which `LapseTerms::validate`
@@ -418,6 +468,22 @@ fn validate_shape(
 /// The parallel of `/publish`, and it takes the same shape: the proposal
 /// open, the requirement satisfied, and one Cedar decision — here
 /// `LapseGrant` at the target, the scope whose material is disclosed.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals/{id}/lapse",
+    operation_id = "grant_lapse_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The granted relaxation", body = LapseView),
+        (status = 400, description = "The proposal is not a relaxation", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Granting the relaxation is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "Approvals are incomplete or the proposal is closed", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "lapses.grant", skip_all)]
 pub(crate) async fn grant(State(state): State<AppState>, Path(id): Path<ProposalId>) -> Response {
     let result = grant_inner(&state, id).await;
@@ -580,7 +646,8 @@ async fn grant_inner(state: &AppState, id: ProposalId) -> Result<Json<LapseView>
 
 // ── Revoke ─────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = LapseRevokeBody)]
 pub(crate) struct RevokeBody {
     /// Why. Mandatory, like the grant's own reason: an ending an auditor
     /// cannot read the reason for is not a governed act.
@@ -593,6 +660,23 @@ pub(crate) struct RevokeBody {
 /// narrow, and a product whose answer to "that grant was a mistake" is
 /// "convene the two stewards again" has not shipped revocation (ADR-0037
 /// decision 15).
+#[utoipa::path(
+    post,
+    path = "/v1/lapses/{id}/revoke",
+    operation_id = "revoke_lapse",
+    tag = "policy-relaxations",
+    params(("id" = String, Path, format = "uuid")),
+    request_body = RevokeBody,
+    responses(
+        (status = 200, description = "The revoked relaxation", body = LapseView),
+        (status = 400, description = "The revocation reason is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Revoking the relaxation is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The relaxation is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The relaxation is already inactive", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "lapses.revoke", skip_all)]
 pub(crate) async fn revoke(
     State(state): State<AppState>,
@@ -702,6 +786,23 @@ pub(crate) struct ListParams {
     active: Option<bool>,
 }
 
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = LapseListResponse)]
+pub(crate) struct LapsesResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    scope_id: Option<ScopeId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope_path: Option<String>,
+    lapses: Vec<LapseView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    standing_only: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_lapses: Option<i64>,
+}
+
 /// `GET /v1/lapses` — grants over one scope, or every grant this caller
 /// may see.
 ///
@@ -719,6 +820,23 @@ pub(crate) struct ListParams {
 /// scope exactly as the scoped form decides it. No tenant-wide grant is
 /// invented: that shape exists next door on `GET /v1/admin/grants` and is
 /// held by org-admins, who are not the people this view is for.
+#[utoipa::path(
+    get,
+    path = "/v1/lapses",
+    operation_id = "list_lapses",
+    tag = "policy-relaxations",
+    params(
+        ("scope_id" = Option<String>, Query, format = "uuid"),
+        ("active" = Option<bool>, Query)
+    ),
+    responses(
+        (status = 200, description = "Visible standing or historical relaxations", body = LapsesResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Policy read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The requested scope is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "lapses.list", skip_all)]
 pub(crate) async fn list(
     State(state): State<AppState>,
@@ -742,7 +860,7 @@ async fn list_at_target(
     state: &AppState,
     scope_id: ScopeId,
     standing_only: bool,
-) -> Result<Json<serde_json::Value>> {
+) -> Result<Json<LapsesResponse>> {
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let target = found(
@@ -774,11 +892,14 @@ async fn list_at_target(
         .filter(|lapse| !standing_only || lapse.outcome_at(now) == LapseOutcome::Active)
         .map(|lapse| render(lapse, (None, Some(path.clone())), now))
         .collect();
-    Ok(Json(json!({
-        "scope_id": target.id,
-        "scope_path": path,
-        "lapses": views,
-    })))
+    Ok(Json(LapsesResponse {
+        scope_id: Some(target.id),
+        scope_path: Some(path),
+        lapses: views,
+        standing_only: None,
+        truncated: None,
+        max_lapses: None,
+    }))
 }
 
 /// The scope-free listing: read the tenant's grants, then keep the ones
@@ -789,7 +910,7 @@ async fn list_at_target(
 /// small because a lapse is an exception. Scopes are decided once and
 /// memoised across both ends, so a grant between two scopes the caller can
 /// read costs two decisions rather than two per row.
-async fn list_in_tenant(state: &AppState, standing_only: bool) -> Result<Json<serde_json::Value>> {
+async fn list_in_tenant(state: &AppState, standing_only: bool) -> Result<Json<LapsesResponse>> {
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let rows = lapses::in_tenant(&mut *tx, tenant_id, standing_only, MAX_TENANT_LAPSES).await?;
@@ -870,12 +991,14 @@ async fn list_in_tenant(state: &AppState, standing_only: bool) -> Result<Json<se
     audit_scope_sweep(&mut tx, tenant_id, decided, views.len()).await?;
     commit(tx).await?;
 
-    Ok(Json(json!({
-        "lapses": views,
-        "standing_only": standing_only,
-        "truncated": truncated,
-        "max_lapses": MAX_TENANT_LAPSES,
-    })))
+    Ok(Json(LapsesResponse {
+        scope_id: None,
+        scope_path: None,
+        lapses: views,
+        standing_only: Some(standing_only),
+        truncated: Some(truncated),
+        max_lapses: Some(MAX_TENANT_LAPSES),
+    }))
 }
 
 /// Chains the scope-free listing's single decision event.

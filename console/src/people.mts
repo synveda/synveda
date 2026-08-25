@@ -44,17 +44,11 @@ export type RoleKey = (typeof ROLE_KEYS)[number];
 /**
  * The group a membership came through, when it came through one.
  *
- * `via_group` is generated as `unknown | null | GroupRefView` — utoipa
- * renders an optional referenced schema that way — so the narrowing happens
- * once, here, rather than at every call site with a cast.
+ * The generated contract carries the exact optional `GroupRefView`; this
+ * helper normalises only absence to `null` for renderers.
  */
 export function viaGroup(member: MemberView): GroupRefView | null {
-  const candidate = member.via_group;
-  if (typeof candidate !== "object" || candidate === null) return null;
-  const record = candidate as Record<string, unknown>;
-  return typeof record.id === "string" && typeof record.slug === "string"
-    ? { id: record.id, slug: record.slug }
-    : null;
+  return member.via_group ?? null;
 }
 
 /**

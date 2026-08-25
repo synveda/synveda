@@ -71,20 +71,23 @@ async fn respond<T: IntoResponse>(
 
 /// One rule, parsed — rendered beside the source so a console can show
 /// what the file *means* without reimplementing the parser.
-#[derive(Serialize)]
-struct RuleView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = CuratorRuleView)]
+pub(crate) struct RuleView {
     pattern: String,
     approvers: Vec<String>,
 }
 
-#[derive(Serialize)]
-struct CuratorsResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct CuratorsResponse {
     /// The node asked about.
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// The scope the effective file is committed at — this node, or the
     /// nearest ancestor carrying one (ADR-0032 decision 14). Absent when
     /// no scope on the chain has a file.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
     effective_at: Option<ScopeId>,
     /// The file's exact authored bytes, comments included.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,11 +103,26 @@ struct CuratorsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     updated_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
     updated_by: Option<IdentityId>,
 }
 
 /// `GET /v1/admin/scopes/{scope_id}/curators` — the curator file in force
 /// for this node: its own, or the nearest ancestor's.
+#[utoipa::path(
+    get,
+    path = "/v1/admin/scopes/{scope_id}/curators",
+    operation_id = "get_scope_curators",
+    tag = "policy",
+    params(("scope_id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The effective curator file", body = CuratorsResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Policy read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "curators.get", skip_all)]
 pub(crate) async fn get(State(state): State<AppState>, Path(scope_id): Path<ScopeId>) -> Response {
     let result = async {
@@ -180,7 +198,8 @@ pub(crate) async fn get(State(state): State<AppState>, Path(scope_id): Path<Scop
     respond(&state, "get", result).await
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = CuratorsPutBody)]
 pub(crate) struct PutBody {
     /// The file's text. An empty file clears this scope's requirements —
     /// there is no delete, because the removal is history too.
@@ -189,8 +208,10 @@ pub(crate) struct PutBody {
     message: String,
 }
 
-#[derive(Serialize)]
-struct PutResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = CuratorsPutResponse)]
+pub(crate) struct PutResponse {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     commit: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -204,6 +225,22 @@ struct PutResponse {
 
 /// `PUT /v1/admin/scopes/{scope_id}/curators` — commit this scope's curator
 /// file.
+#[utoipa::path(
+    put,
+    path = "/v1/admin/scopes/{scope_id}/curators",
+    operation_id = "put_scope_curators",
+    tag = "policy",
+    params(("scope_id" = String, Path, format = "uuid")),
+    request_body = PutBody,
+    responses(
+        (status = 200, description = "The committed curator file", body = PutResponse),
+        (status = 400, description = "The curator file or message is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Policy management is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "curators.put", skip_all)]
 pub(crate) async fn put(
     State(state): State<AppState>,

@@ -76,7 +76,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-    JsonObject, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ResultType,
+    JsonObject, ListToolsResult, MetaObject, PaginatedRequestParams, ProtocolVersion, ResultType,
     ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
@@ -146,6 +146,15 @@ pub struct Server {
     /// the server asks `/v1/me` and takes the answer only when there is
     /// exactly one.
     workspace: Option<String>,
+    /// Optional project for this launch. A project makes the run and all
+    /// advertised Skill/Tool metadata exact; when present its workspace is
+    /// derived from `/v1/me` and checked against `workspace`, if both were
+    /// supplied.
+    project: Option<String>,
+    /// The policy-visible workspace/project selection, resolved once from
+    /// the public bootstrap response. This is application metadata, never a
+    /// store handle.
+    target: Mutex<Option<Target>>,
     /// The Synveda run this launch writes to and composes from, opened on
     /// first use (CPR-12, ADR-0078 decision 5).
     ///
@@ -154,7 +163,7 @@ pub struct Server {
     /// anybody has signed in to Synveda and sometimes when the gateway is not
     /// running. A constructor that had to reach the network would make the
     /// whole server fail to start over a condition that fixes itself.
-    session: Mutex<Option<String>>,
+    session: Mutex<Option<ResolvedSession>>,
     /// What this launch advertises — decision 6's whole mechanism, decided
     /// once. `tools/list` is per-process, which is what lets `--writes` be
     /// a launch argument and keeps ADR-0027 decision 1's property that this
@@ -167,10 +176,17 @@ pub struct Server {
 impl Server {
     /// Builds a server for `profile`, advertising the tools `writes` says
     /// this host needs.
-    pub fn new(profile: String, writes: Writes, workspace: Option<String>) -> Result<Self, String> {
+    pub fn new(
+        profile: String,
+        writes: Writes,
+        workspace: Option<String>,
+        project: Option<String>,
+    ) -> Result<Self, String> {
         Ok(Self {
             profile,
             workspace,
+            project,
+            target: Mutex::new(None),
             external_session_id: format!("mcp-{}", random_token()?),
             session: Mutex::new(None),
             tools: match writes {
@@ -297,22 +313,225 @@ fn schema(value: Value) -> Arc<JsonObject> {
 
 // ── The run this launch writes to ──────────────────────────────────────
 
-/// As much of `GET /v1/me` as choosing a workspace needs.
-#[derive(Deserialize)]
-struct MeResponse {
-    workspaces: Vec<MeWorkspace>,
+/// The governed target selected from the public `/v1/me` bootstrap response.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Target {
+    workspace_id: String,
+    project_id: Option<String>,
+    scope_id: String,
 }
 
-#[derive(Deserialize)]
-struct MeWorkspace {
+/// The run and the exact target whose advertisements belong to it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ResolvedSession {
     id: String,
-    name: String,
+    target: Target,
 }
 
-/// The opened run, as `POST /v1/sessions` answers.
-#[derive(Deserialize)]
-struct OpenedSession {
-    id: String,
+fn string_field<'a>(value: &'a Value, field: &str, what: &str) -> Result<&'a str, String> {
+    value[field]
+        .as_str()
+        .ok_or_else(|| format!("Synveda's {what} response has no `{field}`"))
+}
+
+/// Resolve the visible workspace/project without mirroring the server DTO.
+///
+/// The generated OpenAPI contract owns the shape. This adapter consumes only
+/// the identifiers it needs from the JSON response, so it cannot grow a
+/// private second application model beside that contract.
+async fn resolve_target(server: &Server, api: &Api) -> Result<Target, String> {
+    let mut held = server.target.lock().await;
+    if let Some(target) = held.as_ref() {
+        return Ok(target.clone());
+    }
+
+    let me = api
+        .get("/v1/me")
+        .await
+        .map_err(|error| format!("Could not read your workspaces and projects: {error}"))?;
+    let workspaces = me["workspaces"]
+        .as_array()
+        .ok_or_else(|| "Synveda's /v1/me response has no `workspaces` array".to_owned())?;
+    let projects = me["projects"]
+        .as_array()
+        .ok_or_else(|| "Synveda's /v1/me response has no `projects` array".to_owned())?;
+
+    let selected_project = server.project.as_ref().map(|wanted| {
+        projects
+            .iter()
+            .find(|project| project["id"].as_str() == Some(wanted))
+            .ok_or_else(|| {
+                format!(
+                    "Project {wanted} is absent or not visible. Open the console and choose a project you can read."
+                )
+            })
+    });
+    let selected_project = match selected_project {
+        Some(project) => Some(project?),
+        None => None,
+    };
+
+    let derived_workspace = selected_project
+        .map(|project| string_field(project, "workspace_id", "project"))
+        .transpose()?;
+    if let (Some(requested), Some(derived)) = (&server.workspace, derived_workspace)
+        && requested != derived
+    {
+        return Err(format!(
+            "Project {} belongs to workspace {derived}, not requested workspace {requested}.",
+            server.project.as_deref().unwrap_or_default(),
+        ));
+    }
+
+    let workspace_id = match (&server.workspace, derived_workspace) {
+        (Some(id), _) => id.as_str(),
+        (None, Some(id)) => id,
+        (None, None) => match workspaces.len() {
+            0 => {
+                return Err(
+                    "You have no Synveda workspace yet. Open the console and create one, then restart this client."
+                        .to_owned(),
+                );
+            }
+            1 => string_field(&workspaces[0], "id", "workspace")?,
+            _ => {
+                let names = workspaces
+                    .iter()
+                    .map(|workspace| {
+                        let name = workspace["display_name"].as_str().unwrap_or("unnamed");
+                        let id = workspace["id"].as_str().unwrap_or("unknown");
+                        format!("{name} ({id})")
+                    })
+                    .collect::<Vec<_>>();
+                return Err(format!(
+                    "You can see {} workspaces and this server was not told which to use: {}. Relaunch it with `--workspace <id>`.",
+                    workspaces.len(),
+                    names.join(", "),
+                ));
+            }
+        },
+    };
+    let workspace = workspaces
+        .iter()
+        .find(|workspace| workspace["id"].as_str() == Some(workspace_id))
+        .ok_or_else(|| {
+            format!(
+                "Workspace {workspace_id} is absent or not visible. Open the console and choose a workspace you can read."
+            )
+        })?;
+
+    let target = Target {
+        workspace_id: workspace_id.to_owned(),
+        project_id: selected_project
+            .map(|project| string_field(project, "id", "project").map(str::to_owned))
+            .transpose()?,
+        scope_id: match selected_project {
+            Some(project) => string_field(project, "scope_id", "project")?.to_owned(),
+            None => string_field(workspace, "scope_id", "workspace")?.to_owned(),
+        },
+    };
+    *held = Some(target.clone());
+    Ok(target)
+}
+
+/// Reduce the public Skill response to the exact advertisement facts a host
+/// needs. Bundle instructions and files stay behind their separately
+/// authorised APIs; this metadata proves which immutable version a binding
+/// made discoverable.
+fn available_skill_metadata(response: &Value) -> Vec<Value> {
+    response["skills"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|skill| {
+            Some(json!({
+                "bindingId": skill.pointer("/binding/id")?.as_str()?,
+                "name": skill["name"].as_str()?,
+                "versionId": skill.pointer("/version/id")?.as_str()?,
+                "digest": skill.pointer("/version/bundle_digest")?.as_str()?,
+                "manifestObjectHash": skill["manifest_object_hash"].as_str()?,
+                // A declaration inside a bundle is descriptive metadata. It
+                // can never authorise this MCP process (CPR-23/29).
+                "declaredToolsAreAuthorization": false,
+            }))
+        })
+        .collect()
+}
+
+/// Reduce generated client configuration to immutable binding evidence. The
+/// actual command/URL and secret-reference configuration belongs to the host
+/// installing that approved server; this adapter neither executes it nor
+/// converts its description into permission.
+fn approved_tool_metadata(response: &Value) -> Vec<Value> {
+    response["bindings"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|binding| {
+            Some(json!({
+                "bindingId": binding["binding_id"].as_str()?,
+                "versionId": binding["version_id"].as_str()?,
+                "digest": binding["digest"].as_str()?,
+            }))
+        })
+        .collect()
+}
+
+/// Read only the policy-visible advertisements for this launch through the
+/// public application routes. Failure leaves the native memory tools usable:
+/// an expired login or a workspace with no project must not prevent an MCP
+/// client from completing protocol discovery.
+async fn governed_advertisement(server: &Server) -> Option<MetaObject> {
+    let (api, _) = Api::connect_as(&server.profile, api::MCP_CLIENT)
+        .await
+        .ok()?;
+    let target = match resolve_target(server, &api).await {
+        Ok(target) => target,
+        Err(error) => {
+            tracing::debug!(%error, "governed MCP advertisements unavailable");
+            return None;
+        }
+    };
+
+    let skills = match api
+        .get(&format!(
+            "/v1/skills/available?scope_id={}",
+            target.scope_id
+        ))
+        .await
+    {
+        Ok(response) => available_skill_metadata(&response),
+        Err(error) => {
+            tracing::debug!(%error, "available Skill metadata was not readable");
+            Vec::new()
+        }
+    };
+    let tools = match &target.project_id {
+        Some(project_id) => match api
+            .get(&format!("/v1/projects/{project_id}/tool-config"))
+            .await
+        {
+            Ok(response) => approved_tool_metadata(&response),
+            Err(error) => {
+                tracing::debug!(%error, "approved Tool binding metadata was not readable");
+                Vec::new()
+            }
+        },
+        None => Vec::new(),
+    };
+
+    let mut metadata = JsonObject::new();
+    metadata.insert("synveda/scopeId".to_owned(), json!(target.scope_id));
+    if let Some(project_id) = target.project_id {
+        metadata.insert("synveda/projectId".to_owned(), json!(project_id));
+    }
+    metadata.insert("synveda/availableSkills".to_owned(), json!(skills));
+    metadata.insert("synveda/approvedToolBindings".to_owned(), json!(tools));
+    metadata.insert(
+        "synveda/declaredToolsAreAuthorization".to_owned(),
+        json!(false),
+    );
+    Some(metadata.into())
 }
 
 /// Resolves this launch's run, opening it on first use.
@@ -328,47 +547,15 @@ struct OpenedSession {
 /// into whichever workspace sorted first would put one team's memories in
 /// another team's scope, silently, forever. So the tool says which workspaces
 /// exist and asks to be launched with `--workspace`.
-async fn resolve_session(server: &Server, api: &Api) -> Result<String, String> {
+async fn resolve_session(server: &Server, api: &Api) -> Result<ResolvedSession, String> {
     let mut held = server.session.lock().await;
-    if let Some(id) = held.as_ref() {
-        return Ok(id.clone());
+    if let Some(session) = held.as_ref() {
+        return Ok(session.clone());
     }
 
-    let workspace = match &server.workspace {
-        Some(id) => id.clone(),
-        None => {
-            let me: MeResponse = api
-                .get_as("/v1/me")
-                .await
-                .map_err(|error| format!("Could not read your workspaces: {error}"))?;
-            match me.workspaces.len() {
-                0 => {
-                    return Err(
-                        "You have no Synveda workspace yet. Open the console and create one, \
-                         then restart this client."
-                            .to_owned(),
-                    );
-                }
-                1 => me.workspaces[0].id.clone(),
-                _ => {
-                    let names: Vec<String> = me
-                        .workspaces
-                        .iter()
-                        .map(|workspace| format!("{} ({})", workspace.name, workspace.id))
-                        .collect();
-                    return Err(format!(
-                        "You can see {} workspaces and this server was not told which to use: {}. \
-                         Relaunch it with `--workspace <id>`.",
-                        me.workspaces.len(),
-                        names.join(", "),
-                    ));
-                }
-            }
-        }
-    };
-
-    let body = json!({
-        "workspace_id": workspace,
+    let target = resolve_target(server, api).await?;
+    let mut body = json!({
+        "workspace_id": target.workspace_id,
         "client_name": "mcp",
         "client_version": env!("CARGO_PKG_VERSION"),
         // The harness id, so a reconnecting client finds the run it already
@@ -376,9 +563,12 @@ async fn resolve_session(server: &Server, api: &Api) -> Result<String, String> {
         "external_session_id": server.external_session_id,
         "agent_name": "mcp",
     });
+    if let Some(project_id) = &target.project_id {
+        body["project_id"] = json!(project_id);
+    }
     // The idempotency key is the launch id: the same launch opening twice is
     // the same request, and that is exactly what a retry after a timeout is.
-    let opened: OpenedSession = api
+    let opened: Value = api
         .post_idempotent_as(
             "/v1/sessions",
             Some(body),
@@ -386,8 +576,10 @@ async fn resolve_session(server: &Server, api: &Api) -> Result<String, String> {
         )
         .await
         .map_err(|error| format!("Could not open a Synveda session: {error}"))?;
-    *held = Some(opened.id.clone());
-    Ok(opened.id)
+    let id = string_field(&opened, "id", "session")?.to_owned();
+    let session = ResolvedSession { id, target };
+    *held = Some(session.clone());
+    Ok(session)
 }
 
 // ── recall ─────────────────────────────────────────────────────────────
@@ -437,7 +629,7 @@ async fn recall(server: &Server, args: RecallArgs) -> CallToolResult {
     };
     match api
         .post_as::<crate::recall::KnowledgeQueryResponse>(
-            &format!("/v1/sessions/{session}/knowledge-query"),
+            &format!("/v1/sessions/{}/knowledge-query", session.id),
             Some(body),
         )
         .await
@@ -516,7 +708,7 @@ async fn remember(server: &Server, args: RememberArgs) -> CallToolResult {
     let body = remember_body(&key, payload);
 
     match api
-        .post_as::<AppendResponse>(&format!("/v1/sessions/{session}/events"), Some(body))
+        .post_as::<AppendResponse>(&format!("/v1/sessions/{}/events", session.id), Some(body))
         .await
     {
         Ok(response) => {
@@ -637,9 +829,20 @@ impl ServerHandler for Server {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
+        let mut tools = self.tools.clone();
+        if let Some(metadata) = governed_advertisement(self).await
+            && let Some(recall) = tools.iter_mut().find(|tool| tool.name == RECALL)
+        {
+            // MCP has no Agent Skills or project-binding primitive. Attach
+            // exact, vendor-prefixed discovery metadata to the read-only
+            // native tool rather than inventing executable tools for the
+            // catalogue. Hosts that understand it can advertise the pinned
+            // assets; every other host safely ignores `_meta`.
+            recall.meta = Some(metadata);
+        }
         Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
-            tools: self.tools.clone(),
+            tools,
             next_cursor: None,
             meta: None,
             ttl_ms: None,
@@ -743,9 +946,10 @@ pub async fn serve(
     profile: String,
     writes: Writes,
     workspace: Option<String>,
+    project: Option<String>,
 ) -> Result<(), String> {
     subscribe();
-    let server = Server::new(profile, writes, workspace)?;
+    let server = Server::new(profile, writes, workspace, project)?;
     let advertising = server
         .tools
         .iter()
@@ -893,7 +1097,7 @@ mod tests {
     use super::*;
 
     fn server(writes: Writes) -> Server {
-        Server::new("default".to_owned(), writes, None).expect("a server")
+        Server::new("default".to_owned(), writes, None, None).expect("a server")
     }
 
     fn advertised(writes: Writes) -> Vec<String> {
@@ -916,6 +1120,59 @@ mod tests {
     #[test]
     fn writes_tool_advertises_both() {
         assert_eq!(advertised(Writes::Tool), [RECALL, REMEMBER]);
+    }
+
+    #[test]
+    fn skill_advertisements_name_exact_versions_and_never_grant_tools() {
+        let response = json!({
+            "skills": [{
+                "binding": {"id": "binding-1"},
+                "name": "release",
+                "version": {
+                    "id": "version-3",
+                    "bundle_digest": "sha256:abc",
+                    "declared_tools_are_authorization": true
+                },
+                "manifest_object_hash": "object-9"
+            }]
+        });
+        assert_eq!(
+            available_skill_metadata(&response),
+            vec![json!({
+                "bindingId": "binding-1",
+                "name": "release",
+                "versionId": "version-3",
+                "digest": "sha256:abc",
+                "manifestObjectHash": "object-9",
+                "declaredToolsAreAuthorization": false,
+            })]
+        );
+    }
+
+    #[test]
+    fn tool_advertisements_are_binding_evidence_not_executable_configuration() {
+        let response = json!({
+            "configuration": {
+                "dangerous": {"command": "never-copy-this", "secretReference": "secret://x"}
+            },
+            "bindings": [{
+                "binding_id": "binding-7",
+                "version_id": "version-4",
+                "digest": "sha256:def"
+            }]
+        });
+        let metadata = approved_tool_metadata(&response);
+        assert_eq!(
+            metadata,
+            vec![json!({
+                "bindingId": "binding-7",
+                "versionId": "version-4",
+                "digest": "sha256:def",
+            })]
+        );
+        let rendered = serde_json::to_string(&metadata).expect("metadata renders");
+        assert!(!rendered.contains("never-copy-this"));
+        assert!(!rendered.contains("secret://x"));
     }
 
     /// ADR-0057 decision 1's one unenforced property, enforced.

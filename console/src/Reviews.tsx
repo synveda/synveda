@@ -21,14 +21,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import {
-  approve,
-  listProposals,
-  scopeCapabilities,
-  readProposal,
-  reject,
-  type Outcome,
-} from "./api.mjs";
+import type { Outcome } from "./api.mjs";
+import { request } from "./client.mjs";
 import { offers, type Capabilities, type CapabilityBatch } from "./explorer.mjs";
 import { Review } from "./Review.js";
 import { PageHeading } from "./Shell.js";
@@ -39,7 +33,7 @@ export function Reviews() {
   const [selected, setSelected] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setQueue(await listProposals());
+    setQueue(await request("list_proposals", { query: { state: "open" } }));
   }, []);
 
   useEffect(() => {
@@ -132,11 +126,11 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
 
   const load = useCallback(async () => {
-    const outcome = await readProposal(id);
+    const outcome = await request("get_proposal", { path: { id } });
     setState(outcome);
     if (outcome.kind === "ok") {
       const scope = (outcome.body as ProposalDetail).target_scope_id;
-      const batch = await scopeCapabilities([scope]);
+      const batch = await request("get_capabilities", { query: { scopes: scope } });
       const probe =
         batch.kind === "ok"
           ? { kind: "ok", body: (batch.body as CapabilityBatch).capabilities[0] }
@@ -156,7 +150,16 @@ function Detail({ id, onSettled }: { id: string; onSettled: () => void }) {
     async (verdict: "approve" | "reject", reason: string) => {
       setBusy(true);
       setError(null);
-      const outcome = verdict === "approve" ? await approve(id, reason) : await reject(id, reason);
+      const outcome =
+        verdict === "approve"
+          ? await request("approve_proposal", {
+              path: { id },
+              body: reason.trim().length > 0 ? { comment: reason.trim() } : {},
+            })
+          : await request("reject_proposal", {
+              path: { id },
+              body: { reason: reason.trim() },
+            });
       setBusy(false);
       if (outcome.kind !== "ok") {
         // The gateway's own sentence. A refusal reworded here is a refusal

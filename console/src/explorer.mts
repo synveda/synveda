@@ -23,73 +23,36 @@
  * waiting to be noticed.
  */
 
+import type {
+  BatchResponse,
+  EffectiveResponse,
+  LapseListResponse,
+  LapseView,
+  ListResponse,
+  NodeCapabilities,
+  OriginView,
+  ScopeView,
+} from "./generated/api.js";
+
 /** A governed scope, as `/v1/admin/scopes` serves it (CPR-7). */
-export interface Node {
-  id: string;
-  parent_scope_id: string | null;
-  kind: "tenant" | "org_unit" | "workspace" | "project" | "principal";
-  slug: string;
-  display_name: string;
-  status: string;
-}
+export type Node = ScopeView;
 
 /** One level of the tree: the parent it hangs from, and its children. */
-export interface ScopeLevel {
-  parent?: Node | null;
-  scopes: Node[];
-}
+export type ScopeLevel = ListResponse;
 
 /** Where an inherited thing came from. One shape, three admin planes. */
-export interface Origin {
-  kind: string;
-  scope_id?: string | null;
-}
+export type Origin = OriginView;
 
-export interface EffectivePack {
-  name: string;
-  version: number;
-  origin: Origin;
-}
+export type EffectivePack = EffectiveResponse;
 
-export interface Capabilities {
-  scope_id: string;
-  /** Absent when the reader may not read the scope itself (ADR-0058
-   * decision 3): the verdicts beside it are the reader's own either way. */
-  scope_path?: string;
-  pack?: EffectivePack;
-  /** The grant keys that reached this reader here (CPR-6; since CPR-7 the
-   * only roles there are). */
-  roles: string[];
-  actions: Record<string, boolean>;
-  read_tiers: Record<string, string[]>;
-}
+export type Capabilities = NodeCapabilities;
 
 /** The batch probe's envelope. */
-export interface CapabilityBatch {
-  capabilities: Capabilities[];
-  not_answered?: string[];
-  max_scopes: number;
-}
+export type CapabilityBatch = BatchResponse;
 
-export interface Lapse {
-  id: string;
-  grantee_scope_id: string;
-  target_scope_id: string;
-  grantee_scope_path?: string;
-  target_scope_path?: string;
-  action: string;
-  reason: string;
-  granted_at: string;
-  expires_at: string;
-  outcome: "active" | "expired" | "revoked";
-}
+export type Lapse = LapseView;
 
-export interface LapseListing {
-  lapses: Lapse[];
-  standing_only?: boolean;
-  truncated?: boolean;
-  max_lapses?: number;
-}
+export type LapseListing = LapseListResponse;
 
 /**
  * An origin in words, relative to the node that was asked about.
@@ -185,6 +148,6 @@ export function lapsesTouching(lapses: Lapse[], scopeId: string): Lapse[] {
  * organisation. The id is left because it is enough to name the row and not
  * enough to locate it.
  */
-export function describeEnd(path: string | undefined, id: string): string {
+export function describeEnd(path: string | null | undefined, id: string): string {
   return path ?? `«${id.slice(0, 8)}»`;
 }

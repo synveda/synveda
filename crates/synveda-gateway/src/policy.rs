@@ -105,23 +105,36 @@ async fn known_pack(conn: &mut PgConnection, tenant_id: TenantId, name: &str) ->
     })
 }
 
-#[derive(Serialize)]
-struct PackSummary {
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct PackSummary {
     name: String,
     version: i64,
     /// `embedded` (compiled into the binary) or `stored` (a tenant row).
+    #[schema(value_type = String)]
     kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     updated_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Serialize)]
-struct PacksResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct PacksResponse {
     packs: Vec<PackSummary>,
 }
 
 /// `GET /v1/policy/packs` — the packs assignable in this tenant: the
 /// embedded product packs and the tenant's stored packs.
+#[utoipa::path(
+    get,
+    path = "/v1/policy/packs",
+    operation_id = "list_policy_packs",
+    tag = "policy",
+    responses(
+        (status = 200, description = "Embedded and tenant-stored policy packs", body = PacksResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Policy metadata is not visible to the caller", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 pub(crate) async fn packs(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
@@ -169,8 +182,8 @@ pub(crate) async fn packs(State(state): State<AppState>) -> Response {
     respond(&state, "packs", result).await
 }
 
-#[derive(Serialize)]
-struct DefaultResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct DefaultResponse {
     /// The stored tenant default, when one exists.
     pack_name: Option<String>,
     /// What applies where nothing is assigned: the stored default, or the
@@ -179,6 +192,18 @@ struct DefaultResponse {
 }
 
 /// `GET /v1/policy/default` — the tenant's default pack.
+#[utoipa::path(
+    get,
+    path = "/v1/policy/default",
+    operation_id = "get_default_policy",
+    tag = "policy",
+    responses(
+        (status = 200, description = "Stored and effective tenant policy defaults", body = DefaultResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Policy metadata is not visible to the caller", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 pub(crate) async fn get_default(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
@@ -213,12 +238,26 @@ pub(crate) async fn get_default(State(state): State<AppState>) -> Response {
     respond(&state, "get_default", result).await
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub(crate) struct SetPackBody {
     name: String,
 }
 
 /// `PUT /v1/policy/default` — set the tenant default pack.
+#[utoipa::path(
+    put,
+    path = "/v1/policy/default",
+    operation_id = "set_default_policy",
+    tag = "policy",
+    request_body = SetPackBody,
+    responses(
+        (status = 200, description = "The resulting tenant policy default", body = DefaultResponse),
+        (status = 400, description = "The pack name is unknown", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Policy assignment is not permitted", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 pub(crate) async fn set_default(
     State(state): State<AppState>,
     payload: std::result::Result<Json<SetPackBody>, JsonRejection>,
@@ -261,6 +300,19 @@ pub(crate) async fn set_default(
 
 /// `DELETE /v1/policy/default` — clear the tenant default; the embedded
 /// `regulated-strict` applies wherever nothing is assigned.
+#[utoipa::path(
+    delete,
+    path = "/v1/policy/default",
+    operation_id = "clear_default_policy",
+    tag = "policy",
+    responses(
+        (status = 204, description = "The stored tenant default was cleared"),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Policy assignment is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "No stored tenant default exists", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 pub(crate) async fn clear_default(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
@@ -301,20 +353,40 @@ pub(crate) async fn clear_default(State(state): State<AppState>) -> Response {
 /// point of that decision is that the admin planes say "this came from
 /// above" in **one** vocabulary rather than three that agree on the day
 /// they are written.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(crate) struct OriginView {
+    #[schema(value_type = String)]
     pub(crate) kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
     pub(crate) scope_id: Option<ScopeId>,
 }
 
-#[derive(Serialize)]
-struct EffectiveResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct PolicyAssignmentView {
+    #[schema(value_type = String, format = "uuid")]
+    scope_id: ScopeId,
+    pack_name: String,
+    updated_at: DateTime<Utc>,
+}
+
+impl From<synveda_types::PolicyAssignment> for PolicyAssignmentView {
+    fn from(value: synveda_types::PolicyAssignment) -> Self {
+        Self {
+            scope_id: value.scope_id,
+            pack_name: value.pack_name,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct EffectiveResponse {
     name: String,
     version: i64,
     origin: OriginView,
     /// The node's own assignment row, when it carries one.
-    assignment: Option<synveda_types::PolicyAssignment>,
+    assignment: Option<PolicyAssignmentView>,
 }
 
 pub(crate) fn origin_view(effective: &EffectivePack) -> OriginView {
@@ -341,6 +413,20 @@ pub(crate) fn origin_view(effective: &EffectivePack) -> OriginView {
 /// `GET /v1/admin/scopes/{scope_id}/policy` — the pack effective at the scope
 /// and where it came from (its own assignment, an ancestor's, the tenant
 /// default, or the embedded default).
+#[utoipa::path(
+    get,
+    path = "/v1/admin/scopes/{scope_id}/policy",
+    operation_id = "get_scope_policy",
+    tag = "policy",
+    params(("scope_id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The effective pack, origin and direct assignment", body = EffectiveResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Policy metadata is not visible to the caller", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 pub(crate) async fn get_scope_policy(
     State(state): State<AppState>,
     Path(id): Path<ScopeId>,
@@ -379,7 +465,7 @@ pub(crate) async fn get_scope_policy(
             origin: origin_view(&effective),
             name: effective.name,
             version: effective.version,
-            assignment,
+            assignment: assignment.map(Into::into),
         }))
     }
     .await;
@@ -388,6 +474,22 @@ pub(crate) async fn get_scope_policy(
 
 /// `PUT /v1/admin/scopes/{scope_id}/policy` — assign a pack at the scope; its
 /// subtree runs it from the next request on.
+#[utoipa::path(
+    put,
+    path = "/v1/admin/scopes/{scope_id}/policy",
+    operation_id = "assign_scope_policy",
+    tag = "policy",
+    params(("scope_id" = String, Path, format = "uuid")),
+    request_body = SetPackBody,
+    responses(
+        (status = 200, description = "The resulting direct policy assignment", body = PolicyAssignmentView),
+        (status = 400, description = "The pack name is unknown", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Policy assignment is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 pub(crate) async fn assign_scope_policy(
     State(state): State<AppState>,
     Path(id): Path<ScopeId>,
@@ -422,7 +524,7 @@ pub(crate) async fn assign_scope_policy(
         )
         .await?;
         commit(tx).await?;
-        Ok(Json(assignment))
+        Ok(Json(PolicyAssignmentView::from(assignment)))
     }
     .await;
     respond(&state, "assign_scope_policy", result).await
@@ -430,6 +532,20 @@ pub(crate) async fn assign_scope_policy(
 
 /// `DELETE /v1/admin/scopes/{scope_id}/policy` — remove the scope's
 /// assignment; it falls back to the inherited pack.
+#[utoipa::path(
+    delete,
+    path = "/v1/admin/scopes/{scope_id}/policy",
+    operation_id = "unassign_scope_policy",
+    tag = "policy",
+    params(("scope_id" = String, Path, format = "uuid")),
+    responses(
+        (status = 204, description = "The direct policy assignment was removed"),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Policy assignment is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope or direct assignment does not exist", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 pub(crate) async fn unassign_scope_policy(
     State(state): State<AppState>,
     Path(id): Path<ScopeId>,

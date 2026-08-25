@@ -15,8 +15,9 @@ path = "src/main.rs"
 # create, token issue — ADR-0008); everything a running gateway can serve
 # goes through its API instead. Policy for the apply-time compile check
 # (AUTHZ-1, ADR-0012): a pack the reloader would reject never reaches the
-# store. Audit because the break-glass audits itself (AUD-1, ADR-0019
-# decision 7) and `synveda audit verify` is the operator's chain check.
+# store. Audit because the retained bootstrap, policy-pack and key/secret
+# custody operations record their explicit break-glass authority (AUD-1,
+# ADR-0019 decision 7); ordinary audit query/verification uses the gateway.
 synveda-audit = { workspace = true }
 synveda-identity = { workspace = true }
 synveda-policy = { workspace = true }
@@ -25,7 +26,7 @@ synveda-types = { workspace = true }
 # The key plane (TEN-4, ADR-0064): `tenant export` seals an archive and
 # `tenant export open` is the command that demonstrates the AC by needing the
 # key. Operator acts on a deployment's own data, so they run at the store
-# level like `db migrate` and `audit verify`.
+# level like `db migrate`.
 synveda-crypto = { workspace = true }
 # `synveda skill install` recomputes what it wrote against the address the
 # published commit named (SKIL-1, ADR-0051 decision 12).

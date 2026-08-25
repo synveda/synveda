@@ -15,72 +15,21 @@
  * only the common VedaFlow review model.
  */
 
-export interface Proposal {
-  id: string;
-  title: string;
-  state: string;
-  asset: string;
-  effect: string;
-  sensitivity: string;
-  commit: string;
-  proposer_subject: string;
-  created_at: string;
-  target_scope_id: string;
-  source_scope_id: string;
-  target_scope_path?: string;
-  source_scope_path?: string;
-  /** What the matrix asks for here, resolved now. */
-  required: Requirement;
-  /** What it still lacks, in one line the gateway wrote. */
-  outstanding: string;
-  close_reason?: string;
-  promotion?: Promotion;
-}
+import type {
+  ApprovalRequirementView,
+  PromotionEvidenceSchema,
+  ProposalApprovalView,
+  ProposalDetail as GeneratedProposalDetail,
+  ProposalMemberView,
+  ProposalSummary,
+} from "./generated/api.js";
 
-export interface Requirement {
-  roles: { role: string; count: number }[];
-  distinct_approvers: number;
-  subjects?: string[];
-  origins: string[];
-}
-
-/** Why a rule opened this, when one did (FLOW-4, ADR-0033 decision 12). */
-export interface Promotion {
-  rule: string;
-  from_seq: number;
-  to_seq: number;
-}
-
-export interface ProposalDetail extends Proposal {
-  members: Member[];
-  approvals: Approval[];
-}
-
-export interface Member {
-  /** Stable member id or authored path. */
-  member: string;
-  asset: string;
-  object_hash: string;
-  /** `false` means the content moved after the proposal opened. */
-  unchanged: boolean;
-  sensitivity: string;
-  effect: "add" | "update" | "none";
-  /** The canonical bytes at the proposed address — what the approvals bind. */
-  proposed: string;
-  /** The member's text as it stands now. */
-  content: string;
-  baseline?: { object_hash: string; text: string };
-}
-
-export interface Approval {
-  approver_subject: string;
-  verdict: string;
-  roles: string[];
-  /** `false` once the proposal's commit has moved past this act. */
-  counts: boolean;
-  comment?: string;
-  created_at: string;
-}
+export type Proposal = ProposalSummary;
+export type Requirement = ApprovalRequirementView;
+export type Promotion = PromotionEvidenceSchema;
+export type ProposalDetail = GeneratedProposalDetail;
+export type Member = ProposalMemberView;
+export type Approval = ProposalApprovalView;
 
 // ── The few pure readings the screen needs ──────────────────────────────
 
@@ -105,6 +54,8 @@ export function effectLabel(effect: Member["effect"]): string {
       return "add";
     case "update":
       return "update";
+    case "apply":
+      return "apply";
     case "none":
       return "same";
   }

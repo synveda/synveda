@@ -122,7 +122,8 @@ pub(crate) fn require_single_actor(
 }
 
 /// A requirement as the API and the audit payload render it.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ApprovalRequirementView)]
 pub(crate) struct RequirementView {
     /// Roles required, with counts.
     pub(crate) roles: Vec<RoleView>,
@@ -138,7 +139,8 @@ pub(crate) struct RequirementView {
 }
 
 /// One role line.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ApprovalRoleView)]
 pub(crate) struct RoleView {
     pub(crate) role: String,
     pub(crate) count: u8,

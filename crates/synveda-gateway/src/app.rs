@@ -6,14 +6,12 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::service_identities;
-
 use axum::Router;
 use axum::extract::{MatchedPath, Query, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::{get, post, put};
+use axum::routing::{get, post};
 use metrics_exporter_prometheus::PrometheusHandle;
 // The two extension traits W3C trace-context extraction needs: `.span()` on
 // an extracted `Context`, and `.set_parent()` on the request span.
@@ -26,22 +24,10 @@ use synveda_types::{Error, Tenant};
 use tower_http::trace::TraceLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
-use crate::audit_query;
 use crate::auth;
-use crate::capabilities;
-use crate::channels;
-use crate::curators;
-use crate::directory_admin;
 use crate::error::ApiError;
-use crate::packs;
-use crate::policy;
-use crate::prompts;
-use crate::proposals;
-use crate::quarantine;
-use crate::skills;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
-use crate::tool_registry;
 
 /// Shared state for all routes.
 #[derive(Clone)]
@@ -186,476 +172,10 @@ pub fn router(state: AppState) -> Router {
     // Every /v1 route sits behind tenant resolution; ops routes do not.
     // The admin planes authorize every operation through the PDP inside
     // their handlers (AUTHZ-1, ADR-0012).
-    let authenticated = Router::new()
-        .route("/v1/whoami", get(whoami))
-        // The context platform's own plane (CPR-4, ADR-0071). `/v1/me` is the
-        // one call a client makes first: who, which tenant, what exists, what
-        // is missing, and what this caller may do — so a client never has to
-        // infer "is this person set up yet" from a 404.
-        .route("/v1/me", get(crate::me::get))
-        // Stable Knowledge and immutable revisions (CPR-17, ADR-0082). Every
-        // mutation creates one idempotent VedaFlow change; every read decides
-        // the exact item and independently filters sources/relations.
-        .route(
-            "/v1/knowledge",
-            get(crate::knowledge_api::list).post(crate::knowledge_api::create),
-        )
-        .route("/v1/knowledge/merge", post(crate::knowledge_api::merge))
-        .route(
-            "/v1/knowledge/{id}",
-            get(crate::knowledge_api::get)
-                .patch(crate::knowledge_api::edit)
-                .delete(crate::knowledge_api::delete),
-        )
-        .route(
-            "/v1/knowledge/{id}/history",
-            get(crate::knowledge_api::history),
-        )
-        .route(
-            "/v1/knowledge/{id}/sources",
-            get(crate::knowledge_api::sources_for_item),
-        )
-        .route("/v1/knowledge/{id}/usage", get(crate::knowledge_api::usage))
-        .route(
-            "/v1/knowledge/{id}/verify",
-            post(crate::knowledge_api::verify),
-        )
-        .route(
-            "/v1/knowledge/{id}/supersede",
-            post(crate::knowledge_api::supersede),
-        )
-        .route(
-            "/v1/knowledge/{id}/archive",
-            post(crate::knowledge_api::archive),
-        )
-        .route(
-            "/v1/knowledge/{id}/restore",
-            post(crate::knowledge_api::restore),
-        )
-        // Workspaces and projects are product-level subtypes of a governed
-        // scope: creating one creates its scope in the same transaction, and
-        // there is no personal/team/enterprise variant of either row
-        // (ADR-0068 decision 1). Creation takes a required `Idempotency-Key`;
-        // update takes a required `expected_revision`.
-        .route(
-            "/v1/workspaces",
-            get(crate::workspaces::list).post(crate::workspaces::create),
-        )
-        .route(
-            "/v1/workspaces/{workspace_id}",
-            get(crate::workspaces::get).patch(crate::workspaces::update),
-        )
-        .route(
-            "/v1/workspaces/{workspace_id}/projects",
-            get(crate::workspaces::list_projects).post(crate::workspaces::create_project),
-        )
-        .route(
-            "/v1/projects/{project_id}",
-            get(crate::workspaces::get_project).patch(crate::workspaces::update_project),
-        )
-        // What a project is *about*, addressed by canonical identity rather
-        // than by where a checkout happens to sit — a filesystem path is
-        // refused by name (ADR-0071 decision 4). There is no update verb:
-        // re-pointing a project at a different repository is a detach and an
-        // attach, so the chain records two acts.
-        .route(
-            "/v1/projects/{project_id}/repositories",
-            get(crate::workspaces::list_repositories).post(crate::workspaces::attach_repository),
-        )
-        .route(
-            "/v1/projects/{project_id}/repositories/{repository_id}",
-            axum::routing::delete(crate::workspaces::detach_repository),
-        )
-        // OKF v0.2 exchange (CPR-27, ADR-0087): clients submit inert bounded
-        // bytes, immutable plans materialise candidates only, and exports are
-        // rendered from freshly authorised current Knowledge. No URL, Git or
-        // server-filesystem fetch exists on this plane.
-        .route(
-            "/v1/projects/{project_id}/okf/imports",
-            post(crate::okf::plan_import),
-        )
-        .route("/v1/okf/imports", get(crate::okf::list_imports))
-        .route("/v1/okf/imports/{id}", get(crate::okf::get_import))
-        .route(
-            "/v1/okf/imports/{id}/materialize",
-            post(crate::okf::materialize_import),
-        )
-        .route(
-            "/v1/projects/{project_id}/okf/exports",
-            post(crate::okf::export),
-        )
-        // The session ledger and runtime API (CPR-10, ADR-0076): what an agent
-        // does, as governed records rather than a correlation string. Opening a
-        // run and composing context for it take a required `Idempotency-Key`;
-        // appending events is idempotent per **event**, by the client's own
-        // `client_event_id`, because a redelivered batch that overlaps a
-        // previous one must append what is new and say `duplicate` for the
-        // rest. Nothing on this plane accepts a tenant or an acting principal
-        // from a client — both come from the verified token.
-        .route(
-            "/v1/sessions",
-            get(crate::sessions::list).post(crate::sessions::open),
-        )
-        .route("/v1/sessions/{session_id}", get(crate::sessions::get))
-        .route(
-            "/v1/sessions/{session_id}/events",
-            post(crate::sessions::append_events),
-        )
-        // The diagnostic expansion (CPR-11): one event, payload included,
-        // behind `session.diagnostics` rather than `session.read`.
-        .route(
-            "/v1/sessions/{session_id}/events/{event_id}",
-            get(crate::sessions::get_event),
-        )
-        .route("/v1/sessions/{session_id}/end", post(crate::sessions::end))
-        .route(
-            "/v1/sessions/{session_id}/timeline",
-            get(crate::sessions::timeline),
-        )
-        // Explainable Knowledge-backed context planning (CPR-20, ADR-0084).
-        // The session POST remains the only delivery seam; inspection,
-        // feedback and deep/evaluation query lenses stay session/project
-        // scoped and re-authorise every exact Knowledge revision.
-        .route(
-            "/v1/sessions/{session_id}/context-runs",
-            post(crate::context_api::create_context_run),
-        )
-        .route(
-            "/v1/sessions/{session_id}/knowledge-query",
-            post(crate::context_api::knowledge_query),
-        )
-        .route(
-            "/v1/sessions/{session_id}/knowledge-evaluation",
-            post(crate::context_api::knowledge_evaluation),
-        )
-        .route("/v1/context-runs", get(crate::context_api::list))
-        .route("/v1/context-runs/{id}", get(crate::context_api::get))
-        .route(
-            "/v1/context-runs/{id}/feedback",
-            post(crate::context_api::feedback),
-        )
-        // Extraction freezes immutable session evidence and stops at
-        // reviewable candidates (CPR-18, ADR-0083). Accepted decisions enter
-        // the same Knowledge/VedaFlow command seam as manual mutations.
-        .route(
-            "/v1/sessions/{session_id}/capture-batches",
-            post(crate::capture::create_batch),
-        )
-        .route("/v1/capture-batches", get(crate::capture::list_batches))
-        .route("/v1/capture-batches/{id}", get(crate::capture::get_batch))
-        .route(
-            "/v1/capture-batches/{id}/accept",
-            post(crate::capture::accept_batch),
-        )
-        .route(
-            "/v1/capture-candidates",
-            get(crate::capture::list_candidates),
-        )
-        .route(
-            "/v1/capture-candidates/{id}/accept",
-            post(crate::capture::accept_candidate),
-        )
-        .route(
-            "/v1/capture-candidates/{id}/merge",
-            post(crate::capture::merge_candidate),
-        )
-        .route(
-            "/v1/capture-candidates/{id}/replace",
-            post(crate::capture::replace_candidate),
-        )
-        .route(
-            "/v1/capture-candidates/{id}/dismiss",
-            post(crate::capture::dismiss_candidate),
-        )
-        // Membership and access assignment (CPR-5, ADR-0072). One model for a
-        // person working alone, four people sharing agent context, and a
-        // company with a directory: a grant gives a principal or a group a
-        // **role key** at a scope, and the scope's subtree inherits it — so a
-        // workspace grant reaches its projects without a second row. What a
-        // role key permits is the policy pack's; there is no permission table
-        // here for it to disagree with.
-        .route(
-            "/v1/workspaces/{workspace_id}/members",
-            get(crate::access::list_workspace_members),
-        )
-        .route(
-            "/v1/workspaces/{workspace_id}/invites",
-            get(crate::access::list_invites).post(crate::access::create_invite),
-        )
-        .route(
-            "/v1/workspaces/{workspace_id}/invites/{invite_id}",
-            axum::routing::delete(crate::access::revoke_invite),
-        )
-        // Redeeming an invitation. Behind the tenant middleware like every
-        // `/v1` route — the token says which access to add, never who is
-        // asking, so the recipient presents their own credential beside it.
-        // The token is in the path, which is why `make_request_span` records
-        // this route's *pattern* rather than its URI (see `SECRET_IN_PATH`).
-        .route(
-            "/v1/invites/{invite_token}/accept",
-            post(crate::access::accept_invite),
-        )
-        .route(
-            "/v1/projects/{project_id}/members",
-            get(crate::access::list_project_members).post(crate::access::add_project_member),
-        )
-        .route(
-            "/v1/projects/{project_id}/members/{principal_id}",
-            axum::routing::delete(crate::access::remove_project_member),
-        )
-        .route(
-            "/v1/admin/groups",
-            get(crate::access::list_groups).post(crate::access::create_group),
-        )
-        .route(
-            "/v1/admin/groups/{group_id}",
-            axum::routing::patch(crate::access::update_group),
-        )
-        .route(
-            "/v1/admin/grants",
-            get(crate::access::list_grants).post(crate::access::create_grant),
-        )
-        .route(
-            "/v1/admin/grants/{grant_id}",
-            axum::routing::delete(crate::access::revoke_grant),
-        )
-        // The scope admin plane (CPR-7, ADR-0074 decision 5): one tree,
-        // administered publicly. Creation is idempotent; a move is decided
-        // at both ends; there is no delete — retiring a scope is a status
-        // transition. The `/v1/hierarchy` routes this replaces are gone
-        // with no alias: old clients get 404s and old scope kinds fail
-        // validation by name, which is the pre-1.0 contract.
-        .route(
-            "/v1/admin/scopes",
-            get(crate::admin_scopes::list).post(crate::admin_scopes::create),
-        )
-        .route(
-            "/v1/admin/scopes/{scope_id}",
-            get(crate::admin_scopes::get).patch(crate::admin_scopes::update),
-        )
-        .route(
-            "/v1/admin/scopes/{scope_id}/ancestors",
-            get(crate::admin_scopes::ancestors),
-        )
-        .route(
-            "/v1/admin/scopes/{scope_id}/descendants",
-            get(crate::admin_scopes::descendants),
-        )
-        // The capability probe (CNSL-2, ADR-0058): what the *caller* may
-        // do, asked of the PDP. A forecast rather than a grant (decision
-        // 2) — nothing downstream reads the answer to decide anything —
-        // and it never takes a `subject`, so it cannot answer about a
-        // third party (decision 3).
-        .route("/v1/capabilities", get(capabilities::batch))
-        // The policy admin plane (AUTHZ-2, ADR-0014 decision 8): the pack
-        // registry and the tenant default, and — re-homed from the
-        // hierarchy nodes it used to hang on — per-scope assignment.
-        .route("/v1/policy/packs", get(policy::packs))
-        .route(
-            "/v1/policy/default",
-            get(policy::get_default)
-                .put(policy::set_default)
-                .delete(policy::clear_default),
-        )
-        .route(
-            "/v1/admin/scopes/{scope_id}/policy",
-            put(policy::assign_scope_policy)
-                .get(policy::get_scope_policy)
-                .delete(policy::unassign_scope_policy),
-        )
-        // The quarantine review plane (MEM-2, ADR-0021 decisions 5–7),
-        // re-anchored on session events by CPR-12 (ADR-0078 decision 4).
-        .route("/v1/quarantine", get(quarantine::list))
-        .route(
-            "/v1/quarantine/{event_id}/release",
-            post(quarantine::release),
-        )
-        .route("/v1/quarantine/{event_id}/reject", post(quarantine::reject))
-        // The audit query plane (AUD-2, ADR-0045): one action, `AuditRead`,
-        // decided at the tenant — there is no scope-resource variant, so
-        // an audit answer covers the whole chain or is refused. The two
-        // AC questions get one call each; `verify` is the chain check the
-        // CLI has had since AUD-1, now reachable without DATABASE_URL.
-        .route("/v1/audit/events", get(audit_query::events))
-        .route("/v1/audit/disclosures", get(audit_query::disclosures))
-        .route("/v1/audit/knowledge", get(audit_query::knowledge))
-        .route("/v1/audit/verify", get(audit_query::verify))
-        // The VedaFlow channel plane (FLOW-2, ADR-0031 decision 12):
-        // reading a scope's standing authored-artifact channels, and
-        // publishing immutable versions across the trust boundary. Since FLOW-3
-        // the publish resolves the same approval matrix a proposal does,
-        // satisfied by the acting principal alone (ADR-0032 decision 8).
-        .route("/v1/channels/{scope_id}", get(channels::list))
-        .route("/v1/channels/{scope_id}/publish", post(channels::publish))
-        // Rollback and pinning (FLOW-7, ADR-0036). `history` is the
-        // listing a rewind is chosen from and renders exactly the set the
-        // rewind accepts; `pin` holds what the channel serves without
-        // moving where it points, and is released by deleting it.
-        .route("/v1/channels/{scope_id}/history", get(channels::history))
-        .route("/v1/channels/{scope_id}/rollback", post(channels::rollback))
-        .route("/v1/channels/{scope_id}/pin", post(channels::pin))
-        .route("/v1/channels/{scope_id}/unpin", post(channels::unpin))
-        // The VedaFlow proposal plane (FLOW-3, ADR-0032): the review in
-        // front of a publication. Opening asks, approving counts, and
-        // publishing runs the effect under `ChannelPublish` — approvals
-        // go in front of that decision, they do not replace it.
-        .route("/v1/proposals", get(proposals::list).post(proposals::open))
-        .route("/v1/proposals/{id}", get(proposals::get))
-        .route("/v1/proposals/{id}/approve", post(proposals::approve))
-        .route("/v1/proposals/{id}/reject", post(proposals::reject))
-        .route("/v1/proposals/{id}/withdraw", post(proposals::withdraw))
-        .route("/v1/proposals/{id}/publish", post(proposals::publish))
-        .route("/v1/proposals/{id}/apply", post(proposals::apply))
-        // The prompt registry (PRMT-1, ADR-0049). Authoring writes a draft
-        // and moves nothing a consumer reads; resolution walks the caller's
-        // own placement chain nearest-first, or serves a named scope's
-        // draft or a commit the caller pins. The wildcard is the path
-        // shape of a prompt name (decision 3), and it sits *after* the
-        // collection route so `GET /v1/prompts?scope_id=…` still lists.
-        .route("/v1/prompts", get(prompts::list).post(prompts::author))
-        .route("/v1/prompts/{*name}", get(prompts::resolve))
-        // The context-pack registry (PRMT-2, ADR-0050). There is no
-        // `GET /v1/context-packs/{name}` resolve route, and that is the
-        // difference between the two authored asset types rather than an
-        // omission: a prompt is fetched by name, and a pack's content
-        // arrives through a context run as ranked pinned material.
-        .route("/v1/context-packs", get(packs::list).post(packs::author))
-        // Stable skills, immutable versions and explicit project/principal
-        // bindings (CPR-23, ADR-0085). Mutations are typed VedaFlow apply
-        // changes; file reads return exact version bytes and never execute
-        // them in the gateway.
-        .route("/v1/skills", get(skills::list).post(skills::install))
-        .route("/v1/skills/available", get(skills::available))
-        .route("/v1/skills/{id}", get(skills::get).patch(skills::update))
-        .route("/v1/skills/{id}/versions", get(skills::list_versions))
-        .route(
-            "/v1/skills/{id}/versions/{version_id}",
-            get(skills::get_version),
-        )
-        .route(
-            "/v1/skills/{id}/versions/{version_id}/files",
-            get(skills::list_files),
-        )
-        .route(
-            "/v1/skills/{id}/versions/{version_id}/files/{*path}",
-            get(skills::get_file),
-        )
-        .route(
-            "/v1/skills/{id}/versions/{version_id}/usage",
-            get(skills::list_usage),
-        )
-        .route(
-            "/v1/skills/{id}/versions/{version_id}/tests",
-            get(skills::list_tests).post(skills::run_test),
-        )
-        .route(
-            "/v1/skill-bindings",
-            get(skills::list_bindings).post(skills::create_binding),
-        )
-        .route(
-            "/v1/skill-bindings/{id}",
-            get(skills::get_binding).patch(skills::update_binding),
-        )
-        .route(
-            "/v1/skill-bindings/{id}/rollback",
-            post(skills::rollback_binding),
-        )
-        .route("/v1/skill-usage", post(skills::record_usage))
-        // Trusted MCP catalogue metadata and exact approved project bindings
-        // (CPR-25, ADR-0086). Discovery/test calls accept read-only reports
-        // from trusted adapters; no route invokes a tool or launches stdio.
-        .route(
-            "/v1/tool-servers/import-client-config",
-            post(tool_registry::import_client_config),
-        )
-        .route(
-            "/v1/tool-servers",
-            get(tool_registry::list).post(tool_registry::register),
-        )
-        .route(
-            "/v1/tool-servers/{id}",
-            get(tool_registry::get).patch(tool_registry::stage_version),
-        )
-        .route(
-            "/v1/tool-servers/{id}/discoveries",
-            post(tool_registry::discover),
-        )
-        .route(
-            "/v1/tool-servers/{id}/versions",
-            get(tool_registry::list_versions),
-        )
-        .route(
-            "/v1/tool-servers/{id}/versions/{version_id}",
-            get(tool_registry::get_version),
-        )
-        .route(
-            "/v1/tool-servers/{id}/versions/{version_id}/diff",
-            get(tool_registry::diff),
-        )
-        .route(
-            "/v1/tool-servers/{id}/versions/{version_id}/tests",
-            get(tool_registry::list_tests).post(tool_registry::run_test),
-        )
-        .route(
-            "/v1/tool-bindings",
-            get(tool_registry::list_bindings).post(tool_registry::create_binding),
-        )
-        .route(
-            "/v1/tool-bindings/{id}",
-            get(tool_registry::get_binding).patch(tool_registry::update_binding),
-        )
-        .route(
-            "/v1/projects/{project_id}/tool-config",
-            get(tool_registry::generate_config),
-        )
-        // The lapse plane (AUTHZ-4, ADR-0037). `POST /v1/lapses` opens a
-        // *proposal* and grants nothing; the grant is that proposal's
-        // effect, beside `/publish` and taking the same shape.
-        .route("/v1/proposals/{id}/lapse", post(crate::lapses::grant))
-        .route(
-            "/v1/lapses",
-            get(crate::lapses::list).post(crate::lapses::propose),
-        )
-        .route("/v1/lapses/{id}/revoke", post(crate::lapses::revoke))
-        // CODEOWNERS-style curator files (FLOW-3, ADR-0032 decisions
-        // 13–15), under the policy plane's own actions: they add required
-        // approvers and grant nothing.
-        .route(
-            "/v1/admin/scopes/{scope_id}/curators",
-            get(curators::get).put(curators::put),
-        )
-        // The service-identity plane (AUTH-3, ADR-0018 decision 3).
-        .route(
-            "/v1/service-identities",
-            get(service_identities::list).post(service_identities::register),
-        )
-        .route(
-            "/v1/service-identities/{id}",
-            get(service_identities::get).delete(service_identities::remove),
-        )
-        // The directory plane's credentials (AUTH-4, ADR-0059
-        // decision 13). On `/v1` rather than on `/scim/v2`: issuing one is
-        // an act of the product's own authority, PDP-gated at the tenant,
-        // and a credential that could mint another would make the
-        // directory the authority on its own access.
-        .merge(crate::scim::credential_routes())
-        // The pull sync's operator surface (AUTH-5, ADR-0060 decision 10).
-        // On `/v1` and reachable from nowhere else: a breaker the directory
-        // can wave through is not a breaker, so releasing one is an act of
-        // the product's own authority and never the provisioning
-        // credential's. It takes its own action rather than
-        // `DirectoryManage`'s, because handing out a token and authorising
-        // irreversible bulk sealing are not the same magnitude and a tenant
-        // must be able to hold them apart.
-        .route("/v1/directory/sync", get(directory_admin::status))
-        .route(
-            "/v1/directory/seal-authorisations",
-            post(directory_admin::authorise),
-        )
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            tenant::resolve_tenant,
-        ));
+    let authenticated = crate::routes::router().route_layer(middleware::from_fn_with_state(
+        state.clone(),
+        tenant::resolve_tenant,
+    ));
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
@@ -732,9 +252,10 @@ async fn render_metrics(State(state): State<AppState>) -> String {
     state.metrics.render()
 }
 
-#[derive(Serialize)]
-struct WhoamiResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct WhoamiResponse {
     subject: String,
+    #[schema(value_type = crate::me::TenantView)]
     tenant: Tenant,
     /// The tenant plane's capability probe, when the caller asked for it
     /// (CNSL-2, ADR-0058 decision 1). Absent by default: the base call is
@@ -760,7 +281,22 @@ pub(crate) struct WhoamiParams {
 /// only**, which is why it needs no permission of its own (ADR-0058
 /// decision 3). Reads the task-local rather than a request extension: this
 /// endpoint exists to prove the propagation path end to end.
-async fn whoami(State(state): State<AppState>, Query(params): Query<WhoamiParams>) -> Response {
+#[utoipa::path(
+    get,
+    path = "/v1/whoami",
+    operation_id = "get_whoami",
+    tag = "me",
+    params(("capabilities" = Option<bool>, Query, description = "Include tenant-plane capability forecasts")),
+    responses(
+        (status = 200, description = "The resolved caller and optional tenant capabilities", body = WhoamiResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn whoami(
+    State(state): State<AppState>,
+    Query(params): Query<WhoamiParams>,
+) -> Response {
     let capabilities = if params.capabilities {
         match crate::capabilities::at_tenant(&state).await {
             Ok(block) => Some(block),

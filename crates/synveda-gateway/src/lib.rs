@@ -77,6 +77,7 @@ pub mod proposals;
 pub mod provision;
 pub mod quarantine;
 mod request;
+pub mod routes;
 pub mod scim;
 pub mod service_identities;
 pub mod sessions;

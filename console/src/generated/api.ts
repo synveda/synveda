@@ -21,7 +21,7 @@ export type AcceptBatchBody = Record<string, unknown>;
  * Optional edits applied while accepting a candidate.
  */
 export type AcceptCandidateBody = {
-    content?: unknown | null | KnowledgeContentBody;
+    content?: null | KnowledgeContentBody;
     /**
      * Override the proposed Knowledge type.
      */
@@ -175,7 +175,7 @@ export type AppendedEventView = {
      * exactly the entries this call resolved.
      */
     client_event_id: string;
-    event?: unknown | null | SessionEventView;
+    event?: null | SessionEventView;
     /**
      * `appended`, `duplicate`, `quarantined` or `denied`.
      */
@@ -185,6 +185,38 @@ export type AppendedEventView = {
      * matched text. Absent when the payload was clean.
      */
     redactions?: Record<string, unknown> | null;
+  };
+
+/**
+ * A requirement as the API and the audit payload render it.
+ */
+export type ApprovalRequirementView = {
+    /**
+     * Distinct identities required.
+     */
+    distinct_approvers: number;
+    /**
+     * Where the requirement came from: `floor`, `pack`, and the scope of
+     * any curator file that contributed — so a trail explains what a
+     * proposal needed without reading a pack that has since changed.
+     */
+    origins: string[];
+    /**
+     * Roles required, with counts.
+     */
+    roles: ApprovalRoleView[];
+    /**
+     * Named subjects a curator file requires.
+     */
+    subjects?: string[];
+  };
+
+/**
+ * One role line.
+ */
+export type ApprovalRoleView = {
+    count: number;
+    role: string;
   };
 
 /**
@@ -224,6 +256,226 @@ export type AttachRepositoryBody = {
   };
 
 /**
+ * One disclosure as the API renders it — the shape of what was served,
+ * never the substance.
+ */
+export type AuditDisclosureView = {
+    /**
+     * The delivery act that put this revision in a session context.
+     */
+    action: string;
+    actor_kind: string;
+    /**
+     * Who was served.
+     */
+    actor_subject: string;
+    content_hash?: string | null;
+    knowledge_item_id: string;
+    knowledge_revision_id?: string | null;
+    occurred_at: string;
+    reason_codes: string[];
+    seq: number;
+    session_id?: string | null;
+  };
+
+export type AuditDisclosuresResponse = AuditFrame & {
+    /**
+     * The events that opened and closed authority over the window — role
+     * bindings, pack assignments, lapses, publications, classifications.
+     * These are *inputs*, not a set of principals.
+     */
+    authority: AuditEventView[];
+    /**
+     * Whether the authority half hit its own cap, which is separate from
+     * the disclosure page's.
+     */
+    authority_truncated: boolean;
+    /**
+     * Who the chain records the Knowledge item being **served** to in the window,
+     * with what they got. This is evidence.
+     */
+    disclosed: AuditDisclosureView[];
+    /**
+     * Why the two lists are not one, in the response rather than only in
+     * the ADR: merging them means deciding, and deciding over
+     * reconstructed inputs is a replay of authority rather than a record
+     * of it (ADR-0045 decision 4).
+     */
+    note: string;
+  };
+
+/**
+ * One chain row as the API renders it.
+ */
+export type AuditEventView = {
+    action: string;
+    /**
+     * How the actor was established (`subject`/`break_glass`/`system`).
+     */
+    actor_kind: string;
+    actor_subject: string;
+    /**
+     * This row's hash, hex.
+     */
+    hash: string;
+    occurred_at: string;
+    outcome: string;
+    payload: unknown;
+    resource: string;
+    seq: number;
+    trace_id?: string | null;
+  };
+
+export type AuditEventsResponse = AuditFrame & {
+    events: AuditEventView[];
+  };
+
+/**
+ * Where the chain stood when the answer was taken, and what the answer
+ * covered (ADR-0045 decision 9).
+ */
+export type AuditFrame = {
+    /**
+     * The lowest seq in this page.
+     */
+    first_seq?: number | null;
+    /**
+     * The head hash, hex — the value that makes an answer re-derivable.
+     */
+    head_hash: string;
+    /**
+     * The chain head's sequence number when the query ran.
+     */
+    head_seq: number;
+    /**
+     * The highest seq in this page.
+     */
+    last_seq?: number | null;
+    /**
+     * The cursor to continue from, when it did.
+     */
+    next_cursor?: number | null;
+    /**
+     * Whether the limit cut the answer short.
+     */
+    truncated: boolean;
+  };
+
+export type AuditKnowledgeResponse = AuditFrame & {
+    at: string;
+    /**
+     * One row per item, carrying the revision *last* delivered at or
+     * before `at`.
+     */
+    known: AuditKnownView[];
+    /**
+     * What this answer is, stated in it: what A was served, not what A
+     * could have asked for (ADR-0045 decision 5).
+     */
+    note: string;
+    subject: string;
+  };
+
+/**
+ * One Knowledge item a subject was last served, with what they got.
+ */
+export type AuditKnownView = {
+    /**
+     * How it arrived that last time.
+     */
+    action: string;
+    content_hash?: string | null;
+    knowledge_item_id: string;
+    knowledge_revision_id?: string | null;
+    /**
+     * How many times it was served in the window read.
+     */
+    occasions: number;
+    /**
+     * When it was last delivered.
+     */
+    occurred_at: string;
+    reason_codes: string[];
+    /**
+     * The chain position of the last delivery — the evidence.
+     */
+    seq: number;
+  };
+
+export type AuditVerifyResponse = {
+    /**
+     * The first divergence, when there is one: the seq and why. A broken
+     * chain is a 200 with `valid: false`, not an error — the verification
+     * succeeded; it is the chain that did not.
+     */
+    broken_at?: number | null;
+    /**
+     * The number of events checked.
+     */
+    events: number;
+    head_hash: string;
+    /**
+     * The chain head after verification.
+     */
+    head_seq: number;
+    reason?: string | null;
+    /**
+     * Whether every row recomputes to its stored hash and the head
+     * matches.
+     */
+    valid: boolean;
+  };
+
+/**
+ * A standing authorisation, as an operator sees it.
+ */
+export type AuthorisationView = {
+    /**
+     * The most it permits. A pass proposing more trips again.
+     */
+    ceiling: number;
+    /**
+     * When it stops covering anything.
+     */
+    expires_at: string;
+    /**
+     * When it was signed.
+     */
+    granted_at: string;
+    /**
+     * Who signed it.
+     */
+    granted_by: string;
+    /**
+     * Why.
+     */
+    reason: string;
+  };
+
+/**
+ * `POST /v1/directory/seal-authorisations`.
+ */
+export type AuthoriseRequest = {
+    /**
+     * The most this authorisation permits a pass to seal.
+     */
+    ceiling: number;
+    /**
+     * How long it stands. Clamped to [`MAX_WINDOW_SECS`].
+     */
+    expires_in_secs?: number | null;
+    /**
+     * Why, in the operator's words. Required, and stored — an
+     * authorisation nobody can read the reason for explains nothing later.
+     */
+    reason: string;
+  };
+
+export type AuthoriseResponse = {
+    ceiling: number;
+  };
+
+/**
  * Visible available skills after binding and PDP evaluation.
  */
 export type AvailableSkillListView = {
@@ -257,6 +509,17 @@ export type AvailableSkillView = {
      * Exact version resolved from the binding.
      */
     version: SkillVersionView;
+  };
+
+/**
+ * The batch response. `not_answered` names the scopes the bound dropped,
+ * and `max_scopes` says what the bound is, so a client can page rather
+ * than guess.
+ */
+export type BatchResponse = {
+    capabilities: NodeCapabilities[];
+    max_scopes: number;
+    not_answered?: string[];
   };
 
 /**
@@ -505,6 +768,287 @@ export type ChainResponse = {
   };
 
 /**
+ * One state a channel has held, as the API renders it.
+ */
+export type ChannelHistoryEntryView = {
+    author: string;
+    commit: string;
+    committed_at: string;
+    /**
+     * True for the commit the channel points at now — where it already
+     * is, and so the one entry a rewind cannot name.
+     */
+    head: boolean;
+    /**
+     * The membership this state served.
+     */
+    members: number;
+    /**
+     * Parents beyond the first: the proposal this publication was the
+     * effect of, when it had one. Present so a reviewer can trace the
+     * decision — and deliberately *not* a rewind target, because a
+     * proposal's tree is a member set that may never have been approved
+     * (ADR-0036 decision 1).
+     */
+    merge_parents?: string[];
+    message: string;
+    /**
+     * The state it replaced — its first parent, absent on the channel's
+     * first commit.
+     */
+    parent?: string | null;
+    /**
+     * True for the commit a pin holds readers at.
+     */
+    served: boolean;
+  };
+
+export type ChannelHistoryResponse = {
+    channel: string;
+    /**
+     * The commit the ref points at.
+     */
+    head: string;
+    /**
+     * Newest first. Every entry but `head` is a legal rewind target, and
+     * nothing outside this listing is (ADR-0036 decision 11).
+     */
+    history: ChannelHistoryEntryView[];
+    pin?: null | ChannelPinView;
+    scope_id: string;
+  };
+
+export type ChannelListResponse = {
+    channels: ChannelStatusView[];
+    scope_id: string;
+  };
+
+export type ChannelPinBody = {
+    asset: string;
+    channel?: string | null;
+    /**
+     * The commit to hold readers at: one of the entries `GET /history`
+     * lists, the head included.
+     */
+    commit: string;
+    /**
+     * Why this scope is holding its readers. The pin's only record — the
+     * ref carries who and when and nothing else (ADR-0036 decision 9).
+     */
+    reason: string;
+  };
+
+export type ChannelPinResponse = {
+    channel: string;
+    /**
+     * The commit readers now compose.
+     */
+    commit: string;
+    /**
+     * Where the channel's ref points. Publications keep landing here
+     * while the pin stands (ADR-0036 decision 6).
+     */
+    head: string;
+    /**
+     * What the pin held before, when this call moved a standing one.
+     */
+    previous?: string | null;
+    scope_id: string;
+  };
+
+/**
+ * A pin as the API renders it.
+ */
+export type ChannelPinView = {
+    /**
+     * The commit readers are held at.
+     */
+    commit: string;
+    pinned_at: string;
+    pinned_by: string;
+  };
+
+export type ChannelPublishBody = {
+    /**
+     * The context-pack documents to admit, by path (PRMT-2, ADR-0050
+     * decision 1). Must be documents of **this** scope, for the reason
+     * the other lists must be its material: the direct route stays
+     * same-scope.
+     *
+     * Exactly one of the three lists may be present. Under the default
+     * pack a pack publication above a team now refuses here on its own
+     * arithmetic — since ADR-0050 decision 15 the matrix asks for a
+     * curator *and* a steward, two distinct people — and names the
+     * proposal route; at a team or a leaf one curator still publishes
+     * directly, which is the governed `SHARED`/`LOCAL` split.
+     */
+    document_paths?: string[];
+    /**
+     * Why — an auditor and a reviewer both read this. Required: a
+     * publication with nothing to say is one nobody can review after
+     * the fact.
+     */
+    message: string;
+    /**
+     * The prompts to admit, by name (PRMT-1, ADR-0049 decision 7). Must be
+     * drafts of **this** scope: the direct route stays same-scope.
+     *
+     * Exactly one member list may be present. Under the default pack
+     * a prompt publication refuses here on its own arithmetic — the matrix
+     * asks for a steward *and* a curator, two distinct people — and names
+     * the proposal route; under `standard` a single curator may publish,
+     * which is that pack saying what that pack exists to say. That is
+     * ADR-0032 decision 8's invariant kept rather than a second rule for
+     * authored assets.
+     */
+    prompt_names?: string[];
+  };
+
+export type ChannelPublishResponse = {
+    /**
+     * Members this call admitted that the channel did not already hold
+     * at that address. Zero means everything named was already
+     * published, unchanged — the act still commits and still audits.
+     */
+    added: number;
+    /**
+     * The channel that moved.
+     */
+    channel: string;
+    /**
+     * The commit it now points at.
+     */
+    commit: string;
+    /**
+     * The published set's size after this call.
+     */
+    members: number;
+    /**
+     * What it pointed at before — absent on the channel's first commit.
+     */
+    parent?: string | null;
+    pinned?: null | ChannelPinView;
+    /**
+     * Each member's content address, in request order.
+     */
+    published: ChannelPublishedMember[];
+    /**
+     * What the approval matrix asked for here, and which of the acting
+     * principal's roles supplied it (FLOW-3, ADR-0032 decision 8).
+     * A publication that needed nothing renders an empty requirement,
+     * which is the honest answer: this pack asks for no review at this
+     * cell.
+     */
+    required: ApprovalRequirementView;
+    scope_id: string;
+  };
+
+export type ChannelPublishedMember = {
+    /**
+     * The tree entry name or authored path.
+     */
+    member: string;
+    object_hash: string;
+  };
+
+export type ChannelRollbackBody = {
+    asset: string;
+    channel?: string | null;
+    /**
+     * The commit being abandoned — what the caller read before deciding.
+     * Required rather than inferred: a rewind is a decision about *which*
+     * state to leave, and that decision is stale if someone else moved
+     * the ref meanwhile (ADR-0030 decision 10's rule, applied to the one
+     * call that can move a ref backwards).
+     */
+    from_commit: string;
+    /**
+     * Why. An auditor reads this, and so does whoever asks next week why
+     * an artifact stopped being published.
+     */
+    message: string;
+    /**
+     * The state to install: one of the entries `GET /history` lists.
+     */
+    to_commit: string;
+  };
+
+export type ChannelRollbackResponse = {
+    channel: string;
+    /**
+     * The commit abandoned.
+     */
+    from: string;
+    /**
+     * The membership after the rewind.
+     */
+    members: number;
+    /**
+     * Member names that stopped being published.
+     */
+    removed: string[];
+    /**
+     * Members whose published version went back to an earlier one, with
+     * the address now bound.
+     */
+    restored: ChannelPublishedMember[];
+    scope_id: string;
+    /**
+     * The commit installed — what the next authorised reader sees.
+     */
+    to: string;
+  };
+
+/**
+ * One standing channel as the API renders it.
+ */
+export type ChannelStatusView = {
+    asset: string;
+    channel: string;
+    /**
+     * Where the channel points — what an authorised reader cites.
+     */
+    commit: string;
+    /**
+     * Entries in that commit's tree: the membership for `published` and
+     * `staged`, the last commit's additions for `derived` (which is a
+     * log, not a set — ADR-0031 decision 3).
+     */
+    entries: number;
+    /**
+     * The ref name, e.g. `prompt/published`.
+     */
+    name: string;
+    pin?: null | ChannelPinView;
+    updated_at: string;
+    updated_by: string;
+  };
+
+export type ChannelUnpinBody = {
+    asset: string;
+    channel?: string | null;
+    /**
+     * Why the hold is being released.
+     */
+    reason: string;
+  };
+
+export type ChannelUnpinResponse = {
+    channel: string;
+    /**
+     * What readers compose from the next session on.
+     */
+    head: string;
+    /**
+     * The commit that was held, when there was a pin. Absent means there
+     * was none, which is the answer rather than an error: the channel
+     * serves its head either way.
+     */
+    released?: string | null;
+    scope_id: string;
+  };
+
+/**
  * One retained, freshly re-authorised planner candidate.
  */
 export type ContextCandidateView = {
@@ -540,8 +1084,8 @@ export type ContextCandidateView = {
      * Why it was considered.
      */
     reason_codes: string[];
-    revision?: unknown | null | KnowledgeRevisionView;
-    scores?: unknown | null | ContextScoreView;
+    revision?: null | KnowledgeRevisionView;
+    scores?: null | ContextScoreView;
     /**
      * Independently visible provenance, full mode only.
      */
@@ -634,6 +1178,126 @@ export type ContextKnowledgeView = {
      * Independently visible provenance.
      */
     sources: KnowledgeSourceView[];
+  };
+
+export type ContextPackAuthorBody = {
+    /**
+     * One line, read in a listing and at review.
+     */
+    description?: string;
+    /**
+     * The documents. A request naming none writes the bundle row alone,
+     * which is how an empty pack gets created before anything is put in
+     * it.
+     */
+    documents?: ContextPackDocumentBody[];
+    /**
+     * Its name: one segment, lower-case, and the identifier a scope's
+     * override is expressed in (ADR-0050 decision 1).
+     */
+    name: string;
+    /**
+     * Where the pack is authored — the scope that will stand behind it,
+     * and the scope whose published channel a proposal would move.
+     */
+    scope_id: string;
+  };
+
+/**
+ * One document as an author supplies it.
+ */
+export type ContextPackDocumentBody = {
+    /**
+     * The text.
+     */
+    content: string;
+    /**
+     * Its name within the pack: path-shaped, so a bundle can carry
+     * `runbooks/payments.md` rather than flattening a directory.
+     */
+    name: string;
+    /**
+     * Its classification. Absent means `internal`. Per document rather
+     * than per pack (decision 12) — a glossary of public terms and an
+     * internal runbook are plausibly the same bundle.
+     */
+    sensitivity?: string | null;
+    /**
+     * One line, read in a listing, at review, and in the index tier
+     * (ADR-0050 decision 10).
+     */
+    title?: string;
+  };
+
+export type ContextPackDocumentView = {
+    /**
+     * How many chunks it cut into.
+     */
+    chunks: number;
+    /**
+     * How many of those this request actually embedded. Zero for a
+     * document whose bytes did not move, which is the observable half of
+     * "re-authoring an unchanged document re-embeds nothing".
+     */
+    embedded: number;
+    name: string;
+    /**
+     * The draft's content address — what a proposal would bind.
+     */
+    object_hash: string;
+    published?: null | ContextPackPublishedView;
+    sensitivity: string;
+    title: string;
+    updated_at: string;
+    updated_by: string;
+  };
+
+export type ContextPackListEntry = {
+    description: string;
+    documents: ContextPackDocumentView[];
+    name: string;
+    updated_at: string;
+    updated_by: string;
+  };
+
+export type ContextPackListResponse = {
+    packs: ContextPackListEntry[];
+    scope_id: string;
+    scope_path: string;
+  };
+
+/**
+ * What a scope's published channel holds for one document right now.
+ */
+export type ContextPackPublishedView = {
+    /**
+     * The commit the channel serves.
+     */
+    commit: string;
+    /**
+     * Whether that is the draft's own address. `false` after an edit: the
+     * draft has moved and the reviewed version has not, which is what
+     * "behind review" looks like from the writing side — and, for a pack,
+     * is also exactly when the old version's chunks keep composing
+     * (decision 3).
+     */
+    current: boolean;
+    /**
+     * The address it names for this document.
+     */
+    object_hash: string;
+  };
+
+export type ContextPackView = {
+    created_at: string;
+    created_by: string;
+    description: string;
+    documents: ContextPackDocumentView[];
+    name: string;
+    scope_id: string;
+    scope_path: string;
+    updated_at: string;
+    updated_by: string;
   };
 
 /**
@@ -848,7 +1512,7 @@ export type ContextSelectionView = {
      * Why it was selected.
      */
     reason_codes: string[];
-    revision?: unknown | null | KnowledgeRevisionView;
+    revision?: null | KnowledgeRevisionView;
     /**
      * Independently visible provenance, full mode only.
      */
@@ -1079,6 +1743,83 @@ export type CreatedInviteView = {
   };
 
 /**
+ * One rule, parsed — rendered beside the source so a console can show
+ * what the file *means* without reimplementing the parser.
+ */
+export type CuratorRuleView = {
+    approvers: string[];
+    pattern: string;
+  };
+
+export type CuratorsPutBody = {
+    /**
+     * Why — an auditor reads this.
+     */
+    message: string;
+    /**
+     * The file's text. An empty file clears this scope's requirements —
+     * there is no delete, because the removal is history too.
+     */
+    source: string;
+  };
+
+export type CuratorsPutResponse = {
+    commit: string;
+    object_hash: string;
+    parent?: string | null;
+    rules: number;
+    scope_id: string;
+    /**
+     * Whether the bytes were already stored: a re-commit of an unchanged
+     * file, which still records who re-asserted it and when.
+     */
+    unchanged: boolean;
+  };
+
+export type CuratorsResponse = {
+    /**
+     * The commit the `curators` ref points at.
+     */
+    commit?: string | null;
+    /**
+     * The scope the effective file is committed at — this node, or the
+     * nearest ancestor carrying one (ADR-0032 decision 14). Absent when
+     * no scope on the chain has a file.
+     */
+    effective_at?: string | null;
+    /**
+     * The file's content address.
+     */
+    object_hash?: string | null;
+    /**
+     * The parsed rules.
+     */
+    rules: CuratorRuleView[];
+    /**
+     * The node asked about.
+     */
+    scope_id: string;
+    /**
+     * The file's exact authored bytes, comments included.
+     */
+    source?: string | null;
+    updated_at?: string | null;
+    updated_by?: string | null;
+  };
+
+export type DefaultResponse = {
+    /**
+     * What applies where nothing is assigned: the stored default, or the
+     * embedded `regulated-strict` (seed §2.1).
+     */
+    effective: string;
+    /**
+     * The stored tenant default, when one exists.
+     */
+    pack_name?: string | null;
+  };
+
+/**
  * `DELETE /v1/knowledge/{id}`. Deletion without a mode is invalid.
  */
 export type DeleteKnowledgeBody = {
@@ -1133,6 +1874,13 @@ export type EditKnowledgeBody = {
      * Provenance for this exact revision. Omission records a manual edit.
      */
     sources?: KnowledgeSourceBody[];
+  };
+
+export type EffectiveResponse = {
+    assignment?: null | PolicyAssignmentView;
+    name: string;
+    origin: OriginView;
+    version: number;
   };
 
 /**
@@ -1433,6 +2181,31 @@ export type InviteView = {
      */
     scope_id: string;
     status: "pending" | "accepted" | "revoked" | "expired";
+  };
+
+/**
+ * `POST /v1/scim/credentials`.
+ */
+export type IssueRequest = {
+    /**
+     * How long it lives. Clamped to [`MAX_LIFETIME_DAYS`].
+     */
+    expires_in_days?: number | null;
+    /**
+     * What an operator recognises it by when deciding to rotate.
+     */
+    label: string;
+  };
+
+/**
+ * The issue response — **the only time the token is ever readable**.
+ */
+export type IssuedCredential = ScimCredentialView & {
+    /**
+     * The value to paste into Entra's "Secret Token" or Okta's
+     * authorisation header. Never stored, never logged, shown once.
+     */
+    token: string;
   };
 
 /**
@@ -1865,6 +2638,108 @@ export type KnowledgeUsageView = {
     session_id: string;
   };
 
+export type LapseListResponse = {
+    lapses: LapseView[];
+    max_lapses?: number | null;
+    scope_id?: string | null;
+    scope_path?: string | null;
+    standing_only?: boolean | null;
+    truncated?: boolean | null;
+  };
+
+export type LapseProposeBody = {
+    /**
+     * What to relax. A closed vocabulary; anything outside it is refused
+     * by name (ADR-0037 decision 2).
+     */
+    action: string;
+    /**
+     * How long the grant runs **once its effect executes** — never from
+     * now, because a proposal that sits in a queue for a week must not
+     * spend the window it was approved for.
+     */
+    duration_secs: number;
+    /**
+     * Who would get the access: every principal placed at or under this
+     * scope. A single person is their own personal scope, so this one
+     * shape covers "team X" and "just Dana".
+     */
+    grantee_scope_id: string;
+    /**
+     * The most sensitive material this grant would disclose, and therefore
+     * the tier its approval matrix resolves at (AUTHZ-5, ADR-0038
+     * decision 6). Omitted means the working tier, which is what every
+     * grant meant before the field existed.
+     *
+     * Declaring `restricted` is what pulls in the invariant floor —
+     * `compliance` plus two distinct approvers — so the ask and the price
+     * of the ask are the same statement.
+     */
+    max_sensitivity?: string | null;
+    /**
+     * Why. Mandatory: it is what two approvers weigh and what an auditor
+     * reads afterwards.
+     */
+    reason: string;
+    /**
+     * The scope whose material would be disclosed. Requirements resolve
+     * here, `ProposalOpen` is decided here, and this is the only scope the
+     * permit will cover.
+     */
+    scope_id: string;
+  };
+
+export type LapseProposeResponse = {
+    action: string;
+    commit: string;
+    duration_secs: number;
+    effect: string;
+    grantee_scope_id: string;
+    grantee_scope_slug: string;
+    max_sensitivity: string;
+    outstanding: string;
+    proposal_id: string;
+    reason: string;
+    required: string;
+    state: string;
+    target_scope_id: string;
+    target_scope_slug: string;
+  };
+
+export type LapseRevokeBody = {
+    /**
+     * Why. Mandatory, like the grant's own reason: an ending an auditor
+     * cannot read the reason for is not a governed act.
+     */
+    reason: string;
+  };
+
+/**
+ * One standing or historical grant, as the listing and the detail render
+ * it.
+ */
+export type LapseView = {
+    action: string;
+    expires_at: string;
+    granted_at: string;
+    granted_by: string;
+    grantee_scope_id: string;
+    grantee_scope_path?: string | null;
+    id: string;
+    /**
+     * Standing, expired, or revoked — rendered from the row rather than
+     * stored on it, the [`synveda_types::ProposalView`] discipline: a
+     * stored state would need something to run to stay true.
+     */
+    outcome: string;
+    proposal_id: string;
+    reason: string;
+    revoke_reason?: string | null;
+    revoked_at?: string | null;
+    target_scope_id: string;
+    target_scope_path?: string | null;
+  };
+
 /**
  * Archive/restore body.
  */
@@ -1884,7 +2759,7 @@ export type LifecycleKnowledgeBody = {
  * children.
  */
 export type ListResponse = {
-    parent?: unknown | null | ScopeView;
+    parent?: null | ScopeView;
     /**
      * The parent's children, sorted by slug.
      */
@@ -1999,7 +2874,7 @@ export type MemberView = {
      */
     scope_id: string;
     source: "owner" | "direct" | "invite" | "directory" | "automation";
-    via_group?: unknown | null | GroupRefView;
+    via_group?: null | GroupRefView;
   };
 
 /**
@@ -2080,6 +2955,35 @@ export type NewEventBody = {
      * The content: a JSON object, at most 64 KiB encoded.
      */
     payload?: Record<string, unknown> | null;
+  };
+
+/**
+ * What a probe says about one scope.
+ */
+export type NodeCapabilities = {
+    /**
+     * The operand-free actions, by their stable machine name.
+     */
+    actions: Record<string, boolean>;
+    pack?: null | PackView;
+    /**
+     * The tier-bearing reads: the tiers each permits here, ascending. An
+     * empty list is a real answer — "nothing at this scope, at any tier".
+     */
+    read_tiers: Record<string, string[]>;
+    /**
+     * The caller's own effective role keys here — the caller's, never
+     * anyone else's (decision 3; since the cutover, the only roles there
+     * are — CPR-6, ADR-0073 decision 5).
+     */
+    roles: string[];
+    scope_id: string;
+    /**
+     * Where the node sits — a fact about the *node*, so it is served only
+     * to a caller who may read it (`ScopeRead`). Absent otherwise, and
+     * the verdicts beside it are unaffected: they are about the caller.
+     */
+    scope_path?: string | null;
   };
 
 /**
@@ -2452,6 +3356,40 @@ export type OpenSessionBody = {
   };
 
 /**
+ * Where an inherited thing came from.
+ *
+ * `pub(crate)` since CNSL-2 (ADR-0058 decision 6): the capabilities probe
+ * and the effective-roles listing both report an origin, and the whole
+ * point of that decision is that the admin planes say "this came from
+ * above" in **one** vocabulary rather than three that agree on the day
+ * they are written.
+ */
+export type OriginView = {
+    kind: string;
+    scope_id?: string | null;
+  };
+
+export type PackSummary = {
+    /**
+     * `embedded` (compiled into the binary) or `stored` (a tenant row).
+     */
+    kind: string;
+    name: string;
+    updated_at?: string | null;
+    version: number;
+  };
+
+export type PackView = {
+    name: string;
+    origin: OriginView;
+    version: number;
+  };
+
+export type PacksResponse = {
+    packs: PackSummary[];
+  };
+
+/**
  * `PATCH /v1/admin/scopes/{scope_id}` — rename, re-describe, archive or
  * move. Omitted fields change nothing; a `parent_scope_id` is a move.
  */
@@ -2502,6 +3440,12 @@ export type PlanOkfImportBody = {
      * Required for Git and retained for provenance.
      */
     source_revision?: string | null;
+  };
+
+export type PolicyAssignmentView = {
+    pack_name: string;
+    scope_id: string;
+    updated_at: string;
   };
 
 /**
@@ -2591,6 +3535,463 @@ export type ProjectView = {
     workspace_id: string;
   };
 
+export type PromotionEvidenceSchema = {
+    actions: string[];
+    from_seq: number;
+    members: PromotionMemberEvidenceSchema[];
+    pack_name: string;
+    pack_version: number;
+    rule: string;
+    to_seq: number;
+  };
+
+export type PromotionMemberEvidenceSchema = {
+    distinct_members: number;
+    first_recall_at: string;
+    last_recall_at: string;
+    recalls: number;
+    record_id: string;
+  };
+
+export type PromptAuthorBody = {
+    /**
+     * One line, read in a listing and at review.
+     */
+    description?: string;
+    /**
+     * Its name: path-shaped, lower-case, and the identifier a consumer
+     * writes in its source (ADR-0049 decision 3).
+     */
+    name: string;
+    /**
+     * Where the prompt is authored — the scope that will stand behind it,
+     * and the scope whose published channel a proposal would move.
+     */
+    scope_id: string;
+    /**
+     * Its classification. Absent means `internal`, the working tier
+     * everything else in the product defaults to. `restricted` is refused
+     * by name: nothing in the product mints that tier for an authored
+     * asset, so a prompt carrying it could never be read back
+     * (decision 5).
+     */
+    sensitivity?: string | null;
+    /**
+     * The text, with `{{ name }}` placeholders.
+     */
+    template: string;
+    /**
+     * Every placeholder the template uses, declared. A schema that
+     * disagrees with the template is refused here rather than discovered
+     * by a consumer (decision 12).
+     */
+    variables?: PromptVariableSchema[];
+  };
+
+export type PromptListEntry = {
+    description: string;
+    name: string;
+    /**
+     * The draft's address, and when it last moved.
+     */
+    object_hash: string;
+    published?: null | PromptPublishedView;
+    sensitivity: string;
+    updated_at: string;
+    updated_by: string;
+    variables: PromptVariableSchema[];
+  };
+
+export type PromptListResponse = {
+    prompts: PromptListEntry[];
+    scope_id: string;
+    scope_path: string;
+  };
+
+/**
+ * Where the served bytes came from — one field with four honest answers,
+ * because a response that cites a frozen commit without saying so
+ * overstates its own freshness (ADR-0036 decision 10, applied here).
+ */
+export type PromptOrigin = "head" | "pinned-commit" | "channel-pin" | "draft";
+
+/**
+ * What a scope's published channel holds for a name right now — the
+ * answer to "is my edit live?", which an author who just saved has to be
+ * told rather than left to infer.
+ */
+export type PromptPublishedView = {
+    /**
+     * The commit the channel serves.
+     */
+    commit: string;
+    /**
+     * Whether that is the draft's own address. `false` after an edit: the
+     * draft has moved and the reviewed version has not, which is what
+     * "behind review" looks like from the writing side.
+     */
+    current: boolean;
+    /**
+     * The address it names for this prompt.
+     */
+    object_hash: string;
+  };
+
+export type PromptResolveResponse = {
+    channel: string;
+    /**
+     * The commit whose tree named this version — what a consumer pins next
+     * time. Absent for a draft, which is on no channel.
+     */
+    commit?: string | null;
+    description: string;
+    name: string;
+    /**
+     * The version's content address.
+     */
+    object_hash: string;
+    /**
+     * What produced these bytes.
+     */
+    origin: PromptOrigin;
+    /**
+     * The scope the version came from — for a walked resolve, the nearest
+     * one on the caller's chain that publishes it and permits the read.
+     */
+    scope_id: string;
+    scope_path: string;
+    sensitivity: string;
+    template: string;
+    variables: PromptVariableSchema[];
+  };
+
+export type PromptVariableSchema = {
+    default?: string | null;
+    description?: string | null;
+    name: string;
+  };
+
+export type PromptView = {
+    created_at: string;
+    created_by: string;
+    description: string;
+    name: string;
+    /**
+     * The draft's content address — what a proposal would bind.
+     */
+    object_hash: string;
+    published?: null | PromptPublishedView;
+    scope_id: string;
+    scope_path: string;
+    sensitivity: string;
+    template: string;
+    updated_at: string;
+    updated_by: string;
+    variables: PromptVariableSchema[];
+  };
+
+/**
+ * One review act as the API renders it.
+ */
+export type ProposalApprovalView = {
+    approver_id: string;
+    approver_subject: string;
+    comment?: string | null;
+    /**
+     * The commit reviewed. An approval of another commit is evidence
+     * about other content and never carries over.
+     */
+    commit: string;
+    /**
+     * Whether this act still counts: `false` once the proposal's commit
+     * has moved past it.
+     */
+    counts: boolean;
+    created_at: string;
+    /**
+     * The effective roles the approver held at the target when they cast
+     * it — recorded then, never re-derived now (ADR-0032 decision 5).
+     */
+    roles: string[];
+    verdict: string;
+  };
+
+/**
+ * The version the target's published channel holds for a member now —
+ * the old side of the diff, present only for [`MemberEffect::Update`].
+ *
+ * This is the one content-visibility widening in FLOW-6 (ADR-0035
+ * decision 8): a reviewer sees what a publication would overwrite.
+ * Bounded by the proposal's own member set,
+ * the target's own channel, and the target scope the reviewer already
+ * holds `ProposalRead` on — and admitted because a review of a change
+ * that hides one side of the change is not a review.
+ */
+export type ProposalBaselineView = {
+    /**
+     * The address the target's tree names for this member today.
+     */
+    object_hash: string;
+    /**
+     * That object's canonical bytes as text (ADR-0030 decision 4's
+     * human-readable form, which FLOW-1 chose for exactly this).
+     */
+    text: string;
+  };
+
+/**
+ * One proposal, in full.
+ */
+export type ProposalDetail = ProposalSummary & {
+    approvals: ProposalApprovalView[];
+    members: ProposalMemberView[];
+  };
+
+export type ProposalListResponse = {
+    proposals: ProposalSummary[];
+  };
+
+/**
+ * What publishing this proposal would do to the target's published
+ * channel, for one member (FLOW-6, ADR-0035 decision 5). Membership in
+ * the target's tree is the predicate — the same sense of "this scope
+ * holds it" ADR-0034 decision 3 used one scope over.
+ */
+export type ProposalMemberEffect = "add" | "update" | "apply" | "none";
+
+/**
+ * One member of a proposal — the id and the address that was proposed,
+ * plus what a reviewer needs to review it: the bytes under review, the
+ * bytes they would replace, and the artifact's current content.
+ */
+export type ProposalMemberView = {
+    /**
+     * What kind of asset this proposal carries — one word, so a reviewer's
+     * first line says what they are looking at.
+     */
+    asset: string;
+    baseline?: null | ProposalBaselineView;
+    /**
+     * The member's text **as it stands now**. Beside `unchanged` this is what makes drift
+     * legible; it is not what the approvals bind.
+     */
+    content: string;
+    /**
+     * What publication would do to the target's channel for this member.
+     */
+    effect: ProposalMemberEffect;
+    /**
+     * The tree entry name: a path for an authored asset or `command` for a
+     * typed aggregate effect. The one field every artifact family carries.
+     */
+    member: string;
+    /**
+     * The address the proposal named.
+     */
+    object_hash: string;
+    /**
+     * The canonical bytes at the proposed address — what the approvals
+     * bind, read from the object store rather than re-derived from the
+     * source row, because an edited artifact is no longer what anyone approved
+     * (ADR-0035 decision 6). Empty only if the object is missing, which
+     * the append-only store makes impossible.
+     */
+    proposed: string;
+    sensitivity: string;
+    /**
+     * Whether the member still hashes to that address. `false` means the
+     * content moved after the proposal opened, and publishing will
+     * refuse (ADR-0032 decision 6).
+     */
+    unchanged: boolean;
+  };
+
+export type ProposalOpenBody = {
+    /**
+     * The context-pack documents to propose, by path (PRMT-2, ADR-0050
+     * decision 1).
+     *
+     * One entry per **document**, named `pack/document`: the pack channel
+     * names documents rather than bundles (decision 3), so a proposal that
+     * publishes half a pack is a thing the vocabulary can express and a
+     * curator can decide on. Exactly one of the three member lists may be
+     * present, for `prompt_names`' reason — a proposal has one asset kind,
+     * because the approval matrix resolves from it and, since decision 15,
+     * `regulated-strict` prices a pack at a department at two distinct
+     * people where it prices a team's memory at one.
+     */
+    document_paths?: string[];
+    /**
+     * The prompts to propose, by name (PRMT-1, ADR-0049 decision 6).
+     *
+     * Exactly one authored-artifact member list may be present: a proposal
+     * has one asset kind because the approval matrix resolves from it.
+     *
+     * The same two senses of "the source holds it" apply: the draft lives
+     * there, or the source's published channel names it at that address —
+     * which is what lets a department propose onward what a team climbed
+     * into it, with no draft row at the department at all.
+     */
+    prompt_names?: string[];
+    /**
+     * The scope whose published channel would move. Requirements resolve
+     * here, and only here — "each level's approvers" is true because
+     * each level's proposal resolves at that level (ADR-0034
+     * decision 4).
+     */
+    scope_id: string;
+    /**
+     * Where the material is now. Absent means the target — the
+     * same-scope case, a climb of zero levels. Present, it must be the
+     * target or a **descendant** of it: a climb goes up the chain that
+     * composition walks down (ADR-0034 decision 2).
+     */
+    source_scope_id?: string | null;
+    /**
+     * What this proposes, in one line. A reviewer reads it in a list.
+     */
+    title: string;
+  };
+
+export type ProposalOpenResponse = ProposalSummary;
+
+export type ProposalPublishResponse = {
+    added: number;
+    channel: string;
+    /**
+     * The commit the channel now points at. Its parents are
+     * `[previous head, proposal commit]` — first-parent mainline as in
+     * git, so lineage is a fact about the graph (ADR-0032 decision 10).
+     */
+    commit: string;
+    members: number;
+    parent?: string | null;
+    /**
+     * The proposal commit, this publication's second parent.
+     */
+    proposal_commit: string;
+    proposal_id: string;
+    scope_id: string;
+  };
+
+export type ProposalRejectBody = {
+    /**
+     * Why. Mandatory — a rejection an auditor cannot read the reason for
+     * is not a review, and FLOW-5 inherits this reason for its
+     * per-level denials.
+     */
+    reason: string;
+  };
+
+export type ProposalReviewBody = {
+    /**
+     * What the reviewer wants to say. Optional on an approval; a
+     * rejection carries its reason in `reason` instead.
+     */
+    comment?: string | null;
+  };
+
+export type ProposalReviewResponse = ProposalSummary & {
+    /**
+     * What this act contributed: the roles it counted under.
+     */
+    counted_roles: string[];
+  };
+
+/**
+ * One proposal in a listing.
+ */
+export type ProposalSummary = {
+    asset: string;
+    close_reason?: string | null;
+    closed_at?: string | null;
+    /**
+     * The commit holding exactly what is proposed.
+     */
+    commit: string;
+    created_at: string;
+    /**
+     * What running this proposal would do (AUTHZ-4, ADR-0037
+     * decision 16). `published` for every FLOW-3 proposal; `lapse` for a
+     * grant. Named for the effect rather than the channel because a lapse
+     * has no channel, and a field that said `published` on a proposal that
+     * publishes nothing would be the paper-over this feature refused at
+     * the schema.
+     */
+    effect: string;
+    id: string;
+    /**
+     * What it still lacks, in one line a reviewer reads.
+     */
+    outstanding: string;
+    promotion?: null | PromotionEvidenceSchema;
+    proposer_id: string;
+    proposer_subject: string;
+    /**
+     * What the matrix asks for here, resolved now.
+     */
+    required: ApprovalRequirementView;
+    sensitivity: string;
+    source_scope_id: string;
+    source_scope_path?: string | null;
+    /**
+     * The five-state vocabulary tech plan §2.3 describes: the stored
+     * state, with `approved` rendered from `open` plus a satisfied
+     * requirement (ADR-0032 decision 11).
+     */
+    state: string;
+    target_scope_id: string;
+    /**
+     * The target's hierarchy path. A review surface that renders two
+     * UUIDs is not one a person can use, and for a climb the *source*
+     * is half of what is being judged (FLOW-6, ADR-0035 decision 9).
+     * Absent only inside TEN-5's disposal window, when the scope the
+     * proposal targets has already gone.
+     */
+    target_scope_path?: string | null;
+    title: string;
+  };
+
+/**
+ * One quarantined event as the API renders it: the redacted payload,
+ * the finding summary, and the review state — never raw finding text
+ * (there is none anywhere to render, ADR-0021 decision 1).
+ */
+export type QuarantineEventView = {
+    client_event_id: string;
+    created_at: string;
+    event_id: string;
+    event_type: string;
+    findings: unknown;
+    payload: unknown;
+    /**
+     * The token subject that opened that run.
+     */
+    principal_id: string;
+    review_reason?: string | null;
+    reviewed_at?: string | null;
+    reviewer_subject?: string | null;
+    scope_id: string;
+    /**
+     * The run the event belongs to — a real aggregate since CPR-12, so a
+     * reviewer can open the transcript this payload came from instead of
+     * deciding about it in isolation.
+     */
+    session_id: string;
+    state: string;
+  };
+
+export type QuarantineQueueResponse = {
+    pending: QuarantineEventView[];
+  };
+
+export type QuarantineReviewBody = {
+    /**
+     * The reviewer's note, recorded on the row and in the audit event.
+     */
+    reason?: string | null;
+  };
+
 /**
  * Append one idempotent usage observation.
  */
@@ -2625,6 +4026,23 @@ export type RecordSkillUsageBody = {
      * Exact immutable version involved.
      */
     version_id: string;
+  };
+
+export type RegisterServiceIdentityBody = {
+    /**
+     * Display name for the agent's personal leaf; defaults to the
+     * subject.
+     */
+    display_name?: string | null;
+    /**
+     * The anchor node whose subtree confines the agent's tokens.
+     */
+    scope_id: string;
+    /**
+     * The `sub` the IdP will put in the agent's client-credentials
+     * tokens (for Rauthy, the client id).
+     */
+    subject: string;
   };
 
 /**
@@ -2776,6 +4194,23 @@ export type RunToolTestBody = {
   };
 
 /**
+ * The non-secret provisioning credential metadata exposed after issuance.
+ */
+export type ScimCredentialView = {
+    created_at: string;
+    created_by: string;
+    expires_at: string;
+    id: string;
+    label: string;
+    last_used_at?: string | null;
+    revoked_at?: string | null;
+  };
+
+export type ScimCredentialsResponse = {
+    credentials: ScimCredentialView[];
+  };
+
+/**
  * `GET /v1/admin/scopes/{scope_id}` — the scope and its path.
  */
 export type ScopeDetail = {
@@ -2833,6 +4268,25 @@ export type ScopeView = {
      * When the scope last changed.
      */
     updated_at: string;
+  };
+
+export type ServiceIdentitiesResponse = {
+    identities: ServiceIdentityView[];
+  };
+
+/**
+ * A service identity as the public application API exposes it.
+ */
+export type ServiceIdentityView = {
+    created_at: string;
+    departed_at?: string | null;
+    display_name?: string | null;
+    email?: string | null;
+    id: string;
+    kind: string;
+    scope_id: string;
+    status: string;
+    subject?: string | null;
   };
 
 /**
@@ -3000,6 +4454,10 @@ export type SessionView = {
      * The workspace the run happened in.
      */
     workspace_id: string;
+  };
+
+export type SetPackBody = {
+    name: string;
   };
 
 /**
@@ -3470,6 +4928,40 @@ export type SupersedeKnowledgeBody = {
      * Replacement provenance.
      */
     sources?: KnowledgeSourceBody[];
+  };
+
+/**
+ * `GET /v1/directory/sync` — what the last pass did.
+ */
+export type SyncStatus = {
+    /**
+     * Set iff the most recent complete pass refused to seal.
+     */
+    breaker_tripped_at?: string | null;
+    /**
+     * How many that pass declined to seal — the number an operator is
+     * being asked to bound.
+     */
+    breaker_would_have_sealed?: number | null;
+    /**
+     * Which connector last wrote this state.
+     */
+    connector: string;
+    /**
+     * The last one that finished. A gap between this and `last_pass_at` is
+     * a connector that runs and never completes — the state in which
+     * nobody is sealed and nothing looks wrong.
+     */
+    last_complete_pass_at?: string | null;
+    /**
+     * The last attempt, complete or not.
+     */
+    last_pass_at?: string | null;
+    /**
+     * Passes that completed. An absence count means nothing without it.
+     */
+    passes_completed: number;
+    seal_authorisation?: null | AuthorisationView;
   };
 
 /**
@@ -4109,6 +5601,12 @@ export type VerifyKnowledgeBody = {
     verification_metadata: Record<string, unknown>;
   };
 
+export type WhoamiResponse = {
+    capabilities?: null | TenantCapabilities;
+    subject: string;
+    tenant: TenantView;
+  };
+
 /**
  * The workspace listing.
  *
@@ -4269,6 +5767,25 @@ export type Operations = {
     readonly response: ChainResponse;
   };
   /**
+   * `GET /v1/admin/scopes/{scope_id}/curators` — the curator file in force
+   * for this node: its own, or the nearest ancestor's.
+   */
+  readonly get_scope_curators: {
+    readonly path: "/v1/admin/scopes/{scope_id}/curators";
+    readonly method: "GET";
+    readonly response: CuratorsResponse;
+  };
+  /**
+   * `PUT /v1/admin/scopes/{scope_id}/curators` — commit this scope's curator
+   * file.
+   */
+  readonly put_scope_curators: {
+    readonly path: "/v1/admin/scopes/{scope_id}/curators";
+    readonly method: "PUT";
+    readonly body: CuratorsPutBody;
+    readonly response: CuratorsPutResponse;
+  };
+  /**
    * `GET /v1/admin/scopes/{scope_id}/descendants` — the whole subtree,
    * nearest first, the scope itself excluded.
    */
@@ -4276,6 +5793,80 @@ export type Operations = {
     readonly path: "/v1/admin/scopes/{scope_id}/descendants";
     readonly method: "GET";
     readonly response: ChainResponse;
+  };
+  /**
+   * `GET /v1/admin/scopes/{scope_id}/policy` — the pack effective at the scope
+   * and where it came from (its own assignment, an ancestor's, the tenant
+   * default, or the embedded default).
+   */
+  readonly get_scope_policy: {
+    readonly path: "/v1/admin/scopes/{scope_id}/policy";
+    readonly method: "GET";
+    readonly response: EffectiveResponse;
+  };
+  /**
+   * `PUT /v1/admin/scopes/{scope_id}/policy` — assign a pack at the scope; its
+   * subtree runs it from the next request on.
+   */
+  readonly assign_scope_policy: {
+    readonly path: "/v1/admin/scopes/{scope_id}/policy";
+    readonly method: "PUT";
+    readonly body: SetPackBody;
+    readonly response: PolicyAssignmentView;
+  };
+  /**
+   * `DELETE /v1/admin/scopes/{scope_id}/policy` — remove the scope's
+   * assignment; it falls back to the inherited pack.
+   */
+  readonly unassign_scope_policy: {
+    readonly path: "/v1/admin/scopes/{scope_id}/policy";
+    readonly method: "DELETE";
+    readonly response: void;
+  };
+  /**
+   * `GET /v1/audit/disclosures` — "who could see X on date D", as two lists
+   * (ADR-0045 decision 4).
+   */
+  readonly list_audit_disclosures: {
+    readonly path: "/v1/audit/disclosures";
+    readonly method: "GET";
+    readonly response: AuditDisclosuresResponse;
+  };
+  /**
+   * `GET /v1/audit/events` — the search (ADR-0045 decision 3).
+   */
+  readonly list_audit_events: {
+    readonly path: "/v1/audit/events";
+    readonly method: "GET";
+    readonly response: AuditEventsResponse;
+  };
+  /**
+   * `GET /v1/audit/knowledge` — "what did agent A know at time T" (ADR-0045
+   * decision 5).
+   */
+  readonly get_audit_knowledge: {
+    readonly path: "/v1/audit/knowledge";
+    readonly method: "GET";
+    readonly response: AuditKnowledgeResponse;
+  };
+  /**
+   * `GET /v1/audit/verify` — the chain check, under the same `AuditRead`
+   * (ADR-0045 decision 1): it returns a verdict and a sequence number and
+   * no event content, so a principal who may read the chain may check it.
+   */
+  readonly verify_audit_chain: {
+    readonly path: "/v1/audit/verify";
+    readonly method: "GET";
+    readonly response: AuditVerifyResponse;
+  };
+  /**
+   * `GET /v1/capabilities?scopes=<id>,<id>,…` — the plural of the same
+   * walk, for the nodes a tree actually rendered.
+   */
+  readonly get_capabilities: {
+    readonly path: "/v1/capabilities";
+    readonly method: "GET";
+    readonly response: BatchResponse;
   };
   /**
    * `GET /v1/capture-batches`.
@@ -4353,6 +5944,80 @@ export type Operations = {
     readonly response: CaptureDecisionView;
   };
   /**
+   * `GET /v1/channels/{scope_id}` — the channels standing at one scope.
+   */
+  readonly list_channels: {
+    readonly path: "/v1/channels/{scope_id}";
+    readonly method: "GET";
+    readonly response: ChannelListResponse;
+  };
+  /**
+   * `GET /v1/channels/{scope_id}/history` — the states this channel has
+   * held, newest first.
+   */
+  readonly get_channel_history: {
+    readonly path: "/v1/channels/{scope_id}/history";
+    readonly method: "GET";
+    readonly response: ChannelHistoryResponse;
+  };
+  /**
+   * `POST /v1/channels/{scope_id}/pin` — hold what this channel serves at a
+   * commit.
+   */
+  readonly pin_channel: {
+    readonly path: "/v1/channels/{scope_id}/pin";
+    readonly method: "POST";
+    readonly body: ChannelPinBody;
+    readonly response: ChannelPinResponse;
+  };
+  /**
+   * `POST /v1/channels/{scope_id}/publish` — admit authored artifact versions.
+   */
+  readonly publish_channel: {
+    readonly path: "/v1/channels/{scope_id}/publish";
+    readonly method: "POST";
+    readonly body: ChannelPublishBody;
+    readonly response: ChannelPublishResponse;
+  };
+  /**
+   * `POST /v1/channels/{scope_id}/rollback` — rewind the channel to a state
+   * it has already held.
+   */
+  readonly rollback_channel: {
+    readonly path: "/v1/channels/{scope_id}/rollback";
+    readonly method: "POST";
+    readonly body: ChannelRollbackBody;
+    readonly response: ChannelRollbackResponse;
+  };
+  /**
+   * `POST /v1/channels/{scope_id}/unpin` — release the hold.
+   */
+  readonly unpin_channel: {
+    readonly path: "/v1/channels/{scope_id}/unpin";
+    readonly method: "POST";
+    readonly body: ChannelUnpinBody;
+    readonly response: ChannelUnpinResponse;
+  };
+  /**
+   * `GET /v1/context-packs?scope_id=…` — the registry at one scope: every
+   * pack, its documents, and what the published channel holds for each.
+   */
+  readonly list_context_packs: {
+    readonly path: "/v1/context-packs";
+    readonly method: "GET";
+    readonly response: ContextPackListResponse;
+  };
+  /**
+   * `POST /v1/context-packs` — author a pack: create it, or replace the
+   * documents named in the request.
+   */
+  readonly author_context_pack: {
+    readonly path: "/v1/context-packs";
+    readonly method: "POST";
+    readonly body: ContextPackAuthorBody;
+    readonly response: ContextPackView;
+  };
+  /**
    * `GET /v1/context-runs` — cursor-paginated, per-session-authorised plans.
    */
   readonly list_context_runs: {
@@ -4377,6 +6042,23 @@ export type Operations = {
     readonly body: ContextFeedbackBody;
     readonly idempotent: true;
     readonly response: ContextFeedbackView;
+  };
+  /**
+   * `POST /v1/directory/seal-authorisations`.
+   */
+  readonly authorise_directory_seals: {
+    readonly path: "/v1/directory/seal-authorisations";
+    readonly method: "POST";
+    readonly body: AuthoriseRequest;
+    readonly response: AuthoriseResponse;
+  };
+  /**
+   * `GET /v1/directory/sync`.
+   */
+  readonly get_directory_sync: {
+    readonly path: "/v1/directory/sync";
+    readonly method: "GET";
+    readonly response: SyncStatus;
   };
   /**
    * `POST /v1/invites/{invite_token}/accept` — redeem one.
@@ -4507,6 +6189,33 @@ export type Operations = {
     readonly response: KnowledgeMutationView;
   };
   /**
+   * `GET /v1/lapses` — grants over one scope, or every grant this caller
+   * may see.
+   */
+  readonly list_lapses: {
+    readonly path: "/v1/lapses";
+    readonly method: "GET";
+    readonly response: LapseListResponse;
+  };
+  /**
+   * `POST /v1/lapses` — open a lapse proposal. Grants nothing.
+   */
+  readonly propose_lapse: {
+    readonly path: "/v1/lapses";
+    readonly method: "POST";
+    readonly body: LapseProposeBody;
+    readonly response: LapseProposeResponse;
+  };
+  /**
+   * `POST /v1/lapses/{id}/revoke` — end a standing grant early.
+   */
+  readonly revoke_lapse: {
+    readonly path: "/v1/lapses/{id}/revoke";
+    readonly method: "POST";
+    readonly body: LapseRevokeBody;
+    readonly response: LapseView;
+  };
+  /**
    * `GET /v1/me`.
    */
   readonly get_me: {
@@ -4538,6 +6247,41 @@ export type Operations = {
     readonly method: "POST";
     readonly idempotent: true;
     readonly response: OkfMaterializationView;
+  };
+  /**
+   * `GET /v1/policy/default` — the tenant's default pack.
+   */
+  readonly get_default_policy: {
+    readonly path: "/v1/policy/default";
+    readonly method: "GET";
+    readonly response: DefaultResponse;
+  };
+  /**
+   * `PUT /v1/policy/default` — set the tenant default pack.
+   */
+  readonly set_default_policy: {
+    readonly path: "/v1/policy/default";
+    readonly method: "PUT";
+    readonly body: SetPackBody;
+    readonly response: DefaultResponse;
+  };
+  /**
+   * `DELETE /v1/policy/default` — clear the tenant default; the embedded
+   * `regulated-strict` applies wherever nothing is assigned.
+   */
+  readonly clear_default_policy: {
+    readonly path: "/v1/policy/default";
+    readonly method: "DELETE";
+    readonly response: void;
+  };
+  /**
+   * `GET /v1/policy/packs` — the packs assignable in this tenant: the
+   * embedded product packs and the tenant's stored packs.
+   */
+  readonly list_policy_packs: {
+    readonly path: "/v1/policy/packs";
+    readonly method: "GET";
+    readonly response: PacksResponse;
   };
   /**
    * `GET /v1/projects/{project_id}`.
@@ -4635,6 +6379,209 @@ export type Operations = {
     readonly path: "/v1/projects/{project_id}/tool-config";
     readonly method: "GET";
     readonly response: ToolClientConfigurationView;
+  };
+  /**
+   * `GET /v1/prompts?scope_id=…` — the registry at one scope: every draft,
+   * with what the published channel holds for it.
+   */
+  readonly list_prompts: {
+    readonly path: "/v1/prompts";
+    readonly method: "GET";
+    readonly response: PromptListResponse;
+  };
+  /**
+   * `POST /v1/prompts` — author a draft: create it, or replace the content
+   * of the one that is there.
+   */
+  readonly author_prompt: {
+    readonly path: "/v1/prompts";
+    readonly method: "POST";
+    readonly body: PromptAuthorBody;
+    readonly response: PromptView;
+  };
+  /**
+   * `GET /v1/prompts/{name}` — resolve a prompt for this caller.
+   */
+  readonly resolve_prompt: {
+    readonly path: "/v1/prompts/{name}";
+    readonly method: "GET";
+    readonly response: PromptResolveResponse;
+  };
+  /**
+   * `GET /v1/proposals` — proposals, newest first.
+   */
+  readonly list_proposals: {
+    readonly path: "/v1/proposals";
+    readonly method: "GET";
+    readonly response: ProposalListResponse;
+  };
+  /**
+   * `POST /v1/proposals` — open a proposal against a scope's published
+   * channel.
+   */
+  readonly open_proposal: {
+    readonly path: "/v1/proposals";
+    readonly method: "POST";
+    readonly body: ProposalOpenBody;
+    readonly response: ProposalOpenResponse;
+  };
+  /**
+   * `GET /v1/proposals/{id}` — one proposal, with its members' content and
+   * its review log.
+   */
+  readonly get_proposal: {
+    readonly path: "/v1/proposals/{id}";
+    readonly method: "GET";
+    readonly response: ProposalDetail;
+  };
+  /**
+   * `POST /v1/proposals/{id}/apply` — run an approved typed aggregate effect.
+   * The artifact command layer repeats ownership, PDP and revision checks at
+   * this boundary; approvals never become write authority by themselves.
+   */
+  readonly apply_proposal: {
+    readonly path: "/v1/proposals/{id}/apply";
+    readonly method: "POST";
+    readonly response: unknown;
+  };
+  /**
+   * `POST /v1/proposals/{id}/approve` — cast an approval.
+   */
+  readonly approve_proposal: {
+    readonly path: "/v1/proposals/{id}/approve";
+    readonly method: "POST";
+    readonly body: null | ProposalReviewBody;
+    readonly response: ProposalReviewResponse;
+  };
+  /**
+   * `POST /v1/proposals/{id}/lapse` — run an approved lapse proposal's
+   * effect.
+   */
+  readonly grant_lapse_proposal: {
+    readonly path: "/v1/proposals/{id}/lapse";
+    readonly method: "POST";
+    readonly response: LapseView;
+  };
+  /**
+   * `POST /v1/proposals/{id}/publish` — run an approved proposal's effect.
+   */
+  readonly publish_proposal: {
+    readonly path: "/v1/proposals/{id}/publish";
+    readonly method: "POST";
+    readonly response: ProposalPublishResponse;
+  };
+  /**
+   * `POST /v1/proposals/{id}/reject` — close a proposal with a reason.
+   */
+  readonly reject_proposal: {
+    readonly path: "/v1/proposals/{id}/reject";
+    readonly method: "POST";
+    readonly body: ProposalRejectBody;
+    readonly response: ProposalSummary;
+  };
+  /**
+   * `POST /v1/proposals/{id}/withdraw` — the proposer closes their own.
+   */
+  readonly withdraw_proposal: {
+    readonly path: "/v1/proposals/{id}/withdraw";
+    readonly method: "POST";
+    readonly response: ProposalSummary;
+  };
+  /**
+   * `GET /v1/quarantine` — the pending review queue, oldest first.
+   * `QuarantineRead` is decided at the tenant either way (module doc);
+   * `scope_id` narrows *which* events come back, after the uniform-404
+   * ownership check on the scope named.
+   */
+  readonly list_quarantine: {
+    readonly path: "/v1/quarantine";
+    readonly method: "GET";
+    readonly response: QuarantineQueueResponse;
+  };
+  /**
+   * `POST /v1/quarantine/{event_id}/reject`.
+   */
+  readonly reject_quarantined_event: {
+    readonly path: "/v1/quarantine/{event_id}/reject";
+    readonly method: "POST";
+    readonly body: QuarantineReviewBody;
+    readonly response: QuarantineEventView;
+  };
+  /**
+   * `POST /v1/quarantine/{event_id}/release`.
+   */
+  readonly release_quarantined_event: {
+    readonly path: "/v1/quarantine/{event_id}/release";
+    readonly method: "POST";
+    readonly body: QuarantineReviewBody;
+    readonly response: QuarantineEventView;
+  };
+  /**
+   * `GET /v1/scim/credentials` — the inventory, revoked and expired ones
+   * included, because rotation is a decision about a history rather than
+   * about a current state.
+   */
+  readonly list_scim_credentials: {
+    readonly path: "/v1/scim/credentials";
+    readonly method: "GET";
+    readonly response: ScimCredentialsResponse;
+  };
+  /**
+   * Issues a credential.
+   */
+  readonly issue_scim_credential: {
+    readonly path: "/v1/scim/credentials";
+    readonly method: "POST";
+    readonly body: IssueRequest;
+    readonly response: IssuedCredential;
+  };
+  /**
+   * `POST /v1/scim/credentials/{id}/revoke`.
+   */
+  readonly revoke_scim_credential: {
+    readonly path: "/v1/scim/credentials/{id}/revoke";
+    readonly method: "POST";
+    readonly response: void;
+  };
+  /**
+   * `GET /v1/service-identities` — the tenant's registered agents. A
+   * tenant-plane read: `ServiceIdentityRead` at the tenant.
+   */
+  readonly list_service_identities: {
+    readonly path: "/v1/service-identities";
+    readonly method: "GET";
+    readonly response: ServiceIdentitiesResponse;
+  };
+  /**
+   * `POST /v1/service-identities` — register an agent at an anchor node.
+   * `ServiceIdentityManage` on the anchor: a steward registers agents in
+   * their subtree, visibly (ADR-0018 decision 3).
+   */
+  readonly register_service_identity: {
+    readonly path: "/v1/service-identities";
+    readonly method: "POST";
+    readonly body: RegisterServiceIdentityBody;
+    readonly response: ServiceIdentityView;
+  };
+  /**
+   * `GET /v1/service-identities/{id}` — one registration.
+   * `ServiceIdentityRead` on the anchor.
+   */
+  readonly get_service_identity: {
+    readonly path: "/v1/service-identities/{id}";
+    readonly method: "GET";
+    readonly response: ServiceIdentityView;
+  };
+  /**
+   * `DELETE /v1/service-identities/{id}` — revoke: delete the identity row
+   * and its personal leaf. `ServiceIdentityManage` on the anchor. Effective
+   * on the next request: an unregistered IdP subject is quarantined at the
+   * seam (ADR-0013 decision 6).
+   */
+  readonly remove_service_identity: {
+    readonly path: "/v1/service-identities/{id}";
+    readonly method: "DELETE";
+    readonly response: void;
   };
   /**
    * `GET /v1/sessions` — the runs this caller may read, newest first.
@@ -5028,6 +6975,16 @@ export type Operations = {
     readonly response: ToolTestRunView;
   };
   /**
+   * Introspection: who does the gateway think is calling? Returns the
+   * caller's own resolution result, and — only when asked — what the caller
+   * may do on the tenant plane.
+   */
+  readonly get_whoami: {
+    readonly path: "/v1/whoami";
+    readonly method: "GET";
+    readonly response: WhoamiResponse;
+  };
+  /**
    * `GET /v1/workspaces` — the tenant's workspaces.
    */
   readonly list_workspaces: {
@@ -5139,7 +7096,17 @@ export const OPERATIONS = {
   get_scope: { path: "/v1/admin/scopes/{scope_id}", method: "GET" },
   update_scope: { path: "/v1/admin/scopes/{scope_id}", method: "PATCH" },
   list_scope_ancestors: { path: "/v1/admin/scopes/{scope_id}/ancestors", method: "GET" },
+  get_scope_curators: { path: "/v1/admin/scopes/{scope_id}/curators", method: "GET" },
+  put_scope_curators: { path: "/v1/admin/scopes/{scope_id}/curators", method: "PUT" },
   list_scope_descendants: { path: "/v1/admin/scopes/{scope_id}/descendants", method: "GET" },
+  get_scope_policy: { path: "/v1/admin/scopes/{scope_id}/policy", method: "GET" },
+  assign_scope_policy: { path: "/v1/admin/scopes/{scope_id}/policy", method: "PUT" },
+  unassign_scope_policy: { path: "/v1/admin/scopes/{scope_id}/policy", method: "DELETE" },
+  list_audit_disclosures: { path: "/v1/audit/disclosures", method: "GET" },
+  list_audit_events: { path: "/v1/audit/events", method: "GET" },
+  get_audit_knowledge: { path: "/v1/audit/knowledge", method: "GET" },
+  verify_audit_chain: { path: "/v1/audit/verify", method: "GET" },
+  get_capabilities: { path: "/v1/capabilities", method: "GET" },
   list_capture_batches: { path: "/v1/capture-batches", method: "GET" },
   get_capture_batch: { path: "/v1/capture-batches/{id}", method: "GET" },
   accept_capture_batch: { path: "/v1/capture-batches/{id}/accept", method: "POST", idempotent: true },
@@ -5148,9 +7115,19 @@ export const OPERATIONS = {
   dismiss_capture_candidate: { path: "/v1/capture-candidates/{id}/dismiss", method: "POST", idempotent: true },
   merge_capture_candidate: { path: "/v1/capture-candidates/{id}/merge", method: "POST", idempotent: true },
   replace_capture_candidate: { path: "/v1/capture-candidates/{id}/replace", method: "POST", idempotent: true },
+  list_channels: { path: "/v1/channels/{scope_id}", method: "GET" },
+  get_channel_history: { path: "/v1/channels/{scope_id}/history", method: "GET" },
+  pin_channel: { path: "/v1/channels/{scope_id}/pin", method: "POST" },
+  publish_channel: { path: "/v1/channels/{scope_id}/publish", method: "POST" },
+  rollback_channel: { path: "/v1/channels/{scope_id}/rollback", method: "POST" },
+  unpin_channel: { path: "/v1/channels/{scope_id}/unpin", method: "POST" },
+  list_context_packs: { path: "/v1/context-packs", method: "GET" },
+  author_context_pack: { path: "/v1/context-packs", method: "POST" },
   list_context_runs: { path: "/v1/context-runs", method: "GET" },
   get_context_run: { path: "/v1/context-runs/{id}", method: "GET" },
   create_context_feedback: { path: "/v1/context-runs/{id}/feedback", method: "POST", idempotent: true },
+  authorise_directory_seals: { path: "/v1/directory/seal-authorisations", method: "POST" },
+  get_directory_sync: { path: "/v1/directory/sync", method: "GET" },
   accept_invite: { path: "/v1/invites/{invite_token}/accept", method: "POST" },
   list_knowledge: { path: "/v1/knowledge", method: "GET" },
   create_knowledge: { path: "/v1/knowledge", method: "POST", idempotent: true },
@@ -5165,10 +7142,17 @@ export const OPERATIONS = {
   supersede_knowledge: { path: "/v1/knowledge/{id}/supersede", method: "POST", idempotent: true },
   get_knowledge_usage: { path: "/v1/knowledge/{id}/usage", method: "GET" },
   verify_knowledge: { path: "/v1/knowledge/{id}/verify", method: "POST", idempotent: true },
+  list_lapses: { path: "/v1/lapses", method: "GET" },
+  propose_lapse: { path: "/v1/lapses", method: "POST" },
+  revoke_lapse: { path: "/v1/lapses/{id}/revoke", method: "POST" },
   get_me: { path: "/v1/me", method: "GET" },
   list_okf_imports: { path: "/v1/okf/imports", method: "GET" },
   get_okf_import: { path: "/v1/okf/imports/{id}", method: "GET" },
   materialize_okf_import: { path: "/v1/okf/imports/{id}/materialize", method: "POST", idempotent: true },
+  get_default_policy: { path: "/v1/policy/default", method: "GET" },
+  set_default_policy: { path: "/v1/policy/default", method: "PUT" },
+  clear_default_policy: { path: "/v1/policy/default", method: "DELETE" },
+  list_policy_packs: { path: "/v1/policy/packs", method: "GET" },
   get_project: { path: "/v1/projects/{project_id}", method: "GET" },
   update_project: { path: "/v1/projects/{project_id}", method: "PATCH" },
   list_project_members: { path: "/v1/projects/{project_id}/members", method: "GET" },
@@ -5180,6 +7164,28 @@ export const OPERATIONS = {
   attach_repository: { path: "/v1/projects/{project_id}/repositories", method: "POST", idempotent: true },
   detach_repository: { path: "/v1/projects/{project_id}/repositories/{repository_id}", method: "DELETE" },
   generate_tool_client_config: { path: "/v1/projects/{project_id}/tool-config", method: "GET" },
+  list_prompts: { path: "/v1/prompts", method: "GET" },
+  author_prompt: { path: "/v1/prompts", method: "POST" },
+  resolve_prompt: { path: "/v1/prompts/{name}", method: "GET" },
+  list_proposals: { path: "/v1/proposals", method: "GET" },
+  open_proposal: { path: "/v1/proposals", method: "POST" },
+  get_proposal: { path: "/v1/proposals/{id}", method: "GET" },
+  apply_proposal: { path: "/v1/proposals/{id}/apply", method: "POST" },
+  approve_proposal: { path: "/v1/proposals/{id}/approve", method: "POST" },
+  grant_lapse_proposal: { path: "/v1/proposals/{id}/lapse", method: "POST" },
+  publish_proposal: { path: "/v1/proposals/{id}/publish", method: "POST" },
+  reject_proposal: { path: "/v1/proposals/{id}/reject", method: "POST" },
+  withdraw_proposal: { path: "/v1/proposals/{id}/withdraw", method: "POST" },
+  list_quarantine: { path: "/v1/quarantine", method: "GET" },
+  reject_quarantined_event: { path: "/v1/quarantine/{event_id}/reject", method: "POST" },
+  release_quarantined_event: { path: "/v1/quarantine/{event_id}/release", method: "POST" },
+  list_scim_credentials: { path: "/v1/scim/credentials", method: "GET" },
+  issue_scim_credential: { path: "/v1/scim/credentials", method: "POST" },
+  revoke_scim_credential: { path: "/v1/scim/credentials/{id}/revoke", method: "POST" },
+  list_service_identities: { path: "/v1/service-identities", method: "GET" },
+  register_service_identity: { path: "/v1/service-identities", method: "POST" },
+  get_service_identity: { path: "/v1/service-identities/{id}", method: "GET" },
+  remove_service_identity: { path: "/v1/service-identities/{id}", method: "DELETE" },
   list_sessions: { path: "/v1/sessions", method: "GET" },
   open_session: { path: "/v1/sessions", method: "POST", idempotent: true },
   get_session: { path: "/v1/sessions/{session_id}", method: "GET" },
@@ -5224,6 +7230,7 @@ export const OPERATIONS = {
   diff_tool_server_version: { path: "/v1/tool-servers/{id}/versions/{version_id}/diff", method: "GET" },
   list_tool_server_tests: { path: "/v1/tool-servers/{id}/versions/{version_id}/tests", method: "GET" },
   run_tool_server_test: { path: "/v1/tool-servers/{id}/versions/{version_id}/tests", method: "POST", idempotent: true },
+  get_whoami: { path: "/v1/whoami", method: "GET" },
   list_workspaces: { path: "/v1/workspaces", method: "GET" },
   create_workspace: { path: "/v1/workspaces", method: "POST", idempotent: true },
   get_workspace: { path: "/v1/workspaces/{workspace_id}", method: "GET" },

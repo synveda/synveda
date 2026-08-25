@@ -42,12 +42,13 @@ programme convention established in Prompt 1.
 | Trusted MCP server catalogue, immutable versions/snapshots, exact project bindings, generated configuration and read-only tests | CPR-25 | **complete** | `07ce9f3` | `9845186` | types 5/5; gateway unit 3/3 + public DB 1/1; policy PASS; RLS 1/1; OpenAPI 5/5; console 186/186 | PASS | PASS (`synveda_test_88082`) | official stable MCP 2026-07-28 pinned to `5f5440b`; isolated `demos/cpr-25-tool-registry.sh` PASS; deterministic report is not live-server evidence | none |
 | Generated-API MCP Tools catalogue, immutable evidence comparison, VedaFlow review linkage, exact bindings and secret-safe configuration | CPR-26 | **complete** | `9845186` | `98f5bcd` | helpers/components 10/10; complete console 196/196; production build PASS | PASS | N/A — console/client-only | no in-app browser exposed; real-component SSR and production bundle PASS | none |
 | Versioned OKF v0.2 validation, import planning/candidates and deterministic Knowledge export | CPR-27 | **complete** | `98f5bcd` | `0dbf163` | adapter 6/6; types 1/1; store 1/1; gateway 1/1; capture 4/4; OpenAPI 5/5; RLS 1/1; console 197/197 | PASS | PASS (`synveda_test_1177`) | canonical v0.2 pinned to `ad30107`; isolated `demos/cpr-27-okf-v02.sh` PASS; no remote fetch/live-host claim | none |
-| Public-API OKF CLI and generated project-console import/export workflows | CPR-28 | **complete** | `0dbf163` | next checkpoint | adapter 6/6; CLI 150/150; console 207/207; public API 1/1; production build PASS | PASS | N/A — client/pure-validation only | isolated `demos/cpr-28-okf-workflows.sh` PASS: real local fixture + public lifecycle + generated console; no remote-host claim | none |
+| Public-API OKF CLI and generated project-console import/export workflows | CPR-28 | **complete** | `0dbf163` | `683a17d` | adapter 6/6; CLI 150/150; console 207/207; public API 1/1; production build PASS | PASS | N/A — client/pure-validation only | isolated `demos/cpr-28-okf-workflows.sh` PASS: real local fixture + public lifecycle + generated console; no remote-host claim | none |
+| Exact generated public contract and console/CLI/generic-MCP client convergence | CPR-29 | **complete** | `683a17d` | next checkpoint | OpenAPI 6/6; service 5/5; audit 13/13; CLI 156/156 + corpus 5/5; MCP 44/44; console 208/208; Claude adapter 98/98 | PASS | PASS | isolated `demos/cpr-29-public-contract.sh` PASS; generated API + 78-script demo gate PASS | none |
 
-**Exact next objective:** complete the repository convergence package: make
-the OpenAPI/server route inventories exact, generate every supported console
-operation, and recut ordinary CLI and generic MCP clients onto the public
-application API before deleting their storage-coupled and handwritten seams.
+**Exact next objective:** implement the governed-configuration artifact
+package: allocate the next feature, record the architecture before schema work,
+then replace mutable runtime settings with immutable versioned artifacts,
+bindings and VedaFlow-governed publication/rollback.
 
 ### Starting-point objective map
 
@@ -4011,5 +4012,81 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `feat(console): add OKF import and export (CPR-28)` on
   `feat/context-platform-mvp`.
+- **Commit hash.** Written by the next checkpoint under the programme's
+  next-checkpoint convention.
+
+### Repository convergence objective — public contract and client cutover (CPR-29)
+
+- **Selected feature and decision.** **CPR-29** is delivered from `683a17d`;
+  it records CPR-28's commit as
+  `683a17d30a812d160781cccf16c8633e9251f425`. Accepted ADR-0088 fixes the
+  boundary: one authenticated application contract and one executable route
+  catalogue, with the unauthenticated login exchange, operational health and
+  metrics, and standards-defined `/scim/v2` protocol remaining deliberately
+  separate. Governed `/v1/scim/credentials` administration is part of the
+  application contract.
+
+- **One executable and documented inventory.** New `routes.rs` owns each
+  method, path and handler once; the same declaration constructs the Axum
+  router and exposes the inventory the OpenAPI acceptance suite compares in
+  both directions. The hand-maintained route list and the separate SCIM
+  credential merge are deleted. All previously undocumented governance,
+  capability, policy, directory, audit, channel, prompt/pack, lapse,
+  quarantine, proposal, service-identity and SCIM-credential handlers now have
+  generated request/response schemas, bearer security, common error envelopes
+  and truthful precondition metadata. The contract grows **106 → 156
+  operations** and **150 → 238 schemas**; a source guard also proves no
+  authenticated `/v1` route is mounted outside the catalogue.
+
+- **Generated console boundary.** `console/src/api.mts` now owns transport and
+  browser-session mechanics only. Reviews, Scopes, Policies, Audit, Service
+  identities and Onboarding call generated operations and consume generated
+  types; handwritten wire DTOs and application wrappers are deleted. The
+  generator now renders multiple-member `allOf` as TypeScript intersections
+  and null-only schemas correctly. The cutover exposed and fixed two client
+  assumptions: the default-policy response is its documented object rather
+  than a scope assignment, and audit's Recent view must first resolve the
+  chain head before requesting a forward cursor page. Generated artifacts are
+  current and the transport test fails if another handwritten application
+  operation appears.
+
+- **CLI and adapter cutover.** Ordinary `synveda service` registration,
+  listing and revocation and `synveda audit` verification/tail now use bearer-
+  authenticated public routes; their modules carry source guards against store
+  authority. Direct local database access remains only for documented
+  bootstrap/reset/migration, key and secret custody, and break-glass policy-
+  pack operations. The generic MCP server resolves workspace/project through
+  `/v1/me`, opens and appends to public sessions, queries scoped current
+  Knowledge, and advertises only exact available Skill and approved project
+  Tool version/digest evidence. Imported tool command/configuration and secret
+  references never enter its tool surface, and declared tools explicitly grant
+  no authority. Project selection survives generated client configuration.
+  The Claude adapter gains a contract test proving every route it calls exists
+  in OpenAPI and that no store, SQLx or retired global runtime route appears.
+
+- **Deletion and schema result.** The remaining handwritten console
+  application client and duplicate DTOs, direct-store service/audit CLI paths,
+  MCP-private `/v1/me` and session response models, and the router's second
+  SCIM merge are deleted. No compatibility route, DTO alias, fallback reader,
+  dual read/write or storage-coupled adapter was added. Epoch **2** remains
+  **52 migration files**, **669** checked SQLx descriptions and **87**
+  forced-RLS tenant tables; no schema, Cedar action, policy pack or audit
+  action changed.
+
+- **Tests and exact results.** OpenAPI parity/source guards **6/6**, service
+  identities **5/5**, audit query **13/13**, focused CLI service **1/1**,
+  audit **2/2** and MCP **44/44**, complete CLI **156/156** plus authentic MCP
+  corpus **5/5**, complete console **208/208**, Claude adapter **98/98**,
+  clippy, crate layering, generated API, backlog, ADR and **78-script** demo
+  drift checks pass. The production console builds at 68 modules, 404.70 kB
+  JavaScript (113.93 kB gzip) and 18.84 kB CSS (4.29 kB gzip). Isolated
+  `demos/cpr-29-public-contract.sh` runs the database-backed public identity
+  and audit paths plus client-boundary guards and passes. Complete `make ci`
+  **PASS** and full disposable-Postgres `make db-test` **PASS**. This package
+  claims public-contract and deterministic client evidence; it adds no new
+  live external-client claim.
+
+- **Commit.** `refactor(api): complete public contract and client cutover
+  (CPR-29)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by the next checkpoint under the programme's
   next-checkpoint convention.

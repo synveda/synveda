@@ -69,26 +69,76 @@ async fn respond<T: IntoResponse>(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = RegisterServiceIdentityBody)]
 pub(crate) struct RegisterBody {
     /// The `sub` the IdP will put in the agent's client-credentials
     /// tokens (for Rauthy, the client id).
     subject: String,
     /// The anchor node whose subtree confines the agent's tokens.
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// Display name for the agent's personal leaf; defaults to the
     /// subject.
     display_name: Option<String>,
 }
 
-#[derive(Serialize)]
-struct ServiceIdentitiesResponse {
-    identities: Vec<Identity>,
+/// A service identity as the public application API exposes it.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub(crate) struct ServiceIdentityView {
+    #[schema(value_type = String, format = "uuid")]
+    id: IdentityId,
+    subject: Option<String>,
+    kind: String,
+    email: Option<String>,
+    display_name: Option<String>,
+    #[schema(value_type = String, format = "uuid")]
+    scope_id: ScopeId,
+    status: String,
+    departed_at: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<Identity> for ServiceIdentityView {
+    fn from(identity: Identity) -> Self {
+        Self {
+            id: identity.id,
+            subject: identity.subject,
+            kind: identity.kind.to_string(),
+            email: identity.email,
+            display_name: identity.display_name,
+            scope_id: identity.scope_id,
+            status: identity.status.to_string(),
+            departed_at: identity.departed_at,
+            created_at: identity.created_at,
+        }
+    }
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct ServiceIdentitiesResponse {
+    identities: Vec<ServiceIdentityView>,
 }
 
 /// `POST /v1/service-identities` — register an agent at an anchor node.
 /// `ServiceIdentityManage` on the anchor: a steward registers agents in
 /// their subtree, visibly (ADR-0018 decision 3).
+#[utoipa::path(
+    post,
+    path = "/v1/service-identities",
+    operation_id = "register_service_identity",
+    tag = "service-identities",
+    request_body = RegisterBody,
+    responses(
+        (status = 201, description = "The registered service identity", body = ServiceIdentityView),
+        (status = 400, description = "The subject or anchor is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Service identity management is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The anchor is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The subject or principal scope already exists", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "service_identity.register", skip_all)]
 pub(crate) async fn register(
     State(state): State<AppState>,
@@ -170,7 +220,10 @@ pub(crate) async fn register(
             anchor.id = %anchor.id,
             "service identity registered"
         );
-        Ok((StatusCode::CREATED, Json(identity)))
+        Ok((
+            StatusCode::CREATED,
+            Json(ServiceIdentityView::from(identity)),
+        ))
     }
     .await;
     respond(&state, "register", result).await
@@ -178,6 +231,18 @@ pub(crate) async fn register(
 
 /// `GET /v1/service-identities` — the tenant's registered agents. A
 /// tenant-plane read: `ServiceIdentityRead` at the tenant.
+#[utoipa::path(
+    get,
+    path = "/v1/service-identities",
+    operation_id = "list_service_identities",
+    tag = "service-identities",
+    responses(
+        (status = 200, description = "Registered service identities", body = ServiceIdentitiesResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Service identity inventory is not visible", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "service_identity.list", skip_all)]
 pub(crate) async fn list(State(state): State<AppState>) -> Response {
     let result = async {
@@ -205,7 +270,9 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
         )
         .await?;
         commit(tx).await?;
-        Ok(Json(ServiceIdentitiesResponse { identities }))
+        Ok(Json(ServiceIdentitiesResponse {
+            identities: identities.into_iter().map(Into::into).collect(),
+        }))
     }
     .await;
     respond(&state, "list", result).await
@@ -213,6 +280,20 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
 
 /// `GET /v1/service-identities/{id}` — one registration.
 /// `ServiceIdentityRead` on the anchor.
+#[utoipa::path(
+    get,
+    path = "/v1/service-identities/{id}",
+    operation_id = "get_service_identity",
+    tag = "service-identities",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "One registered service identity", body = ServiceIdentityView),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "The service identity is not visible", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The identity is absent, non-service or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "service_identity.get", skip_all)]
 pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<IdentityId>) -> Response {
     let result = async {
@@ -240,7 +321,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<IdentityId
         )
         .await?;
         commit(tx).await?;
-        Ok(Json(identity))
+        Ok(Json(ServiceIdentityView::from(identity)))
     }
     .await;
     respond(&state, "get", result).await
@@ -250,6 +331,20 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<IdentityId
 /// and its personal leaf. `ServiceIdentityManage` on the anchor. Effective
 /// on the next request: an unregistered IdP subject is quarantined at the
 /// seam (ADR-0013 decision 6).
+#[utoipa::path(
+    delete,
+    path = "/v1/service-identities/{id}",
+    operation_id = "remove_service_identity",
+    tag = "service-identities",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 204, description = "The service identity was revoked"),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Service identity management is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The identity is absent, non-service or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "service_identity.remove", skip_all)]
 pub(crate) async fn remove(State(state): State<AppState>, Path(id): Path<IdentityId>) -> Response {
     let result = async {

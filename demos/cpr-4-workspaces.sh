@@ -271,7 +271,8 @@ for ACTION in workspace.created workspace.updated project.created \
     N="$(psql_db -c "select count(*) from audit_log where action = '${ACTION}'")"
     [ "$N" -ge 1 ] || fail "the chain does not record ${ACTION}"
 done
-"$BIN" audit verify --tenant "$TENANT_ID" >"$WORK/verify.log" 2>&1 ||
+SYNVEDA_GATEWAY="$GATEWAY_URL" SYNVEDA_TOKEN="$TOKEN" \
+    "$BIN" audit verify >"$WORK/verify.log" 2>&1 ||
     fail "the chain does not verify: $(cat "$WORK/verify.log")"
 ok "workspace.created, workspace.updated, project.created, project.repository.attached — chain verifies"
 

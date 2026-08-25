@@ -52,7 +52,8 @@ const ALLOWED = {
   // Policy added with AUTHZ-1 (ADR-0012): `synveda policy apply` compile-checks
   // a pack against the same schema the gateway's reloader enforces.
   // Audit added with AUD-1 (ADR-0019): the break-glass audits itself, and
-  // `synveda audit verify` is the operator's chain check.
+  // Retained local bootstrap/key/policy-pack acts append break-glass events;
+  // ordinary audit query and verification use the public gateway API.
   // VedaFlow added with SKIL-1 (ADR-0051 decision 12): `synveda skill install`
   // recomputes each written file's content address and compares it to the one
   // the published commit named. That is what makes "installs unmodified" a

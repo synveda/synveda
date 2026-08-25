@@ -2054,6 +2054,31 @@ CPR-28  OKF import and export product workflows (L)
   is added; focused CLI/component acceptance, production build, demo and
   `make ci` pass. No ADR; ADR-0087 fixes the boundary.
 
+CPR-29  Public contract and client convergence (XL)
+  Filed 2026-08-25 by the autonomous continuation. Complete the generated
+  OpenAPI 3.1 application contract over every authenticated production `/v1`
+  operation, then remove the handwritten console calls and storage-coupled
+  ordinary CLI paths that the contract exposes. Re-cut the generic MCP and
+  Claude adapters against the same public session, Knowledge, context, Skill
+  and Tool-binding vocabulary without adding adapter-private authority.
+  AC: one route declaration is the executable router inventory and the
+  contract test proves exact method/path equality in both directions; every
+  operation has a unique generated identifier, the common error envelope,
+  authentication, idempotency and revision-precondition metadata where the
+  server requires them, and consistent bounded pagination where the existing
+  collection supports it; generated console operations/types cover proposals,
+  capabilities, policy assignment, lapses, audit, channels, prompts, packs,
+  quarantine, service identities, directory administration, SCIM credentials,
+  Knowledge, capture, context, Skills, Tools and OKF; no governed console call
+  remains hand-written; ordinary service-identity and audit CLI commands call
+  the public API while only documented database/bootstrap/key/secret operator
+  actions retain store access; generic MCP uses only current public session,
+  Knowledge/context, available-Skill and project Tool-binding reads, Claude
+  remains public-API-only, and neither adapter imports a core service layer;
+  duplicate client DTOs and obsolete route-private business rules are deleted;
+  focused gateway/contract/console/CLI/adapter acceptance, `make ci` and the
+  relevant database suite pass. ADR-0088.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2147,7 +2172,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

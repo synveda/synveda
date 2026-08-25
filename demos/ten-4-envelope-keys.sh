@@ -28,7 +28,8 @@
 #   DATABASE_URL   the database to run against (defaults to the dev one)
 #   KEEP_DB=1      keep the scratch database on the way out
 #
-# Cost: one scratch database, no gateway, no network. Under a minute.
+# Cost: one scratch database and one loopback gateway, no external network.
+# The gateway exists only for the final public audit verification.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -42,6 +43,9 @@ COMPOSE="docker compose -f deploy/compose/docker-compose.yml"
 DB="synveda_ten4_demo_$$"
 URL="postgres://synveda:synveda-dev@localhost:5432/${DB}"
 WORK="$(mktemp -d)"
+PORT=8139
+GATEWAY_URL="http://127.0.0.1:${PORT}"
+GATEWAY_PID=""
 
 # A **scratch database**, for the reason `make db-test` takes one: this demo
 # admits tenants and mints keys, and the deployment key is a per-database
@@ -51,6 +55,7 @@ psql_admin() { $COMPOSE exec -T postgres psql -U synveda -d postgres -qtAX -v ON
 psql_db() { $COMPOSE exec -T postgres psql -U synveda -d "$DB" -qtAX -v ON_ERROR_STOP=1 "$@"; }
 
 cleanup() {
+    [ -n "$GATEWAY_PID" ] && kill "$GATEWAY_PID" 2>/dev/null || true
     if [ "${KEEP_DB:-0}" = "1" ]; then
         echo "keeping ${URL}"
     else
@@ -66,9 +71,10 @@ fail() { printf '   \033[31mFAIL\033[0m %s\n' "$1"; exit 1; }
 
 $COMPOSE ps postgres >/dev/null 2>&1 || { echo "run \`make dev-up\` first"; exit 1; }
 
-step "Building the CLI"
-cargo build -q -p synveda-cli
+step "Building the CLI and gateway"
+cargo build -q -p synveda-cli -p synveda-gateway
 BIN="./target/debug/synveda"
+GATEWAY="./target/debug/synveda-gateway"
 
 step "A scratch database"
 psql_admin -c "create database ${DB}" >/dev/null
@@ -196,7 +202,30 @@ LEAKS="$(psql_db -c "select count(*) from audit_log where tenant_id = '${TENANT}
 [ "$LEAKS" = "0" ] || fail "a credential reached an audit payload"
 ok "no credential material in any payload — AUTH-4's sweep, applied here"
 
-"$BIN" audit verify --tenant "$TENANT" >"$WORK/verify.txt" 2>&1 \
+# Verification is an ordinary governed read now (CPR-29): start the public
+# application boundary, resolve the caller's principal/root, seed only the
+# dev-token operator door this scratch tenant cannot obtain from an IdP, and
+# ask the API. The key/export commands above remain local custody operations.
+export SYNVEDA_DEV_JWT_SECRET="ten4-demo-secret"
+export SYNVEDA_LISTEN_ADDR="127.0.0.1:${PORT}"
+export SYNVEDA_PUBLIC_URL="$GATEWAY_URL"
+export SYNVEDA_SEARCH_INDEX_DIR="$WORK/search-index"
+TOKEN="$("$BIN" token issue --tenant "$TENANT" --subject ten4-auditor)"
+"$GATEWAY" >"$WORK/gateway.log" 2>&1 &
+GATEWAY_PID=$!
+for _ in $(seq 1 60); do
+    curl -fsS "${GATEWAY_URL}/healthz" >/dev/null 2>&1 && break
+    sleep 0.5
+done
+ME="$(curl -fsS -H "authorization: Bearer ${TOKEN}" "${GATEWAY_URL}/v1/me")" ||
+    fail "the gateway did not resolve the audit caller: $(tail -5 "$WORK/gateway.log")"
+ROOT_SCOPE="$(printf '%s' "$ME" | python3 -c 'import json,sys; print(json.load(sys.stdin)["onboarding"]["tenant_scope_id"])')"
+psql_db -c "insert into scope_grants
+              (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source)
+            values (gen_random_uuid(), '${TENANT}', '${ROOT_SCOPE}', 'principal',
+                    'ten4-auditor', 'administrator', 'automation')" >/dev/null
+SYNVEDA_GATEWAY="$GATEWAY_URL" SYNVEDA_TOKEN="$TOKEN" \
+    "$BIN" audit verify >"$WORK/verify.txt" 2>&1 \
     || fail "the chain does not verify: $(cat "$WORK/verify.txt")"
 ok "$(tr -d '\n' <"$WORK/verify.txt" | head -c 100)"
 

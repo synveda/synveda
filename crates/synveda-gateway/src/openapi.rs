@@ -17,17 +17,14 @@
 //! those two disagree. So there are three artefacts and two checks, and the
 //! only one a human edits is the Rust.
 //!
-//! # It covers this plane and says so
+//! # Exact executable coverage
 //!
-//! The document describes the workspace, project, repository, access,
-//! `/v1/me` and scope-admin routes — the surface CPR-4, CPR-5 and CPR-7
-//! add — and **not** the `/v1` paths that predate it. That is a bounded
-//! start rather than a bounded ambition:
-//! Prompt 19 of the context-platform programme owns bringing the whole surface
-//! onto the contract, and the alternative here was annotating fifty-four
-//! handlers this programme is about to delete or re-cut. The document's own
-//! description says which routes it covers, so nobody reads its silence about
-//! `/v1/observe` as a claim that the route does not exist.
+//! CPR-29 (ADR-0088) makes the document cover every bearer-authenticated
+//! production `/v1` operation. [`crate::routes`] builds the Axum router and its
+//! method/path inventory from one declaration; the contract test compares that
+//! inventory with this generated document in both directions. Auth callbacks,
+//! operational probes and the separately authenticated `/scim/v2` protocol
+//! surface are intentionally outside this application contract.
 
 use utoipa::OpenApi;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
@@ -51,60 +48,31 @@ use crate::workspaces;
         description = "\
 Governed Knowledge and context for AI agents.
 
-**Coverage.** This document describes the context-platform surface: `/v1/me`, \
-the workspace, project and repository planes (CPR-4), the access plane — \
-members, groups, grants and invitations (CPR-5), and the scope admin plane \
-(CPR-7: `/v1/admin/scopes` — list, create, get, patch, ancestors, descendants), \
-and the session ledger and runtime API (CPR-10: `/v1/sessions` — open, list, get, \
-append events, end, timeline, and the context-run endpoint), with CPR-11's \
-paginated and filtered listing and its diagnostic expansion of one event. \
-CPR-17 adds stable Knowledge, immutable revision history, independently \
-governed provenance and lifecycle mutations at `/v1/knowledge`; every write \
-is an idempotent VedaFlow change and the collection is current-active by \
-default with lexical and honestly degraded semantic search. \
-CPR-18 adds `/v1/capture-batches` and `/v1/capture-candidates`: explicit or \
-session-end extraction freezes exact event evidence and produces reviewable \
-candidates only. Accept, edit, merge and replace enter the same Knowledge \
-VedaFlow command layer; dismissal publishes nothing. \
-CPR-20 makes context runs explainable over current immutable Knowledge, adds \
-re-authorised trace and feedback operations, and provides ordinary and \
-diagnostic session-scoped Knowledge query lenses without a global recall. \
-CPR-23 adds the Agent Skills-compatible catalogue: stable Skills, immutable \
-versions and exact file content, revisioned project/principal bindings, \
-version-specific host/model usage evidence, and controlled non-executing test \
-runs. Install, update, bind, disable and rollback are typed VedaFlow changes; \
-declared tools are metadata and never authorisation. \
-CPR-25 adds the trusted MCP catalogue: stable servers, immutable source and \
-capability snapshots pinned to MCP 2026-07-28, quarantined changed versions, \
-exact project bindings, secret-reference-only configuration and immutable \
-read-only connection-test evidence. Registration, version approval and every \
-binding transition are typed VedaFlow changes; capability descriptions grant \
-no invocation authority and the gateway is not an execution proxy. \
-CPR-27 pins the official Open Knowledge Format v0.2 specification and adds \
-bounded, inert dry-run imports that materialise reviewable candidates only, \
-plus deterministic exports of freshly authorised current Knowledge. The \
-gateway never fetches a supplied locator, runs Git or executes bundle content. \
-Since CPR-12 the session plane is also the **only** runtime plane: \
-`POST /v1/sessions/{session_id}/events` is where observations are admitted and \
-`POST /v1/sessions/{session_id}/context-runs` is where context is composed. \
-The global `/v1/observe`, `/v1/inject` and `/v1/recall` routes that used to do \
-both are deleted, not merely undocumented. \
-The rest of the `/v1` surface — proposals, channels, the registries and the \
-older admin planes — predates the OpenAPI contract and is brought onto it by a \
-later prompt of the context-platform programme. Its absence here is a \
-statement about this document, not about the gateway.
+**Coverage.** This is the exact bearer-authenticated production application \
+surface mounted under `/v1`: identity and onboarding; scopes and access; \
+workspaces, projects and repositories; sessions and immutable events; capture; \
+Knowledge and explainable context; VedaFlow proposals and authored-artifact \
+channels; policy administration and time-bounded relaxations; audit and \
+quarantine; service identities and directory controls; Agent Skills; the \
+trusted MCP catalogue; and OKF v0.2 import/export. The same route declaration \
+builds the executable router and the inventory compared with this document. \
+Auth callbacks, health/metrics/OpenAPI endpoints, static console assets and the \
+separately authenticated `/scim/v2` protocol surface are intentionally outside \
+this application contract. Since CPR-12 the session plane is the only adapter \
+runtime plane: observations enter through session events and context is \
+composed through session context runs. The deleted global observe, inject and \
+recall routes are neither mounted nor documented.
 
 **Tenancy.** Every path below sits behind bearer authentication and tenant \
 resolution. A response is always scoped to the caller's tenant, which is why \
 no response body echoes a tenant id.
 
-**Idempotency.** Every creation takes a required `Idempotency-Key` header. \
-Reusing a key with the same request replays the original resource with `200`; \
-a fresh key creates and answers `201`; reusing a key with a *different* request \
-is `409`. Appending session events is the one exception, and it is idempotent \
-by a finer unit: each event carries the client's own `client_event_id`, unique \
-within its session, so a redelivered batch appends what is new and reports \
-`duplicate` for the rest.
+**Idempotency.** Operations that accept `Idempotency-Key` declare it on that \
+operation. Reusing a key with the same request replays the original result; \
+reusing it with a different request is `409`. Session-event delivery is \
+idempotent at the finer event unit through `client_event_id`. One-time secret \
+issuance is deliberately not replayed: the plaintext token is returned once \
+and never stored.
 
 **Identity.** No request body on this surface accepts a tenant or an acting \
 principal. Both are resolved from the bearer credential; a body naming either \
@@ -119,6 +87,56 @@ revision, and its mutations are last-writer-wins under the PDP.",
     ),
     servers((url = "/", description = "This gateway")),
     paths(
+        crate::app::whoami,
+        crate::capabilities::batch,
+        crate::policy::packs,
+        crate::policy::get_default,
+        crate::policy::set_default,
+        crate::policy::clear_default,
+        crate::policy::get_scope_policy,
+        crate::policy::assign_scope_policy,
+        crate::policy::unassign_scope_policy,
+        crate::service_identities::register,
+        crate::service_identities::list,
+        crate::service_identities::get,
+        crate::service_identities::remove,
+        crate::directory_admin::status,
+        crate::directory_admin::authorise,
+        crate::scim::credentials::issue,
+        crate::scim::credentials::list,
+        crate::scim::credentials::revoke,
+        crate::quarantine::list,
+        crate::quarantine::release,
+        crate::quarantine::reject,
+        crate::audit_query::events,
+        crate::audit_query::disclosures,
+        crate::audit_query::knowledge,
+        crate::audit_query::verify,
+        crate::channels::list,
+        crate::channels::publish,
+        crate::channels::history,
+        crate::channels::rollback,
+        crate::channels::pin,
+        crate::channels::unpin,
+        crate::prompts::author,
+        crate::prompts::resolve,
+        crate::prompts::list,
+        crate::packs::author,
+        crate::packs::list,
+        crate::lapses::propose,
+        crate::lapses::grant,
+        crate::lapses::revoke,
+        crate::lapses::list,
+        crate::curators::get,
+        crate::curators::put,
+        crate::proposals::list,
+        crate::proposals::get,
+        crate::proposals::open,
+        crate::proposals::approve,
+        crate::proposals::reject,
+        crate::proposals::withdraw,
+        crate::proposals::apply,
+        crate::proposals::publish,
         crate::admin_scopes::list,
         crate::admin_scopes::create,
         crate::admin_scopes::get,
@@ -227,6 +245,94 @@ revision, and its mutations are last-writer-wins under the PDP.",
         access::revoke_grant,
     ),
     components(schemas(
+        crate::app::WhoamiResponse,
+        crate::capabilities::NodeCapabilities,
+        crate::capabilities::PackView,
+        crate::capabilities::BatchResponse,
+        crate::policy::PackSummary,
+        crate::policy::PacksResponse,
+        crate::policy::DefaultResponse,
+        crate::policy::SetPackBody,
+        crate::policy::OriginView,
+        crate::policy::PolicyAssignmentView,
+        crate::policy::EffectiveResponse,
+        crate::service_identities::RegisterBody,
+        crate::service_identities::ServiceIdentityView,
+        crate::service_identities::ServiceIdentitiesResponse,
+        crate::directory_admin::SyncStatus,
+        crate::directory_admin::AuthorisationView,
+        crate::directory_admin::AuthoriseRequest,
+        crate::directory_admin::AuthoriseResponse,
+        crate::scim::credentials::IssueRequest,
+        crate::scim::credentials::IssuedCredential,
+        crate::scim::credentials::ScimCredentialView,
+        crate::scim::credentials::ScimCredentialsResponse,
+        crate::quarantine::QuarantineView,
+        crate::quarantine::QueueResponse,
+        crate::quarantine::ReviewBody,
+        crate::audit_query::Frame,
+        crate::audit_query::EventView,
+        crate::audit_query::EventsResponse,
+        crate::audit_query::DisclosureView,
+        crate::audit_query::DisclosuresResponse,
+        crate::audit_query::KnownView,
+        crate::audit_query::KnowledgeResponse,
+        crate::audit_query::VerifyResponse,
+        crate::approvals::RequirementView,
+        crate::approvals::RoleView,
+        crate::channels::ChannelView,
+        crate::channels::PinView,
+        crate::channels::ChannelsResponse,
+        crate::channels::PublishBody,
+        crate::channels::PublishResponse,
+        crate::channels::PublishedMember,
+        crate::channels::HistoryEntryView,
+        crate::channels::HistoryResponse,
+        crate::channels::RollbackBody,
+        crate::channels::RollbackResponse,
+        crate::channels::PinBody,
+        crate::channels::UnpinBody,
+        crate::channels::PinResponse,
+        crate::channels::UnpinResponse,
+        crate::prompts::PromptVariableSchema,
+        crate::prompts::AuthorBody,
+        crate::prompts::PublishedView,
+        crate::prompts::PromptView,
+        crate::prompts::Origin,
+        crate::prompts::ResolveResponse,
+        crate::prompts::ListEntry,
+        crate::prompts::ListResponse,
+        crate::packs::DocumentBody,
+        crate::packs::AuthorBody,
+        crate::packs::PublishedView,
+        crate::packs::DocumentView,
+        crate::packs::PackView,
+        crate::packs::ListEntry,
+        crate::packs::ListResponse,
+        crate::lapses::LapseView,
+        crate::lapses::ProposeBody,
+        crate::lapses::ProposeResponse,
+        crate::lapses::RevokeBody,
+        crate::lapses::LapsesResponse,
+        crate::curators::RuleView,
+        crate::curators::CuratorsResponse,
+        crate::curators::PutBody,
+        crate::curators::PutResponse,
+        crate::proposals::ProposalSummary,
+        crate::proposals::PromotionMemberEvidenceSchema,
+        crate::proposals::PromotionEvidenceSchema,
+        crate::proposals::ApprovalView,
+        crate::proposals::MemberEffect,
+        crate::proposals::BaselineView,
+        crate::proposals::MemberView,
+        crate::proposals::ProposalDetail,
+        crate::proposals::ListResponse,
+        crate::proposals::OpenBody,
+        crate::proposals::OpenResponse,
+        crate::proposals::ReviewBody,
+        crate::proposals::RejectBody,
+        crate::proposals::ReviewResponse,
+        crate::proposals::PublishResponse,
         me::MeView,
         me::PrincipalView,
         me::TenantView,
@@ -381,6 +487,16 @@ revision, and its mutations are last-writer-wins under the PDP.",
         (name = "knowledge", description = "Stable governed Knowledge, immutable revisions, provenance and lifecycle"),
         (name = "capture", description = "Session evidence extraction into reviewable Knowledge candidates"),
         (name = "context", description = "Explainable Knowledge planning, scoped query and explicit feedback"),
+        (name = "proposals", description = "VedaFlow proposals, review evidence, and governed effects"),
+        (name = "channels", description = "Immutable authored-artifact channel state, publication, rollback and pins"),
+        (name = "prompts", description = "Governed prompt drafts and policy-visible resolution"),
+        (name = "context-packs", description = "Governed authored context-pack documents"),
+        (name = "policy", description = "Policy packs, scope assignments and curator requirements"),
+        (name = "policy-relaxations", description = "Time-bounded governed policy relaxations"),
+        (name = "audit", description = "Hash-chained audit query and verification"),
+        (name = "quarantine", description = "Redacted event quarantine and governed review"),
+        (name = "directory", description = "Directory synchronisation controls and provisioning credential metadata"),
+        (name = "service-identities", description = "Headless principal registration and revocation"),
         (name = "skills", description = "Agent Skills-compatible immutable versions, governed bindings, usage and controlled tests"),
         (name = "tools", description = "Trusted MCP server metadata, immutable quarantined versions, exact project bindings and read-only evidence"),
     ),
@@ -446,4 +562,29 @@ pub fn declared_paths() -> Vec<String> {
         .keys()
         .cloned()
         .collect::<Vec<_>>()
+}
+
+/// Every method/path pair declared by the generated application contract.
+///
+/// Kept as strings so the contract test compares this inventory directly
+/// with [`crate::routes::OPERATIONS`] without depending on Utoipa's internal
+/// path-item representation.
+#[must_use]
+pub fn declared_operations() -> Vec<(String, String)> {
+    const METHODS: &[&str] = &["get", "post", "put", "patch", "delete", "head", "options"];
+    let value: serde_json::Value =
+        serde_json::from_str(&document()).expect("the generated OpenAPI document parses as JSON");
+    let mut operations = Vec::new();
+    for (path, item) in value["paths"]
+        .as_object()
+        .expect("the generated document has a paths object")
+    {
+        for method in METHODS {
+            if item.get(*method).is_some() {
+                operations.push((method.to_ascii_uppercase(), path.clone()));
+            }
+        }
+    }
+    operations.sort();
+    operations
 }

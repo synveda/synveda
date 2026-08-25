@@ -134,14 +134,14 @@ how expensive a publication is.
 
 ## 7. Verify the whole thing
 
-The audit verbs take a tenant UUID and have no default, so get yours first —
-`synveda whoami` prints it on the `id` line, and the seeder printed the exact
-command when it finished:
+The audit verbs use the same authenticated profile as every ordinary product
+command. The gateway resolves the tenant from that bearer and applies
+`AuditRead`; no tenant identifier or database connection is accepted:
 
 ```sh
 synveda whoami
-synveda audit verify --tenant <your-tenant-uuid>
-synveda audit tail    --tenant <your-tenant-uuid>
+synveda audit verify
+synveda audit tail
 ```
 
 The chain covers every act since installation and holds exactly **one**
@@ -376,5 +376,5 @@ conclusion from. See `docs/BENCHMARKS.md`; the full run exists as
 
 What is most useful, roughly in order: something that behaved differently from
 this document; a refusal you could not explain from the console; a harness you
-tried to connect and could not. Include `synveda audit tail --tenant <yours>`
+tried to connect and could not. Include `synveda audit tail`
 output where it is relevant — the chain usually says what happened.

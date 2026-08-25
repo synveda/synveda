@@ -17,6 +17,7 @@
 #![cfg_attr(not(test), forbid(unsafe_code))]
 
 mod api;
+mod audit;
 mod channel;
 mod credentials;
 mod diff;
@@ -35,6 +36,7 @@ mod recall;
 mod reset;
 mod scim;
 mod scope;
+mod service;
 mod session;
 mod skill;
 mod spool;
@@ -51,9 +53,9 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::Hs256Verifier;
 use synveda_types::{
-    CompositionConfig, DedupConfig, DedupMode, IdentityId, IdentityKind, IndexTier, InjectChannels,
-    PackConfig, PromotionConfig, ProposalId, ProposalState, RedactionConfig, RedactionMode,
-    RetentionConfig, ScanSeverity, ScopeId, SkillIndex, SkillScanConfig, TenantId, TenantStatus,
+    CompositionConfig, DedupConfig, DedupMode, IdentityId, IndexTier, InjectChannels, PackConfig,
+    PromotionConfig, ProposalId, ProposalState, RedactionConfig, RedactionMode, RetentionConfig,
+    ScanSeverity, ScopeId, SkillIndex, SkillScanConfig, TenantId, TenantStatus,
 };
 
 #[derive(Parser)]
@@ -222,6 +224,11 @@ enum Command {
         /// than writing a model's assertions into whichever sorted first.
         #[arg(long)]
         workspace: Option<String>,
+        /// The project this server's run and governed Skill/Tool
+        /// advertisements belong to. Its workspace is derived and checked;
+        /// omit it for workspace-scoped memory with no project Tool binding.
+        #[arg(long)]
+        project: Option<String>,
         /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
         /// `default`.
         #[arg(long)]
@@ -1116,21 +1123,26 @@ enum AuthCommand {
 
 #[derive(Subcommand)]
 enum AuditCommand {
-    /// Walk the tenant's whole chain, recomputing every hash, and report
-    /// the first divergence. Exits non-zero on a broken chain.
+    /// Ask the governed audit API to verify the caller's tenant chain.
     Verify {
-        /// Tenant UUID.
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
-        tenant: TenantId,
+        profile: Option<String>,
+        /// Print the public response as JSON.
+        #[arg(long)]
+        json: bool,
     },
-    /// Print the tenant's most recent events, newest first, as JSON.
+    /// Print the caller's most recent policy-visible events.
     Tail {
-        /// Tenant UUID.
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
-        tenant: TenantId,
+        profile: Option<String>,
         /// How many events.
         #[arg(long, default_value_t = 20)]
         limit: i64,
+        /// Print the complete cursor-page response as JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1540,9 +1552,9 @@ enum ServiceCommand {
     /// `service`); prints the identity as JSON. Tokens for its subject
     /// are then confined to the anchor's subtree.
     Register {
-        /// Tenant UUID.
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
-        tenant: TenantId,
+        profile: Option<String>,
         /// The `sub` the IdP puts in the agent's client-credentials
         /// tokens (for Rauthy, the client id).
         #[arg(long)]
@@ -1556,18 +1568,18 @@ enum ServiceCommand {
     },
     /// Revoke a service identity: deletes the row and its personal leaf.
     Remove {
-        /// Tenant UUID.
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
-        tenant: TenantId,
+        profile: Option<String>,
         /// The registered identity UUID (see `service list`).
         #[arg(long)]
         id: IdentityId,
     },
     /// List the tenant's service identities as JSON.
     List {
-        /// Tenant UUID.
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
-        tenant: TenantId,
+        profile: Option<String>,
     },
 }
 
@@ -1744,10 +1756,12 @@ async fn run(cli: Cli) -> Result<(), String> {
             command: None,
             writes,
             workspace,
+            project,
             profile,
-        } => mcp::serve(profile_name(profile), writes, workspace).await,
+        } => mcp::serve(profile_name(profile), writes, workspace, project).await,
         Command::Mcp {
-            workspace: _,
+            workspace,
+            project,
             command:
                 Some(McpCommand::Install {
                     client,
@@ -1758,15 +1772,21 @@ async fn run(cli: Cli) -> Result<(), String> {
                     profile,
                 }),
             ..
-        } => mcp::install::install(&mcp::install::Plan {
-            client,
-            config,
-            profile: profile_name(profile),
-            dry_run,
-            force,
-            print,
-        }),
+        } => mcp::install::install_for(
+            &mcp::install::Plan {
+                client,
+                config,
+                profile: profile_name(profile),
+                dry_run,
+                force,
+                print,
+            },
+            workspace.as_deref(),
+            project.as_deref(),
+        ),
         Command::Mcp {
+            workspace: _,
+            project: _,
             command:
                 Some(McpCommand::Uninstall {
                     client,
@@ -2087,170 +2107,25 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Service(ServiceCommand::Register {
-            tenant,
+            profile,
             subject,
             scope,
             name,
-        }) => {
-            let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let anchor = synveda_store::scopes::get(&mut *tx, tenant, scope)
-                .await
-                .map_err(|err| err.to_string())?
-                .filter(|node| node.tenant_id == tenant)
-                .ok_or_else(|| format!("no scope {scope} in tenant {tenant}"))?;
-            let identity_id = IdentityId::new();
-            let display_name = name.as_deref().unwrap_or(&subject);
-            // The agent's own scope: a principal-shaped scope under the
-            // operator's anchor, so token confinement is tree position.
-            let leaf = synveda_store::scopes::create(
-                &mut tx,
-                &synveda_store::scopes::NewScope {
-                    id: ScopeId::new(),
-                    tenant_id: tenant,
-                    kind: synveda_types::scope::ScopeKind::Principal,
-                    parent_scope_id: Some(anchor.id),
-                    slug: synveda_store::scopes::principal_slug(&subject),
-                    display_name: display_name.to_owned(),
-                    attributes: serde_json::json!({}),
-                    principal_id: Some(subject.clone()),
-                    created_by: None,
-                },
-            )
-            .await
-            .map_err(|err| err.to_string())?;
-            let identity = synveda_store::identities::create(
-                &mut tx,
-                identity_id,
-                tenant,
-                Some(&subject),
-                IdentityKind::Service,
-                None,
-                name.as_deref(),
-                leaf.id,
-            )
-            .await
-            .map_err(|err| err.to_string())?;
-            record_break_glass(
-                &mut tx,
-                tenant,
-                AuditAction::ServiceIdentityRegistered,
-                format!("scope {}", anchor.id),
-                json!({
-                    "identity": {"id": identity.id, "subject": identity.subject},
-                    "leaf_scope_id": leaf.id,
-                    "anchor": {"slug": anchor.slug},
-                }),
-            )
-            .await?;
-            tx.commit().await.map_err(|err| err.to_string())?;
-            eprintln!(
-                "note: a running gateway caches entities out-of-process; restart it or use the API path"
-            );
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&identity).map_err(|err| err.to_string())?
-            );
-            Ok(())
+        }) => service::register(&profile_name(profile), &subject, scope, name.as_deref()).await,
+        Command::Service(ServiceCommand::Remove { profile, id }) => {
+            service::remove(&profile_name(profile), id).await
         }
-        Command::Service(ServiceCommand::Remove { tenant, id }) => {
-            let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let identity = synveda_store::identities::by_id(&mut *tx, tenant, id)
-                .await
-                .map_err(|err| err.to_string())?
-                .filter(|identity| identity.kind == IdentityKind::Service)
-                .ok_or_else(|| format!("no service identity {id} in tenant {tenant}"))?;
-            // The anchor (the leaf's parent) names the event's resource,
-            // read before the leaf goes.
-            let anchor_id = synveda_store::scopes::get(&mut *tx, tenant, identity.scope_id)
-                .await
-                .map_err(|err| err.to_string())?
-                .and_then(|own| own.parent_scope_id);
-            // Row first (its FK pins the leaf), then the leaf.
-            synveda_store::identities::delete_service(&mut *tx, tenant, id)
-                .await
-                .map_err(|err| err.to_string())?;
-            synveda_store::scopes::set_status(
-                &mut *tx,
-                tenant,
-                identity.scope_id,
-                synveda_types::scope::ScopeStatus::Archived,
-            )
-            .await
-            .map_err(|err| err.to_string())?;
-            record_break_glass(
-                &mut tx,
-                tenant,
-                AuditAction::ServiceIdentityRevoked,
-                anchor_id.map_or_else(|| format!("tenant {tenant}"), |id| format!("scope {id}")),
-                json!({"identity": {"id": identity.id, "subject": identity.subject}}),
-            )
-            .await?;
-            tx.commit().await.map_err(|err| err.to_string())?;
-            eprintln!("service identity revoked; its tokens are quarantined from the next request");
-            Ok(())
+        Command::Service(ServiceCommand::List { profile }) => {
+            service::list(&profile_name(profile)).await
         }
-        Command::Service(ServiceCommand::List { tenant }) => {
-            let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let identities = synveda_store::identities::services(&mut *tx, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&identities).map_err(|err| err.to_string())?
-            );
-            Ok(())
+        Command::Audit(AuditCommand::Verify { profile, json }) => {
+            audit::verify(&profile_name(profile), json).await
         }
-        Command::Audit(AuditCommand::Verify { tenant }) => {
-            let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let verification = synveda_audit::verify(&mut tx, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            println!("{verification}");
-            match verification {
-                synveda_audit::ChainVerification::Valid { .. } => Ok(()),
-                synveda_audit::ChainVerification::Broken { .. } => {
-                    Err("audit chain verification failed".to_owned())
-                }
-            }
-        }
-        Command::Audit(AuditCommand::Tail { tenant, limit }) => {
-            let pool = connect_current_epoch().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let events = synveda_audit::tail(&mut tx, tenant, limit)
-                .await
-                .map_err(|err| err.to_string())?;
-            for event in events {
-                println!(
-                    "{}",
-                    json!({
-                        "seq": event.seq,
-                        "occurred_at": event.occurred_at,
-                        "actor": {"kind": event.actor_kind, "subject": event.actor_subject},
-                        "action": event.action,
-                        "resource": event.resource,
-                        "outcome": event.outcome,
-                        "payload": event.payload,
-                        "trace_id": event.trace_id,
-                        "hash": event.hash_hex(),
-                    })
-                );
-            }
-            Ok(())
-        }
+        Command::Audit(AuditCommand::Tail {
+            profile,
+            limit,
+            json,
+        }) => audit::tail(&profile_name(profile), limit, json).await,
         Command::Proposal(command) => match command {
             ProposalCommand::List {
                 scope,

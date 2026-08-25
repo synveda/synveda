@@ -105,13 +105,24 @@ async fn respond<T: IntoResponse>(
 
 // ── Author ─────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)] // Contract-only projection for an upstream wire type.
+pub(crate) struct PromptVariableSchema {
+    name: String,
+    description: Option<String>,
+    default: Option<String>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = PromptAuthorBody)]
 pub(crate) struct AuthorBody {
     /// Where the prompt is authored — the scope that will stand behind it,
     /// and the scope whose published channel a proposal would move.
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// Its name: path-shaped, lower-case, and the identifier a consumer
     /// writes in its source (ADR-0049 decision 3).
+    #[schema(value_type = String)]
     name: PromptName,
     /// One line, read in a listing and at review.
     #[serde(default)]
@@ -122,6 +133,7 @@ pub(crate) struct AuthorBody {
     /// disagrees with the template is refused here rather than discovered
     /// by a consumer (decision 12).
     #[serde(default)]
+    #[schema(value_type = Vec<PromptVariableSchema>)]
     variables: Vec<PromptVariable>,
     /// Its classification. Absent means `internal`, the working tier
     /// everything else in the product defaults to. `restricted` is refused
@@ -129,14 +141,16 @@ pub(crate) struct AuthorBody {
     /// asset, so a prompt carrying it could never be read back
     /// (decision 5).
     #[serde(default)]
+    #[schema(value_type = Option<String>)]
     sensitivity: Option<Sensitivity>,
 }
 
 /// What a scope's published channel holds for a name right now — the
 /// answer to "is my edit live?", which an author who just saved has to be
 /// told rather than left to infer.
-#[derive(Serialize)]
-struct PublishedView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = PromptPublishedView)]
+pub(crate) struct PublishedView {
     /// The commit the channel serves.
     commit: String,
     /// The address it names for this prompt.
@@ -147,20 +161,26 @@ struct PublishedView {
     current: bool,
 }
 
-#[derive(Serialize)]
-struct PromptView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = PromptView)]
+pub(crate) struct PromptView {
     name: String,
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     scope_path: String,
     description: String,
+    #[schema(value_type = String)]
     sensitivity: Sensitivity,
     template: String,
+    #[schema(value_type = Vec<PromptVariableSchema>)]
     variables: Vec<PromptVariable>,
     /// The draft's content address — what a proposal would bind.
     object_hash: String,
     created_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     created_by: IdentityId,
     updated_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     updated_by: IdentityId,
     /// The published version at this scope, when there is one.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -173,6 +193,21 @@ struct PromptView {
 /// An overwrite is the authoring act rather than a conflict; what cannot
 /// change is the prompt's identity, which migration 0029's trigger
 /// enforces below this handler.
+#[utoipa::path(
+    post,
+    path = "/v1/prompts",
+    operation_id = "author_prompt",
+    tag = "prompts",
+    request_body = AuthorBody,
+    responses(
+        (status = 200, description = "The authored prompt draft", body = PromptView),
+        (status = 400, description = "The prompt name, template, variables, or sensitivity is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Prompt authoring is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The governing scope is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "prompts.author", skip_all)]
 pub(crate) async fn author(
     State(state): State<AppState>,
@@ -311,9 +346,10 @@ pub(crate) struct ResolveParams {
 /// Where the served bytes came from — one field with four honest answers,
 /// because a response that cites a frozen commit without saying so
 /// overstates its own freshness (ADR-0036 decision 10, applied here).
-#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug, utoipa::ToSchema)]
+#[schema(as = PromptOrigin)]
 #[serde(rename_all = "kebab-case")]
-enum Origin {
+pub(crate) enum Origin {
     /// The channel's head: the current reviewed version.
     Head,
     /// The commit this request named.
@@ -325,13 +361,16 @@ enum Origin {
     Draft,
 }
 
-#[derive(Serialize)]
-struct ResolveResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = PromptResolveResponse)]
+pub(crate) struct ResolveResponse {
     name: String,
     /// The scope the version came from — for a walked resolve, the nearest
     /// one on the caller's chain that publishes it and permits the read.
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     scope_path: String,
+    #[schema(value_type = String)]
     channel: PromptChannel,
     /// What produced these bytes.
     origin: Origin,
@@ -341,13 +380,35 @@ struct ResolveResponse {
     commit: Option<String>,
     /// The version's content address.
     object_hash: String,
+    #[schema(value_type = String)]
     sensitivity: Sensitivity,
     description: String,
     template: String,
+    #[schema(value_type = Vec<PromptVariableSchema>)]
     variables: Vec<PromptVariable>,
 }
 
 /// `GET /v1/prompts/{name}` — resolve a prompt for this caller.
+#[utoipa::path(
+    get,
+    path = "/v1/prompts/{name}",
+    operation_id = "resolve_prompt",
+    tag = "prompts",
+    params(
+        ("name" = String, Path),
+        ("channel" = Option<String>, Query),
+        ("scope_id" = Option<String>, Query, format = "uuid"),
+        ("commit" = Option<String>, Query)
+    ),
+    responses(
+        (status = 200, description = "The resolved prompt version", body = ResolveResponse),
+        (status = 400, description = "The prompt selector is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Prompt read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "No visible prompt matches", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "prompts.resolve", skip_all)]
 pub(crate) async fn resolve(
     State(state): State<AppState>,
@@ -736,22 +797,28 @@ pub(crate) struct ListParams {
     scope_id: ScopeId,
 }
 
-#[derive(Serialize)]
-struct ListEntry {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = PromptListEntry)]
+pub(crate) struct ListEntry {
     name: String,
     description: String,
+    #[schema(value_type = String)]
     sensitivity: Sensitivity,
     /// The draft's address, and when it last moved.
     object_hash: String,
     updated_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     updated_by: IdentityId,
+    #[schema(value_type = Vec<PromptVariableSchema>)]
     variables: Vec<PromptVariable>,
     #[serde(skip_serializing_if = "Option::is_none")]
     published: Option<PublishedView>,
 }
 
-#[derive(Serialize)]
-struct ListResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = PromptListResponse)]
+pub(crate) struct ListResponse {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     scope_path: String,
     prompts: Vec<ListEntry>,
@@ -763,6 +830,20 @@ struct ListResponse {
 /// Entries the caller may not read at their tier are omitted rather than
 /// refused, for the reason the walk skips them: a listing that refused
 /// wholesale would make one `confidential` prompt hide the rest.
+#[utoipa::path(
+    get,
+    path = "/v1/prompts",
+    operation_id = "list_prompts",
+    tag = "prompts",
+    params(("scope_id" = String, Query, format = "uuid")),
+    responses(
+        (status = 200, description = "Visible prompt drafts at the scope", body = ListResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Prompt read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The governing scope is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "prompts.list", skip_all)]
 pub(crate) async fn list(
     State(state): State<AppState>,

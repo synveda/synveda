@@ -88,6 +88,10 @@ Knowledge.
 CPR-28, the public-API OKF CLI and generated project-console workflow, is
 delivered; local paths never become gateway authority and imports still stop
 at New Learnings.
+CPR-29, the exact generated application contract and client convergence, is
+delivered under ADR-0088; the 156-operation authenticated application contract,
+executable router, generated console client and ordinary CLI/adapter boundary
+are now exact.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -147,13 +151,14 @@ the committed file and the tree disagree, and `console/src/generated/api.ts`
 is generated from that file (`make check-api-types`). **Never hand-edit
 either.** To refresh both: `SYNVEDA_WRITE_OPENAPI=1 cargo test -p
 synveda-gateway --test openapi` then `node scripts/generate-api-types.mjs`.
-The document covers the context-platform plane — `/v1/me`,
-workspaces/projects/repositories, access, admin scopes, sessions and the public
-Knowledge lifecycle/search, capture, explainable context, immutable Skill and
-trusted MCP catalogue planes (**101 operations** since CPR-25) — and says
-so in its own description; the remaining production planes join under the
-programme's public-contract convergence package.
-Since CPR-8 the generator also emits
+The document covers the complete authenticated application plane — **156
+operations** from `/v1/me` through workspaces/projects/repositories, access,
+governance, policy, audit, sessions, Knowledge, capture, context, immutable
+Skills, trusted MCP Tools and OKF. Since CPR-29 one route catalogue constructs
+the executable router and exposes the method/path inventory that the OpenAPI
+test compares exactly in both directions; the console has no hand-written
+application operation, and ordinary service/audit CLI and generic MCP paths
+are public-API clients. Since CPR-8 the generator also emits
 the **runtime** path/method table beside the type table and marks every
 operation whose document requires an `Idempotency-Key`, so the console's
 client requires the key at compile time and no hand-written copy of a path
@@ -197,7 +202,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 94 of 125 features delivered — see docs/backlog/STATUS.md for
+features done. 95 of 126 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -332,6 +337,15 @@ It was delivered the same day, making it **125 with 94 delivered**: local
 validation/inspection and atomic export share the pinned adapter, while import
 and all governed state changes remain on the public API and existing
 CaptureCandidate/VedaFlow path.
+**CPR-29 was filed next**, making it **126 with 94 delivered**: it completes
+the authenticated `/v1` contract and deletes handwritten or storage-coupled
+ordinary clients rather than treating the generated surface as a newer-plane
+island.
+It was delivered the same day, making it **126 with 95 delivered**: one
+catalogue now constructs all 156 authenticated application operations and is
+checked exactly against OpenAPI; the console consumes generated operations,
+while ordinary service/audit CLI and generic MCP/Claude clients reach product
+state only through the public gateway boundary.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

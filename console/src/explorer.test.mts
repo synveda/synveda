@@ -108,6 +108,8 @@ function lapse(overrides: Partial<Lapse> = {}): Lapse {
     reason: "joint incident review",
     granted_at: "2026-08-01T09:00:00Z",
     expires_at: "2026-09-01T09:00:00Z",
+    granted_by: "0199bb11-1111-7111-8111-111111111112",
+    proposal_id: "0199bb11-1111-7111-8111-111111111113",
     outcome: "active",
     ...overrides,
   };

@@ -187,8 +187,22 @@ pub struct Plan {
 }
 
 /// `synveda mcp install --client <name>`.
+#[cfg(test)]
 pub fn install(plan: &Plan) -> Result<(), String> {
-    let entry = entry(&plan.profile)?;
+    install_for(plan, None, None)
+}
+
+/// Install a configuration that pins the runtime workspace/project selection.
+///
+/// Kept beside the ordinary entry point so existing callers and tests retain
+/// the default no-selection shape, while the CLI can faithfully carry its
+/// outer `mcp --workspace/--project` arguments into the file a client owns.
+pub fn install_for(
+    plan: &Plan,
+    workspace: Option<&str>,
+    project: Option<&str>,
+) -> Result<(), String> {
+    let entry = entry_for(&plan.profile, workspace, project)?;
     let client = lookup(&plan.client)?;
     let key = client.key.as_str();
 
@@ -350,7 +364,16 @@ fn remove_entry(document: &mut Document, key: &str, path: &Path) -> Result<(), S
 }
 
 /// The entry a client will exec.
+#[cfg(test)]
 fn entry(profile: &str) -> Result<Value, String> {
+    entry_for(profile, None, None)
+}
+
+fn entry_for(
+    profile: &str,
+    workspace: Option<&str>,
+    project: Option<&str>,
+) -> Result<Value, String> {
     let exe = std::env::current_exe().map_err(|err| format!("locate this binary: {err}"))?;
     // Through symlinks, because a client that cannot read this path is a
     // server that never starts, and `current_exe` may hand back a shim.
@@ -366,6 +389,14 @@ fn entry(profile: &str) -> Result<Value, String> {
     // what it means so a later change of default cannot quietly take
     // `remember` away from every config already on disk.
     let mut args = vec![json!("mcp"), json!("--writes"), json!("tool")];
+    if let Some(workspace) = workspace {
+        args.push(json!("--workspace"));
+        args.push(json!(workspace));
+    }
+    if let Some(project) = project {
+        args.push(json!("--project"));
+        args.push(json!(project));
+    }
     if profile != DEFAULT_PROFILE {
         args.push(json!("--profile"));
         args.push(json!(profile));
@@ -1023,6 +1054,24 @@ mod tests {
         assert_eq!(
             work["args"],
             json!(["mcp", "--writes", "tool", "--profile", "work"])
+        );
+    }
+
+    #[test]
+    fn an_exact_project_selection_is_carried_into_the_entry() {
+        let selected =
+            entry_for("default", Some("workspace-1"), Some("project-2")).expect("selected entry");
+        assert_eq!(
+            selected["args"],
+            json!([
+                "mcp",
+                "--writes",
+                "tool",
+                "--workspace",
+                "workspace-1",
+                "--project",
+                "project-2"
+            ])
         );
     }
 

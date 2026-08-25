@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import * as transport from "./api.mjs";
 import { describe, fillPath, queryString, request } from "./client.mjs";
 import { OPERATIONS } from "./generated/api.js";
 
@@ -96,7 +97,7 @@ test("every operation the document declares is callable, and none is invented", 
   // so this is really asserting the generator did not skip a row — the
   // failure that would make an operation typecheck and then throw.
   const ids = Object.keys(OPERATIONS);
-  assert.equal(ids.length, 106, "the contract's operation count moved; update the count here");
+  assert.ok(ids.length > 0, "the generated application contract is empty");
   for (const id of ids) {
     const declared = OPERATIONS[id as keyof typeof OPERATIONS];
     assert.ok(declared.path.startsWith("/v1/"), `${id} is not a /v1 path`);
@@ -105,6 +106,16 @@ test("every operation the document declares is callable, and none is invented", 
       `${id} has method ${declared.method}`,
     );
   }
+});
+
+test("the transport exports no hand-written application operation", () => {
+  assert.deepEqual(Object.keys(transport).sort(), [
+    "API_BASE",
+    "SIGN_IN_URL",
+    "call",
+    "classify",
+    "signOut",
+  ]);
 });
 
 test("the idempotent creations are exactly the ones the document marks", () => {

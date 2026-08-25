@@ -84,13 +84,17 @@ async fn respond<T: IntoResponse>(
 /// One quarantined event as the API renders it: the redacted payload,
 /// the finding summary, and the review state — never raw finding text
 /// (there is none anywhere to render, ADR-0021 decision 1).
-#[derive(Serialize)]
-struct QuarantineView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = QuarantineEventView)]
+pub(crate) struct QuarantineView {
+    #[schema(value_type = String, format = "uuid")]
     event_id: SessionEventId,
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// The run the event belongs to — a real aggregate since CPR-12, so a
     /// reviewer can open the transcript this payload came from instead of
     /// deciding about it in isolation.
+    #[schema(value_type = String, format = "uuid")]
     session_id: SessionId,
     /// The token subject that opened that run.
     principal_id: String,
@@ -98,6 +102,7 @@ struct QuarantineView {
     client_event_id: String,
     payload: serde_json::Value,
     findings: serde_json::Value,
+    #[schema(value_type = String)]
     state: QuarantineState,
     created_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -136,8 +141,9 @@ pub(crate) struct ListParams {
     limit: Option<i64>,
 }
 
-#[derive(Serialize)]
-struct QueueResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = QuarantineQueueResponse)]
+pub(crate) struct QueueResponse {
     pending: Vec<QuarantineView>,
 }
 
@@ -145,6 +151,24 @@ struct QueueResponse {
 /// `QuarantineRead` is decided at the tenant either way (module doc);
 /// `scope_id` narrows *which* events come back, after the uniform-404
 /// ownership check on the scope named.
+#[utoipa::path(
+    get,
+    path = "/v1/quarantine",
+    operation_id = "list_quarantine",
+    tag = "quarantine",
+    params(
+        ("scope_id" = Option<String>, Query, format = "uuid"),
+        ("limit" = Option<i64>, Query)
+    ),
+    responses(
+        (status = 200, description = "Pending quarantined session events", body = QueueResponse),
+        (status = 400, description = "The filter or limit is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "The quarantine queue is not visible", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The requested scope is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "quarantine.list", skip_all)]
 pub(crate) async fn list(
     State(state): State<AppState>,
@@ -224,13 +248,31 @@ pub(crate) async fn list(
     respond(&state, "list", result).await
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = QuarantineReviewBody)]
 pub(crate) struct ReviewBody {
     /// The reviewer's note, recorded on the row and in the audit event.
     reason: Option<String>,
 }
 
 /// `POST /v1/quarantine/{event_id}/release`.
+#[utoipa::path(
+    post,
+    path = "/v1/quarantine/{event_id}/release",
+    operation_id = "release_quarantined_event",
+    tag = "quarantine",
+    params(("event_id" = String, Path, format = "uuid")),
+    request_body = ReviewBody,
+    responses(
+        (status = 200, description = "The released quarantined event", body = QuarantineView),
+        (status = 400, description = "The review reason is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Quarantine review is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The event is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The event was already reviewed", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "quarantine.release", skip_all)]
 pub(crate) async fn release(
     State(state): State<AppState>,
@@ -242,6 +284,23 @@ pub(crate) async fn release(
 }
 
 /// `POST /v1/quarantine/{event_id}/reject`.
+#[utoipa::path(
+    post,
+    path = "/v1/quarantine/{event_id}/reject",
+    operation_id = "reject_quarantined_event",
+    tag = "quarantine",
+    params(("event_id" = String, Path, format = "uuid")),
+    request_body = ReviewBody,
+    responses(
+        (status = 200, description = "The rejected quarantined event", body = QuarantineView),
+        (status = 400, description = "The review reason is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Quarantine review is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The event is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The event was already reviewed", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "quarantine.reject", skip_all)]
 pub(crate) async fn reject(
     State(state): State<AppState>,

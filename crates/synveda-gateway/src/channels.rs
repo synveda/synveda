@@ -88,11 +88,13 @@ async fn respond<T: IntoResponse>(
 }
 
 /// One standing channel as the API renders it.
-#[derive(Serialize)]
-struct ChannelView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ChannelStatusView)]
+pub(crate) struct ChannelView {
     /// The ref name, e.g. `prompt/published`.
     name: String,
     asset: String,
+    #[schema(value_type = String)]
     channel: Channel,
     /// Where the channel points — what an authorised reader cites.
     commit: String,
@@ -101,6 +103,7 @@ struct ChannelView {
     /// log, not a set — ADR-0031 decision 3).
     entries: usize,
     updated_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     updated_by: IdentityId,
     /// The standing pin, when there is one: readers compose this commit
     /// rather than the one above until it is released (FLOW-7, ADR-0036
@@ -110,11 +113,13 @@ struct ChannelView {
 }
 
 /// A pin as the API renders it.
-#[derive(Serialize)]
-struct PinView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ChannelPinView)]
+pub(crate) struct PinView {
     /// The commit readers are held at.
     commit: String,
     pinned_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     pinned_by: IdentityId,
 }
 
@@ -128,8 +133,10 @@ impl PinView {
     }
 }
 
-#[derive(Serialize)]
-struct ChannelsResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ChannelListResponse)]
+pub(crate) struct ChannelsResponse {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     channels: Vec<ChannelView>,
 }
@@ -139,6 +146,20 @@ struct ChannelsResponse {
 /// A scope with no channels answers 200 with an empty list: refs
 /// materialise on first write (ADR-0031 decision 2), so "nothing has been
 /// committed here" is the answer, not a 404.
+#[utoipa::path(
+    get,
+    path = "/v1/channels/{scope_id}",
+    operation_id = "list_channels",
+    tag = "channels",
+    params(("scope_id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The scope's authored-artifact channels", body = ChannelsResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Channel read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "channels.list", skip_all)]
 pub(crate) async fn list(State(state): State<AppState>, Path(scope_id): Path<ScopeId>) -> Response {
     let result = async {
@@ -204,7 +225,8 @@ pub(crate) async fn list(State(state): State<AppState>, Path(scope_id): Path<Sco
     respond(&state, "list", result).await
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ChannelPublishBody)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PublishBody {
     /// The prompts to admit, by name (PRMT-1, ADR-0049 decision 7). Must be
@@ -218,6 +240,7 @@ pub(crate) struct PublishBody {
     /// ADR-0032 decision 8's invariant kept rather than a second rule for
     /// authored assets.
     #[serde(default)]
+    #[schema(value_type = Vec<String>)]
     prompt_names: Vec<synveda_types::PromptName>,
     /// The context-pack documents to admit, by path (PRMT-2, ADR-0050
     /// decision 1). Must be documents of **this** scope, for the reason
@@ -231,6 +254,7 @@ pub(crate) struct PublishBody {
     /// proposal route; at a team or a leaf one curator still publishes
     /// directly, which is the governed `SHARED`/`LOCAL` split.
     #[serde(default)]
+    #[schema(value_type = Vec<String>)]
     document_paths: Vec<synveda_types::DocumentPath>,
     /// Why — an auditor and a reviewer both read this. Required: a
     /// publication with nothing to say is one nobody can review after
@@ -238,8 +262,10 @@ pub(crate) struct PublishBody {
     message: String,
 }
 
-#[derive(Serialize)]
-struct PublishResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ChannelPublishResponse)]
+pub(crate) struct PublishResponse {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// The channel that moved.
     channel: String,
@@ -271,14 +297,32 @@ struct PublishResponse {
     pinned: Option<PinView>,
 }
 
-#[derive(Serialize)]
-struct PublishedMember {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ChannelPublishedMember)]
+pub(crate) struct PublishedMember {
     /// The tree entry name or authored path.
     member: String,
     object_hash: String,
 }
 
 /// `POST /v1/channels/{scope_id}/publish` — admit authored artifact versions.
+#[utoipa::path(
+    post,
+    path = "/v1/channels/{scope_id}/publish",
+    operation_id = "publish_channel",
+    tag = "channels",
+    params(("scope_id" = String, Path, format = "uuid")),
+    request_body = PublishBody,
+    responses(
+        (status = 200, description = "The resulting published channel state", body = PublishResponse),
+        (status = 400, description = "The member set or message is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Publication or artifact read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope or authored artifact is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The channel state changed", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "channels.publish", skip_all)]
 pub(crate) async fn publish(
     State(state): State<AppState>,
@@ -654,8 +698,9 @@ fn decide_asset_read(
 }
 
 /// One state a channel has held, as the API renders it.
-#[derive(Serialize)]
-struct HistoryEntryView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ChannelHistoryEntryView)]
+pub(crate) struct HistoryEntryView {
     commit: String,
     /// The state it replaced — its first parent, absent on the channel's
     /// first commit.
@@ -668,6 +713,7 @@ struct HistoryEntryView {
     /// (ADR-0036 decision 1).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     merge_parents: Vec<String>,
+    #[schema(value_type = String, format = "uuid")]
     author: IdentityId,
     message: String,
     committed_at: DateTime<Utc>,
@@ -680,8 +726,10 @@ struct HistoryEntryView {
     served: bool,
 }
 
-#[derive(Serialize)]
-struct HistoryResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ChannelHistoryResponse)]
+pub(crate) struct HistoryResponse {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     channel: String,
     /// The commit the ref points at.
@@ -696,6 +744,26 @@ struct HistoryResponse {
 
 /// `GET /v1/channels/{scope_id}/history` — the states this channel has
 /// held, newest first.
+#[utoipa::path(
+    get,
+    path = "/v1/channels/{scope_id}/history",
+    operation_id = "get_channel_history",
+    tag = "channels",
+    params(
+        ("scope_id" = String, Path, format = "uuid"),
+        ("asset" = String, Query),
+        ("channel" = Option<String>, Query),
+        ("limit" = Option<u32>, Query)
+    ),
+    responses(
+        (status = 200, description = "The channel's immutable history", body = HistoryResponse),
+        (status = 400, description = "The channel selector is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Channel read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope or channel is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "channels.history", skip_all)]
 pub(crate) async fn history(
     State(state): State<AppState>,
@@ -790,10 +858,13 @@ async fn history_inner(
     }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ChannelRollbackBody)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RollbackBody {
+    #[schema(value_type = String)]
     asset: AssetKind,
+    #[schema(value_type = Option<String>)]
     channel: Option<Channel>,
     /// The commit being abandoned — what the caller read before deciding.
     /// Required rather than inferred: a rewind is a decision about *which*
@@ -808,8 +879,10 @@ pub(crate) struct RollbackBody {
     message: String,
 }
 
-#[derive(Serialize)]
-struct RollbackResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ChannelRollbackResponse)]
+pub(crate) struct RollbackResponse {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     channel: String,
     /// The commit abandoned.
@@ -827,6 +900,23 @@ struct RollbackResponse {
 
 /// `POST /v1/channels/{scope_id}/rollback` — rewind the channel to a state
 /// it has already held.
+#[utoipa::path(
+    post,
+    path = "/v1/channels/{scope_id}/rollback",
+    operation_id = "rollback_channel",
+    tag = "channels",
+    params(("scope_id" = String, Path, format = "uuid")),
+    request_body = RollbackBody,
+    responses(
+        (status = 200, description = "The rewound channel state", body = RollbackResponse),
+        (status = 400, description = "The channel, commit, or message is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Channel rollback is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope, channel, or target commit is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The channel head no longer matches", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "channels.rollback", skip_all)]
 pub(crate) async fn rollback(
     State(state): State<AppState>,
@@ -936,10 +1026,13 @@ async fn rollback_inner(
     }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ChannelPinBody)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PinBody {
+    #[schema(value_type = String)]
     asset: AssetKind,
+    #[schema(value_type = Option<String>)]
     channel: Option<Channel>,
     /// The commit to hold readers at: one of the entries `GET /history`
     /// lists, the head included.
@@ -949,17 +1042,22 @@ pub(crate) struct PinBody {
     reason: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ChannelUnpinBody)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct UnpinBody {
+    #[schema(value_type = String)]
     asset: AssetKind,
+    #[schema(value_type = Option<String>)]
     channel: Option<Channel>,
     /// Why the hold is being released.
     reason: String,
 }
 
-#[derive(Serialize)]
-struct PinResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ChannelPinResponse)]
+pub(crate) struct PinResponse {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     channel: String,
     /// The commit readers now compose.
@@ -972,8 +1070,10 @@ struct PinResponse {
     head: String,
 }
 
-#[derive(Serialize)]
-struct UnpinResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ChannelUnpinResponse)]
+pub(crate) struct UnpinResponse {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     channel: String,
     /// The commit that was held, when there was a pin. Absent means there
@@ -987,6 +1087,22 @@ struct UnpinResponse {
 
 /// `POST /v1/channels/{scope_id}/pin` — hold what this channel serves at a
 /// commit.
+#[utoipa::path(
+    post,
+    path = "/v1/channels/{scope_id}/pin",
+    operation_id = "pin_channel",
+    tag = "channels",
+    params(("scope_id" = String, Path, format = "uuid")),
+    request_body = PinBody,
+    responses(
+        (status = 200, description = "The channel's standing pin", body = PinResponse),
+        (status = 400, description = "The channel, commit, or reason is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Channel pinning is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope, channel, or commit is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "channels.pin", skip_all)]
 pub(crate) async fn pin(
     State(state): State<AppState>,
@@ -1068,6 +1184,22 @@ async fn pin_inner(
 }
 
 /// `POST /v1/channels/{scope_id}/unpin` — release the hold.
+#[utoipa::path(
+    post,
+    path = "/v1/channels/{scope_id}/unpin",
+    operation_id = "unpin_channel",
+    tag = "channels",
+    params(("scope_id" = String, Path, format = "uuid")),
+    request_body = UnpinBody,
+    responses(
+        (status = 200, description = "The channel now serving its head", body = UnpinResponse),
+        (status = 400, description = "The channel or reason is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Channel pinning is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope or channel is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "channels.unpin", skip_all)]
 pub(crate) async fn unpin(
     State(state): State<AppState>,

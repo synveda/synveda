@@ -348,7 +348,8 @@ done
 SECRET="${INVITE_TOKEN##*.}"
 LEAK="$(psql_db -c "select count(*) from audit_log where payload::text like '%${SECRET}%'")"
 [ "$LEAK" = "0" ] || fail "${LEAK} audit event(s) carry the invitation secret"
-"$BIN" audit verify --tenant "$TENANT_ID" >"$WORK/verify.log" 2>&1 ||
+SYNVEDA_GATEWAY="$GATEWAY_URL" SYNVEDA_TOKEN="$TOKEN" \
+    "$BIN" audit verify >"$WORK/verify.log" 2>&1 ||
     fail "the chain does not verify: $(cat "$WORK/verify.log")"
 ok "every act under its own name, no token anywhere, chain verifies"
 

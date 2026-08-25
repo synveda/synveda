@@ -102,14 +102,9 @@ test("access source names the mechanism, because that is what you have to change
   );
 });
 
-test("a group reference is narrowed rather than trusted", () => {
-  // `via_group` arrives as `unknown | null | GroupRefView` from the
-  // generator, so the narrowing happens once rather than as a cast at every
-  // call site.
+test("an absent generated group reference is normalised", () => {
   assert.equal(viaGroup(member()), null);
   assert.equal(viaGroup(member({ via_group: null })), null);
-  assert.equal(viaGroup(member({ via_group: "engineering" })), null);
-  assert.equal(viaGroup(member({ via_group: { id: "g" } })), null);
   assert.deepEqual(viaGroup(member({ via_group: { id: "g", slug: "eng" } })), {
     id: "g",
     slug: "eng",

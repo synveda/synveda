@@ -65,8 +65,9 @@ use crate::telemetry::CAPABILITY_PROBES_TOTAL;
 pub(crate) const MAX_BATCH_SCOPES: usize = 128;
 
 /// What a probe says about one scope.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(crate) struct NodeCapabilities {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// Where the node sits — a fact about the *node*, so it is served only
     /// to a caller who may read it (`ScopeRead`). Absent otherwise, and
@@ -83,15 +84,18 @@ pub(crate) struct NodeCapabilities {
     /// The caller's own effective role keys here — the caller's, never
     /// anyone else's (decision 3; since the cutover, the only roles there
     /// are — CPR-6, ADR-0073 decision 5).
+    #[schema(value_type = Vec<String>)]
     roles: Vec<RoleKey>,
     /// The operand-free actions, by their stable machine name.
+    #[schema(value_type = BTreeMap<String, bool>)]
     actions: BTreeMap<&'static str, bool>,
     /// The tier-bearing reads: the tiers each permits here, ascending. An
     /// empty list is a real answer — "nothing at this scope, at any tier".
+    #[schema(value_type = BTreeMap<String, Vec<String>>)]
     read_tiers: BTreeMap<&'static str, Vec<Sensitivity>>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(crate) struct PackView {
     name: String,
     version: i64,
@@ -101,10 +105,11 @@ pub(crate) struct PackView {
 /// The batch response. `not_answered` names the scopes the bound dropped,
 /// and `max_scopes` says what the bound is, so a client can page rather
 /// than guess.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub(crate) struct BatchResponse {
     capabilities: Vec<NodeCapabilities>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<String>)]
     not_answered: Vec<ScopeId>,
     max_scopes: usize,
 }
@@ -342,6 +347,20 @@ fn anchor_context<'a>(
 
 /// `GET /v1/capabilities?scopes=<id>,<id>,…` — the plural of the same
 /// walk, for the nodes a tree actually rendered.
+#[utoipa::path(
+    get,
+    path = "/v1/capabilities",
+    operation_id = "get_capabilities",
+    tag = "capabilities",
+    params(("scopes" = String, Query, description = "Comma-separated governed scope ids, at most 128 answered per request")),
+    responses(
+        (status = 200, description = "Forecasts for the caller at the requested scopes", body = BatchResponse),
+        (status = 400, description = "No valid scope ids were supplied", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "A scope is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 pub(crate) async fn batch(
     State(state): State<AppState>,
     Query(params): Query<BatchParams>,

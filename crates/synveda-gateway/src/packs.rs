@@ -101,10 +101,12 @@ async fn respond<T: IntoResponse>(
 // ── Author ─────────────────────────────────────────────────────────────
 
 /// One document as an author supplies it.
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ContextPackDocumentBody)]
 pub(crate) struct DocumentBody {
     /// Its name within the pack: path-shaped, so a bundle can carry
     /// `runbooks/payments.md` rather than flattening a directory.
+    #[schema(value_type = String)]
     name: DocumentName,
     /// One line, read in a listing, at review, and in the index tier
     /// (ADR-0050 decision 10).
@@ -116,16 +118,20 @@ pub(crate) struct DocumentBody {
     /// than per pack (decision 12) — a glossary of public terms and an
     /// internal runbook are plausibly the same bundle.
     #[serde(default)]
+    #[schema(value_type = Option<String>)]
     sensitivity: Option<Sensitivity>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ContextPackAuthorBody)]
 pub(crate) struct AuthorBody {
     /// Where the pack is authored — the scope that will stand behind it,
     /// and the scope whose published channel a proposal would move.
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// Its name: one segment, lower-case, and the identifier a scope's
     /// override is expressed in (ADR-0050 decision 1).
+    #[schema(value_type = String)]
     name: ContextPackName,
     /// One line, read in a listing and at review.
     #[serde(default)]
@@ -138,8 +144,9 @@ pub(crate) struct AuthorBody {
 }
 
 /// What a scope's published channel holds for one document right now.
-#[derive(Serialize)]
-struct PublishedView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ContextPackPublishedView)]
+pub(crate) struct PublishedView {
     /// The commit the channel serves.
     commit: String,
     /// The address it names for this document.
@@ -152,10 +159,12 @@ struct PublishedView {
     current: bool,
 }
 
-#[derive(Serialize)]
-struct DocumentView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ContextPackDocumentView)]
+pub(crate) struct DocumentView {
     name: String,
     title: String,
+    #[schema(value_type = String)]
     sensitivity: Sensitivity,
     /// The draft's content address — what a proposal would bind.
     object_hash: String,
@@ -166,21 +175,26 @@ struct DocumentView {
     /// "re-authoring an unchanged document re-embeds nothing".
     embedded: u32,
     updated_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     updated_by: IdentityId,
     #[serde(skip_serializing_if = "Option::is_none")]
     published: Option<PublishedView>,
 }
 
-#[derive(Serialize)]
-struct PackView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ContextPackView)]
+pub(crate) struct PackView {
     name: String,
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     scope_path: String,
     description: String,
     documents: Vec<DocumentView>,
     created_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     created_by: IdentityId,
     updated_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     updated_by: IdentityId,
 }
 
@@ -192,6 +206,21 @@ struct PackView {
 /// below this handler. Documents *not* named in the request are left
 /// alone — a bundle is edited a file at a time, and a request that dropped
 /// the rest would make every save a full re-upload.
+#[utoipa::path(
+    post,
+    path = "/v1/context-packs",
+    operation_id = "author_context_pack",
+    tag = "context-packs",
+    request_body = AuthorBody,
+    responses(
+        (status = 200, description = "The authored context-pack draft", body = PackView),
+        (status = 400, description = "The pack or document content is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Context-pack authoring is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The governing scope is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "context_packs.author", skip_all)]
 pub(crate) async fn author(
     State(state): State<AppState>,
@@ -675,17 +704,21 @@ pub(crate) struct ListParams {
     scope_id: ScopeId,
 }
 
-#[derive(Serialize)]
-struct ListEntry {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ContextPackListEntry)]
+pub(crate) struct ListEntry {
     name: String,
     description: String,
     documents: Vec<DocumentView>,
     updated_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     updated_by: IdentityId,
 }
 
-#[derive(Serialize)]
-struct ListResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ContextPackListResponse)]
+pub(crate) struct ListResponse {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     scope_path: String,
     packs: Vec<ListEntry>,
@@ -697,6 +730,20 @@ struct ListResponse {
 /// Documents the caller may not read at their tier are omitted rather than
 /// refused, for the reason composition skips them: a listing that refused
 /// wholesale would make one `confidential` runbook hide the rest.
+#[utoipa::path(
+    get,
+    path = "/v1/context-packs",
+    operation_id = "list_context_packs",
+    tag = "context-packs",
+    params(("scope_id" = String, Query, format = "uuid")),
+    responses(
+        (status = 200, description = "Visible context-pack drafts at the scope", body = ListResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Context-pack read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The governing scope is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "context_packs.list", skip_all)]
 pub(crate) async fn list(
     State(state): State<AppState>,

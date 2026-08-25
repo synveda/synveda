@@ -45,7 +45,7 @@ use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Router, middleware};
 use serde_json::json;
 use synveda_types::{Error, ScimCredential, Tenant};
@@ -327,21 +327,6 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .delete(groups::delete),
         )
         .route_layer(middleware::from_fn_with_state(state, require_credential))
-}
-
-/// The `/v1` admin routes that manage this plane's credentials. Mounted on
-/// the governed plane, not here: issuing one is an act of the product's own
-/// authority, PDP-gated at the tenant (ADR-0059 decision 13).
-pub fn credential_routes() -> Router<AppState> {
-    Router::new()
-        .route(
-            "/v1/scim/credentials",
-            get(credentials::list).post(credentials::issue),
-        )
-        .route(
-            "/v1/scim/credentials/{id}/revoke",
-            post(credentials::revoke),
-        )
 }
 
 /// `GET /ServiceProviderConfig` — RFC 7644 §4. Unauthenticated discovery is

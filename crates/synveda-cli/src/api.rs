@@ -207,6 +207,16 @@ impl Api {
         self.send(request, "PATCH", path).await
     }
 
+    /// `DELETE path`, as a JSON value (or `null` for a 204).
+    pub async fn delete(&self, path: &str) -> Result<Value, String> {
+        self.send(
+            self.http.delete(format!("{}{path}", self.base)),
+            "DELETE",
+            path,
+        )
+        .await
+    }
+
     /// `PATCH path` with a required idempotency key.
     pub async fn patch_idempotent(
         &self,

@@ -178,8 +178,8 @@ PDP.
 ```sh
 synveda scope tree                          # your organisation
 synveda recall --query "..."                 # a governed read
-synveda audit tail  --tenant <id> --limit 20 # who did what
-synveda audit verify --tenant <id>           # the chain
+synveda audit tail --limit 20 # policy-visible recent activity
+synveda audit verify         # the caller's tenant chain
 ```
 
 Traces are at <http://localhost:16686>.

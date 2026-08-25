@@ -14,9 +14,9 @@ Rust workspace + TypeScript adapters and console. Postgres-first. Knowledge
 is governed by VedaFlow (propose → review → approve → publish, git-like
 semantics natively in Postgres). It is a control plane, not an agent
 framework, orchestrator, or vector-DB wrapper: any harness plugs into the
-same three primitives — `observe` (write, async), `inject` (read,
-token-budgeted), `recall` (read, deep) — and every read and write passes an
-embedded Cedar Policy Decision Point. This product sells trustworthiness.
+public session/event, context-run and scoped Knowledge APIs, and every read
+and write passes an embedded Cedar Policy Decision Point. This product sells
+trustworthiness.
 
 ## Required reading (in order, before any task)
 
@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **125 features filed, 94 delivered**;
+Cursor frame has been replayed. **126 features filed, 95 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -130,13 +130,15 @@ Load-bearing facts about Phase 5:
   grant keys only. A login with the `synveda-admins` IdP group mints a
   tenant's first grant; a dev-token tenant seeds it by hand once
   (INSTALL.md's SQL).
-- The generated OpenAPI contract covers the context-platform plane (`/v1/me`,
-  workspaces, projects, repositories, access, admin scopes, sessions and the
-  public Knowledge lifecycle/search, capture and explainable context surfaces —
-  immutable Skills and the trusted MCP catalogue — **101 operations** since
-  CPR-25). The console consumes generated operations only;
-  the remaining production planes join under the programme's public-contract
-  convergence package.
+- CPR-29 (ADR-0088): the generated OpenAPI contract is the complete
+  authenticated application plane — **156 operations** from `/v1/me` through
+  governance, audit, Knowledge, capture, context, Skills, Tools and OKF. One
+  executable route catalogue builds the router and supplies the inventory an
+  exact parity test compares with OpenAPI. The console has no hand-written
+  application operations; ordinary service/audit CLI commands and the generic
+  MCP adapter are public-API clients. Only documented local bootstrap,
+  reset/migration, key custody and break-glass operations retain direct local
+  authority.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys

@@ -30,14 +30,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { PageHeading } from "./Shell.js";
-import {
-  childrenOf,
-  scopeCapabilities,
-  scopeLevel,
-  scopePolicy,
-  standingLapses,
-  type Outcome,
-} from "./api.mjs";
+import type { Outcome } from "./api.mjs";
+import { request } from "./client.mjs";
 import {
   deniedCount,
   describeEnd,
@@ -61,7 +55,7 @@ export function Scopes() {
   const [lapses, setLapses] = useState<Lapse[]>([]);
 
   const load = useCallback(async () => {
-    const outcome = await scopeLevel();
+    const outcome = await request("list_scopes", { query: {} });
     setRoot(outcome);
     if (outcome.kind === "ok") {
       const level = outcome.body as ScopeLevel;
@@ -71,7 +65,7 @@ export function Scopes() {
     // node: the scope-free listing is already the set this reader may see
     // anywhere, so asking again per selection would be the same answer
     // filtered twice.
-    const grants = await standingLapses();
+    const grants = await request("list_lapses", { query: {} });
     if (grants.kind === "ok") {
       setLapses((grants.body as LapseListing).lapses ?? []);
     }
@@ -145,7 +139,7 @@ function Branch({
     // make the cheapest interaction on the screen the most expensive.
     if (next && kids === null) {
       setKids({ kind: "loading" });
-      const level = await childrenOf(node.id);
+      const level = await request("list_scopes", { query: { parent_id: node.id } });
       // The expansion call answers a level; the tree renders its children.
       setKids(
         level.kind === "ok"
@@ -204,8 +198,8 @@ function NodeDetail({ node, lapses }: { node: Node; lapses: Lapse[] }) {
 
   useEffect(() => {
     void (async () => {
-      setPack(await scopePolicy(node.id));
-      const batch = await scopeCapabilities([node.id]);
+      setPack(await request("get_scope_policy", { path: { scope_id: node.id } }));
+      const batch = await request("get_capabilities", { query: { scopes: node.id } });
       // The batch answers a list; this detail asked about one.
       setCaps(
         batch.kind === "ok"

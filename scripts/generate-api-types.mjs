@@ -48,15 +48,13 @@ function typeOf(schema, path) {
     }
     return name;
   }
-  // utoipa emits `allOf: [{$ref}]` when a field carries a description beside a
-  // referenced schema. One member is a reference with a note on it; more than
-  // one is an intersection this generator does not claim to render.
+  // Utoipa emits `allOf: [{$ref}]` when a field carries a description beside a
+  // referenced schema, and multiple members for Rust response structs that
+  // use `serde(flatten)`. TypeScript intersections preserve both shapes.
   if (Array.isArray(schema.allOf)) {
-    if (schema.allOf.length !== 1) {
-      unsupported.push(`${path}: allOf with ${schema.allOf.length} members`);
-      return "unknown";
-    }
-    return typeOf(schema.allOf[0], path);
+    return schema.allOf
+      .map((member, index) => typeOf(member, `${path}.allOf[${index}]`))
+      .join(" & ");
   }
   if (Array.isArray(schema.oneOf) || Array.isArray(schema.anyOf)) {
     const members = schema.oneOf ?? schema.anyOf;
@@ -71,6 +69,7 @@ function typeOf(schema, path) {
 
   let rendered;
   if (concrete.length === 0) {
+    if (nullable) return "null";
     // No `type` at all: an untyped object (utoipa's `Object` value type) or a
     // free-form value.
     rendered = schema.enum ? enumOf(schema.enum) : "unknown";

@@ -12,39 +12,17 @@
  * the verdict rather than the status, which is exactly the mistake a
  * surface makes when it treats "did the call work" as "is the answer good".
  *
- * Both calls are hand-written: the audit plane is not on the OpenAPI
- * contract yet.
+ * Both calls use the generated public contract.
  */
 
-import { auditEvents, auditVerify } from "./api.mjs";
+import { request } from "./client.mjs";
+import type { AuditEventsResponse, AuditVerifyResponse } from "./generated/api.js";
 import { Loaded, useQuery, useRefresh } from "./Query.js";
 import { PageHeading } from "./Shell.js";
 import { whenOf } from "./people.mjs";
 
 /** How many rows the page asks for. A console is a window, not an export. */
 const PAGE = 50;
-
-interface Verification {
-  valid: boolean;
-  events: number;
-  head_seq: number;
-  head_hash: string;
-  broken_at?: number;
-  reason?: string;
-}
-
-interface Events {
-  events: {
-    seq: number;
-    occurred_at: string;
-    actor_kind: string;
-    actor_subject: string;
-    action: string;
-    resource: string;
-    outcome: string;
-    hash: string;
-  }[];
-}
 
 export function Audit() {
   return (
@@ -57,12 +35,12 @@ export function Audit() {
 }
 
 function Verify() {
-  const entry = useQuery("audit/verify", () => auditVerify());
+  const entry = useQuery("audit/verify", () => request("verify_audit_chain", {}));
   const retry = useRefresh("audit/verify");
   return (
     <section>
       <h2>Chain</h2>
-      <Loaded<Verification> entry={entry} what="the chain verification" onRetry={retry}>
+      <Loaded<AuditVerifyResponse> entry={entry} what="the chain verification" onRetry={retry}>
         {(body) => (
           <div className={body.valid ? "banner" : "banner error"} role="status">
             <p>
@@ -85,12 +63,22 @@ function Verify() {
 }
 
 function Recent() {
-  const entry = useQuery("audit/events", () => auditEvents(PAGE));
+  const entry = useQuery("audit/events", async () => {
+    // The audit collection is deliberately forward-keyset paginated. Read
+    // the authorised head first so "recent" means the tail of that same
+    // public chain instead of accidentally rendering its oldest page.
+    const verification = await request("verify_audit_chain", {});
+    if (verification.kind !== "ok") return verification;
+    const after = Math.max(0, verification.body.head_seq - PAGE);
+    return request("list_audit_events", {
+      query: { after: String(after), limit: String(PAGE) },
+    });
+  });
   const retry = useRefresh("audit/events");
   return (
     <section>
       <h2>Recent events</h2>
-      <Loaded<Events> entry={entry} what="the audit log" onRetry={retry}>
+      <Loaded<AuditEventsResponse> entry={entry} what="the audit log" onRetry={retry}>
         {(body) =>
           body.events.length === 0 ? (
             <p className="muted">Nothing recorded yet.</p>
