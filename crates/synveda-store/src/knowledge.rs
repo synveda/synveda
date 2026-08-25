@@ -126,6 +126,27 @@ pub struct KnowledgeSnapshot {
     pub transaction_to: Option<DateTime<Utc>>,
 }
 
+/// Content-free immutable timing evidence for an exact Knowledge revision.
+///
+/// The audit plane reads this under tenant-wide `AuditRead` to test explicit
+/// valid-time and transaction-time claims without acquiring `KnowledgeRead`
+/// or resolving title/body/summary (CPR-33, ADR-0092 decision 2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevisionTemporalEvidence {
+    /// Immutable revision address.
+    pub revision_id: KnowledgeRevisionId,
+    /// Stable aggregate the revision belongs to.
+    pub knowledge_item_id: KnowledgeItemId,
+    /// Semantic validity begins here, inclusive.
+    pub valid_from: DateTime<Utc>,
+    /// Semantic validity ends here, exclusive.
+    pub valid_to: Option<DateTime<Utc>>,
+    /// When this immutable revision entered the database.
+    pub transaction_time: DateTime<Utc>,
+    /// Canonical content hash, never content.
+    pub content_hash: String,
+}
+
 struct ItemRow {
     id: Uuid,
     tenant_id: Uuid,
@@ -982,6 +1003,54 @@ pub async fn revision(
     .await
     .map_err(storage_error)?;
     row.map(TryInto::try_into).transpose()
+}
+
+/// Read content-free temporal evidence for exact immutable revision ids.
+///
+/// Missing rows remain missing: forget may have removed plaintext and its
+/// revision row, and the audit caller must report that as unresolved instead
+/// of reconstructing or defaulting evidence.
+#[tracing::instrument(
+    name = "store.knowledge.revision_temporal_evidence",
+    skip_all,
+    fields(tenant.id = %tenant_id, knowledge.revisions = revision_ids.len()),
+    err(Display)
+)]
+pub async fn revision_temporal_evidence(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    revision_ids: &[KnowledgeRevisionId],
+) -> Result<Vec<RevisionTemporalEvidence>> {
+    if revision_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<Uuid> = revision_ids
+        .iter()
+        .map(KnowledgeRevisionId::as_uuid)
+        .collect();
+    let rows = sqlx::query!(
+        r#"select id, knowledge_item_id, valid_from, valid_to,
+                  transaction_time, content_hash
+             from knowledge_revisions
+            where tenant_id = $1 and id = any($2::uuid[])
+            order by transaction_time, id"#,
+        tenant_id.as_uuid(),
+        &ids,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| RevisionTemporalEvidence {
+            revision_id: KnowledgeRevisionId::from_uuid(row.id),
+            knowledge_item_id: KnowledgeItemId::from_uuid(row.knowledge_item_id),
+            valid_from: row.valid_from,
+            valid_to: row.valid_to,
+            transaction_time: row.transaction_time,
+            content_hash: row.content_hash,
+        })
+        .collect())
 }
 
 /// Lists a revision's sources whose own governed scopes the caller was

@@ -128,6 +128,13 @@ pub struct EventFilter {
     pub from: Option<DateTime<Utc>>,
     /// Exclusive upper bound on `occurred_at`.
     pub until: Option<DateTime<Utc>>,
+    /// Exact JSON containment predicate over the canonical payload.
+    ///
+    /// The gateway constructs this only from validated typed artifact,
+    /// session and context-run identifiers. Keeping the predicate structured
+    /// means no query interprets display strings or searches arbitrary JSON
+    /// text (CPR-33, ADR-0092 decision 1).
+    pub payload_contains: Option<Value>,
 }
 
 /// The chain head, for stamping an answer.
@@ -201,8 +208,9 @@ pub async fn search(
              and ($6::text is null or resource = $6)
              and ($7::timestamptz is null or occurred_at >= $7)
              and ($8::timestamptz is null or occurred_at < $8)
+             and ($9::jsonb is null or payload @> $9)
            order by seq
-           limit $9"#,
+           limit $10"#,
         tenant.as_uuid(),
         after,
         filter.actor_subject.as_deref(),
@@ -211,6 +219,7 @@ pub async fn search(
         filter.resource.as_deref(),
         filter.from,
         filter.until,
+        filter.payload_contains.as_ref(),
         limit,
     )
     .fetch_all(&mut *conn)
@@ -248,8 +257,8 @@ pub struct Disclosure {
 /// its substance (ADR-0045 decision 6).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DisclosedEntry {
-    /// Stable Knowledge aggregate served.
-    pub knowledge_item_id: String,
+    /// Stable Knowledge aggregate served. Absent in hashes-only retention.
+    pub knowledge_item_id: Option<String>,
     /// Exact immutable revision served. Absent in hashes-only retention.
     pub knowledge_revision_id: Option<String>,
     /// Canonical revision content hash.
@@ -371,28 +380,38 @@ pub async fn knowledge(
     tenant: TenantId,
     subject: &str,
     at: DateTime<Utc>,
+    before: i64,
     limit: i64,
 ) -> Result<Page<Disclosure>> {
     let frame = frame(&mut *conn, tenant).await?;
-    let rows = sqlx::query!(
+    let fetch = limit.checked_add(1).ok_or_else(|| Error::Invalid {
+        message: "audit Knowledge limit is too large".to_owned(),
+    })?;
+    let mut rows = sqlx::query!(
         r#"select seq, occurred_at, actor_kind, actor_subject, action, payload
            from audit_log
            where tenant_id = $1
              and action = 'session.context.composed'
              and actor_subject = $2
              and occurred_at <= $3
+             and seq < $4
            order by seq desc
-           limit $4"#,
+           limit $5"#,
         tenant.as_uuid(),
         subject,
         at,
-        limit,
+        before,
+        fetch,
     )
     .fetch_all(&mut *conn)
     .await
     .map_err(|err| storage_error("read audit knowledge", &err))?;
 
-    let truncated = i64::try_from(rows.len()).unwrap_or(i64::MAX) >= limit;
+    let truncated = i64::try_from(rows.len()).unwrap_or(i64::MAX) > limit;
+    if truncated {
+        rows.pop();
+    }
+    let lowest_read = rows.last().map(|row| row.seq);
     let mut items = rows
         .into_iter()
         .flat_map(|row| {
@@ -420,9 +439,99 @@ pub async fn knowledge(
         // lowest seq reached: a caller who wants more walks backwards from
         // it, which is the opposite direction to [`search`] and is why this
         // function assembles its own page rather than calling `page`.
-        next_cursor: truncated.then(|| first_seq.unwrap_or(0)),
+        next_cursor: truncated.then(|| lowest_read.unwrap_or(0)),
         items,
         frame,
+        first_seq,
+        last_seq,
+    })
+}
+
+/// One cursor page from a frozen contiguous chain prefix.
+///
+/// `through` is the prefix head captured by the first request. Later pages
+/// repeat it, so audit-read events appended while walking the export can never
+/// enter the artifact being assembled (CPR-33, ADR-0092 decision 4).
+#[tracing::instrument(
+    name = "audit.export_page",
+    skip_all,
+    fields(tenant.id = %tenant, after = after, through = ?through, limit = limit),
+    err(Display)
+)]
+pub async fn export_page(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    after: i64,
+    through: Option<i64>,
+    limit: i64,
+) -> Result<Page<StoredEvent>> {
+    let live = frame(&mut *conn, tenant).await?;
+    let through = through.unwrap_or(live.head_seq);
+    if through < 0 || through > live.head_seq {
+        return Err(Error::Invalid {
+            message: format!(
+                "audit export through must be between 0 and the current head {}",
+                live.head_seq
+            ),
+        });
+    }
+    if after < 0 || after > through {
+        return Err(Error::Invalid {
+            message: format!("audit export after must be between 0 and through {through}"),
+        });
+    }
+
+    let snapshot_hash = if through == 0 {
+        crate::chain::genesis_hash(tenant).to_vec()
+    } else {
+        sqlx::query_scalar!(
+            "select hash from audit_log where tenant_id = $1 and seq = $2",
+            tenant.as_uuid(),
+            through,
+        )
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(|err| storage_error("read audit export snapshot hash", &err))?
+        .ok_or_else(|| Error::Storage {
+            message: format!("audit chain has no row at frozen head {through}"),
+        })?
+    };
+
+    // Fetch one look-ahead row so `truncated` means another row definitely
+    // exists inside this frozen prefix, rather than merely that the page was
+    // exactly full.
+    let fetch = limit.checked_add(1).ok_or_else(|| Error::Invalid {
+        message: "audit export limit is too large".to_owned(),
+    })?;
+    let mut events = sqlx::query_as!(
+        StoredEvent,
+        r#"select seq, occurred_at, actor_kind, actor_subject, action,
+                  resource, outcome, payload, trace_id, prev_hash, hash
+             from audit_log
+            where tenant_id = $1 and seq > $2 and seq <= $3
+            order by seq
+            limit $4"#,
+        tenant.as_uuid(),
+        after,
+        through,
+        fetch,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|err| storage_error("read frozen audit export page", &err))?;
+    let truncated = i64::try_from(events.len()).unwrap_or(i64::MAX) > limit;
+    if truncated {
+        events.pop();
+    }
+    let first_seq = events.first().map(|event| event.seq);
+    let last_seq = events.last().map(|event| event.seq);
+    Ok(Page {
+        next_cursor: truncated.then_some(last_seq.unwrap_or(after)),
+        items: events,
+        frame: ChainFrame {
+            head_seq: through,
+            head_hash: snapshot_hash,
+        },
         first_seq,
         last_seq,
     })
@@ -444,8 +553,11 @@ pub struct Known {
     pub occasions: usize,
 }
 
-/// Fold disclosures to one row per Knowledge item: the revision *last* delivered at
-/// or before the instant asked at, with the number of occasions behind it.
+/// Fold disclosures to one row per retained Knowledge identity: the revision
+/// *last* delivered at or before the instant asked at, with the number of
+/// occasions behind it. Full/redacted evidence is keyed by stable item ID;
+/// hashes-only evidence is keyed by the retained content hash and never grows a
+/// synthetic item ID.
 ///
 /// Last-wins by `seq`, which is the chain's own order — not by
 /// `occurred_at`, which two events can share at microsecond precision.
@@ -457,7 +569,7 @@ pub fn fold_knowledge(disclosures: &[Disclosure]) -> Vec<Known> {
     for disclosure in disclosures {
         match known
             .iter_mut()
-            .find(|item| item.entry.knowledge_item_id == disclosure.entry.knowledge_item_id)
+            .find(|item| same_retained_identity(&item.entry, &disclosure.entry))
         {
             Some(item) => {
                 item.occasions += 1;
@@ -510,15 +622,22 @@ fn entries(payload: &Value) -> Vec<DisclosedEntry> {
 fn entry_for(payload: &Value, knowledge_item_id: &str) -> Option<DisclosedEntry> {
     entries(payload)
         .into_iter()
-        .find(|entry| entry.knowledge_item_id == knowledge_item_id)
+        .find(|entry| entry.knowledge_item_id.as_deref() == Some(knowledge_item_id))
 }
 
-/// One entry, read defensively: every field that is absent stays absent.
+/// One entry, read defensively: every field that is absent stays absent. A
+/// hashes-only trace is still evidence, so a content hash is sufficient to
+/// retain the entry; a value carrying neither an address nor a hash is not.
 fn entry_from(value: &Value) -> Option<DisclosedEntry> {
+    let knowledge_item_id = string_field(value, "knowledge_item_id");
+    let content_hash = string_field(value, "content_hash");
+    if knowledge_item_id.is_none() && content_hash.is_none() {
+        return None;
+    }
     Some(DisclosedEntry {
-        knowledge_item_id: string_field(value, "knowledge_item_id")?,
+        knowledge_item_id,
         knowledge_revision_id: string_field(value, "knowledge_revision_id"),
-        content_hash: string_field(value, "content_hash"),
+        content_hash,
         reason_codes: value
             .get("reason_codes")
             .and_then(Value::as_array)
@@ -531,6 +650,20 @@ fn entry_from(value: &Value) -> Option<DisclosedEntry> {
             })
             .unwrap_or_default(),
     })
+}
+
+/// Compare only evidence the configured retention mode actually kept. Item IDs
+/// dominate when present; addressless hashes-only rows can only be correlated
+/// by their content hash.
+fn same_retained_identity(left: &DisclosedEntry, right: &DisclosedEntry) -> bool {
+    match (
+        left.knowledge_item_id.as_deref(),
+        right.knowledge_item_id.as_deref(),
+    ) {
+        (Some(left), Some(right)) => left == right,
+        (None, None) => left.content_hash == right.content_hash,
+        _ => false,
+    }
 }
 
 /// A string field, or `None` — including when it is present but not a
@@ -562,7 +695,7 @@ mod tests {
             action: "session.context.composed".to_owned(),
             session_id: None,
             entry: DisclosedEntry {
-                knowledge_item_id: item.to_owned(),
+                knowledge_item_id: Some(item.to_owned()),
                 knowledge_revision_id: revision.map(ToOwned::to_owned),
                 ..DisclosedEntry::default()
             },
@@ -580,7 +713,7 @@ mod tests {
         assert_eq!(folded.len(), 2, "one row per item, not per delivery");
         let rec_a = folded
             .iter()
-            .find(|item| item.entry.knowledge_item_id == "item-a")
+            .find(|item| item.entry.knowledge_item_id.as_deref() == Some("item-a"))
             .expect("item-a folded");
         assert_eq!(
             rec_a.entry.knowledge_revision_id.as_deref(),
@@ -615,14 +748,35 @@ mod tests {
     #[test]
     fn hashes_only_absence_stays_absent() {
         let payload = json!({
-            "knowledge": [{"knowledge_item_id": "item-a", "content_hash": "1602..."}],
+            "knowledge": [{"content_hash": "1602..."}],
         });
 
-        let entry = entry_for(&payload, "item-a").expect("the entry is found");
+        let entry = entries(&payload).pop().expect("hash evidence is retained");
 
+        assert_eq!(entry.knowledge_item_id, None);
         assert_eq!(entry.content_hash.as_deref(), Some("1602..."));
         assert_eq!(entry.knowledge_revision_id, None);
         assert!(entry.reason_codes.is_empty());
+    }
+
+    #[test]
+    fn hashes_only_entries_fold_without_inventing_an_address() {
+        let mut first = disclosure(1, "discarded-address", None);
+        first.entry.knowledge_item_id = None;
+        first.entry.content_hash = Some("same-content".to_owned());
+        let mut second = disclosure(2, "discarded-address", None);
+        second.entry.knowledge_item_id = None;
+        second.entry.content_hash = Some("same-content".to_owned());
+
+        let folded = fold_knowledge(&[first, second]);
+
+        assert_eq!(folded.len(), 1);
+        assert_eq!(folded[0].entry.knowledge_item_id, None);
+        assert_eq!(
+            folded[0].entry.content_hash.as_deref(),
+            Some("same-content")
+        );
+        assert_eq!(folded[0].occasions, 2);
     }
 
     #[test]
@@ -653,6 +807,7 @@ mod tests {
         assert!(entries(&json!({"knowledge": []})).is_empty());
         assert!(entries(&json!({"block_hash": "abcd"})).is_empty());
         assert!(entries(&json!({"knowledge": "not-an-array"})).is_empty());
+        assert!(entries(&json!({"knowledge": [{}]})).is_empty());
         assert!(entry_for(&json!({"knowledge": [{"content_hash": "abcd"}]}), "item-a").is_none());
     }
 

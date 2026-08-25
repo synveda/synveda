@@ -176,7 +176,13 @@ still authorises and renders each visible proposal under its own scope.
   on next session start.
 - **Blame/lineage**: every published sentence of context traces to an author or a source
   session, through an approval, under a recorded policy version.
-- **Audit story**: the auditor reads proposals, not database rows.
+- **Audit story**: the auditor reads the tenant-complete hash chain through
+  `AuditRead`, not application tables. Typed artifact/context filters cite
+  canonical events; bitemporal Knowledge answers distinguish semantic valid
+  time from transaction/as-known time; a frozen-prefix export carries every
+  canonical hash input for offline verification. These are recorded decisions,
+  never a historical Cedar replay, and ordinary evidence resolves no content
+  or secret.
 
 ---
 

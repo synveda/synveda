@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **129 features filed, 98 delivered**;
+  Cursor frame has been replayed. **130 features filed, 99 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -167,6 +167,14 @@ Load-bearing facts about Phase 5:
   Cedar remains the authority. Advanced Reviews filters, decides, cancels and
   executes this common lifecycle; New Learnings and session quarantine remain
   their distinct candidate and admission boundaries.
+- CPR-33 (ADR-0092): audit query extends the existing tenant-complete chain,
+  not a replay or second store. Typed artifact/session/context filters,
+  distinct valid/as-known Knowledge evidence and exact effective
+  Configuration/relaxation/Skill/Knowledge references remain content-free
+  behind tenant-root `AuditRead`. Frozen-head cursor export contains every
+  canonical hash input and verifies offline; its own reads land after the
+  frozen prefix. Hashes-only evidence stays explicitly unresolved without an
+  invented address. The public contract has **165 operations**.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys

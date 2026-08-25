@@ -44,12 +44,13 @@ use synveda_types::context::{ContextFeedbackType, ContextReasonCode, TraceRetent
 use synveda_types::knowledge::{
     KnowledgeLifecycleState, KnowledgeRevision, KnowledgeSource, KnowledgeType,
 };
+use synveda_types::relaxation::CurrentRelaxation;
 use synveda_types::session::{ContextRun, Session};
 use synveda_types::{
-    CaptureCandidateId, ContextCandidate, ContextCandidateId, ContextCompletionStatus,
-    ContextFeedback, ContextFeedbackId, ContextRunId, ContextSelection, ContextSelectionId, Error,
-    KnowledgeItemId, KnowledgeRevisionId, PolicyAssignment, ProjectId, Result, ScopeId,
-    Sensitivity, SessionId, TenantId,
+    ArtifactFamily, ArtifactReference, CaptureCandidateId, ContextCandidate, ContextCandidateId,
+    ContextCompletionStatus, ContextFeedback, ContextFeedbackId, ContextRunId, ContextSelection,
+    ContextSelectionId, Error, KnowledgeItemId, KnowledgeRevisionId, PolicyAssignment, ProjectId,
+    Result, ScopeId, Sensitivity, SessionId, TenantId,
 };
 use utoipa::ToSchema;
 
@@ -634,6 +635,7 @@ struct PreparedContext {
     knowledge_scopes: Vec<ScopeId>,
     unreviewed_scopes: Vec<ScopeId>,
     configuration: EffectiveConfiguration,
+    relaxations: Vec<CurrentRelaxation>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -833,7 +835,41 @@ async fn prepare_context(
         knowledge_scopes,
         unreviewed_scopes,
         configuration,
+        relaxations: input.relaxations,
     })
+}
+
+fn configuration_audit_evidence(configuration: &EffectiveConfiguration) -> Value {
+    json!({
+        "scope_id": configuration.scope_id,
+        "binding_id": configuration.binding_id,
+        "binding_scope_id": configuration.binding_scope_id,
+        "artifact_id": configuration.artifact_id,
+        "version_id": configuration.version_id,
+        "content_hash": configuration.content_hash,
+        "policy_pack": configuration.document.policy_pack,
+    })
+}
+
+fn relaxation_audit_evidence(relaxations: &[CurrentRelaxation]) -> Vec<Value> {
+    relaxations
+        .iter()
+        .map(|current| {
+            json!({
+                "relaxation_id": current.relaxation.id,
+                "version_id": current.version.id,
+                "content_hash": current.version.content_hash,
+                "subject_identity_id": current.version.terms.subject_identity_id,
+                "target_scope_id": current.version.terms.target_scope_id,
+                "action": current.version.terms.action,
+                "max_sensitivity": current.version.terms.max_sensitivity,
+                "effective_start_at": current.version.effective_start_at,
+                "hard_expires_at": current.version.hard_expires_at,
+                "configuration_version_id": current.version.configuration_version_id,
+                "configuration_hash": current.version.configuration_hash,
+            })
+        })
+        .collect()
 }
 
 fn trace_retention_rank(mode: TraceRetentionMode) -> u8 {
@@ -1949,6 +1985,69 @@ async fn plan_context_run(
             .collect::<Vec<_>>(),
         TraceRetentionMode::Disabled => Vec::new(),
     };
+    let configuration_evidence = configuration_audit_evidence(&prepared.configuration);
+    let relaxation_evidence = relaxation_audit_evidence(&prepared.relaxations);
+    let mut artifact_references = Vec::new();
+    if matches!(
+        prepared.plan.trace_retention,
+        TraceRetentionMode::Full | TraceRetentionMode::Redacted
+    ) {
+        for candidate in candidates
+            .iter()
+            .filter(|candidate| candidate.selected_tokens.is_some())
+        {
+            if let (Some(item_id), Some(revision_id)) =
+                (candidate.item_id(), candidate.revision_id())
+            {
+                artifact_references.push(ArtifactReference::new(
+                    ArtifactFamily::Knowledge,
+                    item_id.to_string(),
+                    "selected",
+                    revision_id.to_string(),
+                    None,
+                )?);
+            }
+        }
+    }
+    if let (Some(artifact_id), Some(version_id)) = (
+        prepared.configuration.artifact_id,
+        prepared.configuration.version_id,
+    ) {
+        artifact_references.push(ArtifactReference::new(
+            ArtifactFamily::Configuration,
+            artifact_id.to_string(),
+            "effective",
+            version_id.to_string(),
+            None,
+        )?);
+        if let Some(binding_id) = prepared.configuration.binding_id {
+            artifact_references.push(ArtifactReference::new(
+                ArtifactFamily::Configuration,
+                binding_id.to_string(),
+                "bound",
+                version_id.to_string(),
+                None,
+            )?);
+        }
+    }
+    for relaxation in &prepared.relaxations {
+        artifact_references.push(ArtifactReference::new(
+            ArtifactFamily::PolicyRelaxation,
+            relaxation.relaxation.id.to_string(),
+            "effective",
+            relaxation.version.id.to_string(),
+            None,
+        )?);
+    }
+    for skill in &authored.skills {
+        artifact_references.push(ArtifactReference::new(
+            ArtifactFamily::Skill,
+            skill.binding_id.to_string(),
+            "advertised",
+            skill.version_id.to_string(),
+            None,
+        )?);
+    }
     audit::record(
         &mut tx,
         tenant_id,
@@ -1966,6 +2065,8 @@ async fn plan_context_run(
             "trace_retention_mode": prepared.plan.trace_retention,
             "configuration_version_id": prepared.configuration.version_id,
             "configuration_hash": prepared.configuration.content_hash,
+            "configuration": &configuration_evidence,
+            "relaxations": &relaxation_evidence,
             "candidates": candidate_refs,
         }),
     )
@@ -1984,6 +2085,8 @@ async fn plan_context_run(
             "tokens": tokens,
             "configuration_version_id": prepared.configuration.version_id,
             "configuration_hash": prepared.configuration.content_hash,
+            "configuration": &configuration_evidence,
+            "relaxations": &relaxation_evidence,
             "selections": &selection_refs,
         }),
     )
@@ -1998,6 +2101,7 @@ async fn plan_context_run(
             "authz": audit::decision_context(Action::SessionWrite, &prepared.session_allowed),
             "session_id": session_id,
             "context_run_id": run_id,
+            "artifact_references": artifact_references,
             "task_hash": query.as_deref().map(task_hash),
             "block_hash": run.block_hash,
             "entry_count": run.entry_count,
@@ -2021,6 +2125,8 @@ async fn plan_context_run(
             "budget_tokens": run.budget_tokens,
             "configuration_version_id": prepared.configuration.version_id,
             "configuration_hash": prepared.configuration.content_hash,
+            "configuration": configuration_evidence,
+            "relaxations": relaxation_evidence,
             "degraded": run.degraded,
             "retrieval_version": RETRIEVAL_VERSION,
             "index_version": INDEX_VERSION,

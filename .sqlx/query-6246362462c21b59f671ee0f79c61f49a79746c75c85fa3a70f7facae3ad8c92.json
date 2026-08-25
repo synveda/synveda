@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select seq, occurred_at, actor_kind, actor_subject, action,\n                  resource, outcome, payload, trace_id, prev_hash, hash\n           from audit_log\n           where tenant_id = $1\n             and seq > $2\n             and ($3::text is null or actor_subject = $3)\n             and ($4::text[] is null or action = any($4))\n             and ($5::text is null or outcome = $5)\n             and ($6::text is null or resource = $6)\n             and ($7::timestamptz is null or occurred_at >= $7)\n             and ($8::timestamptz is null or occurred_at < $8)\n           order by seq\n           limit $9",
+  "query": "select seq, occurred_at, actor_kind, actor_subject, action,\n                  resource, outcome, payload, trace_id, prev_hash, hash\n             from audit_log\n            where tenant_id = $1 and seq > $2 and seq <= $3\n            order by seq\n            limit $4",
   "describe": {
     "columns": [
       {
@@ -63,12 +63,7 @@
       "Left": [
         "Uuid",
         "Int8",
-        "Text",
-        "TextArray",
-        "Text",
-        "Text",
-        "Timestamptz",
-        "Timestamptz",
+        "Int8",
         "Int8"
       ]
     },
@@ -86,5 +81,5 @@
       false
     ]
   },
-  "hash": "312f8e0fbb6416f46b83719ff728b181b01ebb53263c389e03093863b1828a7c"
+  "hash": "6246362462c21b59f671ee0f79c61f49a79746c75c85fa3a70f7facae3ad8c92"
 }

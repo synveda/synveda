@@ -1153,6 +1153,48 @@
             }
           },
           {
+            "name": "artifact_family",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifact_version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "context_run_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
             "name": "after",
             "in": "query",
             "required": false,
@@ -1220,6 +1262,91 @@
         ]
       }
     },
+    "/v1/audit/export": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "`GET /v1/audit/export` — a cursor page from one frozen, offline-verifiable\nchain prefix (CPR-33, ADR-0092 decisions 4 and 5).",
+        "operationId": "export_audit_chain",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "through",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A frozen deterministic chain-export page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditExportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The cursor, frozen head or page bound is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Audit read is not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/audit/knowledge": {
       "get": {
         "tags": [
@@ -1237,12 +1364,30 @@
             }
           },
           {
-            "name": "at",
+            "name": "valid_at",
             "in": "query",
             "required": false,
             "schema": {
               "type": "string",
               "format": "date-time"
+            }
+          },
+          {
+            "name": "as_known_at",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
             }
           },
           {
@@ -13010,7 +13155,6 @@
           "actor_kind",
           "actor_subject",
           "action",
-          "knowledge_item_id",
           "reason_codes"
         ],
         "properties": {
@@ -13032,7 +13176,10 @@
             ]
           },
           "knowledge_item_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "knowledge_revision_id": {
             "type": [
@@ -13175,6 +13322,130 @@
           }
         ]
       },
+      "AuditExportEvent": {
+        "type": "object",
+        "description": "Every canonical event input needed by an offline verifier.",
+        "required": [
+          "seq",
+          "occurred_at",
+          "actor_kind",
+          "actor_subject",
+          "action",
+          "resource",
+          "outcome",
+          "payload",
+          "prev_hash",
+          "hash"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor_kind": {
+            "type": "string"
+          },
+          "actor_subject": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "payload": {},
+          "prev_hash": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "trace_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AuditExportPage": {
+        "type": "object",
+        "description": "One page from a frozen deterministic audit-chain prefix.",
+        "required": [
+          "format",
+          "hash_algorithm",
+          "canonicalization",
+          "tenant_id",
+          "genesis_hash",
+          "snapshot_seq",
+          "snapshot_hash",
+          "events",
+          "truncated"
+        ],
+        "properties": {
+          "canonicalization": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditExportEvent"
+            }
+          },
+          "first_seq": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "format": {
+            "type": "string"
+          },
+          "genesis_hash": {
+            "type": "string"
+          },
+          "hash_algorithm": {
+            "type": "string"
+          },
+          "last_seq": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "next_cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "snapshot_hash": {
+            "type": "string"
+          },
+          "snapshot_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
       "AuditFrame": {
         "type": "object",
         "description": "Where the chain stood when the answer was taken, and what the answer\ncovered (ADR-0045 decision 9).",
@@ -13232,12 +13503,15 @@
             "type": "object",
             "required": [
               "subject",
-              "at",
+              "valid_at",
+              "as_known_at",
               "known",
+              "outside_time",
+              "unresolved",
               "note"
             ],
             "properties": {
-              "at": {
+              "as_known_at": {
                 "type": "string",
                 "format": "date-time"
               },
@@ -13246,14 +13520,32 @@
                 "items": {
                   "$ref": "#/components/schemas/AuditKnownView"
                 },
-                "description": "One row per item, carrying the revision *last* delivered at or\nbefore `at`."
+                "description": "One row per item, carrying the revision *last* delivered at or\nbefore `as_known_at` and valid at `valid_at`."
               },
               "note": {
                 "type": "string",
                 "description": "What this answer is, stated in it: what A was served, not what A\ncould have asked for (ADR-0045 decision 5)."
               },
+              "outside_time": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AuditKnownView"
+                },
+                "description": "Delivered revisions that are retained but outside the requested\nvalid/transaction-time pair. They are evidence, not part of `known`."
+              },
               "subject": {
                 "type": "string"
+              },
+              "unresolved": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AuditKnownView"
+                },
+                "description": "Hashes-only or erased delivery evidence whose temporal interval can no\nlonger be resolved. It is not silently counted as known."
+              },
+              "valid_at": {
+                "type": "string",
+                "format": "date-time"
               }
             }
           }
@@ -13263,12 +13555,12 @@
         "type": "object",
         "description": "One Knowledge item a subject was last served, with what they got.",
         "required": [
-          "knowledge_item_id",
           "reason_codes",
           "seq",
           "occurred_at",
           "action",
-          "occasions"
+          "occasions",
+          "temporal_status"
         ],
         "properties": {
           "action": {
@@ -13282,7 +13574,11 @@
             ]
           },
           "knowledge_item_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable aggregate address when retained. Hashes-only traces deliberately\nomit it and remain in `unresolved` as content-free evidence."
           },
           "knowledge_revision_id": {
             "type": [
@@ -13310,6 +13606,34 @@
             "type": "integer",
             "format": "int64",
             "description": "The chain position of the last delivery — the evidence."
+          },
+          "temporal_status": {
+            "type": "string",
+            "description": "`valid`, `outside_valid_time`, `not_known_at` or `unresolved`."
+          },
+          "transaction_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Immutable revision transaction time, when retained."
+          },
+          "valid_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Immutable revision valid-time start, when retained."
+          },
+          "valid_to": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Immutable revision valid-time end, when bounded and retained."
           }
         }
       },
@@ -22583,6 +22907,7 @@
         "type": "object",
         "description": "Evidence for one generated configuration entry.",
         "required": [
+          "server_id",
           "binding_id",
           "version_id",
           "digest"
@@ -22596,6 +22921,11 @@
           "digest": {
             "type": "string",
             "description": "Immutable version digest."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable server id."
           },
           "version_id": {
             "type": "string",

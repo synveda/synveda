@@ -2135,6 +2135,27 @@ CPR-32  Unified approvals across governed artifacts (XL)
   survives; audit, PDP, RLS, focused acceptance, demo, `make ci` and
   `make db-test` pass. ADR-0091.
 
+CPR-33  Context-platform audit query and deterministic export (XL)
+  Filed 2026-08-25 by the autonomous continuation. Re-cut the existing
+  tenant-complete AuditRead plane over current Knowledge, sessions, governed
+  artifact families and effective runtime governance without replaying a
+  historical PDP decision. AC: the cursor-keyset event query accepts exact
+  typed artifact, session and context-run filters; artifact lifecycle audit
+  evidence consistently carries immutable typed references from proposal
+  through apply/reject/expiry; the Knowledge answer names distinct valid-time
+  and as-known transaction-time instants and returns only revisions whose
+  immutable temporal evidence supports the claim, with erased/hashes-only
+  evidence explicitly unresolved rather than invented; context composition
+  records exact selected Knowledge/Skill versions, Configuration aggregate,
+  binding, version, digest and active relaxation versions actually used; a
+  frozen-head cursor export contains every canonical hash input and can be
+  assembled and verified offline, while the export's own audited reads fall
+  after its frozen boundary; ordinary audit payloads remain content- and
+  secret-free behind tenant-wide AuditRead; generated OpenAPI, console and
+  public-HTTP CLI surfaces expose query/export/verification; old record-noun
+  query branches and misleading storage-coupled audit claims are deleted;
+  focused tests, demo, `make ci` and `make db-test` pass. ADR-0092.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2228,7 +2249,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

@@ -103,7 +103,7 @@ only through its original PDP- and revision-checked command path.
 ## Project status
 
 **Phases 0–2 are complete. Phase 5 is re-cutting the product while Phase 3 is
-paused.** 98 of 129 filed features are delivered, each with acceptance
+paused.** 99 of 130 filed features are delivered, each with acceptance
 evidence and, where it has a runtime, a runnable script in [`demos/`](demos/).
 
 It installs, on somebody else's machine, with Docker as the only prerequisite:
@@ -127,10 +127,10 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration and policy relaxations | 🚧 32 packages delivered; programme continues |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations and offline-verifiable audit export | 🚧 33 packages delivered; programme continues |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **129
-in total, 98 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **130
+in total, 99 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
@@ -193,8 +193,11 @@ Published benchmark scores, and what they do and do not measure:
   enterprise are documents over the same binary and schema. Create, publish,
   bind, pin, disable and rollback all remain VedaFlow changes; capture batches
   and context runs cite the exact version and digest they used.
-- **Audit** — a tamper-evident chain, plus a query surface that answers
-  *"who could see X on date D"* and *"what did agent A know at time T"*.
+- **Audit** — a tamper-evident chain with exact artifact/session/context-run
+  filters, distinct valid-time and as-known-time Knowledge evidence, and a
+  frozen tenant-bound export that verifies offline. It answers *"who was served
+  revision X?"* and *"what did agent A know at time T?"* from recorded
+  decisions without replaying historical authority or resolving content.
 - **Governed assets** — prompt templates, context packs, and an
   Agent Skills-compatible immutable catalogue where installing, updating,
   binding or rolling back executable content is a typed VedaFlow change and

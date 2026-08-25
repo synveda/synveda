@@ -1046,54 +1046,7 @@ async fn open_command(
 ) -> Result<SkillMutationResult> {
     let actor = identity_of(&authorization.input, "changing a skill")?;
     let payload_hash = command_payload_hash(command)?;
-    let artifact_reference = match command {
-        SkillCommand::Install {
-            skill_id,
-            version_id,
-            ..
-        } => ArtifactReference::new(
-            ArtifactFamily::Skill,
-            skill_id.to_string(),
-            command.kind(),
-            version_id.to_string(),
-            None,
-        )?,
-        SkillCommand::Update {
-            skill_id,
-            expected_current_version_id,
-            version_id,
-            ..
-        } => ArtifactReference::new(
-            ArtifactFamily::Skill,
-            skill_id.to_string(),
-            command.kind(),
-            version_id.to_string(),
-            Some(expected_current_version_id.to_string()),
-        )?,
-        SkillCommand::Bind {
-            binding_id,
-            pinned_version_id,
-            ..
-        } => ArtifactReference::new(
-            ArtifactFamily::Skill,
-            binding_id.to_string(),
-            command.kind(),
-            pinned_version_id.map_or_else(|| payload_hash.clone(), |id| id.to_string()),
-            None,
-        )?,
-        SkillCommand::SetBinding {
-            binding_id,
-            expected_revision,
-            pinned_version_id,
-            ..
-        } => ArtifactReference::new(
-            ArtifactFamily::Skill,
-            binding_id.to_string(),
-            command.kind(),
-            pinned_version_id.map_or_else(|| payload_hash.clone(), |id| id.to_string()),
-            Some(expected_revision.to_string()),
-        )?,
-    };
+    let artifact_reference = skill_artifact_reference(command, &payload_hash)?;
     let manifest = canonicalise(&json!({
         "command": command.kind(),
         "payload_hash": payload_hash,
@@ -1191,6 +1144,60 @@ async fn open_command(
         claim.remember(tx, tenant, proposal.id.as_uuid()).await?;
     }
     Ok(result)
+}
+
+fn skill_artifact_reference(
+    command: &SkillCommand,
+    payload_hash: &str,
+) -> Result<ArtifactReference> {
+    match command {
+        SkillCommand::Install {
+            skill_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Skill,
+            skill_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            None,
+        ),
+        SkillCommand::Update {
+            skill_id,
+            expected_current_version_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Skill,
+            skill_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            Some(expected_current_version_id.to_string()),
+        ),
+        SkillCommand::Bind {
+            binding_id,
+            pinned_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Skill,
+            binding_id.to_string(),
+            command.kind(),
+            pinned_version_id.map_or_else(|| payload_hash.to_owned(), |id| id.to_string()),
+            None,
+        ),
+        SkillCommand::SetBinding {
+            binding_id,
+            expected_revision,
+            pinned_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Skill,
+            binding_id.to_string(),
+            command.kind(),
+            pinned_version_id.map_or_else(|| payload_hash.to_owned(), |id| id.to_string()),
+            Some(expected_revision.to_string()),
+        ),
+    }
 }
 
 async fn apply_loaded(
@@ -1312,6 +1319,7 @@ async fn apply_loaded(
                     "change_id": change_id,
                     "command": command.kind(),
                     "payload_hash": payload_hash,
+                    "artifact_references": [skill_artifact_reference(command, payload_hash)?],
                     "reason_code": reason,
                 }),
             )
@@ -1362,6 +1370,7 @@ async fn apply_loaded(
             "change_id": change_id,
             "command": command.kind(),
             "payload_hash": payload_hash,
+            "artifact_references": [skill_artifact_reference(command, payload_hash)?],
             "skill_id": applied_result.skill_id,
             "version_id": applied_result.version_id,
             "binding_id": applied_result.binding_id,
@@ -2367,6 +2376,13 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<SkillId>) 
                 "skill_id": skill.id,
                 "version_id": version.id,
                 "bundle_digest": store::hex_32(&version.bundle_digest),
+                "artifact_references": [ArtifactReference::new(
+                    ArtifactFamily::Skill,
+                    skill.id.to_string(),
+                    "resolved",
+                    version.id.to_string(),
+                    None,
+                )?],
                 "authz": audit::decision_context(Action::SkillRead, &authorized),
                 "content_served": false,
             }),
@@ -2563,6 +2579,13 @@ pub(crate) async fn get_file(
                 "version_id": version_id,
                 "path": path,
                 "object_hash": object_hash.to_hex(),
+                "artifact_references": [ArtifactReference::new(
+                    ArtifactFamily::Skill,
+                    id.to_string(),
+                    "resource_loaded",
+                    version_id.to_string(),
+                    None,
+                )?],
                 "authz": audit::decision_context(Action::SkillRead, &authorized),
             }),
         )
@@ -2976,6 +2999,22 @@ pub(crate) async fn record_usage(
                     "skill_id": skill.id,
                     "version_id": version.id,
                     "session_id": stored.session_id,
+                    "artifact_references": [
+                        ArtifactReference::new(
+                            ArtifactFamily::Skill,
+                            skill.id.to_string(),
+                            stage.as_str(),
+                            version.id.to_string(),
+                            None,
+                        )?,
+                        ArtifactReference::new(
+                            ArtifactFamily::Skill,
+                            binding.id.to_string(),
+                            stage.as_str(),
+                            version.id.to_string(),
+                            Some(binding.revision.to_string()),
+                        )?,
+                    ],
                     "stage": stage.as_str(),
                     "evidence": evidence.as_str(),
                     "authz": {

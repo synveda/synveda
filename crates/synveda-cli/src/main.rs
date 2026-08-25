@@ -1281,6 +1281,97 @@ enum AuditCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Search policy-visible audit events through structured content-free filters.
+    Events {
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Exact acting subject.
+        #[arg(long)]
+        actor_subject: Option<String>,
+        /// Exact audit action.
+        #[arg(long)]
+        action: Option<String>,
+        /// Exact outcome (`allow`, `deny`, `success`, or `failure`).
+        #[arg(long)]
+        outcome: Option<String>,
+        /// Exact content-free resource string.
+        #[arg(long)]
+        resource: Option<String>,
+        /// Inclusive RFC 3339 occurrence-time bound.
+        #[arg(long)]
+        from: Option<String>,
+        /// Exclusive RFC 3339 occurrence-time bound.
+        #[arg(long)]
+        until: Option<String>,
+        /// Governed artifact family.
+        #[arg(long)]
+        artifact_family: Option<String>,
+        /// Stable governed artifact id.
+        #[arg(long, requires = "artifact_family")]
+        artifact_id: Option<String>,
+        /// Exact immutable artifact version.
+        #[arg(long, requires = "artifact_family")]
+        artifact_version: Option<String>,
+        /// Exact session id.
+        #[arg(long)]
+        session_id: Option<String>,
+        /// Exact context-run id.
+        #[arg(long)]
+        context_run_id: Option<String>,
+        /// Forward keyset cursor.
+        #[arg(long, default_value_t = 0)]
+        after: i64,
+        /// Maximum page size.
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+        /// Print the complete cursor-page response as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reconstruct content-free Knowledge evidence at valid and transaction times.
+    Knowledge {
+        /// Subject whose served Knowledge is being reconstructed.
+        subject: String,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Valid-time instant, RFC 3339. Defaults to `as-known-at`.
+        #[arg(long)]
+        valid_at: Option<String>,
+        /// Transaction-time instant, RFC 3339. Defaults to now.
+        #[arg(long)]
+        as_known_at: Option<String>,
+        /// Reverse keyset cursor (exclusive audit sequence).
+        #[arg(long)]
+        before: Option<i64>,
+        /// Maximum page size.
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+        /// Print the complete temporal response as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Export one frozen tenant-bound chain prefix for offline verification.
+    Export {
+        /// Destination JSON file; an existing file is never overwritten.
+        #[arg(long)]
+        output: std::path::PathBuf,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Cursor page size used while assembling the frozen prefix.
+        #[arg(long, default_value_t = 1000)]
+        page_size: i64,
+    },
+    /// Verify a previously exported chain without contacting Synveda.
+    VerifyExport {
+        /// Export JSON file.
+        path: std::path::PathBuf,
+        /// Print the verification summary as JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2376,6 +2467,74 @@ async fn run(cli: Cli) -> Result<(), String> {
             limit,
             json,
         }) => audit::tail(&profile_name(profile), limit, json).await,
+        Command::Audit(AuditCommand::Events {
+            profile,
+            actor_subject,
+            action,
+            outcome,
+            resource,
+            from,
+            until,
+            artifact_family,
+            artifact_id,
+            artifact_version,
+            session_id,
+            context_run_id,
+            after,
+            limit,
+            json,
+        }) => {
+            audit::events(
+                &profile_name(profile),
+                audit::EventQuery {
+                    actor_subject,
+                    action,
+                    outcome,
+                    resource,
+                    from,
+                    until,
+                    artifact_family,
+                    artifact_id,
+                    artifact_version,
+                    session_id,
+                    context_run_id,
+                    after,
+                    limit,
+                },
+                json,
+            )
+            .await
+        }
+        Command::Audit(AuditCommand::Knowledge {
+            subject,
+            profile,
+            valid_at,
+            as_known_at,
+            before,
+            limit,
+            json,
+        }) => {
+            audit::knowledge(
+                &profile_name(profile),
+                audit::KnowledgeQuery {
+                    subject,
+                    valid_at,
+                    as_known_at,
+                    before,
+                    limit,
+                },
+                json,
+            )
+            .await
+        }
+        Command::Audit(AuditCommand::Export {
+            output,
+            profile,
+            page_size,
+        }) => audit::export(&profile_name(profile), &output, page_size).await,
+        Command::Audit(AuditCommand::VerifyExport { path, json }) => {
+            audit::verify_export_file(&path, json)
+        }
         Command::Proposal(command) => match command {
             ProposalCommand::List {
                 scope,

@@ -163,6 +163,11 @@ command. The gateway resolves the tenant from that bearer and applies
 synveda whoami
 synveda audit verify
 synveda audit tail
+synveda audit events --artifact-family knowledge --artifact-id <id>
+synveda audit knowledge alice --valid-at 2026-08-25T12:00:00Z \
+  --as-known-at 2026-08-25T12:30:00Z
+synveda audit export --output audit-chain.json
+synveda audit verify-export audit-chain.json
 ```
 
 The chain covers every act since installation and holds exactly **one**
@@ -170,6 +175,16 @@ break-glass event: admitting the tenant, before any person existed to attribute
 it to. Everything after it — the tenant root, your `administrator` grant, each
 scope, each observed turn, the proposal — is attributed to you and hash-chained
 to what came before.
+
+Artifact, session and context-run filters match typed identifiers recorded by
+the governed operation; they do not search message or artifact content. The two
+Knowledge instants are deliberately different: `valid-at` asks when the fact
+was semantically true, while `as-known-at` asks which immutable revision and
+delivery evidence had reached Synveda by then. Erased or hashes-only evidence
+is labelled unresolved rather than reconstructed. Export freezes its head
+before recording its own read, pages that exact prefix through the public API,
+and writes a tenant-bound JSON bundle. `verify-export` recomputes the BLAKE3
+chain without a bearer, gateway or database.
 
 ## 8. Connect an agent
 

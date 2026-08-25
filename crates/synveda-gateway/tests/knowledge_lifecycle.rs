@@ -1135,6 +1135,22 @@ async fn review_is_live_and_forget_leaves_only_content_free_evidence() {
         !audit_text.contains(sentinel),
         "ordinary audit evidence must retain hashes and IDs, not erased content"
     );
+    for event in audit.iter().filter(|event| {
+        matches!(
+            event.action.as_str(),
+            "knowledge.change.applied"
+                | "knowledge.change.rejected"
+                | "knowledge.erased"
+                | "knowledge.erasure.blocked"
+        )
+    }) {
+        assert!(
+            event.payload["artifact_references"]
+                .as_array()
+                .is_some_and(|references| !references.is_empty()),
+            "terminal Knowledge evidence lost its typed address: {event:?}"
+        );
+    }
 }
 
 /// CPR-17's public acceptance seam. This deliberately enters mutations only

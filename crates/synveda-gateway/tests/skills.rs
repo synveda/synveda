@@ -709,4 +709,18 @@ async fn immutable_versions_bindings_usage_and_tests_share_one_governed_path() {
             "missing {required} in {actions:?}"
         );
     }
+    let untyped_terminal: i64 = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from audit_log
+           where tenant_id = $1
+             and action in ('skill.change.applied', 'skill.change.rejected')
+             and not (payload @> '{"artifact_references":[{"family":"skill"}]}'::jsonb)"#,
+        world.tenant.id.as_uuid(),
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .expect("check terminal Skill artifact references");
+    assert_eq!(
+        untyped_terminal, 0,
+        "terminal Skill evidence lost its typed address"
+    );
 }

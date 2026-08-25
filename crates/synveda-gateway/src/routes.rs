@@ -217,6 +217,7 @@ define_routes! {
     "/v1/quarantine/{event_id}/release" => [POST crate::quarantine::release],
     "/v1/quarantine/{event_id}/reject" => [POST crate::quarantine::reject],
     "/v1/audit/events" => [GET crate::audit_query::events],
+    "/v1/audit/export" => [GET crate::audit_query::export],
     "/v1/audit/disclosures" => [GET crate::audit_query::disclosures],
     "/v1/audit/knowledge" => [GET crate::audit_query::knowledge],
     "/v1/audit/verify" => [GET crate::audit_query::verify],

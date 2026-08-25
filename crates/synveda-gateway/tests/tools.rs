@@ -761,6 +761,21 @@ async fn versions_discovery_bindings_config_and_tests_share_one_governed_path() 
             "missing {required} in {actions:?}"
         );
     }
+    let untyped_terminal: i64 = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from audit_log
+           where tenant_id = $1
+             and action in ('tool.change.applied', 'tool.change.rejected',
+                            'tool.configuration.generated')
+             and not (payload ? 'artifact_references')"#,
+        world.tenant.as_uuid(),
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .expect("check terminal Tool artifact references");
+    assert_eq!(
+        untyped_terminal, 0,
+        "terminal Tool evidence lost its typed address"
+    );
     let plaintext_leaks: i64 = sqlx::query_scalar!(
         r#"select count(*) as "count!" from audit_log
            where tenant_id = $1 and payload::text like $2"#,

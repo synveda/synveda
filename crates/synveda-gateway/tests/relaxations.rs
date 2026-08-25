@@ -446,6 +446,22 @@ async fn personal_auto_apply_uses_vedaflow_and_immutable_versions() {
     .await
     .expect("count applied audit events");
     assert_eq!((opened, applied), (3, 3));
+    let untyped_terminal = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from audit_log
+           where tenant_id = $1
+             and action in ('policy.relaxation.change.applied',
+                            'policy.relaxation.change.rejected',
+                            'policy.relaxation.expired')
+             and not (payload @> '{"artifact_references":[{"family":"policy_relaxation"}]}'::jsonb)"#,
+        world.tenant.as_uuid(),
+    )
+    .fetch_one(&world.state.pool)
+    .await
+    .expect("check terminal relaxation artifact references");
+    assert_eq!(
+        untyped_terminal, 0,
+        "terminal relaxation evidence lost its typed address"
+    );
     let old_table = sqlx::query_scalar!(r#"select to_regclass('policy_lapses')::text as "name?""#)
         .fetch_one(&world.state.pool)
         .await

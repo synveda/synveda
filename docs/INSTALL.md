@@ -285,9 +285,19 @@ synveda scope tree                          # your organisation
 synveda recall --query "..."                 # a governed read
 synveda audit tail --limit 20 # policy-visible recent activity
 synveda audit verify         # the caller's tenant chain
+synveda audit events --context-run-id <uuid> # content-free exact evidence
+synveda audit export --output audit-chain.json # frozen public-API prefix
+synveda audit verify-export audit-chain.json # offline; no profile needed
 ```
 
 Traces are at <http://localhost:16686>.
+
+Audit query and export require tenant-wide `audit.read`; a grant below the
+tenant root is refused rather than served a misleading partial chain. The
+export command never accepts a tenant or database URL, verifies every canonical
+hash input before its atomic no-overwrite write, and contains identifiers,
+hashes, decisions and provenance—not Knowledge bodies, Skill files, Tool
+credentials or Configuration documents.
 
 ## Connect an AI client
 

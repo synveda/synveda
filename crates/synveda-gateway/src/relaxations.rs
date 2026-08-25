@@ -571,17 +571,11 @@ fn command_payload_hash(command: &RelaxationCommand) -> Result<String> {
         .to_string())
 }
 
-async fn open_command(
-    state: &AppState,
-    tx: &mut PgConnection,
-    tenant: TenantId,
+fn relaxation_artifact_reference(
     command: &RelaxationCommand,
-    authorization: &CommandAuthorization,
-    claim: &Claim,
-) -> Result<RelaxationMutationResult> {
-    let actor = identity_of(&authorization.input)?;
-    let payload_hash = command_payload_hash(command)?;
-    let artifact_reference = match command {
+    payload_hash: &str,
+) -> Result<ArtifactReference> {
+    match command {
         RelaxationCommand::Create {
             relaxation_id,
             version_id,
@@ -592,7 +586,7 @@ async fn open_command(
             command.kind(),
             version_id.to_string(),
             None,
-        )?,
+        ),
         RelaxationCommand::Revise {
             relaxation_id,
             expected_current_version_id,
@@ -604,7 +598,7 @@ async fn open_command(
             command.kind(),
             version_id.to_string(),
             Some(expected_current_version_id.to_string()),
-        )?,
+        ),
         RelaxationCommand::Revoke {
             relaxation_id,
             expected_current_version_id,
@@ -613,10 +607,23 @@ async fn open_command(
             ArtifactFamily::PolicyRelaxation,
             relaxation_id.to_string(),
             command.kind(),
-            payload_hash.clone(),
+            payload_hash.to_owned(),
             Some(expected_current_version_id.to_string()),
-        )?,
-    };
+        ),
+    }
+}
+
+async fn open_command(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    command: &RelaxationCommand,
+    authorization: &CommandAuthorization,
+    claim: &Claim,
+) -> Result<RelaxationMutationResult> {
+    let actor = identity_of(&authorization.input)?;
+    let payload_hash = command_payload_hash(command)?;
+    let artifact_reference = relaxation_artifact_reference(command, &payload_hash)?;
     let manifest = canonicalise(&json!({
         "command": command.kind(),
         "payload_hash": payload_hash,
@@ -800,6 +807,7 @@ async fn apply_loaded(
                     "change_id": effect.change_id,
                     "command": effect.command.kind(),
                     "payload_hash": effect.payload_hash,
+                    "artifact_references": [relaxation_artifact_reference(effect.command, effect.payload_hash)?],
                     "relaxation_id": effect.command.relaxation_id(),
                     "reason_code": reason,
                 }),
@@ -851,6 +859,7 @@ async fn apply_loaded(
             "change_id": effect.change_id,
             "command": effect.command.kind(),
             "payload_hash": effect.payload_hash,
+            "artifact_references": [relaxation_artifact_reference(effect.command, effect.payload_hash)?],
             "relaxation_id": applied.relaxation_id,
             "version_id": applied.version_id,
             "revision": applied.revision,
@@ -1436,6 +1445,13 @@ async fn expire_tenant(pool: &sqlx::PgPool, tenant: TenantId) -> Result<usize> {
         {
             continue;
         }
+        let artifact_reference = ArtifactReference::new(
+            ArtifactFamily::PolicyRelaxation,
+            current.relaxation.id.to_string(),
+            "expired",
+            current.version.id.to_string(),
+            None,
+        )?;
         audit::record_as(
             &mut tx,
             tenant,
@@ -1444,6 +1460,7 @@ async fn expire_tenant(pool: &sqlx::PgPool, tenant: TenantId) -> Result<usize> {
             Resource::Scope(current.relaxation.governing_scope_id).to_string(),
             Outcome::Success,
             json!({
+                "artifact_references": [artifact_reference],
                 "relaxation_id": current.relaxation.id,
                 "version_id": current.version.id,
                 "change_id": current.version.proposal_id,

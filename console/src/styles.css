@@ -854,6 +854,17 @@ ul.sessions li.incomplete {
   gap: 0.15rem;
 }
 
+.audit-filters {
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.audit-filters input,
+.audit-filters select {
+  max-width: 18rem;
+}
+
 .run-summary {
   margin-bottom: 1.2rem;
 }

@@ -103,6 +103,10 @@ CPR-32, unified approvals, is delivered under ADR-0091; immutable typed
 artifact references, exact-commit verdicts and configurable separation of
 duties now span Knowledge, Skills, Tools, Configuration, relaxations and OKF
 through one generated Advanced Reviews lifecycle.
+CPR-33, context-platform audit query/export, is delivered under ADR-0092; one
+tenant-complete chain now supports typed artifact/session/context filters,
+distinct valid/as-known Knowledge evidence, exact effective-governance refs
+and frozen-head deterministic exports that verify offline without replay.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -214,7 +218,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 98 of 129 features delivered — see docs/backlog/STATUS.md for
+features done. 99 of 130 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -384,6 +388,15 @@ It was delivered the same day, making it **129 with 98 delivered**: every
 proposal now carries immutable typed artifact addresses, both verdicts bind
 the inspected commit, stricter profiles separate author, reviewer and effect
 actor, and generated Advanced Reviews completes that one common lifecycle.
+**CPR-33 was filed next**, making it **130 with 98 delivered**: it extends the
+existing tenant-complete audit plane with typed context-platform filters,
+explicit valid/as-known Knowledge evidence and frozen-head deterministic
+exports that can be verified offline, without replaying historical authority.
+It was delivered the same day, making it **130 with 99 delivered**: exact
+terminal artifact and effective-governance evidence now reaches the one
+content-free chain; hashes-only delivery remains honestly unresolved; and a
+public cursor walk freezes, assembles and verifies every canonical hash input
+offline while its own audited reads stay beyond the snapshot.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

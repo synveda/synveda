@@ -42,7 +42,7 @@ use synveda_types::knowledge::{
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
     GrantId, Identity, IdentityId, IdentityKind, KnowledgeItemId, KnowledgeRevisionId,
-    KnowledgeSourceId, ScopeId, Sensitivity, TenantId, TenantStatus,
+    KnowledgeSourceId, ScopeId, Sensitivity, TenantId, TenantStatus, TraceRetentionMode,
 };
 use tower::ServiceExt;
 
@@ -689,7 +689,10 @@ async fn what_did_this_agent_know_is_one_call_and_its_ids_resolve_bitemporally()
 
     let (status, body) = get(
         &w.app,
-        &format!("/v1/audit/knowledge?subject=alice&at={}", stamp(at)),
+        &format!(
+            "/v1/audit/knowledge?subject=alice&valid_at={0}&as_known_at={0}",
+            stamp(at)
+        ),
         &w.dana,
     )
     .await;
@@ -746,6 +749,9 @@ async fn what_did_this_agent_know_is_one_call_and_its_ids_resolve_bitemporally()
         "the answer names the exact revision, which makes it checkable: {runbook_row}"
     );
     assert!(runbook_row["content_hash"].is_string());
+    assert_eq!(runbook_row["temporal_status"].as_str(), Some("valid"));
+    assert!(runbook_row["valid_from"].is_string());
+    assert!(runbook_row["transaction_time"].is_string());
 
     // **bitemporal**: every id the answer names resolves to the version
     // that was current at the instant asked at. The audit answer and the
@@ -787,14 +793,18 @@ async fn what_did_this_agent_know_is_one_call_and_its_ids_resolve_bitemporally()
 }
 
 /// The instant is load-bearing: asked *before* any session ran, alice knew
-/// nothing. Same call, same subject, same corpus — only `at` differs.
+/// nothing. Same call, same subject, same corpus — only both explicit time
+/// axes differ.
 #[tokio::test]
 async fn the_instant_decides_what_the_answer_contains() {
     let Some(w) = world().await else { return };
 
     let (status, before) = get(
         &w.app,
-        &format!("/v1/audit/knowledge?subject=alice&at={}", stamp(w.before)),
+        &format!(
+            "/v1/audit/knowledge?subject=alice&valid_at={0}&as_known_at={0}",
+            stamp(w.before)
+        ),
         &w.dana,
     )
     .await;
@@ -805,11 +815,69 @@ async fn the_instant_decides_what_the_answer_contains() {
     );
 
     let (status, now) = get(&w.app, "/v1/audit/knowledge?subject=alice", &w.dana).await;
-    assert_eq!(status, StatusCode::OK, "`at` defaults to now");
+    assert_eq!(status, StatusCode::OK, "both time axes default to now");
     assert!(
         !now["known"].as_array().expect("known").is_empty(),
         "and by now she has been: {now}"
     );
+}
+
+/// A hashes-only runtime deliberately drops aggregate and revision addresses.
+/// The historical question must retain the hash as unresolved evidence rather
+/// than silently dropping the disclosure or fabricating an address.
+#[tokio::test]
+async fn hashes_only_disclosures_remain_visible_as_unresolved_hash_evidence() {
+    let Some(w) = world().await else { return };
+    let root = scopes::tenant_root(&w.pool, w.tenant)
+        .await
+        .expect("read tenant root")
+        .expect("tenant root exists");
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
+        .await
+        .expect("begin hashes-only Configuration change");
+    configuration_support::set_trace_retention(
+        &mut tx,
+        w.tenant,
+        root.id,
+        TraceRetentionMode::HashesOnly,
+    )
+    .await;
+    tx.commit()
+        .await
+        .expect("commit hashes-only Configuration change");
+
+    let run = session_seed::seed_run_for(&w.pool, w.tenant, "aud2-hashes", "alice").await;
+    let (status, body) = inject(&w.app, &w.alice, run.session_id).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "hashes-only composition: {body}"
+    );
+
+    let (status, body) = get(&w.app, "/v1/audit/knowledge?subject=alice&limit=1", &w.dana).await;
+    assert_eq!(status, StatusCode::OK, "hashes-only audit answer: {body}");
+    assert_eq!(body["known"], json!([]));
+    assert_eq!(body["outside_time"], json!([]));
+    let unresolved = body["unresolved"].as_array().expect("unresolved array");
+    assert!(
+        !unresolved.is_empty(),
+        "hash evidence must not disappear: {body}"
+    );
+    for row in unresolved {
+        assert!(
+            row.get("knowledge_item_id").is_none(),
+            "no invented item ID: {row}"
+        );
+        assert!(
+            row.get("knowledge_revision_id").is_none(),
+            "no invented revision ID: {row}"
+        );
+        assert!(
+            row["content_hash"].is_string(),
+            "retained hash evidence: {row}"
+        );
+        assert_eq!(row["temporal_status"], "unresolved");
+    }
 }
 
 // ── The refusals ─────────────────────────────────────────────────────
@@ -835,6 +903,7 @@ async fn a_subtree_bound_auditor_is_refused_rather_than_served_a_subset() {
             w.runbook
         ),
         "/v1/audit/knowledge?subject=alice".to_owned(),
+        "/v1/audit/export?limit=2".to_owned(),
         "/v1/audit/verify".to_owned(),
     ] {
         let (status, body) = get(&w.app, &path, &w.erin).await;
@@ -845,7 +914,7 @@ async fn a_subtree_bound_auditor_is_refused_rather_than_served_a_subset() {
         );
     }
 
-    // And the same four are open to the same role held at the root, so
+    // And the same five are open to the same role held at the root, so
     // the refusal is about *where the grant is written* and not about the
     // role.
     let (status, _) = get(&w.app, "/v1/audit/verify", &w.dana).await;
@@ -863,7 +932,11 @@ async fn a_subtree_bound_auditor_is_refused_rather_than_served_a_subset() {
 async fn the_subject_of_an_audit_answer_cannot_read_the_audit_plane() {
     let Some(w) = world().await else { return };
 
-    for path in ["/v1/audit/events", "/v1/audit/knowledge?subject=alice"] {
+    for path in [
+        "/v1/audit/events",
+        "/v1/audit/knowledge?subject=alice",
+        "/v1/audit/export",
+    ] {
         let (status, body) = get(&w.app, path, &w.alice).await;
         assert_eq!(
             status,
@@ -893,6 +966,7 @@ async fn no_knowledge_content_reaches_any_audit_answer() {
             w.runbook
         ),
         "/v1/audit/knowledge?subject=alice".to_owned(),
+        "/v1/audit/export?limit=500".to_owned(),
         "/v1/audit/verify".to_owned(),
     ] {
         let (status, body) = get(&w.app, &path, &w.dana).await;
@@ -1140,6 +1214,143 @@ async fn the_search_filters_by_actor_action_and_outcome_including_denials() {
     }
 }
 
+/// Typed payload filters address exact governed nouns rather than searching
+/// display strings or arbitrary JSON text. The context event is the strongest
+/// fixture because it cites the selected immutable Knowledge revision and the
+/// session/run that received it in one recorded decision.
+#[tokio::test]
+async fn typed_artifact_session_and_context_filters_select_exact_evidence() {
+    let Some(w) = world().await else { return };
+
+    let (status, all) = get(
+        &w.app,
+        "/v1/audit/events?action=session.context.composed&limit=200",
+        &w.dana,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "composition evidence: {all}");
+    let event = all["events"]
+        .as_array()
+        .expect("events")
+        .iter()
+        .find(|event| {
+            event["payload"]["artifact_references"]
+                .as_array()
+                .is_some_and(|references| {
+                    references.iter().any(|reference| {
+                        reference["family"] == "knowledge"
+                            && reference["artifact_id"] == w.runbook.to_string()
+                            && reference["version"] == w.runbook_revision.to_string()
+                    })
+                })
+        })
+        .expect("one composition selected the runbook");
+    let session_id = event["payload"]["session_id"].as_str().expect("session id");
+    let context_run_id = event["payload"]["context_run_id"]
+        .as_str()
+        .expect("context run id");
+    let configuration = &event["payload"]["configuration"];
+    for field in [
+        "binding_id",
+        "binding_scope_id",
+        "artifact_id",
+        "version_id",
+        "content_hash",
+        "policy_pack",
+    ] {
+        assert!(
+            configuration[field].is_string(),
+            "composition evidence must freeze effective Configuration {field}: {event}"
+        );
+    }
+    assert!(
+        event["payload"]["relaxations"].is_array(),
+        "the exact active relaxation-version set is recorded even when empty: {event}"
+    );
+
+    for path in [
+        format!(
+            "/v1/audit/events?artifact_family=knowledge&artifact_id={}&artifact_version={}&limit=200",
+            w.runbook, w.runbook_revision
+        ),
+        format!("/v1/audit/events?session_id={session_id}&limit=200"),
+        format!("/v1/audit/events?context_run_id={context_run_id}&limit=200"),
+    ] {
+        let (status, filtered) = get(&w.app, &path, &w.dana).await;
+        assert_eq!(status, StatusCode::OK, "typed filter {path}: {filtered}");
+        assert!(
+            !filtered["events"].as_array().expect("events").is_empty(),
+            "the exact evidence is addressable through {path}: {filtered}"
+        );
+    }
+}
+
+/// Export pages are one frozen prefix even though every page read appends a
+/// later audit event. The public JSON alone is sufficient to recompute every
+/// link and the tenant-bound genesis without querying Postgres.
+#[tokio::test]
+async fn deterministic_export_freezes_before_its_own_reads_and_verifies_offline() {
+    let Some(w) = world().await else { return };
+    let (status, first) = get(&w.app, "/v1/audit/export?after=0&limit=3", &w.dana).await;
+    assert_eq!(status, StatusCode::OK, "first export page: {first}");
+    let snapshot = first["snapshot_seq"].as_i64().expect("snapshot seq");
+    let mut after = 0_i64;
+    let mut page = first.clone();
+    let mut events = Vec::new();
+    loop {
+        for field in [
+            "format",
+            "hash_algorithm",
+            "canonicalization",
+            "tenant_id",
+            "genesis_hash",
+            "snapshot_seq",
+            "snapshot_hash",
+        ] {
+            assert_eq!(page[field], first[field], "frozen {field}: {page}");
+        }
+        events.extend(page["events"].as_array().expect("events").iter().cloned());
+        match page["next_cursor"].as_i64() {
+            Some(next) => {
+                assert!(next > after, "cursor advances: {page}");
+                after = next;
+                let (status, next_page) = get(
+                    &w.app,
+                    &format!("/v1/audit/export?after={after}&through={snapshot}&limit=3"),
+                    &w.dana,
+                )
+                .await;
+                assert_eq!(status, StatusCode::OK, "next export page: {next_page}");
+                page = next_page;
+            }
+            None => break,
+        }
+    }
+
+    let assembled = json!({
+        "format": first["format"],
+        "hash_algorithm": first["hash_algorithm"],
+        "canonicalization": first["canonicalization"],
+        "tenant_id": first["tenant_id"],
+        "genesis_hash": first["genesis_hash"],
+        "snapshot_seq": first["snapshot_seq"],
+        "snapshot_hash": first["snapshot_hash"],
+        "events": events,
+    });
+    let verified = synveda_audit::verify_export(&assembled).expect("offline verification");
+    assert_eq!(verified.tenant_id, w.tenant);
+    assert_eq!(verified.head_seq, snapshot);
+    assert_eq!(verified.events, snapshot);
+    assert!(
+        assembled["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .all(|event| event["payload"]["op"] != "export"),
+        "the prefix froze before this export's own audited reads: {assembled}"
+    );
+}
+
 /// A misspelled action is a 400, not an empty answer: "no events" and "you
 /// spelled it wrong" are different facts, and only one of them is an audit
 /// finding. Same for a limit over the cap, which is refused rather than
@@ -1154,6 +1365,12 @@ async fn a_typo_is_refused_rather_than_answered_with_nothing() {
         "/v1/audit/events?outcome=denied",
         "/v1/audit/events?limit=1001",
         "/v1/audit/events?limit=0",
+        "/v1/audit/events?after=-1",
+        "/v1/audit/events?artifact_family=unknown",
+        "/v1/audit/events?artifact_id=orphan",
+        "/v1/audit/events?artifact_version=orphan",
+        "/v1/audit/export?after=-1",
+        "/v1/audit/export?through=-1",
     ] {
         let (status, body) = get(&w.app, path, &w.dana).await;
         assert_eq!(

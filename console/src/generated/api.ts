@@ -288,7 +288,7 @@ export type AuditDisclosureView = {
      */
     actor_subject: string;
     content_hash?: string | null;
-    knowledge_item_id: string;
+    knowledge_item_id?: string | null;
     knowledge_revision_id?: string | null;
     occurred_at: string;
     reason_codes: string[];
@@ -349,6 +349,41 @@ export type AuditEventsResponse = AuditFrame & {
   };
 
 /**
+ * Every canonical event input needed by an offline verifier.
+ */
+export type AuditExportEvent = {
+    action: string;
+    actor_kind: string;
+    actor_subject: string;
+    hash: string;
+    occurred_at: string;
+    outcome: string;
+    payload: unknown;
+    prev_hash: string;
+    resource: string;
+    seq: number;
+    trace_id?: string | null;
+  };
+
+/**
+ * One page from a frozen deterministic audit-chain prefix.
+ */
+export type AuditExportPage = {
+    canonicalization: string;
+    events: AuditExportEvent[];
+    first_seq?: number | null;
+    format: string;
+    genesis_hash: string;
+    hash_algorithm: string;
+    last_seq?: number | null;
+    next_cursor?: number | null;
+    snapshot_hash: string;
+    snapshot_seq: number;
+    tenant_id: string;
+    truncated: boolean;
+  };
+
+/**
  * Where the chain stood when the answer was taken, and what the answer
  * covered (ADR-0045 decision 9).
  */
@@ -380,10 +415,10 @@ export type AuditFrame = {
   };
 
 export type AuditKnowledgeResponse = AuditFrame & {
-    at: string;
+    as_known_at: string;
     /**
      * One row per item, carrying the revision *last* delivered at or
-     * before `at`.
+     * before `as_known_at` and valid at `valid_at`.
      */
     known: AuditKnownView[];
     /**
@@ -391,7 +426,18 @@ export type AuditKnowledgeResponse = AuditFrame & {
      * could have asked for (ADR-0045 decision 5).
      */
     note: string;
+    /**
+     * Delivered revisions that are retained but outside the requested
+     * valid/transaction-time pair. They are evidence, not part of `known`.
+     */
+    outside_time: AuditKnownView[];
     subject: string;
+    /**
+     * Hashes-only or erased delivery evidence whose temporal interval can no
+     * longer be resolved. It is not silently counted as known.
+     */
+    unresolved: AuditKnownView[];
+    valid_at: string;
   };
 
 /**
@@ -403,7 +449,11 @@ export type AuditKnownView = {
      */
     action: string;
     content_hash?: string | null;
-    knowledge_item_id: string;
+    /**
+     * Stable aggregate address when retained. Hashes-only traces deliberately
+     * omit it and remain in `unresolved` as content-free evidence.
+     */
+    knowledge_item_id?: string | null;
     knowledge_revision_id?: string | null;
     /**
      * How many times it was served in the window read.
@@ -418,6 +468,22 @@ export type AuditKnownView = {
      * The chain position of the last delivery — the evidence.
      */
     seq: number;
+    /**
+     * `valid`, `outside_valid_time`, `not_known_at` or `unresolved`.
+     */
+    temporal_status: string;
+    /**
+     * Immutable revision transaction time, when retained.
+     */
+    transaction_time?: string | null;
+    /**
+     * Immutable revision valid-time start, when retained.
+     */
+    valid_from?: string | null;
+    /**
+     * Immutable revision valid-time end, when bounded and retained.
+     */
+    valid_to?: string | null;
   };
 
 export type AuditVerifyResponse = {
@@ -5467,6 +5533,10 @@ export type ToolConfigurationBindingView = {
      */
     digest: string;
     /**
+     * Stable server id.
+     */
+    server_id: string;
+    /**
      * Exact version id.
      */
     version_id: string;
@@ -6110,6 +6180,15 @@ export type Operations = {
     readonly path: "/v1/audit/events";
     readonly method: "GET";
     readonly response: AuditEventsResponse;
+  };
+  /**
+   * `GET /v1/audit/export` — a cursor page from one frozen, offline-verifiable
+   * chain prefix (CPR-33, ADR-0092 decisions 4 and 5).
+   */
+  readonly export_audit_chain: {
+    readonly path: "/v1/audit/export";
+    readonly method: "GET";
+    readonly response: AuditExportPage;
   };
   /**
    * `GET /v1/audit/knowledge` — "what did agent A know at time T" (ADR-0045
@@ -7471,6 +7550,7 @@ export const OPERATIONS = {
   list_scope_descendants: { path: "/v1/admin/scopes/{scope_id}/descendants", method: "GET" },
   list_audit_disclosures: { path: "/v1/audit/disclosures", method: "GET" },
   list_audit_events: { path: "/v1/audit/events", method: "GET" },
+  export_audit_chain: { path: "/v1/audit/export", method: "GET" },
   get_audit_knowledge: { path: "/v1/audit/knowledge", method: "GET" },
   verify_audit_chain: { path: "/v1/audit/verify", method: "GET" },
   get_capabilities: { path: "/v1/capabilities", method: "GET" },

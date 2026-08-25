@@ -885,17 +885,11 @@ fn command_payload_hash(command: &ConfigurationCommand) -> Result<String> {
         .to_string())
 }
 
-async fn open_command(
-    state: &AppState,
-    tx: &mut PgConnection,
-    tenant: TenantId,
+fn configuration_artifact_reference(
     command: &ConfigurationCommand,
-    authorization: &CommandAuthorization,
-    claim: &Claim,
-) -> Result<ConfigurationMutationResult> {
-    let actor = identity_of(&authorization.input)?;
-    let payload_hash = command_payload_hash(command)?;
-    let artifact_reference = match command {
+    payload_hash: &str,
+) -> Result<ArtifactReference> {
+    match command {
         ConfigurationCommand::Create {
             artifact_id,
             version_id,
@@ -906,7 +900,7 @@ async fn open_command(
             command.kind(),
             version_id.to_string(),
             None,
-        )?,
+        ),
         ConfigurationCommand::Publish {
             artifact_id,
             expected_current_version_id,
@@ -918,7 +912,7 @@ async fn open_command(
             command.kind(),
             version_id.to_string(),
             Some(expected_current_version_id.to_string()),
-        )?,
+        ),
         ConfigurationCommand::Bind {
             binding_id,
             pinned_version_id,
@@ -927,9 +921,9 @@ async fn open_command(
             ArtifactFamily::Configuration,
             binding_id.to_string(),
             command.kind(),
-            pinned_version_id.map_or_else(|| payload_hash.clone(), |id| id.to_string()),
+            pinned_version_id.map_or_else(|| payload_hash.to_owned(), |id| id.to_string()),
             None,
-        )?,
+        ),
         ConfigurationCommand::SetBinding {
             binding_id,
             expected_revision,
@@ -939,10 +933,23 @@ async fn open_command(
             ArtifactFamily::Configuration,
             binding_id.to_string(),
             command.kind(),
-            pinned_version_id.map_or_else(|| payload_hash.clone(), |id| id.to_string()),
+            pinned_version_id.map_or_else(|| payload_hash.to_owned(), |id| id.to_string()),
             Some(expected_revision.to_string()),
-        )?,
-    };
+        ),
+    }
+}
+
+async fn open_command(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    command: &ConfigurationCommand,
+    authorization: &CommandAuthorization,
+    claim: &Claim,
+) -> Result<ConfigurationMutationResult> {
+    let actor = identity_of(&authorization.input)?;
+    let payload_hash = command_payload_hash(command)?;
+    let artifact_reference = configuration_artifact_reference(command, &payload_hash)?;
     let manifest = canonicalise(&json!({
         "command": command.kind(),
         "payload_hash": payload_hash,
@@ -1107,6 +1114,7 @@ async fn apply_loaded(
                     "change_id": change_id,
                     "command": command.kind(),
                     "payload_hash": payload_hash,
+                    "artifact_references": [configuration_artifact_reference(command, payload_hash)?],
                     "reason_code": reason,
                 }),
             )
@@ -1148,6 +1156,7 @@ async fn apply_loaded(
             "change_id": change_id,
             "command": command.kind(),
             "payload_hash": payload_hash,
+            "artifact_references": [configuration_artifact_reference(command, payload_hash)?],
             "artifact_id": applied.artifact_id,
             "version_id": applied.version_id,
             "binding_id": applied.binding_id,

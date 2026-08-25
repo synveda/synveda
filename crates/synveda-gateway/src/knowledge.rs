@@ -1105,6 +1105,7 @@ async fn apply_loaded(
                     "actor_hash": actor_hash,
                     "reason_hash": reason_hash,
                     "payload_hash": payload_hash,
+                    "artifact_references": artifact_references(command, payload_hash)?,
                 }),
             )
             .await?;
@@ -1172,6 +1173,7 @@ async fn apply_loaded(
                     "knowledge_item_id": item_id,
                     "hook": code,
                     "payload_hash": payload_hash,
+                    "artifact_references": artifact_references(command, payload_hash)?,
                 }),
             )
             .await?;
@@ -1227,6 +1229,7 @@ async fn apply_loaded(
             "change_id": change_id,
             "command": command.kind().as_str(),
             "payload_hash": payload_hash,
+            "artifact_references": artifact_references(command, payload_hash)?,
             "target_item_ids": command.target_item_ids(),
             "resulting_item_id": applied.item_id,
             "resulting_revision_id": applied.revision_id,
@@ -1284,6 +1287,7 @@ async fn reject_change(
             "change_id": change_id,
             "command": command.kind().as_str(),
             "payload_hash": payload_hash,
+            "artifact_references": artifact_references(command, payload_hash)?,
             "target_item_ids": command.target_item_ids(),
             "knowledge_item_id": item_id,
             "operation_id": operation_id,
@@ -1323,6 +1327,16 @@ async fn reject_open_changes_for_erasure(
         knowledge_lifecycle::open_changes_for_item(&mut *tx, tenant_id, item_id, forget_change_id)
             .await?;
     for change in affected {
+        let artifact_references =
+            vedaflow::proposals::read(&mut *tx, tenant_id, change.proposal_id)
+                .await?
+                .ok_or_else(|| Error::Internal {
+                    message: format!(
+                        "Knowledge change {} disappeared while erasure invalidated it",
+                        change.proposal_id
+                    ),
+                })?
+                .artifact_references;
         if !vedaflow::proposals::close(
             &mut *tx,
             tenant_id,
@@ -1350,6 +1364,7 @@ async fn reject_open_changes_for_erasure(
                 "change_id": change.proposal_id,
                 "command": change.command_kind.as_str(),
                 "payload_hash": change.payload_hash,
+                "artifact_references": artifact_references,
                 "knowledge_item_id": item_id,
                 "invalidated_by_change_id": forget_change_id,
                 "operation_id": operation_id,

@@ -557,6 +557,9 @@ pub struct ToolClientConfigurationView {
 /// Evidence for one generated configuration entry.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ToolConfigurationBindingView {
+    /// Stable server id.
+    #[schema(value_type = String, format = "uuid")]
+    pub server_id: ToolServerId,
     /// Binding id.
     #[schema(value_type = String, format = "uuid")]
     pub binding_id: ToolBindingId,
@@ -1095,17 +1098,8 @@ fn command_payload_hash(command: &ToolCommand) -> Result<String> {
         .to_string())
 }
 
-async fn open_command(
-    state: &AppState,
-    tx: &mut PgConnection,
-    tenant: TenantId,
-    command: &ToolCommand,
-    authorization: &CommandAuthorization,
-    claim: &Claim,
-) -> Result<ToolMutationResult> {
-    let actor = identity_of(&authorization.input, "changing trusted MCP metadata")?;
-    let payload_hash = command_payload_hash(command)?;
-    let artifact_reference = match command {
+fn tool_artifact_reference(command: &ToolCommand) -> Result<ArtifactReference> {
+    match command {
         ToolCommand::Register {
             server_id,
             version_id,
@@ -1116,7 +1110,7 @@ async fn open_command(
             command.kind(),
             version_id.to_string(),
             None,
-        )?,
+        ),
         ToolCommand::StageVersion {
             server_id,
             expected_current_version_id,
@@ -1128,7 +1122,7 @@ async fn open_command(
             command.kind(),
             version_id.to_string(),
             Some(expected_current_version_id.to_string()),
-        )?,
+        ),
         ToolCommand::Bind {
             binding_id,
             version_id,
@@ -1139,7 +1133,7 @@ async fn open_command(
             command.kind(),
             version_id.to_string(),
             None,
-        )?,
+        ),
         ToolCommand::SetBinding {
             binding_id,
             expected_revision,
@@ -1151,8 +1145,21 @@ async fn open_command(
             command.kind(),
             version_id.to_string(),
             Some(expected_revision.to_string()),
-        )?,
-    };
+        ),
+    }
+}
+
+async fn open_command(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    command: &ToolCommand,
+    authorization: &CommandAuthorization,
+    claim: &Claim,
+) -> Result<ToolMutationResult> {
+    let actor = identity_of(&authorization.input, "changing trusted MCP metadata")?;
+    let payload_hash = command_payload_hash(command)?;
+    let artifact_reference = tool_artifact_reference(command)?;
     let manifest = canonicalise(&json!({
         "command": command.kind(),
         "payload_hash": payload_hash,
@@ -1437,6 +1444,7 @@ async fn apply_loaded(
                     "change_id": change_id,
                     "command": command.kind(),
                     "payload_hash": payload_hash,
+                    "artifact_references": [tool_artifact_reference(command)?],
                     "reason_code": reason,
                 }),
             )
@@ -1487,6 +1495,7 @@ async fn apply_loaded(
             "change_id": change_id,
             "command": command.kind(),
             "payload_hash": payload_hash,
+            "artifact_references": [tool_artifact_reference(command)?],
             "server_id": result.server_id,
             "version_id": result.version_id,
             "binding_id": result.binding_id,
@@ -2492,11 +2501,33 @@ pub(crate) async fn generate_config(
             entry.insert("digest".to_owned(), json!(store::hex_32(&version.digest)));
             configuration.insert(server.name, Value::Object(entry));
             included.push(ToolConfigurationBindingView {
+                server_id: server.id,
                 binding_id: binding.id,
                 version_id: version.id,
                 digest: store::hex_32(&version.digest),
             });
         }
+        let artifact_references = included
+            .iter()
+            .flat_map(|binding| {
+                [
+                    ArtifactReference::new(
+                        ArtifactFamily::ToolServer,
+                        binding.server_id.to_string(),
+                        "configuration_generated",
+                        binding.version_id.to_string(),
+                        None,
+                    ),
+                    ArtifactReference::new(
+                        ArtifactFamily::ToolBinding,
+                        binding.binding_id.to_string(),
+                        "configuration_generated",
+                        binding.version_id.to_string(),
+                        None,
+                    ),
+                ]
+            })
+            .collect::<Result<Vec<_>>>()?;
         audit::record(
             &mut tx,
             tenant,
@@ -2506,7 +2537,9 @@ pub(crate) async fn generate_config(
             json!({
                 "project_id": project_id,
                 "binding_count": included.len(),
+                "artifact_references": artifact_references,
                 "bindings": included.iter().map(|binding| json!({
+                    "server_id": binding.server_id,
                     "binding_id": binding.binding_id,
                     "version_id": binding.version_id,
                     "digest": binding.digest,

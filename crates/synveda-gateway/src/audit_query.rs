@@ -1,13 +1,15 @@
 //! The audit query API (AUD-2, ADR-0045): `/v1/audit/*` behind tenant
 //! resolution and one PDP action, `AuditRead`.
 //!
-//! Four routes. `events` is the search the AC asks for — actor, action,
+//! Five routes. `events` is the search the AC asks for — actor, action,
 //! outcome, resource, time window, denials included as an ordinary filter
 //! value. `disclosures` and `knowledge` are the two questions the feature
 //! exists for, one call each. `verify` is the chain check the CLI has had
-//! since AUD-1, now reachable by an auditor who holds no `DATABASE_URL`.
+//! since AUD-1, now reachable by an auditor who holds no `DATABASE_URL`;
+//! `export` freezes and pages the complete canonical evidence for offline
+//! verification.
 //!
-//! Three properties hold across all four, and none of them is a filter
+//! Three properties hold across all five, and none of them is a filter
 //! this module could forget to apply:
 //!
 //! - **Tenant-complete or refused.** `AuditRead` reaches only
@@ -38,12 +40,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use synveda_audit::{
-    AUTHORITY_ACTIONS, AuditAction, ChainVerification, Disclosure, EventFilter, Outcome,
-    StoredEvent,
+    AUTHORITY_ACTIONS, AuditAction, ChainVerification, Disclosure, EXPORT_CANONICALIZATION,
+    EXPORT_FORMAT, EXPORT_HASH_ALGORITHM, EventFilter, Outcome, StoredEvent,
 };
 use synveda_policy::{Action, Resource};
-use synveda_store::rls;
-use synveda_types::{Error, KnowledgeItemId, Result};
+use synveda_store::{knowledge as knowledge_store, rls};
+use synveda_types::{
+    ArtifactFamily, ContextRunId, Error, KnowledgeItemId, KnowledgeRevisionId, Result, SessionId,
+};
 
 use crate::app::AppState;
 use crate::audit;
@@ -181,6 +185,16 @@ pub(crate) struct EventsParams {
     from: Option<DateTime<Utc>>,
     /// Exclusive upper bound on `occurred_at`.
     until: Option<DateTime<Utc>>,
+    /// Closed governed artifact family carried by `artifact_references`.
+    artifact_family: Option<String>,
+    /// Stable artifact or binding id. Requires `artifact_family`.
+    artifact_id: Option<String>,
+    /// Exact immutable version/digest. Requires `artifact_family`.
+    artifact_version: Option<String>,
+    /// Exact session recorded in an event payload.
+    session_id: Option<SessionId>,
+    /// Exact context run recorded in an event payload.
+    context_run_id: Option<ContextRunId>,
     /// Return events after this seq — the cursor from a previous page.
     after: Option<i64>,
     limit: Option<i64>,
@@ -207,6 +221,11 @@ pub(crate) struct EventsResponse {
         ("resource" = Option<String>, Query),
         ("from" = Option<DateTime<Utc>>, Query),
         ("until" = Option<DateTime<Utc>>, Query),
+        ("artifact_family" = Option<String>, Query),
+        ("artifact_id" = Option<String>, Query),
+        ("artifact_version" = Option<String>, Query),
+        ("session_id" = Option<String>, Query, format = "uuid"),
+        ("context_run_id" = Option<String>, Query, format = "uuid"),
         ("after" = Option<i64>, Query),
         ("limit" = Option<i64>, Query)
     ),
@@ -225,6 +244,8 @@ pub(crate) async fn events(
 ) -> Response {
     let result = async {
         let limit = limit_of(params.limit)?;
+        let after = non_negative_cursor(params.after, "after")?;
+        let payload_contains = payload_filter(&params)?;
         let filter = EventFilter {
             actor_subject: params.actor,
             actions: match params.action.as_deref() {
@@ -238,25 +259,27 @@ pub(crate) async fn events(
             resource: params.resource,
             from: params.from,
             until: params.until,
+            payload_contains,
         };
 
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let authorized = gate(&state, &mut tx).await?;
-        let page = synveda_audit::search(
-            &mut tx,
-            tenant_id,
-            &filter,
-            params.after.unwrap_or(0),
-            limit,
-        )
-        .await?;
+        let page = synveda_audit::search(&mut tx, tenant_id, &filter, after, limit).await?;
         let frame = Frame::from(&page);
         chain_the_read(
             &mut tx,
             "events",
             &authorized,
-            json!({"count": page.items.len()}),
+            json!({
+                "count": page.items.len(),
+                "after": after,
+                "artifact_family": params.artifact_family,
+                "artifact_id": params.artifact_id,
+                "artifact_version": params.artifact_version,
+                "session_id": params.session_id,
+                "context_run_id": params.context_run_id,
+            }),
         )
         .await?;
         commit(tx).await?;
@@ -284,7 +307,8 @@ pub(crate) struct DisclosureView {
     action: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     session_id: Option<String>,
-    knowledge_item_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    knowledge_item_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     knowledge_revision_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -455,7 +479,10 @@ pub(crate) async fn disclosures(
 #[derive(Serialize, utoipa::ToSchema)]
 #[schema(as = AuditKnownView)]
 pub(crate) struct KnownView {
-    knowledge_item_id: String,
+    /// Stable aggregate address when retained. Hashes-only traces deliberately
+    /// omit it and remain in `unresolved` as content-free evidence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    knowledge_item_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     knowledge_revision_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -469,15 +496,29 @@ pub(crate) struct KnownView {
     action: String,
     /// How many times it was served in the window read.
     occasions: usize,
+    /// Immutable revision valid-time start, when retained.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    valid_from: Option<DateTime<Utc>>,
+    /// Immutable revision valid-time end, when bounded and retained.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    valid_to: Option<DateTime<Utc>>,
+    /// Immutable revision transaction time, when retained.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transaction_time: Option<DateTime<Utc>>,
+    /// `valid`, `outside_valid_time`, `not_known_at` or `unresolved`.
+    temporal_status: String,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct KnowledgeParams {
     /// The subject asked about — a user or a service identity.
     subject: String,
-    /// The instant. Defaults to now, which makes the route "what does A
-    /// know" without a special case.
-    at: Option<DateTime<Utc>>,
+    /// Semantic valid-time instant. Defaults to `as_known_at`.
+    valid_at: Option<DateTime<Utc>>,
+    /// Transaction-time/delivery cutoff. Defaults to now.
+    as_known_at: Option<DateTime<Utc>>,
+    /// Resume before this sequence cursor when walking older disclosures.
+    before: Option<i64>,
     limit: Option<i64>,
 }
 
@@ -485,10 +526,17 @@ pub(crate) struct KnowledgeParams {
 #[schema(as = AuditKnowledgeResponse)]
 pub(crate) struct KnowledgeResponse {
     subject: String,
-    at: DateTime<Utc>,
+    valid_at: DateTime<Utc>,
+    as_known_at: DateTime<Utc>,
     /// One row per item, carrying the revision *last* delivered at or
-    /// before `at`.
+    /// before `as_known_at` and valid at `valid_at`.
     known: Vec<KnownView>,
+    /// Delivered revisions that are retained but outside the requested
+    /// valid/transaction-time pair. They are evidence, not part of `known`.
+    outside_time: Vec<KnownView>,
+    /// Hashes-only or erased delivery evidence whose temporal interval can no
+    /// longer be resolved. It is not silently counted as known.
+    unresolved: Vec<KnownView>,
     /// What this answer is, stated in it: what A was served, not what A
     /// could have asked for (ADR-0045 decision 5).
     note: &'static str,
@@ -497,9 +545,10 @@ pub(crate) struct KnowledgeResponse {
 }
 
 const KNOWLEDGE_NOTE: &str = "What the chain records this subject being served at or before the \
-     instant — not what they were permitted to ask for. Each entry names \
-     an immutable Knowledge revision and content hash; content remains behind \
-     an independent KnowledgeRead decision (ADR-0084).";
+     as-known instant and whose retained immutable revision covers the valid-time \
+     instant — not what they were permitted to ask for. `outside_time` and \
+     `unresolved` preserve evidence the bitemporal claim cannot include. Content \
+     remains behind an independent KnowledgeRead decision (ADR-0084).";
 
 /// `GET /v1/audit/knowledge` — "what did agent A know at time T" (ADR-0045
 /// decision 5).
@@ -510,7 +559,9 @@ const KNOWLEDGE_NOTE: &str = "What the chain records this subject being served a
     tag = "audit",
     params(
         ("subject" = String, Query),
-        ("at" = Option<DateTime<Utc>>, Query),
+        ("valid_at" = Option<DateTime<Utc>>, Query),
+        ("as_known_at" = Option<DateTime<Utc>>, Query),
+        ("before" = Option<i64>, Query),
         ("limit" = Option<i64>, Query)
     ),
     responses(
@@ -533,14 +584,71 @@ pub(crate) async fn knowledge(
                 message: "subject must not be empty".to_owned(),
             });
         }
-        let at = params.at.unwrap_or_else(Utc::now);
+        let as_known_at = params.as_known_at.unwrap_or_else(Utc::now);
+        let valid_at = params.valid_at.unwrap_or(as_known_at);
+        let before = params.before.unwrap_or(i64::MAX);
+        if before <= 0 {
+            return Err(Error::Invalid {
+                message: "before must be a positive sequence cursor".to_owned(),
+            });
+        }
 
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let authorized = gate(&state, &mut tx).await?;
-        let page = synveda_audit::knowledge(&mut tx, tenant_id, &params.subject, at, limit).await?;
+        let page = synveda_audit::knowledge(
+            &mut tx,
+            tenant_id,
+            &params.subject,
+            as_known_at,
+            before,
+            limit,
+        )
+        .await?;
         let frame = Frame::from(&page);
-        let known = synveda_audit::fold_knowledge(&page.items);
+        let folded = synveda_audit::fold_knowledge(&page.items);
+        let revision_ids: Vec<KnowledgeRevisionId> = folded
+            .iter()
+            .filter_map(|item| item.entry.knowledge_revision_id.as_deref())
+            .filter_map(|id| id.parse().ok())
+            .collect();
+        let evidence =
+            knowledge_store::revision_temporal_evidence(&mut *tx, tenant_id, &revision_ids).await?;
+        let mut known = Vec::new();
+        let mut outside_time = Vec::new();
+        let mut unresolved = Vec::new();
+        for item in folded {
+            let resolved = item
+                .entry
+                .knowledge_revision_id
+                .as_deref()
+                .and_then(|id| id.parse::<KnowledgeRevisionId>().ok())
+                .and_then(|id| evidence.iter().find(|entry| entry.revision_id == id));
+            let destination = match resolved {
+                Some(entry)
+                    if item
+                        .entry
+                        .knowledge_item_id
+                        .as_deref()
+                        .and_then(|id| id.parse::<KnowledgeItemId>().ok())
+                        != Some(entry.knowledge_item_id)
+                        || item.entry.content_hash.as_deref()
+                            != Some(entry.content_hash.as_str()) =>
+                {
+                    &mut unresolved
+                }
+                Some(entry)
+                    if entry.transaction_time <= as_known_at
+                        && entry.valid_from <= valid_at
+                        && entry.valid_to.is_none_or(|until| valid_at < until) =>
+                {
+                    &mut known
+                }
+                Some(_) => &mut outside_time,
+                None => &mut unresolved,
+            };
+            destination.push(render_known(item, resolved, as_known_at, valid_at));
+        }
 
         chain_the_read(
             &mut tx,
@@ -548,8 +656,12 @@ pub(crate) async fn knowledge(
             &authorized,
             json!({
                 "subject": params.subject,
-                "at": at,
+                "valid_at": valid_at,
+                "as_known_at": as_known_at,
+                "before": before,
                 "knowledge_items": known.len(),
+                "outside_time": outside_time.len(),
+                "unresolved": unresolved.len(),
                 "disclosures": page.items.len(),
             }),
         )
@@ -558,26 +670,202 @@ pub(crate) async fn knowledge(
 
         Ok(Json(KnowledgeResponse {
             subject: params.subject,
-            at,
-            known: known
-                .into_iter()
-                .map(|item| KnownView {
-                    knowledge_item_id: item.entry.knowledge_item_id,
-                    knowledge_revision_id: item.entry.knowledge_revision_id,
-                    content_hash: item.entry.content_hash,
-                    reason_codes: item.entry.reason_codes,
-                    seq: item.seq,
-                    occurred_at: item.occurred_at,
-                    action: item.action,
-                    occasions: item.occasions,
-                })
-                .collect(),
+            valid_at,
+            as_known_at,
+            known,
+            outside_time,
+            unresolved,
             note: KNOWLEDGE_NOTE,
             frame,
         }))
     }
     .await;
     respond(&state, "knowledge", result).await
+}
+
+fn render_known(
+    item: synveda_audit::Known,
+    evidence: Option<&knowledge_store::RevisionTemporalEvidence>,
+    as_known_at: DateTime<Utc>,
+    valid_at: DateTime<Utc>,
+) -> KnownView {
+    let temporal_status = match evidence {
+        None => "unresolved",
+        Some(entry)
+            if item
+                .entry
+                .knowledge_item_id
+                .as_deref()
+                .and_then(|id| id.parse::<KnowledgeItemId>().ok())
+                != Some(entry.knowledge_item_id)
+                || item.entry.content_hash.as_deref() != Some(entry.content_hash.as_str()) =>
+        {
+            "unresolved"
+        }
+        Some(entry) if entry.transaction_time > as_known_at => "not_known_at",
+        Some(entry)
+            if entry.valid_from > valid_at
+                || entry.valid_to.is_some_and(|until| valid_at >= until) =>
+        {
+            "outside_valid_time"
+        }
+        Some(_) => "valid",
+    };
+    KnownView {
+        knowledge_item_id: item.entry.knowledge_item_id,
+        knowledge_revision_id: item.entry.knowledge_revision_id,
+        content_hash: item.entry.content_hash,
+        reason_codes: item.entry.reason_codes,
+        seq: item.seq,
+        occurred_at: item.occurred_at,
+        action: item.action,
+        occasions: item.occasions,
+        valid_from: evidence.map(|entry| entry.valid_from),
+        valid_to: evidence.and_then(|entry| entry.valid_to),
+        transaction_time: evidence.map(|entry| entry.transaction_time),
+        temporal_status: temporal_status.to_owned(),
+    }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ExportParams {
+    /// Resume after this sequence. The first request uses zero.
+    after: Option<i64>,
+    /// Frozen snapshot head returned by the first page.
+    through: Option<i64>,
+    /// Page size, 1..=1000.
+    limit: Option<i64>,
+}
+
+/// Every canonical event input needed by an offline verifier.
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = AuditExportEvent)]
+pub(crate) struct ExportEventView {
+    seq: i64,
+    occurred_at: DateTime<Utc>,
+    actor_kind: String,
+    actor_subject: String,
+    action: String,
+    resource: String,
+    outcome: String,
+    payload: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trace_id: Option<String>,
+    prev_hash: String,
+    hash: String,
+}
+
+impl From<StoredEvent> for ExportEventView {
+    fn from(event: StoredEvent) -> Self {
+        Self {
+            seq: event.seq,
+            occurred_at: event.occurred_at,
+            actor_kind: event.actor_kind,
+            actor_subject: event.actor_subject,
+            action: event.action,
+            resource: event.resource,
+            outcome: event.outcome,
+            payload: event.payload,
+            trace_id: event.trace_id,
+            prev_hash: hex(&event.prev_hash),
+            hash: hex(&event.hash),
+        }
+    }
+}
+
+/// One page from a frozen deterministic audit-chain prefix.
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = AuditExportPage)]
+pub(crate) struct ExportResponse {
+    format: &'static str,
+    hash_algorithm: &'static str,
+    canonicalization: &'static str,
+    #[schema(value_type = String, format = "uuid")]
+    tenant_id: synveda_types::TenantId,
+    genesis_hash: String,
+    snapshot_seq: i64,
+    snapshot_hash: String,
+    events: Vec<ExportEventView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    first_seq: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_seq: Option<i64>,
+    truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_cursor: Option<i64>,
+}
+
+/// `GET /v1/audit/export` — a cursor page from one frozen, offline-verifiable
+/// chain prefix (CPR-33, ADR-0092 decisions 4 and 5).
+#[utoipa::path(
+    get,
+    path = "/v1/audit/export",
+    operation_id = "export_audit_chain",
+    tag = "audit",
+    params(
+        ("after" = Option<i64>, Query),
+        ("through" = Option<i64>, Query),
+        ("limit" = Option<i64>, Query)
+    ),
+    responses(
+        (status = 200, description = "A frozen deterministic chain-export page", body = ExportResponse),
+        (status = 400, description = "The cursor, frozen head or page bound is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Audit read is not permitted", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+#[tracing::instrument(name = "audit.export", skip_all)]
+pub(crate) async fn export(
+    State(state): State<AppState>,
+    Query(params): Query<ExportParams>,
+) -> Response {
+    let result = async {
+        let limit = limit_of(params.limit)?;
+        let after = non_negative_cursor(params.after, "after")?;
+        let tenant_id = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let authorized = gate(&state, &mut tx).await?;
+        let page =
+            synveda_audit::export_page(&mut tx, tenant_id, after, params.through, limit).await?;
+        let snapshot_seq = page.frame.head_seq;
+        let snapshot_hash = hex(&page.frame.head_hash);
+        let first_seq = page.first_seq;
+        let last_seq = page.last_seq;
+        let truncated = page.truncated();
+        let next_cursor = page.next_cursor;
+        let count = page.items.len();
+        let events = page.items.into_iter().map(Into::into).collect();
+        chain_the_read(
+            &mut tx,
+            "export",
+            &authorized,
+            json!({
+                "after": after,
+                "through": snapshot_seq,
+                "count": count,
+                "snapshot_hash": snapshot_hash,
+            }),
+        )
+        .await?;
+        commit(tx).await?;
+        Ok(Json(ExportResponse {
+            format: EXPORT_FORMAT,
+            hash_algorithm: EXPORT_HASH_ALGORITHM,
+            canonicalization: EXPORT_CANONICALIZATION,
+            tenant_id,
+            genesis_hash: hex(&synveda_audit::genesis_hash(tenant_id)),
+            snapshot_seq,
+            snapshot_hash,
+            events,
+            first_seq,
+            last_seq,
+            truncated,
+            next_cursor,
+        }))
+    }
+    .await;
+    respond(&state, "export", result).await
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -704,6 +992,65 @@ fn limit_of(limit: Option<i64>) -> Result<i64> {
         });
     }
     Ok(limit)
+}
+
+fn non_negative_cursor(cursor: Option<i64>, name: &str) -> Result<i64> {
+    let cursor = cursor.unwrap_or(0);
+    if cursor < 0 {
+        return Err(Error::Invalid {
+            message: format!("{name} must be non-negative"),
+        });
+    }
+    Ok(cursor)
+}
+
+/// Build one exact JSON-containment predicate from validated structured
+/// filters. Artifact fields occupy one object in the reference array, which
+/// prevents a family on one reference and an id on another from satisfying
+/// the same query.
+fn payload_filter(params: &EventsParams) -> Result<Option<Value>> {
+    if params.artifact_family.is_none()
+        && (params.artifact_id.is_some() || params.artifact_version.is_some())
+    {
+        return Err(Error::Invalid {
+            message: "artifact_id and artifact_version require artifact_family".to_owned(),
+        });
+    }
+    let mut payload = serde_json::Map::new();
+    if let Some(name) = params.artifact_family.as_deref() {
+        let family: ArtifactFamily = name.parse()?;
+        let mut reference = serde_json::Map::new();
+        reference.insert("family".to_owned(), json!(family.as_str()));
+        if let Some(id) = params.artifact_id.as_deref() {
+            bounded_filter("artifact_id", id, 1_024)?;
+            reference.insert("artifact_id".to_owned(), json!(id));
+        }
+        if let Some(version) = params.artifact_version.as_deref() {
+            bounded_filter("artifact_version", version, 512)?;
+            reference.insert("version".to_owned(), json!(version));
+        }
+        payload.insert(
+            "artifact_references".to_owned(),
+            Value::Array(vec![Value::Object(reference)]),
+        );
+    }
+    if let Some(session_id) = params.session_id {
+        payload.insert("session_id".to_owned(), json!(session_id));
+    }
+    if let Some(context_run_id) = params.context_run_id {
+        payload.insert("context_run_id".to_owned(), json!(context_run_id));
+    }
+    Ok((!payload.is_empty()).then_some(Value::Object(payload)))
+}
+
+fn bounded_filter(name: &str, value: &str, max: usize) -> Result<()> {
+    let length = value.chars().count();
+    if length == 0 || length > max || value.chars().any(char::is_control) {
+        return Err(Error::Invalid {
+            message: format!("{name} must contain 1..={max} non-control characters"),
+        });
+    }
+    Ok(())
 }
 
 /// Resolve a dotted action name against the closed in-process vocabulary.

@@ -754,4 +754,18 @@ async fn immutable_versions_bindings_and_runtime_evidence_share_one_governed_pat
     .expect("count Configuration audit applications");
     assert!(opened >= 6, "expected public Configuration change audits");
     assert!(applied >= 5, "expected applied Configuration audits");
+    let untyped_terminal = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from audit_log
+           where tenant_id = $1
+             and action in ('configuration.change.applied', 'configuration.change.rejected')
+             and not (payload @> '{"artifact_references":[{"family":"configuration"}]}'::jsonb)"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("check terminal Configuration artifact references");
+    assert_eq!(
+        untyped_terminal, 0,
+        "terminal Configuration evidence lost its typed address"
+    );
 }

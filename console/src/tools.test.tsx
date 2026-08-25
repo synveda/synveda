@@ -176,6 +176,7 @@ async function seedCatalogue(): Promise<void> {
     project_id: PROJECT_ID,
     bindings: [
       {
+        server_id: SERVER_ID,
         binding_id: "binding-pulseboard",
         version_id: APPROVED_ID,
         digest: "a".repeat(64),

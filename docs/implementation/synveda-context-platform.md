@@ -46,13 +46,14 @@ programme convention established in Prompt 1.
 | Exact generated public contract and console/CLI/generic-MCP client convergence | CPR-29 | **complete** | `683a17d` | `b33ba51` | OpenAPI 6/6; service 5/5; audit 13/13; CLI 156/156 + corpus 5/5; MCP 44/44; console 208/208; Claude adapter 98/98 | PASS | PASS | isolated `demos/cpr-29-public-contract.sh` PASS; generated API + 78-script demo gate PASS | none |
 | Versioned governed runtime configuration, templates and scope bindings | CPR-30 | **complete** | `b33ba51` | `ed7d233` | domain 4/4; API 1/1; capture 4/4; context 3/3; approvals 6/6; packs 7/7; PDP 11/11; RLS 83/83; OpenAPI 6/6; console 210/210 | PASS | PASS | isolated `demos/cpr-30-governed-configuration.sh` PASS: 2 artifacts, 3 versions, 2 bindings, 6 audited applies, zero assignment tables; 79-script demo gate PASS | none |
 | Governed auto-apply audit and versioned exact-subject policy-relaxation successor | CPR-31 | **complete** | `ed7d233` | `9281951` | types 210/210 + serde 50/50; policy relaxation 3/3; API 2/2; RLS 83/83; OpenAPI 6/6; audit 27/27; CLI 155/155 + MCP 5/5; console 209/209; retrieval 53/53 | PASS | PASS (`synveda_test_35856`) | isolated `demos/cpr-31-governed-relaxations.sh` PASS: 2 aggregates, 3 immutable versions, 5 governed changes, zero predecessor tables; 79-script demo gate PASS | none |
-| One typed VedaFlow approval lifecycle across Knowledge, Skills, Tools, Configuration, relaxations and OKF publication | CPR-32 | **complete** | `9281951` | pending (record in next checkpoint) | types 212/212 + serde 50/50; policy 77/77; VedaFlow 73/73 + store 10/10; gateway family suites 27/27; OpenAPI 6/6; console 210/210; store policy packs 5/5 + RLS 83/83 | PASS | PASS (`synveda_test_43866`) | isolated `demos/cpr-32-unified-approvals.sh` PASS: 81 typed proposals, 7 families, 23 exact-commit reviews, regulated three-person separation, zero audited content; 80-script demo gate PASS | none |
+| One typed VedaFlow approval lifecycle across Knowledge, Skills, Tools, Configuration, relaxations and OKF publication | CPR-32 | **complete** | `9281951` | `cf52f34` | types 212/212 + serde 50/50; policy 77/77; VedaFlow 73/73 + store 10/10; gateway family suites 27/27; OpenAPI 6/6; console 210/210; store policy packs 5/5 + RLS 83/83 | PASS | PASS (`synveda_test_43866`) | isolated `demos/cpr-32-unified-approvals.sh` PASS: 81 typed proposals, 7 families, 23 exact-commit reviews, regulated three-person separation, zero audited content; 80-script demo gate PASS | none |
+| Policy-authorised context-platform audit questions and deterministic offline-verifiable export | CPR-33 | **complete** | `cf52f34` | next checkpoint | audit 23/23 + tamper 7/7; gateway 16/16; terminal refs 5/5; CLI audit 4/4; OpenAPI 6/6; console 212/212; RLS completeness PASS | PASS | PASS (`synveda_test_51591`) | isolated `demos/cpr-33-audit-export.sh` PASS: 7 self-audited export reads, 49 typed artifact events, one payload index; 81-script demo gate PASS | none |
 
-**Exact next objective:** file and implement the audit-query/export package from
-the resulting CPR-32 commit: re-cut policy-authorised bitemporal artifact,
-session/context, Skill, Tool, Configuration and relaxation questions over the
-context-platform chain, with cursor pagination and deterministic offline
-verification evidence, and delete old-noun branches.
+**Exact next objective:** file and complete the directory-adapter convergence
+package from the CPR-33 checkpoint: re-anchor SCIM push and scheduled pull on
+the shared principal, Group, `group_members` and `scope_grants` model; retain
+source ownership and honest captured/live labels; delete superseded directory
+rows and mappings without migrating pre-epoch data.
 
 ### Starting-point objective map
 
@@ -4340,5 +4341,86 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `feat(governance): extend approvals across artifact families
   (CPR-32)` on `feat/context-platform-mvp`.
+- **Commit hash.** Written by the next checkpoint under the programme's
+  next-checkpoint convention.
+
+### Repository governance objective — audit query and export (CPR-33)
+
+- **Selected feature and decision.** **CPR-33** is delivered from `cf52f34`;
+  it records CPR-32's commit as
+  `cf52f34b4d408ef147310041f9367b1e445b4162`. Accepted ADR-0092 extends the
+  existing tenant-complete hash chain rather than creating a replay engine,
+  search projection or second audit truth. Tenant-root `AuditRead`, forced RLS
+  and one content-free audit event after each answer remain the boundary.
+
+- **Current-noun questions.** The cursor-keyset event query accepts exact
+  typed artifact family/id/version, session and context-run filters using JSON
+  containment; unknown families, incomplete dependent filters, control
+  characters and invalid cursors fail rather than becoming empty findings.
+  Terminal applied, rejected, superseded, archived, restored, forgotten,
+  expired, Skill, Tool, Configuration and relaxation evidence repeats the
+  immutable typed artifact reference. Context retrieval, selection and
+  composition record the effective Configuration aggregate, binding and
+  binding scope, immutable version/hash/policy pack, every gathered relaxation
+  version, exact selected Knowledge revisions in address-retaining modes and
+  exact advertised Skill bindings/versions.
+
+- **Bitemporal and retention honesty.** `GET /v1/audit/knowledge` separates
+  semantic `valid_at` from delivery/transaction `as_known_at`, accepts a
+  reverse sequence cursor and folds the latest retained identity in chain
+  order. It joins only content-free immutable revision interval/hash evidence;
+  content remains behind a separate Knowledge decision. Erased, malformed and
+  hashes-only evidence is returned under `unresolved`. A hashes-only row keeps
+  its content hash but never grows a synthetic Knowledge item/revision id, and
+  an empty address page still advances by the last event considered.
+
+- **Frozen export and clients.** `GET /v1/audit/export` captures sequence and
+  head hash before auditing its own read, then walks that fixed contiguous
+  prefix at at most 1,000 rows per page. The envelope pins canonical format,
+  hash rule, tenant-bound genesis and frozen head; the offline verifier
+  recomputes every content/link hash and refuses mutation, gaps, reordering,
+  incompleteness or another tenant. `synveda audit events|knowledge|export`
+  uses public HTTP only; export verifies before an atomic no-overwrite write,
+  while `verify-export` needs neither profile nor database. Advanced Audit
+  uses generated operations to filter and download the same frozen snapshot.
+  This is deterministic offline evidence, not SIEM delivery or WORM storage;
+  AUD-3/AUD-4 remain explicit extensions.
+
+- **Schema and generated contract.** Migration
+  `0058_context_audit_export` adds one tenant-leading JSONB containment index
+  and no data translator, table or canonical audit-byte change. Schema epoch
+  **2** now has **56 migration files**, **700** checked SQLx query descriptions
+  and **91** tenant tables in the forced-RLS completeness inventory. One net
+  export operation grows the authenticated contract **164 → 165 operations**
+  and typed audit evidence grows **262 → 264 schemas**; generated TypeScript is
+  the console's only application contract.
+
+- **Gate findings.** A final retention audit found that addressless
+  hashes-only composition entries were being discarded before they could
+  reach the promised unresolved set; parsing and folding now key those rows by
+  retained content hash without inventing identity, with both pure and real
+  context-run regressions. Strict Clippy also reduced the atomic writer's saved
+  error propagation to the direct `?` form after temporary-file cleanup. The
+  first unprivileged CI attempt could not bind the two existing loopback test
+  listeners; the unchanged gate passed with local-loopback permission. The
+  long-lived pre-hard-cut developer database was not reset or translated when
+  it refused migration 0057's mandatory typed refs; compilation and all
+  database evidence used fresh epoch-2 databases as the hard cut requires.
+
+- **Tests and exact results.** Audit unit **23/23** plus tamper **7/7**,
+  gateway audit **16/16**, terminal-reference regressions across Knowledge,
+  Skills, Tools, Configuration and relaxations **5/5**, focused CLI audit
+  **4/4**, complete CLI **157/157** plus MCP corpus **5/5**, OpenAPI **6/6**,
+  complete console **212/212**, and forced-RLS completeness pass. Generated
+  API/SQLx, strict Clippy, dependency, licence, backlog, ADR and **81-script**
+  demo-drift checks pass. Isolated `demos/cpr-33-audit-export.sh` passes with
+  seven self-audited export reads, 49 typed artifact events and exactly one
+  tenant-leading payload index. Complete final-byte `make ci` and full
+  disposable-Postgres `make db-test` **PASS**, the latter against
+  `synveda_test_51591`. This is deterministic local evidence and adds no live
+  external-provider claim.
+
+- **Commit.** `feat(audit): query and export the context platform chain
+  (CPR-33)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by the next checkpoint under the programme's
   next-checkpoint convention.
